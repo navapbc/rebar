@@ -13,7 +13,6 @@ import os
 import sys
 from typing import Any
 
-from rebar._deprecations import warn_deprecated
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.reads import (
     ReadError,
@@ -98,7 +97,6 @@ _LIST_VALUE_OPTS = frozenset(
     }
 )
 _SEARCH_VALUE_OPTS = frozenset({"--status", "--type", "--has-tag", "--sort"})
-_LIST_EPICS_VALUE_OPTS = frozenset({"--has-tag", "--min-children"})
 _SESSION_LOGS_VALUE_OPTS = frozenset({"--limit"})
 _READY_VALUE_OPTS = frozenset({"--epic", "--sort"})
 
@@ -504,71 +502,6 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     return 0
 
 
-def _cmd_list_epics(argv: list[str], tracker: str) -> int:
-    """DEPRECATED thin wrapper over the generic list: a deprecation warning, then
-    exactly TWO generic calls — one for epics, one for P0 bugs — assembled into
-    ``{p0_bugs, epics}``. Replaces the retired bespoke list-epics reduction.
-    Blocking-awareness is the generic blocking_state filter (default: unblocked)."""
-    warn_deprecated("cli:list-epics", via="stderr")
-    try:
-        fmt, rest = parse_output(argv, "report")
-    except OutputFormatError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
-    include_blocked = False
-    has_tag = ""
-    min_children: int | None = None
-    rest = _coalesce_value_opts(rest, _LIST_EPICS_VALUE_OPTS)
-    for arg in rest:
-        if arg == "--all":
-            include_blocked = True
-        elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag=") :]
-        elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children=") :]
-            if not raw.isdigit():
-                print(
-                    f"Error: --min-children expects a non-negative integer, got '{raw}'",
-                    file=sys.stderr,
-                )
-                return 2
-            min_children = int(raw)
-        elif arg in ("--help", "-h"):
-            print(
-                "Usage: ticket list-epics [--all] [--has-tag=<tag>] [--min-children=<n>] "
-                "[--output json]   (DEPRECATED — use 'list --type=epic ...')",
-                file=sys.stderr,
-            )
-            return 0
-        else:
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            return 2
-    if not os.path.isdir(tracker):
-        print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
-        return 1
-    epics = list_states(
-        tracker,
-        TicketQuery(
-            ticket_type="epic",
-            status="open,in_progress",
-            blocking_state="" if include_blocked else "unblocked",
-            has_tag=has_tag,
-            min_children=min_children,
-            with_children_count=True,
-        ),
-    )
-    p0_bugs = list_states(tracker, TicketQuery(ticket_type="bug", priority="0"))
-    if fmt == "json":
-        print(json.dumps({"p0_bugs": p0_bugs, "epics": epics}, ensure_ascii=False))
-    else:
-        for e in epics:
-            print(
-                f"{e.get('alias') or e['ticket_id']}\tP{e.get('priority', '')}\t"
-                f"{e.get('title', '')}\t{e.get('children_count', 0)}"
-            )
-    return 0
-
-
 def _cmd_next_batch(argv: list[str], tracker: str) -> int:
     """Compute-heavy read (Tier C): the conflict-aware parallel batch selector.
     Delegates to the faithful port; rendering/exit codes live there."""
@@ -592,7 +525,6 @@ _COMMANDS = {
     "deps": _cmd_deps,
     "ready": _cmd_ready,
     "search": _cmd_search,
-    "list-epics": _cmd_list_epics,
     "next-batch": _cmd_next_batch,
     "validate": _cmd_validate,
     "session-logs": _cmd_session_logs,
@@ -617,12 +549,10 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         print(f"Error: unknown read subcommand '{sub}'", file=sys.stderr)
         return 1
-    # Freshness: strip --no-pull (canonical; --no-sync kept as a deprecated alias)
-    # before the subcommand parses its own flags, so all read arms share one policy.
-    if "--no-sync" in rest:
-        warn_deprecated("cli:--no-sync", via="stderr")
-    no_pull = "--no-pull" in rest or "--no-sync" in rest
-    rest = [a for a in rest if a not in ("--no-pull", "--no-sync")]
+    # Freshness: strip --no-pull before the subcommand parses its own flags, so all
+    # read arms share one freshness policy.
+    no_pull = "--no-pull" in rest
+    rest = [a for a in rest if a != "--no-pull"]
     tracker = tracker_dir()
     if sub not in _NO_PREFETCH:
         ensure_fresh(tracker, no_sync=no_pull)

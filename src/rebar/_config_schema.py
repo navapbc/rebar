@@ -333,13 +333,9 @@ class McpConfig:
 @dataclass
 class ReconcilerConfig:
     jira_cli_timeout: int = 0
-    # Pass-lock/phase-gate backend (epic dust-troth-naval): "ref" = the self-healing
-    # refs/reconciler/* CAS lock (default since C4). "file" (the legacy tickets-branch
-    # lock files) was removed in C4 and is now deprecated-and-ignored — honoured as
-    # "ref" with a one-time warning.
-    lock_backend: str = "ref"
     # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
-    # max(1, lease // 3). Consumed by the ref backend (C2/C3); ignored under "file".
+    # max(1, lease // 3). Consumed by the refs/reconciler/* CAS lock (epic
+    # dust-troth-naval / ADR 0031), the only pass-lock backend.
     lock_lease_secs: int = 120
     deletion_probe_limit: int = 20
     id_guard_bypass_unsafe: bool = False
@@ -451,7 +447,6 @@ _SECTIONS: dict[str, dict] = {
     },
     "reconciler": {
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
-        "lock_backend": lambda v, k: _as_choice(v, k, {"file", "ref"}),
         "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),

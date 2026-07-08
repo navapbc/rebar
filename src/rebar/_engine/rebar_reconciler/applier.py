@@ -207,7 +207,6 @@ from rebar_reconciler.rebar_id_audit import (  # noqa: E402
     _AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC,
     _audit_rebar_id_label_writes,
     _BatchAuditView,
-    _get_rebar_id_guard_mode_from_config,
     _is_rebar_id_label_write_mutation,
 )
 
@@ -348,7 +347,6 @@ __all__ = [
     "_errors_module",
     "_event_meta",
     "_extract_name",
-    "_get_rebar_id_guard_mode_from_config",
     "_is_illegal_transition_400",
     "_is_rebar_id_label_write_mutation",
     "_jira_key_to_local_id",

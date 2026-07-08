@@ -108,21 +108,17 @@ committed index/aggregate that concurrent clients would both rewrite.
 
 - **Sanctioned, grandfathered exception:** the reconciler's pass-lock/phase-gate is a
   single-writer-by-design cross-client advisory lock (only one reconciler runs at a
-  time). It has **two backends**, selected by `[reconciler] lock_backend` (epic
-  dust-troth-naval / ADR 0031):
-  - `file` (today's default): a committed, tickets-branch `.reconciler-pass-lock` /
-    `.reconciler-phase-gate` (`rebar_reconciler/_advisory_lock.py`), advanced via a
-    `git update-ref refs/heads/tickets <new> <old>` CAS that retries on a concurrent
-    writer.
-  - `ref`: a self-healing **bare-ref CAS lock on `refs/reconciler/*`** (`_ref_lock.py`)
-    — a ref → blob, so it is **never in the tickets working tree and never
-    union-merged**. Acquire is a create-only CAS; a lease + heartbeat lets a crashed
-    holder's lock be reclaimed after one lease interval (skew-proof, no cross-clone
-    clock comparison). Authoritative on `origin` via `git push
-    --force-with-lease=<ref>:<old>`.
-  This is the one allowed cross-client lock — **not** a precedent for new ones. The
-  `ref` backend keeps I6 cleaner: the lock is no longer a committed tickets-branch
-  file needing a `merge=ours` union-merge carve-out.
+  time). Its backend (epic dust-troth-naval / ADR 0031) is a self-healing **bare-ref
+  CAS lock on `refs/reconciler/*`** (`_ref_lock.py`) — a ref → blob, so it is **never
+  in the tickets working tree and never union-merged**. Acquire is a create-only CAS;
+  a lease + heartbeat lets a crashed holder's lock be reclaimed after one lease
+  interval (skew-proof, no cross-clone clock comparison). Authoritative on `origin`
+  via `git push --force-with-lease=<ref>:<old>`. (The legacy `file` backend — a
+  committed tickets-branch `.reconciler-pass-lock` advanced by a `refs/heads/tickets`
+  CAS — and the `[reconciler] lock_backend` selector key were removed pre-1.0; the ref
+  backend is the only backend.) This is the one allowed cross-client lock — **not** a
+  precedent for new ones. It keeps I6 cleaner: the lock is no longer a committed
+  tickets-branch file needing a `merge=ours` union-merge carve-out.
 
 ### I7 — Derived/aggregate data is computed from replay or stored local-only
 Search indexes, counters, memory stores, etc. are either recomputed from the
@@ -279,9 +275,9 @@ freshness into the native read path so all three interfaces agree.
 
 **Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
 or when a write already synced): set `REBAR_SYNC_PULL=off` (the `sync.pull` policy,
-honored by all interfaces; deprecated alias `REBAR_NO_SYNC=1`) or pass the
-`--no-pull` flag to any read subcommand (`rebar list --no-pull`; deprecated alias
-`--no-sync`). The reducer's local `.cache.json` (I3/I3a) is still used; only the
+honored by all interfaces; permanent alias `REBAR_NO_SYNC=1`) or pass the
+`--no-pull` flag to any read subcommand (`rebar list --no-pull`). The reducer's
+local `.cache.json` (I3/I3a) is still used; only the
 network fetch/merge is skipped. (Temp repos with no remote set `REBAR_SYNC_PULL=off`
 together with `REBAR_SYNC_PUSH=off` to skip both directions; the former private
 `_TICKET_TEST_NO_SYNC` flag was removed in favor of these.)

@@ -69,8 +69,7 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def ref_backend(advisory: ModuleType, monkeypatch: pytest.MonkeyPatch):
-    """Force lock_backend=ref, a local (no-remote) CAS, and a short lease."""
-    monkeypatch.setattr(advisory, "_lock_backend", lambda: "ref")
+    """A local (no-remote) CAS and a short lease."""
     monkeypatch.setattr(advisory, "_lock_lease_secs", lambda: 1)
     monkeypatch.setattr(advisory, "_lock_remote", lambda repo_root: None)
 

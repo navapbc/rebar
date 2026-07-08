@@ -125,10 +125,15 @@ def test_precedence_full_chain(tmp_path: Path, monkeypatch) -> None:
     cfg.set_cli_overrides(None)
 
 
-def test_max_steps_legacy_env_alias_beats_file(tmp_path: Path, monkeypatch) -> None:
+def test_max_steps_legacy_env_alias_removed(tmp_path: Path, monkeypatch) -> None:
+    # The REBAR_LLM_MAX_ITERS alias was removed (ticket 5899, breaking): only the
+    # canonical REBAR_LLM_MAX_STEPS is honored, so the legacy name no longer overrides
+    # the file value.
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[llm]\nmax_steps = 5\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "40")  # deprecated alias, still env layer
+    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "40")  # removed alias — ignored now
+    assert _cfg(p).max_iterations == 5
+    monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "40")  # canonical still wins
     assert _cfg(p).max_iterations == 40
 
 

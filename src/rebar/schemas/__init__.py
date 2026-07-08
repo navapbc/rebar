@@ -56,7 +56,6 @@ __all__ = [
     "DELETE_RESULT",
     "GATE_RESULT",
     "SUMMARY",
-    "LIST_EPICS",
     "FSCK",
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
@@ -98,7 +97,6 @@ TRANSITION_RESULT = "transition_result"
 DELETE_RESULT = "delete_result"
 GATE_RESULT = "gate_result"
 SUMMARY = "summary"
-LIST_EPICS = "list_epics"
 FSCK = "fsck"
 # rebar.llm — output of an LLM review operation (`rebar review`). The MCP tool is
 # exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
@@ -275,7 +273,6 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "check_ac": GATE_RESULT,
     "quality_check": GATE_RESULT,
     "summary": SUMMARY,
-    "list_epics": LIST_EPICS,
     "fsck": FSCK,
     "review": REVIEW_RESULT,
     # completion-verification op: like `review`, no CLI help arm (so the --output

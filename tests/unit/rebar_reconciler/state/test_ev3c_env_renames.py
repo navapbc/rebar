@@ -21,8 +21,6 @@ def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
         "REBAR_RECONCILER_LOCK_RETRY_BUDGET",
         "REBAR_UNSAFE_ID_GUARD_BYPASS",
         "REBAR_ID_GUARD_MODE",
-        "REBAR_LLM_MAX_STEPS",
-        "REBAR_LLM_MAX_ITERS",
         "REBAR_ROOT",
         "REBAR_CONFIG",
     ):
@@ -79,12 +77,6 @@ def test_id_guard_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) -> Non
     assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
-# ── REBAR_LLM_MAX_ITERS -> REBAR_LLM_MAX_STEPS ────────────────────────────────
-def test_llm_max_steps_canonical_and_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    from rebar.llm.config import _env_int_aliased
-
-    monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "40")
-    assert _env_int_aliased("REBAR_LLM_MAX_STEPS", "REBAR_LLM_MAX_ITERS", 25) == 40
-    monkeypatch.delenv("REBAR_LLM_MAX_STEPS")
-    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "20")  # deprecated alias
-    assert _env_int_aliased("REBAR_LLM_MAX_STEPS", "REBAR_LLM_MAX_ITERS", 25) == 20
+# (The REBAR_LLM_MAX_ITERS -> REBAR_LLM_MAX_STEPS alias was removed in ticket 5899;
+#  only the canonical REBAR_LLM_MAX_STEPS is honored. Canonical resolution is covered
+#  by tests/unit/test_config_llm.py::test_max_steps_legacy_env_alias_removed.)

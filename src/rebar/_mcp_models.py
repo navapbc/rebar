@@ -94,11 +94,6 @@ try:
         reason: str
         passed: bool | None = None
 
-    class ListEpicsOut(_Out):
-        # Mirrors src/rebar/schemas/list_epics.schema.json ({p0_bugs, epics}).
-        p0_bugs: list[dict] = []
-        epics: list[dict] = []
-
     class BridgeFsckOut(_Out):
         # Mirrors src/rebar/schemas/bridge_fsck.schema.json.
         orphaned: list = []
@@ -169,7 +164,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
-    ListEpicsOut = BridgeFsckOut = None  # type: ignore[assignment,misc]
+    BridgeFsckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]

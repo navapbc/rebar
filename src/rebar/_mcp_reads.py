@@ -23,7 +23,6 @@ from rebar._mcp_models import (
     FileImpactItemOut,
     GateResultOut,
     GroundingInfoOut,
-    ListEpicsOut,
     NextBatchOut,
     TicketStateOut,
     ValidateReportOut,
@@ -229,34 +228,6 @@ def register_read_tools(mcp, ctx) -> None:
     def summary(ticket_ids: list[str]) -> list[dict]:
         """One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]."""
         return rebar.summary(*ticket_ids)
-
-    @mcp.tool(annotations=_ANN["READ_ONLY"])
-    def list_epics(
-        include_blocked: bool = False,
-        has_tag: str | None = None,
-        min_children: int | None = None,
-    ) -> ListEpicsOut:
-        """DEPRECATED — thin wrapper over `list`. Returns {p0_bugs, epics} (ticket_state
-        arrays) from two generic calls. Prefer the `list_tickets` tool directly:
-        ticket_type='epic', status='open,in_progress', blocking_state='unblocked',
-        min_children=N — plus ticket_type='bug', priority=0 for the P0 bugs.
-        include_blocked=True drops the unblocked-only filter."""
-        from rebar._deprecations import warn_deprecated
-
-        # Emit the MCP tool's own deprecation signal through the central registry. The
-        # underlying rebar.list_epics() library function was removed pre-1.0 (DE7), so
-        # this tool now composes the two generic list_tickets calls itself.
-        warn_deprecated("mcp:list_epics", via="warning")
-        epics = rebar.list_tickets(
-            ticket_type="epic",
-            status="open,in_progress",
-            blocking_state="" if include_blocked else "unblocked",
-            has_tag=has_tag,
-            min_children=min_children,
-            with_children_count=True,
-        )
-        p0_bugs = rebar.list_tickets(ticket_type="bug", priority=0)
-        return ListEpicsOut.model_validate({"p0_bugs": p0_bugs, "epics": epics})
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def bridge_fsck() -> BridgeFsckOut:

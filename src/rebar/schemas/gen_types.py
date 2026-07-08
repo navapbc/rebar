@@ -57,7 +57,6 @@ TOP_LEVEL_OBJECTS: list[str] = [
     "verify_signature_result",
     "deps_graph",
     "next_batch",
-    "list_epics",
     "bridge_fsck",
     "workflow_run",
 ]

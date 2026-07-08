@@ -2,7 +2,7 @@
 
 The CLI runs this before each in-process command arm, with a per-command policy:
 
-* ``init_only=True`` (read arms: show/list/deps/ready/search/next-batch/list-epics)
+* ``init_only=True`` (read arms: show/list/deps/ready/search/next-batch)
   — auto-init only; the read path owns its own throttled reconverge
   (``rebar._engine_support.reads.ensure_fresh``), so the middleware must NOT
   reconverge too (that would double-sync).

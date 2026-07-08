@@ -261,13 +261,6 @@ class NextBatch(TypedDict):
     skipped_needs_planning: NotRequired[list[SkippedItem]]
 
 
-class ListEpics(TypedDict):
-    """Return shape of the `list_epics` output schema."""
-
-    p0_bugs: list[dict[str, Any]]
-    epics: list[dict[str, Any]]
-
-
 class BridgeFsck(TypedDict):
     """Return shape of the `bridge_fsck` output schema."""
 

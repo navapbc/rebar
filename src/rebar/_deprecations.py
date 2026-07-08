@@ -71,50 +71,29 @@ def _permanent(kind: str, name: str, replacement: str) -> Deprecation:
 # add a deprecation, add a row here AND route its warning through warn_deprecated;
 # the completeness test fails otherwise.
 _ENTRIES: tuple[Deprecation, ...] = (
-    # ── env aliases: scheduled for removal (the rename-window aliases) ─────────
-    # NOTE (DE7): the pre-1.0 breaking removal dropped the scheduled env aliases
-    # REBAR_PUSH, TICKETS_TRACKER_DIR, and REBAR_MCP_ALLOW_RECONCILE_LIVE — only
-    # their canonical names (REBAR_SYNC_PUSH / REBAR_TRACKER_DIR /
-    # REBAR_MCP_ALLOW_JIRA_SYNC) are honored now.
-    # REBAR_LLM_MAX_ITERS: documented as a "deprecated alias" of REBAR_LLM_MAX_STEPS
-    # with no stated horizon — classified as SCHEDULED (per ticket 5274: treat any
-    # surface you cannot confidently prove permanent as scheduled) at the v1.0.0
-    # major boundary shared by the other scheduled removals.
-    _scheduled("env", "REBAR_LLM_MAX_ITERS", "REBAR_LLM_MAX_STEPS"),
     # ── env aliases: PERMANENT ergonomic renames (no removal planned) ──────────
     # These are stable REBAR_-prefixed renames of established names; they warned
     # "deprecated" historically, which was a contradiction — they are kept forever.
+    # This registry now holds ONLY these permanent renames: every remaining
+    # SCHEDULED (removable) surface has been removed in the pre-1.0 breaking passes.
     _permanent("env", "REBAR_NO_SYNC", "REBAR_SYNC_PULL"),
     _permanent("env", "COMPACT_THRESHOLD", "REBAR_COMPACT_THRESHOLD"),
     _permanent("env", "SCRATCH_BASE_DIR", "REBAR_SCRATCH_BASE_DIR"),
     _permanent("env", "REBAR_ACLI_TIMEOUT", "REBAR_JIRA_CLI_TIMEOUT"),
     _permanent("env", "RECONCILER_ABSENT_GET_BUDGET", "REBAR_RECONCILER_DELETION_PROBE_LIMIT"),
     _permanent("env", "REBAR_ID_GUARD_MODE", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
-    # ── config-key surfaces ───────────────────────────────────────────────────
-    # NOTE (DE7): the pre-1.0 breaking removal dropped the scheduled config
-    # surfaces verify.require_verdict_for_close (use verify.require_signature_for_close)
-    # and the flat .rebar/config.conf reader (use rebar.toml or a [tool.rebar] table).
-    # reconciler.lock_backend='file' is accepted-but-ignored (the file backend was
-    # removed in epic dust-troth-naval / ADR 0031). No explicit horizon exists;
-    # classified as scheduled (the config key acceptance is retired at v1.0.0).
-    _scheduled(
-        "cfg",
-        "reconciler.lock_backend='file'",
-        "the refs/reconciler/* lock backend (remove the key)",
-    ),
-    # ── CLI surfaces ──────────────────────────────────────────────────────────
-    _scheduled(
-        "cli",
-        "list-epics",
-        "rebar list --type=epic --status=open,in_progress --unblocked [--min-children=N]",
-    ),
-    _scheduled("cli", "--no-sync", "--no-pull"),
-    # ── library surfaces ──────────────────────────────────────────────────────
-    # NOTE (DE7): the pre-1.0 breaking removal dropped the CLI --verdict-hash flag,
-    # the lib edit_ticket(tags=...) alias (use set_tags / add_tags / remove_tags),
-    # and the lib rebar.list_epics() function (use list_tickets(ticket_type='epic', ...)).
-    # ── MCP surfaces ──────────────────────────────────────────────────────────
-    _scheduled("mcp", "list_epics", "the list_tickets tool (ticket_type='epic', ...)"),
+    # ── removed scheduled surfaces (historical record) ─────────────────────────
+    # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
+    # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the
+    # config surface verify.require_verdict_for_close + the flat .rebar/config.conf
+    # reader, the CLI --verdict-hash flag, and the lib edit_ticket(tags=...) alias +
+    # rebar.list_epics() function.
+    # NOTE (this pass, ticket 5899): the second breaking removal dropped the env
+    # alias REBAR_LLM_MAX_ITERS (use REBAR_LLM_MAX_STEPS), the accepted-but-ignored
+    # config value reconciler.lock_backend='file' (the whole key is gone — the ref
+    # backend is the only backend), the CLI list-epics subcommand + --no-sync alias
+    # (use `list --type=epic …` / --no-pull), and the MCP list_epics tool (use
+    # list_tickets(ticket_type='epic', …)).
 )
 
 REGISTRY: dict[str, Deprecation] = {d.key: d for d in _ENTRIES}

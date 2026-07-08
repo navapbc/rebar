@@ -25,8 +25,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rebar._deprecations import warn_deprecated
-
 # ---------------------------------------------------------------------------
 # Module-level logger
 # ---------------------------------------------------------------------------
@@ -72,11 +70,6 @@ def _reconciler_config():
         return None
 
 
-def _lock_backend() -> str:
-    cfg = _reconciler_config()
-    return getattr(cfg, "lock_backend", "ref") if cfg is not None else "ref"
-
-
 def _lock_lease_secs() -> int:
     cfg = _reconciler_config()
     return int(getattr(cfg, "lock_lease_secs", 120)) if cfg is not None else 120
@@ -94,21 +87,6 @@ def _lock_remote(repo_root: Path) -> str | None:
         remote = "origin"
     check = git_adapter.remote_get_url(repo_root, remote)
     return remote if check.returncode == 0 else None
-
-
-_file_backend_warned = False
-
-
-def _warn_if_file_backend() -> None:
-    """One-time deprecation warning if an operator still sets ``lock_backend=file``.
-
-    The file backend was removed in C4; ``file`` is honoured as ``ref`` (the
-    self-healing lock is proven). Warn once so the config surface is not a silent
-    surprise, then proceed on the ref backend."""
-    global _file_backend_warned
-    if not _file_backend_warned and _lock_backend() == "file":
-        _file_backend_warned = True
-        warn_deprecated("cfg:reconciler.lock_backend='file'", logger=logger)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +137,6 @@ def acquire_pass_lock(pass_id: str, repo_root: Path) -> str | None:
     Raises:
         ReconcileLockError — if the lock is already held (create-only CAS rejected).
     """
-    _warn_if_file_backend()
     ref_lock = _load_ref_lock()
     try:
         return ref_lock.acquire(

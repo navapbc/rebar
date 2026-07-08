@@ -216,27 +216,14 @@ def test_summary_shape(rebar_repo: Path) -> None:
     v.validate(rebar.summary(a, b, repo_root=r))
 
 
-def test_list_epics_wrapper_shape(rebar_repo: Path) -> None:
-    # The CLI list-epics command is a DEPRECATED thin wrapper over the generic list:
-    # always exit 0, {p0_bugs, epics} (ticket_state arrays), deprecation warning on
-    # stderr. (The library rebar.list_epics() function was removed pre-1.0 — DE7 — so
-    # this only exercises the surviving CLI command + its output schema.)
+def test_list_epics_cli_removed(rebar_repo: Path) -> None:
+    # The CLI list-epics command was removed (ticket 5899, breaking): the read
+    # dispatcher no longer knows the subcommand and exits non-zero with an
+    # "unknown read subcommand" error. Use `list --type=epic ...` instead.
     r = str(rebar_repo)
-    v = schemas.validator(schemas.LIST_EPICS)
-    # no epics yet -> exit 0, empty epics, valid shape, warning on stderr (not stdout)
     cp = _cli("list-epics", "--output", "json", cwd=r)
-    assert cp.returncode == 0
-    d = json.loads(cp.stdout)
-    v.validate(d)
-    assert d["epics"] == []
-    assert "deprecated" in cp.stderr.lower()
-    # one open (unblocked) epic -> appears
-    rebar.create_ticket("epic", "E1", repo_root=r)
-    cp = _cli("list-epics", "--output", "json", cwd=r)
-    assert cp.returncode == 0
-    out = json.loads(cp.stdout)
-    v.validate(out)
-    assert len(out["epics"]) == 1
+    assert cp.returncode != 0
+    assert "unknown subcommand 'list-epics'" in cp.stderr.lower()
 
 
 def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:

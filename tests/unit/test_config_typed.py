@@ -22,7 +22,7 @@ def test_defaults_when_empty() -> None:
     assert c.compact.threshold == 10
     assert c.sync.push == "always" and c.sync.pull == "on"
     assert c.mcp.readonly is False and c.mcp.allow_llm is False and c.mcp.allow_jira_sync is False
-    assert c.reconciler.lock_backend == "ref" and c.reconciler.deletion_probe_limit == 20
+    assert c.reconciler.deletion_probe_limit == 20
     assert c.reconciler.lock_lease_secs == 120 and c.reconciler.id_guard_bypass_unsafe is False
     assert c.jira.url == "" and c.scratch.base_dir == ""
 

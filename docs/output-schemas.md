@@ -53,7 +53,6 @@ Structured via `--output json`:
 | `transition` / `reopen`          | `transition_result`       |
 | `delete`                         | `delete_result`           |
 | `summary`                        | `summary`                 |
-| `list-epics`                     | `list_epics`              |
 | `fsck`                           | `fsck`                    |
 | `review` (CLI/library)           | `review_result`           |
 | `verify-completion` (CLI/library) | `completion_verdict`     |

@@ -23,8 +23,8 @@ best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
 the shared ``ticket-sync.sh`` ``_reconverge_tickets`` (the SAME mechanism and the
 SAME ``/tmp/.ticket-sync-<md5>`` throttle marker the dispatcher's
 ``_ensure_initialized`` used) so all three interfaces share one contract. Opt out
-with ``REBAR_SYNC_PULL=off`` (deprecated alias ``REBAR_NO_SYNC=1``) or the
-``--no-pull`` CLI flag (deprecated alias ``--no-sync``).
+with ``REBAR_SYNC_PULL=off`` (permanent alias ``REBAR_NO_SYNC=1``) or the
+``--no-pull`` CLI flag.
 """
 
 from __future__ import annotations

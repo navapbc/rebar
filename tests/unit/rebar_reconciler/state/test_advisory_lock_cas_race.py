@@ -63,7 +63,6 @@ def test_ref_backend_create_cas_single_winner(
     """Two acquirers race the create-only CAS on refs/reconciler/lock; exactly one
     wins and the other gets ReconcileLockError (the CAS discriminator classifies the
     exit-128 'reference already exists' correctly for the reconciler ref)."""
-    monkeypatch.setattr(lock_mod, "_lock_backend", lambda: "ref")
     monkeypatch.setattr(lock_mod, "_lock_lease_secs", lambda: 1)
     monkeypatch.setattr(lock_mod, "_lock_remote", lambda repo_root: None)
     repo = tmp_git_repo_with_tickets

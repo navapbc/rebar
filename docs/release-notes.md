@@ -4,6 +4,29 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — remaining uncatalogued deprecations removed
+
+A sibling breaking pass to DE7 removed the five remaining **scheduled** (removable)
+deprecation shims — every entry left in `rebar._deprecations.REGISTRY` is now a
+**permanent** ergonomic rename with no removal planned. Each old name below **now
+does nothing** (env alias ignored; config value/key rejected as unknown; CLI
+subcommand/flag unrecognized; MCP tool absent) — switch to the canonical
+replacement:
+
+| Removed surface | Kind | Use instead |
+|---|---|---|
+| env `REBAR_LLM_MAX_ITERS` | env var | env `REBAR_LLM_MAX_STEPS` |
+| cfg `reconciler.lock_backend = "file"` | config value | (drop it — the `refs/reconciler/*` ref lock is the only backend; the `lock_backend` key itself is gone) |
+| CLI `rebar list-epics` | CLI subcommand | `rebar list --type=epic --status=open,in_progress --unblocked [--min-children=N]` + `rebar list --type=bug --priority=0` |
+| CLI `--no-sync` (read flag) | CLI flag | `--no-pull` |
+| MCP `list_epics` tool | MCP tool | the `list_tickets` tool (`ticket_type="epic", status="open,in_progress", blocking_state="unblocked", …"`) |
+
+Notes: the `list_epics` output schema (`schemas/list_epics.schema.json`) and its
+`ListEpics` public TypedDict were removed with the surfaces. The permanent
+ergonomic env renames (`REBAR_NO_SYNC`, `COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`,
+`REBAR_ACLI_TIMEOUT`, `RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`) are
+unaffected and still honored. (ticket `unclear-verymad-sablefish`)
+
 ## BREAKING (pre-1.0) — deprecated back-compat aliases removed (DE7)
 
 Eight scheduled deprecation shims were removed at the pre-1.0 breaking-change
@@ -22,9 +45,11 @@ kwarg/function are gone) — switch to the canonical replacement:
 | lib `rebar.list_epics()` | library function | `rebar.list_tickets(ticket_type="epic", status="open,in_progress", blocking_state="unblocked", …)` (+ `ticket_type="bug", priority=0` for the P0 bugs) |
 | CLI `--verdict-hash` (transition) | CLI flag | `rebar sign <id> <manifest>` (the certified-signature close gate) |
 
-Notes: the CLI `list-epics` command and the MCP `list_epics` tool are **kept** (both
-now compose `list_tickets` internally); only the `rebar.list_epics()` *library*
-function was removed. The permanent ergonomic env renames (`REBAR_NO_SYNC`,
+Notes: at the time of DE7 the CLI `list-epics` command and the MCP `list_epics`
+tool were kept (composing `list_tickets` internally) and only the
+`rebar.list_epics()` *library* function was removed; the follow-up pass above
+(`unclear-verymad-sablefish`) has since removed those two surfaces as well. The
+permanent ergonomic env renames (`REBAR_NO_SYNC`,
 `COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`,
 `RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`) are unaffected and still
 honored. (ticket `imposing-petite-xenopus`)

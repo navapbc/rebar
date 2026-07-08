@@ -55,8 +55,7 @@ _BASELINE_FIELDS: tuple[str, ...] = (
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
-# typo'd ops value degrades to the default rather than aborting the pass
-# (mirrors applier.py's best-effort _get_rebar_id_guard_mode_from_config).
+# typo'd ops value degrades to the default rather than aborting the pass.
 _DEFAULT_ABSENT_RETIRE_GRACE = 3
 
 

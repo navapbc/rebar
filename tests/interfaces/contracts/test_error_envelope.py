@@ -16,8 +16,8 @@ Out of scope (documented):
     so it is outside this ``--output json`` contract;
   * the TOLERANT reads — ``summary``/``list-descendants`` render an empty/placeholder
     result at exit 0; ``get-file-impact <missing>`` returns ``[]`` at exit 0;
-    ``scratch get <missing>`` returns ``{status: miss}`` at exit 0; ``list-epics``
-    emits its canonical empty shape — none of those are failures.
+    ``scratch get <missing>`` returns ``{status: miss}`` at exit 0 — none of those are
+    failures.
 """
 
 from __future__ import annotations

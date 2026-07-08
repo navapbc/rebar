@@ -1,8 +1,8 @@
 """rebar library — read path (queries, export/import, fsck).
 
 The in-process read wrappers (``show_ticket`` / ``list_tickets`` / ``deps`` /
-``ready`` / ``next_batch`` / ``search`` / ``recent_session_logs`` / the deprecated
-``list_epics``), the NDJSON ``export_tickets`` / ``import_tickets`` interop, and
+``ready`` / ``next_batch`` / ``search`` / ``recent_session_logs``), the NDJSON
+``export_tickets`` / ``import_tickets`` interop, and
 ``fsck`` — split out of the ``rebar`` package facade (``__init__.py``, ticket
 S3 / 4532) so it stays a thin re-export namespace. Every function is re-exported
 as ``rebar.<name>``. The private ``_json_or`` helper lives here too and is
@@ -281,12 +281,10 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     return out.getvalue()
 
 
-# NOTE (DE7): the deprecated ``rebar.list_epics()`` library function was removed
-# pre-1.0. Compose the primitives directly instead::
+# NOTE: the deprecated ``rebar.list_epics()`` library function (DE7), the CLI
+# ``list-epics`` command, and the MCP ``list_epics`` tool were all removed pre-1.0
+# (the last two in ticket 5899). Compose the primitives directly instead::
 #
 #     rebar.list_tickets(ticket_type="epic", status="open,in_progress",
 #                        blocking_state="unblocked", min_children=N)
 #     rebar.list_tickets(ticket_type="bug", priority=0)
-#
-# The CLI ``list-epics`` command and the MCP ``list_epics`` tool remain (they now
-# compose the primitives themselves).

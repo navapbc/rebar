@@ -177,17 +177,18 @@ standard names, which deliberately differ from the auto-derived
 ```toml
 [tool.rebar.reconciler]   # advanced; sensible defaults, rarely needed
 jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT (alias REBAR_ACLI_TIMEOUT)
-lock_backend           = ref   # pass-lock/phase-gate backend: "ref" (default; self-healing refs/reconciler/* CAS lock).
-                               # "file" (the legacy tickets-branch lock files) was removed in the dust-troth-naval epic
-                               # and is deprecated-and-ignored — honoured as "ref" with a one-time warning. See ADR 0031.
+# pass-lock/phase-gate backend: the self-healing refs/reconciler/* CAS lock is the ONLY backend.
+# The `lock_backend` key + its legacy accepted-but-ignored "file" value were removed pre-1.0
+# (ticket unclear-verymad-sablefish); a still-present key is ignored as unknown. See ADR 0031.
 lock_lease_secs        = 120   # ref-lock lease (s); the heartbeat renews at max(1, lease // 3).
 deletion_probe_limit   = 20    # GET probes to confirm a deletion. env REBAR_RECONCILER_DELETION_PROBE_LIMIT (alias RECONCILER_ABSENT_GET_BUDGET)
 # Removed in the dust-troth-naval epic: `lock_max_retries` (+ env REBAR_RECONCILER_LOCK_MAX_RETRIES /
 # REBAR_RECONCILER_LOCK_RETRY_BUDGET) — it tuned the b859 outer-retry loop, now superseded by the
 # self-healing ref lock. A still-present key is ignored with a one-time deprecation warning (not a load error).
 id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard — do NOT leave on; fail-CLOSED.
-                               # env REBAR_UNSAFE_ID_GUARD_BYPASS; deprecated REBAR_ID_GUARD_MODE env + legacy flat
-                               # `rebar_id_guard_mode` key (value-flip: warn→true/bypass, raise→false/guard)
+                               # env REBAR_UNSAFE_ID_GUARD_BYPASS; permanent alias REBAR_ID_GUARD_MODE env
+                               # (value-flip: warn→true/bypass, raise→false/guard). The legacy flat
+                               # `rebar_id_guard_mode` config key is no longer honored (removed pre-1.0).
 
 [tool.rebar.jira]   # Atlassian-standard, UNPREFIXED env names
 url     = ""   # env JIRA_URL
@@ -224,7 +225,7 @@ model          = "claude-opus-4-8"   # env REBAR_LLM_MODEL
 model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
 max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
-max_steps      = 50                  # env REBAR_LLM_MAX_STEPS (alias REBAR_LLM_MAX_ITERS); ~2 steps per tool call
+max_steps      = 50                  # env REBAR_LLM_MAX_STEPS; ~2 steps per tool call
 timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)
 mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
 ```
@@ -317,13 +318,16 @@ names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
 (negative→positive flip), `COMPACT_THRESHOLD`→`REBAR_COMPACT_THRESHOLD`,
 `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
 `RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
-`REBAR_LLM_MAX_ITERS`→`REBAR_LLM_MAX_STEPS`, `REBAR_ID_GUARD_MODE`→
+`REBAR_ID_GUARD_MODE`→
 `REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). **Removed pre-1.0 (DE7 — no
 longer honored):** the flat `.rebar/config.conf` reader (use `rebar.toml` / a
 `[tool.rebar]` pyproject table), the `verify.require_verdict_for_close` config alias
 (use `verify.require_signature_for_close`), and the env aliases `REBAR_PUSH` (use
 `REBAR_SYNC_PUSH`), `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), and
-`REBAR_MCP_ALLOW_RECONCILE_LIVE` (use `REBAR_MCP_ALLOW_JIRA_SYNC`). Also removed (no alias):
+`REBAR_MCP_ALLOW_RECONCILE_LIVE` (use `REBAR_MCP_ALLOW_JIRA_SYNC`). **Also removed pre-1.0
+(ticket unclear-verymad-sablefish):** the env alias `REBAR_LLM_MAX_ITERS` (use
+`REBAR_LLM_MAX_STEPS`) and the `reconciler.lock_backend` config key (the ref lock is the
+only backend). Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
 dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var

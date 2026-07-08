@@ -127,50 +127,10 @@ _AUTHORIZED_REBAR_ID_LABEL_ACTIONS: dict[str, frozenset[str]] = {
 # list (or before dispatching the typed-mutation leaf) to ensure no unauthorized
 # leaf emits a rebar-id-* label mutation.
 #
-# The guard is BYPASSED only when REBAR_UNSAFE_ID_GUARD_BYPASS is truthy (deprecated
-# aliases: REBAR_ID_GUARD_MODE=warn env / rebar_id_guard_mode=warn config). Default:
-# guard active, fail-closed. See _resolve_id_guard_bypass; precedence env > config.
+# The guard is BYPASSED only when REBAR_UNSAFE_ID_GUARD_BYPASS is truthy (permanent
+# alias: REBAR_ID_GUARD_MODE=warn env). Default: guard active, fail-closed. See
+# _resolve_id_guard_bypass; precedence env > config.
 # ---------------------------------------------------------------------------
-
-
-def _get_rebar_id_guard_mode_from_config() -> str | None:
-    """Read rebar_id_guard_mode from the rebar config file, if present.
-
-    Returns the value string (e.g. 'raise', 'warn') or None when the key
-    is absent or the file cannot be read.
-
-    Resolution order for the guard mode (env wins):
-      1. os.environ['REBAR_ID_GUARD_MODE'] (deprecated alias of REBAR_UNSAFE_ID_GUARD_BYPASS)
-      2. This function (.rebar/config.conf fallback)
-      3. Default: 'raise'
-    """
-    try:
-        _root = os.environ.get("REBAR_ROOT")
-        if os.environ.get("REBAR_CONFIG"):
-            config_path = Path(os.environ["REBAR_CONFIG"])
-        elif _root:
-            config_path = Path(_root) / ".rebar" / "config.conf"
-        else:
-            config_path = (
-                Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-                / ".rebar"
-                / "config.conf"
-            )
-        if not config_path.exists():
-            return None
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("rebar_id_guard_mode"):
-                parts = line.split("=", 1)
-                if len(parts) == 2:
-                    return parts[1].strip().strip('"').strip("'")
-    except OSError:
-        # Best-effort config read: filesystem-level failures (permission denied,
-        # missing parent dir on race, etc.) fall through to the default 'raise'
-        # guard mode. Programming errors (AttributeError, TypeError) intentionally
-        # propagate so they surface during test runs.
-        return None
-    return None
 
 
 def _resolve_id_guard_bypass() -> bool:
@@ -243,8 +203,8 @@ def _audit_rebar_id_label_writes(leaf_name: str, mutations: list) -> None:
         contract is per-action; defeating it would leave a security gap by
         allowing an authorized leaf to perform any action.
 
-    Guard bypass (REBAR_UNSAFE_ID_GUARD_BYPASS=true; deprecated aliases
-    REBAR_ID_GUARD_MODE=warn env / rebar_id_guard_mode=warn config), default OFF:
+    Guard bypass (REBAR_UNSAFE_ID_GUARD_BYPASS=true; permanent alias
+    REBAR_ID_GUARD_MODE=warn env), default OFF:
       - bypass OFF (default): RebarIdLabelWriteError raised on violation (fail-closed).
       - bypass ON: a LOUD WARNING is logged on every violation; no exception (staged rollout).
 

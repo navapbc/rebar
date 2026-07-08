@@ -140,16 +140,16 @@ def test_sync_disabled_reads_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert reads._sync_disabled(str(p)) is True
 
 
-# ── CLI flag: --no-pull (canonical) + --no-sync (deprecated alias) ────────────
+# ── CLI flag: --no-pull (canonical; --no-sync alias was removed, ticket 5899) ──
 @pytest.mark.parametrize(
     "flags,expected_no_sync",
-    [([], False), (["--no-pull"], True), (["--no-sync"], True)],
+    [([], False), (["--no-pull"], True)],
 )
 def test_no_pull_flag_strips_and_opts_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: list[str], expected_no_sync: bool
 ) -> None:
-    """The read dispatcher strips --no-pull / --no-sync before the subcommand and
-    passes the opt-out to ensure_fresh; the subcommand never sees the flag."""
+    """The read dispatcher strips --no-pull before the subcommand and passes the
+    opt-out to ensure_fresh; the subcommand never sees the flag."""
     # The read dispatcher (main / _COMMANDS / facade calls) lives in reads_cli; patch
     # there (reads_cli binds the facades at its own import, so patching `reads` wouldn't
     # affect the dispatcher).
@@ -171,3 +171,27 @@ def test_no_pull_flag_strips_and_opts_out(
     assert rc == 0
     assert seen["no_sync"] is expected_no_sync
     assert seen["rest"] == ["--id", "x"]  # flag stripped, other args intact
+
+
+def test_no_sync_cli_alias_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deprecated --no-sync CLI alias was removed (ticket 5899): the dispatcher no
+    longer recognizes it, so it does NOT opt out of freshness and is passed through to
+    the subcommand as an ordinary (unknown) argument rather than being stripped."""
+    from rebar._engine_support import reads_cli
+
+    seen: dict = {}
+
+    def _fake_fresh(tracker, *, no_sync=False):
+        seen["no_sync"] = no_sync
+
+    def _dummy(rest, tracker):
+        seen["rest"] = rest
+        return 0
+
+    monkeypatch.setattr(reads_cli, "ensure_fresh", _fake_fresh)
+    monkeypatch.setattr(reads_cli, "tracker_dir", lambda *a, **k: str(tmp_path))
+    monkeypatch.setitem(reads_cli._COMMANDS, "dummy", _dummy)
+    rc = reads_cli.main(["dummy", "--id", "x", "--no-sync"])
+    assert rc == 0
+    assert seen["no_sync"] is False  # not recognized -> no opt-out
+    assert seen["rest"] == ["--id", "x", "--no-sync"]  # passed through, not stripped

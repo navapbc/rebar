@@ -11,8 +11,8 @@ Read-freshness (uniform across CLI / library / MCP): before each read we run a
 best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
 the shared in-process freshness helper (``reads.ensure_fresh``) — so MCP (the
 primary agent surface) is no longer the stalest interface. Opt out with
-``REBAR_SYNC_PULL=off`` (deprecated alias ``REBAR_NO_SYNC=1``; the CLI also accepts
-``--no-pull`` / deprecated ``--no-sync``). Reuses the SAME throttle marker the
+``REBAR_SYNC_PULL=off`` (permanent alias ``REBAR_NO_SYNC=1``; the CLI also accepts
+``--no-pull``). Reuses the SAME throttle marker the
 dispatcher uses, so CLI and in-process reads never double-fetch.
 """
 

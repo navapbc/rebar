@@ -36,7 +36,7 @@ to an emitted code are contract changes and must be called out in release notes.
 - **Option-value syntax → accept BOTH `--opt value` and `--opt=value`.** Every
   value-taking option on the structured read commands (`list --status`,
   `session-logs --limit`, `search --status/--type/--has-tag/--sort`, `ready
-  --epic/--sort`, `list-epics --has-tag/--min-children`, plus `--output`) accepts
+  --epic/--sort`, plus `--output`) accepts
   the space form *and* the equals form interchangeably — matching the
   write/composer commands (`claim --assignee <you>`) and the `--opt <value>`
   convention used throughout `CLAUDE.md`. So `rebar session-logs --limit 30` and
@@ -96,7 +96,6 @@ guarantee `2`).
 | `link` | 0 | 1 | — | missing relation arg → 1 |
 | `list` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
 | `list-descendants` | 0 | 0 | — | tolerant read: unknown root → empty buckets, 0 |
-| `list-epics` | 0 | — | — | exit reflects epic availability: 0=an unblocked epic, 1=no open epics, 2=all blocked |
 | `next-batch` | 0 | 1 | — | |
 | `purge-bridge` | 0 | — | — | no ticket id |
 | `quality-check` | 0 | 1 | — | **gate**: 0=dispatch-ready, 1=not-ready **or** not-found |

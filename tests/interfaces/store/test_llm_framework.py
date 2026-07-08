@@ -359,7 +359,7 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("REBAR_LLM_BASE_URL", "http://localhost:1234/v1")
-    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "7")
+    monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "7")
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
     cfg = LLMConfig.from_env(repo_root=".")

@@ -21,10 +21,10 @@ import re
 from rebar import _cli
 from rebar._cli import _help
 
-# Arms intentionally NOT advertised in the overview (parity with the bash
-# ALLOWLIST="help list-epics"). ``help`` is the top-level help word (no .txt of its
-# own); ``list-epics`` is deprecated and folded into ``list_tickets``.
-_OVERVIEW_ALLOWLIST = frozenset({"help", "list-epics"})
+# Arms intentionally NOT advertised in the overview. ``help`` is the top-level help
+# word (no .txt of its own). (The deprecated ``list-epics`` arm was removed in ticket
+# 5899; use ``list --type=epic ...``.)
+_OVERVIEW_ALLOWLIST = frozenset({"help"})
 
 
 def _routable_subcommands() -> frozenset[str]:
