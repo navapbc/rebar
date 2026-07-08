@@ -214,8 +214,9 @@ that same log. Retrieve recent logs with `rebar.recent_session_logs(limit=5)` /
 first, default 5).
 
 **Auto-rotation per session (no manual `start` needed).** The pointer stores a
-session fingerprint alongside the log id, taken from `CLAUDE_CODE_SESSION_ID` (then
-`REBAR_SESSION_ID` / `SESSION_ID`). When a NEW session's first `append` sees a
+session fingerprint alongside the log id, taken from the shared session-id resolver
+(`REBAR_SESSION_ID`, then `CLAUDE_CODE_SESSION_ID`, then `SESSION_ID`; see
+`docs/config.md`). When a NEW session's first `append` sees a
 pointer whose fingerprint *differs* from this session's, it auto-rotates to a fresh
 log — so distinct agent sessions get distinct logs without anyone running
 `session-log start`. A *differing* pointer fingerprint includes a **missing** one: if

@@ -333,14 +333,27 @@ dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var
 standardization story `60ce`.
 
-**Session provenance (`REBAR_SESSION_ID` / `SESSION_ID`).** The session id stamped
-into the FORCE_CLOSE audit comment resolves with precedence
-`REBAR_SESSION_ID` → `SESSION_ID` → short git HEAD → `"unknown"`. `REBAR_SESSION_ID`
-is the explicit, rebar-owned override; `SESSION_ID` is the ambient, externally-set
-(e.g. CI/agent) value. This is **additive "support both"**, *not* a deprecating
-rename: ambient `SESSION_ID` remains permanently valid (setting only it is unchanged),
-so there is **no deprecation warning** — unlike the renamed keys above. Decided on
-ticket `83f2`; see `60ce`.
+**Session provenance (one shared resolver).** rebar records "which coding-agent
+session emitted an event" via ONE shared resolver
+(`rebar._commands.session_id.resolve_session_id`, epic crust-fetch-stump). Its ordered,
+data-driven var list resolves with precedence (first NON-EMPTY wins):
+`REBAR_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `SESSION_ID` → `None`. `REBAR_SESSION_ID`
+is the explicit, rebar-owned override (authoritative — e.g. hook-injected); the native
+harness var `CLAUDE_CODE_SESSION_ID` is next; the ambient, externally-set (e.g. CI/agent)
+`SESSION_ID` is last. An empty / whitespace-only value is treated as **absent** (skipped).
+The resolver **never returns git HEAD** (a HEAD changes on every commit within one session,
+so it is not a session id). The var list is extensible — story c557 appends the OSS harness
+vars `OPENCODE_SESSION_ID` / `CODEX_THREAD_ID`.
+
+This unifies two formerly divergent chains and is **additive "support both"**, *not* a
+deprecating rename: ambient `SESSION_ID` remains permanently valid, so there is **no
+deprecation warning** — unlike the renamed keys above. **Precedence-inversion note:** the
+`session_log` current-log fingerprint formerly put `CLAUDE_CODE_SESSION_ID` before
+`REBAR_SESSION_ID`; the unified contract puts `REBAR_SESSION_ID` first, an intentional
+change that only differs when BOTH are set. The FORCE_CLOSE audit comment consumes the
+shared resolver, then applies a LOCAL cosmetic fallback to short git HEAD then `"unknown"`
+so the comment is always a non-empty string (that fallback is the call site's, not the
+resolver's). Decided on tickets `83f2` / `6014`; see `60ce`.
 
 ## Transparency
 

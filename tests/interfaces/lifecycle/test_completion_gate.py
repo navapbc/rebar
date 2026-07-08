@@ -470,35 +470,50 @@ def test_session_log_close_is_refused_no_signature(rebar_repo: Path, monkeypatch
     assert rebar.verify_signature(log, repo_root=str(rebar_repo))["verdict"] == "unsigned"
 
 
-# ── session-provenance precedence: REBAR_SESSION_ID > SESSION_ID > short HEAD > "unknown" ──
-# Ticket c1bf (decided on 83f2): the FORCE_CLOSE audit-comment session id prefers the explicit,
-# rebar-owned REBAR_SESSION_ID, then the ambient SESSION_ID, then short git HEAD, then "unknown".
-# Additive "support both" — no deprecation warning; setting only ambient SESSION_ID is unchanged.
+# ── session-provenance precedence (unified resolver, epic crust-fetch-stump / 6014) ──
+# The FORCE_CLOSE audit-comment session id now delegates to the shared resolver
+# (REBAR_SESSION_ID > CLAUDE_CODE_SESSION_ID > SESSION_ID), then keeps this call site's
+# LOCAL cosmetic fallback to short git HEAD, then "unknown". Delegating fixed a latent bug:
+# the old local chain OMITTED CLAUDE_CODE_SESSION_ID, so a real Claude Code session fell
+# through to git HEAD. Additive "support both" — no deprecation warning.
 def test_resolve_session_prefers_rebar_session_id(monkeypatch) -> None:
-    """(a) REBAR_SESSION_ID wins even when ambient SESSION_ID is also set."""
+    """(a) REBAR_SESSION_ID wins even when the other session vars are also set."""
     monkeypatch.setenv("REBAR_SESSION_ID", "explicit-rebar")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "claude")
     monkeypatch.setenv("SESSION_ID", "ambient")
     assert _tc._resolve_session("ignored") == "explicit-rebar"
+
+
+def test_resolve_session_captures_claude_code_session_id(monkeypatch) -> None:
+    """(a2) BUG FIX: with only CLAUDE_CODE_SESSION_ID set, it is captured (not git HEAD)."""
+    monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("SESSION_ID", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "claude-sess")
+    monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "abc1234")
+    assert _tc._resolve_session("ignored") == "claude-sess"
 
 
 def test_resolve_session_falls_back_to_ambient_session_id(monkeypatch) -> None:
     """(b) With only ambient SESSION_ID set, behavior is exactly as before (back-compat)."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setenv("SESSION_ID", "ambient")
     assert _tc._resolve_session("ignored") == "ambient"
 
 
 def test_resolve_session_falls_back_to_short_head(monkeypatch) -> None:
-    """(c) Neither env var set → short git HEAD is used."""
+    """(c) No session env var set → short git HEAD is used (local cosmetic fallback)."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("SESSION_ID", raising=False)
     monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "abc1234")
     assert _tc._resolve_session("ignored") == "abc1234"
 
 
 def test_resolve_session_falls_back_to_unknown(monkeypatch) -> None:
-    """(d) Neither env var set and no HEAD available → 'unknown'."""
+    """(d) No session env var set and no HEAD available → 'unknown'."""
     monkeypatch.delenv("REBAR_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("SESSION_ID", raising=False)
     monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "")
     assert _tc._resolve_session("ignored") == "unknown"
