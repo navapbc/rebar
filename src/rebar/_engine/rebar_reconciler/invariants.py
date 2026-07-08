@@ -5,8 +5,8 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
+from typing import NamedTuple
 
 _CAP_PER_PASS = 5
 
@@ -73,121 +73,114 @@ def _load_alert_store():
     return mod
 
 
+_SINK_MOD = None
+
+
+def _load_sink():
+    """Load the sibling invariant_sink.py module (the remediation side-effect sink).
+
+    Mirrors ``_load_alert_store``'s by-path load (this module is exec'd standalone in
+    tests, so a plain import would not resolve). The sink is stateless, so the loaded
+    module is cached to avoid re-exec on every reconciler pass.
+    """
+    global _SINK_MOD
+    if _SINK_MOD is None:
+        spec = importlib.util.spec_from_file_location(
+            "invariant_sink", Path(__file__).parent / "invariant_sink.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("invariants_sink", mod)
+        spec.loader.exec_module(mod)
+        _SINK_MOD = mod
+    return _SINK_MOD
+
+
+class AtMostOneViolation(NamedTuple):
+    """A structured at-most-one-local-id violation (a PURE detection record).
+
+    Carries everything the remediation sink needs without any I/O: the offending
+    ``jira_key``, its duplicate ``local_ids``, and the canonical + legacy dedup keys
+    (the "bridge-alert:" namespace contract lives here, computed purely from the key).
+
+    A NamedTuple (not a dataclass) deliberately: invariants.py is exec'd standalone in
+    tests via ``spec_from_file_location`` WITHOUT registering the module in
+    ``sys.modules``, and on Python 3.14 ``@dataclass`` resolves stringified
+    (PEP 563) annotations through ``sys.modules[cls.__module__]`` at class-definition
+    time, which raises ``AttributeError`` for such an unregistered module. NamedTuple
+    does not, so it is robust to every load path.
+    """
+
+    jira_key: str
+    local_ids: list
+    dedup_key: str
+    legacy_dedup_key: str
+
+
+def detect_at_most_one_local_id(snapshot: dict) -> list[AtMostOneViolation]:
+    """PURE detector: find Jira issues mapped to more than one local_id.
+
+    No I/O, no subprocess, no alert-store access — this is compute-only and directly
+    unit-testable. ``snapshot`` maps jira_key -> {fields}. Returns one
+    ``AtMostOneViolation`` per offending issue, in snapshot iteration order. Dedup and
+    the per-pass cap are filing policy and live in the sink, not here, so this returns
+    ALL structural violations.
+    """
+    violations: list[AtMostOneViolation] = []
+    for jira_key, fields in snapshot.items():
+        rebar_ids = fields.get("local_ids", [])
+        if isinstance(rebar_ids, list) and len(rebar_ids) > 1:
+            # Dedup key uses the canonical "bridge-alert:" namespace prefix per the
+            # at-most-one-invariant ticket's Considerations section. Without the
+            # prefix, cross-invariant dedup scanners that filter by "bridge-alert:"
+            # prefix would miss these entries.
+            violations.append(
+                AtMostOneViolation(
+                    jira_key=jira_key,
+                    local_ids=rebar_ids,
+                    dedup_key=f"bridge-alert:at-most-one:{jira_key}",
+                    legacy_dedup_key=f"at-most-one:{jira_key}",
+                )
+            )
+    return violations
+
+
 def check_at_most_one_local_id(
     snapshot: dict,
     repo_root: Path | None = None,
     ticket_cli: str | None = None,
 ) -> list[dict]:
-    """Check that no Jira issue has more than one local_id mapping.
+    """Check that no Jira issue has more than one local_id mapping (detect -> sink).
 
-    snapshot: dict mapping jira_key -> {fields}
-    Returns list of violation dicts filed this pass.
+    Thin composition preserved for the caller (run_differs): PURE detection via
+    ``detect_at_most_one_local_id`` feeds the remediation sink
+    (``invariant_sink.file_at_most_one_violations``), which owns the dedup gate, the
+    per-pass cap, the alert-store append, and the ticket-CLI bug-filing.
 
-    Bug-filing failures (TimeoutExpired, FileNotFoundError, OSError) are
-    surfaced to stderr but do NOT abort the loop or re-raise — the alert
-    record itself is rolled back so the next reconciler pass re-files cleanly
-    instead of being short-circuited by is_deduped on an orphaned record.
+    snapshot: dict mapping jira_key -> {fields}. Returns list of violation dicts filed
+    this pass.
+
+    Bug-filing failures (TimeoutExpired, FileNotFoundError, OSError) are surfaced to
+    stderr but do NOT abort the loop or re-raise — the alert record itself is left in
+    place so the next reconciler pass re-files cleanly instead of being short-circuited
+    by is_deduped on an orphaned record. (``subprocess`` is passed into the sink from
+    this module's namespace so the invariants tests that patch ``invariants.subprocess``
+    still intercept the CLI call.)
     """
     if repo_root is None:
         repo_root = _default_repo_root()
     if ticket_cli is None:
         ticket_cli = _default_ticket_cli()
 
-    alert_store = _load_alert_store()
-    violations_filed: list[dict] = []
-
-    for jira_key, fields in snapshot.items():
-        # Check if this issue has multiple local_id values (duplicates)
-        rebar_ids = fields.get("local_ids", [])
-        if isinstance(rebar_ids, list) and len(rebar_ids) > 1:
-            if len(violations_filed) >= _CAP_PER_PASS:
-                continue
-
-            # Dedup key uses the canonical "bridge-alert:" namespace prefix per
-            # the at-most-one-invariant ticket's Considerations section. Without
-            # the prefix, cross-invariant dedup scanners that filter by
-            # "bridge-alert:" prefix would miss these entries.
-            dedup_key = f"bridge-alert:at-most-one:{jira_key}"
-            # Backward-compat: also check the legacy (pre-prefix) dedup_key so
-            # alerts filed under the old format are recognized during the
-            # transition window and not re-filed as duplicates.
-            _legacy_dedup_key = f"at-most-one:{jira_key}"
-            if alert_store.is_deduped(dedup_key, repo_root) or alert_store.is_deduped(
-                _legacy_dedup_key, repo_root
-            ):
-                continue
-
-            # File bridge-alert record
-            record = {
-                "key": dedup_key,
-                "jira_key": jira_key,
-                "timestamp_ns": time.time_ns(),
-                "reason": f"multiple local_ids: {rebar_ids}",
-            }
-            alert_store.append(record, repo_root)
-
-            # File bug ticket via CLI. Narrow exception handling: catch the
-            # subprocess-class and OS-class exceptions explicitly so genuine
-            # programming errors (AttributeError, TypeError) still propagate.
-            bug_id = ""
-            cli_error: str | None = None
-            try:
-                result = subprocess.run(
-                    [
-                        ticket_cli,
-                        "create",
-                        "bug",
-                        f"at-most-one violation: {jira_key} has multiple local_ids",
-                        "--priority",
-                        "1",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    bug_id = _extract_ticket_id(result.stdout)
-                    if not bug_id:
-                        # CLI exited 0 but stdout did not contain a
-                        # canonical ticket ID — treat as failure so the
-                        # alert remains orphan-with-warning instead of
-                        # being patched with a garbage value.
-                        cli_error = (
-                            "exit=0 but no canonical ticket ID found in "
-                            f"stdout={result.stdout[:200]!r}"
-                        )
-                else:
-                    cli_error = f"exit={result.returncode} stderr={result.stderr[:200]!r}"
-            except subprocess.TimeoutExpired:
-                cli_error = "ticket-create timed out after 30s"
-            except (OSError, subprocess.SubprocessError) as exc:
-                cli_error = f"{type(exc).__name__}: {exc}"
-
-            if bug_id:
-                alert_store.patch_bug_filed(dedup_key, bug_id, repo_root)
-            else:
-                # Bug-filing failed. Surface the failure to operators via
-                # stderr, then leave the alert record on disk. The next pass
-                # will hit is_deduped() and skip — operators must manually
-                # file the bug or roll the alert forward. See bug ticket TBD
-                # for a sweeper that converts orphan alerts into ticket-create
-                # retries on subsequent passes.
-                print(  # noqa: T201
-                    f"WARN: invariants.check_at_most_one_local_id: "
-                    f"alert {dedup_key!r} filed but bug-ticket creation "
-                    f"failed ({cli_error}); alert is orphan-without-bug.",
-                    file=sys.stderr,
-                )
-
-            violations_filed.append(
-                {
-                    "jira_key": jira_key,
-                    "local_ids": rebar_ids,
-                    "dedup_key": dedup_key,
-                }
-            )
-
-    return violations_filed
+    violations = detect_at_most_one_local_id(snapshot)
+    return _load_sink().file_at_most_one_violations(
+        violations,
+        repo_root=repo_root,
+        ticket_cli=ticket_cli,
+        alert_store=_load_alert_store(),
+        runner=subprocess,
+        extract_ticket_id=_extract_ticket_id,
+        cap=_CAP_PER_PASS,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -313,53 +306,28 @@ def check_dual_identity_complete(local_state: dict, jira_state: dict) -> tuple[s
 
 
 def report_schema_drift(issue_key: str, observed: dict, expected: dict) -> None:
-    """File a bug ticket for schema drift via the rebar dispatcher.
+    """File a bug ticket for schema drift via the rebar dispatcher (thin sink wrapper).
+
+    Delegates the side effects (dedup gate + alert-store append + best-effort ticket
+    filing) to ``invariant_sink.report_schema_drift``. This wrapper resolves the
+    collaborators from THIS module's namespace — ``subprocess`` and
+    ``_load_alert_store`` — so the invariants tests that patch ``invariants.subprocess``
+    / ``invariants._load_alert_store`` still intercept them, and passes the ticket-CLI
+    resolver lazily so a deduped call does no extra work.
 
     Uses a stable ``dedup_key`` of the form ``bridge-alert:schema-drift:<issue_key>``
-    so repeated drift on the same issue can be correlated.  The alert_store
-    dedup check prevents duplicate tickets across reconciler passes — without
-    it, every pass that hits the cap fires a new ticket for the same key
-    (root cause of bug 1c59-90ca-3391-46ac: 12+ duplicate "schema drift: L-16"
-    tickets created by repeated cap-hit signals).
-
-    Subprocess failures are swallowed (``check=False``) — drift reporting is
-    best-effort and must not abort the reconcile loop.
-
-    NOTE: The previous implementation used ``python -m reconciler_cli`` which
-    does not exist as a module in this repo.  This version uses the same
-    ``rebar create`` dispatcher as the rest of invariants.py.
+    so repeated drift on the same issue can be correlated. The dedup check prevents
+    duplicate tickets across reconciler passes (root cause of bug
+    1c59-90ca-3391-46ac: 12+ duplicate "schema drift: L-16" tickets from repeated
+    cap-hit signals). Subprocess failures are swallowed (``check=False``) — drift
+    reporting is best-effort and must not abort the reconcile loop.
     """
-    dedup_key = f"bridge-alert:schema-drift:{issue_key}"
-    repo_root = _default_repo_root()
-
-    alert_store = _load_alert_store()
-    if alert_store.is_deduped(dedup_key, repo_root):
-        return
-
-    # Persist the alert record before filing the ticket so subsequent passes
-    # hit is_deduped() and skip, mirroring the pattern in
-    # check_at_most_one_local_id().
-    alert_store.append(
-        {
-            "key": dedup_key,
-            "issue_key": issue_key,
-            "timestamp_ns": time.time_ns(),
-            "reason": f"schema-drift observed={observed} expected={expected}",
-        },
-        repo_root,
-    )
-
-    ticket_cli = _default_ticket_cli()
-    subprocess.run(
-        [
-            ticket_cli,
-            "create",
-            "bug",
-            f"schema drift: {issue_key}",
-            "--priority",
-            "2",
-            "--description",
-            f"dedup_key={dedup_key} observed={observed} expected={expected}",
-        ],
-        check=False,
+    _load_sink().report_schema_drift(
+        issue_key,
+        observed,
+        expected,
+        repo_root=_default_repo_root(),
+        alert_store=_load_alert_store(),
+        runner=subprocess,
+        resolve_ticket_cli=_default_ticket_cli,
     )
