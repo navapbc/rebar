@@ -58,7 +58,7 @@ fi
 # copy the image's baked plugins on first run (so an empty mounted plugins dir does
 # not hide them — S4a then drops webhooks/events-log here and they persist), and
 # chown to the in-image gerrit uid so the container can write.
-for d in git index cache db etc logs plugins; do
+for d in git index cache db etc logs plugins reviewbot; do
   mkdir -p "${SITE_HOST_DIR}/${d}"
 done
 
@@ -66,7 +66,7 @@ done
 # subdir, each a local `bind` volume onto the EBS-backed host path. external:true in
 # the compose file means `docker compose down -v` cannot destroy them. Idempotent:
 # `volume inspect || volume create`.
-for d in git index cache db etc logs plugins; do
+for d in git index cache db etc logs plugins reviewbot; do
   vol="gerrit_${d}"
   docker volume inspect "${vol}" >/dev/null 2>&1 || \
     docker volume create \

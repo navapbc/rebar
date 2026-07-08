@@ -85,6 +85,14 @@ services:
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
       # is fixed at 8000 (uvicorn --port in the Dockerfile).
       - "127.0.0.1:${REVIEW_BOT_PORT:-8000}:8000"
+    volumes:
+      # Persist the dedup ledger + reconcile cursor across container recreation. Auto-deploy
+      # rebuilds this container on every deploy; without a volume the reconcile cursor resets
+      # to empty each time, forcing a full events-log re-scan on every deploy (the bug c943
+      # amplifier). Bind onto the EBS host path like the gerrit_* site volumes; the external
+      # volume is created by compose-up.sh (and pre-provisioned on the host). The review-bot
+      # image runs as root, so the root-owned host dir is writable.
+      - gerrit_reviewbot:/var/gerrit/site/reviewbot
     # REBAR_MCP_ALLOW_LLM deliberately NOT set (gates only the stdio MCP server;
     # the receiver calls the rebar.llm library directly — S4b).
     logging:
@@ -109,4 +117,8 @@ volumes:
   gerrit_logs:
     external: true
   gerrit_plugins:
+    external: true
+  # rebar review-bot state (dedup ledger + reconcile cursor) — bind onto
+  # /var/gerrit/site/reviewbot; created by compose-up.sh alongside the gerrit_* volumes.
+  gerrit_reviewbot:
     external: true
