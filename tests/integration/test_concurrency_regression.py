@@ -721,3 +721,34 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     # The orphan comment is folded back in — its body is present in reduced state.
     state = reduce_ticket(str(seed_dir))
     assert any("orphan-comment-body" in (c.get("body") or "") for c in state.get("comments", []))
+
+
+def test_push_retry_merge_under_lock_preserves_events(two_clones):
+    """A write on B that triggers a non-fast-forward push-retry merge (now taken under the
+    write lock) must succeed without a spurious StoreError and lose no events — B's write,
+    a second B write, and A's already-pushed write all survive (audit reliability #2, e699)."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_b = _tracker(repo_b)
+
+    # Prime B's read-side sync marker so B writes against a STALE base (does not first
+    # fetch A's write) — that is what forces its push to be non-fast-forward and drives
+    # the locked push-retry merge path.
+    _engine_run(repo_b, "list")
+
+    # A writes and auto-pushes, advancing origin/tickets.
+    assert _engine_run(repo_a, "comment", seed, "from A").returncode == 0
+
+    # B writes twice: each commits locally, then push_after_commit performs the non-ff
+    # fetch+merge under the write lock. Both must succeed (no StoreError / non-zero exit).
+    r1 = _engine_run(repo_b, "comment", seed, "from B one", check=False)
+    assert r1.returncode == 0, f"B write during push-retry merge failed: {r1.stderr}"
+    r2 = _engine_run(repo_b, "comment", seed, "from B two", check=False)
+    assert r2.returncode == 0, f"second B write failed: {r2.stderr}"
+
+    # No event lost: after B converges, its store carries A's comment and both of B's.
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
+    bodies = " ".join(c.get("body", "") for c in shown.get("comments", []))
+    for expected in ("from A", "from B one", "from B two"):
+        assert expected in bodies, f"event lost — {expected!r} missing from: {bodies!r}"
