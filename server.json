@@ -37,11 +37,6 @@
           "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
           "description": "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only.",
           "isRequired": false
-        },
-        {
-          "name": "REBAR_MCP_ALLOW_RECONCILE_LIVE",
-          "description": "DEPRECATED alias of REBAR_MCP_ALLOW_JIRA_SYNC — prefer that name; still honored for backward compatibility.",
-          "isRequired": false
         }
       ]
     }

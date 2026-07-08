@@ -1,8 +1,11 @@
-"""EV-1: unified sync model REBAR_SYNC_PUSH / REBAR_SYNC_PULL with deprecation
-aliases (REBAR_PUSH, REBAR_NO_SYNC) and the NO_SYNC negative->positive boolean flip.
-Verifies the canonical names, the legacy aliases (warn + map), canonical-wins
-precedence, and the value flip — at the config layer (the single source of truth)
-and through the push (_push_mode) / freshness (_sync_disabled) consumers.
+"""EV-1: unified sync model REBAR_SYNC_PUSH / REBAR_SYNC_PULL with the permanent
+REBAR_NO_SYNC alias and its negative->positive boolean flip. Verifies the canonical
+names, the REBAR_NO_SYNC alias (warn + map), canonical-wins precedence, and the value
+flip — at the config layer (the single source of truth) and through the push
+(_push_mode) / freshness (_sync_disabled) consumers.
+
+(The scheduled REBAR_PUSH alias of REBAR_SYNC_PUSH was removed pre-1.0 — DE7 — so it
+is now ignored; only REBAR_SYNC_PUSH is honored.)
 """
 
 from __future__ import annotations
@@ -24,7 +27,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "XDG_CONFIG_HOME",
         "REBAR_SYNC_PUSH",
         "REBAR_SYNC_PULL",
-        "REBAR_PUSH",
         "REBAR_NO_SYNC",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -45,20 +47,11 @@ def test_canonical_sync_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert c.sync.push == "async" and c.sync.pull == "off"
 
 
-# ── deprecated alias: REBAR_PUSH -> sync.push ─────────────────────────────────
-def test_legacy_rebar_push_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+# ── removed alias: REBAR_PUSH is no longer read (DE7) ─────────────────────────
+def test_removed_rebar_push_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # REBAR_PUSH was removed pre-1.0; it no longer feeds sync.push (which stays at
+    # its default 'always'). Only REBAR_SYNC_PUSH is honored now.
     monkeypatch.setenv("REBAR_PUSH", "off")
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
-        c = cfg.load_config(root=_proj(tmp_path))
-    assert c.sync.push == "off"
-    assert any(
-        "REBAR_PUSH" in r.getMessage() and "deprecated" in r.getMessage() for r in caplog.records
-    )
-
-
-def test_canonical_push_beats_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
-    monkeypatch.setenv("REBAR_PUSH", "off")  # legacy ignored when canonical set
     assert cfg.load_config(root=_proj(tmp_path)).sync.push == "always"
 
 
@@ -112,11 +105,11 @@ def test_default_sync_when_unset(tmp_path: Path) -> None:
     assert c.sync.push == "always" and c.sync.pull == "on"  # defaults
 
 
-# ── precedence: env (incl. alias) over a config file ──────────────────────────
-def test_env_alias_beats_project_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+# ── precedence: env over a config file ────────────────────────────────────────
+def test_env_beats_project_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[sync]\npush = 'always'\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_PUSH", "off")  # legacy alias still beats the file
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")  # env beats the file
     assert cfg.load_config(root=p).sync.push == "off"
 
 

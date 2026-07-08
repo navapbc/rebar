@@ -277,8 +277,7 @@ def _signature_gate(
     config_error: str | None,
 ) -> None:
     """Story/epic close gate: require a CERTIFIED signature made at the current HEAD
-    (OFF unless ``verify.require_signature_for_close=true`` — legacy alias
-    ``verify.require_verdict_for_close=true`` — in ``.rebar/config.conf``).
+    (OFF unless ``verify.require_signature_for_close=true`` in ``rebar.toml``).
 
     The FLAG (is the gate on?) is resolved by ``gates.resolve_signature_gate`` OUTSIDE the write
     lock and passed in as ``require_sig`` / ``config_error`` — so this function performs only the

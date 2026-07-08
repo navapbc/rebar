@@ -2,7 +2,7 @@
 
 Pins the byte/exit-code/parse surfaces directly (the bash suites cover the
 end-to-end paths): canonical committed bytes, the 75 rebase guard, lock timeout,
-the event_type enum, and REBAR_PUSH parsing.
+the event_type enum, and REBAR_SYNC_PUSH parsing.
 """
 
 from __future__ import annotations
@@ -141,18 +141,18 @@ def test_dual_lock_mutual_exclusion_same_process(tracker: str):
     ],
 )
 def test_push_mode_parsing(monkeypatch, val, expect):
-    monkeypatch.setenv("REBAR_PUSH", val)
+    monkeypatch.setenv("REBAR_SYNC_PUSH", val)
     assert push._push_mode() == (expect if val.strip() else "always")
 
 
 def test_push_off_is_noop(tracker: str, monkeypatch):
-    monkeypatch.setenv("REBAR_PUSH", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # No remote configured; off must return immediately without error.
     push.push_tickets_branch(tracker)  # no raise
 
 
 def test_push_no_remote_is_noop(tracker: str, monkeypatch):
-    monkeypatch.setenv("REBAR_PUSH", "always")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     push.push_tickets_branch(tracker)  # no remote → silent best-effort return
 
 

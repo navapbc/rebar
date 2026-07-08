@@ -260,7 +260,7 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         return _fsck.fsck_cli(rest)
     if sub == "fsck-recover":
         # The recover path resolves its own tracker (honors REBAR_TRACKER_DIR /
-        # TICKETS_TRACKER_DIR / --tracker-dir); the dispatcher only auto-inits when
+        # --tracker-dir); the dispatcher only auto-inits when
         # no tracker is injected.
         from rebar import config
 

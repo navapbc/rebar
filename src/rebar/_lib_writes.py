@@ -380,8 +380,8 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description.
 
     Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
-    mutate via convergent TAG_DELTA deltas. ``tags=`` is a DEPRECATED alias for
-    ``set_tags`` (kept for back-compat; emits the same convergent set delta).
+    mutate via convergent TAG_DELTA deltas. (The ``tags=`` set-alias was removed
+    pre-1.0 — DE7; it is now rejected as an unknown field.)
     """
     tag_add = fields.pop("add_tags", None)
     tag_remove = fields.pop("remove_tags", None)
@@ -390,8 +390,6 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
     for key, value in fields.items():
         if value is None:
             continue
-        if key == "tags" and isinstance(value, (list, tuple)):
-            value = ",".join(value)
         normalized[key] = str(value)
     from rebar._commands import composer
 

@@ -172,8 +172,7 @@ that does not itself need the `[agents]` extra, though individual LLM steps do).
 > [docs/adr/](docs/adr/).
 
 There is no `init` over MCP (operator bootstrap only). `reconcile` `live` mode
-additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1` (deprecated alias
-`REBAR_MCP_ALLOW_RECONCILE_LIVE`). Both env gates accept
+additionally requires `REBAR_MCP_ALLOW_JIRA_SYNC=1`. Both env gates accept
 any case-insensitive truthy value (`1`/`true`/`yes`, whitespace tolerated);
 anything else (including unset) is off.
 
@@ -462,7 +461,7 @@ the local branch is ahead of that remote. The sync remote is **`sync.remote`**
 source of truth is a remote **other** than `origin` (this repo keeps it on
 `origin` = GitHub while code review lives on a separate `gerrit` remote; see the
 remotes note under "Git workflow"). The **`REBAR_SYNC_PUSH`** env var tunes push
-timing (default `always`; deprecated alias `REBAR_PUSH`): `async` pushes in the
+timing (default `always`): `async` pushes in the
 background so per-write network latency doesn't serialize a batch claim, and `off`
 keeps commits local — both still surface `PUSH_PENDING` via `fsck` (see
 `docs/concurrency.md`).

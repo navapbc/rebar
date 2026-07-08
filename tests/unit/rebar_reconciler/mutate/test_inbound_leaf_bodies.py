@@ -58,7 +58,7 @@ def applier():
 def fixture_repo(tmp_path, monkeypatch):
     """A minimal repo layout with an initialised .tickets-tracker dir.
 
-    Removes TICKETS_TRACKER_DIR from the environment so a developer-set
+    Removes REBAR_TRACKER_DIR from the environment so a developer-set
     override in the host shell cannot leak into the test and steer writes
     away from the tmp tracker dir (PR #375 review thread 3306949620).
 
@@ -69,7 +69,6 @@ def fixture_repo(tmp_path, monkeypatch):
     and CI runs (PR #375 review thread 3307104056).
     """
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
     monkeypatch.delenv("REBAR_AUTHOR", raising=False)
     tracker = tmp_path / ".tickets-tracker"

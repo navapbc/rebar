@@ -1,4 +1,4 @@
-"""REBAR_PUSH auto-push policy, end-to-end against a real local bare origin.
+"""REBAR_SYNC_PUSH auto-push policy, end-to-end against a real local bare origin.
 
 In-process port of the real-origin half of tests/scripts/test-rebar-push-policy.sh
 (the bash engine is being deleted). The unit tier already covers parsing + the
@@ -67,7 +67,7 @@ def test_push_off_does_not_move_origin(
 ) -> None:
     repo, origin = repo_with_origin
     before = _origin_ref(origin)
-    monkeypatch.setenv("REBAR_PUSH", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     rebar.create_ticket("task", "off", repo_root=str(repo))
     assert _origin_ref(origin) == before
 
@@ -77,7 +77,7 @@ def test_push_always_moves_origin_synchronously(
 ) -> None:
     repo, origin = repo_with_origin
     before = _origin_ref(origin)
-    monkeypatch.setenv("REBAR_PUSH", "always")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     rebar.create_ticket("task", "always", repo_root=str(repo))
     # Synchronous: origin already advanced by the time create() returned.
     assert _origin_ref(origin) != before
@@ -88,7 +88,7 @@ def test_push_async_moves_origin_within_bounded_wait(
 ) -> None:
     repo, origin = repo_with_origin
     before = _origin_ref(origin)
-    monkeypatch.setenv("REBAR_PUSH", "async")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "async")
     rebar.create_ticket("task", "async", repo_root=str(repo))
     after = before
     for _ in range(25):  # ≤ ~10s, same bound as the bash test (25 × 0.4s)
@@ -96,7 +96,7 @@ def test_push_async_moves_origin_within_bounded_wait(
         if after != before:
             break
         time.sleep(0.4)
-    assert after != before, "REBAR_PUSH=async never pushed in the background"
+    assert after != before, "REBAR_SYNC_PUSH=async never pushed in the background"
 
 
 def test_push_off_is_case_and_space_insensitive(
@@ -104,6 +104,6 @@ def test_push_off_is_case_and_space_insensitive(
 ) -> None:
     repo, origin = repo_with_origin
     before = _origin_ref(origin)
-    monkeypatch.setenv("REBAR_PUSH", " OFF ")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", " OFF ")
     rebar.create_ticket("task", "off2", repo_root=str(repo))
     assert _origin_ref(origin) == before

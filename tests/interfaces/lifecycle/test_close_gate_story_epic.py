@@ -9,7 +9,7 @@ which the existing suite asserts the *exit code* of but not its side effects.
 Contract (see rebar._commands.txn._signature_gate +
 rebar._commands.transition.transition_compute):
 
-  * gate OFF (default, no .rebar/config.conf) → story/epic close without a signature;
+  * gate OFF (default, no rebar.toml) → story/epic close without a signature;
   * gate ON → an unsigned story/epic close is rejected (exit 1, "certified
     signature"); closing after a valid sign_manifest at the current HEAD succeeds;
   * a signature certified against an OLDER store/code HEAD is rejected once the
@@ -35,8 +35,7 @@ _TYPES = ("story", "epic")
 
 
 def _enable_gate(repo: Path) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text("verify.require_signature_for_close=true\n")
+    (repo / "rebar.toml").write_text("[verify]\nrequire_signature_for_close = true\n")
 
 
 def _commit(repo: Path, msg: str = "c") -> None:

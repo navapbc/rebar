@@ -342,23 +342,14 @@ def edit_core(
     Tags: ``tag_add``/``tag_remove`` are add/remove deltas; ``tag_set`` (mutually
     exclusive with add/remove) is a wholesale set COMPILED to a delta against the
     locally-observed tags (add-wins: a concurrent unobserved remote add survives).
-    A non-None ``fields['tags']`` is the DEPRECATED set-alias and is folded into
-    ``tag_set`` here, before the field allow-list is checked.
+    (The ``edit_ticket(tags=...)`` set-alias was removed pre-1.0 — DE7; ``tags`` is
+    now just an unknown field, so use ``set_tags``/``add_tags``/``remove_tags``.)
     """
     from rebar.reducer import reduce_ticket
     from rebar.reducer._version import TAG_DELTA
 
     tracker = tracker_dir(repo_root)
     fields = dict(fields)
-    # Deprecated alias: edit(tags=...) -> --set-tags (pre-pass, BEFORE the
-    # _EDIT_FIELDS validation loop, else 'tags' is rejected as an unknown field).
-    if "tags" in fields:
-        from rebar._deprecations import warn_deprecated
-
-        warn_deprecated("lib:edit_ticket(tags=...)", via="warning")
-        alias = fields.pop("tags")
-        if tag_set is None and tag_add is None and tag_remove is None:
-            tag_set = alias
 
     for name in fields:
         if name not in _EDIT_FIELDS:

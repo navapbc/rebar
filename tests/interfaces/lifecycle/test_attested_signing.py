@@ -24,10 +24,7 @@ def _git(repo: Path, *a: str) -> None:
 
 
 def _enable(repo: Path) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text(
-        "verify.require_completion_verification_for_close = true\n"
-    )
+    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
 
 
 def _commit(repo: Path) -> None:

@@ -1,15 +1,14 @@
 """0ac6 (slice 2): route the reconciler.* tunables through the typed Config as the
-config-FILE layer, so a `[tool.rebar.reconciler]` / `rebar.toml` / legacy
-`.rebar/config.conf` value is actually CONSUMED (not just shown by `rebar config`).
+config-FILE layer, so a `[tool.rebar.reconciler]` / `rebar.toml` value is actually
+CONSUMED (not just shown by `rebar config`).
 
 Covers the four consumers — acli_subprocess._acli_call_timeout (jira_cli_timeout),
 _advisory_lock._resolve_retry_budget (lock_max_retries), outbound deletion-probe
 budget (deletion_probe_limit), rebar_id_audit._resolve_id_guard_bypass
-(id_guard_bypass_unsafe) — across config LOCATIONS (pyproject, rebar.toml, legacy
-conf, XDG user, env, `rebar -c`) and asserts precedence CLI > env > project > user >
-default, the ergonomic canonical env names (REBAR_JIRA_CLI_TIMEOUT,
-REBAR_UNSAFE_ID_GUARD_BYPASS) + EV-3c deprecated aliases, the id-guard value-flip and
-fail-CLOSED default, and the legacy flat `rebar_id_guard_mode` key.
+(id_guard_bypass_unsafe) — across config LOCATIONS (pyproject, rebar.toml, XDG user,
+env, `rebar -c`) and asserts precedence CLI > env > project > user > default, the
+ergonomic canonical env names (REBAR_JIRA_CLI_TIMEOUT, REBAR_UNSAFE_ID_GUARD_BYPASS)
++ EV-3c deprecated aliases, and the id-guard value-flip and fail-CLOSED default.
 """
 
 from __future__ import annotations
@@ -80,10 +79,9 @@ def test_timeout_rebar_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert acli_subprocess._acli_call_timeout() == 31
 
 
-def test_timeout_legacy_dotted_conf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_timeout_rebar_toml_alt_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("reconciler.jira_cli_timeout=32\n", encoding="utf-8")
+    (p / "rebar.toml").write_text("[reconciler]\njira_cli_timeout = 32\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_ROOT", str(p))
     assert acli_subprocess._acli_call_timeout() == 32
 
@@ -176,16 +174,6 @@ def test_id_guard_env_beats_file(tmp_path: Path, monkeypatch) -> None:
 def test_id_guard_legacy_env_value_flip(tmp_path: Path, monkeypatch, mode, expect) -> None:
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
     monkeypatch.setenv("REBAR_ID_GUARD_MODE", mode)
-    assert rebar_id_audit._resolve_id_guard_bypass() is expect
-
-
-@pytest.mark.parametrize("mode,expect", [("warn", True), ("raise", False)])
-def test_id_guard_legacy_flat_conf_value_flip(tmp_path: Path, monkeypatch, mode, expect) -> None:
-    """The legacy FLAT (non-dotted) `.rebar/config.conf` key `rebar_id_guard_mode`."""
-    p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text(f"rebar_id_guard_mode={mode}\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_ROOT", str(p))
     assert rebar_id_audit._resolve_id_guard_bypass() is expect
 
 

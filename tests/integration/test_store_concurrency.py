@@ -32,7 +32,7 @@ def _clean_env(**extra: str) -> dict:
     """A subprocess env with ALL ambient ``REBAR_*`` scrubbed.
 
     These tests drive the CLI through git-backed stores in ``tmp_path``; an
-    inherited ``REBAR_ROOT``/``REBAR_FORCE_MKDIR_LOCK``/``REBAR_PUSH``/… from the
+    inherited ``REBAR_ROOT``/``REBAR_FORCE_MKDIR_LOCK``/``REBAR_SYNC_PUSH``/… from the
     caller's shell would silently steer the writers at a different store or lock mode and
     make the storm assertions meaningless. We start from a REBAR-free environment
     and add back only the knobs each test sets explicitly (plus REBAR_NO_SYNC)."""

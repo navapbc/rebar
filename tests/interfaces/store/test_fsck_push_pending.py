@@ -50,8 +50,8 @@ def repo_with_origin(
     rebar.init_repo(repo_root=str(repo))
 
     tracker = repo / ".tickets-tracker"
-    # Seed origin/tickets (REBAR_PUSH=always) so a later un-pushed commit diverges.
-    monkeypatch.setenv("REBAR_PUSH", "always")
+    # Seed origin/tickets (REBAR_SYNC_PUSH=always) so a later un-pushed commit diverges.
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     rebar.create_ticket("task", "seed", repo_root=str(repo))
     _git_q("fetch", "origin", "tickets", cwd=tracker)
     yield repo, tracker
@@ -69,7 +69,7 @@ def test_fsck_reports_push_pending_and_stays_exit_0(
 ) -> None:
     repo, tracker = repo_with_origin
     # A local-only commit: push off so origin does not advance.
-    monkeypatch.setenv("REBAR_PUSH", "off")
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     rebar.create_ticket("task", "unpushed local ticket", repo_root=str(repo))
     _git_q("fetch", "origin", "tickets", cwd=tracker)
     assert _ahead(tracker) >= 1, "fixture did not reach a local-ahead state"

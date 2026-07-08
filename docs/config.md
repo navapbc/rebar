@@ -10,7 +10,8 @@
 
 1. **Format — TOML.** Config lives under **`[tool.rebar]` in `pyproject.toml`**, or
    in a standalone **`rebar.toml`**, parsed with the stdlib **`tomllib`**. This
-   replaces the bespoke flat `key=value` `.rebar/config.conf` parser (which
+   replaced the bespoke flat `key=value` `.rebar/config.conf` parser (removed
+   pre-1.0 — DE7 — which
    silently mishandles `=` in values, has no types/nesting, and drops unknown keys
    silently). TOML is the converged-on default for modern Python tooling (PEP
    518/621/680).
@@ -52,7 +53,7 @@
   `requires-python = ">=3.11"`, so `tomllib` is in the stdlib. (The ruff
   `target-version = "py310"` is a *lint* target only — unrelated to runtime.)
 - **Config is working-tree content, not events.** Config files (`pyproject.toml` /
-  `rebar.toml` / `.rebar/config.conf`) are ordinary repo content on the working
+  `rebar.toml`) are ordinary repo content on the working
   branch — **not** events on the `tickets` orphan branch. There is no event-log
   migration and config is not auto-pushed/merged by the store; back-compat is
   plain file compatibility.
@@ -90,7 +91,7 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 ```toml
 [tool.rebar]
 # verification gate
-verify.require_signature_for_close = false   # alias: verify.require_verdict_for_close
+verify.require_signature_for_close = false
 verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
                                              # model window a single verify request may use before
                                              # the findings are split into multiple calls (0.1–1.0)
@@ -124,7 +125,7 @@ ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICK
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
 
 # sync (git-backed store)
-sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH; alias REBAR_PUSH)
+sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH)
 sync.pull   = "on"      # on | off               (env REBAR_SYNC_PULL; alias REBAR_NO_SYNC)
 sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/reconcile, the
                         # fsck PUSH_PENDING check, and attested ticket-store materialization
@@ -136,13 +137,13 @@ sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/
 # MCP server gates
 mcp.readonly         = false
 mcp.allow_llm        = false
-mcp.allow_jira_sync  = false   # live (applying) Jira writes (alias env REBAR_MCP_ALLOW_RECONCILE_LIVE)
+mcp.allow_jira_sync  = false   # live (applying) Jira writes (env REBAR_MCP_ALLOW_JIRA_SYNC)
 
 # scratch space
 scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
 
 # ticket store (worktree/symlink dir + orphan branch) — both default to today's values
-tracker.dir    = ".tickets-tracker"  # env REBAR_TRACKER_DIR (alias TICKETS_TRACKER_DIR); a bare
+tracker.dir    = ".tickets-tracker"  # env REBAR_TRACKER_DIR; a bare
                                       # relative name (the repo-root symlink + gitignore entry) or an
                                       # absolute path to relocate the store (EV-3b). Validated: no
                                       # empty / `..` traversal / control chars.
@@ -154,8 +155,8 @@ tracker.branch = "tickets"           # env REBAR_TRACKER_BRANCH; the orphan bran
 
 > **Resolution change (tracker.dir).** `tracker_dir()` (and the new `tickets_branch()`) now
 > resolve through the full precedence chain (`-c` flag > `REBAR_<KEY>` env > project > user >
-> default), not the env-only path used historically. `REBAR_TRACKER_DIR` keeps working (it is
-> the canonical env override); `TICKETS_TRACKER_DIR` is honored as a deprecated alias.
+> default), not the env-only path used historically. `REBAR_TRACKER_DIR` is
+> the canonical env override (the removed `TICKETS_TRACKER_DIR` alias is no longer honored — DE7).
 >
 > **Set at `init`, not auto-migrated.** Both values are read at `rebar init` and on every
 > read/write thereafter. Changing `tracker.dir`/`tracker.branch` on an **already-initialized**
@@ -167,8 +168,7 @@ tracker.branch = "tickets"           # env REBAR_TRACKER_BRANCH; the orphan bran
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
 
 `reconciler.*` and `jira.*` are settable in `[tool.rebar.reconciler]` /
-`[tool.rebar.jira]` (or `rebar.toml` `[reconciler]`/`[jira]`, or the legacy
-`.rebar/config.conf`), reported by `rebar config`, and **consumed** by the Jira
+`[tool.rebar.jira]` (or `rebar.toml` `[reconciler]`/`[jira]`), reported by `rebar config`, and **consumed** by the Jira
 reconciler — the file value is overridden by the env var, then by
 `rebar -c SECTION.KEY=VALUE`. Their env overrides keep the ERGONOMIC / Atlassian-
 standard names, which deliberately differ from the auto-derived
@@ -308,22 +308,22 @@ commonly the same person.
 
 ## Back-compat
 
-The legacy flat `.rebar/config.conf` keeps being read **identically for ≥1
-release**; legacy key names are aliased (e.g. `verify.require_verdict_for_close`).
 `ticket_clarity.threshold` (clarity-check pass threshold, default 5) is a typed key —
-settable in `[tool.rebar.ticket_clarity]`/`rebar.toml`, via `REBAR_TICKET_CLARITY_THRESHOLD`,
-or the legacy flat `ticket_clarity.threshold` (the section name matches, so it reads
-with no alias); it appears in `rebar config`.
+settable in `[tool.rebar.ticket_clarity]`/`rebar.toml`, via `REBAR_TICKET_CLARITY_THRESHOLD`;
+it appears in `rebar config`.
 Unknown keys **warn** (not fail) during the deprecation window and hard-error under
-`REBAR_CONFIG_UNKNOWN_KEYS=error`. Renamed env vars keep their old names as
-deprecated aliases (with a warning): `REBAR_PUSH`→`REBAR_SYNC_PUSH`,
-`REBAR_NO_SYNC`→`REBAR_SYNC_PULL` (negative→positive flip), `COMPACT_THRESHOLD`→
-`REBAR_COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`,
-`REBAR_MCP_ALLOW_RECONCILE_LIVE`→`REBAR_MCP_ALLOW_JIRA_SYNC`, `TICKETS_TRACKER_DIR`→
-`REBAR_TRACKER_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
+`REBAR_CONFIG_UNKNOWN_KEYS=error`. The PERMANENT ergonomic env renames keep their old
+names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
+(negative→positive flip), `COMPACT_THRESHOLD`→`REBAR_COMPACT_THRESHOLD`,
+`SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
 `RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
 `REBAR_LLM_MAX_ITERS`→`REBAR_LLM_MAX_STEPS`, `REBAR_ID_GUARD_MODE`→
-`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). Removed (no alias):
+`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). **Removed pre-1.0 (DE7 — no
+longer honored):** the flat `.rebar/config.conf` reader (use `rebar.toml` / a
+`[tool.rebar]` pyproject table), the `verify.require_verdict_for_close` config alias
+(use `verify.require_signature_for_close`), and the env aliases `REBAR_PUSH` (use
+`REBAR_SYNC_PUSH`), `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), and
+`REBAR_MCP_ALLOW_RECONCILE_LIVE` (use `REBAR_MCP_ALLOW_JIRA_SYNC`). Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
 dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var

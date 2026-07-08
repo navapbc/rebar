@@ -30,11 +30,7 @@ from rebar._engine_support.resolver import resolve_ticket_id
 
 
 def _enable(repo: Path) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    # DOTTED legacy keys — the [section] INI form is silently dropped by .conf parsing (BL-1).
-    (repo / ".rebar" / "config.conf").write_text(
-        "verify.require_completion_verification_for_close = true\n"
-    )
+    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
 
 
 def _commit(repo: Path) -> None:
@@ -373,22 +369,6 @@ def test_force_close_skips_file_impact_check(rebar_repo: Path, monkeypatch) -> N
     )
     assert _status(tid, rebar_repo) == "closed"
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
-
-
-def test_config_dotted_conf_enables_flag_but_ini_form_does_not(tmp_path: Path, monkeypatch) -> None:
-    """BL-1 regression: the DOTTED legacy form loads the flag; the [section] INI form in a
-    .conf is silently dropped (must NOT enable it)."""
-    from rebar import config
-
-    dotted = tmp_path / "dotted.conf"
-    dotted.write_text("verify.require_completion_verification_for_close = true\n")
-    monkeypatch.setenv("REBAR_CONFIG", str(dotted))
-    assert config.load_config(None).verify.require_completion_verification_for_close is True
-
-    ini = tmp_path / "ini.conf"
-    ini.write_text("[verify]\nrequire_completion_verification_for_close = true\n")
-    monkeypatch.setenv("REBAR_CONFIG", str(ini))
-    assert config.load_config(None).verify.require_completion_verification_for_close is False
 
 
 def test_config_rebar_toml_enables_flag_and_default_off(tmp_path: Path) -> None:

@@ -46,7 +46,7 @@ def _make_repo(path: Path, *, config_toml: str = "", origin: Path | None = None)
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.setenv("REBAR_SYNC_PULL", "off")
     monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     cfg.reset_config_cache()

@@ -72,9 +72,10 @@ def _permanent(kind: str, name: str, replacement: str) -> Deprecation:
 # the completeness test fails otherwise.
 _ENTRIES: tuple[Deprecation, ...] = (
     # ── env aliases: scheduled for removal (the rename-window aliases) ─────────
-    _scheduled("env", "REBAR_PUSH", "REBAR_SYNC_PUSH"),
-    _scheduled("env", "TICKETS_TRACKER_DIR", "REBAR_TRACKER_DIR"),
-    _scheduled("env", "REBAR_MCP_ALLOW_RECONCILE_LIVE", "REBAR_MCP_ALLOW_JIRA_SYNC"),
+    # NOTE (DE7): the pre-1.0 breaking removal dropped the scheduled env aliases
+    # REBAR_PUSH, TICKETS_TRACKER_DIR, and REBAR_MCP_ALLOW_RECONCILE_LIVE — only
+    # their canonical names (REBAR_SYNC_PUSH / REBAR_TRACKER_DIR /
+    # REBAR_MCP_ALLOW_JIRA_SYNC) are honored now.
     # REBAR_LLM_MAX_ITERS: documented as a "deprecated alias" of REBAR_LLM_MAX_STEPS
     # with no stated horizon — classified as SCHEDULED (per ticket 5274: treat any
     # surface you cannot confidently prove permanent as scheduled) at the v1.0.0
@@ -90,12 +91,9 @@ _ENTRIES: tuple[Deprecation, ...] = (
     _permanent("env", "RECONCILER_ABSENT_GET_BUDGET", "REBAR_RECONCILER_DELETION_PROBE_LIMIT"),
     _permanent("env", "REBAR_ID_GUARD_MODE", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
     # ── config-key surfaces ───────────────────────────────────────────────────
-    _scheduled("cfg", "verify.require_verdict_for_close", "verify.require_signature_for_close"),
-    _scheduled(
-        "cfg",
-        "flat .rebar/config.conf reader",
-        "rebar.toml or a [tool.rebar] table in pyproject.toml",
-    ),
+    # NOTE (DE7): the pre-1.0 breaking removal dropped the scheduled config
+    # surfaces verify.require_verdict_for_close (use verify.require_signature_for_close)
+    # and the flat .rebar/config.conf reader (use rebar.toml or a [tool.rebar] table).
     # reconciler.lock_backend='file' is accepted-but-ignored (the file backend was
     # removed in epic dust-troth-naval / ADR 0031). No explicit horizon exists;
     # classified as scheduled (the config key acceptance is retired at v1.0.0).
@@ -110,11 +108,11 @@ _ENTRIES: tuple[Deprecation, ...] = (
         "list-epics",
         "rebar list --type=epic --status=open,in_progress --unblocked [--min-children=N]",
     ),
-    _scheduled("cli", "--verdict-hash", "rebar sign <id> <manifest>"),
     _scheduled("cli", "--no-sync", "--no-pull"),
     # ── library surfaces ──────────────────────────────────────────────────────
-    _scheduled("lib", "edit_ticket(tags=...)", "set_tags / add_tags / remove_tags"),
-    _scheduled("lib", "rebar.list_epics()", "list_tickets(ticket_type='epic', ...)"),
+    # NOTE (DE7): the pre-1.0 breaking removal dropped the CLI --verdict-hash flag,
+    # the lib edit_ticket(tags=...) alias (use set_tags / add_tags / remove_tags),
+    # and the lib rebar.list_epics() function (use list_tickets(ticket_type='epic', ...)).
     # ── MCP surfaces ──────────────────────────────────────────────────────────
     _scheduled("mcp", "list_epics", "the list_tickets tool (ticket_type='epic', ...)"),
 )

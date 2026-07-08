@@ -109,16 +109,15 @@ def test_sources_report_winning_layer_under_full_stack(
     assert cfgobj.scratch.base_dir == "" and sources["scratch"]["base_dir"] == "default"
 
 
-def test_sources_legacy_conf_labeled_project(tmp_path: Path) -> None:
-    """A legacy ``.rebar/config.conf`` is the project layer: its keys attribute to
-    'project' and the discovered kind is reported as 'legacy' for transparency."""
+def test_sources_rebar_toml_labeled_project(tmp_path: Path) -> None:
+    """A ``rebar.toml`` is the project layer: its keys attribute to 'project' and the
+    discovered kind is reported as 'toml' for transparency."""
     p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("sync.push=async\n", encoding="utf-8")
+    (p / "rebar.toml").write_text("[sync]\npush = 'async'\n", encoding="utf-8")
     cfgobj, sources, project = cfg.resolve_with_sources(root=p)
     assert cfgobj.sync.push == "async"
     assert sources["sync"]["push"] == "project"
-    assert project is not None and project[1] == "legacy"
+    assert project is not None and project[1] == "toml"
 
 
 def test_sources_match_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

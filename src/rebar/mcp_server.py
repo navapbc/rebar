@@ -6,7 +6,7 @@ Reads (``show``/``list``) run in-process via rebar._reads (no subprocess);
 
 Safety:
   * ``reconcile`` defaults to ``dry-run``; ``live`` additionally requires
-    REBAR_MCP_ALLOW_JIRA_SYNC=1 (deprecated alias: REBAR_MCP_ALLOW_RECONCILE_LIVE).
+    REBAR_MCP_ALLOW_JIRA_SYNC=1.
   * Write tools (create/transition/edit/link/unlink/tag/untag/archive/comment)
     are gated by REBAR_MCP_READONLY: set it to 1 to expose a read-only server.
 
@@ -92,8 +92,8 @@ __all__ = [
 #
 # Each entry: name, a one-line description, and whether it is a deprecated alias.
 # The active gates are read in mcp_server.build_server / _mcp_reads / _mcp_llm /
-# _mcp_writes / config.py; REBAR_MCP_ALLOW_RECONCILE_LIVE is the deprecated alias
-# of REBAR_MCP_ALLOW_JIRA_SYNC (resolved in config.py).
+# _mcp_writes / config.py. (The REBAR_MCP_ALLOW_RECONCILE_LIVE alias of
+# REBAR_MCP_ALLOW_JIRA_SYNC was removed pre-1.0 — DE7.)
 MCP_ENV_VARS: tuple[dict, ...] = (
     {
         "name": "REBAR_ROOT",
@@ -123,14 +123,6 @@ MCP_ENV_VARS: tuple[dict, ...] = (
             "reconcile is dry-run only."
         ),
         "deprecated": False,
-    },
-    {
-        "name": "REBAR_MCP_ALLOW_RECONCILE_LIVE",
-        "description": (
-            "DEPRECATED alias of REBAR_MCP_ALLOW_JIRA_SYNC — prefer that name; "
-            "still honored for backward compatibility."
-        ),
-        "deprecated": True,
     },
 )
 

@@ -1,6 +1,5 @@
-"""0ac6 (slice 1): route ticket_clarity.threshold through the typed Config — it was
-the last live `.rebar/config.conf` read bypassing load_config. The typed section name
-(`ticket_clarity`) matches the legacy flat key, so the legacy file reads with no alias.
+"""0ac6 (slice 1): route ticket_clarity.threshold through the typed Config, resolved
+from rebar.toml / a [tool.rebar] pyproject table, env, and CLI overrides.
 """
 
 from __future__ import annotations
@@ -42,15 +41,6 @@ def test_pyproject(tmp_path: Path) -> None:
     assert cfg.load_config(root=p).ticket_clarity.threshold == 70
 
 
-def test_legacy_flat_conf_reads_with_no_alias(tmp_path: Path) -> None:
-    """The legacy `.rebar/config.conf` key `ticket_clarity.threshold` maps directly to
-    the typed `ticket_clarity` section (matching name) — now via load_config."""
-    p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("ticket_clarity.threshold=42\n", encoding="utf-8")
-    assert cfg.load_config(root=p).ticket_clarity.threshold == 42
-
-
 def test_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[ticket_clarity]\nthreshold = 70\n", encoding="utf-8")
@@ -65,10 +55,11 @@ def test_read_config_file_toml(tmp_path: Path) -> None:
     assert cfg.read_config_file(f).ticket_clarity.threshold == 33
 
 
-def test_read_config_file_legacy(tmp_path: Path) -> None:
-    f = tmp_path / ".rebar" / "config.conf"
-    f.parent.mkdir(parents=True)
-    f.write_text("ticket_clarity.threshold=44\n", encoding="utf-8")
+def test_read_config_file_non_toml_suffix_reads_as_toml(tmp_path: Path) -> None:
+    # A non-pyproject explicit file is parsed as TOML regardless of suffix (the legacy
+    # flat .conf reader was removed pre-1.0 — DE7).
+    f = tmp_path / "cfg.conf"
+    f.write_text("[ticket_clarity]\nthreshold = 44\n", encoding="utf-8")
     assert cfg.read_config_file(f).ticket_clarity.threshold == 44
 
 

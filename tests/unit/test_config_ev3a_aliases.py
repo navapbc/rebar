@@ -1,9 +1,11 @@
-"""EV-3a: core config-backed env renames with deprecation aliases —
-COMPACT_THRESHOLD->REBAR_COMPACT_THRESHOLD (compact.threshold),
-SCRATCH_BASE_DIR->REBAR_SCRATCH_BASE_DIR (scratch.base_dir),
-REBAR_MCP_ALLOW_RECONCILE_LIVE->REBAR_MCP_ALLOW_JIRA_SYNC (mcp.allow_jira_sync).
-Verifies canonical names, legacy aliases (warn + map), canonical-wins precedence,
-and the consumers (scratch.base_dir, the MCP jira-sync gate fail-safe).
+"""EV-3a: core config-backed env renames — the PERMANENT ergonomic aliases
+COMPACT_THRESHOLD->REBAR_COMPACT_THRESHOLD (compact.threshold) and
+SCRATCH_BASE_DIR->REBAR_SCRATCH_BASE_DIR (scratch.base_dir). Verifies canonical
+names, the permanent aliases (warn + map), canonical-wins precedence, and the
+consumers (scratch.base_dir, the MCP jira-sync gate fail-safe).
+
+(The scheduled REBAR_MCP_ALLOW_RECONCILE_LIVE alias of REBAR_MCP_ALLOW_JIRA_SYNC was
+removed pre-1.0 — DE7 — so it is now ignored; only REBAR_MCP_ALLOW_JIRA_SYNC works.)
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "REBAR_SCRATCH_BASE_DIR",
         "SCRATCH_BASE_DIR",
         "REBAR_MCP_ALLOW_JIRA_SYNC",
-        "REBAR_MCP_ALLOW_RECONCILE_LIVE",
         "REBAR_MCP_READONLY",
         "REBAR_MCP_ALLOW_LLM",
     ):
@@ -111,11 +112,11 @@ def test_mcp_allow_jira_sync_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
     cfg.reset_config_cache()
     assert mcp_server._allow_jira_sync() is True
-    # legacy alias still enables it
+    # the removed REBAR_MCP_ALLOW_RECONCILE_LIVE alias (DE7) no longer enables it
     monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC")
     monkeypatch.setenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", "1")
     cfg.reset_config_cache()
-    assert mcp_server._allow_jira_sync() is True
+    assert mcp_server._allow_jira_sync() is False
 
 
 def test_mcp_allow_jira_sync_failsafe_on_garbage(

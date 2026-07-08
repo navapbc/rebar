@@ -88,12 +88,8 @@ def _capture_graph():
 
 
 def _enable_close_gate(repo: Path) -> None:
-    """Turn ON the completion-verification CLOSE gate via the dotted .conf form (the
-    INI ``[section]`` form is silently dropped — see test_completion_gate BL-1)."""
-    (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text(
-        "verify.require_completion_verification_for_close = true\n"
-    )
+    """Turn ON the completion-verification CLOSE gate via rebar.toml."""
+    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
 
 
 def _seed_in_progress(repo: Path) -> str:

@@ -348,13 +348,7 @@ convergence, above), **material freshness** (drift-refresh, ADR 0002), and **del
 | `verify.completion_priority_floor` | `0.4` | The completion floor: drop a delivered, plan-semantics finding only if its priority < this (same "below major" band as the novelty floor). |
 | `verify.completion_preserve_criteria` | `["T5c","T10"]` | Always-preserve criterion ids the completion floor never drops (security overlay + endpoint/interface contract). Accepts a TOML array or a comma-separated string; add privacy/compliance ids here — a config change, not code. |
 
-Enable it in `.rebar/config.conf` (dotted legacy form) or a `[verify]` table in
-`rebar.toml` / `pyproject.toml`:
-
-```ini
-# .rebar/config.conf
-verify.require_plan_review_for_claim = true
-```
+Enable it in a `[verify]` table in `rebar.toml` / `pyproject.toml`:
 
 ```toml
 # rebar.toml or [tool.rebar.verify] in pyproject.toml

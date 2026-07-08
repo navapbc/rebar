@@ -266,11 +266,12 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
 def test_guard_mode_precedence(
     applier, errors_mod, env_val, config_val, expected_raises, tmp_path, monkeypatch
 ):
-    """env var REBAR_ID_GUARD_MODE takes precedence over the legacy .rebar/config.conf
-    key — exercised through the real typed-config layer (0ac6 slice 2: the guard now
-    resolves via rebar.config.load_config, so both the deprecated env alias and the
-    legacy flat config key flow through the single config entry point with env > file
-    precedence and the warn->bypass / raise->guard value-flip preserved)."""
+    """env var REBAR_ID_GUARD_MODE takes precedence over the typed
+    `[reconciler] id_guard_bypass_unsafe` config key — exercised through the real
+    typed-config layer (0ac6 slice 2: the guard now resolves via
+    rebar.config.load_config, so both the deprecated env alias and the typed config
+    key flow through the single config entry point with env > file precedence and the
+    warn->bypass / raise->guard value-flip preserved)."""
     import rebar.config as _cfg
 
     assert hasattr(applier, "_audit_rebar_id_label_writes"), (
@@ -278,13 +279,14 @@ def test_guard_mode_precedence(
     )
     mut = _MockLabelMutation(payload="rebar-id-prec-test", action="create")
 
-    # config layer: the legacy flat .rebar/config.conf key under a tmp project root.
+    # config layer: the typed `[reconciler] id_guard_bypass_unsafe` key in rebar.toml
+    # under a tmp project root (warn->true, raise->false per the value-flip).
     monkeypatch.delenv("REBAR_UNSAFE_ID_GUARD_BYPASS", raising=False)
     monkeypatch.delenv("REBAR_ID_GUARD_MODE", raising=False)
     if config_val is not None:
-        (tmp_path / ".rebar").mkdir()
-        (tmp_path / ".rebar" / "config.conf").write_text(
-            f"rebar_id_guard_mode={config_val}\n", encoding="utf-8"
+        bypass = "true" if config_val == "warn" else "false"
+        (tmp_path / "rebar.toml").write_text(
+            f"[reconciler]\nid_guard_bypass_unsafe = {bypass}\n", encoding="utf-8"
         )
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
     # env layer (deprecated alias): REBAR_ID_GUARD_MODE, when set, must beat the file.

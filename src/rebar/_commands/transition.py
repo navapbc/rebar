@@ -22,7 +22,6 @@ from rebar import config
 from rebar._commands._seam import CommandError
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
-from rebar._deprecations import warn_deprecated
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar.reducer import reduce_ticket
@@ -43,8 +42,6 @@ _USAGE = (
     "  --force                  Bypass the plan-review gate when starting work "
     "(open->in_progress); the --reason text becomes the audit note. Does NOT bypass the "
     "unresolved-children close guard (a structural invariant — close/detach children first).\n"
-    "  --verdict-hash=<hash>    DEPRECATED (ignored): the story/epic close gate now "
-    "requires a certified signature ('rebar sign'), not a verdict hash.\n"
     "  --force-close=<reason>   Bypass the signature requirement for story/epic "
     "(requires user approval via hook).\n"
     "  Examples:\n"
@@ -92,25 +89,14 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _warn_verdict_hash_deprecated() -> None:
-    """Emit the ``--verdict-hash`` deprecation warning at the CLI parse boundary.
-
-    The flag is fully IGNORED — the story/epic close gate now requires a certified
-    signature (``rebar sign``), not a verdict hash. This one-line warning is the ONLY
-    remaining trace of the flag: it is no longer threaded into ``transition_compute`` /
-    ``close_ticket`` / ``transition_core`` / ``_signature_gate`` (item 16b-1)."""
-    warn_deprecated("cli:--verdict-hash", via="stderr")
-
-
 def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
     """Parse [--reason[=]] [--force] [--force-close[=]] from the args AFTER
     <current> <target>. Returns (reason, force, force_close_reason). Mirrors
     ticket-transition.sh's flag loop (unknown tokens are silently skipped).
 
-    ``--verdict-hash`` is DEPRECATED and fully ignored: it is still recognised here
-    (and its value consumed) only to emit a one-line deprecation warning at the CLI
-    boundary, then discarded — it is not threaded any further into the transition
-    path."""
+    (The ``--verdict-hash`` flag was removed pre-1.0 — DE7; the story/epic close gate
+    requires a certified signature via ``rebar sign``. It is now just an unknown
+    token, silently skipped.)"""
     reason = ""
     force = False
     force_close = ""
@@ -128,14 +114,6 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
         elif a == "--force":
             force = True
             i += 1
-        elif a.startswith("--verdict-hash="):
-            _warn_verdict_hash_deprecated()
-            i += 1
-        elif a == "--verdict-hash":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --verdict-hash requires a value", returncode=1)
-            _warn_verdict_hash_deprecated()
-            i += 2
         elif a.startswith("--force-close="):
             force_close = a[len("--force-close=") :]
             i += 1

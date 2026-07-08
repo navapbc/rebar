@@ -105,11 +105,10 @@ _DESC = (
 
 
 def _enable(repo: Path, *, progressive: bool = True) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    conf = "verify.require_plan_review_for_claim = true\n"
+    conf = "[verify]\nrequire_plan_review_for_claim = true\n"
     if progressive:
-        conf += "verify.progressive_drift_refresh = true\n"
-    (repo / ".rebar" / "config.conf").write_text(conf)
+        conf += "progressive_drift_refresh = true\n"
+    (repo / "rebar.toml").write_text(conf)
 
 
 def _commit(repo: Path) -> None:

@@ -20,7 +20,7 @@ from rebar._errors import RebarError
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
-    from rebar.types import DepsGraph, ListEpics, NextBatch, TicketState
+    from rebar.types import DepsGraph, NextBatch, TicketState
 
 
 def _json_or(out: str, default):
@@ -281,30 +281,12 @@ def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) ->
     return out.getvalue()
 
 
-def list_epics(
-    *, include_blocked: bool = False, has_tag=None, min_children=None, repo_root=None
-) -> ListEpics:
-    """DEPRECATED — thin wrapper over the generic ``list``. Returns
-    ``{p0_bugs, epics}`` (both ``ticket_state`` arrays) by making exactly TWO
-    generic calls: one for epics, one for P0 bugs. Blocking-awareness is now the
-    generic ``blocking_state`` filter (``include_blocked=False`` → only unblocked
-    epics). Prefer composing the primitives directly::
-
-        rebar.list_tickets(ticket_type="epic", status="open,in_progress",
-                           blocking_state="unblocked", min_children=N)
-        rebar.list_tickets(ticket_type="bug", priority=0)
-    """
-    from rebar._deprecations import warn_deprecated
-
-    warn_deprecated("lib:rebar.list_epics()", via="warning", stacklevel=2)
-    epics = list_tickets(
-        ticket_type="epic",
-        status="open,in_progress",
-        blocking_state="" if include_blocked else "unblocked",
-        has_tag=has_tag,
-        min_children=min_children,
-        with_children_count=True,
-        repo_root=repo_root,
-    )
-    p0_bugs = list_tickets(ticket_type="bug", priority=0, repo_root=repo_root)
-    return cast("ListEpics", {"p0_bugs": p0_bugs, "epics": epics})
+# NOTE (DE7): the deprecated ``rebar.list_epics()`` library function was removed
+# pre-1.0. Compose the primitives directly instead::
+#
+#     rebar.list_tickets(ticket_type="epic", status="open,in_progress",
+#                        blocking_state="unblocked", min_children=N)
+#     rebar.list_tickets(ticket_type="bug", priority=0)
+#
+# The CLI ``list-epics`` command and the MCP ``list_epics`` tool remain (they now
+# compose the primitives themselves).

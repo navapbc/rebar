@@ -466,8 +466,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "Path to the .tickets-tracker directory. "
-            "Defaults to REBAR_TRACKER_DIR env var (deprecated alias "
-            "TICKETS_TRACKER_DIR) or <repo-root>/.tickets-tracker."
+            "Defaults to the REBAR_TRACKER_DIR env var "
+            "or <repo-root>/.tickets-tracker."
         ),
     )
     parser.add_argument(

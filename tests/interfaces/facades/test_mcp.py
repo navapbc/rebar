@@ -96,7 +96,7 @@ def test_readonly_truthy_parse_is_case_insensitive(
 
 
 def test_live_reconcile_refused_without_optin(monkeypatch: pytest.MonkeyPatch, rebar_repo) -> None:
-    monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
     srv = build_server()
     with pytest.raises(Exception) as exc:
         asyncio.run(srv.call_tool("reconcile", {"mode": "live"}))
@@ -139,7 +139,7 @@ def test_reconcile_cap0_modes_allowed_in_both_gates(
         monkeypatch.setenv("REBAR_MCP_READONLY", readonly) if readonly else monkeypatch.delenv(
             "REBAR_MCP_READONLY", raising=False
         )
-        monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+        monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
         srv = build_server()
         try:
             asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
@@ -194,7 +194,7 @@ def test_readonly_dry_run_reconcile_performs_zero_store_writes(
     (cap-0 dry-run is allowed under readonly), so the differ runs but nothing
     is persisted."""
     monkeypatch.setenv("REBAR_MCP_READONLY", "1")
-    monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
     # bug 626d: the inbound fetch is scoped to jira.project and fails closed on an
     # empty key; configure one so the dry-run reaches the (empty) acli fetch.
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
@@ -217,7 +217,7 @@ def test_reconcile_mutating_refused_under_readonly(
 ) -> None:
     """Readonly blocks ALL mutating modes — even with the live opt-in set."""
     monkeypatch.setenv("REBAR_MCP_READONLY", "1")
-    monkeypatch.setenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", "1")
+    monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
     srv = build_server()
     with pytest.raises(Exception) as exc:
         asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
@@ -231,7 +231,7 @@ def test_reconcile_mutating_refused_without_optin(
 ) -> None:
     """Non-readonly but missing the live opt-in refuses all mutating modes."""
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
-    monkeypatch.delenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", raising=False)
+    monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
     srv = build_server()
     with pytest.raises(Exception) as exc:
         asyncio.run(srv.call_tool("reconcile", {"mode": mode}))

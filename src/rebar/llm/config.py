@@ -330,7 +330,7 @@ def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | No
 def denied_paths(root: str) -> tuple[str, ...]:
     """Realpaths the agent must never read OR cite: git internals, reconciler
     state, and the live event store — resolved from rebar.config.tracker_dir(root)
-    so the REBAR_TRACKER_DIR override (deprecated alias TICKETS_TRACKER_DIR; a
+    so the REBAR_TRACKER_DIR override (a
     relocated/renamed store) is covered too.
     Shared by the file tools (read) and citation resolution (output) so neither can
     leak internal state."""
@@ -378,7 +378,7 @@ def _env_int_aliased(name: str, legacy: str, default: int) -> int:
 # llm.* is resolved HERE (not the stdlib-core typed Config) so importing rebar.llm
 # never pulls the agents stack into core. The non-secret, non-runtime, non-derived
 # knobs are settable in a ``[tool.rebar.llm]`` table (pyproject / rebar.toml [llm] /
-# legacy .rebar/config.conf llm.* / XDG user config), read via the core loader's
+# XDG user config), read via the core loader's
 # discovery so file LOCATIONS + precedence match the rest of rebar. Resolution per
 # key: ``rebar -c llm.KEY=VALUE`` (CLI) > ``REBAR_LLM_<KEY>`` env > config file >
 # default. Secrets (REBAR_LLM_API_KEY / ANTHROPIC/OPENAI keys / LANGFUSE_*),

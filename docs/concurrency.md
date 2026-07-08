@@ -167,7 +167,7 @@ recovery state) never fails the caller — it warns, leaves local commits intact
 and the branch stays diverged. `rebar fsck` surfaces that divergence as a
 `PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not silent.
 
-**Push policy — `REBAR_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
+**Push policy — `REBAR_SYNC_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
 CLI / library / MCP honour it uniformly; case/space-insensitive; default
 `always`):
 

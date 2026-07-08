@@ -65,7 +65,6 @@ from rebar._lib_reads import (
     export_tickets,
     fsck,
     import_tickets,
-    list_epics,
     list_tickets,
     next_batch,
     ready,
@@ -155,7 +154,6 @@ __all__ = [
     "compact",
     "fsck",
     "summary",
-    "list_epics",
     "bridge_fsck",
     # quality gates + file-impact
     "clarity_check",

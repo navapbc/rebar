@@ -470,10 +470,10 @@ _SECTIONS: dict[str, dict] = {
     },
 }
 
-# section -> {deprecated_key -> canonical_key}
-_ALIASES: dict[str, dict[str, str]] = {
-    "verify": {"require_verdict_for_close": "require_signature_for_close"},
-}
+# section -> {deprecated_key -> canonical_key}. Empty since the pre-1.0 breaking
+# removal (DE7) dropped verify.require_verdict_for_close; kept as the extension point
+# for any future config-key rename window (the coerce_sparse loop below consumes it).
+_ALIASES: dict[str, dict[str, str]] = {}
 
 # Config sections owned by an OPTIONAL layer rather than the stdlib core typed
 # Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by

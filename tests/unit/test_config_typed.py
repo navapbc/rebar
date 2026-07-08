@@ -157,15 +157,10 @@ def test_unknown_key_and_section_warn_not_drop(caplog: pytest.LogCaptureFixture)
     assert "[bogus_section]" in text
 
 
-def test_legacy_verify_alias_with_deprecation_warning(caplog: pytest.LogCaptureFixture) -> None:
+def test_removed_verdict_alias_is_unknown_key(caplog: pytest.LogCaptureFixture) -> None:
+    # The require_verdict_for_close alias was removed pre-1.0 (DE7): it no longer maps
+    # to the canonical key — it is just an unknown key (warned + ignored).
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = Config.from_mapping({"verify": {"require_verdict_for_close": True}})
-    assert c.verify.require_signature_for_close is True
+    assert c.verify.require_signature_for_close is False
     assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
-
-
-def test_new_key_wins_over_legacy_alias() -> None:
-    c = Config.from_mapping(
-        {"verify": {"require_verdict_for_close": False, "require_signature_for_close": True}}
-    )
-    assert c.verify.require_signature_for_close is True

@@ -2,8 +2,8 @@
 
 llm.* is resolved by the optional rebar.llm layer (NOT the stdlib-core typed Config,
 so importing rebar.llm never pulls the agents stack). The non-secret knobs are
-settable in a [tool.rebar.llm] table (pyproject / rebar.toml [llm] / legacy
-.rebar/config.conf llm.* / XDG user) read via the core loader's discovery, with
+settable in a [tool.rebar.llm] table (pyproject / rebar.toml [llm] / XDG user) read
+via the core loader's discovery, with
 resolution CLI (`rebar -c llm.KEY=VALUE`) > REBAR_LLM_<KEY> env > file > default.
 Secrets (api_key) + the runtime-only repo_path + the DERIVED runner stay env-only.
 
@@ -94,11 +94,10 @@ def test_rebar_toml_top_level_llm(tmp_path: Path) -> None:
     assert _cfg(p).model == "claude-haiku-4-5"
 
 
-def test_legacy_dotted_conf(tmp_path: Path) -> None:
+def test_rebar_toml_llm_table(tmp_path: Path) -> None:
     p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text(
-        "llm.model=claude-opus-4-8\nllm.max_steps=7\n", encoding="utf-8"
+    (p / "rebar.toml").write_text(
+        "[llm]\nmodel = 'claude-opus-4-8'\nmax_steps = 7\n", encoding="utf-8"
     )
     o = _cfg(p)
     assert o.model == "claude-opus-4-8" and o.max_iterations == 7

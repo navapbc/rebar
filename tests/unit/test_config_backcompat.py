@@ -1,8 +1,10 @@
-"""Back-compat alias window for the legacy flat ``.rebar/config.conf`` (task 83e6):
-the legacy file reads IDENTICALLY (parity with the typed TOML path), legacy keys
-are aliased to their canonical names with a deprecation warning, unknown keys WARN
-during the deprecation window and HARD-ERROR past the cutover
-(``REBAR_CONFIG_UNKNOWN_KEYS=error``), with cross-layer precedence preserved.
+"""Config unknown-key policy: unknown keys WARN during the deprecation window and
+HARD-ERROR past the cutover (``REBAR_CONFIG_UNKNOWN_KEYS=error``), with cross-layer
+precedence preserved.
+
+(The legacy flat ``.rebar/config.conf`` reader and the ``verify.require_verdict_for_close``
+alias were removed pre-1.0 — DE7 — so config now loads only from ``rebar.toml`` / a
+``[tool.rebar]`` pyproject table, and the old alias is just an unknown key now.)
 """
 
 from __future__ import annotations
@@ -34,94 +36,25 @@ def _proj(tmp: Path) -> Path:
     return p
 
 
-def _legacy(p: Path, body: str) -> None:
-    (p / ".rebar").mkdir(exist_ok=True)
-    (p / ".rebar" / "config.conf").write_text(body, encoding="utf-8")
-
-
-# ── parity: legacy flat conf reads identically to the typed TOML path ─────────
-def test_legacy_conf_parity_with_toml(tmp_path: Path) -> None:
-    """The same settings via the legacy flat conf and via rebar.toml resolve to an
-    IDENTICAL typed Config — the legacy reader is a faithful front-end, not a
-    second semantics."""
-    pa = _proj(tmp_path / "a")
-    _legacy(
-        pa,
-        "# leading comment\n"
-        "verify.require_signature_for_close=true\n"
-        'ticket.display_mode="plain"\n'  # quoted value tolerated
-        "sync.pull = off\n"  # spaces around '=' tolerated
-        "compact.threshold=42\n",
-    )
-    pb = _proj(tmp_path / "b")
-    (pb / "rebar.toml").write_text(
-        "[verify]\nrequire_signature_for_close = true\n"
-        "[ticket]\ndisplay_mode = 'plain'\n"
-        "[sync]\npull = 'off'\n"
-        "[compact]\nthreshold = 42\n",
-        encoding="utf-8",
-    )
-    ca = cfg.load_config(root=pa)
-    cb = cfg.load_config(root=pb)
-    assert ca == cb
-    assert ca.verify.require_signature_for_close is True
-    assert ca.ticket.display_mode == "plain" and ca.sync.pull == "off"
-    assert ca.compact.threshold == 42
-
-
-def test_legacy_conf_skips_blank_comment_and_keyless_lines(tmp_path: Path) -> None:
-    p = _proj(tmp_path)
-    _legacy(p, "\n# a comment\n   \nthis-line-has-no-equals\nsync.push=async\n")
-    assert cfg.load_config(root=p).sync.push == "async"  # the one real key applies
-
-
-# ── legacy key alias window ───────────────────────────────────────────────────
-def test_legacy_key_alias_honored_with_warning(
+# ── removed alias: verify.require_verdict_for_close is now an unknown key ──────
+def test_removed_verdict_alias_ignored_and_warns(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """The scheduled ``verify.require_verdict_for_close`` alias was removed pre-1.0
+    (DE7): it no longer maps to the canonical key — it is just an unknown key now
+    (warned + ignored), so the canonical stays at its default (False)."""
     p = _proj(tmp_path)
-    _legacy(p, "verify.require_verdict_for_close=true\n")  # legacy name
+    (p / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=p)
-    assert c.verify.require_signature_for_close is True  # aliased to canonical
+    assert c.verify.require_signature_for_close is False  # NOT aliased anymore
     assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
-
-
-def test_canonical_wins_over_legacy_in_same_layer(tmp_path: Path) -> None:
-    p = _proj(tmp_path)
-    # both keys in one file: canonical must win (legacy dropped)
-    (p / "rebar.toml").write_text(
-        "[verify]\nrequire_verdict_for_close = true\nrequire_signature_for_close = false\n",
-        encoding="utf-8",
-    )
-    assert cfg.load_config(root=p).verify.require_signature_for_close is False
-
-
-def test_legacy_alias_cross_layer_precedence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The 252e review property: a LEGACY key in a lower layer and the CANONICAL key
-    in a higher layer must compare by their shared canonical name — the higher layer
-    wins, because aliases resolve per-layer (to canonical) BEFORE the merge."""
-    xdg = tmp_path / "xdg"
-    (xdg / "rebar").mkdir(parents=True)
-    # user (lower) sets the LEGACY key true
-    (xdg / "rebar" / "config.toml").write_text(
-        "[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8"
-    )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
-    p = _proj(tmp_path)
-    # project (higher) sets the CANONICAL key false → must win over the lower legacy
-    (p / "rebar.toml").write_text(
-        "[verify]\nrequire_signature_for_close = false\n", encoding="utf-8"
-    )
-    assert cfg.load_config(root=p).verify.require_signature_for_close is False
 
 
 # ── unknown-key policy: WARN during window, ERROR past cutover ────────────────
 def test_unknown_key_warns_during_window(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     p = _proj(tmp_path)
-    _legacy(p, "sync.push=off\nsync.bogus=1\n")
+    (p / "rebar.toml").write_text("[sync]\npush = 'off'\nbogus = 1\n", encoding="utf-8")
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=p)  # default policy = warn
     assert c.sync.push == "off"  # the good key still applies
@@ -148,20 +81,27 @@ def test_unknown_section_errors_under_strict(
         cfg.load_config(root=p)
 
 
-def test_strict_does_not_error_on_known_or_aliased_keys(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Strict mode hard-fails only TRULY unknown keys — a known key loads, and a
-    deprecated-but-recognized legacy alias still WARNs (not errors)."""
+def test_strict_loads_known_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strict mode loads recognized keys without error."""
     monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text(
-        "[verify]\nrequire_verdict_for_close = true\n[sync]\npush = 'off'\n", encoding="utf-8"
+        "[verify]\nrequire_signature_for_close = true\n[sync]\npush = 'off'\n", encoding="utf-8"
     )
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
-        c = cfg.load_config(root=p)
+    c = cfg.load_config(root=p)
     assert c.verify.require_signature_for_close is True and c.sync.push == "off"
-    assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
+
+
+def test_strict_errors_on_removed_verdict_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The removed ``require_verdict_for_close`` alias (DE7) is now a truly-unknown
+    key, so under the strict cutover it hard-errors like any other unknown key."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
+    with pytest.raises(cfg.ConfigError, match="require_verdict_for_close"):
+        cfg.load_config(root=p)
 
 
 def test_strict_policy_unrecognized_value_falls_back_to_warn(

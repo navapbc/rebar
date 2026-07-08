@@ -79,20 +79,6 @@ def test_id_guard_canonical_beats_legacy(monkeypatch: pytest.MonkeyPatch) -> Non
     assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
-def test_id_guard_legacy_config_value_flip(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The legacy .rebar/config.conf key rebar_id_guard_mode=warn -> bypass True (no
-    env set), exercising the config-file branch of the value-flip."""
-    (tmp_path / ".rebar").mkdir()
-    (tmp_path / ".rebar" / "config.conf").write_text("rebar_id_guard_mode=warn\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    assert rebar_id_audit._resolve_id_guard_bypass() is True
-    # raise (or absent) -> guard active
-    (tmp_path / ".rebar" / "config.conf").write_text(
-        "rebar_id_guard_mode=raise\n", encoding="utf-8"
-    )
-    assert rebar_id_audit._resolve_id_guard_bypass() is False
-
-
 # ── REBAR_LLM_MAX_ITERS -> REBAR_LLM_MAX_STEPS ────────────────────────────────
 def test_llm_max_steps_canonical_and_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     from rebar.llm.config import _env_int_aliased

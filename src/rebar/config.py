@@ -89,51 +89,26 @@ def plan_review_guide_anchor(
 
 
 def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
-    """First existing of $REBAR_CONFIG, <root>/.rebar/config.conf, <root>/.rebar.conf."""
+    """The explicit ``$REBAR_CONFIG`` file when set and present, else ``None``.
+    (Project-config discovery — rebar.toml / a ``[tool.rebar]`` pyproject table —
+    is done by :func:`_discover_project_config`.)"""
     env = os.environ.get("REBAR_CONFIG")
     if env and Path(env).is_file():
         return Path(env)
-    base = repo_root(root)
-    for candidate in (base / ".rebar" / "config.conf", base / ".rebar.conf"):
-        if candidate.is_file():
-            return candidate
     return None
-
-
-# Warn-once registry for deprecated standalone env vars (those resolved outside the
-# load_config cache, e.g. the tracker-dir override, which is read on a hot path).
-_WARNED_LEGACY_ENV: set[str] = set()
-
-# Warn-once guard for the deprecated flat ``.rebar/config.conf`` reader (see
-# _read_legacy_conf); emitting per-read would be noisy on a cache miss.
-_WARNED_LEGACY_CONF = False
-
-
-def _warn_once_legacy_env(legacy: str) -> None:
-    if legacy not in _WARNED_LEGACY_ENV:
-        _WARNED_LEGACY_ENV.add(legacy)
-        warn_deprecated(f"env:{legacy}", logger=logger)
 
 
 def tracker_dir_override() -> str | None:
     """The explicit ticket-store location override, or ``None`` when unset:
-    ``REBAR_TRACKER_DIR`` (canonical) or the deprecated ``TICKETS_TRACKER_DIR``
-    (honored during the rename window with a one-time deprecation warning). The
-    decoupled/relocated store is a supported feature (EV-3b)."""
-    val = os.environ.get("REBAR_TRACKER_DIR")
-    if val:
-        return val
-    legacy = os.environ.get("TICKETS_TRACKER_DIR")
-    if legacy:
-        _warn_once_legacy_env("TICKETS_TRACKER_DIR")
-        return legacy
-    return None
+    ``REBAR_TRACKER_DIR``. The decoupled/relocated store is a supported feature
+    (EV-3b)."""
+    return os.environ.get("REBAR_TRACKER_DIR") or None
 
 
 def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
     """Path to the ticket event store, resolved through the full config precedence:
-    the explicit env override (``REBAR_TRACKER_DIR``, deprecated alias
-    ``TICKETS_TRACKER_DIR``) wins verbatim; otherwise the configured ``tracker.dir``
+    the explicit env override (``REBAR_TRACKER_DIR``) wins verbatim; otherwise the
+    configured ``tracker.dir``
     (``-c`` flag > project/user config > default ``.tickets-tracker``) — an absolute
     value relocates the store (EV-3b), a relative one is the dir name under the repo
     root. Previously this consulted env only; it now reads the typed config too."""
@@ -253,7 +228,6 @@ def reset_config_cache() -> None:
     global _CLI_OVERRIDES
     _TOML_CACHE.clear()
     _RESULT_CACHE.clear()
-    _WARNED_LEGACY_ENV.clear()
     _CLI_OVERRIDES = None
 
 
@@ -288,62 +262,6 @@ def _read_toml_table(path: Path, *, pyproject: bool) -> dict:
     return table if isinstance(table, dict) else {}
 
 
-# Legacy FLAT (non-dotted) ``.rebar/config.conf`` keys mapped to a typed section.key
-# for back-compat. Values are transformed by :func:`_map_legacy_flat_conf`. The only
-# entry is the id-guard mode, whose flat key predates the typed reconciler section.
-_LEGACY_FLAT_CONF_KEYS: dict[str, tuple[str, str]] = {
-    "rebar_id_guard_mode": ("reconciler", "id_guard_bypass_unsafe"),
-}
-
-
-def _map_legacy_flat_conf(key: str, value: str) -> str:
-    """Map a legacy flat-conf value to its typed config value. The only case is
-    ``rebar_id_guard_mode`` (the id-guard value-flip: ``warn`` → bypass/"true",
-    ``raise``/other → "false")."""
-    if key == "rebar_id_guard_mode":
-        return "true" if value.strip().lower() == "warn" else "false"
-    return value
-
-
-def _read_legacy_conf(path: Path) -> dict:
-    """Read the legacy flat ``.rebar/config.conf`` (dotted ``section.key=value``)
-    into a nested sparse mapping (values stay strings; coerce_sparse types them).
-    A handful of legacy NON-dotted keys (:data:`_LEGACY_FLAT_CONF_KEYS`, e.g.
-    ``rebar_id_guard_mode``) are mapped to their typed section.key for back-compat,
-    with the canonical dotted key winning if both appear in the file.
-
-    Reading this format is itself deprecated (scheduled for removal at the v1.0.0
-    major boundary) in favour of ``rebar.toml`` / a ``[tool.rebar]`` pyproject
-    table — signalled once via the central deprecation registry."""
-    global _WARNED_LEGACY_CONF
-    if not _WARNED_LEGACY_CONF:
-        _WARNED_LEGACY_CONF = True
-        warn_deprecated("cfg:flat .rebar/config.conf reader", logger=logger)
-    out: dict[str, dict] = {}
-    flat_legacy: dict[tuple[str, str], str] = {}
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"could not read config {path}: {exc}") from None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        k = k.strip()
-        v = v.strip().strip('"').strip("'")
-        if "." in k:
-            sect, key = k.split(".", 1)
-            out.setdefault(sect, {})[key] = v
-        elif k in _LEGACY_FLAT_CONF_KEYS:
-            flat_legacy[_LEGACY_FLAT_CONF_KEYS[k]] = _map_legacy_flat_conf(k, v)
-    # Apply legacy flat keys only where the canonical dotted key was not set
-    # (canonical wins); the legacy flat name stays honored during the back-compat window.
-    for (sect, key), val in flat_legacy.items():
-        out.setdefault(sect, {}).setdefault(key, val)
-    return out
-
-
 def _pyproject_rebar_state(path: Path) -> str:
     """Whether a ``pyproject.toml`` carries a ``[tool.rebar]`` table:
     ``"has"`` / ``"absent"`` / ``"unreadable"`` (won't parse). An unreadable
@@ -363,15 +281,14 @@ def _pyproject_rebar_state(path: Path) -> str:
 def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tuple[Path, str] | None:
     """Find the project config: ``$REBAR_CONFIG`` (explicit) first; else walk UP
     from the repo root for the nearest ``rebar.toml`` or a ``pyproject.toml`` with a
-    ``[tool.rebar]`` table (stopping at ``.git`` / filesystem root); else the legacy
-    ``.rebar/config.conf`` / ``.rebar.conf``. Returns ``(path, kind)`` or ``None``
-    where kind ∈ {toml, pyproject, legacy}."""
+    ``[tool.rebar]`` table (stopping at ``.git`` / filesystem root). Returns
+    ``(path, kind)`` or ``None`` where kind ∈ {toml, pyproject}."""
     env = os.environ.get("REBAR_CONFIG")
     if env and Path(env).is_file():
         p = Path(env)
         if p.name == "pyproject.toml":
             return (p, "pyproject")
-        return (p, "toml" if p.suffix == ".toml" else "legacy")
+        return (p, "toml")
     base = repo_root(root)
     cur = base
     while True:
@@ -390,9 +307,6 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
         if (cur / ".git").exists() or cur.parent == cur:
             break  # repo boundary / filesystem root
         cur = cur.parent
-    for cand in (base / ".rebar" / "config.conf", base / ".rebar.conf"):
-        if cand.is_file():
-            return (cand, "legacy")
     return None
 
 
@@ -452,18 +366,16 @@ def _canonical_env_name(sect: str, key: str) -> str:
 # user-facing surface — including these env aliases — now live in the machine-readable
 # registry in ``rebar._deprecations`` (the single source of truth), and every runtime
 # signal routes through :func:`rebar._deprecations.warn_deprecated`. The DICT below is
-# the RESOLUTION table (legacy env name -> section/key/canonical) the env layer consults;
-# its SCHEDULED subset (REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE)
-# is retired at v1.0.0 there and the rest (REBAR_NO_SYNC, COMPACT_THRESHOLD, …) are
-# permanent renames. Adding an alias here without a registry row fails the registry test.
+# the RESOLUTION table (legacy env name -> section/key/canonical) the env layer consults.
+# Every alias remaining here is now a PERMANENT ergonomic rename (REBAR_NO_SYNC,
+# COMPACT_THRESHOLD, …); the once-scheduled aliases (REBAR_PUSH / TICKETS_TRACKER_DIR /
+# REBAR_MCP_ALLOW_RECONCILE_LIVE) were removed pre-1.0 (DE7). Adding an alias here without
+# a registry row fails the registry test.
 _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
     # legacy name                      -> (section, key, canonical name)
-    "REBAR_PUSH": ("sync", "push", "REBAR_SYNC_PUSH"),
     "REBAR_NO_SYNC": ("sync", "pull", "REBAR_SYNC_PULL"),
     "COMPACT_THRESHOLD": ("compact", "threshold", "REBAR_COMPACT_THRESHOLD"),
     "SCRATCH_BASE_DIR": ("scratch", "base_dir", "REBAR_SCRATCH_BASE_DIR"),
-    "TICKETS_TRACKER_DIR": ("tracker", "dir", "REBAR_TRACKER_DIR"),
-    "REBAR_MCP_ALLOW_RECONCILE_LIVE": ("mcp", "allow_jira_sync", "REBAR_MCP_ALLOW_JIRA_SYNC"),
     # reconciler.* (EV-3c renames) — canonical names are the ergonomic ones above.
     "REBAR_ACLI_TIMEOUT": ("reconciler", "jira_cli_timeout", "REBAR_JIRA_CLI_TIMEOUT"),
     # (reconciler.lock_max_retries + its env aliases REBAR_RECONCILER_LOCK_MAX_RETRIES /
@@ -549,11 +461,7 @@ def _ordered_layers(
     proj = _discover_project_config(root)
     if proj is not None:
         path, kind = proj
-        raw = (
-            _read_legacy_conf(path)
-            if kind == "legacy"
-            else _read_toml_table(path, pyproject=(kind == "pyproject"))
-        )
+        raw = _read_toml_table(path, pyproject=(kind == "pyproject"))
         layers.append(("project", coerce_sparse(raw, source=str(path), strict=strict)))
     layers.append(("env", coerce_sparse(env_overrides(), source="env", strict=strict)))
     if cli_overrides:
@@ -631,8 +539,6 @@ def _config_probe_paths(root: str | os.PathLike[str] | None = None) -> list[Path
         if (cur / ".git").exists() or cur.parent == cur:
             break
         cur = cur.parent
-    out.append(base / ".rebar" / "config.conf")
-    out.append(base / ".rebar.conf")
     return out
 
 
@@ -717,16 +623,14 @@ def mcp_readonly() -> bool:
 def read_config_file(path: str | os.PathLike[str]) -> Config:
     """Resolve a typed Config from a SINGLE explicit config file — no discovery, env,
     or user-layer merging. For callers that point at a specific file (e.g.
-    ``clarity-check --config-file``); honors the same pyproject/TOML/legacy formats and
+    ``clarity-check --config-file``); honors the same pyproject/TOML formats and
     coercion as the layered loader. Raises :class:`ConfigError` on an unreadable/
     invalid file (fail-closed)."""
     p = Path(path)
     if p.name == "pyproject.toml":
         raw = _read_toml_table(p, pyproject=True)
-    elif p.suffix == ".toml":
-        raw = _read_toml_table(p, pyproject=False)
     else:
-        raw = _read_legacy_conf(p)
+        raw = _read_toml_table(p, pyproject=False)
     return Config.from_mapping(raw, source=str(p), strict=_strict_unknown_keys())
 
 
@@ -808,12 +712,10 @@ def write_jira_config(
     Target selection (deterministic): :func:`_discover_project_config` →
 
     * a ``rebar.toml`` → that file is the target.
-    * a ``pyproject.toml`` / legacy ``.rebar/config.conf`` / nothing → the target is
-      ``<repo_root>/rebar.toml`` (CREATED if absent). A user-owned ``pyproject.toml``
-      is NEVER edited; the fresh ``rebar.toml`` wins read precedence over pyproject
-      (rebar.toml is probed first by the discovery walk). A legacy conf is left
-      untouched — its values are still read, but persistence moves forward to
-      ``rebar.toml``.
+    * a ``pyproject.toml`` / nothing → the target is ``<repo_root>/rebar.toml``
+      (CREATED if absent). A user-owned ``pyproject.toml`` is NEVER edited; the fresh
+      ``rebar.toml`` wins read precedence over pyproject (rebar.toml is probed first by
+      the discovery walk).
 
     Mechanism: read the target whole with stdlib ``tomllib`` (so ``[jira]`` /
     ``jira = {…}`` inline-table / ``jira.url`` dotted-key forms all normalize to the
@@ -889,11 +791,7 @@ def read_reserved_section(name: str, root: str | os.PathLike[str] | None = None)
     proj = _discover_project_config(root)
     if proj is not None:
         path, kind = proj
-        table = (
-            _read_legacy_conf(path)
-            if kind == "legacy"
-            else _read_toml_table(path, pyproject=(kind == "pyproject"))
-        )
+        table = _read_toml_table(path, pyproject=(kind == "pyproject"))
         sub = table.get(name)
         if isinstance(sub, dict):
             merged.update(sub)

@@ -1,4 +1,4 @@
-"""Config loader: discovery + TOML/legacy reading + XDG user fallback + the
+"""Config loader: discovery + TOML reading + XDG user fallback + the
 CLI > env > project > user > defaults layering, verified across representative
 COMBINATIONS of config parameters and LOCATIONS, plus precedence + portability
 (config-refinement task 43a0).
@@ -97,16 +97,6 @@ def test_project_pyproject_tool_rebar(tmp_path: Path) -> None:
     )
     c = cfg.load_config(root=p)
     assert c.mcp.allow_jira_sync is True
-
-
-def test_legacy_config_conf_backcompat(tmp_path: Path) -> None:
-    p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text(
-        "verify.require_signature_for_close=true\nsync.pull=off\n", encoding="utf-8"
-    )
-    c = cfg.load_config(root=p)
-    assert c.verify.require_signature_for_close is True and c.sync.pull == "off"
 
 
 def test_rebar_config_env_points_at_explicit_file(
@@ -252,12 +242,11 @@ def test_rebar_config_env_points_at_pyproject(
     )  # pyproject-kind via $REBAR_CONFIG
 
 
-def test_env_beats_legacy_conf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_beats_project_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("sync.push=async\n", encoding="utf-8")
+    (p / "rebar.toml").write_text("[sync]\npush = 'async'\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
-    assert cfg.load_config(root=p).sync.push == "off"  # env > legacy project layer
+    assert cfg.load_config(root=p).sync.push == "off"  # env > project file layer
 
 
 def test_cli_partial_section_merges_with_project(tmp_path: Path) -> None:
@@ -287,11 +276,10 @@ def test_malformed_pyproject_fails_closed(tmp_path: Path) -> None:
         cfg.load_config(root=p)
 
 
-def test_absent_pyproject_does_not_preempt_legacy_conf(tmp_path: Path) -> None:
-    """A parseable pyproject WITHOUT [tool.rebar] is skipped (not selected), so the
-    legacy .rebar/config.conf is still found and applied."""
+def test_absent_pyproject_is_skipped(tmp_path: Path) -> None:
+    """A parseable pyproject WITHOUT [tool.rebar] is skipped (not selected): with no
+    other config present, discovery finds nothing and defaults apply."""
     p = _proj(tmp_path)
     (p / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("compact.threshold=5\n", encoding="utf-8")
-    assert cfg.load_config(root=p).compact.threshold == 5
+    # default compact.threshold is not 5 (proves the pyproject was not treated as config)
+    assert cfg.load_config(root=p).compact.threshold != 5

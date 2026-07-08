@@ -63,7 +63,6 @@ def resolve_signature_gate(cfg_root: str) -> tuple[bool, str | None]:
     gates: unlike :func:`gate_enabled` (which fails OPEN — an unreadable config *skips* the gate),
     a present-but-unreadable config here must NEVER silently disable the gate — it *requires* a
     signature (fail-CLOSED). An ABSENT config returns the default (gate off), the intended opt-out.
-    (Also honours the legacy ``require_verdict_for_close`` alias via the typed config layer.)
 
     Returns ``(require_sig, config_error)``. On a :class:`ConfigError` it returns
     ``(True, "<error text>")`` WITHOUT printing — the caller emits the fail-closed warning once it

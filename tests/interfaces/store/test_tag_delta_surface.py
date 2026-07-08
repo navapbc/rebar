@@ -6,7 +6,7 @@ whole-field EDIT.tags clobber. Pinned here at the library + CLI tier:
   * leaf tag/untag and edit --add-tag/--remove-tag emit TAG_DELTA (no EDIT.tags);
   * --set-tags is compiled to a delta (add-wins) vs observed state;
   * mutual-exclusion + same-tag + --tags-removed errors;
-  * the deprecated edit(tags=) alias still works (as a set);
+  * the removed edit(tags=) alias is now rejected (DE7 — canonical set_tags only);
   * tag-name validation; no-op suppression.
 """
 
@@ -120,12 +120,14 @@ def test_whitespace_only_tag_rejected_on_leaf_path(rebar_repo: Path) -> None:
     assert _tags(rebar_repo, tid) == []
 
 
-# ── deprecated edit(tags=) alias behaves as a (convergent) set ────────────────
-def test_deprecated_tags_alias_sets(rebar_repo: Path) -> None:
+# ── the edit(tags=) alias was removed pre-1.0 (DE7): now rejected, not a set ───
+def test_removed_tags_alias_is_rejected(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo, tags=["old"])
-    rebar.edit_ticket(tid, tags=["only", "two"], repo_root=str(rebar_repo))
-    assert _tags(rebar_repo, tid) == ["only", "two"]
-    assert "EDIT" not in _event_types(rebar_repo, tid)
+    # ``tags=`` is no longer an accepted alias for set_tags — it is now an unknown
+    # edit field and raises; the ticket's tags are left untouched.
+    with pytest.raises(rebar.RebarError):
+        rebar.edit_ticket(tid, tags=["only", "two"], repo_root=str(rebar_repo))
+    assert _tags(rebar_repo, tid) == ["old"]
 
 
 # ── a tag-only edit emits only TAG_DELTA; a mixed edit emits EDIT + TAG_DELTA ──

@@ -1,8 +1,8 @@
 """Best-effort push of the tickets branch.
 
 Faithful port of ``_push_tickets_branch`` (ticket-lib.sh). Honours the ``sync.push``
-policy (``always`` | ``async`` | ``off``, default ``always``; env ``REBAR_SYNC_PUSH``,
-deprecated alias ``REBAR_PUSH``, or a config file — resolved via the typed config),
+policy (``always`` | ``async`` | ``off``, default ``always``; env ``REBAR_SYNC_PUSH``
+or a config file — resolved via the typed config),
 pushes ``HEAD:tickets`` (the detached-HEAD commit, bug 27d8-b230), retries ≤3, and
 reconciles a non-fast-forward by **merging** ``origin/tickets`` (never rebasing —
 merge is atomic, no rebase-merge state to strand picks; 637b Fix 3), including the
@@ -32,8 +32,8 @@ _MAX_RETRIES = 3
 
 def _push_mode(root: str | None = None) -> str:
     """The outbound push policy (``always`` | ``async`` | ``off``), resolved through
-    the typed config (``sync.push``; env ``REBAR_SYNC_PUSH``, deprecated alias
-    ``REBAR_PUSH``, or a config file). ``root`` is passed explicitly (the repo dir
+    the typed config (``sync.push``; env ``REBAR_SYNC_PUSH`` or a config file).
+    ``root`` is passed explicitly (the repo dir
     holding the tracker) so resolution is pure stat-based discovery — it never shells
     out to ``git`` for root detection, which would conflict with callers that mock
     subprocess. Best-effort: a malformed config falls back to the ``always`` default —

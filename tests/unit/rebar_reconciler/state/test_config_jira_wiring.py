@@ -1,13 +1,13 @@
 """0ac6 (slice 3): route jira.* (url/user/project) through the typed Config so a
-`[tool.rebar.jira]` / `rebar.toml` / legacy `.rebar/config.conf` value is actually
-CONSUMED by the reconciler, with the Atlassian-standard env vars JIRA_URL / JIRA_USER
-/ JIRA_PROJECT as the canonical (no-warn) env override. The SECRET JIRA_API_TOKEN
-stays env-ONLY (never a config key).
+`[tool.rebar.jira]` / `rebar.toml` value is actually CONSUMED by the reconciler,
+with the Atlassian-standard env vars JIRA_URL / JIRA_USER / JIRA_PROJECT as the
+canonical (no-warn) env override. The SECRET JIRA_API_TOKEN stays env-ONLY (never a
+config key).
 
 Exercises the shared resolver acli_subprocess.resolve_jira_settings() across config
-LOCATIONS (pyproject, rebar.toml, legacy dotted conf, XDG user, env, `rebar -c`),
-asserting precedence CLI > env > project > user > default, project_default
-substitution, the env-only token, ConfigError → env fallback, and provenance.
+LOCATIONS (pyproject, rebar.toml, XDG user, env, `rebar -c`), asserting precedence
+CLI > env > project > user > default, project_default substitution, the env-only
+token, ConfigError → env fallback, and provenance.
 """
 
 from __future__ import annotations
@@ -85,12 +85,11 @@ def test_rebar_toml(tmp_path: Path, monkeypatch) -> None:
     assert resolve_jira_settings().url == "https://rt.example"
 
 
-def test_legacy_dotted_conf(tmp_path: Path, monkeypatch) -> None:
+def test_rebar_toml_alt_url(tmp_path: Path, monkeypatch) -> None:
     p = _proj(tmp_path)
-    (p / ".rebar").mkdir()
-    (p / ".rebar" / "config.conf").write_text("jira.url=https://legacy.example\n", encoding="utf-8")
+    (p / "rebar.toml").write_text("[jira]\nurl = 'https://alt.example'\n", encoding="utf-8")
     monkeypatch.setenv("REBAR_ROOT", str(p))
-    assert resolve_jira_settings().url == "https://legacy.example"
+    assert resolve_jira_settings().url == "https://alt.example"
 
 
 # ── canonical env name is the unprefixed Atlassian name ───────────────────────

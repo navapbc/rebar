@@ -309,8 +309,7 @@ def test_llm_view_compacts_signature(rebar_repo: Path) -> None:
 
 # ── close gate: story/epic require a certified signature (opt-in) ──────────────
 def _enable_gate(repo: Path) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "config.conf").write_text("verify.require_signature_for_close=true\n")
+    (repo / "rebar.toml").write_text("[verify]\nrequire_signature_for_close = true\n")
 
 
 def _commit(repo: Path, msg: str = "c") -> None:

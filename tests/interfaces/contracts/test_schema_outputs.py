@@ -217,10 +217,10 @@ def test_summary_shape(rebar_repo: Path) -> None:
 
 
 def test_list_epics_wrapper_shape(rebar_repo: Path) -> None:
-    # list-epics is now a DEPRECATED thin wrapper over the generic list: always
-    # exit 0, {p0_bugs, epics} (ticket_state arrays), deprecation warning on stderr.
-    import warnings
-
+    # The CLI list-epics command is a DEPRECATED thin wrapper over the generic list:
+    # always exit 0, {p0_bugs, epics} (ticket_state arrays), deprecation warning on
+    # stderr. (The library rebar.list_epics() function was removed pre-1.0 — DE7 — so
+    # this only exercises the surviving CLI command + its output schema.)
     r = str(rebar_repo)
     v = schemas.validator(schemas.LIST_EPICS)
     # no epics yet -> exit 0, empty epics, valid shape, warning on stderr (not stdout)
@@ -237,9 +237,6 @@ def test_list_epics_wrapper_shape(rebar_repo: Path) -> None:
     out = json.loads(cp.stdout)
     v.validate(out)
     assert len(out["epics"]) == 1
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        v.validate(rebar.list_epics(repo_root=r))
 
 
 def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:

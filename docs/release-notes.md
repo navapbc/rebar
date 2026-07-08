@@ -4,6 +4,31 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — deprecated back-compat aliases removed (DE7)
+
+Eight scheduled deprecation shims were removed at the pre-1.0 breaking-change
+window. Each **old name now does nothing** (env aliases are silently ignored; the
+config alias / flat reader are treated as unknown; the CLI flag and library
+kwarg/function are gone) — switch to the canonical replacement:
+
+| Removed surface | Kind | Use instead |
+|---|---|---|
+| env `REBAR_PUSH` | env var | env `REBAR_SYNC_PUSH` |
+| env `TICKETS_TRACKER_DIR` | env var | env `REBAR_TRACKER_DIR` |
+| env `REBAR_MCP_ALLOW_RECONCILE_LIVE` | env var | env `REBAR_MCP_ALLOW_JIRA_SYNC` |
+| cfg `verify.require_verdict_for_close` | config key | cfg `verify.require_signature_for_close` |
+| flat `.rebar/config.conf` reader | config file | `rebar.toml` or a `[tool.rebar]` table in `pyproject.toml` |
+| lib `edit_ticket(tags=…)` | library kwarg | `edit_ticket(set_tags=…)` (or `add_tags=` / `remove_tags=`) |
+| lib `rebar.list_epics()` | library function | `rebar.list_tickets(ticket_type="epic", status="open,in_progress", blocking_state="unblocked", …)` (+ `ticket_type="bug", priority=0` for the P0 bugs) |
+| CLI `--verdict-hash` (transition) | CLI flag | `rebar sign <id> <manifest>` (the certified-signature close gate) |
+
+Notes: the CLI `list-epics` command and the MCP `list_epics` tool are **kept** (both
+now compose `list_tickets` internally); only the `rebar.list_epics()` *library*
+function was removed. The permanent ergonomic env renames (`REBAR_NO_SYNC`,
+`COMPACT_THRESHOLD`, `SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`,
+`RECONCILER_ABSENT_GET_BUDGET`, `REBAR_ID_GUARD_MODE`) are unaffected and still
+honored. (ticket `imposing-petite-xenopus`)
+
 ## 0.7.1 — MCP Registry auto-published; first fully-automated release
 
 The `mcp_registry` job (GitHub Actions OIDC) now auto-publishes `server.json` to

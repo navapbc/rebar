@@ -62,7 +62,7 @@ def test_noninteractive_read_attaches_to_existing_origin_tickets(
     clone, tid = clone_with_origin_tickets
     monkeypatch.setenv("REBAR_ROOT", str(clone))
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     # Force the non-interactive branch deterministically (the bug's environment).
     monkeypatch.setattr(_init, "_is_interactive", lambda: False)
 
@@ -90,7 +90,7 @@ def test_genuine_first_time_init_still_requires_consent_noninteractively(tmp_pat
 
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
-    monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.setattr(_init, "_is_interactive", lambda: False)
 
     with pytest.raises(SystemExit):

@@ -241,20 +241,22 @@ def register_read_tools(mcp, ctx) -> None:
         ticket_type='epic', status='open,in_progress', blocking_state='unblocked',
         min_children=N — plus ticket_type='bug', priority=0 for the P0 bugs.
         include_blocked=True drops the unblocked-only filter."""
-        import warnings
-
         from rebar._deprecations import warn_deprecated
 
-        # Emit the MCP tool's own deprecation signal through the central registry, then
-        # suppress the inner library-level warning so callers see exactly one signal.
+        # Emit the MCP tool's own deprecation signal through the central registry. The
+        # underlying rebar.list_epics() library function was removed pre-1.0 (DE7), so
+        # this tool now composes the two generic list_tickets calls itself.
         warn_deprecated("mcp:list_epics", via="warning")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            return ListEpicsOut.model_validate(
-                rebar.list_epics(
-                    include_blocked=include_blocked, has_tag=has_tag, min_children=min_children
-                )
-            )
+        epics = rebar.list_tickets(
+            ticket_type="epic",
+            status="open,in_progress",
+            blocking_state="" if include_blocked else "unblocked",
+            has_tag=has_tag,
+            min_children=min_children,
+            with_children_count=True,
+        )
+        p0_bugs = rebar.list_tickets(ticket_type="bug", priority=0)
+        return ListEpicsOut.model_validate({"p0_bugs": p0_bugs, "epics": epics})
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def bridge_fsck() -> BridgeFsckOut:
@@ -281,8 +283,7 @@ def register_read_tools(mcp, ctx) -> None:
         """Run the Jira reconciler. Defaults to a non-mutating dry-run.
 
         The Jira-mutating modes (bootstrap-strict, bootstrap-throttle, live) each
-        require REBAR_MCP_ALLOW_JIRA_SYNC=1 (deprecated alias
-        REBAR_MCP_ALLOW_RECONCILE_LIVE) and are blocked under REBAR_MCP_READONLY.
+        require REBAR_MCP_ALLOW_JIRA_SYNC=1 and are blocked under REBAR_MCP_READONLY.
         reconcile-check / dry-run are non-mutating.
         """
         # MODE_CAPS / Mode are imported once at module load (see top of file).
