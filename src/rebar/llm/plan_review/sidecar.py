@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
 
+# The impact-model formula version that produced this sidecar's scores (story
+# raptorial-galloping-dragon). Stamped top-level so the calibration replay can SEGMENT
+# old-formula vs new-formula findings and never pool across versions (the same cohort-tagging
+# discipline as the per-finding `cohort` carrier; a MISSING tag reads as "unknown/skip" offline).
+# Bump this whenever `decide.impact_plan` changes shape → a fresh calibration cohort.
+IMPACT_MODEL_VERSION = "plan-v2"
+
 # Retention bound (child db7b AC4). REVIEW_RESULT is reducer-IGNORED, so rebar's event
 # COMPACTION intentionally PRESERVES it (never snapshots/absorbs a non-KNOWN type) —
 # compaction therefore cannot bound its growth. A dedicated prune keeps the most-recent
@@ -328,6 +335,7 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     )
     return {
         "schema": "plan_review_result_v1",
+        "impact_model_version": IMPACT_MODEL_VERSION,
         "verdict": verdict.get("verdict"),
         "ticket_id": verdict.get("ticket_id"),
         "ticket_type": verdict.get("ticket_type"),
