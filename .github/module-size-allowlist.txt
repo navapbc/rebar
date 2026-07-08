@@ -1,4 +1,3 @@
-src/rebar/__init__.py
 src/rebar/_engine/rebar_reconciler/inbound_differ.py
 src/rebar/_engine/rebar_reconciler/reconcile.py
 src/rebar/config.py

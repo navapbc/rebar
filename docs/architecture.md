@@ -29,7 +29,9 @@ over one git-backed store.
   - **CLI** (`src/rebar/cli.py` → `rebar._cli`) — an in-process argparse CLI that
     routes each subcommand to its in-process handler; intercepts `reconcile` to
     route it to `python -m rebar_reconciler`.
-  - **Library** (`src/rebar/__init__.py`) — typed in-process functions over
+  - **Library** (`src/rebar/__init__.py`) — a thin public-API namespace that
+    re-exports typed in-process functions from the topical `_lib_*` submodules
+    (`_lib_writes` / `_lib_gates` / `_lib_reads` / `_lib_ops`) over
     `rebar._commands` / `rebar.reducer` / `rebar.graph`, mapping the write path's
     exit 10 to `ConcurrencyError`; in-process reads via `_native.py` / `_reads.py`.
   - **MCP server** (`src/rebar/mcp_server.py`) — FastMCP tools built on the library;
@@ -217,12 +219,27 @@ requires a row here.
 |------|--------|
 | `rebar_reconciler/inbound_differ.py` | crossed the cap (was exactly at 800) adding the `idea ↔ IDEA` status-map entry (epic idea-status). Split along the existing seam: the hand-maintained `_JIRA_TO_LOCAL_STATUS` map + status-translation helpers (`_jira_status_to_local` and friends) into a sibling `inbound_status.py`, leaving the field/comment/link diffing in `inbound_differ.py` — both stay well above the 100-LOC floor |
 | `rebar_reconciler/reconcile.py` | `reconcile_once` is now a thin ~50-LOC sequencer, but the phase helpers it calls carry the mass — `_run_differs` alone is ~380 LOC (legacy + inbound/outbound diff + OM/IM→Mutation conversion). Extract the differ-running phase into a sibling `run_differs.py` (well above the 100-LOC file floor) along the phase seam the sequencer already carves |
-| `__init__.py` | library facade over the cap (also carries the workflow entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result` + `attach_commits`, epic a88f). KEEP as one surface: it is a deliberate flat public-API namespace whose functions share private helpers; a read/write split forces re-exports for no readability gain |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
 | `llm/plan_review/attest.py` | the fastest-growing file in the tree (kind-keyed attestations, epic dark-acme-lumen, + the completion-aware `delivered_now` predicate). Two candidate split seams: the completion-delivery cluster (`_attested_delivered` / `_supersedes_child`) into `attest_delivered.py`, and the validity-computation cluster (`compute_validity` + the reopen/code-drift/material-edit invalidation checks) into `attest_validity.py`. Note the kind-generic validity/signing surface is gate-neutral (the completion gate imports it too), so a gate-neutral home is preferable to keeping it under `plan_review/` |
 | `llm/plan_review/det_floor.py` | crossed the cap adding the verify-command lint (epic cite-stone-sea / WS4, G-3a). Extract the lint cluster (`_lint_verify_command`, `_verify_command_strings`, the `_VERIFY_*` / `_GREP_*` pattern constants) into a sibling `det_verify_lint.py` — the seam already exists (P1–P9 call it, don't share its internals) |
 | `llm/plan_review/passes.py` | crossed the cap across epic cite-stone-sea (WS7 shared preamble, WS8 the foundation/enhancement MOVE_REGISTRY entry, WS9 cohort stamping). Extract the coach cluster (`MOVE_REGISTRY`, `load_move_registry`, `pass4_coach`) into a sibling `coach_moves.py` along the Pass-4 boundary the module already carves |
+
+`src/rebar/__init__.py` was **split** along its concern seams (ticket S3 / 4532),
+**reversing** the earlier "KEEP as one surface" decision: the ~50 public wrapper
+bodies moved into four topical `_lib_*` submodules, leaving `__init__.py` a thin
+public-API namespace that re-exports them. The split: `_lib_writes.py` (ticket
+lifecycle + mutations + signing — also home to the private `_python_leaf` leaf-write
+adapter), `_lib_gates.py` (the quality gates, file-impact / verify-command get&set
+pairs, `grounding_info`, `summary`), `_lib_reads.py` (queries, NDJSON export/import,
+`fsck` — also home to the private `_json_or` helper), and `_lib_ops.py` (the
+workflow-engine entrypoints `run_workflow`/`get_workflow_status`/`get_workflow_result`,
+the Jira `reconcile` launcher, and the `bridge_fsck` audit). `__init__.py` re-exports
+every name (with its identical signature and `__all__`), so `import rebar` /
+`from rebar import …` / `rebar.<name>` — including `rebar._python_leaf` and
+`rebar._json_or` — are unchanged. `_lib_gates` imports `_python_leaf` one-way from
+`_lib_writes` (no cycle). This brought `__init__.py` back under the soft cap (dropped
+from the allowlist), and every new module sits comfortably within the 100–800-LOC band.
 
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
