@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/_engine/rebar_reconciler/acli_subprocess.py","reason":"bulk-path 429 Retry-After parity"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783470524090074001,"uuid":"55a821ac-e27a-4e69-9780-7c1ee7d0ccfe"}
