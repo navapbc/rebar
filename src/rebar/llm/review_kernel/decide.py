@@ -118,6 +118,62 @@ def impact(attrs: dict[str, Any]) -> float:
     return round((sev + blast + like + rev) / 4.0, 4)
 
 
+# ── plan-review impact model (story fishable-apivorous-redhead) ───────────────────────────
+# The plan-review gate dispatches `impact_plan` via `impact_fn` (see pass3_decide) INSTEAD of
+# the mean `impact`. Rationale: the mean dilutes a genuinely high-severity plan finding below
+# the bar (a critical axis averaged with low axes lands ~0.60-0.69). Severity-first MAX + a
+# hard-override floor + a detection amplifier fixes that. The seven axes are emitted by
+# verify.plan_review_verification_model; a missing axis maps to 0.0 (an older/absent verifier
+# ABSTAINS — it never inflates impact). Code-review dispatches its own model (child albite).
+_PLAN_SEVERITY_AXES = (
+    "ac_unverifiable",
+    "dod_uncertifiable",
+    "undecomposed",
+    "divergent_implementation",
+    "internal_conflict",
+    "vague_directive",
+    "irreversible_without_rationale",
+)
+# The four axes that mean "the plan will build the wrong thing": ANY of them present makes the
+# finding auto-high via a hard floor, regardless of the other axes.
+_PLAN_HARD_OVERRIDE_AXES = (
+    "ac_unverifiable",
+    "dod_uncertifiable",
+    "undecomposed",
+    "divergent_implementation",
+)
+_PLAN_HARD_OVERRIDE_FLOOR = 0.85
+
+
+def impact_plan(attrs: dict[str, Any]) -> float:
+    """Plan-review IMPACT ∈ [0,1]: severity-first MAX + hard override + detection amplifier
+    (story fishable-apivorous-redhead), dispatched into :func:`pass3_decide` via ``impact_fn``.
+
+    1. ``impact_sev`` = MAX over the seven ordinal-mapped plan-severity axes (no averaging);
+    2. DETECTION AMPLIFIER: ``mult`` = 0.8 for a ``self_revealing`` finding, else 1.0; a present
+       ``dod_uncertifiable`` forces 1.0 (a DoD you cannot certify is never "self-revealing").
+       ``amplified = min(1.0, impact_sev * mult)``;
+    3. HARD OVERRIDE (applied LAST, as a floor): if ANY of {ac_unverifiable, dod_uncertifiable,
+       undecomposed, divergent_implementation} is present (non-none), the result is floored at
+       0.85.
+
+    The override is floored AFTER the amplifier on purpose. The ticket's stated compose
+    (``impact_sev = max(impact_sev, 0.85)`` THEN ``× mult``) lets a self-revealing override
+    finding land at 0.85 × 0.8 = 0.68 — BELOW the 0.70 bar — silently defeating the "auto-high"
+    intent (flagged by this ticket's own plan-review, findings COH/E1/G6). Flooring last
+    guarantees an override finding is always ≥ 0.85, mirroring impact_code's reversibility
+    floor. All three mechanisms (MAX, override, amplifier) are present, per AC2."""
+    contribs = [_SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES]
+    impact_sev = max(contribs) if contribs else 0.0
+    mult = 0.8 if attrs.get("silent_vs_self_revealing") == "self_revealing" else 1.0
+    if _SEV01.get(attrs.get("dod_uncertifiable"), 0.0) > 0.0:
+        mult = 1.0  # a DoD you cannot certify forces full detection weight
+    amplified = min(1.0, impact_sev * mult)
+    has_override = any(_SEV01.get(attrs.get(a), 0.0) > 0.0 for a in _PLAN_HARD_OVERRIDE_AXES)
+    result = max(amplified, _PLAN_HARD_OVERRIDE_FLOOR) if has_override else amplified
+    return round(result, 4)
+
+
 def severity_label(imp: float) -> str:
     if imp >= 0.75:
         return "critical"
@@ -133,6 +189,7 @@ def pass3_decide(
     *,
     block_threshold: float = DEFAULT_BLOCK_THRESHOLD,
     blocking_enabled: bool = False,
+    impact_fn: Callable[[dict[str, Any]], float] | None = None,
 ) -> dict[str, Any]:
     """The deterministic decision. Returns
     ``{decision, reason, validity, impact, priority, severity}``.
@@ -144,7 +201,12 @@ def pass3_decide(
       * validity < 0.5 → DROPPED (low validity);
       * else BLOCK iff (not vetoed) AND blocking_enabled AND priority ≥ block_threshold;
       * else ADVISORY.
-    """
+
+    ``impact_fn`` is the PER-GATE impact model (story fishable-apivorous-redhead). It defaults
+    to the mean :func:`impact` — so any caller that does not pass it (e.g. the code-review path
+    today) is byte-unchanged — while the plan-review gate threads ``impact_fn=impact_plan`` and
+    code-review later threads its own. The signed-verdict shape is identical either way; only
+    the ``impact`` scalar's provenance differs."""
     if not verification:
         return {
             "decision": "indeterminate",
@@ -157,7 +219,7 @@ def pass3_decide(
     binary = verification.get("binary", {}) or {}
     attrs = verification.get("severity_attributes", {}) or {}
     val = validity(binary)
-    imp = impact(attrs)
+    imp = (impact_fn or impact)(attrs)
     priority = round(val * imp, 4)
     sev = severity_label(imp)
     if binary.get("cited_reference_accurate") == "no":
@@ -197,18 +259,26 @@ def pass3_over_findings(
     verifs: dict[int, dict[str, Any]],
     *,
     threshold_for: ThresholdResolver,
+    impact_fn: Callable[[dict[str, Any]], float] | None = None,
 ) -> list[dict[str, Any]]:
     """Deterministic Pass-3 over the verifiable findings: per-criterion thresholds
     (resolved by the consumer-supplied ``threshold_for``) + :func:`pass3_decide`
     keyed by each finding's index into ``findings`` (matching the
     ``{index: verification}`` map Pass-2 produced). The shared decision core every
     gate calls — the too_big/shed routing is the caller's (it differs by
-    index-domain)."""
+    index-domain).
+
+    ``impact_fn`` (story fishable-apivorous-redhead) is threaded verbatim to
+    :func:`pass3_decide` — the plan-review wrapper passes ``impact_plan``; a caller that
+    omits it gets the mean :func:`impact` unchanged."""
     decided: list[dict[str, Any]] = []
     for i, f in enumerate(findings):
         block_threshold, blocking_enabled = threshold_for(f.get("criteria", []))
         d = pass3_decide(
-            verifs.get(i), block_threshold=block_threshold, blocking_enabled=blocking_enabled
+            verifs.get(i),
+            block_threshold=block_threshold,
+            blocking_enabled=blocking_enabled,
+            impact_fn=impact_fn,
         )
         decided.append({**f, **d, "verification": verifs.get(i), "tier": "LLM"})
     return decided

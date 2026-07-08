@@ -658,7 +658,13 @@ def pass3_over_findings(
     def _threshold_for(criteria: Any) -> tuple[float, bool]:
         return _criteria.threshold_for(criteria, crit_by_id, gate="plan_review")
 
-    return review_kernel.pass3_over_findings(findings, verifs, threshold_for=_threshold_for)
+    # Plan-review dispatches its own impact model (story fishable-apivorous-redhead):
+    # severity-first MAX + hard override + detection amplifier over the 7 plan-severity axes,
+    # INSTEAD of the mean `impact`. The signed-verdict shape is unchanged; code-review keeps
+    # the kernel default (no impact_fn) and is byte-unchanged.
+    return review_kernel.pass3_over_findings(
+        findings, verifs, threshold_for=_threshold_for, impact_fn=review_kernel.impact_plan
+    )
 
 
 def _exempt_verdict(ctx: PlanContext, *, reason: str) -> dict[str, Any]:

@@ -84,6 +84,101 @@ VERIFIER_RULES: tuple[tuple[str, str], ...] = (
 VERIFIER_RULES_SCAFFOLD = "\n".join(f"- {name}: {text}" for name, text in VERIFIER_RULES)
 
 
+# The binary sub-question descriptions + na-defaults, at MODULE scope so BOTH the base
+# `verification_model` and the plan-review `plan_review_verification_model` build the SAME
+# Binary vocabulary from ONE source (no drift). Kept out of the functions (which lazily
+# import pydantic) because these are plain data, not pydantic types.
+_BINARY_DESC = {
+    "is_verifiable": "yes|no|insufficient|na — finding stated concretely enough to test.",
+    "evidence_entails_finding": (
+        "yes|no|insufficient|na — the cited evidence actually ENTAILS the finding under a "
+        "charitable reading (load-bearing; do not answer na)."
+    ),
+    "path_reachable": (
+        "yes|no|insufficient|na — the situation is reachable as written (na if the finding is "
+        "structural/organisational with no execution path)."
+    ),
+    "impact_follows_necessarily": "yes|no|insufficient|na — asserted harm NECESSARILY follows.",
+    "no_viable_alternative_explanation": (
+        "yes|no|insufficient|na — no reasonable benign reading dissolves the finding."
+    ),
+    "no_existing_mitigation": "yes|no|insufficient|na — nothing already mitigates the flaw.",
+    "severity_claim_justified": (
+        "yes|no|insufficient|na — the finding's asserted impact is proportionate, not inflated."
+    ),
+    # DSO-adopted (epic cite-stone-sea / WS1, ADR 0032). Both na-default (see below).
+    "committed_work_relies_on_unbacked_claim": (
+        "yes|no|insufficient|na — a COMMITTED element of the plan (an AC, a task, an "
+        "edit, or a scope EXCLUSION such as 'OUT: X — already exists / handled by Y') "
+        "rests on a factual claim the plan neither verifies (a run Verify command / "
+        "cited evidence) nor guards with a fallback. 'yes' upholds a confident-assertion "
+        "or false-exclusion finding; `na` unless the finding is about a committed element "
+        "depending on such a claim."
+    ),
+    "respects_artifact_altitude": (
+        "yes|no|insufficient|na — the finding does NOT demand a detail, or presume a "
+        "design choice, that this artifact at its level (epic/story/task) legitimately "
+        "defers to a child or to implementation. 'no' marks an altitude-error false "
+        "positive (it then LOWERS validity like any other sub-answer); `na` if altitude "
+        "is not in question."
+    ),
+}
+# Sub-answers that default to "na" (abstain, EXCLUDED from validity) rather than
+# "insufficient": they apply only to a specific finding SHAPE, so a verifier that does not
+# engage them must not drag validity, and old sidecars predating them stay comparable
+# (absent key == na, both excluded by decide.validity). Data-driven default over the SAME
+# uniform loop — no per-criterion branching in the pass. See ADR 0032 (epic cite-stone-sea).
+_BINARY_NA_DEFAULT = frozenset(
+    {"committed_work_relies_on_unbacked_claim", "respects_artifact_altitude"}
+)
+
+
+def _build_binary(forbid: Any) -> type:
+    """Build the shared ``Binary`` sub-answer model — the 7 GRADED sub-questions (whose
+    graded fraction is the finding's validity) PLUS the ``cited_reference_accurate`` veto —
+    from the module-level vocabulary, so the base and plan-review models never diverge."""
+    from pydantic import Field, create_model
+
+    binary_fields: dict[str, Any] = {
+        "cited_reference_accurate": (str, Field(default="na", description="yes|no|insufficient|na"))
+    }
+    for q in GRADED_BINARY:
+        _default = "na" if q in _BINARY_NA_DEFAULT else "insufficient"
+        binary_fields[q] = (str, Field(default=_default, description=_BINARY_DESC.get(q, "")))
+    return create_model("Binary", __config__=forbid, **binary_fields)
+
+
+def _build_verification_output(forbid: Any, severity_cls: type) -> type:
+    """Wrap a severity-attributes class + the shared ``Binary`` into the per-finding
+    ``Verification`` and its ``VerificationOutput`` wrapper. Built via ``create_model`` (real
+    type objects, NOT string annotations) so the parametric ``severity_cls`` resolves cleanly
+    under this module's ``from __future__ import annotations``."""
+    from pydantic import Field, create_model
+
+    Binary = _build_binary(forbid)
+    Verification = create_model(
+        "Verification",
+        __config__=forbid,
+        index=(int, Field(description="The 0-based index of the finding being verified.")),
+        analysis=(
+            str,
+            Field(
+                default="",
+                description="REASON FIRST: brief reasoning through this finding's sub-questions "
+                "(as an unproven claim) before the attributes/answers.",
+            ),
+        ),
+        severity_attributes=(severity_cls, Field(default_factory=severity_cls)),
+        binary=(Binary, Field(default_factory=Binary)),
+    )
+    verifications_type = list[Verification]  # type: ignore[valid-type]  # runtime-built model
+    return create_model(
+        "VerificationOutput",
+        __config__=forbid,
+        verifications=(verifications_type, Field(default_factory=list)),
+    )
+
+
 # ── the registered `verification` CONTRACT (the SINGLE source of the binary vocabulary +
 #    severity-attribute enums; small/flat for tolerant validation) ────────────────────────
 def verification_model(*, strict: bool = False) -> type:
@@ -105,7 +200,7 @@ def verification_model(*, strict: bool = False) -> type:
     pinned by tests and is the flip-ready future default (expand-contract: see
     docs/adr/0006-llm-stage-seam-contracts.md). Flipping the live contract is a one-liner —
     change the registration below to ``verification_model(strict=True)``."""
-    from pydantic import BaseModel, ConfigDict, Field, create_model
+    from pydantic import BaseModel, ConfigDict, Field
 
     forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
 
@@ -123,78 +218,86 @@ def verification_model(*, strict: bool = False) -> type:
         likelihood: str = Field(default="low", description="low|medium|high")
         reversibility: str = Field(default="easy", description="easy|moderate|hard")
 
-    # The binary field set is DERIVED from GRADED_BINARY (the single vocabulary in .decide) so
-    # the contract and the validity math can never name different sub-questions. Each graded
-    # sub-question accepts yes|no|insufficient|na — `na` (or any non-yes/no/insufficient value)
-    # is EXCLUDED from the validity mean by `decide.validity`, so a verifier can abstain on a
-    # sub-question that does not apply to a finding's shape instead of guessing `insufficient`.
-    _BINARY_DESC = {
-        "is_verifiable": "yes|no|insufficient|na — finding stated concretely enough to test.",
-        "evidence_entails_finding": (
-            "yes|no|insufficient|na — the cited evidence actually ENTAILS the finding under a "
-            "charitable reading (load-bearing; do not answer na)."
-        ),
-        "path_reachable": (
-            "yes|no|insufficient|na — the situation is reachable as written (na if the finding is "
-            "structural/organisational with no execution path)."
-        ),
-        "impact_follows_necessarily": "yes|no|insufficient|na — asserted harm NECESSARILY follows.",
-        "no_viable_alternative_explanation": (
-            "yes|no|insufficient|na — no reasonable benign reading dissolves the finding."
-        ),
-        "no_existing_mitigation": "yes|no|insufficient|na — nothing already mitigates the flaw.",
-        "severity_claim_justified": (
-            "yes|no|insufficient|na — the finding's asserted impact is proportionate, not inflated."
-        ),
-        # DSO-adopted (epic cite-stone-sea / WS1, ADR 0032). Both na-default (see below).
-        "committed_work_relies_on_unbacked_claim": (
-            "yes|no|insufficient|na — a COMMITTED element of the plan (an AC, a task, an "
-            "edit, or a scope EXCLUSION such as 'OUT: X — already exists / handled by Y') "
-            "rests on a factual claim the plan neither verifies (a run Verify command / "
-            "cited evidence) nor guards with a fallback. 'yes' upholds a confident-assertion "
-            "or false-exclusion finding; `na` unless the finding is about a committed element "
-            "depending on such a claim."
-        ),
-        "respects_artifact_altitude": (
-            "yes|no|insufficient|na — the finding does NOT demand a detail, or presume a "
-            "design choice, that this artifact at its level (epic/story/task) legitimately "
-            "defers to a child or to implementation. 'no' marks an altitude-error false "
-            "positive (it then LOWERS validity like any other sub-answer); `na` if altitude "
-            "is not in question."
-        ),
-    }
-    # Sub-answers that default to "na" (abstain, EXCLUDED from validity) rather than
-    # "insufficient": they apply only to a specific finding SHAPE, so a verifier that does not
-    # engage them must not drag validity, and old sidecars predating them stay comparable
-    # (absent key == na, both excluded by decide.validity). Data-driven default over the SAME
-    # uniform loop — no per-criterion branching in the pass. See ADR 0032 (epic cite-stone-sea).
-    _BINARY_NA_DEFAULT = frozenset(
-        {"committed_work_relies_on_unbacked_claim", "respects_artifact_altitude"}
-    )
-    binary_fields: dict[str, Any] = {
-        "cited_reference_accurate": (str, Field(default="na", description="yes|no|insufficient|na"))
-    }
-    for q in GRADED_BINARY:
-        _default = "na" if q in _BINARY_NA_DEFAULT else "insufficient"
-        binary_fields[q] = (str, Field(default=_default, description=_BINARY_DESC.get(q, "")))
-    Binary = create_model("Binary", __config__=forbid, **binary_fields)
+    # Binary vocabulary + the Verification/VerificationOutput wrapper come from the shared
+    # module-level builders, so the plan-review model reuses this EXACT shape (no drift).
+    return _build_verification_output(forbid, SeverityAttrs)
 
-    class Verification(BaseModel):
+
+def plan_review_verification_model(*, strict: bool = False) -> type:
+    """The PLAN-REVIEW Pass-2 model (story fishable-apivorous-redhead): the same ``Verification``
+    shape as :func:`verification_model`, but its ``severity_attributes`` is a ``PlanSeverityAttrs``
+    that ADDS 7 plan-severity axes + a detection axis on top of the base five. Registered as the
+    plan-review-specific ``plan_review_verification`` contract; the kernel ``verification`` (used
+    by code-review + the kernel default) is UNCHANGED.
+
+    Each new axis is graded ``none|low|medium|high`` and defaults to ``"none"`` (detection to
+    ``""``), so an older/absent verifier ABSTAINS: a missing axis maps to 0 in
+    :func:`rebar.llm.review_kernel.decide.impact_plan` and never inflates impact (back-compat).
+    ``impact_plan`` aggregates the seven axes by MAX, floors the four hard-override axes, and
+    applies the detection amplifier — see that function for the exact compose."""
+    from pydantic import BaseModel, ConfigDict, Field
+
+    forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
+
+    class PlanSeverityAttrs(BaseModel):
         model_config = forbid
-        index: int = Field(description="The 0-based index of the finding being verified.")
-        analysis: str = Field(
-            default="",
-            description="REASON FIRST: brief reasoning through this finding's sub-questions "
-            "(as an unproven claim) before the attributes/answers.",
+        # Base severity attributes (kept for sidecar continuity; impact_plan reads the axes below).
+        prod_impact: str = Field(default="none", description="none|low|medium|high")
+        debt_impact: str = Field(default="none", description="none|low|medium|high")
+        blast_radius: str = Field(
+            default="local",
+            description=(
+                "local|module|system — ONE-WAY ratchet: a wide radius only LOWERS tolerance for "
+                "an already-real defect; it never raises a trivial finding's severity."
+            ),
         )
-        severity_attributes: SeverityAttrs = Field(default_factory=SeverityAttrs)
-        binary: Binary = Field(default_factory=Binary)  # type: ignore[valid-type]
+        likelihood: str = Field(default="low", description="low|medium|high")
+        reversibility: str = Field(default="easy", description="easy|moderate|hard")
+        # ── The 7 plan-severity axes (decide.impact_plan aggregates these by MAX). ──
+        ac_unverifiable: str = Field(
+            default="none",
+            description="none|low|medium|high — an acceptance criterion cannot be objectively "
+            "verified as written. HARD-OVERRIDE axis (any non-none floors impact to 0.85).",
+        )
+        dod_uncertifiable: str = Field(
+            default="none",
+            description="none|low|medium|high — a definition-of-done / success criterion cannot be "
+            "certified true. HARD-OVERRIDE axis; also forces the detection multiplier to x1.0.",
+        )
+        undecomposed: str = Field(
+            default="none",
+            description="none|low|medium|high — work is left undecomposed (a flat plan that should "
+            "be broken down). Grade only a GENUINE gap: the deterministic G5 signal already "
+            "suppresses false 'flat' findings on tickets that have children. HARD-OVERRIDE axis.",
+        )
+        divergent_implementation: str = Field(
+            default="none",
+            description="none|low|medium|high — the plan diverges from the implementation/reality "
+            "it claims to describe (builds the wrong thing). HARD-OVERRIDE axis.",
+        )
+        internal_conflict: str = Field(
+            default="none",
+            description="none|low|medium|high — the plan internally contradicts itself.",
+        )
+        vague_directive: str = Field(
+            default="none",
+            description="none|low|medium|high — a load-bearing directive is too vague to act on "
+            "unambiguously.",
+        )
+        irreversible_without_rationale: str = Field(
+            default="none",
+            description="none|low|medium|high — an irreversible/destructive step is taken without "
+            "a stated rationale or fallback.",
+        )
+        # ── Detection axis (drives decide.impact_plan's detection amplifier). ──
+        silent_vs_self_revealing: str = Field(
+            default="",
+            description="silent|self_revealing — 'silent' = the plan builds the wrong thing "
+            "undetectably (amplifier x1.0); 'self_revealing' = the mistake hits an obvious wall "
+            "and is caught (x0.8). Leave empty when not applicable (treated as x1.0).",
+        )
 
-    class VerificationOutput(BaseModel):
-        model_config = forbid
-        verifications: list[Verification] = Field(default_factory=list)
-
-    return VerificationOutput
+    return _build_verification_output(forbid, PlanSeverityAttrs)
 
 
 def register_verification_contract() -> None:

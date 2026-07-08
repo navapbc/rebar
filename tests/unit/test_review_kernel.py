@@ -155,21 +155,56 @@ def _fnd(text: str, *, criteria=("E1",), evidence=(), impact_text="") -> dict:
     }
 
 
-def test_verification_contract_is_the_single_registered_source() -> None:
-    """The kernel registers ``verification``; plan-review's ``plan_review_verification`` is the
-    SAME model factory (an alias, not a second shape). The Binary fields are DERIVED from the
-    single GRADED_BINARY vocabulary + the cited-reference veto."""
-    from rebar.llm.plan_review import passes
-
-    assert passes._pass2_model is kverify.verification_model
-    model = kverify.verification_model()
-    binary_fields = set(
+def _binary_fields(model: type) -> set[str]:
+    return set(
         model.model_fields["verifications"]
         .annotation.__args__[0]
         .model_fields["binary"]
         .annotation.model_fields
     )
-    assert binary_fields == {*review_kernel.GRADED_BINARY, "cited_reference_accurate"}
+
+
+def _severity_fields(model: type) -> set[str]:
+    return set(
+        model.model_fields["verifications"]
+        .annotation.__args__[0]
+        .model_fields["severity_attributes"]
+        .annotation.model_fields
+    )
+
+
+def test_verification_contract_shares_the_binary_vocabulary() -> None:
+    """The kernel registers ``verification``; plan-review's ``plan_review_verification`` EXTENDS
+    that shape with the 7 plan-severity axes + a detection axis (story fishable-apivorous-redhead)
+    while reusing the EXACT same Binary vocabulary via the shared builder — so the two models
+    never diverge on the sub-question set (derived from the single GRADED_BINARY + the
+    cited-reference veto), and the kernel model stays byte-identical for code-review."""
+    from rebar.llm.plan_review import passes
+
+    # plan-review dispatches the EXTENDED model, not the kernel alias
+    assert passes._pass2_model is kverify.plan_review_verification_model
+
+    expected_binary = {*review_kernel.GRADED_BINARY, "cited_reference_accurate"}
+    base = kverify.verification_model()
+    plan = kverify.plan_review_verification_model()
+    # identical Binary vocabulary on both models
+    assert _binary_fields(base) == expected_binary
+    assert _binary_fields(plan) == expected_binary
+    # the plan model is a strict SUPERSET on severity_attributes: the base five + 7 axes + detection
+    base_sev = _severity_fields(base)
+    plan_sev = _severity_fields(plan)
+    assert base_sev == {"prod_impact", "debt_impact", "blast_radius", "likelihood", "reversibility"}
+    assert base_sev < plan_sev
+    assert plan_sev - base_sev == {
+        "ac_unverifiable",
+        "dod_uncertifiable",
+        "undecomposed",
+        "divergent_implementation",
+        "internal_conflict",
+        "vague_directive",
+        "irreversible_without_rationale",
+        "silent_vs_self_revealing",
+    }
 
 
 def test_listing_preserves_global_index() -> None:

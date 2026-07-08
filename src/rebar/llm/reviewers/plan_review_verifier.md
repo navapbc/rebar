@@ -59,6 +59,29 @@ discriminates across a ticket's findings.
   one-way door — an on-disk data/format or public-contract shape that, once built on, is costly to
   unwind (e.g. it forces a later migration to change).
 
+PLAN-SEVERITY AXES — additionally score these SEVEN axes plus the detection axis for THIS finding.
+They drive the plan-review impact score (severity-first MAX over the axes, a hard-override floor,
+and a detection amplifier); the base attributes above are kept for continuity. Grade each
+none|low|medium|high by how severely THIS finding exhibits it, or leave "none" if it does not apply
+— an axis left "none" contributes NOTHING, so do not inflate. Reserve non-none for a genuine instance.
+- ac_unverifiable — an acceptance criterion this finding concerns cannot be objectively verified as
+  written (no observable pass/fail). HARD-OVERRIDE axis: any non-none marks the finding auto-high.
+- dod_uncertifiable — a definition-of-done / success criterion cannot be certified true. HARD-OVERRIDE;
+  also forces the detection amplifier to full weight.
+- undecomposed — the plan is a flat, undecomposed unit that should be broken down. Grade ONLY a
+  genuine gap: a deterministic signal already suppresses false "flat" findings on tickets that HAVE
+  children, so score this only when decomposition is truly absent or insufficient. HARD-OVERRIDE.
+- divergent_implementation — the plan diverges from the implementation or reality it claims to
+  describe (it would build the wrong thing). HARD-OVERRIDE.
+- internal_conflict — the plan contradicts itself (two requirements or sections cannot both hold).
+- vague_directive — a load-bearing directive is too vague to act on unambiguously.
+- irreversible_without_rationale — an irreversible or destructive step is taken with no stated
+  rationale or fallback.
+DETECTION AXIS:
+- silent_vs_self_revealing — "silent" if acting on this flaw builds the wrong thing UNDETECTABLY (no
+  obvious failure surfaces); "self_revealing" if the mistake would hit an obvious wall and be caught
+  quickly. Leave empty when not applicable. (Silent flaws weigh x1.0; self-revealing x0.8.)
+
 BINARY SUB-ANSWERS (yes|no|insufficient) — answer each atomically, about the FINDING as a claim:
 - is_verifiable — the finding is stated concretely enough to test against the plan or code; for
   an absence finding, 'X is missing' is verifiable by checking the complete artifact.
