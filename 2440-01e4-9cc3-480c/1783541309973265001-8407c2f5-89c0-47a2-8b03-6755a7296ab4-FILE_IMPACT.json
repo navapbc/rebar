@@ -1,1 +1,0 @@
-{"author":"RebarBotNava","data":{"file_impact":[{"path":".gitignore","reason":"add .tokensave/; dedupe dist//build/"},{"path":"docs/api-stability.md","reason":"remove stale version literal"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783541309973265001,"uuid":"8407c2f5-89c0-47a2-8b03-6755a7296ab4"}
