@@ -126,6 +126,14 @@ def _candidate_events(events: list[dict], project: str) -> dict[str, dict]:
         patchset = ev.get("patchSet") or ev.get("patchset") or {}
         if project and change.get("project") and change.get("project") != project:
             continue
+        # Skip changes Gerrit considers CLOSED: voting a MERGED/ABANDONED change draws a 409
+        # "change is closed" that the voter records as a non-actionable voter_error and — no
+        # dedup row is written on failure — re-attempts forever (bug c943). Only an open
+        # change is votable. Fail OPEN on an absent/unknown status: never drop a candidate on
+        # missing metadata (that would risk skipping a live open change and stalling the gate).
+        status = change.get("status")
+        if status and str(status).upper() != "NEW":
+            continue
         change_id = change.get("id")
         if not change_id or not patchset.get("revision") or not patchset.get("ref"):
             continue

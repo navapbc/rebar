@@ -44,6 +44,29 @@ def _event(change_id="rebar~main~Iabc", revision="rev1", project="rebar") -> dic
     }
 
 
+def test_candidate_events_skips_closed_changes():
+    # Bug c943: the backfill reconciler re-voted MERGED/ABANDONED changes, drawing a 409
+    # "change is closed" that the voter records as a (non-actionable) voter_error and — since
+    # no dedup row is written on failure — re-attempts forever. _candidate_events must skip
+    # changes Gerrit considers CLOSED. Open (NEW) and status-ABSENT changes MUST still be
+    # candidates (fail-open: never drop a live change on missing metadata, which would risk
+    # skipping a real open change and stalling the LLM-Review gate).
+    def ev(cid, status):
+        e = _event(change_id=cid, revision="r_" + cid)
+        if status is not None:
+            e["change"]["status"] = status
+        return e
+
+    events = [
+        ev("c-new", "NEW"),
+        ev("c-merged", "MERGED"),
+        ev("c-abandoned", "ABANDONED"),
+        ev("c-nostatus", None),
+    ]
+    candidates = reconcile._candidate_events(events, "rebar")
+    assert set(candidates) == {"c-new", "c-nostatus"}
+
+
 class FakeGerrit:
     """Records vote/clone/diff/has-vote calls; no network. ``parents=1`` (default) is a
     NON-merge revision (the get_patch path); ``parents>=2`` routes the voter through the
