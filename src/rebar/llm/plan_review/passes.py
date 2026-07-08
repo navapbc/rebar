@@ -281,15 +281,24 @@ def pass1_chunk(
     plan: str,
     chunk: list[dict[str, Any]],
     agentic: bool = False,
+    extra_context: str = "",
 ) -> list[dict[str, Any]]:
     """Run one Pass-1 finder call over a chunk of criteria. Returns the findings
     (each tagged with the criteria it maps to). Single-turn unless ``agentic``
-    (the code-grounding tier)."""
+    (the code-grounding tier).
+
+    ``extra_context`` is authoritative, store-derived context prepended to the rubric
+    instructions (currently the G5 DECOMPOSITION STATE block — see
+    :func:`rebar.llm.plan_review.det_floor.decomposition_state_block`). The caller
+    populates it ONLY for chunks whose criteria need it, so co-chunked criteria that
+    don't are unaffected; empty by default (byte-identical to the prior instructions)."""
     ids = [c["id"] for c in chunk]
     rubric = "\n\n".join(_criterion_block(c) for c in chunk)
+    context_block = f"{extra_context}\n\n" if extra_context else ""
     req = RunRequest(
         system_prompt=_resolve_system(PASS_FINDER, plan, cfg),
         instructions=(
+            f"{context_block}"
             f"## Rubric criteria for this pass (ids: {', '.join(ids)})\n{rubric}\n\n"
             "Surface every grounded finding for these criteria. Return ONLY findings whose "
             "`criteria` are in this id set; an empty list for a clean chunk is correct."

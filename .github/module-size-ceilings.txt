@@ -13,10 +13,15 @@
 # NOTE (transient): reconcile.py is pinned to 1083 = its largest size across the in-flight
 # janitor stack (it ratchets down to 1064 as the reconciler decomposition lands); the slack
 # lets the ratchet stay green if the stack lands piecemeal rather than atomically.
+#
+# NOTE (epic foliaged-merry-collie — review-gate impact redesign): det_floor.py 849->946 (the G5
+# store-derived decomposition signal, child spangly-beggarly-blackrhino) and passes.py 839->852
+# (the Pass-1 finding-memory recall, child disused-unpoliced-solenodon) grew for the impact-redesign
+# epic; their ceilings are raised here to the landed size (remedy rows already in architecture.md).
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 802
 src/rebar/_engine/rebar_reconciler/reconcile.py 1083
 src/rebar/config.py 836
 src/rebar/llm/plan_review/attest.py 837
-src/rebar/llm/plan_review/det_floor.py 849
-src/rebar/llm/plan_review/passes.py 839
+src/rebar/llm/plan_review/det_floor.py 946
+src/rebar/llm/plan_review/passes.py 852
 src/rebar/llm/workflow/lint_refs.py 870
