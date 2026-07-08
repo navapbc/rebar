@@ -173,6 +173,24 @@ def claim_compute(
     from rebar._store import push
 
     push.push_after_commit(tracker)
+
+    # Best-effort cross-clone claim-loss detection (audit reliability #1, story 3003).
+    # If push_after_commit merged a competing claim that was already on the remote, the
+    # locally-reduced `assignee` (the authoritative ownership field, HLC last-writer-wins)
+    # now reflects that other clone's ownership. Surface the loss so the losing agent stops
+    # instead of duplicating work. When no competing merge is visible (offline, sync.push
+    # off/async, unreachable remote), the assignee is still ours and we return success
+    # unchanged — a resolved fork is still discoverable later via fsck/show.
+    if assignee:
+        from rebar.reducer import reduce_ticket
+
+        reduced = reduce_ticket(os.path.join(tracker, ticket_id))
+        won = reduced.get("assignee") if reduced else None
+        if won and won != assignee:
+            raise ConcurrencyMismatch(
+                f"claim lost on cross-clone merge: {ticket_id} is now assigned to {won!r}, "
+                f"not {assignee!r} (a concurrent claim won the merge). Pick another ticket."
+            )
     return {"ticket_id": ticket_id, "status": "in_progress", "assignee": assignee or None}
 
 
