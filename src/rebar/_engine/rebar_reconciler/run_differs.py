@@ -106,21 +106,43 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     ``ctx`` is the shared ``reconcile._PassContext`` (typed loosely as ``Any`` so
     this module holds no import edge back to reconcile.py). ``route_inbound_probe``
     is reconcile.py's probe router, injected as a parameter for the same reason.
+
+    A thin orchestrator over the named ``_run_differs_*`` phase helpers, each of
+    which captures one cohesive stage of the former inline body VERBATIM.
     """
-    pass_id = ctx.pass_id
-    repo_root = ctx.repo_root
+    skip_invariant_filing, quarantine_keys, seed_repair_property_mutations = (
+        _run_differs_invariants(ctx)
+    )
+
+    # Compute mutations (pure function, no I/O). The invariant signals are
+    # passed through so the differ honors quarantine + seed mutations.
+    mutations = ctx.differ.compute_mutations(
+        ctx.prev_snapshot,
+        ctx.curr_snapshot,
+        quarantine_set=quarantine_keys,
+        seed_mutations=seed_repair_property_mutations,
+    )
+
+    _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
+    _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe)
+    outbound_raw, absent_alive_fields, outbound_diff_client = _run_differs_outbound(ctx, mutations)
+    _run_differs_inbound(ctx, mutations, outbound_raw, absent_alive_fields)
+    _run_differs_binding_walk(ctx, mutations, outbound_diff_client)
+
+    ctx.mutations = mutations
+
+
+def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
+    """Invariant phase: at-most-one-local-id filing + dual-identity round-trip.
+
+    Returns ``(skip_invariant_filing, quarantine_keys, seed_repair_property_mutations)``
+    — the ``skip_invariant_filing`` gate reused by later phases to suppress bug-filing
+    side effects, plus the quarantine set + seed mutations the differ honors.
+    """
     persist = ctx.persist
     filter_local_ids = ctx.filter_local_ids
-    differ = ctx.differ
-    applier = ctx.applier
+    repo_root = ctx.repo_root
     invariants_mod = ctx.invariants_mod
-    outbound_differ_mod = ctx.outbound_differ_mod
-    inbound_differ_mod = ctx.inbound_differ_mod
-    local_label_intent_mod = ctx.local_label_intent_mod
-    sync_logger = ctx.sync_logger
-    local_tickets = ctx.local_tickets
-    binding_store = ctx.binding_store
-    tracker_dir = ctx.tracker_dir
     prev_snapshot = ctx.prev_snapshot
     curr_snapshot = ctx.curr_snapshot
 
@@ -164,16 +186,11 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         quarantine_keys, seed_repair_property_mutations = (
             invariants_mod.check_dual_identity_complete(prev_snapshot, curr_snapshot)
         )
+    return skip_invariant_filing, quarantine_keys, seed_repair_property_mutations
 
-    # Compute mutations (pure function, no I/O). The invariant signals are
-    # passed through so the differ honors quarantine + seed mutations.
-    mutations = differ.compute_mutations(
-        prev_snapshot,
-        curr_snapshot,
-        quarantine_set=quarantine_keys,
-        seed_mutations=seed_repair_property_mutations,
-    )
 
+def _run_differs_report_schema_drift(mutations, skip_invariant_filing, invariants_mod) -> None:
+    """Post-emit phase: file dedup'd bug tickets for repair_property schema-drift follow-ons."""
     # Post-emit filter: scan mutations for repair_property follow-ons that carry a
     # schema-drift kind. report_schema_drift surfaces each drift (files a dedup'd bug
     # ticket + writes an alert record) so the signal is not swallowed.
@@ -218,6 +235,9 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
                 follow_on.get("expected"),
             )
 
+
+def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe) -> None:
+    """Inbound-probe dispatch phase: route (inbound, probe) mutations, append follow-ons."""
     # Inbound-probe dispatch: any (inbound, probe) Mutation emitted by the
     # differ is routed through the live inbound_probe classifier, then
     # converted into a branch-specific follow-on (or a log-only outcome) via
@@ -250,6 +270,27 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
             probe_follow_ons.extend(follow_ons)
     if probe_follow_ons:
         mutations.extend(probe_follow_ons)
+
+
+def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
+    """Outbound differ phase: recover bindings, compute label intent + the outbound
+    differ, and convert each OutboundMutation -> typed Mutation onto ``mutations``.
+
+    Returns ``(outbound_raw, absent_alive_fields, outbound_diff_client)`` for the
+    inbound differ + binding-walk phases that follow.
+    """
+    filter_local_ids = ctx.filter_local_ids
+    binding_store = ctx.binding_store
+    applier = ctx.applier
+    local_tickets = ctx.local_tickets
+    local_label_intent_mod = ctx.local_label_intent_mod
+    tracker_dir = ctx.tracker_dir
+    outbound_differ_mod = ctx.outbound_differ_mod
+    pass_id = ctx.pass_id
+    prev_snapshot = ctx.prev_snapshot
+    curr_snapshot = ctx.curr_snapshot
+    sync_logger = ctx.sync_logger
+    mut_mod = _load("reconcile_mutation", "mutation.py")
 
     # -------------------------------------------------------------------
     # Outbound differ: local → Jira mutations via binding store.
@@ -396,6 +437,18 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         else:
             continue  # unknown action — skip
         mutations.append(typed)
+    return outbound_raw, absent_alive_fields, outbound_diff_client
+
+
+def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields) -> None:
+    """Inbound differ phase (binding-aware): Jira -> local for bound tickets;
+    convert each InboundMutation -> typed Mutation onto ``mutations``."""
+    local_tickets = ctx.local_tickets
+    inbound_differ_mod = ctx.inbound_differ_mod
+    binding_store = ctx.binding_store
+    sync_logger = ctx.sync_logger
+    curr_snapshot = ctx.curr_snapshot
+    mut_mod = _load("reconcile_mutation", "mutation.py")
 
     # -------------------------------------------------------------------
     # Inbound differ (binding-aware): Jira → local for bound tickets.
@@ -483,6 +536,18 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         )
         mutations.append(typed)
 
+
+def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None:
+    """Binding-store-driven acting walk (drift classes A + C); extend ``mutations``."""
+    repo_root = ctx.repo_root
+    persist = ctx.persist
+    local_tickets = ctx.local_tickets
+    binding_store = ctx.binding_store
+    curr_snapshot = ctx.curr_snapshot
+    outbound_differ_mod = ctx.outbound_differ_mod
+    sync_logger = ctx.sync_logger
+    mut_mod = _load("reconcile_mutation", "mutation.py")
+
     # ── binding-store-driven acting walk (drift classes A + C; epic 3006-e198) ──
     # The differ above iterates the ACTIVE local snapshot, so a bound pair whose
     # local ticket has been archived/deleted (dropped from ``rebar list``) is
@@ -541,5 +606,3 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     for _alert_key in walk.alerted:
         sync_logger.log("binding_walk_alert", jira_key=_alert_key)
     mutations.extend(walk.mutations)
-
-    ctx.mutations = mutations

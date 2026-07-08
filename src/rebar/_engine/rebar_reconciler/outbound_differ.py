@@ -436,43 +436,9 @@ def compute_outbound_mutations(
 
     mutations: list[OutboundMutation] = []
 
-    # Bug 1e08 — rotation pre-selection for bound-but-absent direct GETs.
-    # Compute the set of jira_keys eligible for a GET this pass: bound,
-    # non-pending, non-retired, and ABSENT from this pass's search snapshot.
-    # Select the K least-recently-GET'd (sorted by last_get_pass ascending; the
-    # "" never-GET'd sentinel sorts first), bounding servicing of every absent
-    # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
-    # Deletion-probe budget (GET probes to confirm a Jira issue is really deleted),
-    # resolved through the typed config: [tool.rebar.reconciler].deletion_probe_limit
-    # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT (deprecated
-    # alias RECONCILER_ABSENT_GET_BUDGET), then `rebar -c reconciler.deletion_probe_limit=…`.
-    # An unreadable config falls back to the default rather than failing the pass.
-    from rebar.config import ConfigError, load_config
-
-    try:
-        _budget = load_config().reconciler.deletion_probe_limit
-    except ConfigError:
-        _budget = _DEFAULT_ABSENT_GET_BUDGET
-    _absent_candidates: list[str] = []
-    _seen_absent: set[str] = set()
-    # Without a client we cannot direct-GET, so there is nothing to select.
-    for _t in local_tickets if client is not None else ():
-        if _t.get("status", "") in excluded_statuses:
-            continue
-        if _t.get("ticket_type", "") in excluded_sync_types:
-            continue
-        _lid = _t.get("ticket_id")
-        if not _lid:
-            continue
-        _jk = binding_store.get_jira_key(_lid)
-        if _jk is None or _jk in jira_snapshot or _jk in _seen_absent:
-            continue
-        if _is_retired(binding_store, _jk):
-            continue
-        _seen_absent.add(_jk)
-        _absent_candidates.append(_jk)
-    _absent_candidates.sort(key=lambda k: _last_get_pass(binding_store, k))
-    _selected_for_get_this_pass: set[str] = set(_absent_candidates[:_budget])
+    _selected_for_get_this_pass = _compute_outbound_select_absent_gets(
+        local_tickets, jira_snapshot, binding_store, excluded_statuses, excluded_sync_types, client
+    )
 
     # Hierarchy pre-check map (ticket 8b25): {local_id → ticket_type}. Used to
     # suppress parent diffs whose resolved parent is a non-epic — Jira only
@@ -534,158 +500,251 @@ def compute_outbound_mutations(
         jira_key = binding_store.get_jira_key(local_id)
 
         if jira_key is None:
-            # Unbound -> outbound create
-            # ticket 929a: for new issues the Jira side has no labels yet,
-            # so the annotation label only needs an ADD (never a REMOVE).
-            annotation_mutations = _diff_status_annotation_labels(
-                local_status=status,
-                jira_labels=[],
-            )
-            mutations.append(
-                OutboundMutation(
-                    local_id=local_id,
-                    jira_key=None,
-                    action="create",
-                    fields=_map_local_to_jira_fields(
-                        ticket,
-                        binding_store=binding_store,
-                        local_ticket_types=local_ticket_types,
-                    ),
-                    comments=_map_comments_for_create(ticket),
-                    labels=(
-                        [
-                            {"action": "add", "label": t}
-                            for t in sorted(ticket.get("tags", []))
-                            if not any(t.startswith(p) for p in _EXCLUDED_PREFIXES)
-                        ]
-                        + annotation_mutations
-                    ),
-                    links=[],  # links resolved after all creates
-                )
+            _compute_outbound_create_mutation(
+                mutations, ticket, status, local_id, binding_store, local_ticket_types
             )
         else:
-            # Bound -> compare fields, emit update if different.
-            #
-            # Bug 1e08-1a35-0267-4ca6: discriminate on MEMBERSHIP, not value.
-            # A bound key ABSENT from this pass's search snapshot must NOT diff
-            # against ``{}`` (that re-emits every field every pass). Two absence
-            # sub-classes: (a) deleted → direct GET 404; (b) status=Done beyond
-            # _DONE_RECENT_CAP → alive (HTTP 200) but absent from the search
-            # snapshot. We resolve the real fields via a bounded direct GET.
-            if jira_key in jira_snapshot:
-                # EXISTING path — key present in the search snapshot.
-                jira_fields = jira_snapshot[jira_key]
-                comment_snapshot = jira_snapshot
-            else:
-                # Bound-but-absent from THIS pass's working set.
-                if client is None:
-                    # No client → we cannot direct-GET to resolve the absence.
-                    # Skip (defer) rather than diff against {} — that re-emit
-                    # against an empty dict was the original defect (bug 1e08).
-                    # Mirrors the _diff_comments no-client safety pattern.
-                    continue
-                if _is_retired(binding_store, jira_key):
-                    continue  # known-dead; no GET, no emit (budget preserved)
-                if jira_key not in _selected_for_get_this_pass:
-                    continue  # not selected this pass → DEFERRED (no emit)
-
-                fields = _safe_get_issue(client, jira_key)
-                # Record the GET regardless of outcome (rotation bookkeeping).
-                _set_last_get(binding_store, jira_key, pass_id)
-
-                if fields is _DELETED:
-                    # HTTPError 404 — issue gone. Bump the consecutive-404
-                    # counter (may retire at GRACE). Emit nothing.
-                    _note_absent(binding_store, jira_key)
-                    continue
-                if fields is _TRANSPORT_ERROR:
-                    # Non-404 HTTPError / URLError / timeout — transient.
-                    # Emit nothing, warn, defer; counter untouched.
-                    print(  # noqa: T201
-                        f"WARNING: outbound_differ: direct GET for bound-but-absent "
-                        f"{jira_key!r} failed (transport error). Deferring this "
-                        f"key's sync to a later pass (no mutation emitted).",
-                        file=sys.stderr,
-                    )
-                    continue
-
-                # HTTP 200 — issue is alive (out-of-window). Reset the absence
-                # counter and build a one-key overlay so the SAME diff path runs.
-                _clear_absent(binding_store, jira_key)
-                jira_fields = fields
-                comment_snapshot = dict(jira_snapshot)
-                comment_snapshot[jira_key] = fields
-                # Bug 0702: share this alive GET result with the inbound differ
-                # so the out-of-window key is mirrored Jira→local without a
-                # second GET. Only the alive (200) case is recorded — 404 and
-                # transport errors are intentionally left out so a gone issue is
-                # never inbound-mirrored (retirement stays outbound-owned).
-                absent_alive_fields[jira_key] = fields
-
-            changed = _diff_fields(
+            _compute_outbound_update_mutation(
+                mutations,
                 ticket,
-                jira_fields,
-                binding_store=binding_store,
-                local_ticket_types=local_ticket_types,
-                assignee_resolver=_assignee_resolver,
-                jira_key=jira_key,
-                prev_jira_fields=(prev_snapshot or {}).get(jira_key),
+                status,
+                local_id,
+                jira_key,
+                jira_snapshot,
+                binding_store,
+                client,
+                pass_id,
+                _selected_for_get_this_pass,
+                prev_snapshot,
+                local_label_intent,
+                local_ticket_types,
+                _assignee_resolver,
+                absent_alive_fields,
             )
-            # Comments use the resolved snapshot (the one-key overlay for the
-            # bounded-GET path) so the GET's native fields.comment.comments is
-            # consulted with NO second network call (C3).
-            comment_mutations = _diff_comments(ticket, jira_key, comment_snapshot, client=client)
-            # bug a06c: intent-gated REMOVE. When local_label_intent is
-            # provided but lacks an entry for this local_id, fall back to
-            # an empty intent set (lazy first-pass safety: suppresses all
-            # REMOVEs for tickets we have no event-log evidence for).
-            intent_set: set[str] | None = None
-            if local_label_intent is not None:
-                intent_set = local_label_intent.get(local_id, set())
-            label_mutations = _diff_labels(ticket, jira_fields, intent_set)
-            # ticket 929a: status annotation labels (rebar-status:blocked/cancelled)
-            # are managed separately from user tags (excluded from _diff_labels via
-            # _EXCLUDED_PREFIXES). Compute and merge annotation mutations here.
-            annotation_mutations = _diff_status_annotation_labels(
-                local_status=status,
-                jira_labels=list(jira_fields.get("labels") or []),
-            )
-            label_mutations = label_mutations + annotation_mutations
-            # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
-            # deduped against the snapshot's existing issuelinks so an
-            # already-present link emits nothing — no per-pass churn).
-            link_mutations = _diff_links(ticket, jira_fields, binding_store)
-
-            if changed or comment_mutations or label_mutations or link_mutations:
-                # Sync-hardening P5 / bug 57d1 diagnosis enabler: emit a
-                # one-line CHANGED-FIELD BREADCRUMB whenever a bound key gets
-                # an outbound UPDATE carrying field diffs. Logs the changed
-                # FIELD NAMES only (never values — descriptions/assignees may
-                # be large or sensitive) so a re-emitting (non-converging)
-                # field becomes visible in CI logs without live Jira creds.
-                # The field list is the keys of the same `changed` dict
-                # _diff_fields already computed — no recomputation. Comment-
-                # only / label-only updates carry no field diff, so `changed`
-                # is empty and the breadcrumb is skipped (keeps stderr quiet
-                # for the common comment-mirror case).
-                print(  # noqa: T201
-                    f"RECON: outbound_update key={jira_key} "
-                    f"changed=[{','.join(sorted(changed))}] "
-                    f"comments={len(comment_mutations)} "
-                    f"labels={len(label_mutations)} "
-                    f"links={len(link_mutations)}",
-                    file=sys.stderr,
-                )
-                mutations.append(
-                    OutboundMutation(
-                        local_id=local_id,
-                        jira_key=jira_key,
-                        action="update",
-                        fields=changed,
-                        comments=comment_mutations,
-                        labels=label_mutations,
-                        links=link_mutations,
-                    )
-                )
 
     return mutations, absent_alive_fields
+
+
+def _compute_outbound_select_absent_gets(
+    local_tickets, jira_snapshot, binding_store, excluded_statuses, excluded_sync_types, client
+) -> set[str]:
+    """Phase: rotation pre-selection of bound-but-absent keys eligible for a direct
+    GET this pass (bug 1e08). Returns the K least-recently-GET'd selected keys."""
+    # Bug 1e08 — rotation pre-selection for bound-but-absent direct GETs.
+    # Compute the set of jira_keys eligible for a GET this pass: bound,
+    # non-pending, non-retired, and ABSENT from this pass's search snapshot.
+    # Select the K least-recently-GET'd (sorted by last_get_pass ascending; the
+    # "" never-GET'd sentinel sorts first), bounding servicing of every absent
+    # key to <= ceil(N/K) passes (anti-starvation, I3/I4).
+    # Deletion-probe budget (GET probes to confirm a Jira issue is really deleted),
+    # resolved through the typed config: [tool.rebar.reconciler].deletion_probe_limit
+    # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT (deprecated
+    # alias RECONCILER_ABSENT_GET_BUDGET), then `rebar -c reconciler.deletion_probe_limit=…`.
+    # An unreadable config falls back to the default rather than failing the pass.
+    from rebar.config import ConfigError, load_config
+
+    try:
+        _budget = load_config().reconciler.deletion_probe_limit
+    except ConfigError:
+        _budget = _DEFAULT_ABSENT_GET_BUDGET
+    _absent_candidates: list[str] = []
+    _seen_absent: set[str] = set()
+    # Without a client we cannot direct-GET, so there is nothing to select.
+    for _t in local_tickets if client is not None else ():
+        if _t.get("status", "") in excluded_statuses:
+            continue
+        if _t.get("ticket_type", "") in excluded_sync_types:
+            continue
+        _lid = _t.get("ticket_id")
+        if not _lid:
+            continue
+        _jk = binding_store.get_jira_key(_lid)
+        if _jk is None or _jk in jira_snapshot or _jk in _seen_absent:
+            continue
+        if _is_retired(binding_store, _jk):
+            continue
+        _seen_absent.add(_jk)
+        _absent_candidates.append(_jk)
+    _absent_candidates.sort(key=lambda k: _last_get_pass(binding_store, k))
+    _selected_for_get_this_pass: set[str] = set(_absent_candidates[:_budget])
+    return _selected_for_get_this_pass
+
+
+def _compute_outbound_create_mutation(
+    mutations, ticket, status, local_id, binding_store, local_ticket_types
+) -> None:
+    """Phase: append the outbound CREATE mutation for an unbound local ticket."""
+    # Unbound -> outbound create
+    # ticket 929a: for new issues the Jira side has no labels yet,
+    # so the annotation label only needs an ADD (never a REMOVE).
+    annotation_mutations = _diff_status_annotation_labels(
+        local_status=status,
+        jira_labels=[],
+    )
+    mutations.append(
+        OutboundMutation(
+            local_id=local_id,
+            jira_key=None,
+            action="create",
+            fields=_map_local_to_jira_fields(
+                ticket,
+                binding_store=binding_store,
+                local_ticket_types=local_ticket_types,
+            ),
+            comments=_map_comments_for_create(ticket),
+            labels=(
+                [
+                    {"action": "add", "label": t}
+                    for t in sorted(ticket.get("tags", []))
+                    if not any(t.startswith(p) for p in _EXCLUDED_PREFIXES)
+                ]
+                + annotation_mutations
+            ),
+            links=[],  # links resolved after all creates
+        )
+    )
+
+
+def _compute_outbound_update_mutation(
+    mutations,
+    ticket,
+    status,
+    local_id,
+    jira_key,
+    jira_snapshot,
+    binding_store,
+    client,
+    pass_id,
+    _selected_for_get_this_pass,
+    prev_snapshot,
+    local_label_intent,
+    local_ticket_types,
+    _assignee_resolver,
+    absent_alive_fields,
+) -> None:
+    """Phase: for a bound ticket, resolve jira_fields (including the bounded
+    bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
+    diverged. A bare ``return`` skips the ticket (emit nothing)."""
+    # Bound -> compare fields, emit update if different.
+    #
+    # Bug 1e08-1a35-0267-4ca6: discriminate on MEMBERSHIP, not value.
+    # A bound key ABSENT from this pass's search snapshot must NOT diff
+    # against ``{}`` (that re-emits every field every pass). Two absence
+    # sub-classes: (a) deleted → direct GET 404; (b) status=Done beyond
+    # _DONE_RECENT_CAP → alive (HTTP 200) but absent from the search
+    # snapshot. We resolve the real fields via a bounded direct GET.
+    if jira_key in jira_snapshot:
+        # EXISTING path — key present in the search snapshot.
+        jira_fields = jira_snapshot[jira_key]
+        comment_snapshot = jira_snapshot
+    else:
+        # Bound-but-absent from THIS pass's working set.
+        if client is None:
+            # No client → we cannot direct-GET to resolve the absence.
+            # Skip (defer) rather than diff against {} — that re-emit
+            # against an empty dict was the original defect (bug 1e08).
+            # Mirrors the _diff_comments no-client safety pattern.
+            return
+        if _is_retired(binding_store, jira_key):
+            return  # known-dead; no GET, no emit (budget preserved)
+        if jira_key not in _selected_for_get_this_pass:
+            return  # not selected this pass → DEFERRED (no emit)
+
+        fields = _safe_get_issue(client, jira_key)
+        # Record the GET regardless of outcome (rotation bookkeeping).
+        _set_last_get(binding_store, jira_key, pass_id)
+
+        if fields is _DELETED:
+            # HTTPError 404 — issue gone. Bump the consecutive-404
+            # counter (may retire at GRACE). Emit nothing.
+            _note_absent(binding_store, jira_key)
+            return
+        if fields is _TRANSPORT_ERROR:
+            # Non-404 HTTPError / URLError / timeout — transient.
+            # Emit nothing, warn, defer; counter untouched.
+            print(  # noqa: T201
+                f"WARNING: outbound_differ: direct GET for bound-but-absent "
+                f"{jira_key!r} failed (transport error). Deferring this "
+                f"key's sync to a later pass (no mutation emitted).",
+                file=sys.stderr,
+            )
+            return
+
+        # HTTP 200 — issue is alive (out-of-window). Reset the absence
+        # counter and build a one-key overlay so the SAME diff path runs.
+        _clear_absent(binding_store, jira_key)
+        jira_fields = fields
+        comment_snapshot = dict(jira_snapshot)
+        comment_snapshot[jira_key] = fields
+        # Bug 0702: share this alive GET result with the inbound differ
+        # so the out-of-window key is mirrored Jira→local without a
+        # second GET. Only the alive (200) case is recorded — 404 and
+        # transport errors are intentionally left out so a gone issue is
+        # never inbound-mirrored (retirement stays outbound-owned).
+        absent_alive_fields[jira_key] = fields
+
+    changed = _diff_fields(
+        ticket,
+        jira_fields,
+        binding_store=binding_store,
+        local_ticket_types=local_ticket_types,
+        assignee_resolver=_assignee_resolver,
+        jira_key=jira_key,
+        prev_jira_fields=(prev_snapshot or {}).get(jira_key),
+    )
+    # Comments use the resolved snapshot (the one-key overlay for the
+    # bounded-GET path) so the GET's native fields.comment.comments is
+    # consulted with NO second network call (C3).
+    comment_mutations = _diff_comments(ticket, jira_key, comment_snapshot, client=client)
+    # bug a06c: intent-gated REMOVE. When local_label_intent is
+    # provided but lacks an entry for this local_id, fall back to
+    # an empty intent set (lazy first-pass safety: suppresses all
+    # REMOVEs for tickets we have no event-log evidence for).
+    intent_set: set[str] | None = None
+    if local_label_intent is not None:
+        intent_set = local_label_intent.get(local_id, set())
+    label_mutations = _diff_labels(ticket, jira_fields, intent_set)
+    # ticket 929a: status annotation labels (rebar-status:blocked/cancelled)
+    # are managed separately from user tags (excluded from _diff_labels via
+    # _EXCLUDED_PREFIXES). Compute and merge annotation mutations here.
+    annotation_mutations = _diff_status_annotation_labels(
+        local_status=status,
+        jira_labels=list(jira_fields.get("labels") or []),
+    )
+    label_mutations = label_mutations + annotation_mutations
+    # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
+    # deduped against the snapshot's existing issuelinks so an
+    # already-present link emits nothing — no per-pass churn).
+    link_mutations = _diff_links(ticket, jira_fields, binding_store)
+
+    if changed or comment_mutations or label_mutations or link_mutations:
+        # Sync-hardening P5 / bug 57d1 diagnosis enabler: emit a
+        # one-line CHANGED-FIELD BREADCRUMB whenever a bound key gets
+        # an outbound UPDATE carrying field diffs. Logs the changed
+        # FIELD NAMES only (never values — descriptions/assignees may
+        # be large or sensitive) so a re-emitting (non-converging)
+        # field becomes visible in CI logs without live Jira creds.
+        # The field list is the keys of the same `changed` dict
+        # _diff_fields already computed — no recomputation. Comment-
+        # only / label-only updates carry no field diff, so `changed`
+        # is empty and the breadcrumb is skipped (keeps stderr quiet
+        # for the common comment-mirror case).
+        print(  # noqa: T201
+            f"RECON: outbound_update key={jira_key} "
+            f"changed=[{','.join(sorted(changed))}] "
+            f"comments={len(comment_mutations)} "
+            f"labels={len(label_mutations)} "
+            f"links={len(link_mutations)}",
+            file=sys.stderr,
+        )
+        mutations.append(
+            OutboundMutation(
+                local_id=local_id,
+                jira_key=jira_key,
+                action="update",
+                fields=changed,
+                comments=comment_mutations,
+                labels=label_mutations,
+                links=link_mutations,
+            )
+        )
