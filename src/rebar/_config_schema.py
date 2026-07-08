@@ -312,6 +312,13 @@ class TicketClarityConfig:
 @dataclass
 class CompactConfig:
     threshold: int = 10
+    # RC2b Option 3 (conservative horizon): compaction only folds an event once it is
+    # older than this many HLC nanoseconds (``hlc.physical_now() - event_ts >=``). The
+    # SNAPSHOT is timestamped at the fold boundary, so younger "hot-edge" events stay
+    # live ``*.json`` and sort AFTER the snapshot — a concurrently-appended sub-horizon
+    # event that merges in later replays on top instead of being silently dropped by the
+    # snapshot's positional skip. Default 1800 s (30 min) in ns.
+    COMPACTION_HORIZON_NS: int = 1_800_000_000_000
 
 
 @dataclass
@@ -436,7 +443,10 @@ _SECTIONS: dict[str, dict] = {
         "default_assignee": lambda v, k: _as_str(v, k),
     },
     "ticket_clarity": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
-    "compact": {"threshold": lambda v, k: _as_int(v, k, minimum=1)},
+    "compact": {
+        "threshold": lambda v, k: _as_int(v, k, minimum=1),
+        "COMPACTION_HORIZON_NS": lambda v, k: _as_int(v, k, minimum=0),
+    },
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
         "pull": lambda v, k: _as_choice(v, k, {"on", "off"}),

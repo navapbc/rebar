@@ -29,15 +29,26 @@ from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-from rebar.reducer._cache import RETIRED_SUFFIX
+from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 logger = logging.getLogger(__name__)
+
+# Process-level count of SNAPSHOT rebuilds (RC2b Option 1) — observability for the
+# fsck remediation path (A3). Read via get_rebuild_count().
+_REBUILD_COUNT = 0
+
+
+def get_rebuild_count() -> int:
+    """Number of snapshot rebuilds performed by this process (RC2b Option 1)."""
+    return _REBUILD_COUNT
 
 
 def _usage() -> int:
     sys.stderr.write(
-        "Usage: ticket-compact.sh <ticket_id> [--threshold=N]\n"
+        "Usage: ticket-compact.sh <ticket_id> [--threshold=N] [--horizon=NS]\n"
         "  Default threshold: REBAR_COMPACT_THRESHOLD env / compact.threshold config or 10\n"
+        "  Default horizon:   REBAR_COMPACTION_HORIZON_NS env / compact.COMPACTION_HORIZON_NS\n"
+        "                     config or 1800s in ns (events younger than this stay live)\n"
     )
     return 1
 
@@ -58,7 +69,12 @@ def _sync_before_compact(tracker: str) -> None:
 
 
 def _compact_locked(
-    tracker: str, ticket_id: str, ticket_dir: str, threshold: int, no_commit: bool
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    threshold: int,
+    no_commit: bool,
+    horizon: int = 0,
 ) -> int:
     """The locked compaction critical section. Returns 0 on success (prints
     EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
@@ -77,24 +93,67 @@ def _compact_locked(
             if f.endswith(".json") and not f.startswith(".") and not f.endswith("-SYNC.json")
         )
         # Forward-compat: unknown-type events (written by a newer clone) are
-        # preserved untouched — never snapshotted or deleted.
-        event_files = []
+        # preserved untouched — never snapshotted or deleted. Parse each candidate
+        # once, capturing its uuid + timestamp for the horizon partition below.
+        parsed: list[tuple[str, str, int | None]] = []  # (path, uuid, ts)
         for fp in candidates:
             try:
                 with open(fp, encoding="utf-8") as f:
-                    etype = json.load(f).get("event_type", "")
+                    ev = json.load(f)
+                etype = ev.get("event_type", "")
+                euuid = ev.get("uuid", os.path.basename(fp))
+                raw_ts = ev.get("timestamp")
+                ets = raw_ts if isinstance(raw_ts, int) else None
             except (json.JSONDecodeError, OSError):
-                etype = ""
+                etype, euuid, ets = "", os.path.basename(fp), None
             if etype and etype not in KNOWN_EVENT_TYPES:
                 continue
-            event_files.append(fp)
-        event_count = len(event_files)
+            parsed.append((fp, euuid, ets))
+        event_count = len(parsed)
 
         if event_count <= threshold:
             sys.stdout.write("below threshold (re-checked inside flock) — skipping compaction\n")
             return 0
 
-        compiled_state = reduce_ticket(ticket_dir)
+        # RC2b Option 3 (conservative horizon): only FOLD events older than the
+        # horizon. Younger "hot-edge" events stay live ``.json`` and — because the
+        # SNAPSHOT is timestamped just after the newest folded event and before the
+        # youngest live one — sort AFTER the snapshot and replay on top. So a
+        # concurrent sub-horizon append that merges in later is NOT silently dropped by
+        # the snapshot's positional skip. horizon<=0 folds everything (the pre-RC2b
+        # behavior; the offline test suite defaults to 0).
+        now = hlc.physical_now()
+
+        def _foldable(ts: int | None) -> bool:
+            return horizon <= 0 or (ts is not None and now - ts >= horizon)
+
+        old = [(fp, u, ts) for (fp, u, ts) in parsed if _foldable(ts)]
+        young = [(fp, u, ts) for (fp, u, ts) in parsed if not _foldable(ts)]
+
+        if not old:
+            sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
+            return 0
+
+        fold_files = [fp for (fp, _u, _ts) in old]
+
+        # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
+        # youngest live one, so folded events sort before it (positionally skipped,
+        # their state in compiled_state) and live events sort after it (replayed).
+        if young:
+            old_ts = [ts for (_fp, _u, ts) in old if ts is not None]
+            young_ts = [ts for (_fp, _u, ts) in young if ts is not None]
+            max_old = max(old_ts) if old_ts else now
+            snapshot_ts = max_old + 1
+            if young_ts and snapshot_ts >= min(young_ts):
+                # No safe placement gap (adjacent straddling timestamps) — defer folding
+                # this pass rather than risk a mis-sorted snapshot.
+                sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
+                return 0
+            compiled_state = reduce_ticket(ticket_dir, event_files_override=fold_files)
+        else:
+            snapshot_ts = hlc.next_tick(tracker, ticket_id)
+            compiled_state = reduce_ticket(ticket_dir)
+
         if compiled_state is None:
             sys.stderr.write(
                 f"Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)\n"
@@ -111,19 +170,12 @@ def _compact_locked(
             sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
             return 1
 
-        source_uuids = []
-        for fp in event_files:
-            try:
-                with open(fp, encoding="utf-8") as f:
-                    source_uuids.append(json.load(f).get("uuid", os.path.basename(fp)))
-            except (json.JSONDecodeError, OSError):
-                source_uuids.append(os.path.basename(fp))
+        source_uuids = [u for (_fp, u, _ts) in old]
 
         env_id = _seam.env_id(Path(tracker))
         author = _git_author()
 
         snapshot_uuid = str(uuid.uuid4())
-        snapshot_ts = hlc.next_tick(tracker, ticket_id)
         snapshot_event = {
             "event_type": "SNAPSHOT",
             "timestamp": snapshot_ts,
@@ -150,7 +202,7 @@ def _compact_locked(
         # fold is atomic: either all sources are retired or none are.
         renamed: list[tuple[str, str]] = []
         try:
-            for fp in event_files:
+            for fp in fold_files:
                 retired = fp + RETIRED_SUFFIX
                 if os.path.exists(retired):
                     continue  # idempotent re-run: source already retired
@@ -211,6 +263,153 @@ def _git_author() -> str:
     return cp.stdout.strip()
 
 
+def _read_event_uuid(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("uuid", os.path.basename(path))
+    except (json.JSONDecodeError, OSError):
+        return os.path.basename(path)
+
+
+def rebuild_snapshot_from_full_log(
+    tracker: str, ticket_id: str, ticket_dir: str, *, no_commit: bool = False
+) -> bool:
+    """RC2b Option 1 (rebuild-on-stray): recompute a ticket's SNAPSHOT from the FULL
+    ordered event log INCLUDING ``*.retired`` sources, folding a merged-in pre-snapshot
+    orphan that a stale snapshot's positional skip had silently dropped.
+
+    Crash-safe via a ``.snapshot-rebuild.bak`` sentinel: it is written before any
+    mutation and removed only after a clean round-trip (a fresh reduce reproduces the
+    rebuilt state). A ``.bak`` present at entry means a prior rebuild was interrupted —
+    we rebuild again (the operation is idempotent). Runs under the write lock
+    (single-writer). Returns True if a rebuild was performed.
+    """
+    global _REBUILD_COUNT
+    try:
+        handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
+    except lock.LockTimeout as exc:
+        logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
+        return False
+    try:
+        bak_path = os.path.join(ticket_dir, ".snapshot-rebuild.bak")
+        if os.path.exists(bak_path):
+            logger.warning(
+                "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
+            )
+
+        # Full raw-history state (active + retired, snapshots stripped) — INCLUDES the
+        # merged-in orphan the stale snapshot's positional skip had dropped.
+        compiled_state = reduce_ticket(ticket_dir, include_retired=True)
+        if compiled_state is None or compiled_state.get("status") in ("error", "fsck_needed"):
+            logger.warning("fsck: snapshot rebuild for %s aborted (reduce failed)", ticket_id)
+            return False
+        compiled_state = {k: v for k, v in compiled_state.items() if k != "updated_at"}
+
+        # Every raw (non-snapshot) event becomes a source of the new SNAPSHOT; the live
+        # ones are retired, superseded snapshot(s) are retired too.
+        live_raw: list[str] = []
+        source_uuids: list[str] = []
+        old_snaps: list[str] = []
+        for name in sorted(os.listdir(ticket_dir)):
+            if name.startswith(".") or name.endswith("-SYNC.json"):
+                continue
+            path = os.path.join(ticket_dir, name)
+            base = name[: -len(RETIRED_SUFFIX)] if name.endswith(RETIRED_SUFFIX) else name
+            if base.endswith("-SNAPSHOT.json"):
+                if is_active_event(name):
+                    old_snaps.append(path)
+                continue
+            source_uuids.append(_read_event_uuid(path))
+            if is_active_event(name):
+                live_raw.append(path)
+
+        env_id = _seam.env_id(Path(tracker))
+        author = _git_author()
+        snapshot_uuid = str(uuid.uuid4())
+        snapshot_ts = hlc.next_tick(tracker, ticket_id)
+        snapshot_event = {
+            "event_type": "SNAPSHOT",
+            "timestamp": snapshot_ts,
+            "uuid": snapshot_uuid,
+            "env_id": env_id,
+            "author": author,
+            "data": {
+                "compiled_state": compiled_state,
+                "source_event_uuids": source_uuids,
+                "compacted_at": snapshot_ts,
+            },
+        }
+
+        # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
+        try:
+            backup = ""
+            if old_snaps:
+                with open(old_snaps[-1], encoding="utf-8") as f:
+                    backup = f.read()
+            fsutil.atomic_write(bak_path, backup, encoding="utf-8")
+        except OSError:
+            logger.warning("fsck: could not write rebuild sentinel for %s", ticket_id)
+            return False
+
+        final_path = os.path.join(
+            ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
+        )
+        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
+
+        for fp in live_raw + old_snaps:
+            retired = fp + RETIRED_SUFFIX
+            if os.path.exists(retired):
+                continue
+            try:
+                os.rename(fp, retired)
+            except OSError:
+                logger.warning("fsck: could not retire %s during rebuild", fp, exc_info=True)
+
+        try:
+            os.remove(os.path.join(ticket_dir, ".cache.json"))
+        except OSError:
+            pass
+
+        # Clean round-trip: a fresh reduce must reproduce the rebuilt status before we
+        # drop the sentinel (else leave it so the next fsck retries).
+        check = reduce_ticket(ticket_dir)
+        if check is None or check.get("status") != compiled_state.get("status"):
+            logger.warning(
+                "fsck: snapshot rebuild round-trip mismatch for %s — leaving .bak for retry",
+                ticket_id,
+            )
+            return False
+        try:
+            os.remove(bak_path)
+        except OSError:
+            pass
+
+        _REBUILD_COUNT += 1
+        logger.warning(
+            "fsck: rebuilt SNAPSHOT for %s from full log (%d sources) — folded a merged-in "
+            "pre-snapshot orphan",
+            ticket_id,
+            len(source_uuids),
+        )
+
+        if not no_commit:
+            add = _git(tracker, "add", "-A", f"{ticket_id}/")
+            if add.returncode == 0:
+                staged = _git(tracker, "diff", "--cached", "--quiet")
+                if staged.returncode != 0:
+                    _git(
+                        tracker,
+                        "commit",
+                        "-q",
+                        "--no-verify",
+                        "-m",
+                        f"ticket: REBUILD SNAPSHOT {ticket_id}",
+                    )
+        return True
+    finally:
+        handle.release()
+
+
 def compact_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar compact <id>`` entry."""
     if len(argv) < 1:
@@ -227,7 +426,9 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
     # A --threshold= flag below still overrides. A malformed config is reported as a
     # clean error (exit 1), not an uncaught traceback.
     try:
-        threshold = config.load_config(repo_root).compact.threshold
+        _cfg = config.load_config(repo_root).compact
+        threshold = _cfg.threshold
+        horizon = _cfg.COMPACTION_HORIZON_NS
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -236,6 +437,8 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
     for a in argv[1:]:
         if a.startswith("--threshold="):
             threshold = int(a[len("--threshold=") :])
+        elif a.startswith("--horizon="):
+            horizon = int(a[len("--horizon=") :])
         elif a == "--skip-sync":
             skip_sync = True
         elif a == "--no-commit":
@@ -273,7 +476,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stdout.write(f"below threshold ({preflock} <= {threshold}) — skipping compaction\n")
         return 0
 
-    rc = _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit)
+    rc = _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit, horizon)
     # A successful compaction commits a SNAPSHOT inline (not via write_and_push), so
     # push it best-effort — unless --no-commit (nothing committed) or --skip-sync
     # (the caller owns sync: compact-on-close passes it and the transition pushes;

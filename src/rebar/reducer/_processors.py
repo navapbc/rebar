@@ -623,12 +623,21 @@ def process_snapshot(state: dict, data: dict) -> None:
 
 def scan_for_latest_snapshot(
     event_files: list[str],
+    *,
+    include_retired: bool = False,
 ) -> tuple[int | None, set[str]]:
     """Pass 1: scan all events to find the latest SNAPSHOT index and its source UUIDs.
 
     Returns (latest_snapshot_idx, snapshot_source_uuids).
     latest_snapshot_idx is None if no SNAPSHOT was found.
+
+    In rebuild mode (``include_retired=True``, RC2b Option 1) the caller has already
+    stripped SNAPSHOT files from ``event_files``; this returns ``(None, set())`` so
+    replay never short-circuits and reconstructs state from the full raw log.
     """
+    if include_retired:
+        return None, set()
+
     latest_snapshot_idx: int | None = None
     snapshot_source_uuids: set[str] = set()
 
@@ -652,17 +661,24 @@ def replay_events(
     cache_path: str,
     dir_hash: str,
     tracker_dir: str | None = None,
+    *,
+    include_retired: bool = False,
 ) -> tuple[int, dict | None]:
     """Pass 2: replay events onto state, applying each processor in order.
 
     Skips events before the latest SNAPSHOT index and events whose UUID appears
     in snapshot_source_uuids (already captured in the SNAPSHOT compiled_state).
 
+    In rebuild mode (``include_retired=True``) there is no snapshot short-circuit —
+    the full raw log (SNAPSHOTs already stripped upstream) is replayed from index 0.
+
     Returns (valid_event_count, early_return_result).
     early_return_result is non-None only when a corrupt CREATE is encountered
     (returns the fsck_needed error dict immediately).
     """
-    latest_snapshot_idx, snapshot_source_uuids = scan_for_latest_snapshot(event_files)
+    latest_snapshot_idx, snapshot_source_uuids = scan_for_latest_snapshot(
+        event_files, include_retired=include_retired
+    )
     start_idx = latest_snapshot_idx if latest_snapshot_idx is not None else 0
     valid_event_count = 0
     seen_uuids: set[str] = set()
