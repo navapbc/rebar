@@ -363,6 +363,10 @@ def run_pass1(
     + ISF). Returns the raw findings list (the too-big/shed routing + Pass-2/Pass-3
     are applied by the orchestrator)."""
     plan = ctx.plan_text
+    # G5 decomposition signal (spangly-beggarly-blackrhino): the authoritative,
+    # store-derived child summary, injected into ONLY the chunk that carries G5 (below) so
+    # co-chunked criteria are unaffected. Empty when the ticket has no children.
+    decomp_context = det_floor.decomposition_state_block(ctx)
     size = _ticket_size(ctx)
     # Container criteria (G3/G4) run via the dedicated per-child loop, not the normal
     # agent path — pull them out of `agent`.
@@ -410,7 +414,9 @@ def run_pass1(
         if cached is not None:
             resumed += 1
             return cached
-        out = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events)
+        # Inject the store-derived decomposition state ONLY into the G5-bearing chunk.
+        extra = decomp_context if any(c.get("id") == "G5" for c in chunk) else ""
+        out = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
         sizing.save_checkpoint(ctx, material, chunk, cfg.model, agentic, out)
         return out
 
@@ -489,6 +495,21 @@ def run_pass1(
             coverage["isf"]["error"] = str(exc)
     else:
         coverage["isf"] = {"ran": False, "reason": "no linked session_log"}
+
+    # G5 decomposition backstop (spangly-beggarly-blackrhino): if the store shows this
+    # ticket HAS children, drop any residual G5 "flat/undecomposed" finding the finder
+    # still emitted. Deterministic, post-Pass-1 (the only seam where the model finding and
+    # the store child-count are co-observable — see det_floor); child content/altitude G5
+    # findings are preserved.
+    findings, vetoed_g5 = det_floor.veto_undecomposed_g5(findings, ctx)
+    if vetoed_g5:
+        coverage["g5_undecomposed_vetoed"] = len(vetoed_g5)
+        logger.info(
+            "G5 decomposition veto: dropped %d false 'undecomposed' finding(s) "
+            "(ticket has %d store child(ren))",
+            len(vetoed_g5),
+            len(ctx.children),
+        )
 
     return findings
 

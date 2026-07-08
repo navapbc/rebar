@@ -122,6 +122,103 @@ class PlanContext:
         return f"{self.title}\n\n{self.description}"
 
 
+# ── G5 decomposition signal (store-derived, task spangly-beggarly-blackrhino) ────────
+# G5 (decomposition) once false-flagged an epic that already had 6 children as a "flat,
+# undecomposed list" because it judged from ticket TEXT and counted children itself. The
+# store already loads the real children (ctx.children). These two helpers make that fact
+# authoritative:
+#   * decomposition_state_block() — an authoritative child summary INJECTED into the G5
+#     finder context (so the model never counts children itself);
+#   * veto_undecomposed_g5() — a deterministic BACKSTOP that drops a residual G5
+#     decomposition-ABSENCE finding when the ticket demonstrably has children.
+# NOTE ON SEAM (why these are NOT DET_CHECKS entries): the DET floor (P1–P9) runs BEFORE
+# the LLM tier produces any findings, so it cannot observe — let alone suppress — a G5
+# finding. The veto is therefore applied POST-Pass-1, in run_pass1 (pass1.py), the only
+# point where the model's finding and the store-derived child count are co-observable.
+# These live here (with the other decomposition logic, e.g. p4_oversize) as pure,
+# unit-testable helpers; run_pass1 calls them.
+def decomposition_state_block(ctx: PlanContext) -> str:
+    """The authoritative, store-sourced decomposition summary for the G5 finder context
+    (AC1). Empty string when the ticket has no children (nothing authoritative to state —
+    the finder judges decomposition from the plan as before). When children exist it names
+    them as GROUND TRUTH so the finder never miscounts and never flags the ticket as
+    flat/undecomposed."""
+    if not ctx.children:
+        return ""
+    lines = [
+        "## DECOMPOSITION STATE (from store)",
+        (
+            f"This ticket has {len(ctx.children)} direct child ticket(s) recorded in the "
+            "store (authoritative ground truth — do NOT count children yourself, and do "
+            "NOT flag this ticket as flat / undecomposed / monolithic / a single big list). "
+            "Judge only the QUALITY of the decomposition (child altitude/content), not its "
+            "existence:"
+        ),
+    ]
+    for c in ctx.children:
+        alias = c.get("alias") or c.get("ticket_id") or "?"
+        title = (c.get("title") or "").strip()[:80]
+        status = c.get("status") or (c.get("state") or {}).get("status") or "?"
+        lines.append(f"  - {alias} — {title} ({status})")
+    return "\n".join(lines)
+
+
+# A decomposition-ABSENCE claim (the false-positive class the veto suppresses). Targets
+# assertions that the ticket has NO decomposition / is flat / monolithic / should be
+# broken up — deliberately NOT quality-of-decomposition language (wrong-altitude, poorly
+# split children), so a genuine child-content/altitude G5 finding is preserved (AC2).
+_G5_UNDECOMPOSED_RE = re.compile(
+    r"(?:"
+    r"undecompos\w*"
+    r"|not\s+(?:yet\s+)?decomposed"
+    r"|lacks?\s+(?:any\s+)?decomposition"
+    r"|no\s+decomposition"
+    r"|without\s+decomposition"
+    r"|flat[,\s]+(?:and\s+)?(?:undecomposed|unstructured)"
+    r"|flat\s+(?:list|structure|epic)"
+    r"|monolithic"
+    r"|(?:should|must|needs?\s+to|ought\s+to)\s+be\s+"
+    r"(?:broken|split|decomposed|divided|carved|subdivided)"
+    r"|break\s+(?:it|this|the\s+\w+)?\s*(?:down|up|into)"
+    r"|split\s+into\s+(?:sub|child|smaller)"
+    r"|no\s+(?:sub-?tasks|sub-?tickets|sub-?stories|children|child\s+tickets)"
+    r"|single\s+(?:giant|large|huge|monolithic|undifferentiated)\s+"
+    r"(?:ticket|epic|story|list|task)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_undecomposed_claim(f: dict[str, Any]) -> bool:
+    """True when a finding's prose asserts the ticket is NOT decomposed (the class the
+    veto suppresses). Scans the finding + impact + suggested_fix text."""
+    text = " ".join(str(f.get(k, "")) for k in ("finding", "impact", "suggested_fix"))
+    return bool(_G5_UNDECOMPOSED_RE.search(text))
+
+
+def veto_undecomposed_g5(
+    findings: list[dict[str, Any]], ctx: PlanContext
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Deterministic backstop: drop any G5 decomposition-ABSENCE finding when the ticket
+    demonstrably has children (count from ``ctx.children`` — the store — not the model).
+    Returns ``(kept, vetoed)``.
+
+    Applied POST-Pass-1 (see the seam note above). A no-op when the ticket has no children
+    (a genuinely monolithic childless ticket still yields its G5 finding). Suppresses ONLY
+    the absence subtype: a G5 finding about child ALTITUDE/CONTENT (children exist but are
+    the wrong size/mix) does not match :data:`_G5_UNDECOMPOSED_RE` and is preserved."""
+    if not ctx.children:
+        return findings, []
+    kept: list[dict[str, Any]] = []
+    vetoed: list[dict[str, Any]] = []
+    for f in findings:
+        if "G5" in (f.get("criteria") or []) and _is_undecomposed_claim(f):
+            vetoed.append(f)
+        else:
+            kept.append(f)
+    return kept, vetoed
+
+
 # ── P1 readiness-shape ─────────────────────────────────────────────────────────
 def _count_ac_items(text: str) -> int:
     """`- [ ]` / `- [x]` checklist items under `## Acceptance Criteria`

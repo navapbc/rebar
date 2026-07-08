@@ -205,6 +205,7 @@ def pass1_with_ladder(
     chunk: list[dict],
     agentic: bool,
     events: list[str],
+    extra_context: str = "",
 ) -> list[dict[str, Any]]:
     """Run a Pass-1 finder call with the SIZE-HANDLING LADDER (ca03 AC4/AC6):
 
@@ -216,9 +217,15 @@ def pass1_with_ladder(
        FINDING (P8: the ticket is too big to review in full — reduce/decompose it).
 
     Non-context errors drop the unit's findings (never abort the review). ``events``
-    accumulates a human-readable ladder trace for the coverage record."""
+    accumulates a human-readable ladder trace for the coverage record.
+
+    ``extra_context`` is authoritative store-derived context (e.g. the G5 DECOMPOSITION
+    STATE block) threaded verbatim to :func:`passes.pass1_chunk` at every ladder rung so
+    the injected fact survives batch→single-criterion fallback and model escalation."""
     try:
-        return passes.pass1_chunk(runner, cfg, plan=plan, chunk=chunk, agentic=agentic)
+        return passes.pass1_chunk(
+            runner, cfg, plan=plan, chunk=chunk, agentic=agentic, extra_context=extra_context
+        )
     except LLMUnavailableError:
         raise  # SYSTEMIC failure (deps/key/auth/connection) — surface, never drop (fuel-posse-ball)
     except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-context failure drops findings, a context error falls through to the size-ladder
@@ -234,7 +241,12 @@ def pass1_with_ladder(
             try:
                 out.extend(
                     passes.pass1_chunk(
-                        runner, replace(cfg, model=model), plan=plan, chunk=[crit], agentic=agentic
+                        runner,
+                        replace(cfg, model=model),
+                        plan=plan,
+                        chunk=[crit],
+                        agentic=agentic,
+                        extra_context=extra_context,
                     )
                 )
                 if model != cfg.model:
