@@ -32,6 +32,7 @@ from rebar._commands._seam import (
     tracker_dir,
 )
 from rebar._commands.composer import create_core, link_core
+from rebar._commands.session_id import resolve_session_id
 
 _DEFAULT_TITLE = "Session log"
 _POINTER_NAME = "current_session_log"
@@ -47,18 +48,14 @@ def _pointer_path(repo_root=None) -> Path:
 def _resolve_session_fp() -> str | None:
     """The current session fingerprint used to auto-rotate the current-log pointer.
 
-    Precedence: the Claude Code harness' stable per-session ``CLAUDE_CODE_SESSION_ID``,
-    then the rebar-owned ``REBAR_SESSION_ID``, then the ambient ``SESSION_ID``. We
-    DELIBERATELY stop at ``None`` — unlike ``transition_close._resolve_session`` we do
-    NOT fall back to git HEAD, because a HEAD-based fingerprint would change on every
-    commit within one session and spuriously rotate the log mid-session.
+    Delegates to the shared :func:`rebar._commands.session_id.resolve_session_id`
+    (epic crust-fetch-stump, story 6014) so session-id precedence is defined in ONE
+    place. NOTE the unified contract puts ``REBAR_SESSION_ID`` BEFORE
+    ``CLAUDE_CODE_SESSION_ID`` — an intentional inversion of this function's former
+    order that only differs when BOTH are set. As before, we stop at ``None`` (never
+    git HEAD) so a commit within one session does not spuriously rotate the log.
     """
-    return (
-        os.environ.get("CLAUDE_CODE_SESSION_ID")
-        or os.environ.get("REBAR_SESSION_ID")
-        or os.environ.get("SESSION_ID")
-        or None
-    )
+    return resolve_session_id()
 
 
 def _read_pointer(repo_root=None) -> dict | None:

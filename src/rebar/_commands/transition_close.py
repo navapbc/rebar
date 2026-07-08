@@ -396,18 +396,15 @@ def close_ticket(
 def _resolve_session(tracker: str) -> str:
     """Resolve the event-provenance session id for the FORCE_CLOSE audit comment.
 
-    Precedence (ticket c1bf, decided on 83f2): the explicit, rebar-owned
-    ``REBAR_SESSION_ID`` wins, then the ambient (externally-set) ``SESSION_ID``,
-    then short git HEAD, then ``"unknown"``. This is an ADDITIVE "support both"
-    precedence, not a deprecating rename — ambient ``SESSION_ID`` stays permanently
-    valid (so setting only it is unchanged), hence NO deprecation warning here.
+    Delegates to the shared :func:`rebar._commands.session_id.resolve_session_id`
+    (epic crust-fetch-stump, story 6014) — which now INCLUDES ``CLAUDE_CODE_SESSION_ID``
+    (its former omission here was the FORCE_CLOSE bug) — then keeps this call site's
+    LOCAL cosmetic fallback (short git HEAD, then ``"unknown"``) so the audit comment is
+    always a non-empty string. The shared resolver itself never returns HEAD.
     """
-    return (
-        os.environ.get("REBAR_SESSION_ID")
-        or os.environ.get("SESSION_ID")
-        or _short_head(tracker)
-        or "unknown"
-    )
+    from rebar._commands.session_id import resolve_session_id
+
+    return resolve_session_id() or _short_head(tracker) or "unknown"
 
 
 def _short_head(tracker: str) -> str:
