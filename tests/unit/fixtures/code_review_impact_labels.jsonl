@@ -1,0 +1,31 @@
+{"label": "HIGH", "note": "silent wrong value feeds a decision (serious, silent)", "severity_attributes": {"silent_wrong_feeding_a_decision": true, "trigger_likelihood": "common", "silent_failure": true}}
+{"label": "HIGH", "note": "data loss with no recovery (serious, common, silent)", "severity_attributes": {"data_loss_without_recovery": true, "trigger_likelihood": "common", "silent_failure": true}}
+{"label": "HIGH", "note": "security check bypassed, escapes CI (serious, escapes_automation)", "severity_attributes": {"security_bypass_not_enforced_elsewhere": true, "trigger_likelihood": "common", "escapes_automation": true}}
+{"label": "HIGH", "note": "data loss, sometimes-triggered but silent", "severity_attributes": {"data_loss_without_recovery": true, "trigger_likelihood": "sometimes", "silent_failure": true}}
+{"label": "HIGH", "note": "published contract broken w/o version bump on a hot file (serious, churn)", "severity_attributes": {"unversioned_published_contract_break": true, "silent_failure": true, "churn90": 34}}
+{"label": "HIGH", "note": "safety-net (test) removed w/o replacement, hot file, escapes automation", "severity_attributes": {"safety_net_removal_without_replacement": true, "escapes_automation": true, "churn90": 22}}
+{"label": "HIGH", "note": "silent wrong feeding a decision on a schema file (surface floor also holds)", "severity_attributes": {"silent_wrong_feeding_a_decision": true, "silent_failure": true, "hard_to_reverse_surface": true}}
+{"label": "HIGH", "note": "capability degraded on a deleted file, escapes automation", "severity_attributes": {"capability_degraded": true, "escapes_automation": true, "hard_to_reverse_surface": true, "trigger_likelihood": "common"}}
+{"label": "HIGH", "note": "security bypass, sometimes-triggered, silent", "severity_attributes": {"security_bypass_not_enforced_elsewhere": true, "trigger_likelihood": "sometimes", "silent_failure": true}}
+{"label": "HIGH", "note": "unversioned contract break, silent, moderate churn", "severity_attributes": {"unversioned_published_contract_break": true, "silent_failure": true, "churn90": 18}}
+{"label": "HIGH", "note": "safety net removal, hot file, silent", "severity_attributes": {"safety_net_removal_without_replacement": true, "silent_failure": true, "churn90": 30}}
+{"label": "HIGH", "note": "data loss, common, escapes automation", "severity_attributes": {"data_loss_without_recovery": true, "trigger_likelihood": "common", "escapes_automation": true}}
+{"label": "HIGH", "note": "silent wrong, common, escapes CI", "severity_attributes": {"silent_wrong_feeding_a_decision": true, "trigger_likelihood": "common", "escapes_automation": true}}
+{"label": "HIGH", "note": "released-packaging break (pyproject) + contract break, silent", "severity_attributes": {"unversioned_published_contract_break": true, "silent_failure": true, "hard_to_reverse_surface": true, "churn90": 12}}
+{"label": "HIGH", "note": "security bypass, common, silent", "severity_attributes": {"security_bypass_not_enforced_elsewhere": true, "trigger_likelihood": "common", "silent_failure": true}}
+{"label": "HIGH", "note": "capability degraded, common, silent, hot file", "severity_attributes": {"capability_degraded": true, "trigger_likelihood": "common", "silent_failure": true, "churn90": 28}}
+{"label": "NIT", "note": "dead/unreachable code introduced (minor, cold, self-revealing)", "severity_attributes": {"dead_code": true, "trigger_likelihood": "common"}}
+{"label": "NIT", "note": "implicit cross-module coupling (minor, cold)", "severity_attributes": {"implicit_coupling": true}}
+{"label": "NIT", "note": "contract drift, moderate but rare + not silent, cold file", "severity_attributes": {"contract_drift": true, "trigger_likelihood": "rare"}}
+{"label": "NIT", "note": "hidden invariant, moderate, cold, self-revealing", "severity_attributes": {"hidden_invariant": true}}
+{"label": "NIT", "note": "capability degraded but RARE and self-revealing", "severity_attributes": {"capability_degraded": true, "trigger_likelihood": "rare"}}
+{"label": "NIT", "note": "no-consequence style finding (no binaries set)", "severity_attributes": {}}
+{"label": "NIT", "note": "dead code on a cold file, self-revealing", "severity_attributes": {"dead_code": true}}
+{"label": "NIT", "note": "implicit coupling, self-revealing, cold", "severity_attributes": {"implicit_coupling": true, "trigger_likelihood": "common"}}
+{"label": "NIT", "note": "hidden invariant, cold, not silent", "severity_attributes": {"hidden_invariant": true, "trigger_likelihood": "common"}}
+{"label": "NIT", "note": "contract drift, cold, self-revealing", "severity_attributes": {"contract_drift": true}}
+{"label": "NIT", "note": "clean finding that merely touches a schema file (impact_base 0 => no floor)", "severity_attributes": {"hard_to_reverse_surface": true}}
+{"label": "NIT", "note": "capability degraded, rare, self-revealing, cold", "severity_attributes": {"capability_degraded": true, "trigger_likelihood": "rare", "silent_failure": false}}
+{"label": "NIT", "note": "dead code with base attrs noise but no consequence binary weight", "severity_attributes": {"dead_code": true, "prod_impact": "low", "reversibility": "easy"}}
+{"label": "NIT", "note": "implicit coupling on a cold module", "severity_attributes": {"implicit_coupling": true, "churn90": 0}}
+{"label": "NIT", "note": "no consequence; documentation-only nit", "severity_attributes": {"trigger_likelihood": "common"}}

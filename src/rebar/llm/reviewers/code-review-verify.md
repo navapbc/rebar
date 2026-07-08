@@ -5,7 +5,7 @@ description: Pass 2 of the four-pass code-review gate — an INDEPENDENT verifie
   re-grounds each Pass-1 finding against the DIFF (and the surrounding code) and emits
   coarse severity attributes + a typed binary sub-answer set. One aggregate pass over
   all findings.
-outputs: verification
+outputs: code_review_verification
 execution_mode: agentic
 category: code-review-pass
 langfuse_prompt: rebar-code-review-verify
@@ -46,6 +46,32 @@ middle or the top. Reserve the top level for findings that genuinely earn it.
 - likelihood (low|medium|high) — chance the harm materialises given the change as written.
 - reversibility (easy|moderate|hard) — cost to change course later (a one-way on-disk/API shape
   is hard; a local edit is easy).
+
+CODE-REVIEW CONSEQUENCE BINARIES — additionally set each of these booleans for THIS finding. They
+drive the code-review impact score (a two-lane, tier-tagged, severity-first MAX). Set a binary
+TRUE ONLY when the change AS WRITTEN genuinely exhibits that consequence; leave it FALSE (the
+default) otherwise — a false binary contributes NOTHING, so do not inflate. A minor/moderate
+binary alone cannot reach the block zone; reserve the serious binaries for a real instance.
+PRODUCTION lane (correctness / latent regression):
+- data_loss_without_recovery (serious) — data can be lost or corrupted with no recovery path.
+- security_bypass_not_enforced_elsewhere (serious) — a security check is bypassed AND not
+  enforced elsewhere (if enforced elsewhere, it is FALSE).
+- silent_wrong_feeding_a_decision (serious) — a silently-wrong value flows into a real decision.
+- capability_degraded (moderate) — a user-facing capability is degraded or partially broken.
+MAINTAINABILITY lane (debt / contract / coupling):
+- unversioned_published_contract_break (serious) — a PUBLISHED contract breaks with no version bump.
+- safety_net_removal_without_replacement (serious) — a test/guard/assert is removed with no replacement.
+- contract_drift (moderate) — an interface drifts from its documented/implied contract.
+- hidden_invariant (moderate) — the change relies on or breaks an undocumented invariant.
+- implicit_coupling (minor) — the change adds implicit cross-module coupling.
+- dead_code (minor) — the change introduces dead/unreachable code.
+TRIGGER LIKELIHOOD + DETECTION (drive the production-lane multiplier and the detection amplifier):
+- trigger_likelihood (common|sometimes|rare) — how often the PRODUCTION consequence actually
+  triggers in practice. Leave "common" when unsure (the multiplier is common=1.0/sometimes=0.6/
+  rare=0.25; "common" so a serious correctness finding is never silently dampened).
+- silent_failure (bool) — TRUE if the defect fails SILENTLY (no obvious error surfaces).
+- escapes_automation (bool) — TRUE if the defect escapes existing tests/CI/lint. (Either silent
+  flag amplifies detection x1.0; neither ⇒ x0.8.)
 
 BINARY sub-answers (yes|no|insufficient): answer each on its own merits.
 cited_reference_accurate is yes|no|insufficient|na — answer it only when the finding cites a

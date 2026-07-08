@@ -209,8 +209,15 @@ def test_verdict_steps_never_reference_the_escalation_steps():
         refs = repr(by_id[sid].get("with") or {})
         assert "steps.triggers" not in refs, f"{sid} must not reference the triggers (Round-A) step"
         assert "steps.union" not in refs, f"{sid} must not reference the union (escalation) step"
-    # and the decide op's inputs are exactly findings + verifications (no membership signal).
-    assert set(by_id["decide"]["with"]) == {"findings", "verifications"}
+    # The decide op consumes the findings + verifications AND the DIFF CONTEXT (changed_files +
+    # diff_text from assemble_diff, which runs BEFORE any escalation) that DET-enriches impact_code
+    # (story albite-lazy-barb) — but NO membership/escalation signal, so the invariant still holds.
+    assert set(by_id["decide"]["with"]) == {
+        "findings",
+        "verifications",
+        "changed_files",
+        "diff_text",
+    }
 
 
 def test_overlay_union_already_run_is_wired_to_the_round_a_triggers_output():
@@ -268,7 +275,7 @@ class _FakeRunner(AgentStepRunner):
                     ]
                 }
             )
-        if schema == "verification":
+        if schema in ("verification", "code_review_verification"):
             return _ex.StepResult(outputs={"verifications": []})  # no verifs → indeterminate → PASS
         if schema == "code_review_coach":
             return _ex.StepResult(outputs={"notes": []})

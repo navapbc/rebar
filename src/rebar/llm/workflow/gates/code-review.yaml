@@ -144,7 +144,7 @@ steps:
     needs: [verify_inputs]
     prompt: code-review-verify
     mode: structured
-    output_schema: verification
+    output_schema: code_review_verification
     with:
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
       instructions: ${{ steps.verify_inputs.outputs.instructions }}
@@ -153,11 +153,13 @@ steps:
 
   # ── Pass 3: deterministic decide (kernel pass3_over_findings + code-review threshold_for). ──
   - id: decide
-    needs: [verify, merge]
+    needs: [verify, merge, assemble_diff]
     uses: code_review_decide
     with:
       findings: ${{ steps.merge.outputs.findings }}
       verifications: ${{ steps.verify.outputs.verifications }}
+      changed_files: ${{ steps.assemble_diff.outputs.changed_files }}
+      diff_text: ${{ steps.assemble_diff.outputs.context }}
 
   # ── Pass 4: affirmative coach over the surviving advisories, then the verdict. ──────────────
   - id: coach_inputs

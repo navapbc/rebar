@@ -275,6 +275,111 @@ def code_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     return {"instructions": instructions}
 
 
+# ── Pass-3 DET enrichment for impact_code (story albite-lazy-barb) ──────────────────────────
+# decide.impact_code reads two DET signals decide.py cannot compute itself: `churn90` (how hot
+# the file is) and `hard_to_reverse_surface` (a one-way-door file). We compute them here — from
+# each finding's `location` path + the diff — and inject them into the VERIFICATION dict's
+# `severity_attributes` (the exact dict pass3_decide passes to impact_code; NOT the finding
+# dict). Best-effort: any failure leaves the signal at its safe default (churn 0 ⇒ freq_mult 0.5;
+# surface False ⇒ no reversibility floor).
+_PACKAGING_BASENAMES = {"pyproject.toml", "setup.py", "setup.cfg"}
+_SERIALIZATION_EXTS = {".proto", ".sql"}
+
+
+def _file_from_location(location: str) -> str:
+    """Extract the file path from a finding `location` ('path' or 'path:line[:col]')."""
+    loc = (location or "").strip()
+    if not loc:
+        return ""
+    # Strip a trailing ':line' (and ':col'); a bare path with no ':' passes through unchanged.
+    return loc.split(":", 1)[0].strip()
+
+
+def _hard_to_reverse_surface(path: str, deleted: set[str]) -> bool:
+    """A one-way-door surface: released packaging, a serialization/schema artifact, or a deletion.
+    An exported-public-API break is undetectable from the path alone, so we conservatively do NOT
+    floor on it (the impact_base>0 gate in impact_code means a clean finding never gets floored)."""
+    from pathlib import PurePosixPath
+
+    if not path:
+        return False
+    if path in deleted:
+        return True
+    p = PurePosixPath(path)
+    base = p.name
+    if base in _PACKAGING_BASENAMES or "CHANGELOG" in base:
+        return True
+    if p.suffix.lower() in _SERIALIZATION_EXTS:
+        return True
+    if base.endswith(".schema.json") or (base.startswith("schema") and base.endswith(".json")):
+        return True
+    return False
+
+
+def _churn_90d(path: str, repo_root: Any) -> int:
+    """Commits touching `path` in the last 90 days (best-effort; 0 on any failure)."""
+    import subprocess
+
+    if not path or not repo_root:
+        return 0
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "log", "--since=90 days ago", "--oneline", "--", path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if out.returncode != 0:
+        return 0
+    return sum(1 for line in out.stdout.splitlines() if line.strip())
+
+
+def _deleted_paths_from_diff(diff_text: str) -> set[str]:
+    """Files removed in a unified diff (a '+++ /dev/null' hunk header names a deletion)."""
+    deleted: set[str] = set()
+    lines = (diff_text or "").splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("+++ ") and line[4:].strip() in {"/dev/null", "b/dev/null"}:
+            for j in range(i - 1, max(-1, i - 4), -1):
+                if lines[j].startswith("--- "):
+                    p = lines[j][4:].strip()
+                    if p.startswith("a/"):
+                        p = p[2:]
+                    if p and p != "/dev/null":
+                        deleted.add(p)
+                    break
+    return deleted
+
+
+def _det_enrich_verifications(
+    findings: list[dict[str, Any]],
+    verifications: dict[int, dict[str, Any]],
+    *,
+    diff_text: str,
+    repo_root: Any,
+) -> None:
+    """Inject `churn90` + `hard_to_reverse_surface` into each verification's `severity_attributes`
+    (in place) so impact_code reads DET signals alongside the LLM binaries from ONE dict."""
+    deleted = _deleted_paths_from_diff(diff_text)
+    churn_cache: dict[str, int] = {}
+    for i, f in enumerate(findings):
+        verif = verifications.get(i)
+        if not isinstance(verif, dict):
+            continue
+        attrs = verif.get("severity_attributes")
+        if not isinstance(attrs, dict):
+            attrs = {}
+            verif["severity_attributes"] = attrs
+        path = _file_from_location(str(f.get("location", "")))
+        if path not in churn_cache:
+            churn_cache[path] = _churn_90d(path, repo_root)
+        attrs["churn90"] = churn_cache[path]
+        attrs["hard_to_reverse_surface"] = _hard_to_reverse_surface(path, deleted)
+
+
 # ── Pass-3 decide (deterministic, kernel) ───────────────────────────────────────────────────
 @register_step(
     "code_review_decide",
@@ -300,8 +405,19 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
             "INDETERMINATE; verdict unchanged): %s",
             reshape.summary(),
         )
+    # DET-enrich the verifications' severity_attributes (churn90 + hard_to_reverse_surface) so
+    # decide.impact_code reads DET signals alongside the LLM binaries from the SAME dict.
+    _det_enrich_verifications(
+        findings,
+        reshape.verifications,
+        diff_text=str(ctx.inputs.get("diff_text") or ""),
+        repo_root=ctx.repo_root,
+    )
     decided = review_kernel.pass3_over_findings(
-        findings, reshape.verifications, threshold_for=registry.threshold_for
+        findings,
+        reshape.verifications,
+        threshold_for=registry.threshold_for,
+        impact_fn=review_kernel.impact_code,
     )
     buckets: dict[str, list[dict[str, Any]]] = {
         "blocking": [],
