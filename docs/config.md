@@ -349,8 +349,10 @@ wrongly-named / absent var simply falls through — never an error.
 
 **Harness provenance (`AI_AGENT`) + remote session (`CLAUDE_CODE_REMOTE_SESSION_ID`).** A
 claim also records, when present, an opaque harness-provenance tag from the rebar-owned
-`AI_AGENT` var (e.g. `claude-code_<ver>` / `opencode` / `codex` / `cursor`, populated by the
-per-harness shims) → `state["claim_harness"]`, and the secondary `CLAUDE_CODE_REMOTE_SESSION_ID`
+`AI_AGENT` var — the harness base name `claude-code` / `opencode` / `codex` / `cursor`,
+OPTIONALLY suffixed with `_<version>` (e.g. `claude-code_1.2.3`) when the shim can discover one,
+populated by the per-harness shims → `state["claim_harness"]`; and the secondary
+`CLAUDE_CODE_REMOTE_SESSION_ID`
 → `state["claim_remote_session"]`. Both are opaque, read verbatim, local-only (never synced to
 Jira).
 

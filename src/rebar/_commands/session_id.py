@@ -42,7 +42,8 @@ _SESSION_ID_VARS: tuple[str, ...] = (
 )
 
 # rebar's harness-provenance convention var: an opaque tag naming the harness that produced
-# the claim (e.g. "claude-code_<ver>" / "opencode" / "codex" / "cursor"), populated by the
+# the claim (base name "claude-code" / "opencode" / "codex" / "cursor", optionally
+# "_<version>"-suffixed), populated by the
 # same per-harness shims as REBAR_SESSION_ID (stories ec5c / 7656). Read verbatim.
 _HARNESS_VAR = "AI_AGENT"
 
