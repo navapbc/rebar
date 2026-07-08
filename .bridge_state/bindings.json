@@ -4747,6 +4747,12 @@
       "jira_key": "REB-777",
       "state": "confirmed",
       "updated_at": "2026-07-07T21:09:01Z"
+    },
+    "jira-reb-810": {
+      "created_at": "2026-07-08T14:12:52Z",
+      "jira_key": "REB-810",
+      "state": "confirmed",
+      "updated_at": "2026-07-08T14:12:52Z"
     }
   },
   "reverse": {
@@ -5531,6 +5537,7 @@
     "REB-808": "ee21-fcd3-edad-462c",
     "REB-809": "bbf1-82e1-cf9d-494a",
     "REB-81": "325a-8036-2069-4ed4",
+    "REB-810": "jira-reb-810",
     "REB-82": "363b-c844-9abe-452c",
     "REB-83": "3657-1c2e-71a7-4ab9",
     "REB-84": "3703-e05c-3e80-4cc6",
