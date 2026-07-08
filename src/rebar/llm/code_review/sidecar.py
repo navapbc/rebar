@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
 SCHEMA = "code_review_result_v1"
+# The impact-model formula version that produced this sidecar's scores (story
+# raptorial-galloping-dragon). Stamped top-level so the calibration replay SEGMENTS old-formula vs
+# new-formula findings and never pools across versions. Bump on any impact_code shape change.
+IMPACT_MODEL_VERSION = "code-v2"
 
 
 def change_fingerprint(
@@ -72,6 +76,7 @@ def build_payload(
     corpus needs."""
     return {
         "schema": SCHEMA,
+        "impact_model_version": IMPACT_MODEL_VERSION,
         "verdict": verdict.get("verdict"),
         "ticket_id": target_ticket,
         "change_id": change_id,
