@@ -159,7 +159,7 @@ def _commit_binding_store_snapshot(
     bindings as normal.  The caller must NOT abort on False — commit failure
     must never break the sync pass.
     """
-    import subprocess as _sp
+    from rebar_reconciler import git_adapter
 
     tracker_dir = repo_root / ".tickets-tracker"  # tickets-boundary-ok
     # Bug 1e08: stage BOTH the live store and the retired-binding store. The
@@ -174,43 +174,24 @@ def _commit_binding_store_snapshot(
     try:
         # Stage only our two state files (never git add -A: avoid staging
         # unrelated working-tree changes in the tickets worktree).
-        _sp.run(
-            ["git", "-C", str(tracker_dir), "add", *_existing_rel],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        git_adapter.add(tracker_dir, *_existing_rel)
         # Check if there is actually a diff to commit (idempotent).
-        status = _sp.run(
-            ["git", "-C", str(tracker_dir), "diff", "--cached", "--name-only"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        staged_names = git_adapter.diff_cached_names(tracker_dir)
         # PER-FILE idempotency (bug 1e08): the prior substring test
         # ``"bindings.json" not in status.stdout`` does NOT match
         # ``bindings-retired.json`` as a distinct file, so a retirement-only
         # change (only bindings-retired.json staged) would be silently skipped.
         # Match on basename membership over the staged-file lines instead.
         _staged_basenames = {
-            os.path.basename(line.strip()) for line in status.stdout.splitlines() if line.strip()
+            os.path.basename(line.strip()) for line in staged_names.splitlines() if line.strip()
         }
         if not ({"bindings.json", "bindings-retired.json"} & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.
-        _sp.run(
-            [
-                "git",
-                "-C",
-                str(tracker_dir),
-                "commit",
-                "--no-verify",
-                "-q",
-                "-m",
-                f"reconciler: persist binding-store snapshot [pass {pass_id}]",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
+        git_adapter.commit(
+            tracker_dir,
+            f"reconciler: persist binding-store snapshot [pass {pass_id}]",
+            no_verify=True,
+            quiet=True,
         )
         return True
     except Exception as exc:  # noqa: BLE001 — fail-open: return False, log + alert, FS copy persists

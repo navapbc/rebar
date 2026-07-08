@@ -8,7 +8,6 @@ This module is inert on its own; callers are wired by subsequent tasks.
 
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,21 +52,12 @@ def snapshot_head(repo_root: Path) -> str:
     as stable until the first commit lands.
     """
     from rebar.config import tickets_branch
+    from rebar_reconciler import git_adapter
 
     branch = tickets_branch(repo_root)  # configured tracker.branch (default "tickets")
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", branch],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = git_adapter.rev_parse(repo_root, branch)
     if result.returncode != 0:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = git_adapter.rev_parse(repo_root, "HEAD")
         if result.returncode != 0:
             return EMPTY_REPO_SENTINEL
     return result.stdout.strip()

@@ -21,7 +21,6 @@ import datetime
 import importlib
 import importlib.util
 import os
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -178,70 +177,37 @@ def _purge_committed_reconciler_locks(repo_root: Path) -> None:
     CAS commit. Idempotent (no-op when none are present) and best-effort: any git
     failure is logged and swallowed so it never aborts the pass.
     """
+    from rebar_reconciler import git_adapter
+
     try:
         present = [
             f
             for f in _LEGACY_LOCK_FILES
-            if subprocess.run(
-                ["git", "-C", str(repo_root), "cat-file", "-e", f"tickets:{f}"],
-                capture_output=True,
-            ).returncode
-            == 0
+            if git_adapter.cat_file_exists(repo_root, f"{git_adapter.TICKETS_BRANCH}:{f}")
         ]
         if not present:
             return
-        old = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "tickets"],
-            capture_output=True,
-            text=True,
-            check=True,
+        old = git_adapter.rev_parse(
+            repo_root, git_adapter.TICKETS_BRANCH, check=True
         ).stdout.strip()
         # Prune the legacy paths in a DETACHED temp index (read-tree → rm --cached →
         # write-tree → commit-tree), then CAS-advance refs/heads/tickets — the main
         # worktree/index is never touched, and the CAS makes a concurrent writer safe.
         env = {**os.environ, "GIT_INDEX_FILE": str(repo_root / ".git" / "reconciler-purge-index")}
-        subprocess.run(
-            ["git", "-C", str(repo_root), "read-tree", old],
-            capture_output=True,
-            check=True,
-            env=env,
-        )
-        subprocess.run(
-            ["git", "-C", str(repo_root), "rm", "--cached", "--ignore-unmatch", *present],
-            capture_output=True,
-            check=True,
-            env=env,
-        )
-        new_tree = subprocess.run(
-            ["git", "-C", str(repo_root), "write-tree"],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        ).stdout.strip()
-        new_commit = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "commit-tree",
-                new_tree,
-                "-p",
-                old,
-                "-m",
+        git_adapter.read_tree(repo_root, old, env=env)
+        git_adapter.rm_cached(repo_root, *present, env=env)
+        new_tree = git_adapter.write_tree(repo_root, env=env)
+        new_commit = git_adapter.commit_tree(
+            repo_root,
+            new_tree,
+            parent=old,
+            message=(
                 "chore(reconciler): drop legacy .reconciler-* lock files "
-                "(moved to refs/reconciler/*)",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
+                "(moved to refs/reconciler/*)"
+            ),
             env=env,
-        ).stdout.strip()
-        subprocess.run(
-            ["git", "-C", str(repo_root), "update-ref", "refs/heads/tickets", new_commit, old],
-            capture_output=True,
-            check=True,
         )
+        git_adapter.update_ref(repo_root, git_adapter.TICKETS_REF, new_commit, old)
         print(
             f"reconcile: purged legacy committed lock files {present} from the tickets branch",
             file=sys.stderr,
