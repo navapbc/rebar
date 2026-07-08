@@ -419,6 +419,12 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
         threshold_for=registry.threshold_for,
         impact_fn=review_kernel.impact_code,
     )
+    # Nit-suppression (story grusome-uncheerful-nematode): an ADVISORY finding whose criteria are
+    # ALL flagged nit_suppressed in the routing (docs / llm-prompts) is demoted from surfaced to
+    # dropped so it adds no coaching noise. POST-pass3: partition-only — validity/impact/priority
+    # and every BLOCK decision are untouched; a finding that ALSO maps to a non-suppressed
+    # criterion still surfaces (all-criteria rule).
+    nit_suppressed = registry.nit_suppressed_criteria()
     buckets: dict[str, list[dict[str, Any]]] = {
         "blocking": [],
         "surfaced": [],
@@ -430,7 +436,13 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
         if decision == "block":
             buckets["blocking"].append(f)
         elif decision == "advisory":
-            buckets["surfaced"].append(f)
+            crit = f.get("criteria") or []
+            if crit and all(c in nit_suppressed for c in crit):
+                f["decision"] = "dropped"
+                f["reason"] = "nit-suppressed"
+                buckets["dropped"].append(f)
+            else:
+                buckets["surfaced"].append(f)
         elif decision == "dropped":
             buckets["dropped"].append(f)
         else:

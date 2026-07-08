@@ -330,3 +330,14 @@ def threshold_for(
     repo-aware caller may pass :func:`effective_routing` to honour a project overlay's re-tunes."""
     idx = routing_map if routing_map is not None else routing_index()
     return _criteria.threshold_for(criteria, idx, gate=_GATE_KEY)
+
+
+def nit_suppressed_criteria(routing_map: dict[str, Any] | None = None) -> frozenset[str]:
+    """The set of criteria flagged ``nit_suppressed: true`` in the routing index (story
+    grusome-uncheerful-nematode). ``code_review_decide`` demotes an advisory finding whose criteria
+    are ALL in this set from the surfaced advisory set to ``dropped`` — reducing docs/llm-prompts
+    nit noise without touching the blocking posture. ``routing_map`` defaults to the PACKAGED
+    :func:`routing_index`; a repo-aware caller may pass :func:`effective_routing` to honour a
+    project overlay's re-tunes (an overlay can add or clear the flag on any criterion)."""
+    idx = routing_map if routing_map is not None else routing_index()
+    return frozenset(k for k, v in idx.items() if isinstance(v, dict) and v.get("nit_suppressed"))

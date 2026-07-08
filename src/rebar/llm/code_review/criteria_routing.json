@@ -1,5 +1,5 @@
 {
-  "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed).",
+  "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed). An overlay's optional nit_suppressed:true (story grusome-uncheerful-nematode) demotes an advisory finding whose criteria are ALL nit-suppressed from the surfaced set to dropped (code_review_decide), reducing docs/llm-prompts nit noise; it does not affect blocking.",
   "security": {
     "exec": "AGENT",
     "applies_to": ["**/auth*", "**/*secret*", "**/security/**", "**/signing*", "**/*cred*"],
@@ -40,7 +40,8 @@
     "applies_to": ["**/*.md", "docs/**", "**/README*"],
     "default_posture": "advisory",
     "block_threshold": 0.95,
-    "blocking_enabled": false
+    "blocking_enabled": false,
+    "nit_suppressed": true
   },
   "supply-chain": {
     "exec": "1-TURN",
@@ -75,7 +76,8 @@
     "applies_to": ["**/reviewers/**", "**/prompts*", "**/*.prompt", "**/schemas/*.schema.json"],
     "default_posture": "advisory",
     "block_threshold": 0.95,
-    "blocking_enabled": false
+    "blocking_enabled": false,
+    "nit_suppressed": true
   },
   "deletion-impact": {
     "_comment": "story f983: CONTENT-triggered (not glob) overlay — registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ADVISORY (blocking_enabled=false): a now-dangling reference is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
