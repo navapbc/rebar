@@ -27,7 +27,7 @@ import sys
 import time
 import uuid
 
-from rebar._store.ensures import APPLIED_MARKER, EnsureOutcome, run_ensures
+from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
 from rebar._store.gitutil import run_git
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
@@ -48,6 +48,7 @@ _GITIGNORE = f""".env-id
 {MKDIR_LOCK_NAME}/
 {_GRAPH_CACHE_FILE}
 {APPLIED_MARKER}
+{HINTED_MARKER}
 """
 
 _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the reconciler rebuilds,
