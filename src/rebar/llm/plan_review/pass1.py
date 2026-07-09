@@ -316,7 +316,7 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
             if not tgt:
                 continue
             try:
-                log = _reads.show_ticket(tgt, repo_root=ctx.repo_root)
+                log = _reads.show_ticket(tgt, repo_root=ctx.tickets_root)
             except Exception:  # noqa: BLE001 — per-dep best-effort session-log fetch; skip unreadable deps
                 continue
             if log.get("ticket_type") == "session_log":
@@ -501,7 +501,7 @@ def run_pass1(
     # WITHOUT any prior findings (independence by construction; ADR 0008 Inv. 1 / the pinned
     # test_prior_findings_only_reach_the_novelty_seam). A candidate the current plan resolved fails
     # Pass-2 validity and is dropped — recall never blocks on memory alone. Best-effort + bounded.
-    concerns = sidecar.prior_concerns(ctx.ticket_id, repo_root=ctx.repo_root)
+    concerns = sidecar.prior_concerns(ctx.ticket_id, repo_root=ctx.tickets_root)
     if concerns:
         seen = {sidecar.norm_id(f) for f in findings}
         recalled = 0

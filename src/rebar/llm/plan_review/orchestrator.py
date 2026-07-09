@@ -201,6 +201,11 @@ def _assemble_context_uncached(
             # induce checkpoint/cache writes into the live checkout.
             allow_checkout_fallback=False,
         ),
+        # The pinned TICKET-STORE snapshot root (attested), captured HERE on the
+        # assembling thread where the ContextVar is set — the pass-1 fan-out runs in
+        # worker threads that would NOT inherit it. ``None`` (local / no gate) → the live
+        # checkout store. Downstream ticket reads use this, never ``repo_root`` (code).
+        tickets_root=current_tickets_root(),
         largest_window_tokens=largest_window_tokens(cfg.model if cfg else None),
         centrality=_centrality(state, children),
     )
