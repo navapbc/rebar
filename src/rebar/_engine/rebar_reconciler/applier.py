@@ -160,6 +160,66 @@ def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, pare
     return lines[-1] if lines else ""
 
 
+def _build_hard_delete_recreate(follow_on: dict, repo_root, binding_store) -> dict | None:
+    """Reconstruct a standard outbound CREATE batch-dict for a hard-deleted Jira issue
+    whose LOCAL content is still present (c244 — the ``create_after_hard_delete``
+    follow-on).
+
+    The follow-on carries only ``local_id``; ``create_one`` needs ``fields``. Fetch the
+    still-present local ticket by reading ``<tracker>/<local_id>/.cache.json`` ``state``
+    (mirroring ``reconcile_check.load_local_tickets``) and map it via the SAME
+    ``_map_local_to_jira_fields`` the outbound differ uses. Returns ``None`` (log + skip)
+    when the local ticket is absent/unreadable/malformed or has no mappable summary — a
+    hard-deleted ticket with no local content is not re-creatable.
+    """
+    local_id = follow_on.get("local_id", "")
+    if not local_id:
+        return None
+    root = (
+        Path(repo_root)
+        if repo_root is not None
+        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+    )
+    cache_path = root / ".tickets-tracker" / local_id / ".cache.json"
+    try:
+        state = json.loads(cache_path.read_text()).get("state")
+    except (ValueError, OSError):
+        state = None  # absent / malformed cache → not re-creatable
+    if not isinstance(state, dict):
+        print(  # noqa: T201
+            f"hard_delete_recreate_skip: no local content for local_id={local_id!r}",
+            file=sys.stderr,
+        )
+        return None
+    ticket = dict(state)
+    ticket.setdefault("ticket_id", local_id)
+    fields = _map_local_to_jira_fields(
+        ticket,
+        binding_store=binding_store,
+        local_ticket_types={local_id: ticket.get("ticket_type", "task")},
+        emit_detach_clear=False,
+    )
+    if not fields or not fields.get("summary"):
+        print(  # noqa: T201
+            f"hard_delete_recreate_skip: no mappable summary for local_id={local_id!r}",
+            file=sys.stderr,
+        )
+        return None
+    # Standard outbound CREATE batch-dict (same shape _mutation_to_batch_dict emits) so
+    # it flows through _apply_batch -> create_one (JQL dedup + bind_confirm + budget).
+    return {
+        "action": "create",
+        "direction": "outbound",
+        "key": "",  # the Jira issue was hard-deleted — a fresh create, no target key
+        "fields": fields,
+        "local_id": local_id,
+        "follow_on": None,
+        "comments": [],
+        "labels": [],
+        "links": [],
+    }
+
+
 # Per-action batch handlers + the per-pass context live in apply_handlers.py.
 # Imported (not re-exported) — _apply_batch's per-mutation step dispatches through
 # dispatch_mutation; the handlers wrap batch_dispatch's create/update/delete_one.
@@ -182,6 +242,10 @@ from rebar_reconciler.batch_dispatch import (  # noqa: E402
     delete_one,
     update_one,
 )
+
+# The canonical local->Jira field mapper (also used by the outbound differ). The
+# hard-delete re-create consumer (c244) reconstructs the CREATE fields with it.
+from rebar_reconciler.outbound_fields import _map_local_to_jira_fields  # noqa: E402
 
 # Pass-write persistence + the reschedule contract live in pass_io.py.
 # Re-exported so apply()/_apply_batch and __main__'s getattr(applier, ...) resolve.
@@ -451,6 +515,12 @@ def apply(
     # Deferred bug-filing directives from inbound conflict leaves, processed
     # AFTER _apply_batch to keep the apply path commit-free (bug d822).
     pending_bug_tickets: list[dict] = []
+    # Hard-delete re-create directives (c244): collected in the inbound loop and
+    # injected into `outbound_list` BEFORE _apply_batch so they flow through the
+    # normal outbound create (create_one: JQL dedup + bind_confirm + REST budget).
+    # NOTE this is deliberately UNLIKE `pending_bug_tickets`, which drains in the
+    # `finally` AFTER _apply_batch via the CLI and bypasses create_one.
+    pending_hard_delete_creates: list[dict] = []
 
     for mut in inbound_typed:
         if not persist:
@@ -467,6 +537,10 @@ def apply(
         follow_on = result_payload.get("follow_on") if isinstance(result_payload, dict) else None
         if isinstance(follow_on, dict) and follow_on.get("kind") == "suppress_pair":
             suppression.record(follow_on.get("local_id", ""), follow_on.get("jira_key", ""))
+        if isinstance(follow_on, dict) and follow_on.get("action") == "create_after_hard_delete":
+            recreate = _build_hard_delete_recreate(follow_on, repo_root, binding_store)
+            if recreate is not None:
+                pending_hard_delete_creates.append(recreate)
         pending = (
             result_payload.get("pending_bug_ticket") if isinstance(result_payload, dict) else None
         )
@@ -488,6 +562,12 @@ def apply(
         outbound_list = [
             d for d in outbound_list if not suppression.is_suppressed(d.get("key", ""))
         ]
+    # Inject hard-delete re-creates into the SAME batch (c244), AFTER the suppression
+    # filter — a re-create is the intended effect of the hard-delete, never a
+    # suppressed pair — so they dispatch through create_one just like any outbound
+    # create (JQL dedup makes a retry idempotent; budget exhaustion defers a pass).
+    if pending_hard_delete_creates:
+        outbound_list.extend(pending_hard_delete_creates)
     is_dry_run = mode_mod is not None and mode == mode_mod.Mode.DRY_RUN
     manifest_path = None
     try:

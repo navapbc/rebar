@@ -181,7 +181,12 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
 
     payload = dict(mutation.payload or {})
-    branch = payload.get("probe_outcome", "out_of_window")
+    # Canonical key is ``reason`` — route_inbound_probe (reconcile.py) emits
+    # ``payload={"reason": "hard_delete", ...}``. ``probe_outcome`` is kept as a
+    # back-compat fallback for any legacy/test payloads still using the old key
+    # (c244: without this the hard_delete branch was unreachable and always fell
+    # through to the ``out_of_window`` default).
+    branch = payload.get("reason") or payload.get("probe_outcome", "out_of_window")
     target = mutation.target
     local_id = target if target.startswith("jira-") else _jira_key_to_local_id(target)
     tracker_dir = _resolve_tracker_dir(repo_root)
@@ -206,8 +211,9 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
             "local_id": local_id,
         }
         result_payload["follow_on"] = follow_on
-        # TODO(epic-3e36): wire the follow-on mutation into reconcile_once so
-        # the outbound re-create runs in the same pass. Tracked separately.
+        # The applier consumes this ``create_after_hard_delete`` follow-on and injects
+        # a standard outbound CREATE into the same pass's batch (c244; the former
+        # epic-3e36 gap). See applier.apply() — ``pending_hard_delete_creates``.
     elif branch == "redirect":
         new_key = payload.get("new_jira_key", "")
         new_local_id = _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"

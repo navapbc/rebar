@@ -267,7 +267,10 @@ def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_m
     "outcome",
     ["hard_delete", "redirect", "out_of_window", "trash"],
 )
-def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome):
+# c244: the leaf now reads the canonical `reason` key (route_inbound_probe emits it);
+# `probe_outcome` is exercised too so the back-compat fallback stays live (not dead code).
+@pytest.mark.parametrize("branch_key", ["reason", "probe_outcome"])
+def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome, branch_key):
     # Seed the ticket dir.
     create_mut = _make_mutation(
         mut_mod,
@@ -278,7 +281,7 @@ def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome):
     )
     applier._apply_typed(create_mut, repo_root=fixture_repo)
 
-    payload = {"probe_outcome": outcome}
+    payload = {branch_key: outcome}
     if outcome == "redirect":
         payload["new_jira_key"] = "DIG-999"
     delete_mut = _make_mutation(
@@ -329,7 +332,7 @@ def test_inbound_delete_redirect_raises_when_destination_exists(applier, mut_mod
         direction=mut_mod.MutationDirection.inbound,
         action=mut_mod.MutationAction.delete,
         target="jira-dig-123",
-        payload={"probe_outcome": "redirect", "new_jira_key": "DIG-999"},
+        payload={"reason": "redirect", "new_jira_key": "DIG-999"},
     )
     with pytest.raises(FileExistsError):
         applier._apply_typed(delete_mut, repo_root=fixture_repo)
