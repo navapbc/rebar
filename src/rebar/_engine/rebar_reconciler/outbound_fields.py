@@ -340,6 +340,8 @@ def _diff_fields(
     prev_jira_fields: dict[str, Any] | None = None,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
+    local_id: str = "",
+    baseline_consumer_swap: bool = False,
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
 
@@ -367,6 +369,18 @@ def _diff_fields(
     """
     verbose = _rebar_env("RECONCILER_VERBOSE", "0") == "1"
     ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
+
+    # Convergence rollout Phase-3 (story a118): the arbitration ANCESTOR used by
+    # direction-suppression (Site A) and both-sides-conflict detection (Site B).
+    # Flag OFF (default): the prev_snapshot-derived ``prev_jira_fields`` — the swap
+    # is byte-for-byte a no-op. Flag ON: the per-binding baseline (get_baseline),
+    # which is JIRA-keyed with the same shape (_BASELINE_FIELDS). A ``None`` baseline
+    # (no ancestor recorded) is the documented local-wins signal (ADR 0026 §2); a
+    # corrupt bindings.json has already failed the pass CLOSED at load, so no new
+    # corrupt-detection branch is needed here.
+    arbitration_prev = prev_jira_fields
+    if baseline_consumer_swap and binding_store is not None and local_id:
+        arbitration_prev = binding_store.get_baseline(local_id)
 
     local_mapped = _map_local_to_jira_fields(
         ticket,
@@ -403,7 +417,7 @@ def _diff_fields(
         # (local != prev), fall through to the normal local-wins emit. Degrades to
         # local-wins when there is no prev entry, so it never regresses.
         if field_name in _INBOUND_MIRRORED_FIELDS and _local_matches_prev(
-            field_name, local_val, prev_jira_fields or {}
+            field_name, local_val, arbitration_prev or {}
         ):
             continue
         if field_name == "assignee":
@@ -516,12 +530,17 @@ def _diff_fields(
     # a713: a both-sides conflict — local AND Jira both diverged from the last-synced
     # baseline — means local-wins is silently overwriting a concurrent Jira edit.
     # Record it for an observable conflict signal; local-wins itself is unchanged.
-    if conflict_sink is not None and prev_jira_fields and jira_key:
+    # Story a118: the ENTIRE Site-B use of the ancestor swaps to arbitration_prev
+    # under the flag — the outer truthiness guard AND both matcher args. Flag OFF:
+    # arbitration_prev IS prev_jira_fields (identical). A None/{} baseline makes the
+    # outer guard falsy (skip conflict detection) — correct local-wins (no ancestor
+    # → no concurrent-edit conflict to record).
+    if conflict_sink is not None and arbitration_prev and jira_key:
         for fname in changed:
             if (
                 fname in _INBOUND_MIRRORED_FIELDS
-                and not _local_matches_prev(fname, local_mapped.get(fname), prev_jira_fields)
-                and not _jira_matches_prev(fname, jira_fields, prev_jira_fields)
+                and not _local_matches_prev(fname, local_mapped.get(fname), arbitration_prev)
+                and not _jira_matches_prev(fname, jira_fields, arbitration_prev)
             ):
                 conflict_sink.append((jira_key, fname))
     return changed

@@ -121,3 +121,17 @@ def test_shadow_never_touches_the_live_consumer(tmp_path: Path) -> None:
     prev_before = dict(prev["REB-1"])
     run(bs, {"REB-1": {"summary": "curr"}}, prev, sync_logger=None)
     assert prev["REB-1"] == prev_before  # prev_snapshot untouched
+
+
+def test_recon_baseline_shadow_check_line_emitted_to_stderr(tmp_path: Path, capsys) -> None:
+    """Story a118: the shadow check prints a `RECON: baseline_shadow_check divergent=N`
+    line to STDERR (even with no sync_logger) so the >=10-clean-pass rollout streak is
+    derivable from the GHA reconcile-bridge run logs."""
+    bs = _store(tmp_path, {"loc-1": "REB-1"})
+    bs.set_baseline("loc-1", {"summary": "OLD", "status": {"name": "To Do"}})
+    curr = {"REB-1": {"summary": "NEW", "status": {"name": "To Do"}}}
+    prev = {"REB-1": {"summary": "DIFFERENT", "status": {"name": "To Do"}}}
+    rec = run(bs, curr, prev, sync_logger=None)
+    err = capsys.readouterr().err
+    assert f"RECON: baseline_shadow_check divergent={rec['divergent']}" in err
+    assert "equal=" in err and "seeded=" in err

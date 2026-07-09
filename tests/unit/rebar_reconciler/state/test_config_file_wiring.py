@@ -198,3 +198,22 @@ def test_show_config_provenance(tmp_path: Path, monkeypatch) -> None:
     config, sources, _ = cfg.resolve_with_sources(root=p)
     assert config.reconciler.jira_cli_timeout == 30
     assert sources["reconciler"]["jira_cli_timeout"] == "env"  # env beat the project file
+
+
+# ── baseline_consumer_swap (story a118) — default + rebar.toml round-trip ──────
+def test_baseline_consumer_swap_default_false(tmp_path: Path) -> None:
+    cfg.reset_config_cache()
+    assert cfg.load_config(root=_proj(tmp_path)).reconciler.baseline_consumer_swap is False
+
+
+def test_baseline_consumer_swap_rebar_toml_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves the `_SECTIONS["reconciler"]` coercer entry exists — without it the TOML
+    key is silently dropped and the value stays False."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[reconciler]\nbaseline_consumer_swap = true\n", encoding="utf-8")
+    monkeypatch.setenv("REBAR_ROOT", str(p))
+    cfg.reset_config_cache()
+    assert cfg.load_config(root=p).reconciler.baseline_consumer_swap is True
+    cfg.reset_config_cache()

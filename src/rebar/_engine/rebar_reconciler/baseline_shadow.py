@@ -23,6 +23,7 @@ It is a no-op unless ``reconciler.baseline_dual_write`` is enabled.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -96,4 +97,14 @@ def run_dual_write_shadow(
                 divergent=divergent,
                 keys=divergent_keys[:20],
             )
+    # Story a118: the SyncLogger writes only the gitignored, ephemeral
+    # bridge_state/sync-log; emit a durable RECON: line to STDERR (the same stream
+    # as applier.py's RECON: diagnostics) so the >=10-clean-shadow-pass rollout
+    # streak is derivable from the GHA reconcile-bridge run logs
+    # (`gh run view <id> --log | grep baseline_shadow_check`).
+    print(  # noqa: T201 — operator-facing rollout diagnostic on the RECON: stderr stream
+        f"RECON: baseline_shadow_check divergent={divergent} equal={equal} seeded={seeded}",
+        file=sys.stderr,
+        flush=True,
+    )
     return record

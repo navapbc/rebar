@@ -314,6 +314,47 @@ a one-way projection — not by writing a false parent.)
 
 ---
 
+## Convergence rollout: the baseline consumer swap (`reconciler.baseline_consumer_swap`)
+
+The outbound field differ arbitrates local⇄Jira edits against an **ancestor**. The
+rollout migrates that ancestor from `prev_snapshot` to the durable per-binding
+**baseline** in two config-gated phases:
+
+- **Phase 1 — shadow (`reconciler.baseline_dual_write = true`).** The baseline is
+  written alongside `prev_snapshot` but **not consumed**. Each pass emits a
+  `RECON: baseline_shadow_check divergent=<N> equal=<M> seeded=<S>` line to **stderr**
+  (captured in the GitHub Actions *Reconcile Bridge* run logs) and, on divergence, a
+  `baseline_shadow_divergence` bridge alert. `divergent == 0` means the baseline would
+  arbitrate identically to `prev_snapshot`.
+- **Phase 3 — consumer swap (`reconciler.baseline_consumer_swap = true`).** The differ
+  **consumes** `get_baseline(local_id)` in place of `prev_snapshot` at both the
+  direction-suppression and both-sides-conflict sites. A `None` baseline is the
+  documented local-wins signal (ADR 0026 §2); a corrupt `bindings.json` has already
+  failed the pass **closed at load**, so the swap adds no new failure mode.
+
+**Flip procedure.** Enable `baseline_dual_write` first and confirm **≥10 consecutive
+clean shadow passes** — derive the streak from the durable GHA run logs:
+
+```sh
+gh run list --workflow=reconcile-bridge.yml --limit 12 --json databaseId,conclusion
+gh run view <databaseId> --log | grep 'baseline_shadow_check'   # divergent must be 0
+```
+
+Any `divergent > 0`, a failed/absent run, or a gap > 2× the schedule interval **resets**
+the streak. Then set `baseline_consumer_swap = true` and run at least one live pass with
+the flag ON, confirming it stays clean.
+
+**Rollback (one line, no deploy):** set `baseline_consumer_swap = false` in `rebar.toml`
+— the differ reverts byte-for-byte to the `prev_snapshot` path on the next pass.
+
+> **Why there is no separate "classifier-vs-legacy" divergence alert.** `classify()`
+> runs only on off-snapshot pairs (binding walk); the field differ owns active bindings,
+> so no production path has both a `classify()` decision and the legacy action for the
+> *same* binding to compare without a forbidden parallel engine. The **`baseline_shadow_check`**
+> shadow gate above IS the rollout's divergence signal — no additional alert is built.
+
+---
+
 ## Rollback / disable
 
 - **Pause sync:** disable *Reconcile Bridge* in the Actions UI (or delete its

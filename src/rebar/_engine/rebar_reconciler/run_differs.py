@@ -450,6 +450,14 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # deduped bridge alerts from them below — behavior is otherwise unchanged.
     conflict_sink: list[tuple[str, str]] = []
     dropped_field_sink: list[tuple[str, str]] = []
+    # Story a118: read the Phase-3 consumer-swap flag ONCE per pass here (mirrors
+    # the max_acting_fraction read below); fail-safe OFF if config is unreadable.
+    try:
+        from rebar.config import ConfigError, load_config
+
+        _consumer_swap = bool(load_config().reconciler.baseline_consumer_swap)
+    except ConfigError:
+        _consumer_swap = False
     outbound_raw, absent_alive_fields = outbound_differ_mod.compute_outbound_mutations(
         local_tickets,
         curr_snapshot,
@@ -462,6 +470,7 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
             prev_snapshot=prev_snapshot,
             conflict_sink=conflict_sink,
             dropped_field_sink=dropped_field_sink,
+            baseline_consumer_swap=_consumer_swap,
         ),
     )
     _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
@@ -693,7 +702,13 @@ def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None
         breaker_allowed=bool(walk.breaker.allowed) if walk.breaker else True,
         refused=walk.refused,
     )
-    sync_logger.log("binding_walk_census", **walk.census)
+    # Story a118 census expand-contract: `walk.census` IS a `classify.census()`
+    # record (binding_walk.py:239), so it is emitted under the canonical
+    # `decision_census` event name (classify.py:351) — the documented-but-never-
+    # emitted census now goes live. No consumer read the old `binding_walk_census`
+    # key (grep-verified), so this is a direct rename. ROLLBACK (one line): revert
+    # this event name to "binding_walk_census".
+    sync_logger.log("decision_census", **walk.census)
     if walk.refused:
         sync_logger.log(
             "binding_walk_breaker_refused",

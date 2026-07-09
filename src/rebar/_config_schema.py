@@ -353,6 +353,10 @@ class ReconcilerConfig:
     # Convergence rollout (task 7d23): dual-write the per-binding baseline
     # alongside prev_snapshot WITHOUT consuming it, for the shadow phase.
     baseline_dual_write: bool = False
+    # Convergence rollout Phase-3 (story a118): CONSUME the per-binding baseline
+    # (get_baseline) as the arbitration ancestor in the outbound field differ,
+    # in place of prev_snapshot. Flipped ON only after >=10 clean shadow passes.
+    baseline_consumer_swap: bool = False
 
 
 @dataclass
@@ -462,6 +466,7 @@ _SECTIONS: dict[str, dict] = {
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
         "max_acting_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "baseline_dual_write": lambda v, k: _as_bool(v, k),
+        "baseline_consumer_swap": lambda v, k: _as_bool(v, k),
     },
     "jira": {
         "url": lambda v, k: _as_str(v, k),

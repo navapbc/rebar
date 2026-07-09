@@ -271,6 +271,10 @@ class OutboundDiffConfig:
     # orchestrator (run_differs) emits deduped bridge alerts from them post-pass.
     conflict_sink: list[tuple[str, str]] | None = None
     dropped_field_sink: list[tuple[str, str]] | None = None
+    # Convergence rollout Phase-3 (story a118). When True, _diff_fields consumes
+    # the per-binding baseline (BindingStore.get_baseline(local_id)) as the
+    # arbitration ancestor in place of prev_snapshot. Off by default end-to-end.
+    baseline_consumer_swap: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +534,7 @@ def compute_outbound_mutations(
                 absent_alive_fields,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
+                baseline_consumer_swap=config.baseline_consumer_swap,
             )
 
     return mutations, absent_alive_fields
@@ -634,6 +639,7 @@ def _compute_outbound_update_mutation(
     *,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
+    baseline_consumer_swap: bool = False,
 ) -> None:
     """Phase: for a bound ticket, resolve jira_fields (including the bounded
     bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
@@ -706,6 +712,8 @@ def _compute_outbound_update_mutation(
         prev_jira_fields=(prev_snapshot or {}).get(jira_key),
         conflict_sink=conflict_sink,
         dropped_field_sink=dropped_field_sink,
+        local_id=local_id,
+        baseline_consumer_swap=baseline_consumer_swap,
     )
     # Comments use the resolved snapshot (the one-key overlay for the
     # bounded-GET path) so the GET's native fields.comment.comments is
