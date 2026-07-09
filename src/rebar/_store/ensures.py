@@ -31,7 +31,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from rebar._store import fsutil
 from rebar._store.lock import LockTimeout, canonical_tracker, write_lock
@@ -121,18 +121,32 @@ def _write_applied(tracker: str, ids: list[str]) -> None:
         logger.warning("run_ensures: could not write %s: %s", APPLIED_MARKER, exc)
 
 
-def run_ensures(tracker: str | os.PathLike) -> list[EnsureOutcome]:
+def run_ensures(
+    tracker: str | os.PathLike,
+    *,
+    timeout: int | None = None,
+    attempts: int | None = None,
+) -> list[EnsureOutcome]:
     """Run EVERY ensure unit unconditionally under the store write lock and rewrite
     ``.ensure-applied`` with the non-failed ids. Returns the per-unit outcomes.
 
     Never raises: a unit that raises is caught (skip-and-continue → ``failed`` and
     excluded from the marker); a write-lock acquisition failure is logged and
     treated like a whole-sweep no-op (init/boot never abort on ensure trouble).
+
+    ``timeout``/``attempts`` bound the write-lock acquisition; ``None`` keeps
+    ``write_lock``'s defaults. A caller that must not block (e.g. MCP boot) passes a
+    SHORT budget so a contended lock skips the sweep rather than delaying it.
     """
     tracker = canonical_tracker(tracker)
+    lock_kwargs: dict[str, Any] = {}
+    if timeout is not None:
+        lock_kwargs["timeout"] = timeout
+    if attempts is not None:
+        lock_kwargs["attempts"] = attempts
     outcomes: list[EnsureOutcome] = []
     try:
-        with write_lock(tracker):
+        with write_lock(tracker, **lock_kwargs):
             reg = _registry()
             for uid in REGISTRY_IDS:
                 fn = reg[uid]
