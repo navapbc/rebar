@@ -14,7 +14,8 @@ that keeps both parents), never by a reset that orphans local commits. So:
     ``tickets`` ref ⇒ stock ``git gc`` is safe by construction (it can only ever
     collect truly unreachable objects).
 
-This is why rebar no longer forces ``gc.auto=0`` (see ``init._migrate_gc_config``)
+This is why rebar no longer forces ``gc.auto=0`` (see the ``gc-config`` ensure unit
+``init._gc_config_unit``, run via ``rebar._store.ensures.run_ensures``)
 and why the reflog is no longer load-bearing. UUID-named event files never collide
 on merge; the only shared mutable root file (``.bridge_state/*``) resolves via the
 tickets-branch ``.gitattributes`` ``merge=ours`` (it is per-pass
