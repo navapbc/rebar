@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests -k \"ensure or pending_hint or fsck\" -q","dd_id":"DD1","dd_text":"all invariant tests green"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783571838286805001,"uuid":"bde0d2e7-a6ac-440c-b6d3-182cda1e848a"}
