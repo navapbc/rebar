@@ -281,9 +281,16 @@ class BindingStore:
             # Direct confirm without prior pending — allowed for recovery
             entry = {"created_at": now}
             self._data["bindings"][local_id] = entry
+        # Read the OLD key BEFORE overwriting so a rebind (e.g. hard-delete ->
+        # re-create binds local_id to a NEW jira_key) drops the stale reverse entry
+        # in the SAME save — otherwise reverse[old_key] dangles at this local_id
+        # forever (c244; there is no dedicated rebind method, only unbind cleaned it).
+        old_key = entry.get("jira_key")
         entry["jira_key"] = jira_key
         entry["state"] = "confirmed"
         entry["updated_at"] = now
+        if old_key and old_key != jira_key:
+            self._data["reverse"].pop(old_key, None)
         # Maintain reverse index
         self._data["reverse"][jira_key] = local_id
 

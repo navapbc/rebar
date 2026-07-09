@@ -59,3 +59,13 @@ Three lessons encode this:
 - The circuit breaker (refuse a pass mutating/retiring > N% of bindings) is the
   defense-in-depth backstop if this discrimination is ever violated by a fetch/JQL
   regression.
+- **Confirmed hard-delete of a still-locally-present ticket now re-creates it (c244).**
+  A proven 404 (`ARCHIVED_OR_MOVED`) preserves the local content, and — because the local
+  ticket is authoritative and still present — the reconciler re-creates the Jira issue in
+  the **same pass**: `_apply_inbound_delete` emits a `create_after_hard_delete` follow-on,
+  and `applier.apply()` reconstructs the CREATE fields from the local ticket
+  (`_map_local_to_jira_fields`) and injects a standard outbound CREATE into the pass's
+  batch, so it flows through `create_one` (JQL dedup makes a retry idempotent; REST-budget
+  exhaustion defers to the next pass). This closes the former `epic-3e36` gap where the
+  follow-on was built but never consumed. A subsequent `bind_confirm` to the fresh key
+  drops the stale reverse-index entry for the old (deleted) key in the same save.

@@ -275,3 +275,29 @@ class TestLoadBindingStore:
         bs = load_binding_store(repo_root)
         assert isinstance(bs, BindingStore)
         assert not bs.is_bound("anything")
+
+
+class TestRebindStaleReverse:
+    def test_bind_confirm_rebind_drops_stale_reverse_key(self, store: BindingStore) -> None:
+        """c244: rebinding a local_id to a NEW jira_key must drop the OLD key's reverse
+        entry in the same save, else reverse[old_key] dangles at the local_id forever
+        (e.g. after a Jira hard-delete -> outbound re-create rebinds to a fresh key)."""
+        local_id = "reb-rebind-1"
+        store.bind_confirm(local_id, "OLD-1")
+        assert store.get_local_id("OLD-1") == local_id
+        assert store.get_jira_key(local_id) == "OLD-1"
+
+        # Rebind to a new key (the hard-delete re-create path).
+        store.bind_confirm(local_id, "NEW-2")
+
+        assert store.get_jira_key(local_id) == "NEW-2"
+        assert store.get_local_id("NEW-2") == local_id
+        assert store.get_local_id("OLD-1") is None, "stale reverse[OLD-1] must be dropped"
+
+    def test_bind_confirm_same_key_is_idempotent(self, store: BindingStore) -> None:
+        """Re-confirming the SAME key must not remove its own reverse entry."""
+        local_id = "reb-rebind-2"
+        store.bind_confirm(local_id, "SAME-9")
+        store.bind_confirm(local_id, "SAME-9")
+        assert store.get_local_id("SAME-9") == local_id
+        assert store.get_jira_key(local_id) == "SAME-9"
