@@ -17,9 +17,8 @@ from rebar._config_schema import _RESERVED_SECTIONS as _RESERVED_SECTIONS
 from rebar._config_schema import _SECTION_CLASSES as _SECTION_CLASSES
 
 # The typed config SCHEMA (dataclasses + coercion + section tables) lives in the
-# sibling module rebar._config_schema (a pure structural split). Import the names
-# config.py uses, then re-export every other moved name so `from rebar.config
-# import X` keeps working for the whole public API (config is imported tree-wide).
+# sibling module rebar._config_schema. Import the names config.py uses, then re-export
+# every other moved name so `from rebar.config import X` keeps working (public API).
 from rebar._config_schema import (
     _SECTIONS,
     Config,
@@ -29,6 +28,7 @@ from rebar._config_schema import (
     merge_sparse,
 )
 from rebar._config_schema import CompactConfig as CompactConfig
+from rebar._config_schema import EnsureConfig as EnsureConfig
 from rebar._config_schema import JiraConfig as JiraConfig
 from rebar._config_schema import McpConfig as McpConfig
 from rebar._config_schema import ReconcilerConfig as ReconcilerConfig

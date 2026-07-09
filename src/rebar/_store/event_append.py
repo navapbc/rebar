@@ -187,6 +187,17 @@ def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, 
     from rebar._store import push
 
     push.push_tickets_branch(_lock.canonical_tracker(tracker))
+    # Best-effort, fail-silent write-path nudge that an existing store is behind the
+    # idempotent ensure-registry (epic odd-vortex-elbow / WS2). This is the single
+    # choke point through which _seam.append_event (comment/tag/edit/link/set_*/sign)
+    # and the composer create/edit/revert path funnel; the nudge NEVER affects the
+    # (already-committed) write. Lazy import so the read path stays untouched.
+    try:
+        from rebar._store import ensures as _ensures
+
+        _ensures.maybe_emit_pending_hint(_lock.canonical_tracker(tracker))
+    except Exception:  # noqa: BLE001 — the hint must never fail a committed write
+        pass
     return rc
 
 

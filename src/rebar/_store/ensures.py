@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -39,6 +40,10 @@ logger = logging.getLogger("rebar")
 
 # Git-ignored marker (JSON array of non-failed unit ids). Absent/garbage → empty set.
 APPLIED_MARKER = ".ensure-applied"
+
+# Git-ignored marker (WS2): a single last-hinted unix timestamp that rate-limits the
+# write-path pending nudge. Absent/garbage → "never hinted".
+HINTED_MARKER = ".ensure-hinted"
 
 EnsureStatus = Literal["ok", "changed", "failed"]
 
@@ -142,3 +147,76 @@ def run_ensures(tracker: str | os.PathLike) -> list[EnsureOutcome]:
     except Exception as exc:  # noqa: BLE001 — an ensure sweep must never abort its caller
         logger.warning("run_ensures: unexpected error, skipping sweep: %s", exc)
     return outcomes
+
+
+# ── WS2: write-path pending-hint (Rails CheckPending, hardened) ──────────────
+#
+# An existing store must learn it is behind the registry WITHOUT hot-path cost. On
+# a covered write (see event_append.write_and_push) we compute the pending unit set
+# ONCE per process per store (cached below), and — only when something is pending —
+# emit a single, rate-limited WARNING that names the pending units and points at
+# `rebar fsck --repair`. It is best-effort and fail-silent: a write must NEVER fail
+# because of it. A converged store caches the empty set and does zero further reads.
+
+# Cache of pending id sets, keyed by canonical tracker path (registry is static per
+# process, so `.ensure-applied` is read at most once per store per process).
+_pending_cache: dict[str, frozenset[str]] = {}
+
+
+def _reset_pending_cache() -> None:
+    """Clear the per-process pending cache (test hook; also lets a fresh sweep's
+    result be re-observed within one process)."""
+    _pending_cache.clear()
+
+
+def _pending_ids(tracker: str) -> frozenset[str]:
+    """The registry ids NOT yet in ``.ensure-applied`` for *tracker*, computed once
+    per process per store and cached (so a converged store adds ≤1 marker read)."""
+    key = canonical_tracker(tracker)
+    cached = _pending_cache.get(key)
+    if cached is None:
+        cached = registry_ids() - applied_ids(key)
+        _pending_cache[key] = cached
+    return cached
+
+
+def _read_hinted(tracker: str) -> float | None:
+    """Parse ``.ensure-hinted`` → last-hinted unix timestamp, or ``None`` when the
+    marker is absent/unparseable ("never hinted", symmetric with applied_ids)."""
+    try:
+        return float(open(os.path.join(tracker, HINTED_MARKER), encoding="utf-8").read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
+    """Best-effort, fail-silent write-path nudge: if this store has pending ensure
+    units and the last hint is older than the configured interval, log ONE WARNING
+    naming the pending units and pointing at ``rebar fsck --repair``, then stamp
+    ``.ensure-hinted``. Swallows ALL of its own exceptions (incl. lazy-import
+    failures) so a committed write never fails because of it."""
+    try:
+        pending = _pending_ids(str(tracker))
+        if not pending:
+            return
+        from rebar import config as _config
+
+        cfg = _config.load_config().ensure
+        if not cfg.hint_enabled:
+            return
+        real = canonical_tracker(tracker)
+        last = _read_hinted(real)
+        now = time.time()
+        if last is not None and (now - last) < cfg.hint_interval_secs:
+            return
+        try:
+            fsutil.atomic_write(os.path.join(real, HINTED_MARKER), f"{now:.0f}\n")
+        except OSError:
+            pass  # best-effort stamp — still surface the hint
+        logger.warning(
+            "rebar: %d ensure unit(s) pending (%s) — run `rebar fsck --repair` to converge",
+            len(pending),
+            ", ".join(sorted(pending)),
+        )
+    except Exception:  # noqa: BLE001 — fail-silent: the hint must NEVER fail a write
+        logger.debug("pending-hint suppressed", exc_info=True)

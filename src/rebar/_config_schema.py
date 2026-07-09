@@ -372,6 +372,16 @@ class ScratchConfig:
 
 
 @dataclass
+class EnsureConfig:
+    # Write-path pending-hint (epic odd-vortex-elbow / WS2). When an existing store is
+    # behind the idempotent ensure-registry, a covered write emits a best-effort,
+    # rate-limited WARNING nudging `rebar fsck --repair`. These tune it; both are
+    # auto-derived env vars (REBAR_ENSURE_HINT_INTERVAL_SECS / REBAR_ENSURE_HINT_ENABLED).
+    hint_interval_secs: int = 86400  # min seconds between hints (rate-limit; 24h)
+    hint_enabled: bool = True  # kill-switch: false silences the nudge entirely
+
+
+@dataclass
 class TrackerConfig:
     # The ticket event-store worktree/symlink dir (repo-root-relative name by default;
     # an absolute path relocates the store — EV-3b) and the orphan branch the event log
@@ -395,6 +405,7 @@ class Config:
     jira: JiraConfig = field(default_factory=JiraConfig)
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
+    ensure: EnsureConfig = field(default_factory=EnsureConfig)
 
     @classmethod
     def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
@@ -419,6 +430,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "jira": JiraConfig,
     "scratch": ScratchConfig,
     "tracker": TrackerConfig,
+    "ensure": EnsureConfig,
 }
 
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
@@ -477,6 +489,10 @@ _SECTIONS: dict[str, dict] = {
     "tracker": {
         "dir": lambda v, k: _as_tracker_dir(v, k),
         "branch": lambda v, k: _as_git_ref(v, k),
+    },
+    "ensure": {
+        "hint_interval_secs": lambda v, k: _as_int(v, k, minimum=0),
+        "hint_enabled": lambda v, k: _as_bool(v, k),
     },
 }
 
