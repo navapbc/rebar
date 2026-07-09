@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"python -m pytest tests -k \"ensures or init_core\" -q","dd_id":"DD1","dd_text":"registry idempotent + init wired"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783571829888507001,"uuid":"a886ebb2-0881-4247-bf52-a43be551add7"}
