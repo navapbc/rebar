@@ -293,6 +293,24 @@ def main() -> None:
     from rebar._logging import install_stderr_handler
 
     install_stderr_handler("rebar")
+
+    # Best-effort ensure-sweep at boot (epic odd-vortex-elbow / WS3): converge a store
+    # that is behind the idempotent registry. run_ensures acquires + RELEASES its own
+    # store write lock internally (a SHORT budget so a contended lock skips rather
+    # than delays boot) — it is NOT held across build_server().run(), which runs under
+    # no lock. Log-and-continue: a missing store / import / sweep error never aborts boot.
+    try:
+        import os
+
+        from rebar import config as _config
+        from rebar._store import ensures as _ensures
+
+        _tracker = str(_config.tracker_dir())
+        if os.path.isdir(_tracker):
+            _ensures.run_ensures(_tracker, timeout=5, attempts=1)
+    except Exception:  # noqa: BLE001 — boot must never abort on the ensure sweep
+        logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
+
     build_server().run()
 
 
