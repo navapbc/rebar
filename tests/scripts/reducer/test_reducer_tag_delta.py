@@ -195,11 +195,13 @@ def test_downgraded_clone_preserves_and_ignores(
     We faithfully simulate the v2 clone by masking the dispatch-comparison constant
     and removing TAG_DELTA from KNOWN_EVENT_TYPES, so the event falls through to the
     generic unknown-type path and the tag mutation is invisible (no error)."""
-    from rebar.reducer import _processors
+    # The dispatch gate (KNOWN_EVENT_TYPES / TAG_DELTA) lives in the replay engine module
+    # (_replay), extracted from _processors along the processors/engine seam.
+    from rebar.reducer import _replay
 
-    masked_known = frozenset(t for t in _processors.KNOWN_EVENT_TYPES if t != "TAG_DELTA")
-    monkeypatch.setattr(_processors, "TAG_DELTA", "TAG_DELTA__masked_for_test")
-    monkeypatch.setattr(_processors, "KNOWN_EVENT_TYPES", masked_known)
+    masked_known = frozenset(t for t in _replay.KNOWN_EVENT_TYPES if t != "TAG_DELTA")
+    monkeypatch.setattr(_replay, "TAG_DELTA", "TAG_DELTA__masked_for_test")
+    monkeypatch.setattr(_replay, "KNOWN_EVENT_TYPES", masked_known)
 
     d = _ticket_dir(tmp_path, "td-downgrade")
     _create(d, tags=["base"])

@@ -14,7 +14,7 @@ Public re-exports:
     process_unlink, process_bridge_alert,
     process_revert, process_edit,
     process_archived, process_snapshot,
-    scan_for_latest_snapshot              — from _processors
+    scan_for_latest_snapshot, replay_events     — from _replay (the two-pass engine)
     to_llm                                — from llm_format
 """
 
@@ -38,9 +38,8 @@ from ._processors import (
     process_snapshot,
     process_status,
     process_unlink,
-    replay_events,
-    scan_for_latest_snapshot,
 )
+from ._replay import replay_events, scan_for_latest_snapshot
 from ._sort import event_sort_key
 from ._state import make_error_dict, make_initial_state
 from ._version import KNOWN_EVENT_TYPES, SCHEMA_VERSION

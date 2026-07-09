@@ -13,7 +13,7 @@ import json
 import os
 
 from ._cache import is_active_event, prepare_event_files, write_cache
-from ._processors import replay_events
+from ._replay import replay_events
 from ._state import make_error_dict, make_initial_state
 from .marker import remove_marker
 
