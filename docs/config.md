@@ -151,6 +151,13 @@ tracker.branch = "tickets"           # env REBAR_TRACKER_BRANCH; the orphan bran
                                       # on (+ its origin/<branch> ref). Validated as a git ref:
                                       # rejects spaces, `..`, leading `-`, ~^:?*[\ / control, trailing
                                       # `/` or `.lock`.
+
+# idempotent ensure-registry pending-hint (epic odd-vortex-elbow; see docs/migrations.md)
+ensure.hint_interval_secs = 86400    # min seconds between write-path "store is behind the ensure
+                                      # registry — run `rebar fsck --repair`" nudges, per store, per
+                                      # process (rate-limit; env REBAR_ENSURE_HINT_INTERVAL_SECS). Min 0.
+ensure.hint_enabled       = true     # kill-switch: false silences the nudge entirely
+                                      # (env REBAR_ENSURE_HINT_ENABLED)
 ```
 
 > **Resolution change (tracker.dir).** `tracker_dir()` (and the new `tickets_branch()`) now
