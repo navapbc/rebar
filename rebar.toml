@@ -54,3 +54,8 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # divergent=0 passes gate the Phase-3 `baseline_consumer_swap` flip. See
 # docs/jira-sync-setup.md "Convergence rollout: the baseline consumer swap".
 baseline_dual_write = true
+# Convergence rollout Phase 3 (story a118): CONSUME the per-binding baseline as the
+# outbound field-differ's arbitration ancestor, replacing prev_snapshot. Flipped ON
+# after 30 consecutive clean (divergent=0) shadow passes proved the baseline
+# arbitrates identically (GHA reconcile-bridge runs 19:33Z-23:33Z 2026-07-09).
+baseline_consumer_swap = true
