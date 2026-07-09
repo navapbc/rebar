@@ -23,6 +23,7 @@ import importlib.util
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -150,6 +151,41 @@ def acquire_pass_lock(pass_id: str, repo_root: Path) -> str | None:
         raise ReconcileLockError(
             f"pass lock {ref_lock.LOCK_REF} already held (pass_id={pass_id!r}): {exc}"
         ) from exc
+
+
+def steal_pass_lock(pass_id: str, repo_root: Path, *, sleep_fn=time.sleep) -> str | None:
+    """Attempt to steal an EXPIRED pass lock, returning the new oid on success.
+
+    Delegates to :func:`_ref_lock.steal` — the sanctioned skew-proof expiry
+    primitive: it reads the ref, sleeps one ``lease_secs``, and re-checks whether
+    the holder made ``(oid, fence)`` progress. ``_ref_lock`` deliberately does NOT
+    trust ``heartbeat_ns`` wall-clock for expiry, so there is no ``pass_lock_is_expired``
+    helper; ``steal()`` IS the expiry test.
+
+    Returns:
+        - a NEW oid — the lease was stale and we stole it (holder made no progress
+          over one lease window); thread it into the heartbeat like ``acquire``'s oid.
+        - ``None`` — the ref is free (holder released during our sleep) OR the holder
+          is live (made progress); the caller re-reads to discriminate.
+
+    Fail-CLOSED: any error from ``steal()`` (git transport/permission) is caught,
+    logged, and reported as ``None`` (not stolen) rather than crashing the pass — the
+    caller then falls through to exit-3.
+
+    ``sleep_fn`` is injected in tests to avoid the real one-lease-length sleep.
+    """
+    ref_lock = _load_ref_lock()
+    try:
+        return ref_lock.steal(
+            repo_root,
+            ref_lock.LOCK_REF,
+            holder=pass_id,
+            remote=_lock_remote(repo_root),
+            sleep_fn=sleep_fn,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-closed: treat a steal error as "not stolen"
+        logging.warning("steal_pass_lock: steal attempt failed (%s) — treating as not stolen", exc)
+        return None
 
 
 def renew_pass_lock(pass_id: str, repo_root: Path, oid: str) -> str:

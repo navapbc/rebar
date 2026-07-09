@@ -65,6 +65,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_PREVIEW_TIMEOUT` | `src/rebar/llm/workflow/criterion_preview.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
+| `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/__main__.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/outbound_fields.py` |  |
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_commands/txn.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py`, `src/rebar/config.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
@@ -80,7 +81,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_70 variables._
+_71 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -90,8 +91,8 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_cli/_jira_onboard.py:185` — `os.environ.get(<non-literal>)`
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_handlers.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/apply_inbound.py:54` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/binding_store.py:69` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/apply_inbound.py:57` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/binding_store.py:92` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/inbound_translate.py:40` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:69` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:94` — `os.environ.get(<non-literal>)`

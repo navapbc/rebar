@@ -524,6 +524,8 @@ class _PassContext:
     curr_snapshot: dict = field(default_factory=dict)
     # populated by run_differs (sibling run_differs.py)
     mutations: list = field(default_factory=list)
+    # pending-binding recovery failures this pass (story 9622); tally-only, not a gate
+    recovery_failures: int = 0
     # populated by _apply_mutations
     unfiltered_count: int = 0
     manifest_path: Any = None
@@ -1038,12 +1040,18 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 file=sys.stderr,
             )
 
+    # Story 9622: pending-binding recovery failures (set by run_differs on ctx) are
+    # surfaced as a tally — observability-only, NOT an exit gate (recovery is
+    # best-effort/fail-open; a transient Jira search hiccup must not fail the pass).
+    recovery_failures = int(getattr(ctx, "recovery_failures", 0) or 0)
+
     sync_logger.log(
         "sync_pass_end",
         pass_id=pass_id,
         mutations_computed=len(mutations),
         mutations_applied=mutations_applied,
         mutation_failures=mutation_failures,
+        recovery_failures=recovery_failures,
     )
     sync_logger.close()
 
@@ -1052,6 +1060,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         "mutation_count": len(mutations),
         "mutations_applied": mutations_applied,
         "mutation_failures": mutation_failures,
+        "recovery_failures": recovery_failures,
         "manifest_path": str(manifest_path) if manifest_path is not None else None,
     }
     # No-write (cap-0) mode: surface the COMPUTED plan in the result so callers

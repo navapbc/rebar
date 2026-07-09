@@ -24,6 +24,26 @@ def is_not_found(exc: BaseException) -> bool:
     return http_status(exc) == HTTPStatus.NOT_FOUND
 
 
+# ADR 0036: jittered exponential backoff, capped. Mirrors the acli_subprocess
+# domain helper so the two retry floors agree on ceiling + jitter shape.
+MAX_BACKOFF_S = 60.0
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    """Parse a ``Retry-After`` header (integer-seconds form only; ADR 0036).
+
+    The rarer HTTP-date form is not honored (-> None; caller falls back to
+    jittered backoff). Jira Cloud does not guarantee the header at all.
+    """
+    if not value:
+        return None
+    try:
+        secs = float(value.strip())
+    except (TypeError, ValueError):
+        return None
+    return secs if secs >= 0 else None
+
+
 # ── the unified reconciler error taxonomy (epic 5ca8 / romp-swath-wince) ────────────────────
 # OSS-informed (requests RequestException / urllib3 HTTPError / tenacity RetryError + PEP 3134):
 # ONE package-level base in this dedicated errors module, raised + re-exported through both the

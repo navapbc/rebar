@@ -167,6 +167,49 @@ def _run_reconcile_check(repo_root: Path) -> int:
 _LEGACY_LOCK_FILES = (".reconciler-pass-lock", ".reconciler-phase-gate")
 
 
+def _lock_steal_enabled() -> bool:
+    """Whether the held-lock path may steal an expired lease (story 9622).
+
+    Kill-switch ``REBAR_RECONCILER_LOCK_STEAL`` — default ON. Only an explicit
+    falsy value (``0``/``false``/``no``/``off``/empty) reverts to the old
+    unconditional exit-3 behavior (ops back-out without a deploy).
+    """
+    return os.environ.get("REBAR_RECONCILER_LOCK_STEAL", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    )
+
+
+def _resolve_held_lock(advisory, pass_id, repo_root, *, acquire_fn):
+    """Resolve a HELD pass lock via steal (story 9622). Steal-enabled precondition.
+
+    Returns ``(exit_code, lock_oid, acquired)``:
+      - steal wins (a new oid)              -> ``(None, stolen_oid, True)``  [case 1: adopt]
+      - steal None + ref still held          -> ``(3, None, False)``          [case 2: live holder]
+      - steal None + freed + acquire wins    -> ``(None, acquired_oid, True)``[case 3a]
+      - steal None + freed + acquire loses   -> ``(3, None, False)``          [case 3b]
+
+    ``steal()`` (via ``advisory.steal_pass_lock``) IS the skew-proof expiry test —
+    a returned oid means the lease was stale. ``None`` means the holder is live OR
+    the ref freed during the steal sleep; a re-read discriminates. On the freed
+    fork we acquire normally via ``acquire_fn`` (a lost race raises
+    ``advisory.ReconcileLockError`` -> yield).
+    """
+    stolen_oid = advisory.steal_pass_lock(pass_id, repo_root)
+    if stolen_oid is not None:
+        return (None, stolen_oid, True)
+    if advisory.check_pass_lock(repo_root):
+        return (3, None, False)  # live holder made progress over our lease window
+    # freed during our steal sleep -> acquire normally (win: proceed; lose: yield).
+    try:
+        return (None, acquire_fn(), True)
+    except advisory.ReconcileLockError:
+        return (3, None, False)
+
+
 def _purge_committed_reconciler_locks(repo_root: Path) -> None:
     """Remove any legacy ``.reconciler-*`` lock files still committed on the tickets
     branch (epic dust-troth-naval / C4 migration).
@@ -496,15 +539,27 @@ def main(argv: list[str] | None = None) -> int:
     # failure logs and continues (never aborts the pass).
     _purge_committed_reconciler_locks(repo_root)
 
-    # Step 2a: pass-lock check (dd-3)
-    if advisory.check_pass_lock(repo_root):
+    # Generate pass_id ONCE, up-front — it is both the lock/steal HOLDER and is
+    # threaded into run_pass(). (Previously generated at Step 3, below the lock
+    # check; hoisted here for story 9622 so the steal attempt has a holder.) Under
+    # any sub-second clock advance a second timestamp could diverge from the lock
+    # owner — a silent hazard for post-mortems correlating locks to pass records.
+    pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+
+    # Step 2a: pass-lock check (dd-3). If held, attempt to STEAL an expired lease
+    # (story 9622) instead of unconditionally exiting 3 — a SIGKILLed pass would
+    # otherwise wedge refs/reconciler/lock until an operator hand-deleted it. Gated
+    # by REBAR_RECONCILER_LOCK_STEAL (default ON; OFF = old unconditional exit-3).
+    held = advisory.check_pass_lock(repo_root)
+    if held and not _lock_steal_enabled():
         print(
             "reconcile: refs/reconciler/lock is held — another pass in flight",
             file=sys.stderr,
         )
         return 3
 
-    # Step 2b: phase-gate check (dd-4)
+    # Step 2b: phase-gate check (dd-4) — BEFORE any lock mutation, so a gate-blocked
+    # pass never needlessly steals.
     if advisory.check_phase_gate(target_mode, repo_root):
         print(
             f"reconcile: refs/reconciler/gate blocks advancement to "
@@ -513,16 +568,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 4
 
+    # Resolve a held lock via steal (only reached when steal is enabled — the
+    # kill-switch early-returns above). Cases 1/2/3a/3b live in _resolve_held_lock;
+    # on the freed fork it acquires via acquire_fn, so the returned oid (stolen or
+    # freed-acquired) is adopted below without a second acquire.
+    pre_acquired_oid: str | None = None
+    if held:
+        exit_code, pre_acquired_oid, _ok = _resolve_held_lock(
+            advisory,
+            pass_id,
+            repo_root,
+            acquire_fn=lambda: advisory.acquire_pass_lock(pass_id, repo_root),
+        )
+        if exit_code is not None:
+            print(
+                "reconcile: refs/reconciler/lock held by a live pass — yielding",
+                file=sys.stderr,
+            )
+            return exit_code
+
     # -------------------------------------------------------------------------
-    # Step 3: acquire lock, run pass, release in finally
-    #
-    # Generate pass_id ONCE here and thread it into both the lock-holder and
-    # run_pass(). Previously run_pass generated a second timestamp, so under
-    # any sub-second clock advance the recorded reconcile pass_id could
-    # diverge from the lock owner pass_id — silent operational hazard for
-    # post-mortems correlating locks to pass records.
+    # Step 3: acquire (or adopt the stolen lock), run pass, release in finally.
     # -------------------------------------------------------------------------
-    pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     # Bug b859: acquire_pass_lock was previously OUTSIDE the try/except so
     # ReconcileLockError (or any pre-run_pass exception) escaped uncaught as
     # a raw Python traceback — invisible to operators / probes that look
@@ -535,7 +602,13 @@ def main(argv: list[str] | None = None) -> int:
     heartbeat: _Heartbeat | None = None
     abort_check = None
     try:
-        lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
+        # Adopt the stolen/freed-acquired oid (story 9622) — skip acquire_pass_lock,
+        # which would otherwise re-CAS the ref we already own — or acquire normally
+        # (the not-held path).
+        if pre_acquired_oid is not None:
+            lock_oid = pre_acquired_oid
+        else:
+            lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
         acquired = True
         # The ref-lock backend returns an oid; start the daemon heartbeat that renews
         # the lease at max(1, lease//3) and build the per-mutation abort checkpoint that

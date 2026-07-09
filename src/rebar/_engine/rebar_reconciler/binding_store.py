@@ -5,15 +5,27 @@ Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
 
 Write-ahead protocol
 --------------------
-1. bind_pending(local_id)          — mark outbound create in-flight
+1. bind_pending(local_id)          — mark outbound create in-flight; save()
 2. Jira client.create_issue(...)   — obtain DIG-NNNN
-3. Jira client.add_label / set_entity_property — plant rebar-id marker
-4. bind_confirm(local_id, jira_key) — finalise binding
-5. save()                          — atomic persist
+3. record_pending_key(local_id, jira_key) — record the key on the STILL-pending
+   entry; save() — BEFORE the rebar-id label is attached (story 9622)
+4. Jira client.add_label / set_entity_property — plant rebar-id marker
+5. bind_confirm(local_id, jira_key) — finalise binding; save()
 
-Recovery (next pass startup): recover_pending_bindings(client) searches
-Jira for the rebar-id label and either confirms or unbinds each pending
-entry.
+The step-3 keyed-pending write is what makes recovery deterministic: if the
+process is hard-killed between create (step 2) and label (step 4), the pending
+entry already carries the ``jira_key``, so recovery re-attaches the label and
+confirms WITHOUT any Jira search (no duplicate). ``jira_key`` on a ``pending``
+entry is an additive SUB-state of the ADR-0027 ``pending`` state, not a new
+enumerated state.
+
+Recovery (next pass startup): recover_pending_bindings(client, failure_sink=…):
+- keyed-pending (has ``jira_key``) → retro-attach the rebar-id label/property
+  (idempotent) and confirm, NO search.
+- keyless-pending → search Jira for the rebar-id label; confirm if found, else
+  unbind (the create never reached Jira).
+- any per-entry error → append ``{local_id, reason}`` to ``failure_sink`` and
+  continue (loud, non-fatal).
 """
 
 from __future__ import annotations
@@ -25,6 +37,17 @@ from pathlib import Path
 from typing import Any
 
 from rebar_reconciler.timeutil import utc_now_iso
+
+
+class BindingPersistError(RuntimeError):
+    """A write-ahead binding persist (``save()``) failed before ``create_issue``.
+
+    Raised by the outbound-create write-ahead path (dispatch_one) when the
+    durable pending record cannot be persisted. A durable pending record is a
+    PRECONDITION for a safe create (it is what recovery keys on), so the create
+    is skipped rather than run without one — the mutation is recorded failed and
+    an alert fires, and the pass continues with the remaining mutations.
+    """
 
 
 def _now_iso() -> str:
@@ -273,6 +296,24 @@ class BindingStore:
             "updated_at": now,
         }
 
+    def record_pending_key(self, local_id: str, jira_key: str) -> None:
+        """Record the Jira key on a STILL-pending entry (write-ahead step 3).
+
+        Called the instant ``create_issue`` returns a key, BEFORE the rebar-id
+        label is attached, so a hard crash in the create->label window leaves a
+        pending entry that recovery can confirm deterministically (no search).
+        The entry stays ``state='pending'`` — only the ``jira_key`` is filled in.
+        If no pending entry exists yet (defensive), one is created.
+        """
+        now = _now_iso()
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            entry = {"state": "pending", "created_at": now}
+            self._data["bindings"][local_id] = entry
+        entry["jira_key"] = jira_key
+        entry["state"] = "pending"
+        entry["updated_at"] = now
+
     def bind_confirm(self, local_id: str, jira_key: str) -> None:
         """Confirm binding after Jira issue creation succeeds."""
         now = _now_iso()
@@ -435,36 +476,63 @@ class BindingStore:
 
     # -- recovery ----------------------------------------------------------
 
-    def recover_pending_bindings(self, client: Any) -> int:
-        """Scan for pending bindings and attempt to recover.
+    def recover_pending_bindings(
+        self, client: Any, *, failure_sink: list[dict[str, Any]] | None = None
+    ) -> int:
+        """Scan for pending bindings and attempt to recover (story 9622).
 
         For each pending binding:
-        1. Search Jira for ``rebar-id:{local_id}`` label (canonical colon form —
-           written by applier.py outbound_create and inbound_create since the
-           identity-label write was introduced).
-        2. If not found, fall back to ``rebar-id-{local_id}`` (legacy hyphen
-           form — old issues created before the colon form was adopted may
-           carry this label; differ.py:402-414 recognises both forms).
-        3. If found via either search → confirm binding with discovered key.
-        4. If not found by either → unbind (the create never reached Jira).
 
-        Returns count of recovered bindings.
+        - **Keyed-pending** (the entry already carries a ``jira_key`` — the
+          write-ahead recorded it the instant ``create_issue`` returned, BEFORE
+          the rebar-id label was attached): the create landed and the key is
+          known, so retro-attach the rebar-id label + ``local_id`` entity
+          property (idempotent — harmless if a prior partial attach already
+          landed them) and confirm. NO Jira search — deterministic, so a hard
+          crash in the create->label window yields NO duplicate.
+        - **Keyless-pending** (no ``jira_key`` — the crash was before/during
+          create): search Jira for the ``rebar-id:{local_id}`` label (canonical
+          colon form), falling back to the legacy ``rebar-id-{local_id}`` hyphen
+          form. Confirm if found; unbind if not (the create never reached Jira).
+
+        Any per-entry error (a failed search or a failed retro-attach) is
+        appended to ``failure_sink`` as ``{local_id, reason}`` and skipped
+        (the entry stays pending for the next pass) — the recovery is loud but
+        non-fatal and a single bad entry never aborts the rest.
+
+        Returns the count of RESOLVED bindings (confirmed or unbound); failed
+        entries are NOT counted (they remain pending). ``client`` must expose
+        ``search_issues`` / ``add_label`` / ``set_entity_property``.
         """
         recovered = 0
         for local_id in list(self.pending_bindings()):
-            # Primary: canonical colon-form label (applier.py:753, 1931).
-            colon_label = f"rebar-id:{local_id}"
-            results = client.search_issues(f'labels = "{colon_label}"')
-            if not results:
-                # Legacy fallback: hyphen-form label (pre-colon-migration issues).
-                hyphen_label = f"rebar-id-{local_id}"
-                results = client.search_issues(f'labels = "{hyphen_label}"')
-            if results:
-                jira_key = results[0]["key"]
-                self.bind_confirm(local_id, jira_key)
-            else:
-                self.unbind(local_id)
-            recovered += 1
+            try:
+                entry = self._data["bindings"].get(local_id) or {}
+                keyed = entry.get("jira_key")
+                if keyed:
+                    # Deterministic: the key is known — retro-attach the identity
+                    # marker (idempotent) so future JQL dedup can find the issue,
+                    # then confirm. No search.
+                    client.add_label(keyed, f"rebar-id:{local_id}")
+                    client.set_entity_property(keyed, "local_id", local_id)
+                    self.bind_confirm(local_id, keyed)
+                    recovered += 1
+                    continue
+                # Keyless: canonical colon-form label (applier.py outbound/inbound).
+                colon_label = f"rebar-id:{local_id}"
+                results = client.search_issues(f'labels = "{colon_label}"')
+                if not results:
+                    # Legacy fallback: hyphen-form (pre-colon-migration issues).
+                    hyphen_label = f"rebar-id-{local_id}"
+                    results = client.search_issues(f'labels = "{hyphen_label}"')
+                if results:
+                    self.bind_confirm(local_id, results[0]["key"])
+                else:
+                    self.unbind(local_id)
+                recovered += 1
+            except Exception as exc:  # noqa: BLE001 — loud-but-non-fatal: record and continue
+                if failure_sink is not None:
+                    failure_sink.append({"local_id": local_id, "reason": repr(exc)})
         return recovered
 
 

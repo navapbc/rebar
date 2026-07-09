@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import subprocess
 import sys
 import time
@@ -33,10 +34,13 @@ import urllib.error
 from pathlib import Path
 
 from rebar_reconciler._errors import (
+    MAX_BACKOFF_S,
     JiraAPIError,
     RetryExhaustedError,
     http_status,
+    parse_retry_after,
 )
+from rebar_reconciler.binding_store import BindingPersistError
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)
@@ -100,9 +104,14 @@ _REST_CALL_BUDGET = 200
 def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwargs):
     """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
 
-    Retryable: TimeoutError, JiraAPIError with status 5xx, JiraAPIError with status 429.
-    Non-retryable: JiraAPIError with 4xx (except 429) — re-raised immediately.
-    On exhaustion of max_retries, raises RetryExhaustedError.
+    Retryable: TimeoutError; JiraAPIError 5xx/429; and (story 9622)
+    urllib.error.HTTPError 5xx/429 — the REST floor (acli_rest) raises raw
+    HTTPError, previously uncaught here, so the idempotent REST writes routed
+    through it got zero retry. 429 honors a present integer ``Retry-After``, else
+    ADR-0036 jittered backoff; 5xx uses that backoff.
+    Non-retryable: JiraAPIError / HTTPError 4xx (except 429) — re-raised raw
+    immediately (preserving the 404 / hierarchy-400 semantics). On exhaustion a
+    retried HTTPError re-raises raw; TimeoutError/JiraAPIError raise RetryExhaustedError.
 
     Args:
         fn:          Callable to invoke.
@@ -122,6 +131,7 @@ def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwa
     last_exc: Exception | None = None
 
     for attempt in range(max_retries + 1):
+        retry_after: float | None = None
         try:
             return fn(*args, **kwargs)
         except JiraAPIError as exc:
@@ -129,13 +139,36 @@ def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwa
             if exc.status_code != 429 and 400 <= exc.status_code < 500:
                 raise
             last_exc = exc
+        except urllib.error.HTTPError as exc:
+            # REST-transport floor (acli_rest raises raw HTTPError): 429/5xx
+            # retryable, other 4xx fail fast (raw). HTTPError.code is the status.
+            if exc.code != 429 and 400 <= exc.code < 500:
+                raise
+            last_exc = exc
+            if exc.code == 429:
+                retry_after = parse_retry_after(
+                    exc.headers.get("Retry-After") if exc.headers else None
+                )
         except TimeoutError as exc:
             last_exc = exc
 
         if attempt < max_retries:
-            delay = delays[min(attempt, len(delays) - 1)]
+            if retry_after is not None:
+                delay: float = min(MAX_BACKOFF_S, retry_after)
+            elif isinstance(last_exc, urllib.error.HTTPError):
+                # ADR 0036: 2**(attempt+1) + jitter, capped.
+                delay = min(MAX_BACKOFF_S, 2 ** (attempt + 1) + random.random())
+            else:
+                delay = delays[min(attempt, len(delays) - 1)]
             time.sleep(delay)
 
+    # On exhaustion of a retried HTTPError, re-raise the ORIGINAL raw HTTPError
+    # (story 9622): downstream catchers switch on raw HTTPError (e.g.
+    # apply_handlers.handle_update softens 404 but re-raises non-404 5xx as
+    # pass-fatal), so wrapping it would silently defeat them. TimeoutError /
+    # JiraAPIError keep the RetryExhaustedError contract.
+    if isinstance(last_exc, urllib.error.HTTPError):
+        raise last_exc
     # CHAIN the cause (PEP 3134) — the prior `raise RetryExhaustedError(str(last_exc))` dropped
     # __cause__, losing the underlying failure (epic romp-swath-wince). Populate last_exception /
     # attempts for post-hoc inspection.
@@ -238,6 +271,19 @@ def create_one(
             _ticket_data["ticket_type"] = _issuetype
         else:
             _ticket_data["ticket_type"] = "Task"
+    # Write-ahead (story 9622): persist a durable pending record BEFORE create so
+    # the create->label window is recoverable. A persist failure is item-scoped
+    # FATAL — skip the create rather than run it without the record recovery keys on.
+    if binding_store is not None and local_id:
+        try:
+            binding_store.bind_pending(local_id)
+            binding_store.save()
+        except Exception as persist_err:  # noqa: BLE001 — persist floor -> item-scoped signal
+            raise BindingPersistError(
+                f"write-ahead bind_pending persist failed for {local_id!r}; "
+                f"create skipped: {persist_err!r}"
+            ) from persist_err
+
     result = _call_with_retry(client.create_issue, _ticket_data)
 
     # Write identity markers so the issue can be re-discovered by dedup JQL
@@ -245,6 +291,18 @@ def create_one(
     jira_key = result.get("key", "") if isinstance(result, dict) else ""
     if jira_key:
         try:
+            # Write-ahead step 3: record the key on the still-pending entry and
+            # persist it BEFORE the rebar-id label, so a crash here recovers
+            # deterministically. Inside the try so a persist failure rolls back.
+            if binding_store is not None and local_id:
+                try:
+                    binding_store.record_pending_key(local_id, jira_key)
+                    binding_store.save()
+                except Exception as persist_err:  # noqa: BLE001 — persist floor: translate to the item-scoped signal
+                    raise BindingPersistError(
+                        f"write-ahead record_pending_key persist failed for "
+                        f"{local_id!r} (key {jira_key!r}): {persist_err!r}"
+                    ) from persist_err
             # Wrap identity writes in _call_with_retry so transient 5xx/429
             # absorb the same retry budget as create_issue above. Without this,
             # a single transient failure here triggers the unnecessary rollback
@@ -338,7 +396,11 @@ def create_one(
                 if not body:
                     continue
                 try:
-                    _call_with_retry(client.add_comment, jira_key, body)
+                    # Story 9622 (D2): SINGLE-attempt (no _call_with_retry) — a
+                    # comment has no cheap Jira idempotency key, so a retry could
+                    # duplicate it; a failed post falls to comment_errors and is
+                    # re-emitted by the comment differ next pass.
+                    client.add_comment(jira_key, body)
                 except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                     # Bug ea6d-e4b2-a316-45ec: non-fatal, but surface it so the
                     # batch outcome no longer reports error=None for an outbound
@@ -607,7 +669,8 @@ def _update_one_dispatch_comments(mutation, client, issue_key, comment_errors) -
                 continue
             _comments_computed += 1
             try:
-                _call_with_retry(client.add_comment, issue_key, body)
+                # Story 9622 (D2): single-attempt, no retry (see create-path note).
+                client.add_comment(issue_key, body)
                 _comments_applied += 1
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch

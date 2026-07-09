@@ -99,6 +99,43 @@ def _emit_outbound_field_alerts(
                 pass
 
 
+def _emit_recovery_failure_alerts(
+    failures: list[dict[str, Any]],
+    repo_root: Path,
+    pass_id: str,
+) -> None:
+    """Emit a deduped bridge alert per pending-binding recovery failure (story 9622).
+
+    Recovery was previously silently swallowed; a failure (a failed Jira search or
+    retro-label attach) now files an ``outbound-recovery-failure`` alert, deduped per
+    local_id over the alert_store 24h window. Fully fail-open — any error is swallowed
+    so observability can never break a reconcile pass."""
+    if not failures:
+        return
+    try:
+        alert_store = _load("rebar_reconciler.alert_store", "alert_store.py")
+    except Exception:  # noqa: BLE001 — observability only; never break the pass
+        return
+    for failure in failures:
+        local_id = failure.get("local_id", "<unknown>")
+        dedup_key = f"outbound-recovery-failure:{local_id}"
+        try:
+            if not alert_store.is_deduped(dedup_key, repo_root=repo_root):
+                alert_store.append(
+                    {
+                        "kind": "outbound-recovery-failure",
+                        "key": dedup_key,
+                        "local_id": local_id,
+                        "reason": failure.get("reason"),
+                        "pass_id": pass_id,
+                        "timestamp_ns": time.time_ns(),
+                    },
+                    repo_root=repo_root,
+                )
+        except Exception:  # noqa: BLE001 — best-effort alert write
+            pass
+
+
 def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) -> dict | None:
     """Targeted read of ONE local ticket (including archived) via ``rebar show``.
 
@@ -323,7 +360,6 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     """
     filter_local_ids = ctx.filter_local_ids
     binding_store = ctx.binding_store
-    applier = ctx.applier
     local_tickets = ctx.local_tickets
     local_label_intent_mod = ctx.local_label_intent_mod
     tracker_dir = ctx.tracker_dir
@@ -344,17 +380,42 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # the unified applier.apply() dispatch (cap enforcement, direction-aware
     # routing).
     # -------------------------------------------------------------------
+    # Build the AcliClient BEFORE recovery (story 9622) so recover_pending_bindings
+    # gets a real client exposing search_issues/add_label/set_entity_property — it
+    # was previously (mis)passed the `applier` MODULE (no search_issues), so every
+    # recovery AttributeError'd into the fail-open swallow below and NEVER ran. The
+    # same client is reused by the outbound differ's live-comment fetch further down.
+    # Built via the stable acli_subprocess floor (acli_mod_for_comments may be a test
+    # fake that only provides AcliClient). Deferred to runtime (not import) so the
+    # differ stays importable without JIRA_URL/JIRA_USER set.
+    from rebar_reconciler import acli as acli_mod_for_comments
+    from rebar_reconciler import acli_subprocess
+
+    _s = acli_subprocess.resolve_jira_settings()
+    outbound_diff_client = acli_mod_for_comments.AcliClient(
+        jira_url=_s.url, user=_s.user, api_token=_s.api_token
+    )
+
     # Filtered passes skip pending-binding recovery to avoid finalizing
     # bindings for non-test tickets (scope leak).
+    ctx.recovery_failures = 0
     if not filter_local_ids:
+        recovery_failures: list[dict[str, Any]] = []
         try:
-            binding_store.recover_pending_bindings(applier)
-        except Exception as exc:  # noqa: BLE001 — fail-open: recovery non-fatal, log and continue
-            # Recovery failure is non-fatal — log and continue.
+            binding_store.recover_pending_bindings(
+                outbound_diff_client, failure_sink=recovery_failures
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-open: a total recovery failure is non-fatal
+            recovery_failures.append({"local_id": "<all>", "reason": repr(exc)})
             print(  # noqa: T201
                 f"reconcile: binding recovery failed ({exc}), continuing",
                 file=sys.stderr,
             )
+        # LOUD (story 9622): surface per-entry failures instead of the silent
+        # swallow — a deduped bridge alert each + a nonzero recovery_failures tally.
+        if recovery_failures:
+            ctx.recovery_failures = len(recovery_failures)
+            _emit_recovery_failure_alerts(recovery_failures, repo_root, pass_id)
 
     # Bug a06c: compute per-binding label-intent map BEFORE the differ
     # runs. The outbound differ uses it to gate REMOVE emission so that
@@ -373,26 +434,9 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
         bound_local_ids, tracker_dir
     )
 
-    # Bug 4292: create an AcliClient for the outbound differ's live comment
-    # fetch path. Jira search results (used by fetcher.fetch_snapshot) do NOT
-    # include the comment field — so every live snapshot entry lacks "comment"
-    # data. Without a client, _diff_comments would fall back to jira_comments=[]
-    # and re-emit every local comment as an "add" on every pass. The client is
-    # used at most once per bound ticket with local comments (bounded call count).
-    # The client is created here (rather than inside outbound_differ.py) so the
-    # differ stays importable in test environments without JIRA_URL/JIRA_USER
-    # env vars set, and to keep the I/O-free fixture path intact.
-    # The in-package acli transport module (rebar_reconciler.acli), shared via
-    # the canonical package key so it is not double-loaded.
-    from rebar_reconciler import acli as acli_mod_for_comments
-    from rebar_reconciler import acli_subprocess
-
-    # Resolve via the stable acli_subprocess floor (acli_mod_for_comments may be a
-    # test fake that only provides AcliClient).
-    _s = acli_subprocess.resolve_jira_settings()
-    outbound_diff_client = acli_mod_for_comments.AcliClient(
-        jira_url=_s.url, user=_s.user, api_token=_s.api_token
-    )
+    # Note: `outbound_diff_client` (the AcliClient used here by the outbound
+    # differ's live-comment fetch — Bug 4292) is now built ABOVE, before
+    # pending-binding recovery, so recovery can reuse it (story 9622).
 
     # Bug 0702-3b6d-c1db-4ed3 (inbound counterpart to 1e08): the outbound differ
     # RETURNS the bound-but-absent ALIVE direct-GET results (each alive HTTP-200
