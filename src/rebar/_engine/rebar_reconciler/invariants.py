@@ -67,6 +67,7 @@ def _load_alert_store():
     spec = importlib.util.spec_from_file_location(
         "alert_store", Path(__file__).parent / "alert_store.py"
     )
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("invariants_alert_store", mod)
     spec.loader.exec_module(mod)
@@ -88,6 +89,7 @@ def _load_sink():
         spec = importlib.util.spec_from_file_location(
             "invariant_sink", Path(__file__).parent / "invariant_sink.py"
         )
+        assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
         sys.modules.setdefault("invariants_sink", mod)
         spec.loader.exec_module(mod)

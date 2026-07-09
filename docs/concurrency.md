@@ -114,11 +114,10 @@ reconciler's event-file write shares this lock via the `event_append` module
 
 **No-flock platforms.** Where util-linux `flock` is absent (default macOS),
 `_flock_stage_commit` falls back to an **atomic `mkdir` lock** (`mkdir` is atomic
-on POSIX). Its behaviour under many concurrent local agents is pinned by a CI
-stress test (`tests/scripts/test-mkdir-lock-stress.sh`, forced on Linux via the
-`REBAR_FORCE_MKDIR_LOCK=1` hook): N concurrent writers lose **zero** events and
-finish within a bounded wait — measured ~2 s for N=15, no starvation. Lost events
-or unbounded blow-up fail the test.
+on POSIX). Its behaviour under many concurrent local agents is pinned by the
+writer-storm regression test
+(`tests/integration/test_store_concurrency.py::test_concurrent_writer_storm_no_loss`):
+N concurrent writers lose **zero** events. Lost events fail the test.
 
 ### I6 — No NEW cross-client lock; no shared mutable index
 Cross-client coordination is **only** git merge-as-union + optimistic
@@ -151,6 +150,16 @@ the lexically-lower UUID wins (`reducer/_processors.py:81-115`,
 `if not existing_uuid or incoming_uuid <= existing_uuid`). Any new
 state-dependent merge logic MUST resolve forks by UUID (or another
 skew-independent key), **never by timestamp alone**.
+
+**Surfacing a resolved fork (story 3003).** A resolved STATUS fork means two clones
+raced (e.g. both claimed the same open ticket) and one lost. This is now discoverable
+rather than silent: the reducer records each resolution in pure derived state
+(`status_fork_resolutions`, rebuilt identically on every replay), which `fsck` reports as
+a `STATUS_FORK_RESOLVED` finding and `show`/`list` surface as a field. Separately, a
+`claim` whose post-push merge reveals another clone already owns the ticket (the merged
+`assignee` — the ownership authority — is not the claimant) exits **10** ("claim lost on
+cross-clone merge") so the losing agent stops instead of duplicating work; when no merge
+is visible at claim time, the durable `fsck`/`show` surfacing catches it after the fact.
 
 ### I9 — Compaction is safe against concurrent remote appends
 Compaction (under the per-clone write lock) writes a SNAPSHOT folding the events
@@ -192,7 +201,10 @@ CLI / library / MCP honour it uniformly; case/space-insensitive; default
 | `async`  | return immediately; the (identical, best-effort) push runs in a detached background job. Convergence is unchanged — `fsck` still reports `PUSH_PENDING` until it lands, and a non-fast-forward still fetches+merges+retries. Use when an agent claims a batch and per-write network latency would serialize the run. |
 | `off`    | never push; commits stay local (`fsck` reports `PUSH_PENDING`). For offline/throwaway work. |
 
-Pinned by `tests/scripts/test-rebar-push-policy.sh`.
+The failed-push resilience and non-fast-forward fetch+merge+retry behind these
+modes are covered by
+`tests/integration/test_concurrency_regression.py::test_failed_push_never_drops_local_commit`
+and `tests/unit/test_push_retry_stash_pop.py`.
 
 `rebar import` uses `off` internally for its whole run and pushes once at the end,
 so a bulk import pays one round-trip rather than one per event; it still does one
@@ -240,8 +252,9 @@ git): a local commit advances `HEAD` but not `refs/heads/tickets`. The previous
 guard tested `origin/tickets..tickets` (the lagging *branch ref*), which read
 empty in that state, so the sync `git reset --hard origin/tickets` **destroyed the
 un-pushed local commit**. Measuring local-ahead by `origin/tickets..HEAD` closes
-this. (Regression tests: `tests/scripts/test-ticket-sync-detached-head-local-ahead.sh`,
-`tests/integration/test_concurrency_regression.py`.)
+this. (This specific detached-HEAD-local-ahead edge has no dedicated automated
+regression test in the current suite — the historical shell test that covered it
+was retired in the bash→Python migration without a like-for-like successor.)
 
 **Why union, not reset — and the safety invariant (epic 97e7 / P1.4).** The
 unrelated-history case used to `reset --hard origin/tickets`, which **orphaned**

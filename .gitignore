@@ -15,8 +15,6 @@ CLAUDE.local.md
 
 # local test/build scratch (never commit)
 .pytest-tmp/
-dist/
-build/
 
 # lint / type-check / coverage artifacts
 .mypy_cache/
@@ -27,6 +25,9 @@ htmlcov/
 
 # Serena MCP (local code-navigation tooling; per-developer)
 .serena/
+
+# tokensave MCP (local code-graph cache; per-developer)
+.tokensave/
 
 # mutmut mutation-testing working copy + result DB (docs/mutation-testing.md)
 mutants/

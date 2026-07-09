@@ -129,12 +129,13 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 capture_output=True,
                 text=True,
             )
-            commit = subprocess.run(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True,
-                text=True,
-            )
             if add.returncode != 0:
+                # Check add's return code BEFORE running commit (audit 2.2): the commit
+                # below commits the whole index, so running it after a failed add could
+                # sweep unrelated staged residue in under THIS write's message. Reset the
+                # index as well as unlinking the worktree file so the (possibly partially)
+                # staged event cannot leak into the next successful write's commit.
+                _unstage(tracker, relative_path)
                 _silent_unlink(final_path)
                 # Surface git's real stderr. The create path historically hid it behind
                 # this generic message, leaving intermittent CI git races (bug edf7 —
@@ -147,6 +148,11 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                     + (f": {add_err}" if add_err else ""),
                     1,
                 )
+            commit = subprocess.run(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+                capture_output=True,
+                text=True,
+            )
             if commit.returncode != 0:
                 # A pre-existing unmerged (UU) index entry — e.g. a stranded stash/merge
                 # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
@@ -154,6 +160,9 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 # HEAD and retry; surface an actionable error for a non-regenerable one.
                 healed, detail = _recover_from_unmerged(tracker, relative_path, commit_msg)
                 if not healed:
+                    # Drop the staged blob from the index too (not just disk) so the failed
+                    # event cannot be committed by the next successful write.
+                    _unstage(tracker, relative_path)
                     _silent_unlink(final_path)
                     git_err = (commit.stderr or commit.stdout).strip()
                     raise StoreError(
@@ -184,6 +193,25 @@ def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, 
 def _silent_unlink(path: str) -> None:
     try:
         os.unlink(path)
+    except OSError:
+        pass
+
+
+def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
+    """Drop a staged event from the git index (best-effort).
+
+    An atomic rename followed by ``git add`` leaves the blob STAGED. If the write then
+    fails, unlinking the worktree file alone is not enough: the blob stays in the index
+    and the NEXT successful write (which commits the whole index) durably commits this
+    failed write's phantom event. Mirrors ``_commands.txn._unstage`` — the claim/
+    transition path already carries this fix; the general append path did not.
+    """
+    try:
+        subprocess.run(
+            ["git", "-C", str(tracker), "reset", "-q", "--", relative_path],
+            capture_output=True,
+            text=True,
+        )
     except OSError:
         pass
 

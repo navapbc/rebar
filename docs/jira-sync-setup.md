@@ -487,3 +487,17 @@ A newly-synced idea is **born in the Jira project's default status** (the create
 call does not set status), and reaches `IDEA` only on a **later** reconcile pass
 (the status is applied as a follow-up transition). This one-pass lag is accepted
 and expected; it is not a bug and is not fixed here.
+
+### Unmapped inbound Jira statuses are skipped, not defaulted (bug 5886)
+
+If an inbound Jira issue is in a workflow status that has **no entry** in
+`config.jira_to_local_status` (and carries no `rebar-status:` annotation label), the
+reconciler **leaves the bound local ticket's status untouched** — it does *not* map the
+unknown status to any local status. Previously such a status silently defaulted to
+`open`, which could **reopen a closed local ticket** on the next inbound pass (corrupting
+board state and re-dispatching completed work with no operator signal).
+
+The unmapped status is still **surfaced**: the fetcher emits a deduped
+`fetcher-unmapped-jira-status` bridge alert (one per distinct status name per pass) so an
+operator can add the missing mapping. Add the status to `config.jira_to_local_status` (kept
+in lock-step with the reconciler's `_JIRA_TO_LOCAL_STATUS`) to have it flow to local.

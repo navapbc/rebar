@@ -868,3 +868,72 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     # The orphan comment is folded back in — its body is present in reduced state.
     state = reduce_ticket(str(seed_dir))
     assert any("orphan-comment-body" in (c.get("body") or "") for c in state.get("comments", []))
+
+
+def test_push_retry_merge_under_lock_preserves_events(two_clones):
+    """A write on B that triggers a non-fast-forward push-retry merge (now taken under the
+    write lock) must succeed without a spurious StoreError and lose no events — B's write,
+    a second B write, and A's already-pushed write all survive (audit reliability #2, e699)."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_b = _tracker(repo_b)
+
+    # Prime B's read-side sync marker so B writes against a STALE base (does not first
+    # fetch A's write) — that is what forces its push to be non-fast-forward and drives
+    # the locked push-retry merge path.
+    _engine_run(repo_b, "list")
+
+    # A writes and auto-pushes, advancing origin/tickets.
+    assert _engine_run(repo_a, "comment", seed, "from A").returncode == 0
+
+    # B writes twice: each commits locally, then push_after_commit performs the non-ff
+    # fetch+merge under the write lock. Both must succeed (no StoreError / non-zero exit).
+    r1 = _engine_run(repo_b, "comment", seed, "from B one", check=False)
+    assert r1.returncode == 0, f"B write during push-retry merge failed: {r1.stderr}"
+    r2 = _engine_run(repo_b, "comment", seed, "from B two", check=False)
+    assert r2.returncode == 0, f"second B write failed: {r2.stderr}"
+
+    # No event lost: after B converges, its store carries A's comment and both of B's.
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
+    bodies = " ".join(c.get("body", "") for c in shown.get("comments", []))
+    for expected in ("from A", "from B one", "from B two"):
+        assert expected in bodies, f"event lost — {expected!r} missing from: {bodies!r}"
+
+
+def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
+    """Two clones claim the same open ticket. The loser (lower-HLC assignee) is told it
+    lost (exit 10) once its push merges the winner's claim, and the resolved STATUS fork
+    is surfaced via fsck + show (audit reliability #1, story 3003)."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+
+    # Prime B's read-side sync marker (fresh) so B does NOT re-fetch on its next op — B's
+    # view stays at the base (seed open, A's claim not yet seen). This is what makes the
+    # two clones genuinely race: B claims against a stale-open view.
+    _engine_run(repo_b, "list")
+
+    # A claims on a FAST clock; its claim auto-pushes to origin.
+    a = _engine_run_at(repo_a, "claim", seed, "--assignee=alice", now=_FAST_NOW)
+    assert a.returncode == 0
+
+    # B still sees the ticket as open locally (has NOT synced A's claim). It claims on a
+    # SLOW clock; its push_after_commit merges A's already-pushed claim, and B's post-push
+    # re-read sees the merged assignee is alice (A's higher-HLC EDIT wins), not bob.
+    b = _engine_run_at(repo_b, "claim", seed, "--assignee=bob", now=_SLOW_NOW, check=False)
+    assert b.returncode == 10, f"the losing claimant must exit 10; got {b.returncode}: {b.stderr}"
+    assert "claim lost" in (b.stderr + b.stdout).lower()
+
+    # Deterministic convergence: both clones agree the ticket is assigned to alice.
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    assignee_a = json.loads(_engine_run(repo_a, "show", seed).stdout).get("assignee")
+    assignee_b = json.loads(_engine_run(repo_b, "show", seed).stdout).get("assignee")
+    assert assignee_a == assignee_b == "alice", f"assignees diverged: A={assignee_a} B={assignee_b}"
+
+    # The resolved STATUS fork is surfaced: show carries the derived record and fsck flags it.
+    shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
+    assert shown.get("status_fork_resolutions"), "show must surface the resolved fork record"
+    fsck = json.loads(_engine_run(repo_b, "fsck", "--output", "json", check=False).stdout)
+    kinds = [f.get("kind") for f in fsck.get("issues", [])]
+    assert "status_fork_resolved" in kinds, f"fsck must flag the resolved fork; kinds={kinds}"

@@ -219,7 +219,7 @@ requires a row here.
 | File | Remedy |
 |------|--------|
 | `rebar_reconciler/inbound_differ.py` | crossed the cap (was exactly at 800) adding the `idea ↔ IDEA` status-map entry (epic idea-status). Split along the existing seam: the hand-maintained `_JIRA_TO_LOCAL_STATUS` map + status-translation helpers (`_jira_status_to_local` and friends) into a sibling `inbound_status.py`, leaving the field/comment/link diffing in `inbound_differ.py` — both stay well above the 100-LOC floor |
-| `rebar_reconciler/reconcile.py` | `reconcile_once` is now a thin ~50-LOC sequencer, but the phase helpers it calls carry the mass — `_run_differs` alone is ~380 LOC (legacy + inbound/outbound diff + OM/IM→Mutation conversion). Extract the differ-running phase into a sibling `run_differs.py` (well above the 100-LOC file floor) along the phase seam the sequencer already carves |
+| `rebar_reconciler/reconcile.py` | The differ-running phase extraction has **shipped** (`run_differs.py`, ~640 LOC), but `reconcile.py` is still over cap (~1070 LOC). Next seam: extract the `_PassContext`-driven pass-phase helpers that cluster around `reconcile_once` — `_load_snapshots`, `_handle_corrupt_snapshot`, `_apply_mutations`, `_persist_and_log` — into a sibling `reconcile_passes.py`, leaving `reconcile_once` as the thin sequencer |
 | `config.py` | split the dataclass/schema from the env/CLI-override + cache machinery along the existing seam |
 | `llm/workflow/lint_refs.py` | grew past cap adding the prompt/step CONTRACT awareness (workflow authoring v2, 5e78): the engine-injected-inputs allow-list + the `${{ steps.*.outputs.* }}` name-existence map. Extract a `lint_contracts.py` once stories e050 (8 op contracts) + c768 (3-state validation depth) add the related logic that clears the 100-LOC floor; today that seam alone is sub-floor |
 | `llm/plan_review/attest.py` | the fastest-growing file in the tree (kind-keyed attestations, epic dark-acme-lumen, + the completion-aware `delivered_now` predicate). Two candidate split seams: the completion-delivery cluster (`_attested_delivered` / `_supersedes_child`) into `attest_delivered.py`, and the validity-computation cluster (`compute_validity` + the reopen/code-drift/material-edit invalidation checks) into `attest_validity.py`. Note the kind-generic validity/signing surface is gate-neutral (the completion gate imports it too), so a gate-neutral home is preferable to keeping it under `plan_review/` |
@@ -317,3 +317,22 @@ Files in the 500–800 band (`_commands/transition.py`, `_commands/composer.py`,
 modules — `apply_inbound.py`, `_advisory_lock.py`, `acli.py`, `inbound_differ.py`,
 `differ.py`, `batch_dispatch.py`, `acli_cli_ops.py`) are at the ceiling, not over
 it — watch, don't split preemptively.
+
+## mypy strictness ratchet
+
+`make typecheck` (`mypy src/rebar`) gates the whole library. Two ratchet dials in
+`[tool.mypy]` tighten it over time, mirroring the module-size allowlist's *shrink-only*
+discipline:
+
+- **`check_untyped_defs = true`** (global) — mypy checks the *bodies* of un-annotated
+  functions, not just their signatures, so bugs inside un-typed defs can't slip through.
+- **`disallow_untyped_defs`** via `[[tool.mypy.overrides]]` — enabled per-package for
+  packages whose functions are fully annotated. This set is **shrink-only for the exempt
+  list**: a package may only be **added** to the strict override (never removed).
+  `tests/unit/test_mypy_ratchet.py` pins the committed baseline (`rebar.graph`,
+  `rebar.grounding`) as a subset of the enabled set, so a regression turns the build red.
+
+**To promote a package** into the strict set: annotate its remaining defs until
+`mypy src/rebar/<pkg> --disallow-untyped-defs` is clean, then add `rebar.<pkg>.*` to the
+override `module` list. New `type: ignore` must carry a specific code (e.g.
+`type: ignore[arg-type]`); blanket `ignore_errors` is not used.

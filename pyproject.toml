@@ -33,6 +33,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: POSIX",
     "Operating System :: MacOS :: MacOS X",
     "Topic :: Software Development :: Bug Tracking",
@@ -72,7 +73,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/navapbc/rebar"
 Repository = "https://github.com/navapbc/rebar"
-Documentation = "https://github.com/navapbc/rebar/tree/main/docs"
+Documentation = "https://github.com/navapbc/rebar/blob/main/docs/README.md"
 Issues = "https://github.com/navapbc/rebar/blob/main/SUPPORT.md"
 Changelog = "https://github.com/navapbc/rebar/blob/main/docs/release-notes.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
@@ -342,6 +343,24 @@ ignore_missing_imports = true
 # imported by the core. The advisory full-tree run still reports everything,
 # because there every file is named on the command line.
 follow_imports = "silent"
+# Strictness ratchet (story d2fa / dullish-computable-buck). Phase 1: check the
+# bodies of untyped functions everywhere (previously only signatures were checked,
+# so bugs inside un-annotated defs slipped through). Phase 2 layers per-package
+# `disallow_untyped_defs` via the overrides below.
+check_untyped_defs = true
+
+# ── mypy strictness ratchet: per-package `disallow_untyped_defs` ─────────────────
+# SHRINK-ONLY ratchet. Packages listed here have every function annotated and are
+# gated at full strictness. A package may only be ADDED to this list (never removed):
+# the exempt set — the src/rebar top-level packages NOT listed here — is
+# {reducer, graph→listed, _store, _io, _snapshot, schemas, _commands, _cli, llm,
+# review_bot, _engine, _engine_support} minus the enabled set, and must only shrink.
+# test_mypy_ratchet.py enforces that the enabled set never loses a member. To promote
+# a package: annotate its remaining defs until `mypy src/rebar/<pkg> --disallow-untyped-defs`
+# is clean, then add it here. See docs/architecture.md "mypy strictness ratchet".
+[[tool.mypy.overrides]]
+module = ["rebar.graph.*", "rebar.grounding.*"]
+disallow_untyped_defs = true
 
 [tool.coverage.run]
 source = ["rebar"]

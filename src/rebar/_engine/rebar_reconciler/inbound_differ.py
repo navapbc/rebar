@@ -222,15 +222,17 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
             local_status = _REBAR_STATUS_LABEL_TO_LOCAL[label]
             break
     if local_status is None:
-        local_status = _JIRA_TO_LOCAL_STATUS.get(status_raw, "open")
+        # Bug 5886: an unmapped Jira status must NOT default to "open" (that silently
+        # reopened closed tickets). Leave it None so the dict omits status → no diff.
+        local_status = _JIRA_TO_LOCAL_STATUS.get(status_raw)
 
     return {
         "title": summary,
         "description": description,
         "ticket_type": _JIRA_TO_LOCAL_TYPE.get(issuetype_raw, "task"),
         "priority": _JIRA_TO_LOCAL_PRIORITY.get(priority_raw, 2),
-        "status": local_status,
         "assignee": assignee,
+        **({"status": local_status} if local_status is not None else {}),
     }
 
 
@@ -280,6 +282,8 @@ def _diff_jira_vs_local(
             if not _assignee_matches(local_assignee, jira_fields.get("assignee")):
                 changed[local_field] = jira_mapped.get(local_field)
             continue
+        if local_field == "status" and "status" not in jira_mapped:
+            continue  # Bug 5886: unmapped Jira status → leave local status untouched.
         jira_val = jira_mapped.get(local_field)
         local_val = local_ticket.get(ticket_field)
         # Normalise None to empty string for string fields

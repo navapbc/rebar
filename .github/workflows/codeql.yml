@@ -1,0 +1,48 @@
+name: CodeQL
+
+# Static analysis (SAST) on the GitHub mirror. CodeQL is free for public repos and
+# runs fine on this read-only mirror: it only needs push/schedule triggers and writes
+# results to the Security tab (it does not push to the tree). This complements the
+# gitleaks secret scan + pip-audit on the Gerrit review path with an independent
+# code-analysis layer. Actions are pinned by major version tag to match the repo
+# convention (see test.yml / gerrit-verify.yaml), not by commit SHA.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 04:23 UTC — catches advisories that land between pushes.
+    - cron: "23 4 * * 1"
+
+# Least privilege by default; the analyze job elevates only what CodeQL needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `javascript` already covers TypeScript (the workflow-editor assets);
+        # `python` covers src/ and scripts/.
+        language: [python, javascript]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
