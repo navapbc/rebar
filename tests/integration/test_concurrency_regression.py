@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from rebar import _engine
+from rebar._commands import fsck
 
 pytestmark = pytest.mark.integration
 
@@ -634,6 +635,152 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
     # ROLLBACK rehearsal: the pre-tag restores the pre-repair tree exactly.
     _git("reset", "--hard", "pre-a3-remediation", cwd=tracker_a)
     assert create_file.exists(), "rollback did not restore the pre-repair state"
+
+
+def _craft_inconsistent_snapshot(tracker: Path, seed: str) -> Path:
+    """Craft one SNAPSHOT_INCONSISTENT fault on *seed* (a SNAPSHOT that lists the
+    still-present CREATE as a folded source — the live-store fault class) and commit
+    it. Returns the still-present CREATE file that repair must retire."""
+    from rebar.reducer import reduce_ticket
+
+    seed_dir = tracker / seed
+    create_file = next(seed_dir.glob("*-CREATE.json"))
+    create_uuid = json.loads(create_file.read_text())["uuid"]
+    compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
+    snap_uuid = "aaaaaaaa-1111-2222-3333-444444444444"
+    snap_name = f"9000000000000000000-{snap_uuid}-SNAPSHOT.json"
+    (seed_dir / snap_name).write_text(
+        json.dumps(
+            {
+                "event_type": "SNAPSHOT",
+                "timestamp": 9000000000000000000,
+                "uuid": snap_uuid,
+                "env_id": "00000000-0000-4000-8000-000000000001",
+                "author": "Test",
+                "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
+            }
+        )
+    )
+    _git("add", "-A", cwd=tracker)
+    _git("commit", "-q", "--no-verify", "-m", "craft: inconsistent snapshot", cwd=tracker)
+    return create_file
+
+
+def test_a3_repair_aborts_when_push_fails_leaving_pretag_for_rollback(two_clones):
+    """A3 safety (34b1): if a batch push is REJECTED (the remote tickets branch diverged
+    under us), the live repair ABORTS and surfaces the error rather than silently leaving
+    the store partly-pushed — and the pre-tag it wrote first still enables a rollback."""
+    _remote, repo_a, repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    create_file = _craft_inconsistent_snapshot(tracker_a, seed)
+    assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout
+
+    # Diverge origin/tickets from under A: B writes+auto-pushes a comment, so A's
+    # non-fast-forward `push origin HEAD:tickets` in the repair is rejected.
+    _engine_run(repo_b, "comment", seed, "divergent-from-b")
+
+    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    assert "ABORT: push failed" in out, out
+    # The pre-tag was written BEFORE any mutation → rollback remains possible.
+    assert _git("rev-parse", "pre-a3-remediation", cwd=tracker_a).returncode == 0
+    # The retire was applied+committed locally (abort is AFTER the failed push), so the
+    # operator recovers via the pre-tag, not by hoping nothing was written.
+    assert (
+        not create_file.exists() and (tracker_a / seed / (create_file.name + ".retired")).exists()
+    )
+
+
+def _reconciler_advisory():
+    """Load the reconciler advisory-lock module the way production does (engine dir on
+    sys.path so the top-level ``rebar_reconciler`` package resolves)."""
+    import sys as _sys
+
+    from rebar._engine import engine_dir
+
+    eng = str(engine_dir())
+    if eng not in _sys.path:
+        _sys.path.insert(0, eng)
+    from rebar_reconciler import _advisory_lock as advisory
+
+    return advisory
+
+
+def test_a3_repair_aborts_when_a_reconciler_pass_is_in_flight(two_clones):
+    """A3 safety (34b1): disabling the GHA schedule stops the NEXT pass, not one already
+    running. If ``refs/reconciler/lock`` is held when repair starts, it ABORTS before any
+    write (never mutating the store under a live reconciler) and repairs cleanly once the
+    lock is released."""
+    _remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    create_file = _craft_inconsistent_snapshot(tracker_a, seed)
+
+    advisory = _reconciler_advisory()
+    oid = advisory.acquire_pass_lock("a3-test-pass", repo_a)
+    assert oid is not None, "failed to acquire the reconciler pass lock for the test"
+    try:
+        out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+        assert "ABORT: a reconciler pass is in flight" in out, out
+        assert create_file.exists(), "repair must NOT retire under a live reconciler pass"
+    finally:
+        # Force-clear the lease (the remote CAS wraps the ref in a commit, so a
+        # blob-oid release no-ops — this test only needs the ref gone).
+        _git("push", "origin", "--delete", "refs/reconciler/lock", cwd=repo_a, check=False)
+        _git("update-ref", "-d", "refs/reconciler/lock", cwd=repo_a, check=False)
+
+    # Lock released → the repair now proceeds and retires the still-present source.
+    out2 = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    assert "ABORT" not in out2, out2
+    assert not create_file.exists()
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+
+
+def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones):
+    """A3 safety (34b1): the per-ticket ``a3-repaired`` marker is a LOCAL, uncommitted
+    optimization — fsck itself is the authoritative resumability check. A crash AFTER the
+    retire+commit but BEFORE the marker write (simulated by deleting the marker) must NOT
+    cause a re-repair: the re-run sees the ticket already clean and is a no-op."""
+    _remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    create_file = _craft_inconsistent_snapshot(tracker_a, seed)
+
+    _engine_run(repo_a, "fsck", "--repair", check=False)
+    assert not create_file.exists()
+
+    git_dir = fsck._resolve_tracker_git_dir(str(tracker_a))
+    marker = Path(git_dir) / "a3-repaired" / seed
+    assert marker.exists(), "expected a per-ticket repair marker under the git dir"
+    # The marker lives under the git dir, never the committed tree.
+    assert seed not in _git("ls-files", "a3-repaired", cwd=tracker_a).stdout
+
+    # Simulate crash-before-marker: the fix is committed but the marker never landed.
+    marker.unlink()
+    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    assert "no repairable faults" in out, out  # fsck-authoritative: nothing to redo
+    assert not (tracker_a / seed / (create_file.name + ".retired" + ".retired")).exists()
+    assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
+
+
+def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
+    """A3 disposition (34b1): MISSING_CREATE is human-triage only — ``fsck --repair``
+    SURFACES it but never fabricates a CREATE (no automatic write). The repair plan skips
+    the ticket ('no repairable faults') while the re-scan still reports the fault."""
+    _remote, repo_a, _repo_b, _seed = two_clones
+    tracker_a = _tracker(repo_a)
+
+    # A ticket dir with a lone COMMENT and no CREATE → reduce_ticket returns None.
+    ghost = tracker_a / "reb-ghost-nocreate"
+    ghost.mkdir()
+    (ghost / "1000000000000000000-cccccccc-1111-2222-3333-444444444444-COMMENT.json").write_text(
+        json.dumps({"uuid": "cccccccc-1111-2222-3333-444444444444", "event_type": "COMMENT"})
+    )
+    _git("add", "-A", cwd=tracker_a)
+    _git("commit", "-q", "--no-verify", "-m", "craft: ghost ticket missing CREATE", cwd=tracker_a)
+    before = {p.name for p in ghost.iterdir()}
+
+    out = _engine_run(repo_a, "fsck", "--repair", check=False).stdout
+    assert "MISSING_CREATE" in out and "reb-ghost-nocreate" in out, out
+    assert "no repairable faults" in out, out  # nothing auto-written for the ghost
+    assert {p.name for p in ghost.iterdir()} == before, "repair must not write for MISSING_CREATE"
 
 
 def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clones):

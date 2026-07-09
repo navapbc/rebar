@@ -7,12 +7,14 @@ delegates to). Each leaf reads its Jira-side payload, translates it via
 inbound_translate, and writes local ticket events; rebar-id/property write-backs
 to Jira run through batch_dispatch._call_with_retry.
 
-Imports downward only (apply_base, batch_dispatch, inbound_translate); never
-imports applier.
+Imports downward only (apply_base, batch_dispatch, inbound_translate, and the
+outbound_fields field-mapper for the hard-delete re-create — none import back);
+never imports applier.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -44,6 +46,7 @@ from rebar_reconciler.inbound_translate import (
     _resolve_tracker_dir,
     _write_event_file,
 )
+from rebar_reconciler.outbound_fields import _map_local_to_jira_fields
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)
@@ -181,7 +184,12 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
     _direction_guard(mutation, mut_mod.MutationDirection.inbound)
 
     payload = dict(mutation.payload or {})
-    branch = payload.get("probe_outcome", "out_of_window")
+    # Canonical key is ``reason`` — route_inbound_probe (reconcile.py) emits
+    # ``payload={"reason": "hard_delete", ...}``. ``probe_outcome`` is kept as a
+    # back-compat fallback for any legacy/test payloads still using the old key
+    # (c244: without this the hard_delete branch was unreachable and always fell
+    # through to the ``out_of_window`` default).
+    branch = payload.get("reason") or payload.get("probe_outcome", "out_of_window")
     target = mutation.target
     local_id = target if target.startswith("jira-") else _jira_key_to_local_id(target)
     tracker_dir = _resolve_tracker_dir(repo_root)
@@ -206,8 +214,9 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
             "local_id": local_id,
         }
         result_payload["follow_on"] = follow_on
-        # TODO(epic-3e36): wire the follow-on mutation into reconcile_once so
-        # the outbound re-create runs in the same pass. Tracked separately.
+        # The applier consumes this ``create_after_hard_delete`` follow-on and injects
+        # a standard outbound CREATE into the same pass's batch (c244; the former
+        # epic-3e36 gap). See applier.apply() — ``pending_hard_delete_creates``.
     elif branch == "redirect":
         new_key = payload.get("new_jira_key", "")
         new_local_id = _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"
@@ -447,3 +456,57 @@ def inbound_repair_property(mutation, client) -> dict:
                 ),
             },
         }
+
+
+def _build_hard_delete_recreate(follow_on: dict, repo_root, binding_store) -> dict | None:
+    """Reconstruct a standard outbound CREATE batch-dict for a hard-deleted Jira issue
+    whose LOCAL content is still present (c244 — the ``create_after_hard_delete``
+    follow-on emitted by :func:`_apply_inbound_delete`).
+
+    The follow-on carries only ``local_id``; ``create_one`` needs ``fields``. Fetch the
+    still-present local ticket by reading ``<tracker>/<local_id>/.cache.json`` ``state``
+    (mirroring ``reconcile_check.load_local_tickets``) and map it via the SAME
+    ``_map_local_to_jira_fields`` the outbound differ uses. Returns ``None`` (log + skip)
+    when the local ticket is absent/unreadable/malformed or has no mappable summary — a
+    hard-deleted ticket with no local content is not re-creatable.
+    """
+    local_id = follow_on.get("local_id", "")
+    if not local_id:
+        return None
+    root = (
+        Path(repo_root)
+        if repo_root is not None
+        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+    )
+    cache_path = root / ".tickets-tracker" / local_id / ".cache.json"
+    try:
+        state = json.loads(cache_path.read_text()).get("state")
+    except (ValueError, OSError):
+        state = None  # absent / malformed cache → not re-creatable
+    if not isinstance(state, dict):
+        logger.info("hard_delete_recreate_skip: no local content for local_id=%r", local_id)
+        return None
+    ticket = dict(state)
+    ticket.setdefault("ticket_id", local_id)
+    fields = _map_local_to_jira_fields(
+        ticket,
+        binding_store=binding_store,
+        local_ticket_types={local_id: ticket.get("ticket_type", "task")},
+        emit_detach_clear=False,
+    )
+    if not fields or not fields.get("summary"):
+        logger.info("hard_delete_recreate_skip: no mappable summary for local_id=%r", local_id)
+        return None
+    # Standard outbound CREATE batch-dict (same shape _mutation_to_batch_dict emits) so
+    # it flows through _apply_batch -> create_one (JQL dedup + bind_confirm + budget).
+    return {
+        "action": "create",
+        "direction": "outbound",
+        "key": "",  # the Jira issue was hard-deleted — a fresh create, no target key
+        "fields": fields,
+        "local_id": local_id,
+        "follow_on": None,
+        "comments": [],
+        "labels": [],
+        "links": [],
+    }

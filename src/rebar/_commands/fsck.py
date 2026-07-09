@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -314,13 +315,18 @@ def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
     plan: dict[str, list] = {"retire": [], "auto_orphans": [], "triage_orphans": []}
     if not snaps:
         return plan
+    latest_snap = snaps[-1]
 
-    # uuid -> (filename, event_type) for active, non-snapshot events.
+    # uuid -> (filename, event_type) for active events. Older SNAPSHOT files ARE
+    # included (only the horizon `latest_snap` is excluded): a re-compaction folds a
+    # prior snapshot INTO the newer one's source_event_uuids, so a still-present older
+    # snapshot is a SNAPSHOT_INCONSISTENT source that must be retired too — mirroring
+    # _check_snapshot, which excludes only the snapshot it is checking.
     event_files: dict[str, tuple[str, str]] = {}
     for name in sorted(os.listdir(ticket_dir)):
         if not name.endswith(".json") or name.startswith("."):
             continue
-        if not is_active_event(name) or name.endswith("-SNAPSHOT.json"):
+        if not is_active_event(name) or name == latest_snap:
             continue
         parts = name.split("-", 1)
         if len(parts) < 2:
@@ -343,10 +349,11 @@ def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
             if u in event_files and event_files[u][0] not in plan["retire"]:
                 plan["retire"].append(event_files[u][0])
 
-    latest_snap = snaps[-1]
     for file_uuid, (name, etype) in event_files.items():
         if etype not in KNOWN_EVENT_TYPES or name in plan["retire"]:
             continue
+        if name.endswith("-SNAPSHOT.json"):
+            continue  # snapshots are never orphan-classified (symmetry with _check_snapshot)
         if name < latest_snap and file_uuid not in all_sources:
             if etype in _AUTO_RECOVER_ORPHAN_TYPES:
                 plan["auto_orphans"].append((name, etype))
@@ -518,6 +525,33 @@ def _reconciler_resume() -> None:
     )
 
 
+def _reconciler_in_flight(repo_root=None) -> bool:
+    """Return True if a reconciler pass is (or may be) mid-flight — the in-flight guard
+    the destructive live repair runs AFTER disabling the schedule.
+
+    Disabling the GHA schedule stops the NEXT pass, not one already running; a pass that
+    started before we disabled would race our batched writes. The pass holds the leased
+    CAS ``refs/reconciler/lock`` for its duration, so ``check_pass_lock`` is the mid-flight
+    probe. Fail-CLOSED: if the lock state cannot be read (``ReconcileLockError``) — or the
+    advisory module can't be imported — we report in-flight=True so an indeterminate state
+    aborts the repair rather than writing under a possibly-live reconciler. A repo that
+    has never run the reconciler (ref absent) reads free → False → repair proceeds."""
+    root = Path(repo_root) if repo_root is not None else Path(".")
+    try:
+        from rebar._engine import engine_dir
+
+        eng = str(engine_dir())
+        if eng not in sys.path:
+            sys.path.insert(0, eng)  # so the top-level rebar_reconciler package resolves
+        from rebar_reconciler import _advisory_lock as advisory
+    except Exception:  # noqa: BLE001 — any import/asset failure → can't prove it's free → fail-closed
+        return True
+    try:
+        return advisory.check_pass_lock(root)
+    except advisory.ReconcileLockError:
+        return True  # indeterminate lock state → fail-closed (do not repair)
+
+
 def _repair_run(
     tracker: str, *, dry_run: bool, limit: int | None = None, repo_root=None
 ) -> tuple[list[str], int]:
@@ -573,6 +607,15 @@ def _repair_run(
     lines.append(f"a3-remediation: reconciler {'paused' if paused else 'pause skipped'}")
     batch = 200
     try:
+        # In-flight guard: disabling the schedule stops the NEXT pass, not one already
+        # running. Abort BEFORE any write if a pass holds refs/reconciler/lock (or its
+        # state is indeterminate) — the finally re-enables the schedule we just disabled.
+        if _reconciler_in_flight(repo_root):
+            lines.append(
+                "ABORT: a reconciler pass is in flight (refs/reconciler/lock held or "
+                "unreadable) — refusing to repair; retry once the pass completes"
+            )
+            return lines, -1
         for i, (tid, _plan) in enumerate(flagged):
             disp = _repair_ticket(tracker, tid, os.path.join(tracker, tid), dry_run=False)
             if disp.get("error"):

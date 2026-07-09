@@ -80,6 +80,7 @@ from rebar_reconciler.apply_inbound import (  # noqa: E402
     _apply_inbound_probe,
     _apply_inbound_repair_property,
     _apply_inbound_update,
+    _build_hard_delete_recreate,
     inbound_repair_property,
 )
 
@@ -451,6 +452,10 @@ def apply(
     # Deferred bug-filing directives from inbound conflict leaves, processed
     # AFTER _apply_batch to keep the apply path commit-free (bug d822).
     pending_bug_tickets: list[dict] = []
+    # Hard-delete re-create directives (c244): collected in the inbound loop, injected
+    # into `outbound_list` BEFORE _apply_batch so they flow through the normal create_one
+    # (JQL dedup + bind_confirm + REST budget), unlike post-batch `pending_bug_tickets`.
+    pending_hard_delete_creates: list[dict] = []
 
     for mut in inbound_typed:
         if not persist:
@@ -467,6 +472,10 @@ def apply(
         follow_on = result_payload.get("follow_on") if isinstance(result_payload, dict) else None
         if isinstance(follow_on, dict) and follow_on.get("kind") == "suppress_pair":
             suppression.record(follow_on.get("local_id", ""), follow_on.get("jira_key", ""))
+        if isinstance(follow_on, dict) and follow_on.get("action") == "create_after_hard_delete":
+            recreate = _build_hard_delete_recreate(follow_on, repo_root, binding_store)
+            if recreate is not None:
+                pending_hard_delete_creates.append(recreate)
         pending = (
             result_payload.get("pending_bug_ticket") if isinstance(result_payload, dict) else None
         )
@@ -488,6 +497,10 @@ def apply(
         outbound_list = [
             d for d in outbound_list if not suppression.is_suppressed(d.get("key", ""))
         ]
+    # Inject hard-delete re-creates AFTER the suppression filter (c244) — a re-create is
+    # the intended effect of the hard-delete, never a suppressed pair.
+    if pending_hard_delete_creates:
+        outbound_list.extend(pending_hard_delete_creates)
     is_dry_run = mode_mod is not None and mode == mode_mod.Mode.DRY_RUN
     manifest_path = None
     try:
