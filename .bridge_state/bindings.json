@@ -4116,6 +4116,12 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:18:19Z"
     },
+    "dabb-7d4b-f5bc-40e6": {
+      "created_at": "2026-07-09T03:14:20Z",
+      "jira_key": "REB-838",
+      "state": "confirmed",
+      "updated_at": "2026-07-09T03:14:20Z"
+    },
     "db34-9db9-3c73-4ae6": {
       "created_at": "2026-06-25T23:18:23Z",
       "jira_key": "REB-340",
@@ -5729,6 +5735,7 @@
     "REB-835": "9a82-3109-29b5-471d",
     "REB-836": "a879-3b64-1be9-4035",
     "REB-837": "fd1d-5f0d-4bd8-40f4",
+    "REB-838": "dabb-7d4b-f5bc-40e6",
     "REB-84": "3703-e05c-3e80-4cc6",
     "REB-85": "3758-60b9-373a-4180",
     "REB-86": "382f-20bc-93c0-48b8",
