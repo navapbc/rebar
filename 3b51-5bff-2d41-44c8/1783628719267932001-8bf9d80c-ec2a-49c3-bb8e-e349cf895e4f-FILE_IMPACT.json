@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":".github/workflows/lockdown.yml","reason":"new repo-lockdown PR welcome/close workflow"},{"path":"CONTRIBUTING.md","reason":"shepherded-patch policy section"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783628719267932001,"uuid":"8bf9d80c-ec2a-49c3-bb8e-e349cf895e4f"}
