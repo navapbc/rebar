@@ -6,6 +6,15 @@ appliers (``apply_inbound``): map Jira issuetype/priority/status to their local
 forms, normalize ADF bodies, and append local ticket events. No Jira writes
 happen here — this is the parse/serialize layer beneath the inbound appliers.
 
+NOTE: ``_write_event_file`` here writes ONE inbound event file per call under the
+store lock (``os.replace``; no ``git add``/``commit`` of its own — it does NOT use
+``stage_and_commit``); the reconciler pass commits via its own orchestration. This
+is a **Jira-sync internal** — NOT the general local-store batch-write mechanism (and
+``applier._apply_batch`` is an OUTBOUND Jira REST sequencer, not a local
+commit-batcher). Local bulk writes (import/export/migration) must not route through
+here; the local batch-write primitive lives in ``rebar._store``. See
+``docs/architecture.md`` "Two writers, one store".
+
 Event writes and reducer reads now go through the in-package store primitives
 (``rebar._store`` / ``rebar.reducer``) directly — Tier E E5b dropped the bare
 ``event_append`` / ``ticket_reducer`` compat shims and their ``sys.path`` dances.

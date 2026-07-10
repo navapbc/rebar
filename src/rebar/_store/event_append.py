@@ -8,6 +8,11 @@ bytes, stages it same-filesystem, and under the unified write lock does the atom
 rename + ``git add`` + ``git commit``. ``write_and_push`` additionally runs the
 best-effort push.
 
+**Scope — this is the LOCAL ticket-store write path.** The Jira reconciler
+(``rebar_reconciler/``) is a separate *client* of this store; its inbound
+commit-batcher is a Jira-sync internal, NOT the general local batch-write API. Do
+not conflate the two — see ``docs/architecture.md`` "Two writers, one store".
+
 **Byte parity (the contract).** The committed bytes come from the single canonical
 serializer :func:`rebar._store.canonical.canonical_bytes`
 (``json.dumps(event, ensure_ascii=False, separators=(',', ':'), sort_keys=True)`` with
