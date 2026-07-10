@@ -102,6 +102,37 @@ def _publish_voter_error_metric() -> None:
         pass
 
 
+def _publish_artifact_emit_error_metric() -> None:
+    """Best-effort publish of ``rebar/host:review_bot_artifact_emit_errors``, mirroring
+    :func:`_publish_voter_error_metric`. The journald marker + the host probe is the reliable
+    path; in-container boto3 may not reach IMDS, so any failure is swallowed."""
+    try:
+        import boto3  # noqa: PLC0415 — optional, lazy: only on a best-effort error path
+
+        boto3.client("cloudwatch").put_metric_data(
+            Namespace="rebar/host",
+            MetricData=[
+                {"MetricName": "review_bot_artifact_emit_errors", "Value": 1, "Unit": "Count"}
+            ],
+        )
+    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
+        pass
+
+
+def _artifact_emit_error(**fields: Any) -> None:
+    """Greppable marker for a SWALLOWED code_review artifact-emission failure (bug
+    desirous-judicial-hogget). Emission is best-effort — the vote is already cast — but a
+    write-dead tickets store (e.g. a fresh single-branch clone lacking ``.env-id``) would
+    otherwise be a SILENT no-op. Emit a distinct ``ARTIFACT_EMIT_ERROR`` line to stderr
+    (journald) + a countable metric so the write-dead store is detectable in logs, WITHOUT
+    changing the continue-don't-crash behaviour."""
+    record = {"event": "ARTIFACT_EMIT_ERROR", "timestamp": time.time(), **fields}
+    line = "ARTIFACT_EMIT_ERROR " + json.dumps(record, default=str)
+    logger.warning(line)
+    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    _publish_artifact_emit_error_metric()
+
+
 # ── merge-change review path (epic 88ab / S2) ────────────────────────────────
 # Bounded sequential REST fan-out per merge review: 1 commit GET (detection) + 1 files GET
 # + 1 mergelist GET + N per-file diff GETs, N bounded by DIFF_CHAR_CAP (per-file diffs are
@@ -265,7 +296,13 @@ def emit_code_review_artifact(
             "code_review artifact %s: linked %d/%d trailer refs", artifact_id, linked, len(refs)
         )
         return artifact_id
-    except Exception:  # noqa: BLE001 — artifact emission is best-effort; never fail the vote
+    except Exception as exc:  # noqa: BLE001 — artifact emission is best-effort; never fail the vote
+        # NON-silent (bug desirous-judicial-hogget / d220): a write-dead tickets store — e.g. a
+        # fresh single-branch clone missing `.env-id` (converged by
+        # infra/scripts/reviewbot-ensure-tickets.sh) — otherwise makes emission a SILENT no-op.
+        # Emit a distinct, greppable ARTIFACT_EMIT_ERROR marker + a countable metric so it is
+        # detectable in logs. The vote is already cast, so we STILL continue-don't-crash.
+        _artifact_emit_error(change_id=change_id, revision=revision, error=str(exc))
         logger.warning("code_review artifact emission failed; continuing", exc_info=True)
         return None
 
