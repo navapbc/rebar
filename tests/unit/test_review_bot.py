@@ -183,6 +183,27 @@ def test_adapter_clean_is_pass(monkeypatch, tmp_path):
     assert out["message"].startswith("[LLM-Review: PASS]")
 
 
+def test_adapter_threads_change_id_into_gate_request(monkeypatch, tmp_path):
+    """Gerrit change-keying (epic super-path-bag): ``code_review_decision`` forwards ``change_id``
+    into the ``CodeReviewRequest``, so the region-gated novelty floor uses the ``change:<id>``
+    keyspace for Gerrit finding-memory — the analogue of the local ``session:<id>`` key. This is the
+    end-to-end wiring that makes 'Gerrit review memory is keyed on the Gerrit change' live."""
+    import rebar.llm.workflow.gate_dispatch as gd
+
+    captured: dict = {}
+
+    def _capture(request):
+        captured["change_id"] = request.change_id
+        return {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {"llm_ran": True}}
+
+    monkeypatch.setattr(gd, "produce_code_review_verdict", _capture, raising=True)
+    adapter.code_review_decision("diff", str(tmp_path), "ref", change_id="Ideadbeef")
+    assert captured["change_id"] == "Ideadbeef"
+    # default (no change_id supplied) is "" — a bare/non-Gerrit invocation stays unkeyed
+    adapter.code_review_decision("diff", str(tmp_path), "ref")
+    assert captured["change_id"] == ""
+
+
 def test_adapter_blocking_finding_is_block(monkeypatch, tmp_path):
     _patch_verdict(
         monkeypatch,

@@ -507,3 +507,150 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
         "coaching": coaching,
         "coverage": coverage,
     }
+
+
+# ── region-gated novelty rising floor (story blameless-grindable-noctule) ─────────────────────────
+def score_code_novelty(
+    findings: list[dict[str, Any]],
+    prior_findings: list[dict[str, Any]],
+    *,
+    diff_text: str,
+    cfg: Any,
+    runner: Any,
+) -> dict[int, tuple[float, str]]:
+    """Score each CURRENT finding's novelty against the prior SURFACED findings via the code-novelty
+    sub-call, returning ``{index: (novelty ∈ [0,1], matched_prior_id)}``.
+
+    Mirrors plan-review's ``_score_floor_novelty`` runner wiring — the prior findings reach ONLY the
+    sub-call INSTRUCTIONS (never the Pass-1 finder), the diff is the domain context — but also
+    returns the
+    ``matched_prior_id`` too (for ``carried_from``), which the kernel ``score_novelty`` wrapper
+    discards. It REUSES the same primitives that wrapper uses: the ``code_review_novelty`` output
+    contract (the SAME ``novelty_model``), ``verify.reshape_novelties``, and ``decide.novelty`` — so
+    the scoring is byte-identical, only the return shape is richer.
+
+    FAIL-SAFE: no findings / no prior / any error → ``{}`` (every finding then scores 0.0, i.e.
+    carryover
+    = kept). A broken novelty signal can only make the floor keep MORE, never drop wrongly."""
+    if not findings or not prior_findings:
+        return {}
+    try:
+        from rebar.llm.prompting import prompts as _prompts
+        from rebar.llm.review_kernel import decide, verify
+        from rebar.llm.runner import RunRequest, get_runner
+
+        runner_sel = runner or get_runner(cfg)
+        prompt = _prompts.get_prompt("code-review-novelty", repo_root=cfg.repo_path)
+        system, _meta = _prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
+        system = _prompts.strip_volatile_marker(system)
+        batch = list(enumerate(findings))
+        context = verify.prior_findings_block(prior_findings)
+        req = RunRequest(
+            system_prompt=system,
+            instructions=(
+                f"## Diff under review\n{diff_text}\n\n"
+                f"{verify.novelty_instructions(batch)}\n\n"
+                f"## Prior-review findings (context)\n{context}"
+            ),
+            config=cfg,
+            reviewers=["code-novelty"],
+            mode="structured",
+            output_schema="code_review_novelty",
+            execution_mode="single_turn",
+        )
+        raw = runner_sel.run(req).get("novelties", []) or []
+        reshaped = verify.reshape_novelties(raw, valid_indices=range(len(findings)))
+        out: dict[int, tuple[float, str]] = {}
+        for gi in range(len(findings)):
+            entry = reshaped.get(gi, {})
+            out[gi] = (
+                decide.novelty(entry.get("matches_prior", {})),
+                str(entry.get("matched_prior_id") or ""),
+            )
+        return out
+    except Exception:  # noqa: BLE001 — fail-safe: any error → un-floored (no drops)
+        logger.warning("code-review novelty scoring failed; running un-floored", exc_info=True)
+        return {}
+
+
+def apply_region_gated_floor(
+    verdict: dict[str, Any],
+    *,
+    key: str | None,
+    cfg: Any,
+    runner: Any,
+    repo_root: Any = None,
+    diff_text: str = "",
+) -> None:
+    """The region-gated novelty rising floor for code review — the convergence mechanism (epic
+    super-path-bag). Mutates ``verdict`` IN PLACE, narrowing its ``advisory`` set before the sidecar
+    emit (the code-review analogue of plan-review's ``_maybe_apply_rising_floor``).
+
+    An advisory finding is DROPPED iff it is NOVEL (novelty ≥ ``novelty_drop_threshold``) AND
+    low-priority (< ``novelty_priority_floor``) AND its cited region is ``REGION_UNCHANGED``. A
+    ``REGION_CHANGED`` or ``REGION_UNKNOWN`` region ALWAYS raises (the fail-safe direction). Dropped
+    findings move to ``verdict["dropped"]`` with ``drop_reason = "novelty-region"``. A finding that
+    MATCHES a prior surfaced finding (low novelty) but is not dropped is stamped
+    ``carried_from = matched_prior_id`` and has its coaching stripped, while remaining surfaced.
+
+    REUSES ``decide.rising_floor_drop`` UNCHANGED and the c639 reader. Gated on
+    ``verify.novelty_drop_active`` (the shared evidence gate, OFF by default — same three keys
+    plan-review uses, no NEW config) and self-gates inert when there is no prior memory for ``key``.
+    FAIL-SAFE: wrapped in try/except → any error leaves the verdict fully unfiltered (no drops)."""
+    try:
+        from rebar import config as _config
+        from rebar.llm.code_review import region_gate, sidecar
+        from rebar.llm.review_kernel import decide
+
+        if not key:
+            return
+        vcfg = _config.load_config(repo_root).verify
+        if not vcfg.novelty_drop_active:  # the shared evidence gate (off by default)
+            return
+        advisory = verdict.get("advisory") or []
+        if not advisory:
+            return
+        prior = sidecar.latest_code_review_result(key, repo_root=repo_root)
+        prior_findings = (prior or {}).get("findings") or []
+        prior_deps = (prior or {}).get("deps") or {}
+        if not prior_findings:  # self-gate: no prior memory ⇒ inert (no flag needed)
+            return
+        nmap = score_code_novelty(
+            advisory, prior_findings, diff_text=diff_text, cfg=cfg, runner=runner
+        )
+        t_novel = vcfg.novelty_drop_threshold
+        floor = vcfg.novelty_priority_floor
+        kept: list[dict[str, Any]] = []
+        dropped: list[dict[str, Any]] = list(verdict.get("dropped") or [])
+        carried_ids: set[Any] = set()
+        for i, f in enumerate(advisory):
+            nov, matched = nmap.get(i, (0.0, ""))
+            prio = float(f.get("priority") or 0.0)
+            region = region_gate.region_for_finding(f, prior_deps, repo_root=repo_root)
+            drop = (
+                decide.rising_floor_drop(prio, nov, t_novel=t_novel, floor=floor)
+                and region == region_gate.REGION_UNCHANGED
+            )
+            if drop:
+                dropped.append(
+                    {**f, "decision": "dropped", "drop_reason": "novelty-region", "novelty": nov}
+                )
+                continue
+            if matched and nov < t_novel:  # carryover: matches a prior surfaced finding, not novel
+                f = {**f, "carried_from": matched}
+                if f.get("id") is not None:
+                    carried_ids.add(f.get("id"))
+            kept.append(f)
+        verdict["advisory"] = kept
+        if dropped:
+            verdict["dropped"] = dropped
+        # Carryover is NOT re-coached: strip coaching notes that reference a carried finding (they
+        # remain SURFACED, just uncoached). Findings carry an `id` by the coach stage.
+        if carried_ids and verdict.get("coaching"):
+            verdict["coaching"] = [
+                c
+                for c in verdict["coaching"]
+                if not (set(c.get("finding_refs") or []) & carried_ids)
+            ]
+    except Exception:  # noqa: BLE001 — fail-safe: any error leaves the verdict unfiltered (no drops)
+        logger.warning("region-gated floor failed; leaving verdict unfiltered", exc_info=True)

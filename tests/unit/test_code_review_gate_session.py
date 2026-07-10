@@ -16,6 +16,7 @@ ATTESTED (like plan review), with both the code root AND the ticket root active.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -299,6 +300,66 @@ def test_local_session_review_creates_reuses_artifact_with_session_and_deps(
         if str(t.get("title") or "") == "code-review: session:sess-abc"
     ]
     assert len(arts2) == 1, "second review under the same session reuses the artifact"
+
+
+def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
+    """Neutrality invariant (ADR 0008 Invariant 1): prior SURFACED findings reach ONLY the
+    region-gated floor's novelty seam — NEVER the workflow that runs the Pass-1 finder. We capture
+    the workflow inputs during a produce run whose reader returns a distinctive prior finding, and
+    assert that sentinel appears nowhere in the finder's inputs."""
+    from rebar.llm.code_review import sidecar
+
+    repo, _tid = repo_with_origin
+    sentinel = "PRIOR_ONLY_SENTINEL_ZZZ"
+    monkeypatch.setattr(
+        sidecar,
+        "latest_code_review_result",
+        lambda key, repo_root=None: {
+            "findings": [{"id": "P1", "finding": sentinel, "priority": 0.2, "location": "x.py"}],
+            "deps": {"x.py": "hh"},
+        },
+    )
+    captured: dict = {}
+
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+
+    def _spy(doc, inputs, **kw):
+        captured["inputs"] = inputs
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+    gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            session_id="sess-neutral",
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+    assert captured.get("inputs") is not None, "workflow must have run"
+    assert sentinel not in json.dumps(captured["inputs"]), (
+        "prior findings leaked into the Pass-1 finder inputs — the neutrality invariant is broken"
+    )
 
 
 def test_review_code_cli_mints_uuid_when_no_session(monkeypatch):

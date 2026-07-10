@@ -167,12 +167,17 @@ def code_review_decision(
     *,
     merge_commits: int | None = None,
     commit_message: str = "",
+    change_id: str = "",
 ) -> dict[str, Any]:
     """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
     ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
     a real BLOCK, an INDETERMINATE, a fail-closed scanner abstain, an inert-disabled verdict, or
     ANY exception → BLOCK (fail-closed). Signature + return shape are stable (the voter is
-    unchanged); the four-pass gate owns the threshold."""
+    unchanged); the four-pass gate owns the threshold.
+
+    ``change_id`` (the Gerrit change) selects the ``change:<id>`` novelty keyspace for the
+    region-gated floor (epic super-path-bag), so cross-patchset finding-memory is keyed on the
+    CHANGE — spanning its revisions — the Gerrit analogue of the local ``session:<id>`` key."""
     try:
         # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
         # package was imported — only when a review actually runs.
@@ -191,6 +196,7 @@ def code_review_decision(
                 LLMConfig.from_env(repo_root=repo_root),
                 diff_text=diff_text,
                 commit_message=commit_message,  # drives the scope-intent overlay (default "")
+                change_id=change_id,  # selects the change:<id> novelty keyspace (finding-memory)
                 repo_root=repo_root,
                 enabled=True,  # voter activation is the authoritative gate (ADR 0015)
             )
