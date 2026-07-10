@@ -13,6 +13,16 @@ import subprocess
 from pathlib import Path
 
 import rebar
+from rebar import config
+
+
+def _commit_count(repo: Path) -> int:
+    """Number of commits on the tracker's tickets branch (git-level, not event count)."""
+    tracker = str(config.tracker_dir(str(repo)))
+    r = subprocess.run(
+        ["git", "-C", tracker, "rev-list", "--count", "HEAD"], capture_output=True, text=True
+    )
+    return int(r.stdout.strip())
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> Path:
@@ -49,11 +59,15 @@ def test_rerun_produces_zero_duplicates(tmp_path: Path) -> None:
     first = rebar.import_tickets(lines, repo_root=str(dst))
     assert first["created"] == 2
     count_after_first = len(rebar.list_tickets(repo_root=str(dst)))
+    commits_after_first = _commit_count(dst)
 
     second = rebar.import_tickets(lines, repo_root=str(dst))
     assert second["created"] == 0
     assert second["skipped"] == 2
     assert len(rebar.list_tickets(repo_root=str(dst))) == count_after_first
+    # The re-run must add ZERO git commits (every record skipped by source_id) —
+    # a git-level proof of idempotency stronger than the created==0 count.
+    assert _commit_count(dst) == commits_after_first
 
 
 def test_resume_after_partial_completes_without_duplicates(tmp_path: Path) -> None:
