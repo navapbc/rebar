@@ -233,8 +233,15 @@ class PydanticAIRunner:
             # The rebar ticket tools read the PINNED ticket-store snapshot when set (the
             # orphan `tickets` branch is absent from the code snapshot `cfg.repo_path`),
             # else the in-place checkout's store. The file tools stay on the code snapshot.
-            tools = pai_tools.filesystem_tools(cfg.repo_path) + pai_tools.rebar_tools(
-                cfg.tickets_path or cfg.repo_path, allow_comment=allow_comment
+            # `grounding_tools` adds the environment-aware `resolve_symbol` (bug 406f)
+            # so the finder can CONFIRM a third-party/stdlib symbol the repo-scoped
+            # file tools cannot see, rather than asserting it is hallucinated.
+            tools = (
+                pai_tools.filesystem_tools(cfg.repo_path)
+                + pai_tools.grounding_tools(cfg.repo_path)
+                + pai_tools.rebar_tools(
+                    cfg.tickets_path or cfg.repo_path, allow_comment=allow_comment
+                )
             )
             if req.extra_tools:
                 tools = [*tools, *req.extra_tools]
