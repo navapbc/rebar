@@ -78,6 +78,13 @@ WORKDIR /app
 COPY . /app
 RUN pip install ".[agents,reviewbot]"
 
+# Install the tickets-store ensure helper (bug desirous-judicial-hogget / d220) onto PATH
+# so the entrypoint can converge a freshly-cloned single-branch `tickets` worktree into a
+# writable rebar store on every boot. A fresh single-branch clone lacks a git identity and
+# the git-ignored `.env-id` store marker, so writes would fail "ticket system not
+# initialized" and emit_code_review_artifact would silently swallow it. Copied from /app.
+RUN install -m 0755 /app/infra/scripts/reviewbot-ensure-tickets.sh /usr/local/bin/reviewbot-ensure-tickets.sh
+
 # The receiver port is single-sourced from the .env (REVIEW_BOT_PORT). The default
 # matches src/rebar/review_bot/app.py DEFAULT_PORT and the uvicorn --port below.
 ENV REVIEW_BOT_PORT=8000
@@ -112,6 +119,11 @@ RUN set -eux; \
       echo '      echo "reviewbot: tickets worktree clone deferred (deploy canary)" >&2'; \
       echo '  fi'; \
       echo 'fi'; \
+      echo '# Converge the (possibly freshly-cloned) tickets worktree into a writable'; \
+      echo '# rebar store: repo-local git identity + the `.env-id` store marker. Idempotent'; \
+      echo '# — a no-op when the clone is deferred or already converged; never blocks boot.'; \
+      echo 'reviewbot-ensure-tickets.sh || \'; \
+      echo '  echo "reviewbot: tickets store ensure deferred (see logs)" >&2'; \
       echo 'exec "$@"'; \
     } > /usr/local/bin/reviewbot-entrypoint.sh; \
     chmod +x /usr/local/bin/reviewbot-entrypoint.sh
