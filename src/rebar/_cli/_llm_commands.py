@@ -35,6 +35,13 @@ def _add_ref_source(
     config-override note so the help text matches the actual resolution."""
     ref_help = f"branch | tag | SHA to verify against (default: {ref_default}"
     ref_help += "; configurable via REBAR_GATE_REF / [snapshot].ref)" if ref_configurable else ")"
+    if ref_configurable:
+        ref_help += (
+            " — pass --ref HEAD when the review depends on code you have committed "
+            "locally but not yet landed on the default ref (a stacked change or feature "
+            "branch): the default ref reads a snapshot predating that code, so symbols it "
+            "adds read as 'does not exist' false findings"
+        )
     parser.add_argument("--ref", default=None, help=ref_help)
     parser.add_argument(
         "--source",
