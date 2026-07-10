@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/compose/Dockerfile.autolander","reason":"service image"},{"path":"infra/compose/docker-compose.yml","reason":"service wiring"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721694167337001,"uuid":"cf177c7f-f9a2-441f-acef-a708d674d937"}

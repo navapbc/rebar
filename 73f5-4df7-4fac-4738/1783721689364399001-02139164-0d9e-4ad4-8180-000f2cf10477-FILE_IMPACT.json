@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/autolander/land.py","reason":"agent-facing command + outcome enum"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721689364399001,"uuid":"02139164-0d9e-4ad4-8180-000f2cf10477"}

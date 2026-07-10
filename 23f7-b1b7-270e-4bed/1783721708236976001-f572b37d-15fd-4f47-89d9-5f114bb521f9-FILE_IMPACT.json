@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/autolander/batch.py","reason":"verified-casting mechanic"},{"path":"docs/adr/0042-auto-lander.md","reason":"batching addendum"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721708236976001,"uuid":"f572b37d-15fd-4f47-89d9-5f114bb521f9"}
