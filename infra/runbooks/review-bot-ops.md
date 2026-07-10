@@ -351,3 +351,57 @@ curl -s localhost:8000/health    # (or /review/health via nginx) → {"status":"
 Then `/rerun` any changes whose `LLM-Review` fail-closed during the outage (see "Manually
 re-run a review" above) — the janitor keeps the store bounded thereafter, and the
 `rebar-root-disk-pressure` alarm clears once `df` drops back under 85%.
+## Disk-full triage (root-volume exhaustion — bug 7a41)
+
+**Symptom.** The box's ROOT filesystem fills up. Because the docker image/build-cache store
+and the review-bot's per-change clone workdir both live on root (see **Where the clone workdir
+lives** below), exhaustion fail-closes the gate: `LLM-Review` votes go to `-1` — typically a
+`[LLM-Review: BLOCK — coverage-gap (…)]` infra veto and/or a `VOTER_ERROR` line (clone/diff
+failure when the clone cannot write), and CI/deploy steps error on "no space left on device"
+(image builds and `docker compose up` fail, so autodeploy may mark `bot-build-failed`).
+
+**Diagnose.** Confirm it is disk before anything else:
+
+```bash
+df -h /                                    # root filesystem — the one that fills
+docker system df                           # images + build cache footprint (the usual culprit)
+du -sh /tmp/rebar-gate-snapshots 2>/dev/null   # leaked gate snapshot dirs (see below)
+du -sh /tmp/reviewbot-* 2>/dev/null        # leaked per-change clone workdirs
+docker builder du 2>/dev/null || docker system df -v | sed -n '/Build cache/,$p'  # builder cache detail
+```
+
+The docker builder cache and dangling images are the most common consumers; the gate snapshot
+store (`/tmp/rebar-gate-snapshots`, overridable via `REBAR_GATE_TMPDIR`) and leaked
+`reviewbot-*` clone dirs are secondary.
+
+**Recover.** Reclaim space, largest lever first:
+
+```bash
+docker builder prune -f          # drop the build cache (rebuilds are slower once, not lost)
+docker image prune -f            # drop dangling (untagged) images — tagged :prev/:latest are kept
+rm -rf /tmp/rebar-gate-snapshots/tmp/*   # clear in-progress/leaked gate snapshot builds
+rm -rf /tmp/reviewbot-*          # clear leaked per-change clone workdirs (none should persist)
+```
+
+Never delete tagged images (`compose-review-bot:prev` is the rollback lifeline). After
+reclaiming, `/rerun` any change left stuck at a disk-induced `-1` (see the `/rerun` section) —
+the vote does not clear on its own.
+
+**Where the clone workdir lives (root-volume-resident).** The voter clones each change into
+`tempfile.TemporaryDirectory(prefix="reviewbot-")` (`src/rebar/review_bot/voter.py`), which
+resolves to the system temp dir (`tempfile.gettempdir()`, typically `/tmp`) on the box's
+**ROOT** volume — **not** the `/var/gerrit` data volume. So a burst of reviews consumes root
+disk, and this workdir is one of the things the root-disk alarm covers. The dir is
+context-managed (removed when the review finishes), so a lingering `reviewbot-*` under `/tmp`
+means a crashed/killed review, not normal operation.
+
+**Automated mitigations already in place.** You should rarely have to do the above by hand:
+
+- **Autodeploy prunes on every deploy.** `prune_docker_caches` in `infra/scripts/autodeploy.sh`
+  runs `docker builder prune -f --keep-storage` + `docker image prune -f` on **both** deploy
+  paths (bot rebuild and the periodic converge), keeping the build cache bounded and dangling
+  images swept without touching tagged images.
+- **Root-disk alarm.** The `rebar-root-disk-pressure` CloudWatch alarm
+  (`infra/terraform/monitoring_autodeploy.tf`) fires when `rebar/host:root_disk_used_percent`
+  (published by `observability.sh`, 5-min cadence) stays above 85% (2 of 3 periods). It pages
+  before exhaustion so you can prune ahead of a fail-closed gate.

@@ -493,6 +493,11 @@ async def review_and_vote(
         # Skipped entirely when a merge-path infra gap already decided the vote above.
         if decision is None:
             try:
+                # Per-change clone workdir. TemporaryDirectory resolves to the system temp
+                # dir (tempfile.gettempdir(), typically /tmp) on the box's ROOT volume — not
+                # the /var/gerrit data volume — so a large series of clones adds to root-disk
+                # pressure, which the `rebar-root-disk-pressure` alarm watches (see the
+                # "Disk-full triage" section of infra/runbooks/review-bot-ops.md).
                 with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
                     await asyncio.to_thread(
                         gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
