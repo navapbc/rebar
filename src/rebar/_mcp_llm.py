@@ -178,7 +178,12 @@ def register_llm_tools(mcp, ctx) -> None:
             return _structured_llm_failure(exc)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
-    def review_plan(ticket_id: str, ref: str | None = None, source: str | None = None) -> dict:
+    def review_plan(
+        ticket_id: str,
+        ref: str | None = None,
+        source: str | None = None,
+        force: bool = False,
+    ) -> dict:
         """Run the plan-review gate on a ticket -> a plan_review_verdict dict
         {verdict: "PASS"|"BLOCK"|"INDETERMINATE", blocking[], advisory[], coaching[],
         indeterminate[], coverage, signature?, source, verified_at_sha, ...}. A deterministic
@@ -186,6 +191,10 @@ def register_llm_tools(mcp, ctx) -> None:
         ticket's whole plan — the inverse of verify_completion. On a non-blocking PASS it signs a
         plan-review attestation (so a subsequent claim passes the gate when enabled) and emits
         the REVIEW_RESULT sidecar; in READONLY mode it runs a pure read (no sign, no sidecar).
+
+        When the ticket is UNCHANGED and already carries a still-valid plan-review
+        attestation, the review SHORT-CIRCUITS (no LLM call) and reuses it; pass
+        ``force=True`` to bypass that and force a full re-review.
 
         ``source=attested`` (default) reviews a snapshot pinned at ``ref`` (default
         ``origin/main``) and binds that SHA into the attestation so the claim gate re-hashes the
@@ -205,7 +214,7 @@ def register_llm_tools(mcp, ctx) -> None:
         ro = _readonly()
         try:
             return rebar.llm.review_plan(
-                ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro
+                ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro, force=force
             )
         except rebar.llm.LLMError as exc:
             return _structured_llm_failure(exc)
