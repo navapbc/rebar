@@ -262,6 +262,34 @@ false, reason: "PASS"}` for an *exempt* runner that returned PASS but was not si
 > never produce — `signature.signed == true` in the verdict JSON is only its in-band
 > echo.
 
+## The idempotence short-circuit (skip the LLM when nothing changed)
+
+`review-plan` runs a billable, multi-pass LLM review. Re-running it on a ticket that has **not
+changed at all** — and already carries a still-valid plan-review attestation — is pure waste:
+the result would be the same PASS and the same signature. So on the **signing path** the review
+**short-circuits before any LLM call** when the ticket is fully unchanged: it computes the
+current material fingerprint and asks the *same* validity oracle the claim gate consumes
+(`claim_gate_check` -> `compute_validity`) whether a **certified** plan-review attestation still
+binds that fingerprint, whose reviewed code has not drifted, whose criteria-registry stamp still
+matches, and which post-dates any reopen. When that holds, it **reuses** the existing
+attestation instead of re-reviewing.
+
+- The skip fires **precisely when a `claim` would already pass**, so it can never weaken the
+  gate — the attestation it reuses is the one already on the ticket (no re-sign, no new
+  sidecar).
+- The reused verdict is a well-formed `plan_review_verdict` with `verdict: PASS`,
+  `coverage.llm_ran: false`, `coverage.idempotent_skip: true`, the current
+  `material_fingerprint`, and `signature.signed: true` mirroring the live attestation. A
+  concise log line (`plan review reused ... -- pass --force to re-run`) marks the skip.
+- It is ordered **before** the code-drift `drift_refresh` check below (a fully-valid
+  attestation beats a needs-refresh one), and applies only when signing (a `--no-sign` /
+  readonly review has no attestation to reuse).
+- **`--force`** (CLI `rebar review-plan --force`, library/MCP `force=True`) bypasses **both**
+  the idempotence skip and the drift-refresh, forcing a full multi-pass re-review. Any real
+  change to the ticket (a material edit, code drift, a registry change, a reopen) already
+  defeats the skip on its own; `--force` is the manual override for an otherwise-unchanged
+  ticket.
+
 ## The convergent remediation re-review (rising floor)
 
 A re-review of an **edited** plan used to be at risk of not converging: each remediation
