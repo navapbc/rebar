@@ -118,7 +118,12 @@ and re-run the review** until it passes — do not claim a ticket with a failing
 absent review. Even on a review that **passes**, you must **remediate all valid
 advisory findings** before continuing (triage each: fix the valid ones; a finding
 you judge invalid must be justified, not silently ignored). The coaching notes tell
-you the productive next move per finding.
+you the productive next move per finding. Run `rebar review-plan <id>` exactly as
+documented so it **signs a plan-review attestation on every non-blocking PASS** — that
+signed attestation is what the claim gate consumes. **Sign on every round:** signing is
+free, you cannot know in advance which round is the last, and remediating a finding
+harmlessly makes the prior attestation read as stale (validity is computed on read), so
+the next passing review re-signs the current plan.
 
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to
