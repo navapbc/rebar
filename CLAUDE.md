@@ -503,6 +503,17 @@ the short version for agents:
 > short / Jira key. Enforced by `verify.require_ticket_for_commit` (on for this repo); see
 > [`docs/commit-ticket-trailer.md`](docs/commit-ticket-trailer.md).
 
+> **Every commit needs a DCO sign-off (agent trailer).** Gerrit rejects an unsigned push to
+> `refs/for/*` (`receive.requireSignedOffBy`). Agent commits are authored by the bot identity
+> (`RebarBotNava` / committer `joeoakhart+bot@navapbc.com`), but the DCO certifier is the
+> **responsible human**, so the sign-off trailer must be **exactly**:
+> `Signed-off-by: Joe Oakhart <joeoakhart+bot@navapbc.com>` — the human's real name with his
+> registered plus-addressed mailbox (which routes to the human; kernel practice accepts
+> plus-addresses). Add it with `git commit -s` when committing as the bot (the configured
+> committer name is `RebarBotNava`, so pass `-c user.name="Joe Oakhart"` if you need the
+> trailer name to read as the human), or append the trailer verbatim. See the "Sign your work
+> (DCO)" section of [CONTRIBUTING.md](CONTRIBUTING.md).
+
 1. **Get Gerrit access once.** Sign in at `https://rebar.solutions.navateam.com` via
    GitHub OAuth, generate an HTTP password (Settings → HTTP Credentials), clone from
    Gerrit (`https://<user>@rebar.solutions.navateam.com/a/rebar`), and install the

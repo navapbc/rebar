@@ -62,7 +62,8 @@ You only do this the first time.
    ```
 3. **Make your edit, then commit with a sign-off and the ticket trailer.** Use
    `git commit -s`, which adds the DCO `Signed-off-by:` line certifying you wrote the
-   change (see <https://developercertificate.org>). Add a `rebar-ticket:` trailer with
+   change (see [**Sign your work (DCO)**](../CONTRIBUTING.md#sign-your-work-dco) in
+   CONTRIBUTING.md). Add a `rebar-ticket:` trailer with
    the id the maintainer gave you:
    ```bash
    git commit -s -m "fix: correct the widget count in the summary

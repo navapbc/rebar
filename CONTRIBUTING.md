@@ -158,6 +158,48 @@ push). That replication is the only way GitHub `main` advances.
 
 ---
 
+## Sign your work (DCO)
+
+rebar uses the **Developer Certificate of Origin** (<https://developercertificate.org>)
+as its inbound-contribution agreement — **the DCO, not a CLA**. Signing off certifies
+that you wrote the change (or have the right to submit it) under the project's license;
+it requires **no paperwork**, just a trailer on each commit.
+
+**Add the sign-off with `git commit -s`.** It appends a line with your real name and
+email:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+Use your **real name** (pseudonyms don't satisfy the DCO), and an email you can be
+reached at. This is **enforced at push time**: Gerrit rejects an unsigned push to
+`refs/for/*`, so a commit without a `Signed-off-by:` trailer cannot even reach review.
+
+**Fixing a missing sign-off.** If a push is rejected (or you forgot), re-sign and
+re-push — nothing is lost:
+
+```bash
+git commit --amend -s --no-edit      # sign the tip commit
+git rebase --signoff origin/main     # or sign a whole branch of commits
+git push origin HEAD:refs/for/main
+```
+
+**Shepherded patches carry two sign-offs.** When a maintainer shepherds your patch
+(see §3a), your own `Signed-off-by:` must already be in the patch (you certify your
+work); the shepherd adds **theirs** on amend. Both lines stay in the final commit.
+
+> **Why DCO and not a CLA.** A CLA asks contributors to grant rights beyond the
+> license and is a barrier peers explicitly cite for *not* accepting contributions;
+> the DCO lowers that barrier while still establishing provenance. **rebar would adopt
+> a CLA only if Nava counsel requires rights beyond Apache-2.0 §5 + the DCO.**
+
+> **Post-flip failure runbook (maintainers).** A rejected push after the DCO flip →
+> `git commit --amend -s --no-edit` and re-push. If agent/bot tooling regresses because
+> its commits aren't signed, **roll back the flag** (`requireSignedOffBy` in
+> `infra/gerrit/project.config`, then re-run `setup-project.sh`) while you fix the
+> tooling — see that file's rollback note.
+
 ## 3. GitHub is a read-only mirror
 
 After the cutover, `navapbc/rebar` on GitHub is a **mirror**: `main` only advances via
