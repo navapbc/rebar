@@ -7,6 +7,10 @@ FILE_IMPACT/VERIFY_COMMANDS + STATUS) — never raw-event injection. This is a
 timestamps, with the source identity preserved as ``source_*`` (see
 :mod:`_provenance`).
 
+Import is the highest-volume LOCAL writer. Any commit-batching for imports belongs
+to the ``rebar._store`` write path — NOT the Jira reconciler's inbound batcher (a
+separate system). See ``docs/architecture.md`` "Two writers, one store".
+
 Two passes:
 
 * **Pass 1 — create.** Every record becomes a ticket; we capture

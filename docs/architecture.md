@@ -94,6 +94,50 @@ over one git-backed store.
   git-canonical (packaged `reviewers/*.md` or project `.rebar/prompts/`). See
   [llm-framework.md](llm-framework.md).
 
+### Two writers, one store
+
+rebar's git-backed event store has **two independent writers** that must not be
+conflated — a recurring confusion for agents scoping bulk-write work:
+
+1. **The local ticket-store write path** — `rebar._store.event_append`
+   (`stage_and_commit` / `write_and_push`) plus the inline locked cores in
+   `rebar._commands.txn` (transition/claim) and `_commands.delete`. Every CLI,
+   library, and MCP mutation — and every bulk operation (import/export/migration) —
+   writes through here. Default granularity is **one event = one commit**; a few
+   inline cores (claim, delete, `compact-all`) already stage several event files
+   into a single commit.
+2. **The Jira reconciler** — `rebar_reconciler/` (shipped as `_engine/` package
+   data) — a **bridge** that syncs the local store ↔ Jira. It is a *client* of the
+   store, not the store itself.
+
+**What they share:** only the low-level single-writer lock (`rebar._store.lock`,
+invariant I5) and the canonical event-byte contract (`rebar._store.canonical`).
+They do **not** share a write API.
+
+**The trap (read this before scoping any "batch write" work).** An agent scoping a
+*local* batch-write greps for "batch"/"commit" and lands in the reconciler — the
+wrong system. Two specific false friends there:
+
+- `applier._apply_batch` is an **outbound Jira REST** mutation sequencer (it batches
+  *Jira API calls*), **not** a local git-commit batcher.
+- The inbound path writes local events via `inbound_translate._write_event_file` —
+  one event file per call, under the store lock, via `os.replace`, with **no**
+  `git add`/`commit` of its own (it does *not* go through `stage_and_commit`). Those
+  files are committed by the reconciler pass's own orchestration, not the local
+  write path.
+
+Both are **Jira-sync internals.** If you are reducing commit flood on **local** bulk
+writes (import/export/migration), the batch-write primitive belongs in
+`rebar._store`; do **not** route local writes through, or "extract" a shared
+primitive out of, the reconciler.
+
+**Overloaded vocabulary.** The same words mean different things inside vs. outside
+the reconciler: *reconcile* = the local↔Jira bridge pass; *apply* (in the
+reconciler) = applying *inbound Jira changes* as local events; *batch* (in the
+reconciler, `_apply_batch`) = **outbound Jira REST** call batching, distinct from a
+local store commit-batch; *sync* = push/pull of the `tickets` branch
+(`rebar._store.push`/`sync`), distinct from Jira sync.
+
 ### Python package layout & the engine import boundary
 
 The library, CLI, MCP server, and all command/read/write logic are the `rebar`
