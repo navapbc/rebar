@@ -1,0 +1,39 @@
+# Dependabot — GitHub Actions version updates only.
+#
+# ADVISORY-PR posture: this repo's `main` advances only through Gerrit review, so
+# a Dependabot pull request CANNOT be merged here. Dependabot PRs are advisory
+# notifications — the maintainer reads the diff, lands the equivalent bump via a
+# Gerrit change, and closes the PR (Dependabot is another shepherded patch author
+# under the PR-as-intake posture). The lockdown workflow
+# (.github/workflows/lockdown.yml, owned by story nonsecular-arthritic-sidewinder)
+# exempts dependabot[bot] with a job-level actor guard so these PRs are not
+# auto-closed.
+#
+# Scope + design decisions (recorded here so they survive independent of tickets):
+#   - GitHub-Actions ecosystem ONLY. No `pip` ecosystem entry: version updates act
+#     on pins/lockfiles, and rebar's core dependencies are unpinned `>=`, so a pip
+#     entry would produce noise with nothing to bump. (Add a `uv` block only if a
+#     uv.lock is ever committed.)
+#   - The `cooldown` key is intentionally OMITTED. It is in production use in pip's
+#     own dependabot config, but its schema status was disputed in review and its
+#     value here is marginal (it only delays update PRs a few days). Omitting it
+#     removes any dependence on a contested feature. Revisit trigger: update-PR noise.
+#   - Rejected alternatives: a bespoke Gerrit-pushing bump bot (the Gerrit-peer
+#     pattern — Wikimedia LibraryUpgrader, OpenStack requirements automation —
+#     overkill for a monthly actions-only stream; parked as idea
+#     misogynic-cerulean-goldfish); and alerts-only with no version-update PRs
+#     (loses the ready-made diff; security alerts fire regardless and stay on).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
