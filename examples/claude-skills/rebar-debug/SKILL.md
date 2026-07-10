@@ -27,6 +27,14 @@ trace, an incident, a Jira ticket, a vague "X is broken"). Run the full protocol
 **each** problem independently. Problems are cheap to parallelize during Phase 1 and are kept
 isolated so evidence for one stays clean of another.
 
+**Before you begin, switch to a fresh worktree based on `origin/main`.** Do this as the very
+first step of skill execution — `git fetch origin && git worktree add <path> -b <branch> origin/main`
+— so all reproduction, experiments, and the eventual Phase 2 fix happen in isolation on
+current `main`, never in the primary checkout. When the skill concludes — whether the fix
+lands, the run fails, or you abandon it — retire the worktree with `git worktree remove <path>`
+(then `git worktree prune`), so it does not leak; keep it only when an unlanded fix must
+survive for follow-up.
+
 ## Operating principles
 
 - **Each stage owns one job; finishing it means producing that stage's work product.** A
