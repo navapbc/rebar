@@ -411,3 +411,22 @@ prompts, the domain-context assembler, the verify-prompt preamble, the move-cata
 the public entry points, the verifier-rules scaffold, and the enforcement rationale
 (structure mechanically + behavior via evals; **no** prompt-text lint) are in
 [review-kernel.md](review-kernel.md).
+
+### Novelty convergence — shared kernel primitives vs the code-review region gate
+
+The novelty rising floor is a further reuse case. The **shared kernel** owns the reusable
+convergence primitives: `review_kernel.verify.novelty_model` / `NOVELTY_SUBANSWERS` /
+`reshape_novelties` (the novelty scoring contract) and `review_kernel.decide.novelty` /
+`rising_floor_drop(priority, novelty)` (the per-finding novelty math + the drop predicate). Both
+review gates bind the SAME `novelty_model` — plan-review as `plan_review_novelty`, code-review as
+`code_review_novelty` — and call `rising_floor_drop` unchanged.
+
+What is **gate-specific** (NOT in the kernel, because it genuinely differs per gate) is the
+orchestration around those primitives: plan-review's whole-artifact floor
+(`plan_review/__init__.py::_maybe_apply_rising_floor`) vs code-review's **per-citation region
+gate** (`code_review/region_gate.py` + `code_review/workflow_ops.py::apply_region_gated_floor`),
+which ANDs `rising_floor_drop` with a content-addressed region check so a finding is dropped only
+when its cited code region is unchanged. The novelty PROMPTS are gate-specific too
+(`reviewers/plan_review_novelty.md` vs `reviewers/code_review_novelty.md`). See
+**[ADR 0037](adr/0037-code-review-novelty-convergence.md)** and [review-kernel.md](review-kernel.md)
+(§ Code-review novelty convergence).

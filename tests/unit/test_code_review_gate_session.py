@@ -16,6 +16,7 @@ ATTESTED (like plan review), with both the code root AND the ticket root active.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -222,3 +223,215 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
         f"expected {seen.get('tickets_root')!r}); otherwise the agent's rebar tools run "
         "against the bare clone and error on a missing .tickets-tracker"
     )
+
+
+# ── local session persistence (story paradoxal-balsamic-bubblefish) ───────────────────────────
+def _stub_workflow(monkeypatch, verdict: dict) -> None:
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+
+    def _spy(doc, inputs, **kw):
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = verdict
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+
+
+def test_local_session_review_creates_reuses_artifact_with_session_and_deps(
+    repo_with_origin, monkeypatch
+):
+    """A local review keyed by ``session_id`` emits a ``code-review: session:<id>`` artifact whose
+    payload carries the ``session_id`` + the reviewed-file ``deps`` map; a SECOND review under the
+    same session REUSES that artifact (append, not duplicate) — the convergence memory."""
+    from rebar.llm.code_review import sidecar
+
+    repo, _tid = repo_with_origin
+    verdict = {
+        "verdict": "PASS",
+        "blocking": [],
+        "advisory": [{"finding": "nit", "location": "x.py:1"}],
+        "coverage": {},
+    }
+    _stub_workflow(monkeypatch, verdict)
+
+    def _run():
+        return gate_dispatch.produce_code_review_verdict(
+            gate_dispatch.CodeReviewRequest(
+                LLMConfig.from_env(repo_root=str(repo)),
+                head="HEAD",
+                diff_text=_DIFF,
+                changed_files=["x.py"],
+                runner=FakeRunner(structured={}),
+                session_id="sess-abc",
+                repo_root=str(repo),
+                enabled=True,
+            )
+        )
+
+    _run()
+    arts = [
+        t
+        for t in rebar.list_tickets(ticket_type="code_review", repo_root=str(repo)) or []
+        if str(t.get("title") or "") == "code-review: session:sess-abc"
+    ]
+    assert len(arts) == 1, "one session-keyed artifact created"
+    got = sidecar.latest_code_review_result("session:sess-abc", repo_root=str(repo))
+    assert got is not None
+    assert got["session_id"] == "sess-abc"
+    assert "x.py" in got["deps"] and got["deps"]["x.py"] != "absent"
+
+    _run()  # second review, same session → reuse, not duplicate
+    arts2 = [
+        t
+        for t in rebar.list_tickets(ticket_type="code_review", repo_root=str(repo)) or []
+        if str(t.get("title") or "") == "code-review: session:sess-abc"
+    ]
+    assert len(arts2) == 1, "second review under the same session reuses the artifact"
+
+
+def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
+    """Neutrality invariant (ADR 0008 Invariant 1): prior SURFACED findings reach ONLY the
+    region-gated floor's novelty seam — NEVER the workflow that runs the Pass-1 finder. We capture
+    the workflow inputs during a produce run whose reader returns a distinctive prior finding, and
+    assert that sentinel appears nowhere in the finder's inputs."""
+    from rebar.llm.code_review import sidecar
+
+    repo, _tid = repo_with_origin
+    sentinel = "PRIOR_ONLY_SENTINEL_ZZZ"
+    monkeypatch.setattr(
+        sidecar,
+        "latest_code_review_result",
+        lambda key, repo_root=None: {
+            "findings": [{"id": "P1", "finding": sentinel, "priority": 0.2, "location": "x.py"}],
+            "deps": {"x.py": "hh"},
+        },
+    )
+    captured: dict = {}
+
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+
+    def _spy(doc, inputs, **kw):
+        captured["inputs"] = inputs
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+    gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            session_id="sess-neutral",
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+    assert captured.get("inputs") is not None, "workflow must have run"
+    assert sentinel not in json.dumps(captured["inputs"]), (
+        "prior findings leaked into the Pass-1 finder inputs — the neutrality invariant is broken"
+    )
+
+
+def test_review_code_cli_mints_uuid_when_no_session(monkeypatch):
+    """The CLI resolves the session key via ``resolve_session_id()``; when it returns None (bare
+    invocation) a per-invocation uuid4 hex is minted (32 hex chars), and a set session var is
+    passed through verbatim."""
+    from rebar._cli import _llm_commands
+
+    captured: dict = {}
+
+    def _fake_review_code(**kw):
+        captured.update(kw)
+        return {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}, "coaching": []}
+
+    import rebar
+
+    monkeypatch.setattr(rebar.llm, "review_code", _fake_review_code)
+    # bare: no session var → uuid4 fallback
+    monkeypatch.setattr("rebar._commands.session_id.resolve_session_id", lambda: None)
+    _llm_commands._review_code(["-o", "json"])
+    sid = captured.get("session_id")
+    assert isinstance(sid, str) and len(sid) == 32 and all(c in "0123456789abcdef" for c in sid)
+    # explicit session var → passed through
+    captured.clear()
+    monkeypatch.setattr("rebar._commands.session_id.resolve_session_id", lambda: "my-session")
+    _llm_commands._review_code(["-o", "json"])
+    assert captured.get("session_id") == "my-session"
+
+
+def _boom(*a, **k):
+    raise RuntimeError("simulated store failure")
+
+
+def _review_with_session(repo, monkeypatch, *, session_id="sess-boom"):
+    return gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            session_id=session_id,
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+
+
+def test_artifact_create_or_reuse_failure_never_fails_the_review(repo_with_origin, monkeypatch):
+    """AC6 resilience: if the session-artifact LOOKUP/CREATE raises (store down), the local review
+    still returns its verdict — the best-effort resolve/create must never fail the review."""
+    repo, _tid = repo_with_origin
+    _stub_workflow(monkeypatch, {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}})
+    monkeypatch.setattr(rebar, "list_tickets", _boom)
+    monkeypatch.setattr(rebar, "create_ticket", _boom)
+    result = _review_with_session(repo, monkeypatch)
+    assert result.get("verdict") == "PASS", "artifact create/reuse failure must not fail the review"
+
+
+def test_artifact_emit_failure_never_fails_the_review(repo_with_origin, monkeypatch):
+    """AC6 resilience: even when the artifact resolves and the sidecar EMIT's underlying event
+    append raises, the review still returns its verdict (the emit is best-effort)."""
+    repo, _tid = repo_with_origin
+    _stub_workflow(monkeypatch, {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}})
+    # An existing artifact resolves (so the emit path IS reached), then the event append blows up.
+    monkeypatch.setattr(
+        rebar,
+        "list_tickets",
+        lambda *a, **k: [{"ticket_id": "art-1", "title": "code-review: session:sess-boom"}],
+    )
+    from rebar._commands import _seam
+
+    monkeypatch.setattr(_seam, "append_event", _boom)
+    result = _review_with_session(repo, monkeypatch)
+    assert result.get("verdict") == "PASS", "artifact emit failure must not fail the review"

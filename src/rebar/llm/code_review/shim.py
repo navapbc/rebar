@@ -122,6 +122,8 @@ def review_code(
     reviewers: list[str] | None = None,
     ref: str | None = None,
     source: str | None = None,
+    target_ticket: str | None = None,
+    session_id: str | None = None,
     repo_root: Any = None,
     config: LLMConfig | None = None,
     runner: Any = None,
@@ -130,7 +132,11 @@ def review_code(
     capability is disabled (default) returns an inert empty result; when enabled, runs the
     four-pass gate and translates its verdict. (``reviewers`` is accepted for surface
     compatibility but the gate selects its own overlays; ``ref``/``source`` are accepted but the
-    v1 gate reviews the supplied diff/working tree — attested-snapshot scoping is a follow-on.)"""
+    v1 gate reviews the supplied diff/working tree — attested-snapshot scoping is a follow-on.)
+
+    ``target_ticket`` anchors the durable ``code_review`` sidecar directly; ``session_id`` (story
+    paradoxal-balsamic-bubblefish) instead keys a LOCAL session artifact so ``rebar review-code``
+    gains cross-run memory — both are forwarded to the gate request."""
     from rebar.llm.workflow import gate_dispatch
 
     if not gate_dispatch.code_review_enabled(repo_root):
@@ -146,6 +152,8 @@ def review_code(
             changed_files=changed_files,
             commit_message=commit_message,
             runner=runner,
+            target_ticket=target_ticket,
+            session_id=session_id,
             repo_root=repo_root,
         )
     )

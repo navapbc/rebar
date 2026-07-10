@@ -119,10 +119,17 @@ def coach_model() -> type:
 def register_contracts() -> None:
     """Register the code-review structured-output contracts. Idempotent."""
     from rebar.llm.review_kernel import code_review_verification_model
+    from rebar.llm.review_kernel.verify import novelty_model
 
     contracts.register_contract("code_review_base_output", base_output_model)
     contracts.register_contract("code_review_findings", findings_model)
     contracts.register_contract("code_review_coach", coach_model)
+    # The novelty sub-call (story blameless-grindable-noctule) REUSES the kernel novelty contract
+    # UNCHANGED — the SAME `novelty_model` plan-review binds as `plan_review_novelty` — under a
+    # code-review output-schema name, so the code novelty prompt emits the identical
+    # matches-prior/matched_prior_id shape the region-gated floor scores. Without this a
+    # `RunRequest(output_schema="code_review_novelty")` fails at runtime.
+    contracts.register_contract("code_review_novelty", novelty_model)
     # The Pass-2 verifier's own model factory (story albite-lazy-barb): the kernel Verification
     # shape EXTENDED with the code-review consequence binaries + detection judgment that
     # decide.impact_code aggregates. It reuses the kernel's exact Binary vocabulary; the kernel

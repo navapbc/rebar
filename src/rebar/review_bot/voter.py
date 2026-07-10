@@ -538,6 +538,7 @@ async def review_and_vote(
                                 repo_root,
                                 info["patchset_ref"],
                                 merge_commits=merge_commits,
+                                change_id=change_id,  # change:<id> novelty keyspace
                             )
                     else:
                         diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
@@ -547,6 +548,7 @@ async def review_and_vote(
                             repo_root,
                             info["patchset_ref"],
                             commit_message=commit_message,  # scope-intent overlay (non-merge path)
+                            change_id=change_id,  # change:<id> novelty keyspace (finding-memory)
                         )
             except GerritError as exc:
                 # A clone / (non-merge) get_patch failure → cannot review → fail-closed. The

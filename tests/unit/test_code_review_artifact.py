@@ -217,3 +217,124 @@ def test_emit_skips_when_no_verdict(store: Path) -> None:
         repo_root=root,
     )
     assert art is None
+
+
+# ── session_id + deps payload / collector / reader (story revenued-thickset-dassie) ───────────
+def test_build_payload_carries_session_id_and_deps() -> None:
+    """`session_id` + `deps` are read off the verdict; absent ⇒ None / {} (so the Gerrit path, which
+    sets neither, degrades cleanly)."""
+    with_fields = sidecar.build_payload(
+        {"verdict": "PASS", "session_id": "sess1", "deps": {"a.py": "hh"}, "advisory": []},
+        target_ticket="T1",
+    )
+    assert with_fields["session_id"] == "sess1"
+    assert with_fields["deps"] == {"a.py": "hh"}
+    without = sidecar.build_payload({"verdict": "PASS", "advisory": []}, target_ticket="T1")
+    assert without["session_id"] is None
+    assert without["deps"] == {}
+
+
+def test_cited_paths_code_review_parses_location() -> None:
+    """Paths are parsed from each finding's `location` string (stripping `:line`), over the
+    blocking + advisory buckets only — code-review findings have no `citations[kind==file]` list."""
+    verdict = {
+        "blocking": [{"location": "src/a.py:42"}, {"location": "src/b.py"}],
+        "advisory": [{"location": "src/c.py:7:3"}, {"location": ""}, {"nope": 1}],
+        "coaching": [{"location": "src/never.py"}],  # not a surfaced bucket → excluded
+    }
+    assert sidecar._cited_paths_code_review(verdict) == {"src/a.py", "src/b.py", "src/c.py"}
+
+
+def test_reviewed_file_hashes_absent_sentinel(store: Path) -> None:
+    """The collector reuses `attest._hash_file`: a present file hashes to a sha256; a missing path
+    hashes to the `absent` sentinel (so a create/delete is detectable)."""
+    from rebar.llm.plan_review import attest
+
+    root = str(store)
+    (store / "present.py").write_text("x = 1\n")
+    deps = sidecar.reviewed_file_hashes(["present.py", "gone.py"], repo_root=root)
+    assert deps["gone.py"] == attest._ABSENT_HASH
+    assert deps["present.py"] != attest._ABSENT_HASH and len(deps["present.py"]) == 64
+
+
+def _emit_session_artifact(root: str, session_id: str, verdict: dict) -> str:
+    import rebar
+
+    title = f"code-review: session:{session_id}"
+    art = rebar.create_ticket("code_review", title, return_alias=True, repo_root=root)
+    aid = str(art["id"] if isinstance(art, dict) else art)
+    sidecar.emit(verdict, target_ticket=aid, repo_root=root)
+    return aid
+
+
+def test_latest_code_review_result_session_key_surfaced_only(store: Path) -> None:
+    """The reader resolves a `session:<id>` key to the exact-title artifact and returns SURFACED
+    findings (blocking + advisory buckets, never coaching) plus the `deps` map."""
+    root = str(store)
+    _emit_session_artifact(
+        root,
+        "sess1",
+        {
+            "verdict": "BLOCK",
+            "deps": {"src/a.py": "aaaa"},
+            "blocking": [{"finding": "real bug", "location": "src/a.py:1"}],
+            "advisory": [{"finding": "nit", "location": "src/a.py:2"}],
+            "coaching": [{"move_id": "m1"}],
+        },
+    )
+    got = sidecar.latest_code_review_result("session:sess1", repo_root=root)
+    assert got is not None
+    findings_text = {f.get("finding") for f in got["findings"]}
+    assert findings_text == {"real bug", "nit"}  # surfaced only; coaching excluded
+    assert got["deps"] == {"src/a.py": "aaaa"}
+
+
+def test_latest_code_review_result_change_key_and_misses(store: Path) -> None:
+    """`change:<id>` strips the tag and matches the `code-review: {id} @` title prefix (spanning
+    revisions); an unknown key kind and an absent key both degrade to None (⇒ no drops)."""
+    import rebar
+
+    root = str(store)
+    title = "code-review: Ichg @ rev2"
+    art = rebar.create_ticket("code_review", title, return_alias=True, repo_root=root)
+    aid = str(art["id"] if isinstance(art, dict) else art)
+    sidecar.emit(
+        {"verdict": "PASS", "deps": {"x.py": "hh"}, "advisory": [{"finding": "carry"}]},
+        target_ticket=aid,
+        change_id="Ichg",
+        revision="rev2",
+        repo_root=root,
+    )
+    got = sidecar.latest_code_review_result("change:Ichg", repo_root=root)
+    assert got is not None and got["deps"] == {"x.py": "hh"}
+    assert {f.get("finding") for f in got["findings"]} == {"carry"}
+    # misses → None
+    assert sidecar.latest_code_review_result("bogus:Ichg", repo_root=root) is None
+    assert sidecar.latest_code_review_result("session:never", repo_root=root) is None
+    assert sidecar.latest_code_review_result("", repo_root=root) is None
+
+
+def test_local_session_artifact_does_not_seed_change_reader(store: Path) -> None:
+    """Cross-keyspace isolation (epic super-path-bag success criterion; ADR 0037): a prior LOCAL
+    session review must NOT contaminate a Gerrit CHANGE-keyed reader call — so a local review can
+    never seed a change's FIRST Gerrit review. A `session:<id>` artifact with surfaced findings
+    exists, yet a `change:<id>` query returns None (the two keyspaces are disjoint by title scheme);
+    the same session key still resolves it, proving the artifact is present and it's the KEY TYPE —
+    not absence — that isolates it."""
+    root = str(store)
+    _emit_session_artifact(
+        root,
+        "sess-iso",
+        {
+            "verdict": "BLOCK",
+            "deps": {"a.py": "h"},
+            "blocking": [{"finding": "local-only finding", "location": "a.py:1"}],
+            "advisory": [],
+        },
+    )
+    # A change-keyed read (any change id) finds NOTHING from the local session artifact.
+    assert sidecar.latest_code_review_result("change:sess-iso", repo_root=root) is None
+    assert sidecar.latest_code_review_result("change:some-change", repo_root=root) is None
+    # Sanity: the SESSION key does resolve it — so it's the keyspace, not absence, that isolates.
+    got = sidecar.latest_code_review_result("session:sess-iso", repo_root=root)
+    assert got is not None and got["findings"][0]["finding"] == "local-only finding"
