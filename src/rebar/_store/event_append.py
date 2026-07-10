@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -141,6 +142,56 @@ def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> tuple
     return staging, final_path, relative_path
 
 
+# git's object database write intermittently fails on CI runners while hashing a blob
+# during ``git add``: the loose-object temp create under ``.git/objects/`` returns
+# ENOENT (Linux: "unable to create temporary file: No such file or directory") or
+# EINVAL (macOS: "… Invalid argument"), surfaced as "failed to insert into database" /
+# "unable to index file" / "fatal: adding files failed". It is a transient
+# filesystem hiccup, NOT a data fault — the identical add succeeds on retry (a Gerrit
+# ``recheck`` on the same patchset passes). Retrying ONLY this signature turns a
+# runner-FS blip from a hard write failure that red-lights unrelated CI into a
+# self-healed write. Bugs vocal-dip-robin / brainy-floral-globefish.
+_TRANSIENT_ADD_MARKERS = (
+    "unable to create temporary file",
+    "failed to insert into database",
+    "unable to index file",
+)
+_GIT_ADD_ATTEMPTS = 3
+_GIT_ADD_BACKOFF_S = 0.1
+
+
+def _is_transient_add_error(text: str) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in _TRANSIENT_ADD_MARKERS)
+
+
+def _git_add(
+    tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
+) -> subprocess.CompletedProcess[str]:
+    """``git -C tracker add -- <relpaths>``, retrying ONLY a transient object-DB failure.
+
+    On success or a NON-transient failure returns immediately (behavior unchanged — a
+    real pathspec/permission/UU error still surfaces on the first attempt). On the
+    transient object-DB signature the identical add is retried up to *attempts* times
+    with a short backoff, because re-adding the same paths is idempotent and the fault
+    clears on retry. Returns the final :class:`subprocess.CompletedProcess`."""
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(
+            ["git", "-C", tracker, "add", "--", *relpaths],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result
+        if attempt < attempts and _is_transient_add_error(result.stderr or result.stdout or ""):
+            time.sleep(_GIT_ADD_BACKOFF_S * attempt)
+            continue
+        return result
+    assert result is not None  # attempts >= 1, so the loop body ran at least once
+    return result
+
+
 def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
     """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
 
@@ -159,11 +210,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 os.replace(staging, final_path)  # atomic rename
             except OSError as exc:
                 raise StoreError("Error: atomic rename failed", 1) from exc
-            add = subprocess.run(
-                ["git", "-C", tracker, "add", relative_path],
-                capture_output=True,
-                text=True,
-            )
+            add = _git_add(tracker, [relative_path])
             if add.returncode != 0:
                 # Check add's return code BEFORE running commit (audit 2.2): the commit
                 # below commits the whole index, so running it after a failed add could
@@ -273,11 +320,7 @@ def batch_stage_and_commit(
                     _rollback_batch(tracker, renamed)
                     raise StoreError("Error: atomic rename failed", 1) from exc
                 renamed.append((final_path, relative_path))
-            add = subprocess.run(
-                ["git", "-C", tracker, "add", "--", *relpaths],
-                capture_output=True,
-                text=True,
-            )
+            add = _git_add(tracker, relpaths)
             if add.returncode != 0:
                 _rollback_batch(tracker, renamed)
                 add_err = (add.stderr or add.stdout).strip()
@@ -449,9 +492,7 @@ def _recover_from_unmerged(
     subprocess.run(
         ["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged], capture_output=True, text=True
     )
-    subprocess.run(
-        ["git", "-C", tracker, "add", "--", *event_relpaths], capture_output=True, text=True
-    )
+    _git_add(tracker, list(event_relpaths))
     retry = subprocess.run(
         ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
         capture_output=True,
