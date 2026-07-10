@@ -242,3 +242,11 @@ if [ -n "$gerrit_sha" ] && [ -n "$github_sha" ]; then
 else
   logger -t rebar-health "mirror sync check skipped (fetch failed: gerrit='${gerrit_sha}' github='${github_sha}')"
 fi
+
+# Always exit success on a completed probe run. Without this, the script's exit
+# status is that of its last statement — and every metric section ends in a
+# `[ "$n" -gt 0 ] && logger …` guard that is *false* on a healthy box (n=0),
+# making the whole probe exit 1 and marking the systemd oneshot `failed` (which
+# trips the deploy/health alarms). The probe reports state via metrics/journald,
+# not its exit code; a run that reached here completed successfully.
+exit 0
