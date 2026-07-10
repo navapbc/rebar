@@ -186,6 +186,34 @@ keep working; tags are not locked, so releases still publish normally.)
 > read [docs/api-stability.md](docs/api-stability.md) and follow the
 > deprecate-then-remove rule it documents.
 
+### 3a. Shepherded patches (when you can't use Gerrit yourself)
+
+If setting up Gerrit is a barrier — or you opened a GitHub PR and the bot redirected
+you here — a maintainer can **shepherd your patch** onto Gerrit for you. This path is
+deliberately **best-effort and slower** than pushing your own change (a human has to
+pick it up), but it means a good patch never goes to waste.
+
+**How it works:**
+
+1. **You** make your change and commit it with your own DCO sign-off:
+   `git commit -s` (this adds your `Signed-off-by:` line — see the DCO section). Then
+   export the patch: `git format-patch -1`. Attach the resulting `.patch` file to a
+   GitHub issue describing the change. (A plain diff with your name and email is also
+   fine, as long as we can credit you.)
+2. **A maintainer** applies it with `git am`, which **preserves you as the commit
+   author** (author = you, committer = the shepherd). Gerrit permits this because it
+   grants Forge Author to registered users, so your authorship is kept intact — you
+   remain the author of record.
+3. **The maintainer** amends the message only (authorship untouched) to add their own
+   `Signed-off-by:` line and a `rebar-ticket: <id>` trailer (they create or reuse the
+   ticket), then pushes it for review and drives it through the two votes on your
+   behalf. If the patch is substantially rewritten during review, they add a
+   `Co-authored-by:` trailer so credit is shared.
+
+So a shepherded patch carries **two `Signed-off-by:` lines** (yours + the shepherd's)
+and keeps you as the author. It is a genuine best-effort convenience, not a fast lane —
+if you can, the self-serve [tutorial](docs/your-first-change.md) is quicker.
+
 ---
 
 ## 4. Multi-story features (feature branches)

@@ -1,0 +1,52 @@
+name: PR lockdown (warm redirect to Gerrit)
+
+# GitHub is a read-only mirror; PRs cannot merge here (a repository ruleset
+# rejects PR merges). Rather than let PRs rot unanswered, this bot replies with a
+# warm redirect to Gerrit + the onboarding tutorial and closes the PR (leaving the
+# thread OPEN for discussion). Issues are REAL intake and are never touched:
+# `process-only: prs`, no issue events, and least-privilege `pull-requests: write`.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+# Least privilege: pull_request_target runs with an elevated token even on fork
+# PRs, so grant ONLY what the bot needs (comment on + close the PR). No issues scope.
+permissions:
+  pull-requests: write
+
+jobs:
+  lockdown:
+    # Dependabot PRs are advisory notifications that a maintainer converts to a
+    # Gerrit change (see .github/dependabot.yml) — the bot must not close them.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned per repo convention (all third-party actions are SHA-pinned).
+      - uses: dessant/repo-lockdown@17c2cc64a91eff426f242b05dd523c6f098889b6 # v5.0.2
+        with:
+          process-only: prs
+          close-pr: true
+          lock-pr: false
+          pr-comment: >
+            Thanks so much for opening this and wanting to improve rebar! 🙏
+
+
+            A quick heads-up: this GitHub repository is a **read-only mirror**, so
+            pull requests can't merge here — this close is **automatic**, and
+            **nothing is wrong with your change**. Code review for rebar happens on
+            our self-hosted Gerrit server, and we'd love to see this land there.
+
+
+            **To land your change** (it takes about five minutes to set up the first
+            time): sign in at https://rebar.solutions.navateam.com with the "Sign in
+            with GitHub" button, then follow the friendly walkthrough at
+            https://github.com/navapbc/rebar/blob/main/docs/your-first-change.md —
+            it takes you from account setup through pushing your change for review.
+
+
+            **Short on time?** Attach your patch (`git format-patch -1`) to a GitHub
+            issue and a maintainer will shepherd it onto Gerrit for you, crediting
+            you as the author — see the "shepherded patch" section of CONTRIBUTING.md.
+
+
+            Thanks again, and welcome. 💛
