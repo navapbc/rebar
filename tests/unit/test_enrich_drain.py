@@ -53,6 +53,13 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     subprocess.run(["git", "config", "user.name", "t"], cwd=r, check=True)
     rebar.init_repo(repo_root=str(r))
     monkeypatch.setattr(ds, "_active_model", lambda repo_root: "claude-opus-4-8")
+    # Pin the opportunistic write-path drain OFF for this fixture's baseline. The write
+    # path calls maybe_drain() with repo_root=None, so its overlap gate reads the AMBIENT
+    # checkout config (cwd) — and this repo enables verify.overlap_enabled. Without this,
+    # every create_ticket/enqueue during test setup would spawn a drain child, polluting
+    # the _spawn_detached_drain spies and racing the queue in test_batch_cap. Tests that
+    # exercise a drain mode opt in explicitly via _mock_flags(drain=...) / direct D.drain.
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN", "off")
     return str(r)
 
 
