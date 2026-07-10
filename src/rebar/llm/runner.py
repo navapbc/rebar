@@ -230,14 +230,17 @@ class PydanticAIRunner:
         # INDETERMINATE. Pin an Anthropic model to the DIRECT public API so rebar bypasses
         # the local proxy; real (non-loopback) gateways and the test model_override path are
         # left untouched, and REBAR_LLM_ALLOW_LOCAL_PROXY=1 opts back in.
+        # The retrying httpx.AsyncClient to close on teardown (story arcticduck); None on the
+        # non-anthropic / model_override paths, which build no client here.
+        _http_client = None
         if self._model_override is None and resolved.startswith("anthropic"):
+            # ONE unified construction for ANY anthropic model (normal AND loopback-bypass):
+            # both get the retrying transport with SDK max_retries=0. `_direct` (None on the
+            # normal path) only varies the base_url. Before this, the normal path let
+            # pydantic-ai build its own provider with the SDK default retries and no transport.
             _direct = _local_proxy_bypass_base_url()
-            if _direct:
-                from pydantic_ai.models.anthropic import AnthropicModel
-                from pydantic_ai.providers.anthropic import AnthropicProvider
-
-                _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
-                model = AnthropicModel(_name, provider=AnthropicProvider(base_url=_direct))
+            _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
+            model, _http_client = _build_retrying_anthropic_model(_name, base_url=_direct, cfg=cfg)
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
         # for an injected test model), not the bare config model — so a parity diff sees
         # exactly what ran.
@@ -371,6 +374,17 @@ class PydanticAIRunner:
 
             err.outcome = classify_llm_failure(exc, ClassifyContext(model=ran_model))  # type: ignore[attr-defined]
             raise err from exc
+        finally:
+            # Close the per-run retrying httpx.AsyncClient (story arcticduck). aclose() is
+            # async; after run_sync()'s own loop is gone, the stdlib asyncio.run() closes the
+            # pool from this synchronous caller. Best-effort — cleanup never fails the run.
+            if _http_client is not None:
+                import asyncio
+
+                try:
+                    asyncio.run(_http_client.aclose())
+                except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
+                    logger.warning("llm transport client aclose failed on teardown", exc_info=True)
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
             "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
@@ -618,6 +632,81 @@ def _local_proxy_bypass_base_url() -> str | None:
     if host in _LOOPBACK_HOSTS or host.endswith(".localhost"):
         return _DIRECT_ANTHROPIC_BASE_URL
     return None
+
+
+# HTTP statuses the transport retries. 529 (Anthropic overloaded) is included explicitly —
+# pydantic-ai's sample retry list omits it. Status codes are not exceptions by default, so
+# `validate_response` raises for them (below) to make the retry predicate fire.
+_RETRY_STATUSES = frozenset({429, 529, 500, 502, 503, 504})
+
+
+def _build_retrying_anthropic_model(
+    name: str, *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None
+):
+    """Build an ``AnthropicModel`` whose ``AsyncAnthropic`` client carries a retrying
+    ``AsyncTenacityTransport`` (story morbid-uncultured-arcticduck). Retry is owned SOLELY by
+    the transport (SDK ``max_retries=0``); a construction-time guard fails fast rather than
+    silently regress to SDK-managed retries. Returns ``(model, http_client)`` — the caller
+    closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``.
+
+    ``base_url=None`` uses the Anthropic SDK default (the normal path); a non-empty value is
+    the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
+    ``httpx.Timeout`` when present, else a bounded default from ``cfg.timeout_s`` (never
+    unbounded). A transient ``{429,529,5xx}``/``httpx.TimeoutException``/``httpx.NetworkError``
+    blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed;
+    ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else exponential backoff."""
+    import httpx
+    from anthropic import AsyncAnthropic
+    from pydantic_ai.models.anthropic import AnthropicModel
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+    from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
+    from tenacity import retry_if_exception_type, stop_after_attempt
+
+    def _validate_response(response: httpx.Response) -> None:
+        if response.status_code in _RETRY_STATUSES:
+            response.raise_for_status()
+
+    def _before_sleep(state) -> None:
+        sleep = getattr(getattr(state, "next_action", None), "sleep", None)
+        logger.warning(
+            "llm transport retry: attempt %d failed, sleeping %.1fs before retry",
+            state.attempt_number,
+            float(sleep or 0.0),
+        )
+
+    attempts = max(1, int(cfg.llm_retry_max_attempts))
+    transport = AsyncTenacityTransport(
+        config=RetryConfig(
+            retry=(
+                retry_if_exception_type(httpx.HTTPStatusError)
+                | retry_if_exception_type(httpx.TimeoutException)
+                | retry_if_exception_type(httpx.NetworkError)
+            ),
+            wait=wait_retry_after(fallback_strategy=None, max_wait=float(cfg.llm_retry_max_wait_s)),
+            stop=stop_after_attempt(attempts),
+            reraise=True,
+            before_sleep=_before_sleep,
+        ),
+        # ``_wrapped_transport`` is a test seam (a MockTransport); production uses the real
+        # httpx transport.
+        wrapped=_wrapped_transport
+        if _wrapped_transport is not None
+        else httpx.AsyncHTTPTransport(),
+        validate_response=_validate_response,
+    )
+    timeout = http_timeout if http_timeout is not None else httpx.Timeout(float(cfg.timeout_s))
+    http_client = httpx.AsyncClient(transport=transport, timeout=timeout)
+    anthropic_client = AsyncAnthropic(
+        base_url=base_url or None, max_retries=0, http_client=http_client
+    )
+    # Construction-time guard: never silently regress to SDK-managed retries.
+    if anthropic_client.max_retries != 0:
+        raise LLMConfigError(
+            "transport-retry guard: AsyncAnthropic.max_retries must be 0 "
+            "(retry is owned by the httpx transport, not the SDK)"
+        )
+    model = AnthropicModel(name, provider=AnthropicProvider(anthropic_client=anthropic_client))
+    return model, http_client
 
 
 def _pai_model(cfg: LLMConfig):

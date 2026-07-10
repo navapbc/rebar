@@ -305,6 +305,11 @@ DEFAULT_OVERLAP_SURFACE_CAP = 3
 DEFAULT_OVERLAP_DRAIN = "async"
 DEFAULT_OVERLAP_DRAIN_BATCH = 5
 DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
+# Transport-layer retry for Anthropic gate calls (story arcticduck, epic jira-reb-687):
+# the tenacity retry envelope wrapping the httpx transport (SDK max_retries=0). Attempts
+# counts the first try; max wait caps the Retry-After / exponential backoff per sleep.
+DEFAULT_LLM_RETRY_MAX_ATTEMPTS = 4
+DEFAULT_LLM_RETRY_MAX_WAIT_S = 60
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -498,6 +503,13 @@ class LLMConfig:
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     timeout_s: int = DEFAULT_TIMEOUT_S
+    # Transport-layer retry (story arcticduck): the httpx AsyncTenacityTransport wrapping
+    # every Anthropic call retries a transient {429,529,5xx}/timeout/network blip below the
+    # SDK (SDK max_retries=0). ``llm_retry_max_attempts`` is stop_after_attempt(N); N<=1
+    # disables retry (fail-fast back-out). ``llm_retry_max_wait_s`` caps the Retry-After /
+    # exponential-backoff wait.
+    llm_retry_max_attempts: int = DEFAULT_LLM_RETRY_MAX_ATTEMPTS
+    llm_retry_max_wait_s: int = DEFAULT_LLM_RETRY_MAX_WAIT_S
     repo_path: str | None = None
     # The read root for the agent's rebar TICKET tools — a pinned snapshot of the ticket
     # store in attested mode (the orphan `tickets` branch is absent from the code snapshot
@@ -588,6 +600,20 @@ class LLMConfig:
                 DEFAULT_MAX_ITERATIONS,
             ),
             timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", DEFAULT_TIMEOUT_S),
+            llm_retry_max_attempts=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_RETRY_MAX_ATTEMPTS",
+                "llm_retry_max_attempts",
+                DEFAULT_LLM_RETRY_MAX_ATTEMPTS,
+            ),
+            llm_retry_max_wait_s=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_RETRY_MAX_WAIT_S",
+                "llm_retry_max_wait_s",
+                DEFAULT_LLM_RETRY_MAX_WAIT_S,
+            ),
             repo_path=repo_path,
             tickets_path=tickets_path,
             mcp_servers=mcp_servers,
