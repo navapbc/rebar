@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/overlap_verdict.schema.json",
+  "title": "OverlapVerdict",
+  "description": "Output of one ORDERED-pair call of the Stage-2 overlap judge (epic only-crave-art, 9022). The judge is prompted with an ordered pair (First, Second) and its `relation` is read DIRECTIONALLY as 'First relation Second'. Only duplicates|supersedes|depends_on are surfaceable; the judge defaults to related_distinct when it cannot cite a concrete shared artifact, and abstains when unsure.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["relation", "confidence", "abstain"],
+  "properties": {
+    "relation": {
+      "type": "string",
+      "description": "First <relation> Second. One of the closed set.",
+      "enum": ["duplicates", "supersedes", "depends_on", "related_distinct", "unrelated"]
+    },
+    "shared_artifact": {
+      "type": ["string", "null"],
+      "description": "The concrete, named shared artifact (config key / schema / file region / entity) that justifies a surfaceable relation; null when none can be cited (→ related_distinct)."
+    },
+    "confidence": {
+      "type": "number",
+      "description": "The judge's confidence in the relation, 0.0-1.0."
+    },
+    "abstain": {
+      "type": "boolean",
+      "description": "True when the judge is unsure; an abstain in EITHER ordering downgrades the pair (not surfaced)."
+    }
+  }
+}

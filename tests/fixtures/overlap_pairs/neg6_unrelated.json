@@ -1,0 +1,16 @@
+{
+  "pair": "neg6_unrelated",
+  "r1": {
+    "relation": "unrelated",
+    "shared_artifact": null,
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "unrelated",
+    "shared_artifact": null,
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": null
+}

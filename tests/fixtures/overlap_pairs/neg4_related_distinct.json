@@ -1,0 +1,16 @@
+{
+  "pair": "neg4_related_distinct",
+  "r1": {
+    "relation": "related_distinct",
+    "shared_artifact": "config-key REBAR_X",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "related_distinct",
+    "shared_artifact": "config-key REBAR_X",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": null
+}

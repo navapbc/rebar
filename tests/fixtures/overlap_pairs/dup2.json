@@ -1,0 +1,16 @@
+{
+  "pair": "dup2",
+  "r1": {
+    "relation": "duplicates",
+    "shared_artifact": "schema ticket_digest",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "duplicates",
+    "shared_artifact": "schema ticket_digest",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "duplicates"
+}
