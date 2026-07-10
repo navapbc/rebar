@@ -314,9 +314,27 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
         regver=registry_version(repo_root),
         verified_at_sha=current_code_sha(),
     )
-    return signing.sign_manifest(
+    sig = signing.sign_manifest(
         verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
     )
+    # Enrichment queue (epic only-crave-art / e1f4): a certification is the trigger to enqueue
+    # this ticket for a store-wide overlap enrichment after a soak (a re-cert bumps the soak
+    # deadline forward — latest-wins). Best-effort and fully isolated: a queue failure must
+    # NEVER fail signing, and this stays a no-op when the [agents] extra is absent.
+    try:
+        from rebar.llm.config import LLMConfig
+        from rebar.llm.overlap import queue as _enqueue_queue
+
+        _enqueue_queue.enqueue(
+            verdict["ticket_id"],
+            soak_min=LLMConfig.from_env(repo_root=repo_root).overlap_soak_min,
+            repo_root=repo_root,
+        )
+    except Exception:  # noqa: BLE001 — enqueue is best-effort; a failure never fails the sign
+        logging.getLogger(__name__).warning(
+            "enrichment enqueue on certification failed; continuing", exc_info=True
+        )
+    return sig
 
 
 def _rehash(paths, *, repo_root=None, pinned_sha: str | None = None) -> dict[str, str]:

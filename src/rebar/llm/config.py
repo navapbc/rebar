@@ -278,6 +278,33 @@ DEFAULT_MAX_TOKENS = 16000
 # via REBAR_LLM_MAX_STEPS; a per-op floor still wins via max(floor, configured).
 DEFAULT_MAX_ITERATIONS = 250
 DEFAULT_TIMEOUT_S = 600
+# Cross-ticket overlap detection (epic only-crave-art) — LLM-feature tunables live on
+# LLMConfig, never VerifyConfig (_config_schema.py reserves the llm.* layer). The Cupid
+# ticket-digest op (ee3d) instructs the model to emit MIN..MAX atomic propositions and
+# post-validates the count (truncate above max; flag low_proposition_count below min).
+DEFAULT_OVERLAP_PROPOSITIONS_MIN = 2
+DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
+# Stage-1 BM25F candidate generation (2d0f/5a8f): top-K candidates; boilerplate prune
+# (ignore terms appearing in > this fraction of digests); overlap floor (fraction of query
+# terms a candidate must share to be returned). Field weights are a code constant in
+# retrieve.py, not a config knob.
+DEFAULT_OVERLAP_K = 20
+DEFAULT_OVERLAP_MAX_DOC_FREQ = 0.5
+DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
+# Enrichment queue (e1f4): the soak (debounce) between plan-review certification and drain
+# eligibility, and the claim lease TTL (a crashed drainer's claim is treated as unclaimed
+# after it expires — self-healing, no separate reaper process).
+DEFAULT_OVERLAP_SOAK_MIN = 60
+DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
+# Stage-2 pairwise judge (9022): the per-ordering confidence a candidate must clear to be
+# surfaced, and the max number of advisory link suggestions surfaced per query ticket.
+DEFAULT_OVERLAP_CONF_THRESHOLD = 0.7
+DEFAULT_OVERLAP_SURFACE_CAP = 3
+# Tier-1 opportunistic drain (c1de): the drain mode (off|async|always), the per-run batch
+# cap, and the cheap gate-check latency budget (ms) for the write-path maybe_drain no-op.
+DEFAULT_OVERLAP_DRAIN = "async"
+DEFAULT_OVERLAP_DRAIN_BATCH = 5
+DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -405,6 +432,32 @@ def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int)
     return default
 
 
+def _llm_float(table: dict, cli: dict, env_name: str, file_key: str, default: float):
+    """Resolve a float setting: CLI > env > file > default. An unparseable higher
+    layer falls through to the next (mirrors :func:`_llm_int`)."""
+    candidates: list = []
+    if file_key in cli:
+        candidates.append(cli[file_key])
+    env_raw = os.environ.get(env_name)
+    if env_raw is not None and env_raw.strip():
+        candidates.append(env_raw)
+    fv = table.get(file_key)
+    if fv is not None and not isinstance(fv, bool):
+        candidates.append(fv)
+    for c in candidates:
+        try:
+            return float(str(c).strip())
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
+def _llm_drain_mode(raw: str) -> str:
+    """Validate the overlap_drain enum; an unrecognized value falls back to the default."""
+    v = str(raw).strip().lower()
+    return v if v in ("off", "async", "always") else DEFAULT_OVERLAP_DRAIN
+
+
 @dataclass
 class LangfuseConfig:
     """Langfuse credentials/host, plus whether OTLP tracing is *enabled* (Langfuse is the
@@ -453,6 +506,24 @@ class LLMConfig:
     tickets_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
+    # Cross-ticket overlap detection (epic only-crave-art) — proposition-count bounds
+    # for the Cupid ticket-digest op (ee3d).
+    overlap_propositions_min: int = DEFAULT_OVERLAP_PROPOSITIONS_MIN
+    overlap_propositions_max: int = DEFAULT_OVERLAP_PROPOSITIONS_MAX
+    # Stage-1 BM25F candidate generation (5a8f).
+    overlap_k: int = DEFAULT_OVERLAP_K
+    overlap_max_doc_freq: float = DEFAULT_OVERLAP_MAX_DOC_FREQ
+    overlap_min_should_match: float = DEFAULT_OVERLAP_MIN_SHOULD_MATCH
+    # Enrichment queue (e1f4).
+    overlap_soak_min: int = DEFAULT_OVERLAP_SOAK_MIN
+    overlap_lease_ttl_min: int = DEFAULT_OVERLAP_LEASE_TTL_MIN
+    # Stage-2 pairwise judge (9022).
+    overlap_conf_threshold: float = DEFAULT_OVERLAP_CONF_THRESHOLD
+    overlap_surface_cap: int = DEFAULT_OVERLAP_SURFACE_CAP
+    # Tier-1 drain (c1de).
+    overlap_drain: str = DEFAULT_OVERLAP_DRAIN
+    overlap_drain_batch: int = DEFAULT_OVERLAP_DRAIN_BATCH
+    overlap_drain_gate_budget_ms: int = DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -521,6 +592,82 @@ class LLMConfig:
             tickets_path=tickets_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
+            overlap_propositions_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_PROPOSITIONS_MIN",
+                "overlap_propositions_min",
+                DEFAULT_OVERLAP_PROPOSITIONS_MIN,
+            ),
+            overlap_propositions_max=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_PROPOSITIONS_MAX",
+                "overlap_propositions_max",
+                DEFAULT_OVERLAP_PROPOSITIONS_MAX,
+            ),
+            overlap_k=_llm_int(table, cli, "REBAR_LLM_OVERLAP_K", "overlap_k", DEFAULT_OVERLAP_K),
+            overlap_max_doc_freq=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_MAX_DOC_FREQ",
+                "overlap_max_doc_freq",
+                DEFAULT_OVERLAP_MAX_DOC_FREQ,
+            ),
+            overlap_min_should_match=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH",
+                "overlap_min_should_match",
+                DEFAULT_OVERLAP_MIN_SHOULD_MATCH,
+            ),
+            overlap_soak_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_SOAK_MIN",
+                "overlap_soak_min",
+                DEFAULT_OVERLAP_SOAK_MIN,
+            ),
+            overlap_lease_ttl_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_LEASE_TTL_MIN",
+                "overlap_lease_ttl_min",
+                DEFAULT_OVERLAP_LEASE_TTL_MIN,
+            ),
+            overlap_conf_threshold=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_CONF_THRESHOLD",
+                "overlap_conf_threshold",
+                DEFAULT_OVERLAP_CONF_THRESHOLD,
+            ),
+            overlap_surface_cap=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_SURFACE_CAP",
+                "overlap_surface_cap",
+                DEFAULT_OVERLAP_SURFACE_CAP,
+            ),
+            overlap_drain=_llm_drain_mode(
+                _llm_str(
+                    table, cli, "REBAR_LLM_OVERLAP_DRAIN", "overlap_drain", DEFAULT_OVERLAP_DRAIN
+                )
+            ),
+            overlap_drain_batch=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_DRAIN_BATCH",
+                "overlap_drain_batch",
+                DEFAULT_OVERLAP_DRAIN_BATCH,
+            ),
+            overlap_drain_gate_budget_ms=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS",
+                "overlap_drain_gate_budget_ms",
+                DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS,
+            ),
         )
 
 

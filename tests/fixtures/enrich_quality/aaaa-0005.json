@@ -1,0 +1,27 @@
+{
+  "ticket_id": "aaaa-0005",
+  "gold": [
+    "drain",
+    "detached"
+  ],
+  "body": "Tier-1 opportunistic detached drain piggybacked on ordinary invocations, plus a rebar enrich CLI. A cheap gate check no-ops in the common case, else detaches the LLM work.",
+  "digest": {
+    "problem_keywords": [
+      "drain",
+      "detached",
+      "opportunistic",
+      "cli"
+    ],
+    "component_or_area": "enrichment drain",
+    "key_entities": [
+      "maybe_drain",
+      "enrich_drain",
+      "DONE_ENRICH"
+    ],
+    "propositions": [
+      "drain the enrichment queue opportunistically",
+      "detach LLM work so it outlives the command",
+      "expose a rebar enrich CLI"
+    ]
+  }
+}

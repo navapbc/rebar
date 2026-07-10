@@ -1,0 +1,16 @@
+{
+  "pair": "neg1_no_artifact",
+  "r1": {
+    "relation": "duplicates",
+    "shared_artifact": null,
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "duplicates",
+    "shared_artifact": null,
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": null
+}

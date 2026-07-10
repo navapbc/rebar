@@ -413,6 +413,21 @@ def _render_plan_review_text(result: dict) -> None:
     for c in result.get("coaching", []):
         link = c.get("guide_url")
         sys.stdout.write(f"  → {c.get('coaching', '')}" + (f"  [{link}]\n" if link else "\n"))
+    # Store-wide overlap advisories (epic only-crave-art) — a separate, advisory-only block
+    # with ready-to-run link suggestions; NEVER part of the blocking/advisory verdict.
+    overlap = result.get("overlap", [])
+    if overlap:
+        sys.stdout.write(
+            f"  overlap: {len(overlap)} candidate cross-ticket relation(s) "
+            f"(advisory — human confirmation, never auto-applied):\n"
+        )
+        for o in overlap:
+            artifact = o.get("shared_artifact")
+            sys.stdout.write(
+                f"    ~ {o.get('relation')} (conf={o.get('confidence')}"
+                + (f", shared: {artifact}" if artifact else "")
+                + f"): {o.get('link_command', '')}\n"
+            )
     sig = result.get("signature", {})
     if sig.get("signed"):
         sys.stdout.write("  signed: plan-review attestation written\n")

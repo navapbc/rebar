@@ -67,6 +67,18 @@ EVENT_TYPES = frozenset(
         # (NOT in KNOWN_EVENT_TYPES) so it never enters compiled state / hot paths and
         # compaction preserves it; it is in this WRITE allow-list so it can be emitted.
         "REVIEW_RESULT",
+        # Cross-ticket overlap detection digest sidecar (epic only-crave-art / 2d0f).
+        # Reducer-IGNORED (like REVIEW_RESULT) — a content-hash-keyed per-ticket Cupid
+        # digest; in this WRITE allow-list so it can be emitted, in _NON_REPLAY_KNOWN_TYPES
+        # so fsck recognises it and does not warn.
+        "TICKET_DIGEST",
+        # Enrichment queue sidecar events (epic only-crave-art / e1f4): cert-triggered
+        # enqueue with a soak deadline, optimistic claim + lease, and done tombstone.
+        # Reducer-IGNORED (like REVIEW_RESULT/TICKET_DIGEST) — a broker-less queue on the
+        # event store; the drain reduces them out-of-band.
+        "ENQUEUE_ENRICH",
+        "CLAIM_ENRICH",
+        "DONE_ENRICH",
     }
 )
 
@@ -104,7 +116,7 @@ def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
             f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}, "
-            "REVIEW_RESULT",
+            "REVIEW_RESULT, TICKET_DIGEST, ENQUEUE_ENRICH, CLAIM_ENRICH, DONE_ENRICH",
             1,
         )
     return event_type, timestamp, uuid_str
@@ -307,7 +319,8 @@ def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, 
     rc = stage_and_commit(tracker, ticket_id, event)
     from rebar._store import push
 
-    push.push_tickets_branch(_lock.canonical_tracker(tracker))
+    canonical = _lock.canonical_tracker(tracker)
+    push.push_tickets_branch(canonical)
     # Best-effort, fail-silent write-path nudge that an existing store is behind the
     # idempotent ensure-registry (epic odd-vortex-elbow / WS2). This is the single
     # choke point through which _seam.append_event (comment/tag/edit/link/set_*/sign)
@@ -316,9 +329,12 @@ def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, 
     try:
         from rebar._store import ensures as _ensures
 
-        _ensures.maybe_emit_pending_hint(_lock.canonical_tracker(tracker))
+        _ensures.maybe_emit_pending_hint(canonical)
     except Exception:  # noqa: BLE001 — the hint must never fail a committed write
         pass
+    # Opportunistic cross-ticket enrichment drain (epic only-crave-art / c1de): a cheap
+    # gate that no-ops unless something is soaked. Best-effort — never fails the write.
+    _maybe_enrich_drain(str(canonical))
     return rc
 
 
@@ -346,6 +362,17 @@ def _rollback_batch(tracker: str, renamed: list[tuple[str, str]]) -> None:
         _unstage(tracker, relative_path)
     for final_path, _relative_path in renamed:
         _silent_unlink(final_path)
+
+
+def _maybe_enrich_drain(tracker: str) -> None:
+    """Ride the write path with the opportunistic enrichment drain gate. Fully isolated: a
+    missing [agents] extra or any failure is a clean no-op (never fails the triggering write)."""
+    try:
+        from rebar.llm.enrich_drain import maybe_drain
+
+        maybe_drain(tracker)
+    except Exception:  # noqa: BLE001 — a drain concern must never fail a write; broad-but-swallowed
+        pass
 
 
 def _silent_unlink(path: str) -> None:

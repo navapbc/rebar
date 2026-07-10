@@ -86,6 +86,63 @@ def completion_verdict_response_model() -> type:
     return CompletionVerdict
 
 
+def ticket_digest_response_model() -> type:
+    """Structured-output model for the Cupid ticket-digest op (epic only-crave-art),
+    mirroring ``ticket_digest.schema.json``: four fields, all required. pydantic is
+    imported inside the body (registration stores this builder, not a model)."""
+    from pydantic import BaseModel, Field
+
+    class TicketDigest(BaseModel):
+        problem_keywords: list[str] = Field(
+            default_factory=list, description="Salient problem/domain keywords (deduped)."
+        )
+        component_or_area: str = Field(
+            default="", description="Component / subsystem / area the ticket concerns."
+        )
+        key_entities: list[str] = Field(
+            default_factory=list,
+            description="Named entities: config keys, schema/table names, files, functions.",
+        )
+        propositions: list[str] = Field(
+            default_factory=list,
+            description="2-6 atomic problem/repro statements; the op enforces the count bound.",
+        )
+
+    return TicketDigest
+
+
+def overlap_verdict_response_model() -> type:
+    """Structured-output model for one ordered-pair overlap-judge call (epic only-crave-art,
+    9022), mirroring ``overlap_verdict.schema.json``. pydantic imported inside the body."""
+    from pydantic import BaseModel, Field, field_validator
+
+    class OverlapVerdict(BaseModel):
+        relation: str = Field(
+            default="related_distinct",
+            description="First <relation> Second (closed relation enum).",
+        )
+        shared_artifact: str | None = Field(
+            default=None, description="The concrete named shared artifact, or null."
+        )
+        confidence: float = Field(default=0.0, description="Confidence 0.0-1.0.")
+        abstain: bool = Field(default=False, description="True when the judge is unsure.")
+
+        @field_validator("relation")
+        @classmethod
+        def _norm_relation(cls, v: str) -> str:
+            r = str(v).strip().lower()
+            allowed = {"duplicates", "supersedes", "depends_on", "related_distinct", "unrelated"}
+            return r if r in allowed else "related_distinct"
+
+    return OverlapVerdict
+
+
 # Built-ins. ``review_result`` (the default findings shape) and ``completion_verdict``.
 register_contract("review_result", findings.findings_response_model)
 register_contract("completion_verdict", completion_verdict_response_model)
+# Cupid ticket-digest op (epic only-crave-art, ee3d). Registered here — co-located with
+# ``response_model_for`` — so importing this module to call it guarantees the digest
+# contract is registered before first use (no startup-import ordering assumption).
+register_contract("ticket_digest", ticket_digest_response_model)
+# Stage-2 overlap judge (9022) — same co-location guarantee.
+register_contract("overlap_verdict", overlap_verdict_response_model)

@@ -1,0 +1,16 @@
+{
+  "pair": "neg2_low_conf",
+  "r1": {
+    "relation": "duplicates",
+    "shared_artifact": "x",
+    "confidence": 0.5,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "duplicates",
+    "shared_artifact": "x",
+    "confidence": 0.5,
+    "abstain": false
+  },
+  "gold": null
+}

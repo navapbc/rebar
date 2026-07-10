@@ -1,0 +1,16 @@
+{
+  "pair": "dep2",
+  "r1": {
+    "relation": "depends_on",
+    "shared_artifact": "overlap queue",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "supersedes",
+    "shared_artifact": "overlap queue",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "depends_on"
+}
