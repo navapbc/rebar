@@ -184,6 +184,39 @@ def test_shape_a_nonretryable_indeterminate_exits_2_not_11() -> None:
     assert _disposition_exit_code({"verdict": "BLOCK"}, indeterminate_code=2) == 1
 
 
+def test_signable_pass_that_failed_to_sign_exits_11_not_0() -> None:
+    """A PASS whose attestation was ATTEMPTED but FAILED to persist (signature.signed False
+    WITH an ``error``) must NOT exit 0 — the expensive review's sole durable product (the
+    signature the claim gate consumes) was lost to a recoverable condition, so surface it as
+    retryable (exit 11), not silent success (ticket middle-actinium-thrush)."""
+    from rebar._cli._llm_commands import _disposition_exit_code
+
+    sign_failed = {
+        "verdict": "PASS",
+        "signature": {
+            "signed": False,
+            "error": "Error: git commit failed while holding lock: ... index.lock: File exists",
+        },
+    }
+    assert _disposition_exit_code(sign_failed, indeterminate_code=2) == 11
+
+
+def test_pass_legitimately_unsigned_still_exits_0() -> None:
+    """A PASS left unsigned for a LEGITIMATE reason — never signed (--no-sign / not-signable /
+    drift), which records a ``reason`` and NO ``error`` — is a real success and stays exit 0.
+    Only an attempted-and-errored sign flips to 11; a deliberate skip does not."""
+    from rebar._cli._llm_commands import _disposition_exit_code
+
+    assert (
+        _disposition_exit_code(
+            {"verdict": "PASS", "signature": {"signed": True}}, indeterminate_code=2
+        )
+        == 0
+    )
+    no_sign = {"verdict": "PASS", "signature": {"signed": False, "reason": "PASS"}}
+    assert _disposition_exit_code(no_sign, indeterminate_code=2) == 0
+
+
 def test_shape_b_raised_error_exits_11_when_retryable() -> None:
     """A RAISED LLM error carrying a retryable ``.outcome`` (completion/verify path) → exit 11;
     a non-retryable or bare error → exit 1 (fail-closed)."""
