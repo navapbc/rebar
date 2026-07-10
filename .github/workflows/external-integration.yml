@@ -96,7 +96,11 @@ jobs:
       - name: Install rebar + the full agents stack
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          # [tracing] pulls the OpenTelemetry SDK + OTLP exporter so setup_tracing()
+          # actually exports spans to Langfuse (rebar emits traces via OTLP, NOT the
+          # Langfuse SDK — see src/rebar/llm/tracing.py). Without it this job would run
+          # tracing as a silent no-op and validate nothing.
+          python -m pip install -e '.[dev,tracing]'
 
       - name: Configure git identity
         run: |
@@ -121,12 +125,16 @@ jobs:
           [ -n "$ok" ] || { echo "::error::Langfuse web never became healthy"; docker compose -f docker-compose.langfuse.yml logs --tail=80 langfuse-web; exit 1; }
           # 2) Auth/readiness — the server reports healthy BEFORE headless-init +
           #    ClickHouse/MinIO migrations finish, so confirm the project resolves.
+          #    Probe the PUBLIC REST API with the baked headless-init keys (Basic
+          #    auth pk:sk) — NOT the langfuse Python SDK, which is intentionally not a
+          #    rebar dependency (tracing is write-only OTLP; see src/rebar/llm/tracing.py).
+          #    stderr is NOT suppressed: a probe failure must surface, never masquerade
+          #    as a timeout (a swallowed ModuleNotFoundError is exactly the bug this
+          #    replaces — see rebar-ticket 416d-c02a-5be4-46ad).
           for i in $(seq 1 24); do
-            if LANGFUSE_HOST=http://localhost:3000 \
-               LANGFUSE_PUBLIC_KEY=pk-lf-1234567890 \
-               LANGFUSE_SECRET_KEY=sk-lf-1234567890 \
-               python -c "from langfuse import get_client; assert get_client().auth_check()" 2>/dev/null; then
-              echo "langfuse auth OK after ${i} tries"; exit 0
+            if curl -fsS -u pk-lf-1234567890:sk-lf-1234567890 \
+                 http://localhost:3000/api/public/projects >/dev/null; then
+              echo "langfuse project API OK after ${i} tries"; exit 0
             fi
             sleep 5
           done

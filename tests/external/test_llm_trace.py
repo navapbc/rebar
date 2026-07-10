@@ -1,26 +1,35 @@
-"""Live Langfuse round-trip validation (ticket 9bd5): a real review run must emit
-a trace that is fetchable back through the Langfuse API.
+"""Live Langfuse OTLP round-trip (rebar-ticket 416d-c02a-5be4-46ad): a real review
+run must EXPORT OpenTelemetry spans that Langfuse ingests into a fetchable trace.
+
+rebar emits traces write-only over OTLP — Langfuse is an OTLP *endpoint*, NOT an SDK
+dependency (``src/rebar/llm/tracing.py``): ``setup_tracing`` installs a
+``BatchSpanProcessor`` → ``OTLPSpanExporter`` and calls ``Agent.instrument_all()``.
+The runner does not surface a ``trace_id`` (it is a sink, never read back into a rebar
+decision), so this test does NOT look for one. Instead it drives a real review, flushes
+the span processor, and confirms via the public REST API that a trace with observations
+was ingested for the run.
 
 Runs against a SELF-HOSTED Langfuse (the ``docker-compose.langfuse.yml`` stack) —
-locally or as the ephemeral stack the external-integration CI job brings up. Like
-the other ``tests/external`` suites it is inert unless ``REBAR_RUN_EXTERNAL=1`` and
-skips unless an LLM key + the ``agents`` extra + a configured Langfuse are all
-present.
+locally or the ephemeral stack the external-integration CI job brings up. Like the
+other ``tests/external`` suites it is inert unless ``REBAR_RUN_EXTERNAL=1`` and skips
+unless an LLM key + the ``agents`` extra + the ``tracing`` extra + a configured
+Langfuse are all present.
 
-Why a REST round-trip (not the SDK's fetch helpers): the public
-``GET /api/public/traces/{id}`` endpoint is stable across SDK majors, so this
-dodges the SDK-v4-vs-self-hosted read-endpoint drift. Ingestion is async — the
-trace is queryable only a few seconds AFTER ``flush()`` — so we poll with a
-bounded read-retry loop (the same pattern Langfuse's own e2e tests use).
+Why REST (not the SDK's fetch helpers): the public ``GET /api/public/traces`` endpoint
+is stable across SDK majors and needs no ``langfuse`` dependency. Ingestion is async —
+spans are queryable only a few seconds AFTER ``force_flush()`` — so we poll with a
+bounded read-retry loop.
 """
 
 from __future__ import annotations
 
 import base64
+import datetime as _dt
 import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -30,8 +39,10 @@ import rebar
 
 pytestmark = pytest.mark.external
 
-_READ_TIMEOUT_S = 60.0  # ingestion is async; poll up to this long after flush()
+_READ_TIMEOUT_S = 90.0  # ingestion is async; poll up to this long after force_flush()
 _READ_INTERVAL_S = 1.0
+# Guard against host/Langfuse clock skew when filtering traces by fromTimestamp.
+_SKEW_MARGIN_S = 300.0
 
 
 def _live_model() -> str | None:
@@ -48,21 +59,34 @@ def _live_model() -> str | None:
     return None
 
 
+def _tracing_extra_installed() -> bool:
+    """True when the ``[tracing]`` extra (OTel SDK + OTLP exporter) is importable —
+    without it ``setup_tracing`` is a silent no-op and nothing is exported."""
+    try:
+        import opentelemetry.exporter.otlp.proto.http.trace_exporter  # noqa: F401
+        import opentelemetry.sdk.trace  # noqa: F401
+    except Exception:  # noqa: BLE001 — extra absent
+        return False
+    return True
+
+
 _MODEL = _live_model()
 _LF_HOST = os.environ.get("LANGFUSE_HOST")
 _LF_PK = os.environ.get("LANGFUSE_PUBLIC_KEY")
 _LF_SK = os.environ.get("LANGFUSE_SECRET_KEY")
-_lf_ready = bool(_MODEL and _LF_HOST and _LF_PK and _LF_SK)
+_lf_ready = bool(_MODEL and _LF_HOST and _LF_PK and _LF_SK and _tracing_extra_installed())
 _skip = pytest.mark.skipif(
     not _lf_ready,
-    reason="needs an LLM key + agents extra + LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY",
+    reason=(
+        "needs an LLM key + agents extra + tracing extra + LANGFUSE_HOST/PUBLIC_KEY/SECRET_KEY"
+    ),
 )
 
 
-def _fetch_trace(trace_id: str) -> dict | None:
-    """GET /api/public/traces/{id} with HTTP Basic auth (public:secret). Returns the
-    decoded trace dict, or None on 404 (not yet ingested) — raising on other errors."""
-    url = f"{_LF_HOST.rstrip('/')}/api/public/traces/{trace_id}"
+def _lf_get(path: str) -> dict | None:
+    """GET a Langfuse public-API path with HTTP Basic auth (public:secret). Returns the
+    decoded JSON, or None on 404 (not yet ingested) — raising on other HTTP errors."""
+    url = f"{_LF_HOST.rstrip('/')}{path}"
     token = base64.b64encode(f"{_LF_PK}:{_LF_SK}".encode()).decode()
     req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
     try:
@@ -74,8 +98,22 @@ def _fetch_trace(trace_id: str) -> dict | None:
         raise
 
 
+def _force_flush_tracing() -> None:
+    """Flush the global tracer provider's BatchSpanProcessor so the review's spans are
+    exported to the OTLP endpoint NOW, instead of on the batch processor's own timer."""
+    try:
+        from opentelemetry import trace
+
+        provider = trace.get_tracer_provider()
+        flush = getattr(provider, "force_flush", None)
+        if callable(flush):
+            flush()
+    except Exception:  # noqa: BLE001 — never let a flush failure mask the assertion
+        pass
+
+
 @_skip
-def test_live_review_emits_fetchable_langfuse_trace(rebar_repo: Path) -> None:
+def test_live_review_exports_langfuse_trace(rebar_repo: Path) -> None:
     import rebar.llm as llm
     from rebar.llm.config import LLMConfig
 
@@ -95,28 +133,47 @@ def test_live_review_emits_fetchable_langfuse_trace(rebar_repo: Path) -> None:
     cfg.model = _MODEL
     assert cfg.langfuse.enabled, "LANGFUSE_* must be configured for this test"
 
-    result = llm.review_ticket(epic, "ticket-quality", repo_root=str(rebar_repo), config=cfg)
-    trace_id = result.get("trace_id")
-    assert trace_id, "review_result must carry a trace_id when Langfuse is enabled"
+    # List-filter window (bounds the page size only). Correctness does NOT rely on the
+    # timestamp: we snapshot the trace ids that ALREADY exist and require a genuinely NEW
+    # one, so a lingering trace from a prior run on a reused stack can't produce a false
+    # pass (a fresh CI stack has none anyway). The skew margin only widens the page.
+    from_ts = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=_SKEW_MARGIN_S)
+    query = urllib.parse.urlencode(
+        {"fromTimestamp": from_ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "limit": 100}
+    )
 
-    # Poll the public API until the (async-ingested) trace is queryable. The trace
-    # ROW can land before its OBSERVATION rows finish ingesting, so keep polling
-    # until observations appear too (within the same deadline) rather than asserting
-    # on the first hit — otherwise the observations check is racy.
+    def _trace_ids() -> set[str]:
+        listing = _lf_get(f"/api/public/traces?{query}")
+        return {e["id"] for e in (listing or {}).get("data", [])}
+
+    seen_before = _trace_ids()
+
+    result = llm.review_ticket(epic, "ticket-quality", repo_root=str(rebar_repo), config=cfg)
+    assert result.get("findings") is not None, "review must have produced a result"
+
+    # Push the batched spans to Langfuse's OTLP endpoint immediately.
+    _force_flush_tracing()
+
+    # Poll until a NEW trace (not present before this run) with observations is queryable.
+    # Ingestion is async: the trace ROW can land before its OBSERVATION rows finish, so
+    # keep polling until observations appear too rather than asserting on the first hit.
     deadline = time.monotonic() + _READ_TIMEOUT_S
-    trace = None
+    new_trace = None
     while time.monotonic() < deadline:
-        fetched = _fetch_trace(trace_id)
-        if fetched is not None:
-            trace = fetched
-            if fetched.get("observations"):
-                break  # fully ingested (trace + its observations)
+        for tid in _trace_ids() - seen_before:
+            fetched = _lf_get(f"/api/public/traces/{tid}")
+            if fetched and fetched.get("observations"):
+                new_trace = fetched
+                break
+        if new_trace is not None:
+            break
         time.sleep(_READ_INTERVAL_S)
 
-    assert trace is not None, f"trace {trace_id} never became fetchable within {_READ_TIMEOUT_S}s"
-    assert trace.get("id") == trace_id
-    # The review is wrapped in a `rebar.review` span (runner._trace), so the trace
-    # must carry at least one observation from the agent run.
-    assert trace.get("observations"), (
-        f"trace {trace_id} fetched but no observations ingested within {_READ_TIMEOUT_S}s"
+    assert new_trace is not None, (
+        "the live review run did not export a NEW OTLP trace with observations to Langfuse "
+        f"within {_READ_TIMEOUT_S}s — the setup_tracing/OTLP export path emitted no spans"
+    )
+    # The exported trace must carry the agent/LLM/tool spans as observations.
+    assert new_trace.get("observations"), (
+        f"trace {new_trace.get('id')} ingested but carried no observations"
     )
