@@ -41,7 +41,7 @@ SCHEMA_VERSION = 3
 # they are handled OUTSIDE the main replay dispatch: the bridge-only ``SYNC`` and
 # the externally-scanned ``PRECONDITIONS``. They are recognized by this binary, so
 # the forward-compat "newer than me" warning must NOT flag them.
-_NON_REPLAY_KNOWN_TYPES = frozenset({"SYNC", "PRECONDITIONS", "REVIEW_RESULT"})
+_NON_REPLAY_KNOWN_TYPES = frozenset({"SYNC", "PRECONDITIONS", "REVIEW_RESULT", "TICKET_DIGEST"})
 
 
 def is_unknown_newer_type(event_type: str) -> bool:
