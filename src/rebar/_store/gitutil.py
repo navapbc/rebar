@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 
 
 def run_git(
@@ -58,3 +59,97 @@ def run_git(
         env=env,
         input=input_data,
     )
+
+
+# The tickets tracker is a SHARED git worktree, so rebar's own write lock (which only
+# serialises writes WITHIN one clone) does not stop a concurrent rebar process — or a
+# crashed git that left a stale lock — from colliding on git's OWN ``.git/index.lock``.
+# git then refuses ``git add``/``git commit`` with "Unable to create '<gitdir>/index.lock':
+# File exists. Another git process seems to be running …". A CONTENDED lock (a live peer
+# that releases quickly) clears on retry, so riding it out with a bounded backoff turns a
+# hard write loss into a self-healed write. A STALE lock (a crashed git that never
+# released) is reclaimed between attempts ONLY when provably old (mtime age >
+# ``_INDEX_LOCK_STALE_S``) — never a young/live lock, whose removal can corrupt a peer's
+# index; a young lock that never releases still ultimately FAILS the write. Same staleness
+# threshold + resolution helper as fsck's Check 3 (bug fix-indexlock-retry). Shared here so
+# EVERY index-mutating git op (event_append's add/commit AND txn.py's claim/transition
+# add/commit) self-heals through the one implementation.
+_INDEX_LOCK_STALE_S = 300  # a lock older than this is a crash remnant, safe to reclaim
+_INDEX_LOCK_ATTEMPTS = 5
+_INDEX_LOCK_BACKOFF_S = 0.2  # gap = base * attempt → ~2s summed over the 4 inter-attempt gaps
+
+
+def _is_index_lock_error(text: str) -> bool:
+    """True if *text* is git's index.lock-contention signature (case-insensitive)."""
+    low = text.lower()
+    return "index.lock" in low and ("file exists" in low or "another git process" in low)
+
+
+def _reclaim_if_stale_index_lock(tracker: str) -> None:
+    """Remove the tracker's git ``index.lock`` ONLY IF provably stale (mtime age >
+    ``_INDEX_LOCK_STALE_S``). Best-effort and safe: a young/live lock (age <= threshold,
+    or unstat-able, or absent) is LEFT in place — removing a lock a live peer holds can
+    corrupt the index. Reuses fsck's git-dir resolution so the same lock path is meant."""
+    from rebar._commands.fsck import _resolve_tracker_git_dir
+
+    git_dir = _resolve_tracker_git_dir(tracker)
+    if not git_dir:
+        return
+    lock_file = os.path.join(git_dir, "index.lock")
+    try:
+        age = time.time() - os.path.getmtime(lock_file)
+    except OSError:
+        return  # no lock file (or unstat-able) → nothing to reclaim
+    if age > _INDEX_LOCK_STALE_S:
+        try:
+            os.remove(lock_file)
+        except OSError:
+            pass
+
+
+def _with_index_lock_retry(
+    tracker: str, run_once: Callable[[], subprocess.CompletedProcess]
+) -> subprocess.CompletedProcess:
+    """Run *run_once* (an index-mutating git invocation), retrying ONLY the index.lock
+    contention signature with a bounded backoff. On success or a NON-lock failure the
+    result is returned immediately (behavior unchanged — a real error still surfaces at
+    once). Between lock retries a provably-stale lock is reclaimed; a young lock that
+    never releases exhausts the attempts and its final failing result is returned. This
+    is the composition seam: a caller that also retries a DIFFERENT signature (e.g.
+    event_append's object-DB ``git add`` retry) passes its own inner loop as *run_once*."""
+    result = run_once()
+    for attempt in range(1, _INDEX_LOCK_ATTEMPTS):
+        if result.returncode == 0:
+            return result
+        if not _is_index_lock_error(result.stderr or result.stdout or ""):
+            return result
+        _reclaim_if_stale_index_lock(tracker)
+        time.sleep(_INDEX_LOCK_BACKOFF_S * attempt)
+        result = run_once()
+    return result
+
+
+def run_git_write(
+    tracker: str | os.PathLike[str],
+    *args: str,
+    check: bool = False,
+) -> subprocess.CompletedProcess:
+    """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
+    git's ``.git/index.lock`` contention. Runs the op and, ONLY on the index.lock
+    signature, reclaims a provably-stale lock, backs off, and retries up to the attempt
+    cap (see :func:`_with_index_lock_retry`). A success or any non-lock failure returns
+    at once, so a genuine error is unchanged. ``check=True`` raises
+    :class:`subprocess.CalledProcessError` on the final non-zero exit (default ``False``
+    so callers that inspect ``returncode`` / raise their own error get the result verbatim).
+
+    Safe to route ANY tracker git op through: index.lock only appears on index-mutating
+    commands, so a read op simply never trips the retry."""
+    result = _with_index_lock_retry(str(tracker), lambda: run_git(tracker, *args, check=False))
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            ["git", *args] if tracker is None else ["git", "-C", str(tracker), *args],
+            result.stdout,
+            result.stderr,
+        )
+    return result

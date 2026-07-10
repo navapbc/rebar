@@ -38,6 +38,11 @@ from typing import Any
 
 from rebar._store import lock as _lock
 from rebar._store.canonical import canonical_bytes  # the single canonical serializer
+
+# Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
+# re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
+from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
+from rebar._store.gitutil import _with_index_lock_retry
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 from rebar.reducer._version import TAG_DELTA  # single source of truth for the type name
 
@@ -165,31 +170,60 @@ def _is_transient_add_error(text: str) -> bool:
     return any(marker in low for marker in _TRANSIENT_ADD_MARKERS)
 
 
+# git's index.lock self-healing (constants + ``_is_index_lock_error`` +
+# ``_reclaim_if_stale_index_lock`` + ``_with_index_lock_retry``) now lives in the SHARED
+# ``rebar._store.gitutil`` so the claim/transition write path (txn.py) self-heals through the
+# same implementation (bug fix-indexlock-retry). Imported at module top; ``_INDEX_LOCK_STALE_S``
+# is re-exported there for tests. ``_git_add`` below composes gitutil's index.lock retry with
+# event_append's OWN object-DB ``git add`` retry (the ``_TRANSIENT_ADD_MARKERS`` loop).
+
+
 def _git_add(
     tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
 ) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker add -- <relpaths>``, retrying ONLY a transient object-DB failure.
+    """``git -C tracker add -- <relpaths>``, retrying transient object-DB AND index.lock
+    failures.
 
     On success or a NON-transient failure returns immediately (behavior unchanged — a
     real pathspec/permission/UU error still surfaces on the first attempt). On the
     transient object-DB signature the identical add is retried up to *attempts* times
     with a short backoff, because re-adding the same paths is idempotent and the fault
-    clears on retry. Returns the final :class:`subprocess.CompletedProcess`."""
-    result: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(1, attempts + 1):
-        result = subprocess.run(
-            ["git", "-C", tracker, "add", "--", *relpaths],
+    clears on retry; index.lock contention is ridden out (and a stale lock reclaimed) by
+    :func:`_with_index_lock_retry`. Returns the final :class:`subprocess.CompletedProcess`."""
+
+    def _add_once() -> subprocess.CompletedProcess[str]:
+        result: subprocess.CompletedProcess[str] | None = None
+        for attempt in range(1, attempts + 1):
+            result = subprocess.run(
+                ["git", "-C", tracker, "add", "--", *relpaths],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return result
+            if attempt < attempts and _is_transient_add_error(result.stderr or result.stdout or ""):
+                time.sleep(_GIT_ADD_BACKOFF_S * attempt)
+                continue
+            return result
+        assert result is not None  # attempts >= 1, so the loop body ran at least once
+        return result
+
+    return _with_index_lock_retry(tracker, _add_once)
+
+
+def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
+    """``git -C tracker commit -q --no-verify -m <msg>``, riding out index.lock
+    contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`. A
+    non-lock failure (including a genuine "nothing to commit" / UU wedge) surfaces
+    immediately, unchanged — the caller's UU-recovery path still handles it."""
+    return _with_index_lock_retry(
+        tracker,
+        lambda: subprocess.run(
+            ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
             capture_output=True,
             text=True,
-        )
-        if result.returncode == 0:
-            return result
-        if attempt < attempts and _is_transient_add_error(result.stderr or result.stdout or ""):
-            time.sleep(_GIT_ADD_BACKOFF_S * attempt)
-            continue
-        return result
-    assert result is not None  # attempts >= 1, so the loop body ran at least once
-    return result
+        ),
+    )
 
 
 def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
@@ -230,11 +264,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                     + (f": {add_err}" if add_err else ""),
                     1,
                 )
-            commit = subprocess.run(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True,
-                text=True,
-            )
+            commit = _git_commit(tracker, commit_msg)
             if commit.returncode != 0:
                 # A pre-existing unmerged (UU) index entry — e.g. a stranded stash/merge
                 # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
@@ -329,11 +359,7 @@ def batch_stage_and_commit(
                     + (f": {add_err}" if add_err else ""),
                     1,
                 )
-            commit = subprocess.run(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True,
-                text=True,
-            )
+            commit = _git_commit(tracker, commit_msg)
             if commit.returncode != 0:
                 healed, detail = _recover_from_unmerged(tracker, relpaths, commit_msg)
                 if not healed:
