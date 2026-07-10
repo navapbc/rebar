@@ -55,6 +55,10 @@ BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap 
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml'
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
 CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh'
+# host observability probe: re-materialized (idempotent installer) on a source change.
+# Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
+# change reaches no trigger above and would otherwise never be refreshed on the box.
+OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh'
 # rsync excludes: protect the SSM secrets .env, the deploy marker, and dev/state dirs.
 RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' --exclude '/.deployed_ref' \
   --exclude '/.venv' --exclude '/.terraform' --exclude '/.serena' --exclude '/.claude' --exclude '/.tickets-tracker')
@@ -185,6 +189,26 @@ if changed "$BOT_PATHS"; then
   fi
   prune_docker_caches
   log "review-bot redeployed + healthy"
+fi
+
+# ── host observability probe: re-materialize on a probe-source change ─────────
+# The systemd timer executes /usr/local/bin/rebar-observability.sh, a COPY that ONLY
+# install-observability.sh writes; nothing else refreshes it. infra/scripts/ is in no
+# trigger above (not a BOT_PATH, so a probe-only change syncs nothing at all), so the
+# installed copy would silently go stale (bug dying-verastile-quelea: 10 days stale).
+# install-observability.sh is idempotent (re-copies the script, rewrites the unit files,
+# daemon-reload), so re-running it from the TARGET source reconverges the host probe.
+# Non-fatal: a probe-refresh failure must not roll back the review-bot, but it emits an
+# AUTODEPLOY err marker so the staleness is alarmed instead of silent.
+if changed "$OBS_PATHS"; then
+  log "host observability probe sources changed; re-materializing from $TARGET"
+  if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
+    err obs-materialize-failed "git checkout $TARGET in $MIRROR_DIR failed; host probe left stale"
+  elif ! bash "$MIRROR_DIR/infra/scripts/install-observability.sh"; then
+    err obs-materialize-failed "install-observability.sh failed; /usr/local/bin probe may be stale"
+  else
+    log "host observability probe re-materialized on the box"
+  fi
 fi
 
 # ── success: advance deployed-sha atomically, clear backoff ───────────────────
