@@ -41,7 +41,7 @@ jobs:
     if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -84,12 +84,12 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # advisory: a live regression reports, it does not block
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Cache pip wheels  # cuts install cost/time on repeated scheduled runs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-eval-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
@@ -131,7 +131,7 @@ jobs:
           PY
       - name: Upload eval JUnit
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-junit
           path: eval-junit/
