@@ -8,3 +8,5 @@
 .ticket-write.lock
 .ticket-write.lock.d/
 .graph-cache.json
+.ensure-applied
+.ensure-hinted
