@@ -108,7 +108,7 @@ scenario_3() {
 	git checkout -q -B mb-main FETCH_HEAD 2>/dev/null || git checkout -q -B mb-main "$(git ls-remote "$GIT_HTTPS_URL" refs/heads/main | awk '{print $1}')"
 	git fetch -q "$GIT_HTTPS_URL" main; git reset -q --hard FETCH_HEAD
 	git fetch -q "$GIT_HTTPS_URL" "$FB"
-	git merge --no-ff -q FETCH_HEAD -m "test(e2e-s3): merge ${FB} into main (reviewed merge change)${TRAILER}" \
+	git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s3): merge ${FB} into main (reviewed merge change)${TRAILER}" \
 		|| { log "s3: --no-ff merge produced conflicts (unexpected for s3)"; git merge --abort 2>/dev/null; return 1; }
 	local cm; cm="$(push_for_review "refs/for/main")" || { log "s3: merge push failed (pushMerge ACL?)"; return 1; }
 	CREATED_CHANGES+=("$cm"); _evi 3 "merge_change=${cm} url=https://${GERRIT_HOST}/c/${PROJECT}/+/${cm}"
@@ -148,7 +148,7 @@ scenario_4() {
 	# open a merge change of FB into main
 	git checkout -q -B s4-mb "$(git ls-remote "$GIT_HTTPS_URL" refs/heads/main | awk '{print $1}')"
 	git fetch -q "$GIT_HTTPS_URL" "$FB"
-	git merge --no-ff -q FETCH_HEAD -m "test(e2e-s4): merge ${FB} for vote-carry probe${TRAILER}" \
+	git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s4): merge ${FB} for vote-carry probe${TRAILER}" \
 		|| { git merge --abort 2>/dev/null; log "s4: unexpected merge conflict"; return 1; }
 	local cm; cm="$(push_for_review "refs/for/main")" || { log "s4: merge push failed"; return 1; }
 	CREATED_CHANGES+=("$cm"); _evi 4 "merge_change=${cm} url=https://${GERRIT_HOST}/c/${PROJECT}/+/${cm}"
@@ -167,11 +167,11 @@ scenario_4() {
 	# re-merge: rebuild the merge commit onto the new main tip, same feature tip.
 	git checkout -q -B s4-remerge "$(git ls-remote "$GIT_HTTPS_URL" refs/heads/main | awk '{print $1}')"
 	git fetch -q "$GIT_HTTPS_URL" "$FB"
-	git merge --no-ff -q FETCH_HEAD -m "test(e2e-s4): re-merge ${FB} (first-parent moved)${TRAILER}" \
+	git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s4): re-merge ${FB} (first-parent moved)${TRAILER}" \
 		|| { git merge --abort 2>/dev/null; log "s4: re-merge conflict"; return 1; }
 	# push as a new patchset of the same change: reuse its Change-Id.
 	local cid; cid="$(api_get "/changes/${cm}?o=CURRENT_REVISION" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("change_id"))')"
-	git commit -q --amend -m "test(e2e-s4): re-merge ${FB} (first-parent moved)
+	git commit -q -s --amend -m "test(e2e-s4): re-merge ${FB} (first-parent moved)
 
 rebar-ticket: ${TICKET}
 Change-Id: ${cid}"
@@ -215,12 +215,12 @@ scenario_5() {
 	# 3) merge feature into main → textual conflict; resolve it in the merge commit.
 	git fetch -q "$GIT_HTTPS_URL" main; git checkout -q -B s5-merge FETCH_HEAD
 	git fetch -q "$GIT_HTTPS_URL" "$FB"
-	if git merge --no-ff -q FETCH_HEAD -m "test(e2e-s5): merge with conflict resolution${TRAILER}" 2>/dev/null; then
+	if git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s5): merge with conflict resolution${TRAILER}" 2>/dev/null; then
 		log "s5: expected a textual conflict but merge was clean"; return 1
 	fi
 	# resolve: keep both sides, non-empty resolution delta
 	printf 'RESOLVED both: FEATURE+MAIN %s\n' "$stamp" > "$f"
-	git add "$f"; git commit -q -m "test(e2e-s5): merge with conflict resolution${TRAILER}"
+	git add "$f"; git commit -q -s -m "test(e2e-s5): merge with conflict resolution${TRAILER}"
 	local cmc; cmc="$(push_for_review "refs/for/main")" || { log "s5: conflict-merge push failed"; return 1; }
 	CREATED_CHANGES+=("$cmc"); _evi 5 "merge_change=${cmc} url=https://${GERRIT_HOST}/c/${PROJECT}/+/${cmc}"
 	# assert the reviewed auto-merge delta is NON-EMPTY (the resolution touched $f).
@@ -255,7 +255,7 @@ scenario_6() {
 	git checkout -q -B s6-base "$(main_sha)"
 	mkdir -p "$(dirname "$base_mod")"
 	printf '"""e2e S6 throwaway base module (added then removed on main)."""\n\n\ndef s6_target() -> int:\n    return 1\n' > "$base_mod"
-	git add -A; git commit -q -m "test(e2e-s6): add throwaway base module ${base_mod}${TRAILER}"
+	git add -A; git commit -q -s -m "test(e2e-s6): add throwaway base module ${base_mod}${TRAILER}"
 	local cbase; cbase="$(push_for_review "refs/for/main")" || { log "s6: base push failed"; return 1; }
 	CREATED_CHANGES+=("$cbase"); local vbase; vbase="$(poll_both_votes "$cbase")"
 	echo "$vbase" | grep -q "LLM=${LLM_REVIEW_MAX} VER=${VERIFIED_MAX}" && submit_change "$cbase" >/dev/null || { log "s6: base not landed ($vbase)"; return 1; }
@@ -274,7 +274,7 @@ scenario_6() {
 	done
 	git fetch -q "$GIT_HTTPS_URL" "$S6FB"; git checkout -q -B s6-fb FETCH_HEAD
 	printf 'import pytest\n\nfrom %s import s6_target\n\npytestmark = pytest.mark.unit\n\n\ndef test_e2e_s6_semantic():\n    assert s6_target() == 1\n' "$base_import" > "$caller"
-	git add -A; git commit -q -m "test(e2e-s6): feature adds a test importing s6_target${TRAILER}"
+	git add -A; git commit -q -s -m "test(e2e-s6): feature adds a test importing s6_target${TRAILER}"
 	local cfb; cfb="$(push_for_review "refs/for/${S6FB}")" || { log "s6: caller push failed"; return 1; }
 	CREATED_CHANGES+=("$cfb"); local vfb; vfb="$(poll_both_votes "$cfb")"
 	echo "$vfb" | grep -q "LLM=${LLM_REVIEW_MAX} VER=${VERIFIED_MAX}" && submit_change "$cfb" >/dev/null || { log "s6: caller not landed on ${S6FB} ($vfb)"; return 1; }
@@ -283,7 +283,7 @@ scenario_6() {
 	# (3) main DELETES the base module (semantic break vs the feature's caller). CI
 	#     green on main (nothing on main imports it). Net: base gone from main again.
 	git checkout -q -B s6-del "$(main_sha)"
-	git rm -q "$base_mod"; git commit -q -m "test(e2e-s6): delete throwaway base module (semantic break setup)${TRAILER}"
+	git rm -q "$base_mod"; git commit -q -s -m "test(e2e-s6): delete throwaway base module (semantic break setup)${TRAILER}"
 	local cdel; cdel="$(push_for_review "refs/for/main")" || { log "s6: delete push failed"; return 1; }
 	CREATED_CHANGES+=("$cdel"); local vdel; vdel="$(poll_both_votes "$cdel")"
 	echo "$vdel" | grep -q "LLM=${LLM_REVIEW_MAX} VER=${VERIFIED_MAX}" && submit_change "$cdel" >/dev/null || { log "s6: delete not landed ($vdel)"; return 1; }
@@ -294,7 +294,7 @@ scenario_6() {
 	#     merged TREE has the caller importing the deleted module => CI RED => Verified blocks.
 	git checkout -q -B s6-merge "$(main_sha)"
 	git fetch -q "$GIT_HTTPS_URL" "$S6FB"
-	git merge --no-ff -q FETCH_HEAD -m "test(e2e-s6): merge ${S6FB} (semantic conflict — empty auto-merge diff, red CI)${TRAILER}" \
+	git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s6): merge ${S6FB} (semantic conflict — empty auto-merge diff, red CI)${TRAILER}" \
 		|| { git merge --abort 2>/dev/null; log "s6: unexpected textual conflict on merge"; return 1; }
 	local cm; cm="$(push_for_review "refs/for/main")" || { log "s6: merge push failed"; return 1; }
 	CREATED_CHANGES+=("$cm"); _evi 6 "merge_change=${cm} url=https://${GERRIT_HOST}/c/${PROJECT}/+/${cm}"
@@ -335,7 +335,7 @@ scenario_7() {
 			_evi 7 "nonmember_create_branch_http=${code_c} expect=403_or_409"
 			# (b) merge push by non-member → expect rejection
 			git checkout -q -B s7-neg "$(git ls-remote "$GIT_HTTPS_URL" refs/heads/main | awk '{print $1}')"
-			git fetch -q "$GIT_HTTPS_URL" "$FB"; git merge --no-ff -q FETCH_HEAD -m "test(e2e-s7): non-member merge push (must be refused)" 2>/dev/null || git merge --abort 2>/dev/null
+			git fetch -q "$GIT_HTTPS_URL" "$FB"; git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s7): non-member merge push (must be refused)" 2>/dev/null || git merge --abort 2>/dev/null
 			local out_b; out_b="$(git push "https://${NEG_USER}:${npw}@${GERRIT_HOST}/a/${PROJECT}" HEAD:refs/for/main 2>&1 || true)"
 			echo "$out_b" | grep -qiE 'prohibited|not permitted|not allowed|no new changes|Push Merge' && _evi 7 "nonmember_merge_push=refused" || _evi 7 "nonmember_merge_push=CHECK: ${out_b:0:120}"
 		else
