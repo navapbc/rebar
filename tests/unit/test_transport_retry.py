@@ -239,3 +239,89 @@ def test_attempts_one_disables_retry_failfast():
     with pytest.raises(Exception):  # noqa: B017
         _run(model)
     assert state["n"] == 1  # no retry
+
+
+# ── Comment idempotency: a mid-run 429->200 self-heals with NO duplicate comment ──
+def _tool_use_body(tool_name: str, tool_id: str = "toolu_1") -> dict:
+    """An Anthropic ``tool_use`` turn: the model asks to call ``tool_name`` exactly once.
+    ``stop_reason='tool_use'`` drives the agent loop to execute the tool locally and send a
+    follow-up turn carrying the ``tool_result``."""
+    return {
+        "id": "msg_tool",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-6",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": tool_id,
+                "name": tool_name,
+                "input": {"ticket_id": "t-1", "body": "done"},
+            }
+        ],
+        "stop_reason": "tool_use",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+
+
+def test_midrun_429_self_heals_without_duplicate_comment():
+    """AC (story morbid-uncultured-arcticduck): a MID-RUN transient — a 429 injected on the
+    HTTP request that FOLLOWS a completed comment tool call, then a 200 — self-heals and
+    produces NO DUPLICATE comment.
+
+    Mechanism it pins: retry is owned SOLELY by the httpx ``AsyncTenacityTransport``, which
+    sits BELOW pydantic-ai's agent tool loop (``_build_retrying_anthropic_model``,
+    ``src/rebar/llm/runner.py`` lines 752-753 + 774-792: "a transient blip is re-sent BELOW
+    the agent loop, so completed tool calls are never re-executed"). Re-sending ONE HTTP
+    request never re-enters the loop, so an already-executed tool (the ``comment_ticket``
+    write, ``src/rebar/llm/pai_tools.py`` line 166) cannot fire a second time.
+
+    Observable asserted (not merely restated): the comment tool callback is invoked EXACTLY
+    ONCE even though the follow-up turn is put on the wire TWICE (429 then 200) — i.e. the
+    transport genuinely retried the HTTP request, yet the side-effect did not duplicate."""
+    comment_calls = {"n": 0}
+    sends = {"total": 0, "followup": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sends["total"] += 1
+        posted_already = b"tool_result" in request.content
+        if not posted_already:
+            # Turn 1: the model asks to call the comment tool (side-effect not yet run).
+            return httpx.Response(200, json=_tool_use_body("post_comment"))
+        # Turn 2 carries the tool_result — the comment has already been posted once by the
+        # agent loop. Inject a transient 429 on the FIRST send of this turn, heal on retry.
+        sends["followup"] += 1
+        if sends["followup"] == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "0"},
+                json={"type": "error", "error": {"type": "rate_limit_error"}},
+            )
+        return httpx.Response(200, json=_ok_body("HEALED"))
+
+    transport = httpx.MockTransport(handler)
+    model, _ = _build_retrying_anthropic_model(
+        "claude-sonnet-4-6", base_url=None, cfg=_cfg(), _wrapped_transport=transport
+    )
+
+    pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
+    try:
+        agent = Agent(model)
+
+        @agent.tool_plain
+        def post_comment(ticket_id: str, body: str) -> str:
+            # Stand-in for pai_tools.comment_ticket — the ONLY write the gate agent makes.
+            comment_calls["n"] += 1
+            return f"Commented on {ticket_id}."
+
+        out = agent.run_sync("go")
+    finally:
+        pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+
+    # The transport REALLY retried: the follow-up turn hit the wire twice (429, then 200).
+    assert sends["followup"] == 2
+    assert sends["total"] == 3  # turn-1 tool_use + turn-2 (429 then 200)
+    # ...yet the comment side-effect fired EXACTLY ONCE — no duplicate comment.
+    assert comment_calls["n"] == 1
+    assert "HEALED" in str(out.output)
