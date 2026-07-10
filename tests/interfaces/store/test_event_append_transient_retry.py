@@ -31,6 +31,34 @@ _TRANSIENT_ADD_STDERR = (
     "fatal: adding files failed"
 )
 
+# The verbatim CI stderr (macOS EINVAL variant) — the exact signature this bug
+# (instant-digestive-flyingfish) was filed against on macos-latest. It differs from the
+# Linux variant only in the errno phrase ("Invalid argument" vs "No such file or
+# directory"); the retry classifier keys on the shared, errno-independent prefix
+# "unable to create temporary file", so this variant must self-heal identically.
+_MACOS_EINVAL_ADD_STDERR = (
+    "error: unable to create temporary file: Invalid argument\n"
+    "error: 227c/1783673831282139152-3a825e61-STATUS.json: failed to insert into database\n"
+    "error: unable to index file '227c/1783673831282139152-3a825e61-STATUS.json'\n"
+    "fatal: adding files failed"
+)
+
+
+def test_macos_einval_add_stderr_is_classified_transient() -> None:
+    """Pin the classification the macos-latest self-heal relies on: the EINVAL variant
+    must match the retry marker."""
+    assert event_append._is_transient_add_error(_MACOS_EINVAL_ADD_STDERR)
+
+
+def test_macos_einval_matches_via_errno_independent_prefix() -> None:
+    """The EINVAL errno LINE on its own — with none of the follow-on
+    "failed to insert" / "unable to index" marker lines — must still classify transient,
+    proving coverage rests on the errno-independent "unable to create temporary file"
+    prefix and not on the Linux-only "No such file or directory" phrase. This goes RED if
+    that shared marker is ever tightened to the full Linux errno phrase."""
+    einval_only = "error: unable to create temporary file: Invalid argument"
+    assert event_append._is_transient_add_error(einval_only)
+
 
 def _fresh_tracker(tmp_path: Path, name: str) -> str:
     repo = tmp_path / name
@@ -84,6 +112,21 @@ def test_single_write_retries_transient_add_failure(
     # actually committed rather than swallowing the failure.
     r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
     assert "COMMENT tk-1" in r.stdout
+
+
+def test_single_write_retries_macos_einval_add_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The macos-latest EINVAL signature this bug was filed against self-heals on retry,
+    exactly like the Linux ENOENT variant."""
+    tracker = _fresh_tracker(tmp_path, "macos")
+    _fail_first_add(monkeypatch, _MACOS_EINVAL_ADD_STDERR)
+
+    rc = event_append.stage_and_commit(tracker, "tk-mac", _event("u-macos"))
+    assert rc == 0
+
+    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    assert "COMMENT tk-mac" in r.stdout
 
 
 def test_batch_write_retries_transient_add_failure(
