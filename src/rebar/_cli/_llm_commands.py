@@ -161,6 +161,17 @@ def _review_code(argv: list[str]) -> int:
         except OSError as exc:
             sys.stderr.write(f"Error: cannot read --diff-file: {exc}\n")
             return 1
+    # Local memory key (story paradoxal-balsamic-bubblefish): resolve the shared session id so the
+    # gate can emit/reuse a `code-review: session:<id>` artifact across `rebar review-code` runs. A
+    # bare/headless invocation (no session var, no SessionStart shim) returns None → mint a
+    # per-invocation uuid4 (NOT persisted): local convergence is intentionally INERT there, chosen
+    # for isolation (no local→Gerrit bleed, no cross-session contamination). Genuine per-session
+    # convergence arrives wherever a session lifecycle exports one of the session-id env vars.
+    import uuid
+
+    from rebar._commands.session_id import resolve_session_id
+
+    session_id = resolve_session_id() or uuid.uuid4().hex
     try:
         result = llm.review_code(
             base=args.base,
@@ -169,6 +180,7 @@ def _review_code(argv: list[str]) -> int:
             reviewers=args.reviewers,
             ref=args.ref,
             source=args.source,
+            session_id=session_id,
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
