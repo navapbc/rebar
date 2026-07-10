@@ -24,6 +24,11 @@ Gerrit-submitted change replicates out. Direct pushes and pull-request merges to
 If you only read the code (no contributions), just use the GitHub mirror as usual — you
 don't need Gerrit.
 
+> **First time contributing? Start with the friendly walkthrough:
+> [docs/your-first-change.md](docs/your-first-change.md).** It walks you through one
+> change end to end (account → clone → commit → push → votes → submit). This document
+> is the complete reference behind that tutorial.
+
 ---
 
 ## 1. One-time setup
@@ -110,25 +115,18 @@ change the review verdict. **Only the two bots and administrators may cast eithe
 so you cannot self-approve or self-verify your own change. (Both labels block submit today —
 the `Verified` requirement was activated 2026-07-02; see the status note above.)
 
-**Reading a `-1`.** An `LLM-Review` `-1` comes in two flavors — check the tag on the bot's
-message:
+**Reading a `-1` (quick version).** An `LLM-Review` `-1` is either a **finding** in
+your code (`[LLM-Review: BLOCK — finding]`, with inline comments → fix, amend, re-push,
+§2d) or a **coverage-gap** infra veto (`[LLM-Review: BLOCK — coverage-gap (…)]` → the
+review couldn't fully run; **not your code** — a maintainer re-triggers it once infra
+recovers, don't "fix" your diff). A `Verified` `-1` means CI failed: open the linked
+run, fix a real failure and re-push (§2d), or comment **`recheck`** to re-run CI on the
+same patchset for a flake.
 
-| Bot message tag | Meaning | What to do |
-|---|---|---|
-| `[LLM-Review: BLOCK — finding]` with inline comments | **Real finding(s)** in your code | Fix the code, amend, re-push (§2d). |
-| `[LLM-Review: BLOCK — coverage-gap (llm-unavailable / scanner / gate-disabled / review-error)]` | **Infra veto, not your code** — the review couldn't fully run (LLM down, a scanner failed, the gate was disabled, or a review error). Fail-closed by design. | Not a code problem. Re-trigger the review once the infra recovers (re-push the same commit, or ask an admin). Don't "fix" your diff — there's nothing wrong with it. |
-
-This distinction is deliberate: a coverage-gap `-1` means "we could not prove your change
-is safe," not "your change is bad."
-
-**A `Verified` `-1` (CI failed).** Open the linked run to see which check failed, then:
-
-- **Real test/lint/type failure** → fix the code, amend, and re-push (§2d). Each new
-  patchset drops the old `Verified` and triggers a fresh run automatically.
-- **A flaky/transient failure** (not your code) → comment **`recheck`** on the change to
-  re-run CI on the *same* patchset without amending. A new run dispatches and re-votes.
-  (You can also just push a new patchset; the in-flight run for the change is cancelled so
-  only the newest patchset's run survives.)
+> **Full vote semantics live in one place:** [docs/review-policy.md](docs/review-policy.md)
+> has the complete tag table (every coverage-gap sub-reason and the merge-change
+> variants, transcribed from the code), who may vote, the dispute / override path, and
+> the responsibility clause. This §2c is the in-flow summary; that doc is authoritative.
 
 ### 2d. Address findings and re-push
 Amend the **same** commit (keep the `Change-Id` so Gerrit updates the existing change
@@ -180,6 +178,34 @@ keep working; tags are not locked, so releases still publish normally.)
 > JSON schema, a `rebar.*` signature, an MCP tool, an event type, or a config key,
 > read [docs/api-stability.md](docs/api-stability.md) and follow the
 > deprecate-then-remove rule it documents.
+
+### 3a. Shepherded patches (when you can't use Gerrit yourself)
+
+If setting up Gerrit is a barrier — or you opened a GitHub PR and the bot redirected
+you here — a maintainer can **shepherd your patch** onto Gerrit for you. This path is
+deliberately **best-effort and slower** than pushing your own change (a human has to
+pick it up), but it means a good patch never goes to waste.
+
+**How it works:**
+
+1. **You** make your change and commit it with your own DCO sign-off:
+   `git commit -s` (this adds your `Signed-off-by:` line — see the DCO section). Then
+   export the patch: `git format-patch -1`. Attach the resulting `.patch` file to a
+   GitHub issue describing the change. (A plain diff with your name and email is also
+   fine, as long as we can credit you.)
+2. **A maintainer** applies it with `git am`, which **preserves you as the commit
+   author** (author = you, committer = the shepherd). Gerrit permits this because it
+   grants Forge Author to registered users, so your authorship is kept intact — you
+   remain the author of record.
+3. **The maintainer** amends the message only (authorship untouched) to add their own
+   `Signed-off-by:` line and a `rebar-ticket: <id>` trailer (they create or reuse the
+   ticket), then pushes it for review and drives it through the two votes on your
+   behalf. If the patch is substantially rewritten during review, they add a
+   `Co-authored-by:` trailer so credit is shared.
+
+So a shepherded patch carries **two `Signed-off-by:` lines** (yours + the shepherd's)
+and keeps you as the author. It is a genuine best-effort convenience, not a fast lane —
+if you can, the self-serve [tutorial](docs/your-first-change.md) is quicker.
 
 ---
 

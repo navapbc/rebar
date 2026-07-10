@@ -230,6 +230,63 @@ field-level pressure tests see `scripts/jira-pressure-test/`.
 
 ---
 
+## 1.0 declaration (staged — lands in the v1.0.0 release change, NOT before)
+
+When rebar cuts **v1.0.0**, the release change itself makes **exactly two** edits
+that turn the compatibility policy into an operative SemVer promise. They are
+recorded here (not only in a ticket) so the requirement survives independently:
+
+1. **`pyproject.toml` classifier:** `Development Status :: 4 - Beta` →
+   `Development Status :: 5 - Production/Stable`.
+2. **`docs/api-stability.md`:** remove the "Pre-1.0 caveat" so the stability
+   matrix becomes the operative post-1.0 SemVer promise (breaking changes only on
+   a major bump, with a deprecation window).
+
+Do **not** make these edits before the v1.0.0 release change — until then rebar is
+0.x and the caveat stands. (These are staged only; the epic that added this note
+does not execute them.)
+
+## Release-policy decisions (1.0)
+
+### Tag signing — SKIPPED (annotated tags + attestations instead)
+We do **not** GPG/sign release tags. Rationale: the 2026 peer baseline
+(CPython/pip/ruff/uv/pytest/httpx) signs zero new release tags — CPython dropped
+GPG at 3.14 (PEP 761); ruff/uv/httpx use lightweight tags — and artifact
+provenance is already covered by **PEP 740 attestations** + GitHub immutable
+releases (see "Supply-chain attestations" above). We keep **annotated** tags and
+immutable releases on. Revisit triggers: a workflow compromise entering the threat
+model, or a downstream consumer asking to cryptographically verify tags.
+
+### Release candidates — SKIPPED (with an RC-safety constraint on release.yml)
+We do **not** ship `rc` release trains. Rationale: an RC only yields signal if
+someone runs it; with no external adopters `--pre` installs ≈ 0, and `1.0.1` is the
+de-facto rc. Peers agree (pydantic v2 went beta→final in 13 days with zero rcs;
+attrs/structlog skipped 1.0 entirely). Revisit trigger: an external adopter
+volunteering to test a pre-release.
+
+> **RC-safety constraint (today's automation is RC-unsafe).** `release.yml` fires
+> on **all** `v*` tags, passes `--latest` unconditionally to `gh release create`,
+> and runs the MCP-registry publish job. So a hypothetical **`v1.0.0rc1`** tag
+> would be marked *Latest* **and** published to the MCP registry — wrong for a
+> pre-release. **No rc-form tag may be pushed** unless `release.yml` first gains a
+> prerelease guard: detect `rc` in the tag → pass `--prerelease` (not `--latest`)
+> and skip the MCP-registry job. Use PEP 440 spelling (`1.0.0rc1`, not `-rc.1`).
+
+### Deferrals (non-goals for now)
+- **SBOM / license-scan tooling** beyond GitHub's dependency-graph export — post-1.0.
+- **Renovate** as a dependency updater — parked as idea `misogynic-cerulean-goldfish`;
+  the approved posture is Dependabot advisory PRs (`.github/dependabot.yml`).
+- A **lockfile for optional extras** — revisit post-1.0.
+
+### Dependency updates — Dependabot advisory PRs
+`.github/dependabot.yml` runs GitHub-Actions version updates monthly. Because PRs
+cannot merge here, its PRs are **advisory**: the maintainer reads the diff and
+lands the bump via a Gerrit change. This is the pip/pydantic GitHub-native shape,
+deliberately *not* the bespoke Gerrit-pushing bot some Gerrit peers run. See that
+file's header for the full rationale.
+
+---
+
 ## Known follow-ups (not release-blocking)
 - **Lock fallback asymmetry** — when util-linux `flock` is absent, the bash write
   paths use a `mkdir` lock while `ticket_txn.py` uses `fcntl.flock`; they don't

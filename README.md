@@ -5,82 +5,67 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/navapbc/rebar/actions/workflows/test.yml/badge.svg)](https://github.com/navapbc/rebar/actions/workflows/test.yml)
 
-A git-native ticket system for coordinating coding agents — and the humans
-working alongside them.
+**An event-sourced, git-backed ticket store + Jira reconciler built for agent
+swarms — one store, exposed as a Python library, a **CLI**, and an **MCP** server.**
 
-Point several agents at one repo and they immediately need a shared place to
-coordinate: to claim work without grabbing the same ticket, record what they
-discover, and hand off cleanly — while your teammates stay in the loop through
-Jira. rebar makes the tracker *part of the repo itself*, so it travels with every
-clone, needs no database or daemon, and lets many agents and sessions write at
-once without merge conflicts or lost work.
+![rebar's core loop: `rebar ready` → `rebar claim` → `rebar transition … closed`](docs/assets/rebar-demo.svg)
 
-Because unsupervised agents drift, rebar can also gate their work with optional
-LLM reviews — of a ticket's *plan* before work starts, its *completion* before
-the ticket closes, and its *code* before it merges.
+- **Three surfaces, one store** — drive rebar as a **CLI** (`rebar`), a Python
+  library (`import rebar`), or an **MCP** server (`rebar-mcp`).
+- **The tracker lives in the repo** — tickets are an append-only event log on a
+  `tickets` git branch; no database, no daemon, and it travels with every clone.
+- **Built for parallel agents** — atomic claims, convergent merges, and provenance
+  links let many agents and sessions write at once without lost work.
+- **Optional LLM gates** — review a ticket's *plan* before work, its *completion*
+  before close, and its *code* before it merges.
+- **Bidirectional Jira sync** — a level-triggered reconciler keeps tickets and Jira
+  in step, so teammates stay in the loop.
+- **Dogfooded through two independent gates** — every change to rebar's own `main`
+  must pass an LLM code review **and** CI, on Gerrit, before it lands.
 
-It's an event-sourced ticket system with a Jira reconciler, exposed three ways:
+## Install
 
-- **CLI** — the `rebar` command
-- **Python library** — `import rebar`
-- **MCP server** — `rebar-mcp` (stdio)
-
-Tickets are stored as an append-only event log on a dedicated `tickets` git
-orphan branch (worktree at `.tickets-tracker/`); state is computed by replaying
-events. A level-triggered reconciler bidirectionally syncs tickets with Jira. Both
-the branch name and the worktree/symlink dir default to those values but are
-configurable (`tracker.branch` / `tracker.dir`) — see [Configuration](#configuration).
-Reads stay sub-second into the thousands of tickets; for measured numbers and
-git-growth expectations see [`docs/scale-envelope.md`](docs/scale-envelope.md).
-
-**New here? Jump to the [Quickstart](#quickstart)** to run one ticket end-to-end.
-
-**Documentation:** the full docs live under [`docs/`](docs/README.md) — start with
-the [docs index](docs/README.md) (grouped by audience: user / operator / contributor
-/ agent) or the day-to-day [user guide](docs/user-guide.md).
+```bash
+pipx install nava-rebar          # the `rebar` CLI (add [mcp] / [agents] for those extras)
+brew install navapbc/rebar/rebar # or via Homebrew
+```
 
 ## Quickstart
 
-Install rebar, initialize a store in your repo, and run one ticket through the
-whole loop. This is the golden path — for every command and flag,
-`rebar --help` (and `rebar <command> --help`) is the authoritative reference;
-this section deliberately doesn't reproduce it.
+Run one ticket end-to-end across all three surfaces. `rebar --help` (and
+`rebar <command> --help`) is the authoritative command reference.
 
 ```bash
-brew install navapbc/rebar/rebar   # the `rebar` CLI on your PATH (see Install for library/MCP/agents extras)
-cd /path/to/your/repo
-rebar init                     # -> Ticket system initialized.
+rebar init && rebar create task "Add a login page"    # CLI: init + create
+rebar ready && rebar claim reel-lot-tea --assignee alice
+rebar transition reel-lot-tea in_progress closed       # -> UNBLOCKED: …
 ```
-
-Create a ticket, see what's ready, claim it, and close it:
-
-```bash
-# Create a task — prints the human line (an id + a memorable alias) then the id:
-rebar create task "Add a login page" --priority 2
-#   Created ticket reel-lot-tea (e804-6013-4fcb-4127): Add a login page
-
-# What's ready to work (nothing blocking it)?
-rebar ready
-
-# Claim it atomically (open -> in_progress + assignee; exit 10 if already taken):
-rebar claim reel-lot-tea --assignee alice
-#   CLAIMED: e804-6013-4fcb-4127 (assignee: alice)
-
-# ...do the work, then close it (there is no `rebar close` — use transition):
-rebar transition reel-lot-tea in_progress closed
+```python
+import rebar                                            # Python library
+tid = rebar.create_ticket("task", "Add a login page")
+rebar.claim(tid, assignee="alice"); rebar.transition(tid, "in_progress", "closed")
 ```
-
-Point a coding agent at the same repo over MCP — one entry in your MCP client
-config (installs on demand via `uvx`; no separate install step):
-
 ```json
 { "mcpServers": { "rebar": { "command": "uvx", "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"] } } }
 ```
 
-That's the whole loop — **init → create → ready → claim → close** — shared through
-the repo so many agents (and teammates via Jira) coordinate without stepping on
-each other. Next: [Install](#install) for the library / MCP / agent extras, or
-`rebar --help` for the full command list.
+That's the whole loop — **init → create → ready → claim → close** — shared through the
+repo so many agents (and teammates via Jira) coordinate without stepping on each other.
+
+## How it works
+
+rebar stores tickets as an **append-only event log** on a dedicated `tickets` git
+orphan branch (worktree at `.tickets-tracker/`); ticket state is computed by replaying
+events, and every write auto-commits and pushes so the store is shared immediately. A
+**level-triggered reconciler** bidirectionally syncs tickets with Jira. The branch name
+and worktree dir are configurable (`tracker.branch` / `tracker.dir` — see
+[Configuration](#configuration)). Reads stay sub-second into the thousands of tickets;
+for measured numbers and git-growth expectations see
+[`docs/scale-envelope.md`](docs/scale-envelope.md).
+
+**Documentation** lives under [`docs/`](docs/README.md) — start with the
+[docs index](docs/README.md) (grouped by audience: user / operator / contributor /
+agent) or the day-to-day [user guide](docs/user-guide.md).
 
 ## Why rebar
 
@@ -297,9 +282,10 @@ pip install -e '.[dev]'
 ```
 
 > **Contributing changes?** GitHub is a **read-only mirror** — `main` only advances via
-> Gerrit's two-vote gate (`LLM-Review` + `Verified`/CI). Read [CONTRIBUTING.md](CONTRIBUTING.md)
-> for the Gerrit contribution flow (clone from Gerrit, push to `refs/for/main`, submit once
-> both votes pass).
+> Gerrit's two-vote gate (`LLM-Review` + `Verified`/CI). New contributors: start with the
+> friendly walkthrough [docs/your-first-change.md](docs/your-first-change.md); the full
+> reference is [CONTRIBUTING.md](CONTRIBUTING.md) (clone from Gerrit, push to
+> `refs/for/main`, submit once both votes pass).
 
 > **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
 > MCP server, and the whole read/write core run **in-process** in Python. The one
