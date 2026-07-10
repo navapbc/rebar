@@ -142,6 +142,50 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
     return [read_file, list_directory, search_files]
 
 
+def grounding_tools(repo_path: str | None) -> list[Callable]:
+    """Environment-aware symbol resolver (bug 406f). The finder's ``filesystem_tools``
+    are repo-scoped and CANNOT see a third-party dependency that lives in
+    site-packages, so a library symbol reads as "not found" and gets wrongly flagged
+    hallucinated/non-existent. This tool consults the INSTALLED Python environment
+    (the same deps the code runs against) so the agent can CONFIRM a symbol exists
+    before asserting it is absent. Read-only (import-locating; a member bind imports
+    the module) and fail-open (never raises into the agent loop)."""
+    root = os.path.realpath(repo_path or ".")
+
+    def resolve_symbol(name: str, module: str = "") -> str:
+        """Check whether a Python symbol/module EXISTS in the installed environment
+        (stdlib + third-party site-packages) that your repo-scoped file tools cannot
+        see. Pass a bare module (``anthropic``), a dotted ``module.Symbol``
+        (``anthropic.Anthropic``), or ``name`` plus ``module`` for a
+        ``from module import name`` binding. Returns ``EXISTS`` (with origin +
+        whether it is repo-local or third-party) when importable, else
+        ``UNRESOLVED`` — which is NOT proof of non-existence (it may be an
+        uninstalled optional dependency): do not flag a symbol hallucinated on an
+        UNRESOLVED result alone."""
+        from rebar.grounding import resolve as _resolve
+
+        try:
+            loc = _resolve.resolve_in_environment(name, container=module or None, language="python")
+        except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface as a string, never crash the loop
+            return f"UNRESOLVED ({name!r}: resolver error {exc})"
+        if loc is None:
+            hint = f" in module {module!r}" if module else ""
+            return (
+                f"UNRESOLVED: {name!r}{hint} is not importable in the installed "
+                "environment. This is NOT proof it does not exist — do not assert "
+                "non-existence on this basis alone."
+            )
+        origin = str(loc.get("origin") or "?")
+        qualified = loc["module"] + (f".{loc['attr']}" if loc.get("attr") else "")
+        inside = _within_root(os.path.realpath(origin), root) if os.path.isabs(origin) else False
+        scope = "repo-local" if inside else "third-party/stdlib (site-packages)"
+        return (
+            f"EXISTS: {qualified} resolves in the installed environment [{scope}, origin={origin}]."
+        )
+
+    return [resolve_symbol]
+
+
 def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]:
     """Least-privilege rebar ticket tools (WS-D3): ``show_ticket`` always;
     ``comment_ticket`` only when ``allow_comment``. Nothing else — no create/edit/
