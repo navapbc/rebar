@@ -65,8 +65,8 @@ def _config() -> ReceiverConfig:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start the queue, the background review worker(s), and the backfill reconciler;
-    cancel them cleanly on shutdown."""
+    """Start the queue, the background review worker(s), the backfill reconciler, and
+    the snapshot-cache janitor; stop them cleanly on shutdown."""
     cfg = app.state.config
     app.state.queue = asyncio.Queue()
     tasks: list[asyncio.Task] = []
@@ -74,9 +74,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(asyncio.create_task(_worker(app.state.queue, cfg)))
     tasks.append(asyncio.create_task(_reconcile.reconcile_loop(config=cfg)))
     app.state.tasks = tasks
+    # Snapshot-cache janitor (incident 2731 / bug e7f4): every review clones into the
+    # content-addressed snapshot store on the ROOT disk, and without the janitor that
+    # store grows unboundedly (694M observed) — the reclamation code existed but no
+    # production process ever started it. Daemon thread, off the hot path; must never
+    # block or fail startup (the gate matters more than the janitor).
+    janitor_stop = None
+    try:
+        from rebar._snapshot import start_background_janitor
+
+        _janitor_thread, janitor_stop = start_background_janitor()
+    except Exception:  # noqa: BLE001 — a janitor failure must not take down the receiver
+        logger.exception("review-bot: snapshot janitor failed to start (non-fatal)")
     try:
         yield
     finally:
+        if janitor_stop is not None:
+            janitor_stop.set()
         for task in tasks:
             task.cancel()
         for task in tasks:
