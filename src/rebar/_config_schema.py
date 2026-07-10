@@ -223,6 +223,12 @@ class VerifyConfig:
     # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
     require_plan_review_for_claim: bool = False
+    # Opt-in store-wide cross-ticket overlap detection (epic only-crave-art). When true, the
+    # plan-review invocation runs an ADVISORY store-wide overlap step (enrich → BM25F retrieve
+    # → pairwise judge) that surfaces ≤3 candidate duplicate/supersede/dependency link
+    # suggestions in a separate `overlap[]` verdict key. NEVER blocks claim, never affects the
+    # claim-gate verdict. Default off; all tunables live on LLMConfig (`[tool.rebar.llm]`).
+    overlap_enabled: bool = False
     # Opt-in commit-ticket gate: when true, `rebar verify-commit-ticket` (run in CI, the
     # Gerrit Verified leg) requires every commit message to reference a rebar ticket that
     # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
@@ -439,6 +445,7 @@ _SECTIONS: dict[str, dict] = {
         "require_signature_for_close": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
+        "overlap_enabled": lambda v, k: _as_bool(v, k),
         "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
         "enable_code_review": lambda v, k: _as_bool(v, k),
         "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
