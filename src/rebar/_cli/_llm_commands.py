@@ -108,6 +108,21 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     v = result.get("verdict")
     verdict = str((v.get("verdict", "") if isinstance(v, dict) else v) or "").upper()
     if verdict == "PASS":
+        # A signable PASS whose attestation was ATTEMPTED but FAILED to persist (signed False
+        # WITH an `error`, not a deliberate `reason` skip) is NOT a silent success: the
+        # review's sole durable product — the signature the claim gate consumes — was lost to
+        # a recoverable condition (e.g. a git index.lock), so a later `claim` still fails the
+        # gate. Surface it as retryable (exit 11) so the expensive review is re-run, not
+        # discarded. A deliberately-unsigned PASS (--no-sign / not-signable / drift → `reason`,
+        # no `error`) and a successfully-signed PASS stay exit 0 (ticket middle-actinium-thrush).
+        sig = result.get("signature") or {}
+        if sig.get("signed") is False and sig.get("error"):
+            sys.stderr.write(
+                "plan review PASSED but the attestation could not be persisted: "
+                f"{sig.get('error')}\n"
+                "re-run `rebar review-plan` to retry — the claim gate needs the signature.\n"
+            )
+            return 11
         return 0
     if coverage.get("retryable"):
         return 11
