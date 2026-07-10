@@ -390,6 +390,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "review-plan":
         return _review_plan(argv[1:])
 
+    # enrich intercept (cross-ticket overlap drain + status; native rebar.llm, epic
+    # only-crave-art). `rebar enrich [--drain|--once|status]`.
+    if argv and argv[0] == "enrich":
+        from rebar import config as _enrich_config
+        from rebar.llm.enrich_drain import cmd_enrich
+
+        return cmd_enrich(argv[1:], str(_enrich_config.tracker_dir()))
+
     # explain intercept (WS10: `rebar explain <criterion-id>` — a pure registry/guide READ, no
     # LLM; owns its --help like review-plan, so no help/*.txt or dispatch arm).
     if argv and argv[0] == "explain":

@@ -300,6 +300,11 @@ DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
 # surfaced, and the max number of advisory link suggestions surfaced per query ticket.
 DEFAULT_OVERLAP_CONF_THRESHOLD = 0.7
 DEFAULT_OVERLAP_SURFACE_CAP = 3
+# Tier-1 opportunistic drain (c1de): the drain mode (off|async|always), the per-run batch
+# cap, and the cheap gate-check latency budget (ms) for the write-path maybe_drain no-op.
+DEFAULT_OVERLAP_DRAIN = "async"
+DEFAULT_OVERLAP_DRAIN_BATCH = 5
+DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -447,6 +452,12 @@ def _llm_float(table: dict, cli: dict, env_name: str, file_key: str, default: fl
     return default
 
 
+def _llm_drain_mode(raw: str) -> str:
+    """Validate the overlap_drain enum; an unrecognized value falls back to the default."""
+    v = str(raw).strip().lower()
+    return v if v in ("off", "async", "always") else DEFAULT_OVERLAP_DRAIN
+
+
 @dataclass
 class LangfuseConfig:
     """Langfuse credentials/host, plus whether OTLP tracing is *enabled* (Langfuse is the
@@ -509,6 +520,10 @@ class LLMConfig:
     # Stage-2 pairwise judge (9022).
     overlap_conf_threshold: float = DEFAULT_OVERLAP_CONF_THRESHOLD
     overlap_surface_cap: int = DEFAULT_OVERLAP_SURFACE_CAP
+    # Tier-1 drain (c1de).
+    overlap_drain: str = DEFAULT_OVERLAP_DRAIN
+    overlap_drain_batch: int = DEFAULT_OVERLAP_DRAIN_BATCH
+    overlap_drain_gate_budget_ms: int = DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -633,6 +648,25 @@ class LLMConfig:
                 "REBAR_LLM_OVERLAP_SURFACE_CAP",
                 "overlap_surface_cap",
                 DEFAULT_OVERLAP_SURFACE_CAP,
+            ),
+            overlap_drain=_llm_drain_mode(
+                _llm_str(
+                    table, cli, "REBAR_LLM_OVERLAP_DRAIN", "overlap_drain", DEFAULT_OVERLAP_DRAIN
+                )
+            ),
+            overlap_drain_batch=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_DRAIN_BATCH",
+                "overlap_drain_batch",
+                DEFAULT_OVERLAP_DRAIN_BATCH,
+            ),
+            overlap_drain_gate_budget_ms=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS",
+                "overlap_drain_gate_budget_ms",
+                DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS,
             ),
         )
 
