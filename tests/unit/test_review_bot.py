@@ -1105,3 +1105,60 @@ def test_lifespan_starts_and_stops_snapshot_janitor(monkeypatch):
         assert stop.is_set(), "janitor stop event not signalled on shutdown"
 
     asyncio.run(drive())
+
+
+# ── worker: a hung review must not stall the queue (bug 9d7c / jaguarundi) ──────
+def test_worker_abandons_hung_review_and_keeps_draining(monkeypatch, tmp_path):
+    """A single review that HANGS forever (clone/subprocess/LLM blocked — as when the
+    disk filled mid-clone, incident 2731) must NOT wedge the single background worker.
+
+    The worker wraps each review in a bounded timeout: the hung event is abandoned (a
+    countable ``VOTER_ERROR`` timeout marker is emitted) and the worker moves on to the
+    NEXT queued event. Without the timeout the worker awaits the hung review forever and
+    every subsequent change silently backs up behind it — this test drives the loop under
+    an outer wall-clock guard so the pre-fix (no-timeout) code fails RED rather than
+    hanging the suite. Requires the ``reviewbot`` extra (fastapi); skipped without it."""
+    pytest.importorskip("fastapi")
+    import contextlib
+
+    from rebar.review_bot import app as appmod
+
+    # Short per-review timeout, injected via the documented override env var.
+    monkeypatch.setenv("REVIEW_TIMEOUT_SECONDS", "0.05")
+
+    processed: list[str] = []
+
+    async def fake_review_and_vote(event, *, config, force=False):
+        cid = event["change"]["id"]
+        processed.append(cid)
+        if cid == "HANG":
+            await asyncio.Event().wait()  # never returns — simulates the hung clone/LLM
+        return {"status": "voted"}
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", fake_review_and_vote)
+
+    markers: list[dict] = []
+    monkeypatch.setattr(appmod._voter, "_voter_error", lambda **f: markers.append(f))
+
+    async def drive():
+        queue: asyncio.Queue = asyncio.Queue()
+        queue.put_nowait({"change": {"id": "HANG"}})
+        queue.put_nowait({"change": {"id": "OK"}})
+        worker = asyncio.create_task(appmod._worker(queue, _cfg(tmp_path)))
+        try:
+            # queue.join() returns only once BOTH events reached task_done — the hung one
+            # only does so if the worker timed out and abandoned it.
+            await queue.join()
+        finally:
+            worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
+
+    # Outer guard: pre-fix code never completes drive() (worker stuck on HANG) → RED here.
+    asyncio.run(asyncio.wait_for(drive(), timeout=10))
+
+    # (1) the hung item did not block forever AND (2) the subsequent item was processed.
+    assert processed == ["HANG", "OK"]
+    # (3) a countable timeout marker was emitted for the abandoned review.
+    assert markers, "no VOTER_ERROR timeout marker emitted for the hung review"
+    assert "timed out" in str(markers[0].get("error", ""))
