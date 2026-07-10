@@ -464,10 +464,14 @@ Gerrit-gated; see §3). Any resulting fix lands as an ordinary Gerrit change (§
   (comment `recheck`), not a vulnerability.
 
 **Dependency updates use security *alerts only*, not version-bump PRs.** GitHub
-Dependabot / Dependabot security **alerts** are enabled to surface vulnerable
-deps, but Dependabot **version-update PRs are intentionally NOT configured** —
-they would open PRs that cannot merge on the mirror. When an alert (or a
-`pip-audit` failure) tells you to bump a dependency, **land the bump through
+Dependabot security **alerts** are enabled to surface vulnerable deps, and
+`.github/dependabot.yml` configures **GitHub-Actions version-update PRs** (monthly).
+Because PRs cannot merge on the mirror, these are **advisory notifications**: a
+maintainer reads the proposed bump, lands the equivalent change through Gerrit, and
+closes the PR (the lockdown bot exempts `dependabot[bot]` so its PRs aren't
+auto-closed). There is intentionally **no `pip` ecosystem entry** — rebar's core
+deps are unpinned `>=`, so version-update PRs there would be noise. When an alert
+(or a `pip-audit` failure) tells you to bump a dependency, **land the bump through
 Gerrit** like any other change (§2): edit the pin in `pyproject.toml`, commit with
 a `rebar-ticket:` trailer, and push to `refs/for/main`.
 
