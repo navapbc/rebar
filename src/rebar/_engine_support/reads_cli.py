@@ -166,9 +166,25 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             overall_rc = 1
             continue
         if fmt == "llm":
+            # The `--output llm` arm is a machine format with a show↔list parity contract
+            # (test_llm_parity_show_vs_list) — do NOT add the overlap flag here.
             print(json.dumps(to_llm(state), ensure_ascii=False, separators=(",", ":")))
         else:
-            print(json.dumps(state, indent=2, ensure_ascii=False))
+            # Cross-ticket overlap (epic only-crave-art): render the digest freshness flag in
+            # the human `show` output ONLY. The flag is added to the dict THIS arm prints — it
+            # never enters the library `show_ticket`/`list`/`search` returns (which share one
+            # shape, test_show_list_search_share_one_shape) nor the `--output llm` arm. Lazy
+            # import + fail-safe so `rebar show` never breaks on it.
+            out = dict(state)
+            try:
+                from rebar.llm.overlap import digest_sidecar
+
+                out["digest_freshness"] = digest_sidecar.freshness(
+                    raw_id, state=state, tracker=tracker
+                )
+            except Exception:  # noqa: BLE001 — presentation-only; never break `show` on it
+                pass
+            print(json.dumps(out, indent=2, ensure_ascii=False))
             unresolved = sum(
                 1 for a in state.get("bridge_alerts", []) if not a.get("resolved", False)
             )
