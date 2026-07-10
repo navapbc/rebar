@@ -242,6 +242,21 @@ def _scan(
             "reconcile host on an old binary may push stale state)."
         )
 
+    # Informational ensure-registry status (epic odd-vortex-elbow / WS3), derived
+    # WITHOUT running the sweep: M = registered units, N = applied units present in
+    # the git-ignored .ensure-applied marker (intersected with the registry so a
+    # stale marker id can't inflate N). Lowercase tag ⇒ text-only, like
+    # a3-remediation:/fsck complete — intentionally NOT lifted into --output json,
+    # so it never inflates issue_count or flips the exit code.
+    from rebar._store import ensures as _ensures
+
+    registry = _ensures.registry_ids()
+    applied_n = len(_ensures.applied_ids(tracker) & registry)
+    ensures_line = f"ensures: {applied_n}/{len(registry)} applied"
+    if applied_n < len(registry):
+        ensures_line += " — run `rebar fsck --repair` to converge"
+    lines.append(ensures_line)
+
     return lines, issue_count
 
 
@@ -729,6 +744,25 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         repair_lines, _unresolved = _repair_run(
             tracker, dry_run=dry_run, limit=limit, repo_root=repo_root
         )
+        # Fold the idempotent ensure-sweep into the existing "drive healthy" verb
+        # (epic odd-vortex-elbow / WS3): a DISTINCT phase from the A3 data-repair —
+        # run_ensures takes + releases the store write lock itself (no nesting), and
+        # is log-and-continue (a failed unit never rolls back committed ticket data).
+        # Only on a live run; --dry-run stays read-only and does not sweep.
+        ensure_lines: list[str] = []
+        if not dry_run:
+            from rebar._store import ensures as _ensures
+
+            outcomes = _ensures.run_ensures(tracker)
+            changed = [o.id for o in outcomes if o.status == "changed"]
+            failed = [o.id for o in outcomes if o.status == "failed"]
+            ensure_lines.append(
+                f"ensures: swept {len(outcomes)} unit(s); "
+                f"{len(changed)} changed, {len(failed)} failed"
+            )
+            ensure_lines += [
+                f"  ensure {o.id}: {o.status} ({o.detail})" for o in outcomes if o.status != "ok"
+            ]
         # Re-scan for the residual state (read-only in dry-run so it writes nothing).
         scan_lines, issue_count = _scan(tracker, no_mutate or dry_run, repo_root)
         summary = (
@@ -737,7 +771,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             else f"fsck complete: {issue_count} issues found"
         )
         rc = 0 if issue_count == 0 else 1
-        full = "\n".join(repair_lines + scan_lines + [summary])
+        full = "\n".join(repair_lines + ensure_lines + scan_lines + [summary])
         sys.stdout.write((_transform_json(full) if fmt == "json" else full) + "\n")
         return rc
 

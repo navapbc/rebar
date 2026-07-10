@@ -66,6 +66,9 @@ Developing rebar itself — architecture, internals, and the dev workflow.
 - **[concurrency.md](concurrency.md)** — rebar's concurrency model: the structural
   invariants (optimistic concurrency, convergent deltas) that make concurrent
   operation safe without locks-in-the-large.
+- **[migrations.md](migrations.md)** — the idempotent ensure-registry (School B,
+  desired-state): how to add an ensure unit, where `run_ensures` runs, the applied-set
+  marker + write-path pending-hint, the accepted trade-offs, and the future A-tier ledger.
 - **[api-stability.md](api-stability.md)** — the 0.x stability promise per surface, so
   you know what you can depend on today and how changes are communicated.
 - **[local-dev-env.md](local-dev-env.md)** — running the **repo checkout's** rebar (not

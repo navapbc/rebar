@@ -5,7 +5,8 @@ linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
 ``.pre-commit-config.yaml`` + ``.gitattributes`` (``merge=ours`` for the per-pass
 mutable root files) on it, generates ``.env-id`` + ``.signing-key``,
 normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=true`` — rebar trusts
-stock ``git gc`` now that recovery is non-destructive, see ``_migrate_gc_config``),
+stock ``git gc`` now that recovery is non-destructive, see the ``gc-config`` ensure
+unit ``_gc_config_unit`` run via ``rebar._store.ensures.run_ensures``),
 and excludes the tracker from the host repo. Idempotent: re-running on an
 initialized repo recovers any stale rebase/merge on the tickets branch, re-applies
 the gc-config migration, and returns 0. A 30s mkdir lock
@@ -26,6 +27,7 @@ import sys
 import time
 import uuid
 
+from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
 from rebar._store.gitutil import run_git
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
@@ -45,6 +47,8 @@ _GITIGNORE = f""".env-id
 {WRITE_LOCK_NAME}
 {MKDIR_LOCK_NAME}/
 {_GRAPH_CACHE_FILE}
+{APPLIED_MARKER}
+{HINTED_MARKER}
 """
 
 _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the reconciler rebuilds,
@@ -84,28 +88,47 @@ def _realpath(p: str) -> str:
     return os.path.realpath(p)
 
 
-def _migrate_gc_config(tracker: str) -> None:
+def _gc_config_unit(tracker: str) -> EnsureOutcome:
     """Trust stock ``git gc`` on the tickets worktree (epic 97e7 / P1.4).
 
     rebar no longer forces ``gc.auto=0``: union recovery (sync.py) keeps every
     ticket commit ref-reachable, so stock background gc is safe by construction and
-    only ever collects truly unreachable objects. Two idempotent steps, run at init
-    and on every re-init so existing trackers self-heal:
+    only ever collects truly unreachable objects. Two idempotent steps, so an
+    existing tracker self-heals on any ensure sweep:
 
-    - ``--unset gc.auto`` sheds the stale ``gc.auto=0`` an older rebar wrote (no-op
-      / exit 5 when absent — harmless, we ignore the return code).
+    - ``--unset gc.auto`` sheds the stale ``gc.auto=0`` an older rebar wrote.
     - ``gc.autoDetach=true`` ensures a triggered background gc forks and never
       serializes a foreground ticket write.
-    """
-    _git(tracker, "config", "--unset", "gc.auto")
-    _git(tracker, "config", "gc.autoDetach", "true")
+
+    Check-then-act: acts only when either value is off the desired state, so a
+    converged tracker reports ``ok`` and mutates nothing (ensure-registry unit)."""
+    changed = False
+    if _git(tracker, "config", "--get", "gc.auto").returncode == 0:
+        _git(tracker, "config", "--unset", "gc.auto")
+        changed = True
+    if _git(tracker, "config", "--get", "gc.autoDetach").stdout.strip() != "true":
+        _git(tracker, "config", "gc.autoDetach", "true")
+        changed = True
+    return EnsureOutcome(
+        "gc-config",
+        "changed" if changed else "ok",
+        "gc.auto unset + gc.autoDetach=true",
+    )
 
 
-def _ensure_env_id(tracker: str) -> None:
+def _ensure_env_id_unit(tracker: str) -> EnsureOutcome:
+    """Ensure the store carries a stable ``.env-id`` (ensure-registry unit).
+
+    Check-then-act: writes a fresh uuid only when absent, so it no-ops on a store
+    that already has one (e.g. after fresh-init's ``_gen_local_files``)."""
     real = _realpath(tracker)
-    if os.path.isdir(real) and not os.path.isfile(os.path.join(real, ".env-id")):
-        with open(os.path.join(real, ".env-id"), "w", encoding="utf-8") as f:
-            f.write(str(uuid.uuid4()) + "\n")
+    if not os.path.isdir(real):
+        return EnsureOutcome("env-id", "ok", "tracker dir absent")
+    if os.path.isfile(os.path.join(real, ".env-id")):
+        return EnsureOutcome("env-id", "ok", ".env-id present")
+    with open(os.path.join(real, ".env-id"), "w", encoding="utf-8") as f:
+        f.write(str(uuid.uuid4()) + "\n")
+    return EnsureOutcome("env-id", "changed", "generated .env-id")
 
 
 def _detect_stale(git_dir: str) -> str:
@@ -123,6 +146,15 @@ def _detect_stale(git_dir: str) -> str:
 def _emit(msg: str, silent: bool) -> None:
     if not silent:
         sys.stderr.write(msg + "\n")
+
+
+def _run_ensures_logged(tracker: str, silent: bool) -> None:
+    """Run the ensure registry at an init entry point and surface any ``failed``
+    unit as a warning (init never aborts on an ensure failure — :func:`run_ensures`
+    already skip-and-continues and never raises)."""
+    for outcome in run_ensures(tracker):
+        if outcome.status == "failed":
+            _emit(f"WARNING: ensure '{outcome.id}' failed: {outcome.detail}", silent)
 
 
 def _resolve_repo_root(repo_root) -> str | None:
@@ -206,11 +238,11 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
                 elif kind == "MERGE_HEAD":
                     _emit("WARNING: Aborting stale merge on tickets branch", silent)
                     _git(tracker, "merge", "--abort")
-            _ensure_env_id(tracker)
-            _migrate_gc_config(tracker)
-            _ensure_merge_ours_driver(tracker)
-            _commit_gitattributes(tracker)  # migrate trackers predating WU-3
-            _commit_gitignore(tracker)  # migrate trackers predating the lock/cache ignores
+            # Converge the store via the ensure registry (idempotent, drift-
+            # correcting) so a config fix shipped after this store was initialized
+            # reaches it on re-init — the migration these hand-listed calls once
+            # performed, generalized (epic odd-vortex-elbow).
+            _run_ensures_logged(tracker, silent)
             _emit("Ticket system already initialized.", silent)
             return 0
 
@@ -238,14 +270,17 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
         rc = _mount_or_create_branch(repo, tracker)
         if rc != 0:
             return rc
+        # Fresh-init-only bootstrap (NOT ensure-registry units): these run once at
+        # genesis and are not idempotent drift-correctors.
         _ensure_branch_user_config(repo, tracker)
-        _commit_gitignore(tracker)
         _exclude_scratch_in_tracker(tracker)
         _commit_precommit(tracker)
-        _commit_gitattributes(tracker)
-        _gen_local_files(tracker)
-        _migrate_gc_config(tracker)
-        _ensure_merge_ours_driver(tracker)
+        _gen_local_files(tracker)  # writes .env-id (env-id unit then no-ops below)
+        # Converge via the ensure registry (gitignore, gitattributes, gc-config,
+        # merge-ours, env-id), AFTER the bootstrap so ordering is preserved. This
+        # replaces the hand-listed _commit_gitignore/_commit_gitattributes/
+        # _migrate_gc_config/_ensure_merge_ours_driver calls (epic odd-vortex-elbow).
+        _run_ensures_logged(tracker, silent)
         _emit("Ticket system initialized.", silent)
         return 0
     finally:
@@ -352,7 +387,11 @@ def _ensure_branch_user_config(repo: str, tracker: str) -> None:
         _git(tracker, "config", "user.name", name)
 
 
-def _commit_gitignore(tracker: str) -> None:
+def _gitignore_unit(tracker: str) -> EnsureOutcome:
+    """Ensure the tickets-branch ``.gitignore`` carries every runtime-artifact entry
+    (ensure-registry unit). Tree-checks the committed blob first, so it commits only
+    when creating it or appending a missing line — a converged store reports ``ok``
+    and makes zero commits."""
     show = _git(tracker, "show", "tickets:.gitignore")
     if show.returncode != 0:
         with open(os.path.join(tracker, ".gitignore"), "w", encoding="utf-8") as f:
@@ -366,26 +405,28 @@ def _commit_gitignore(tracker: str) -> None:
             "-m",
             "chore: add .gitignore for env-id, state-cache, scratch, and reducer cache",
         )
-        return
+        return EnsureOutcome("gitignore", "changed", "created .gitignore")
     # Migration (bug stem-ewe-tomb): an existing tracker's committed .gitignore may
-    # predate the lock/cache entries. Append any missing lines (idempotent — init
-    # re-runs harmlessly) so existing stores stop surfacing the artifacts untracked.
+    # predate the lock/cache entries. Append any missing lines (idempotent — the
+    # sweep re-runs harmlessly) so existing stores stop surfacing the artifacts.
     existing = set(show.stdout.splitlines())
     missing = [ln for ln in _GITIGNORE.splitlines() if ln and ln not in existing]
-    if missing:
-        path = os.path.join(tracker, ".gitignore")
-        body = show.stdout if show.stdout.endswith("\n") else show.stdout + "\n"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(body + "\n".join(missing) + "\n")
-        _git(tracker, "add", ".gitignore")
-        _git(
-            tracker,
-            "commit",
-            "-q",
-            "--no-verify",
-            "-m",
-            "chore: gitignore write-lock and graph-cache runtime artifacts",
-        )
+    if not missing:
+        return EnsureOutcome("gitignore", "ok", ".gitignore converged")
+    path = os.path.join(tracker, ".gitignore")
+    body = show.stdout if show.stdout.endswith("\n") else show.stdout + "\n"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body + "\n".join(missing) + "\n")
+    _git(tracker, "add", ".gitignore")
+    _git(
+        tracker,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        "chore: gitignore write-lock and graph-cache runtime artifacts",
+    )
+    return EnsureOutcome("gitignore", "changed", f"added {len(missing)} .gitignore line(s)")
 
 
 def _exclude_scratch_in_tracker(tracker: str) -> None:
@@ -403,24 +444,32 @@ def _exclude_scratch_in_tracker(tracker: str) -> None:
     _exclude(git_dir, ".scratch/")
 
 
-def _ensure_merge_ours_driver(tracker: str) -> None:
+def _merge_ours_unit(tracker: str) -> EnsureOutcome:
     """Define the ``ours`` merge driver the ``.gitattributes`` references (epic 97e7
     / WU-3). ``true`` always exits 0, leaving OUR version of a conflicted path in
     place. Without this, ``merge=ours`` in ``.gitattributes`` is silently ignored
     and the shared mutable root files conflict on a union reconverge. Local config
-    (per clone; shared by symlinked worktrees via the common git dir); idempotent."""
+    (per clone; shared by symlinked worktrees via the common git dir).
+
+    Check-then-act: sets the driver only when it is not already ``true`` (ensure-
+    registry unit), so a converged clone reports ``ok``."""
+    if _git(tracker, "config", "--get", "merge.ours.driver").stdout.strip() == "true":
+        return EnsureOutcome("merge-ours", "ok", "merge.ours.driver=true")
     _git(tracker, "config", "merge.ours.driver", "true")
+    return EnsureOutcome("merge-ours", "changed", "set merge.ours.driver=true")
 
 
-def _commit_gitattributes(tracker: str) -> None:
+def _gitattributes_unit(tracker: str) -> EnsureOutcome:
     """Commit the tickets-branch ``.gitattributes`` (create-if-absent, idempotent),
     so a union merge keeps OUR copy of the per-pass mutable root files instead of
-    wedging. Pairs with :func:`_ensure_merge_ours_driver` (the driver it names).
+    wedging. Pairs with :func:`_merge_ours_unit` (the driver it names).
 
     Also runs a one-time migration (epic dust-troth-naval / C4): an already-committed
     ``.gitattributes`` predating the ref-lock still carries ``.reconciler-* merge=ours``;
     strip that retired line (the lock moved off the tickets tree onto refs/reconciler/*).
-    Idempotent; a git failure logs and continues (never aborts init)."""
+
+    Tree-checks the committed blob first, so a converged store makes zero commits and
+    reports ``ok`` (ensure-registry unit; run_ensures catches any raise → ``failed``)."""
     show = _git(tracker, "show", "tickets:.gitattributes")
     if show.returncode != 0:
         with open(os.path.join(tracker, ".gitattributes"), "w", encoding="utf-8") as f:
@@ -434,28 +483,26 @@ def _commit_gitattributes(tracker: str) -> None:
             "-m",
             "chore: add .gitattributes merge=ours for shared mutable root files (epic 97e7)",
         )
-        return
+        return EnsureOutcome("gitattributes", "changed", "created .gitattributes")
 
     # Migration arm: strip any retired line from an existing committed .gitattributes.
     lines = show.stdout.splitlines()
     kept = [ln for ln in lines if ln.strip() not in _RETIRED_GITATTRIBUTES_LINES]
     if len(kept) == len(lines):
-        return  # nothing retired present — idempotent no-op
-    try:
-        path = os.path.join(tracker, ".gitattributes")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(kept) + ("\n" if kept else ""))
-        _git(tracker, "add", ".gitattributes")
-        _git(
-            tracker,
-            "commit",
-            "-q",
-            "--no-verify",
-            "-m",
-            "chore(reconciler): drop retired .reconciler-* merge=ours (moved to refs/reconciler/*)",
-        )
-    except OSError as exc:  # log-and-continue: a migration failure must not abort init
-        print(f"WARN: .gitattributes migration skipped: {exc!r}", file=sys.stderr)
+        return EnsureOutcome("gitattributes", "ok", ".gitattributes converged")
+    path = os.path.join(tracker, ".gitattributes")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(kept) + ("\n" if kept else ""))
+    _git(tracker, "add", ".gitattributes")
+    _git(
+        tracker,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        "chore(reconciler): drop retired .reconciler-* merge=ours (moved to refs/reconciler/*)",
+    )
+    return EnsureOutcome("gitattributes", "changed", "stripped retired merge=ours line")
 
 
 def _commit_precommit(tracker: str) -> None:
@@ -561,7 +608,9 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
         return 1
     if os.path.islink(tracker):
         if _realpath(tracker) == _realpath(main_tracker):
-            _ensure_env_id(tracker)
+            # Already symlinked to the main store — converge it (idempotent) so a
+            # worktree attach still reaches any pending ensure (epic odd-vortex-elbow).
+            _run_ensures_logged(tracker, silent)
             _emit("Ticket system already initialized.", silent)
             return 0
         os.remove(tracker)
@@ -579,7 +628,9 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
         entry = _tracker_exclude_entry(repo, tracker)
         if entry:
             _exclude(wt_git, entry)
-    _ensure_env_id(tracker)
+    # Newly symlinked to the main store — converge it via the ensure registry
+    # (idempotent; the env-id unit no-ops when the main store already has one).
+    _run_ensures_logged(tracker, silent)
     _emit("Ticket system initialized (symlink to main repo).", silent)
     return 0
 
