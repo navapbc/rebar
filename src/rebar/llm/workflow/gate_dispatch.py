@@ -589,9 +589,20 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
         _detectors.apply_failclosed(
             verdict, changed_files=list(prep.dc.changed_files), repo_root=request.repo_root
         )
-        if request.target_ticket:
-            from rebar.llm.code_review import sidecar as _sidecar
+        # deps (story revenued-thickset-dassie): the content-addressed reviewed-file hash map the
+        # region-gated novelty floor (blameless-grindable-noctule) compares against next run.
+        # Computed UNCONDITIONALLY (regardless of target_ticket) and stashed on the verdict, so BOTH
+        # the produce emit below AND the Gerrit voter emit (same verdict) carry it via build_payload
+        # The import moves above the target_ticket check for the deps helpers. Best-effort: the
+        # collector self-guards (logs + returns {}); a defensive setdefault covers any surprise.
+        from rebar.llm.code_review import sidecar as _sidecar
 
+        try:
+            _dep_paths = set(prep.dc.changed_files) | _sidecar._cited_paths_code_review(verdict)
+            verdict["deps"] = _sidecar.reviewed_file_hashes(_dep_paths, repo_root=request.repo_root)
+        except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
+            verdict.setdefault("deps", {})
+        if request.target_ticket:
             _sidecar.emit(verdict, target_ticket=request.target_ticket, repo_root=request.repo_root)
         return verdict
     return _degraded_code_review_verdict(

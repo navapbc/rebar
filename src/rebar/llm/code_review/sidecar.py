@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,14 @@ def build_payload(
     findings/coaching), tagged with its schema + the anchor ticket. When change metadata is supplied
     (the reviewbot artifact path) the payload also carries the ``(change_id, revision)`` key, the
     diff-scoped ``change_fingerprint``, and per-finding ``norm_id``s — the join keys a calibration
-    corpus needs."""
+    corpus needs.
+
+    ``session_id`` and ``deps`` (story revenued-thickset-dassie) are read straight off the
+    ``verdict`` dict, so they flow to EVERY emit path — the produce-path emit AND the Gerrit voter
+    emit (which passes the same verdict) — with no per-call-site change. ``session_id`` (nullable)
+    is None for Gerrit reviews and set by the local persistence path so local memory is queryable by
+    session; ``deps`` is the ``{reviewed-file path: sha256}`` content-hash map the region-gated
+    novelty floor (blameless-grindable-noctule) compares against next run."""
     return {
         "schema": SCHEMA,
         "impact_model_version": IMPACT_MODEL_VERSION,
@@ -82,6 +90,8 @@ def build_payload(
         "change_id": change_id,
         "revision": revision,
         "change_fingerprint": change_fp,
+        "session_id": verdict.get("session_id"),
+        "deps": verdict.get("deps") or {},
         "runner": verdict.get("runner"),
         "model": verdict.get("model"),
         "coverage": verdict.get("coverage", {}),
@@ -124,3 +134,163 @@ def emit(
     except Exception:  # noqa: BLE001 — sidecar is best-effort; a failure must not fail the gate
         logger.warning("code-review REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
+
+
+# ── reviewed-file content-hash map (deps) — the region-gate state ────────────────────────────────
+def _cited_paths_code_review(verdict: dict[str, Any]) -> set[str]:
+    """The FILE paths cited by a code-review verdict's SURFACED findings, parsed from each finding's
+    ``location`` string (``path`` or ``path:line``) across the ``blocking`` + ``advisory`` buckets.
+
+    This is the code-review analogue of ``plan_review.attest._cited_paths`` — which is NOT reusable
+    here because it reads a ``citations`` list with ``kind == "file"``, and code-review findings
+    carry no such list (they only have a ``location`` string). Empty / non-path locations are
+    ignored; a trailing ``:line[:col]`` is stripped to keep the path component."""
+    out: set[str] = set()
+    for bucket in ("blocking", "advisory"):
+        for f in verdict.get(bucket) or []:
+            if not isinstance(f, dict):
+                continue
+            loc = str(f.get("location") or "").strip()
+            if not loc:
+                continue
+            path = loc.split(":", 1)[0].strip()  # "src/foo.py:42" -> "src/foo.py"
+            if path:
+                out.add(path)
+    return out
+
+
+def reviewed_file_hashes(paths, *, repo_root=None) -> dict[str, str]:
+    """A ``{path: sha256}`` content-hash map over a code review's reviewed files, REUSING the
+    private ``plan_review.attest._hash_file`` primitive (raw file-bytes sha256; a missing/unreadable
+    path → the ``absent`` sentinel, so a create/delete is detectable). A THIN collector — it does
+    NOT reuse ``dependency_hashes`` (that is plan/ticket-coupled: it pulls ticket file_impact +
+    plan-verdict citation buckets). The region-gated novelty floor re-hashes these same paths next
+    run and compares, so an UNCHANGED file's hash matches (content-addressed, rebase-resilient).
+
+    The base resolves to the WORKING TREE (``_hash_basis`` with no active gate snapshot), which is
+    the reviewed basis for both keyspaces: a local ``review-code`` reviews the working tree, and the
+    Gerrit voter bot checks out the reviewed revision. Best-effort — never raises."""
+    from rebar.llm.plan_review import attest
+
+    try:
+        base = attest._hash_basis(repo_root)
+        return {p: attest._hash_file(p, base=base) for p in sorted(set(paths or []))}
+    except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
+        logger.warning(
+            "code-review reviewed_file_hashes failed; returning empty deps", exc_info=True
+        )
+        return {}
+
+
+def _ts_prefix(fname: str) -> int:
+    """The leading ns-epoch integer of a sidecar filename (0 if unparseable)."""
+    head = fname.split("-", 1)[0]
+    try:
+        return int(head)
+    except ValueError:
+        return 0
+
+
+def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str, Any] | None, int]:
+    """The newest usable ``code_review_result_v1`` sidecar payload for ``ticket_id`` + its ns
+    timestamp (from the filename prefix), walking newest→oldest and tolerating a malformed/foreign
+    newest file. ``(None, -1)`` when nothing usable. Best-effort; never raises."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("code_review sidecar %s unreadable; trying older", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") == SCHEMA:
+                return payload, _ts_prefix(fname)
+        return None, -1
+    except (FileNotFoundError, NotADirectoryError):
+        return None, -1
+    except Exception:  # noqa: BLE001 — reader is best-effort; never raises into the floor
+        logger.warning("code_review _latest_payload_with_ts failed", exc_info=True)
+        return None, -1
+
+
+def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | None:
+    """Return the most-recent SURFACED code-review findings + ``deps`` map for a TYPED memory key,
+    or ``None`` when nothing usable — the reader the region-gated novelty floor consumes.
+
+    ``key`` is typed (disjoint keyspaces, so a prior LOCAL review can never seed a change's FIRST
+    Gerrit review):
+
+    - ``session:<id>`` (local) → the artifact whose title == ``code-review: session:{id}`` (exact).
+    - ``change:<id>`` (Gerrit) → strip the ``change:`` tag and match artifacts whose title starts
+      with ``code-review: {id} @`` (spans revisions of the same change; the change is the memory
+      key, the revision only makes each artifact idempotent).
+
+    SURFACED-only (mandatory; bug old-frilly-plankton): ``code_review_result_v1`` stores findings in
+    SEPARATE ``blocking``/``advisory``/``coaching`` buckets (no per-finding ``decision``), so
+    "surfaced" is the UNION of the ``blocking`` + ``advisory`` buckets — the reader returns ONLY
+    those two (never ``coaching`` or any future dropped bucket), so a dropped finding can never
+    re-enter the novelty prior set.
+
+    Posture mirrors ``plan_review.sidecar.latest_review_result``: best-effort, NEVER raises,
+    schema-guarded to ``code_review_result_v1``, walks newest→oldest per artifact. A reader error
+    degrades to ``None`` (⇒ the floor runs un-narrowed = no drops)."""
+    try:
+        kind, _, ident = str(key or "").partition(":")
+        if not ident:
+            return None
+        if kind == "session":
+            wanted = f"code-review: session:{ident}"
+
+            def _match(t: Any) -> bool:
+                return str(t.get("title") or "") == wanted
+        elif kind == "change":
+            prefix = f"code-review: {ident} @"
+
+            def _match(t: Any) -> bool:
+                return str(t.get("title") or "").startswith(prefix)
+        else:
+            return None
+
+        import rebar
+
+        arts = rebar.list_tickets(ticket_type="code_review", repo_root=repo_root) or []
+        best_payload: dict[str, Any] | None = None
+        best_ts = -1
+        for t in arts:
+            if not _match(t):
+                continue
+            aid = str(t.get("ticket_id") or t.get("id") or "")
+            if not aid:
+                continue
+            payload, ts = _latest_payload_with_ts(aid, repo_root=repo_root)
+            if payload is not None and ts > best_ts:
+                best_payload, best_ts = payload, ts
+        if best_payload is None:
+            return None
+        surfaced = list(best_payload.get("blocking") or []) + list(
+            best_payload.get("advisory") or []
+        )
+        return {
+            "findings": surfaced,
+            "deps": best_payload.get("deps") or {},
+            "session_id": best_payload.get("session_id"),
+            "change_id": best_payload.get("change_id"),
+        }
+    except Exception:  # noqa: BLE001 — reader is best-effort; a failure ⇒ no prior memory (no drops)
+        logger.warning(
+            "code-review latest_code_review_result failed; treating as no prior memory",
+            exc_info=True,
+        )
+        return None
