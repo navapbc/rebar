@@ -1,0 +1,27 @@
+name: 💬 Question / usage help
+description: Ask a question about using rebar. (Check the README, docs/, and `rebar --help` first — they answer most questions.)
+title: "[question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions are welcome here in Issues — rebar has no separate forum or
+        Discussions board. Before filing, please skim
+        [README.md](https://github.com/navapbc/rebar#readme), the
+        [docs/](https://github.com/navapbc/rebar/tree/main/docs) directory, and
+        `rebar <subcommand> --help`, which answer most usage questions.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and where are you stuck?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried?
+      description: Commands you ran, docs you read, and anything that surprised you. Include `rebar --version` if relevant.
+    validations:
+      required: false

@@ -1,23 +1,19 @@
 name: ✨ Feature request
 description: Suggest an enhancement or new capability for rebar.
 title: "[feature]: "
-labels: ["enhancement"]
+labels: ["enhancement", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting an improvement!
-
-        **Note:** rebar's GitHub repo is a read-only mirror and Issues may be
-        disabled — see [SUPPORT.md](https://github.com/navapbc/rebar/blob/main/SUPPORT.md)
-        for where proposals are triaged, and
-        [CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md)
-        if you'd like to contribute the change yourself (via Gerrit).
+        Thanks for suggesting an improvement! If you'd like to contribute the
+        change yourself, see [CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md)
+        (code review happens on Gerrit; this GitHub repo is a read-only mirror).
   - type: textarea
     id: problem
     attributes:
       label: Problem / motivation
-      description: What problem would this feature solve? What are you trying to do?
+      description: What problem would this feature solve? What are you trying to do that rebar makes hard today?
     validations:
       required: true
   - type: textarea
@@ -40,18 +36,11 @@ body:
         - Docs
         - Other / not sure
     validations:
-      required: true
+      required: false
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
       description: Any workarounds or alternative approaches you've thought about.
-    validations:
-      required: false
-  - type: textarea
-    id: context
-    attributes:
-      label: Additional context
-      description: Anything else that would help us understand the request.
     validations:
       required: false

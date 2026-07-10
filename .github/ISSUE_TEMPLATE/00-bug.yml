@@ -1,0 +1,72 @@
+name: 🐛 Bug report
+description: Report a defect in rebar (CLI, Python library, MCP server, or reconciler).
+title: "[bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+
+        For **security** vulnerabilities, do **not** file a public issue —
+        follow [SECURITY.md](https://github.com/navapbc/rebar/blob/main/SECURITY.md).
+        For code *changes*, see [CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md)
+        (review happens on Gerrit; this GitHub repo is a read-only mirror).
+  - type: input
+    id: version
+    attributes:
+      label: rebar version
+      description: The version you are running (`rebar --version`, or the `nava-rebar` release / commit SHA).
+      placeholder: "e.g. nava-rebar 0.7.1 (or commit 965fd9e)"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "Paste your environment: `rebar --version`, your OS, and how you installed rebar (pipx / pip / from source)."
+      placeholder: |
+        rebar --version : nava-rebar 0.7.1
+        OS              : macOS 15.5 (arm64)
+        Install method  : pipx install nava-rebar
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      description: Which entry point does this affect?
+      options:
+        - CLI (`rebar`)
+        - Python library (`import rebar`)
+        - MCP server (`rebar-mcp`)
+        - Jira reconciler
+        - Other / not sure
+    validations:
+      required: false
+  - type: textarea
+    id: did
+    attributes:
+      label: What did you do?
+      description: The exact command(s), inputs, and relevant config. Minimal steps to reproduce.
+      placeholder: |
+        1. Run `rebar ...`
+        2. ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: saw
+    attributes:
+      label: What did you see?
+      description: The actual behavior — full error output, exit code, or unexpected result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What you expected to happen instead.
+    validations:
+      required: true
