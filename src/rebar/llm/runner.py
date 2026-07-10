@@ -240,7 +240,17 @@ class PydanticAIRunner:
             # pydantic-ai build its own provider with the SDK default retries and no transport.
             _direct = _local_proxy_bypass_base_url()
             _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
-            model, _http_client = _build_retrying_anthropic_model(_name, base_url=_direct, cfg=cfg)
+            # Per-request READ timeout (story hoopoe): the transport-level bound on a hung
+            # model, reusing cfg.timeout_s. This is authoritative on the anthropic path (our
+            # custom client); non-anthropic providers keep the model_settings['timeout'] below.
+            import httpx as _httpx
+
+            _http_timeout = _httpx.Timeout(
+                read=float(cfg.timeout_s), connect=10.0, write=30.0, pool=10.0
+            )
+            model, _http_client = _build_retrying_anthropic_model(
+                _name, base_url=_direct, cfg=cfg, http_timeout=_http_timeout
+            )
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
         # for an injected test model), not the bare config model — so a parity diff sees
         # exactly what ran.
@@ -251,6 +261,10 @@ class PydanticAIRunner:
             "system_prompt": req.system_prompt,
             "tools": tools,
             "toolsets": toolsets,
+            # Per-tool execution timeout (story hoopoe): bounds a hung ASYNC/MCP tool. A
+            # no-op on single_turn (tools=[]) and for sync in-process tools (async cancel
+            # can't interrupt a blocking call — those are bounded by the derived step caps).
+            "tool_timeout": float(cfg.llm_tool_timeout_s),
         }
         # Prompt caching (story 0250) — anthropic-GATED. The stable bytes re-sent across
         # the container fan-out (the WHOLE parent plan) live in `system_prompt`;
