@@ -23,9 +23,19 @@ Two passes:
   satisfied; ``force`` is a safety net for a genuinely-non-closed child).
 
 A dangling parent / link target (a source id not in this import set) is skipped
-with a warning — never a hard failure. Idempotent skip-by-source_id and
-deferred-push performance are layered on in a later sub-task; this importer always
-creates (a re-run duplicates — documented).
+with a warning — never a hard failure.
+
+**Performance (epic cold-stall-chalk).** The import is idempotent (skip-by-
+``source_id``) and defers push (``REBAR_SYNC_PUSH=off`` + one final push). On top of
+that, the independent passes — Pass 1 (CREATE), Pass 2a (parents), Pass 2c (file-
+impact / verify-commands), Pass 2d (comments) — are **batch-committed**: each pass
+buffers its events through the ``_seam.batch_sink`` contextvar and flushes them via
+``event_append.batch_stage_and_commit`` in ``_CHUNK``-sized commits, collapsing
+``ceil(pass/_CHUNK)`` commits from one-per-event. Each pass is flushed before the
+next so later passes read the prior pass's committed state. Pass 2b (links) and Pass
+2e (statuses) stay one-event-per-commit: 2b because ``add_dependency`` does read-
+after-write within the pass (reciprocal ``relates_to`` + idempotency), 2e because it
+is stateful (children-before-parents). Interactive writes are never batched.
 """
 
 from __future__ import annotations
@@ -163,7 +173,26 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
         set_file_impact,
         set_verify_commands,
     )
+    from rebar._commands import _seam
     from rebar._commands.transition import transition_compute
+    from rebar._store import event_append
+
+    # Chunk size for the batched-commit flush (epic cold-stall-chalk / B2). Bulk
+    # import collapses each independent pass's writes into ceil(pass/CHUNK) commits
+    # instead of one-per-event via event_append.batch_stage_and_commit. Hard-coded
+    # (single consumer — no config key). Interactive writes are unaffected: only the
+    # importer sets the _seam.batch_sink contextvar, so every other caller still
+    # commits one-event-per-commit (the per-write durability guarantee).
+    _CHUNK = 256
+
+    def _flush(buf: list[tuple[str, dict]]) -> None:
+        """Commit a pass's buffered events in CHUNK-sized batches, then clear it.
+        Uses batch_stage_and_commit (no push) — the importer defers push and does one
+        final push at the end. All-or-nothing per chunk; a crash mid-flush leaves
+        whole-commit-or-none and the source_id re-scan resumes on re-run."""
+        for i in range(0, len(buf), _CHUNK):
+            event_append.batch_stage_and_commit(tracker, buf[i : i + _CHUNK])
+        buf.clear()
 
     # id_map seeds with pre-existing source→local mappings so a NEW ticket can still
     # parent/link onto an already-imported one; only freshly-created records are
@@ -184,34 +213,45 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
     os.environ["REBAR_SYNC_PUSH"] = "off"
     try:
         # ── Pass 1: create new tickets; skip already-imported by source_id ─────
-        for rec in records:
-            sid = rec.get("ticket_id")
-            if not sid or not rec.get("ticket_type"):
-                warn(f"skipping record without ticket_id/ticket_type: {str(rec)[:80]}")
-                continue
-            if sid in seen_source:
-                skipped += 1
-                continue
-            local = create_ticket(repo_root=rr, **_provenance.create_kwargs(rec))
-            id_map[sid] = local
-            seen_source.add(sid)
-            created += 1
-            created_records.append(rec)
+        # Batched: buffer every CREATE and flush in chunks. create_ticket returns the
+        # fresh local id synchronously (composed before the deferred commit), so id_map
+        # is populated during the loop even though the events commit at the flush.
+        _buf: list[tuple[str, dict]] = []
+        with _seam.batch_sink(_buf):
+            for rec in records:
+                sid = rec.get("ticket_id")
+                if not sid or not rec.get("ticket_type"):
+                    warn(f"skipping record without ticket_id/ticket_type: {str(rec)[:80]}")
+                    continue
+                if sid in seen_source:
+                    skipped += 1
+                    continue
+                local = create_ticket(repo_root=rr, **_provenance.create_kwargs(rec))
+                id_map[sid] = local
+                seen_source.add(sid)
+                created += 1
+                created_records.append(rec)
+        _flush(_buf)  # commit all CREATEs before Pass 2 reads their committed state
 
         # ── Pass 2a: set parents while every new ticket is still open ──────────
-        for rec in created_records:
-            local = id_map.get(_rec_sid(rec))
-            if local is None:
-                continue
-            psid = rec.get("parent_id")
-            if not psid:
-                continue
-            plocal = id_map.get(psid)
-            if plocal is None:
-                warn(f"dangling parent {psid!r} for {rec.get('ticket_id')!r} — left unparented")
-                continue
-            edit_ticket(local, parent=plocal, repo_root=rr)
-            parent_local[local] = plocal
+        # Batched: independent per-ticket EDITs. Pass 1 is already committed, so each
+        # edit_ticket reads the created ticket's state; the parent (also from Pass 1)
+        # exists. Flush before Pass 2b so link promotion walks the committed hierarchy.
+        with _seam.batch_sink(_buf):
+            for rec in created_records:
+                local = id_map.get(_rec_sid(rec))
+                if local is None:
+                    continue
+                psid = rec.get("parent_id")
+                if not psid:
+                    continue
+                plocal = id_map.get(psid)
+                if plocal is None:
+                    warn(f"dangling parent {psid!r} for {rec.get('ticket_id')!r} — left unparented")
+                    continue
+                edit_ticket(local, parent=plocal, repo_root=rr)
+                parent_local[local] = plocal
+        _flush(_buf)
 
         # ── Pass 2b: links (dedup by local (source,target,relation)) ───────────
         seen_links: set[tuple[str, str, str]] = set()
@@ -242,37 +282,45 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
                     warn(f"could not link {local}->{tlocal} ({relation}): {exc}")
 
         # ── Pass 2c: file-impact / verify-commands ─────────────────────────────
-        for rec in created_records:
-            local = id_map.get(_rec_sid(rec))
-            if local is None:
-                continue
-            fi = rec.get("file_impact")
-            if fi:
-                try:
-                    set_file_impact(local, fi, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad file_impact never aborts the import run; collected via warn()
-                    warn(f"could not set file_impact on {local}: {exc}")
-            vc = rec.get("verify_commands")
-            if vc:
-                try:
-                    set_verify_commands(local, vc, repo_root=rr)
-                except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad verify_commands never aborts the import run; collected via warn()
-                    warn(f"could not set verify_commands on {local}: {exc}")
+        # Batched: independent per-ticket FILE_IMPACT / VERIFY_COMMANDS appends. The
+        # per-row fail-open (a bad file_impact never aborts the run) is preserved — a
+        # compose-time error is caught here so the event is simply never buffered.
+        with _seam.batch_sink(_buf):
+            for rec in created_records:
+                local = id_map.get(_rec_sid(rec))
+                if local is None:
+                    continue
+                fi = rec.get("file_impact")
+                if fi:
+                    try:
+                        set_file_impact(local, fi, repo_root=rr)
+                    except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad file_impact never aborts the import run; collected via warn()
+                        warn(f"could not set file_impact on {local}: {exc}")
+                vc = rec.get("verify_commands")
+                if vc:
+                    try:
+                        set_verify_commands(local, vc, repo_root=rr)
+                    except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad verify_commands never aborts the import run; collected via warn()
+                        warn(f"could not set verify_commands on {local}: {exc}")
+        _flush(_buf)
 
         # ── Pass 2d: comments (with provenance) ────────────────────────────────
-        for rec in created_records:
-            local = id_map.get(_rec_sid(rec))
-            if local is None:
-                continue
-            for entry in rec.get("comments") or []:
-                body = entry.get("body")
-                if not body:
+        # Batched: append-only COMMENT events, independent per ticket.
+        with _seam.batch_sink(_buf):
+            for rec in created_records:
+                local = id_map.get(_rec_sid(rec))
+                if local is None:
                     continue
-                try:
-                    comment(local, body, source=_provenance.comment_source(entry), repo_root=rr)
-                    comments += 1
-                except Exception as exc:  # noqa: BLE001 — per-comment fail-open: one bad comment never aborts the import run; collected via warn()
-                    warn(f"could not add comment on {local}: {exc}")
+                for entry in rec.get("comments") or []:
+                    body = entry.get("body")
+                    if not body:
+                        continue
+                    try:
+                        comment(local, body, source=_provenance.comment_source(entry), repo_root=rr)
+                        comments += 1
+                    except Exception as exc:  # noqa: BLE001 — per-comment fail-open: one bad comment never aborts the import run; collected via warn()
+                        warn(f"could not add comment on {local}: {exc}")
+        _flush(_buf)
 
         # ── Pass 2e: statuses last (children before parents; archived via archive)
         closes: list[tuple[str, str]] = []  # (local_id, source_id)
