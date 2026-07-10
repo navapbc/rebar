@@ -23,6 +23,12 @@
       "last_jira_key": "REB-738",
       "local_id": "4c3b-b984-2903-4d87",
       "retired_at": "2026-07-07T05:10:02Z"
+    },
+    "REB-877": {
+      "absent_404_count": 3,
+      "last_jira_key": "REB-877",
+      "local_id": "8519-a58a-8af4-4830",
+      "retired_at": "2026-07-10T01:42:14Z"
     }
   },
   "version": 1
