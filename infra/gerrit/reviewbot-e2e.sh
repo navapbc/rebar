@@ -155,7 +155,7 @@ git config user.name  "reviewbot e2e"
 stamp="$(date -u +%Y%m%d%H%M%S)"
 echo "reviewbot-e2e probe ${stamp}" >> "reviewbot-e2e-${stamp}.txt"
 git add -A
-git commit -q -m "test: reviewbot e2e probe ${stamp}" \
+git commit -q -s -m "test: reviewbot e2e probe ${stamp}" \
 	|| harness "git commit failed (commit-msg hook?)"
 
 log "pushing to refs/for/${TEST_BRANCH}…"
@@ -318,7 +318,7 @@ sys.exit(0 if "gerrit-mirror-lock-main" in names else 1)
 	git checkout -q -B "$probe_branch" "$GERRIT_SHA" 2>/dev/null || git checkout -q -B "$probe_branch"
 	echo "neg-path probe ${stamp}" >> "neg-${stamp}.txt"
 	git add -A
-	git commit -q -m "test: negative-path direct-push probe ${stamp}" || true
+	git commit -q -s -m "test: negative-path direct-push probe ${stamp}" || true
 	if git push -q "https://github.com/${GITHUB_REPO}" "HEAD:refs/heads/main" >/dev/null 2>&1; then
 		# It SUCCEEDED — the lock failed to reject an out-of-band push. That is a
 		# real failure of the protection; surface it (try to undo is out of scope).

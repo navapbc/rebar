@@ -259,6 +259,20 @@ clone_repo() {
 	chmod +x .git/hooks/commit-msg
 	git config user.email "fb-e2e@navateam.com"
 	git config user.name  "feature-branch e2e"
+
+	# DCO: after the requireSignedOffBy flip Gerrit rejects unsigned pushes to
+	# refs/for/*. Every commit the sourced scenarios make is signed at its call site
+	# (`git commit -s`) and every merge with `git merge --signoff`; this
+	# prepare-commit-msg hook is the belt-and-braces net that also signs commits a
+	# future scenario might add without -s (and merge commits, which cannot take -s).
+	# It is idempotent: --if-exists doNothing skips a trailer that -s already added.
+	cat > .git/hooks/prepare-commit-msg <<-'HOOK'
+		#!/bin/sh
+		git interpret-trailers --if-exists doNothing \
+			--trailer "Signed-off-by: feature-branch e2e <fb-e2e@navateam.com>" \
+			--in-place "$1"
+	HOOK
+	chmod +x .git/hooks/prepare-commit-msg
 }
 
 # =============================================================================
