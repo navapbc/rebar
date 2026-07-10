@@ -93,6 +93,39 @@ consumer-seam plug-ins (WS1 + WS2), mirroring plan-review's shapes:
 The escalation orchestration (base → overlay union, one-hop, capped) + the `gates/code-review.yaml`
 workflow + `produce_code_review_verdict` are WS3/WS4 (they do not change the kernel).
 
+### Code-review novelty convergence (epic `374d`, the region-gated rising floor)
+
+Code review converges across patchsets/sessions the way plan-review converges across re-reviews
+(ADR 0008), REUSING the kernel novelty primitives unchanged and adding only gate-specific
+orchestration — full rationale in **[ADR 0037](adr/0037-code-review-novelty-convergence.md)**. The
+behavior a reviewer/author sees:
+
+- **Region-gated drop.** On re-review, a NOVEL + low-priority advisory finding is DROPPED **only if
+  the cited code REGION is unchanged** since the prior review. The floor reuses the kernel
+  `decide.rising_floor_drop(priority, novelty)` unchanged and ANDs it with a per-citation region
+  check (`code_review/region_gate.py`): `REGION_UNCHANGED` → droppable; `REGION_CHANGED` and
+  `REGION_UNKNOWN` (path absent / multi-location / absence-evidence / moved / renamed / any error)
+  → always RAISE. A dropped finding carries `drop_reason = "novelty-region"`.
+- **Carryover labeling.** A finding that MATCHES a prior surfaced finding (low novelty) but is not
+  dropped is stamped `carried_from = <matched prior id>` and has its coaching stripped, while
+  remaining SURFACED — so a genuine repeat is acknowledged, not re-coached.
+- **Keying (typed, disjoint keyspaces).** Local `rebar review-code` memory is keyed
+  `session:<session_id>` (artifact `code-review: session:{id}`); Gerrit memory is keyed
+  `change:<change_id>` (artifact `code-review: {change_id} @ {revision}`, spanning revisions). The
+  reader (`code_review/sidecar.py::latest_code_review_result`) matches only its own title scheme, so
+  a prior LOCAL review can never seed a change's FIRST Gerrit review.
+- **Resilience.** Region state is CONTENT-ADDRESSED — the artifact stores a `{path: sha256}` map
+  (`reviewed_file_hashes`, reusing `plan_review.attest._hash_file`); comparison keys on content, not
+  a reachable commit, so it survives a rebase / force-push. File-level in v1.
+- **Surfaced-only + fail-safe.** Novelty is scored ONLY against prior SURFACED findings (the
+  `blocking` + `advisory` buckets), so a dropped finding never re-enters the prior set (the
+  code-review counterpart of the plan-review fix, bug `old-frilly-plankton`). The whole floor is
+  fail-safe: any reader/hash/novelty error leaves the verdict fully unfiltered (no drops). It is
+  OFF by default (gated on the shared `verify.novelty_drop_active`) and self-gates inert with no
+  prior memory. The novelty sub-call (`reviewers/code_review_novelty.md`, `code-novelty` reviewer,
+  `code_review_novelty` contract = the SAME kernel `novelty_model`) sees prior findings ONLY in its
+  instructions — never the Pass-1 finder (ADR 0008 Invariant 1).
+
 ## The verifier-rules scaffold (soft prompt rules)
 
 `review_kernel.VERIFIER_RULES_SCAFFOLD` records the four soft rules a verifier's
