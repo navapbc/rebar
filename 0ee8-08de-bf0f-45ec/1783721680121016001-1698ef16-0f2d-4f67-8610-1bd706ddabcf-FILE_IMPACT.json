@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/autolander/loop.py","reason":"core serial loop"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721680121016001,"uuid":"1698ef16-0f2d-4f67-8610-1bd706ddabcf"}
