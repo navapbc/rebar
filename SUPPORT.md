@@ -39,8 +39,10 @@ channel.** Open a new issue and pick the matching form from the chooser:
 - **Security vulnerabilities** — do **not** report these in public. Follow
   [`SECURITY.md`](SECURITY.md) (private email / GitHub Private Vulnerability
   Reporting).
-- **Code of Conduct concerns** — see [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
-  (enforcement contact: hello@navapbc.com).
+- **Code of Conduct concerns** — see [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+  Reports go to the lead maintainer at **hello@navapbc.com**; a report concerning
+  the lead maintainer goes to the Nava PBC backstop at the same address (it
+  reaches Nava, not the individual). See [`GOVERNANCE.md`](GOVERNANCE.md) §6.
 
 > **GitHub Discussions are intentionally off.** rebar keeps a single inbox —
 > GitHub Issues — instead of enabling Discussions: with a single maintainer there
