@@ -70,8 +70,10 @@ fall out and are encoded in the harness:
 
 ### 4. Report
 
-`pytest -m live --junitxml=reports/d01e-live-matrix.junit.xml` emits the JUnit XML (a CI
-artifact path); a small script derives a JSON summary. Both are gitignored run artifacts; the
+`scripts/run_live_matrix.py` is the one-command entry point: it runs
+`pytest -m live --junitxml=reports/d01e-live-matrix.junit.xml` (the JUnit XML, a CI artifact
+path) and derives the JSON summary at `reports/d01e-live-matrix.report.json` (totals +
+per-test outcome/duration). Both are gitignored run artifacts; the
 durable evidence (pass/fail table + live run ids) is recorded on ticket d01e.
 
 ## Consequences
