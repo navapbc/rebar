@@ -284,6 +284,13 @@ DEFAULT_TIMEOUT_S = 600
 # post-validates the count (truncate above max; flag low_proposition_count below min).
 DEFAULT_OVERLAP_PROPOSITIONS_MIN = 2
 DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
+# Stage-1 BM25F candidate generation (2d0f/5a8f): top-K candidates; boilerplate prune
+# (ignore terms appearing in > this fraction of digests); overlap floor (fraction of query
+# terms a candidate must share to be returned). Field weights are a code constant in
+# retrieve.py, not a config knob.
+DEFAULT_OVERLAP_K = 20
+DEFAULT_OVERLAP_MAX_DOC_FREQ = 0.5
+DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -483,6 +490,10 @@ class LLMConfig:
     # for the Cupid ticket-digest op (ee3d).
     overlap_propositions_min: int = DEFAULT_OVERLAP_PROPOSITIONS_MIN
     overlap_propositions_max: int = DEFAULT_OVERLAP_PROPOSITIONS_MAX
+    # Stage-1 BM25F candidate generation (5a8f).
+    overlap_k: int = DEFAULT_OVERLAP_K
+    overlap_max_doc_freq: float = DEFAULT_OVERLAP_MAX_DOC_FREQ
+    overlap_min_should_match: float = DEFAULT_OVERLAP_MIN_SHOULD_MATCH
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -564,6 +575,21 @@ class LLMConfig:
                 "REBAR_LLM_OVERLAP_PROPOSITIONS_MAX",
                 "overlap_propositions_max",
                 DEFAULT_OVERLAP_PROPOSITIONS_MAX,
+            ),
+            overlap_k=_llm_int(table, cli, "REBAR_LLM_OVERLAP_K", "overlap_k", DEFAULT_OVERLAP_K),
+            overlap_max_doc_freq=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_MAX_DOC_FREQ",
+                "overlap_max_doc_freq",
+                DEFAULT_OVERLAP_MAX_DOC_FREQ,
+            ),
+            overlap_min_should_match=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH",
+                "overlap_min_should_match",
+                DEFAULT_OVERLAP_MIN_SHOULD_MATCH,
             ),
         )
 
