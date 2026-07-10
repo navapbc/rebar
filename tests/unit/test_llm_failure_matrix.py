@@ -247,6 +247,35 @@ MATRIX: list[Case] = [
         "CURRENT(runner.py:346): UsageLimitExceeded -> LLMRunnerError (step budget)",
     ),
     Case(
+        # DISTINCT failure CLASS from the step-budget row above: a UsageLimitExceeded that
+        # trips on the TOOL-CALLS ceiling (tool_calls_limit=max(8,max_iterations)), not the
+        # request/step budget (request_limit=ceil(max_iterations/2)). Today the runner's ONE
+        # `except UsageLimitExceeded` handler collapses BOTH sub-classes into the same opaque
+        # LLMRunnerError — the tool-call-runaway signal is indistinguishable from step-budget
+        # exhaustion (the opacity a later story splits). Discovered empirically: LLMRunnerError.
+        "tool-call-limit-usage-limit",
+        lambda: _raise(
+            UsageLimitExceeded("The next request would exceed the tool_calls_limit of 8")
+        ),
+        LLMRunnerError,
+        "CURRENT(runner.py:390): tool-call-limit UsageLimitExceeded -> LLMRunnerError "
+        "(same handler as step budget)",
+    ),
+    Case(
+        # Validation-RETRY EXHAUSTION (distinct from `unparseable-output`): the body is VALID
+        # JSON but the WRONG SHAPE, so it clears the tolerant parse yet fails Pydantic schema
+        # validation. The PromptedOutput loop feeds the validation error back and retries
+        # OUTPUT_RETRIES(2)+1 = 3 times; every attempt re-fails (the canned model is static),
+        # so the loop exhausts and `raise last` surfaces the final StructuredOutputError. This
+        # is the validation-retry-exhaustion → StructuredOutputError seam (gate INDETERMINATE).
+        # Discovered empirically (3 model calls, then StructuredOutputError).
+        "validation-retry-exhaustion",
+        lambda: _canned('{"wrong_field": 1, "also_wrong": true}'),
+        StructuredOutputError,
+        "CURRENT(runner.py:579): valid-JSON wrong-schema exhausts the bounded output retry "
+        "-> StructuredOutputError (raise last)",
+    ),
+    Case(
         "unknown-exception",
         lambda: _raise(RuntimeError("some novel provider failure")),
         LLMUnavailableError,
@@ -451,6 +480,78 @@ def test_disabled_code_review_never_invokes_runner():
         repo_root=".",
     )
     assert out["findings"] == []  # inert result, no LLM ran
+
+
+# ── Guard: --force / --force-close SKIP the plan-review / completion gates (no LLM) ─
+def test_force_claim_skips_plan_review_gate(monkeypatch):
+    """CURRENT(gates.py:120): with the plan-review claim gate ENABLED, a non-empty
+    ``force_reason`` (the ``claim --force="<reason>"`` bypass) short-circuits and returns
+    None BEFORE the gate check runs — proving the injected gate call is NEVER invoked on the
+    --force path. A non-force claim DOES reach the check (positive control), so the skip is
+    attributable to --force, not to the gate being off. The claim gate is a fast LOCAL HMAC
+    verify (no billable model call), so the ``claim_gate_check`` seam stands in for the gate
+    work the bypass must skip."""
+    from rebar._commands import gates as _gates
+
+    monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)
+    calls: list[str] = []
+
+    def _spy_gate_check(ticket_id, *, repo_root=None):
+        calls.append(ticket_id)
+        return {"ok": True}  # a valid attestation, so a NON-force claim would ALSO return None
+
+    import rebar.llm as _llm
+
+    monkeypatch.setattr(_llm, "claim_gate_check", _spy_gate_check)
+
+    # --force path: returns None WITHOUT ever calling the gate check.
+    assert _gates.plan_review_precheck("rec-0000", ".", None, force_reason="approved") is None
+    assert calls == [], "claim_gate_check MUST NOT run on the --force claim path"
+
+    # Positive control: without --force the same enabled gate DOES invoke the check.
+    assert _gates.plan_review_precheck("rec-0000", ".", None, force_reason="") is None
+    assert calls == ["rec-0000"], "the gate check must run when --force is absent"
+
+
+def test_force_close_skips_completion_gate(monkeypatch):
+    """CURRENT(transition_close.py:114): with the completion-verification close gate ENABLED,
+    a non-empty ``force_close`` (the ``--force-close="<reason>"`` bypass) short-circuits and
+    returns None BEFORE the billable ``verify_completion`` LLM call — proving the model is
+    NEVER invoked on the --force-close path. A non-force close DOES reach ``verify_completion``
+    (positive control), so the skip is attributable to --force-close."""
+    from rebar._commands import gates as _gates
+    from rebar._commands import transition_close as _tc
+
+    monkeypatch.setattr(_gates, "gate_enabled", lambda *a, **k: True)
+    # Neutralize the deterministic file-impact precheck that sits before the LLM call, so the
+    # non-force control reaches verify_completion regardless of the local tracker/git state.
+    from rebar._engine_support import field_reads as _fr
+
+    monkeypatch.setattr(_fr, "file_impact", lambda *a, **k: [])
+    calls: list[str] = []
+
+    def _spy_verify(ticket_id, **kwargs):
+        calls.append(ticket_id)
+        # PASS from a "local" source so the precheck returns None right after the call
+        # (no signing manifest / git read) — we only pin THAT the model ran.
+        return {"verdict": "PASS", "source": "local"}
+
+    import rebar.llm as _llm
+
+    monkeypatch.setattr(_llm, "verify_completion", _spy_verify)
+
+    # --force-close path: returns None WITHOUT ever calling verify_completion.
+    assert (
+        _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="approved")
+        is None
+    )
+    assert calls == [], "verify_completion MUST NOT run on the --force-close path"
+
+    # Positive control: without --force-close the same enabled gate DOES invoke the LLM verify.
+    assert (
+        _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="") is None
+    )
+    assert calls == ["rec-0000"], "verify_completion must run when --force-close is absent"
 
 
 # ── Meta-test: every parametrized id carries a CURRENT(<file>:<line>) marker ───
