@@ -34,6 +34,15 @@ SITE_SUBDIRS="git index cache db etc logs plugins reviewbot reviewbot-tickets"
 # so the derivation lives here, once: gerrit_ prefix + hyphens -> underscores.
 volume_for_subdir() { printf 'gerrit_%s\n' "${1//-/_}"; }
 
+# Side-effect-free enumeration mode, consumed by config-check.sh check 5 (the CI
+# drift gate). MUST stay above every side-effecting section (dnf/systemctl/docker/
+# fetch-secrets): it prints the external volume names this script would create,
+# one per line, and exits.
+if [ "${1:-}" = "--print-volumes" ]; then
+  for d in ${SITE_SUBDIRS}; do volume_for_subdir "${d}"; done
+  exit 0
+fi
+
 cd "${REPO_ROOT}"
 
 # --- 1. Ensure Docker + the compose plugin are installed and running -------
