@@ -148,6 +148,17 @@ Gerrit merges the change into its `main`, then **replicates the new `main` to Gi
 where the same commit appears on the read-only mirror (and the branch CI runs on the
 push). That replication is the only way GitHub `main` advances.
 
+> **`main` is Fast Forward Only (ADR-0040): a change must sit on the current tip to submit.**
+> Gerrit will not merge or rebase for you. If `main` moved while you were in review, Submit is
+> refused ("not fast-forward / out of date") until you put your change back on the tip:
+> `git fetch origin && git rebase origin/main` (a **feature-branch** change re-merges: `git
+> merge --no-ff gerrit/feature/<name>` onto the new `main`), then re-push
+> `HEAD:refs/for/main`. The rebase drops the stale `Verified` vote and **CI re-runs against the
+> exact tree that lands**, which is what guarantees a change that breaks CI can never reach
+> `main`. Expect to do this under concurrent landing — it is the deliberate tradeoff (no
+> auto-merge of an untested tree). Do **not** add `changekind:TRIVIAL_REBASE` to the `Verified`
+> `copyCondition`: that would let a stale vote survive a rebase and defeat the guarantee.
+
 > **Submitting requires contributor authorization.** The **Submit** action is restricted to
 > the `Contributors` group (plus Administrators) — anyone may push to `refs/for/*` to
 > *propose* a change, but only an authorized contributor (or an admin) can *land* one, even

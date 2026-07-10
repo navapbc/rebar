@@ -539,6 +539,18 @@ the short version for agents:
    re-push (each new patchset re-runs both votes). **Submit** once both are green → Gerrit
    merges and **replicates the new `main` to GitHub** (where branch CI runs on the push).
 
+> **Your change must be on the CURRENT `main` tip to submit (Fast Forward Only, ADR-0040).**
+> `main` uses the **Fast Forward Only** submit type, so Gerrit never merges/rebases for you:
+> a change is submittable only if it is built directly on the current `main` tip. If `main`
+> advanced while you were in review, your change goes **non-submittable** until you **rebase**
+> it (ordinary change / relation chain) — or **re-merge** it (feature-branch change) — onto
+> the new tip. That rebase mints a new patch set, which **drops `Verified` and re-runs CI on
+> the exact tree that will land** — the mechanism that makes it *impossible to land a stale or
+> untested tree on `main`*. Practically: when Submit says "not fast-forward / out of date," run
+> `git fetch origin && git rebase origin/main`, `git push gerrit HEAD:refs/for/main`, wait for
+> the fresh votes, then Submit. Under heavy concurrent landing this rebase-and-re-CI step is
+> expected (the accepted tradeoff for the guarantee).
+
 > **Multi-story features → a feature branch (not one giant change).** Steps 1–4 above are
 > the path for **one** change. When you're driving a **multi-story feature** — especially
 > several agents in parallel — don't stack it into one change or a fragile chain: use a
