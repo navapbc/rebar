@@ -40,10 +40,15 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
   metric_name = "deploy_errors"
   statistic   = "Sum"
 
-  # 5-minute periods; the deploy backs off, so alarm on 2 periods to avoid a single-transient
-  # page while still catching a stuck/looping-failure deploy.
-  period              = 300
-  evaluation_periods  = 2
+  # Cadence MUST match the deploy's capped backoff (autodeploy.sh BACKOFF_CAP=900s):
+  # once backed off, failures arrive at most once per 15 min, so two CONSECUTIVE
+  # 5-minute periods > 0 essentially never happen — the original 300s/2-consecutive
+  # shape stayed silent through 41h of continuous deploy failure (incident 2731,
+  # bug ac14). 15-minute periods with 2-of-4 datapoints latch a persistent failure
+  # loop within ~an hour while a single transient error still doesn't page.
+  period              = 900
+  evaluation_periods  = 4
+  datapoints_to_alarm = 2
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
@@ -56,5 +61,57 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
     Project = "rebar"
     Epic    = "88ab"
     Story   = "8903"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Root-filesystem disk pressure (incident 2731). The box's 30G ROOT disk holds
+# docker's image/build-cache storage and the review-bot's working tmp; when it
+# filled, every LLM-Review fail-closed (clone/pip ENOSPC) — yet the only disk
+# metric published was the /var/gerrit EBS data volume, and NO alarm watched
+# even that. The host probe (observability.sh §2) now also publishes the root
+# filesystem as rebar/host:root_disk_used_percent — DIMENSIONLESS on both sides
+# (the monitoring.tf / GerritReachable convention: CloudWatch keys a metric by
+# namespace+name+dimensions, so a dimension on only one side silently unmatches).
+#
+# Custom metric contract (what the host probe must PutMetricData):
+#   Namespace  = rebar/host
+#   MetricName = root_disk_used_percent
+#   Dimensions = NONE
+#   Unit       = Percent  (df used% of /)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "root_disk_pressure" {
+  alarm_name        = "rebar-root-disk-pressure"
+  alarm_description = <<-EOT
+    The rebar box's ROOT filesystem is above 85% used. Docker image/build-cache
+    storage and the review-bot's clone tmp live here: exhaustion fail-closes every
+    LLM-Review vote (incident 2731). Reclaim with the autodeploy prune helper /
+    `docker builder prune` and check /tmp/rebar-gate-snapshots; published as
+    rebar/host:root_disk_used_percent by observability.sh §2 (5-min cadence).
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "root_disk_used_percent"
+  statistic   = "Maximum"
+
+  # Probe cadence is 5 min; 2-of-3 periods over 85% pages within ~15 min of
+  # sustained pressure without paging on one anomalous sample.
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 85
+  comparison_operator = "GreaterThanThreshold"
+
+  # A dead probe/host is caught by the S7 gate-down alarm (treat_missing_data =
+  # breaching there); duplicating that here would double-page on host loss.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Bug     = "ac14"
   }
 }

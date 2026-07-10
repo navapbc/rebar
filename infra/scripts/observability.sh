@@ -67,6 +67,19 @@ if [ -n "$used_pct" ]; then
   logger -t rebar-health "disk ${DATA_MOUNT} used_percent=${used_pct}"
 fi
 
+# --- 2b. ROOT filesystem usage (incident 2731) ------------------------------
+# The 30G root disk holds docker's image/build-cache storage and the review-bot
+# clone tmp; when it filled, every LLM-Review fail-closed (ENOSPC) with no metric
+# even watching it. DIMENSIONLESS on both sides (the GerritReachable convention):
+# the rebar-root-disk-pressure alarm (monitoring_autodeploy.tf) declares no
+# dimensions, and CloudWatch keys metrics by namespace+name+dimensions.
+root_pct=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [ -n "$root_pct" ]; then
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name root_disk_used_percent --unit Percent --value "$root_pct" 2>/dev/null || true
+  logger -t rebar-health "disk / used_percent=${root_pct}"
+fi
+
 # --- 3. Gerrit->GitHub replication failures (S5) ---------------------------
 # Watch the replication plugin's log for failure signatures and publish the COUNT
 # of NEW failure lines since last run to rebar/host:replication_errors (the metric
