@@ -66,6 +66,13 @@ EVENT_TYPES = frozenset(
         # digest; in this WRITE allow-list so it can be emitted, in _NON_REPLAY_KNOWN_TYPES
         # so fsck recognises it and does not warn.
         "TICKET_DIGEST",
+        # Enrichment queue sidecar events (epic only-crave-art / e1f4): cert-triggered
+        # enqueue with a soak deadline, optimistic claim + lease, and done tombstone.
+        # Reducer-IGNORED (like REVIEW_RESULT/TICKET_DIGEST) — a broker-less queue on the
+        # event store; the drain reduces them out-of-band.
+        "ENQUEUE_ENRICH",
+        "CLAIM_ENRICH",
+        "DONE_ENRICH",
     }
 )
 
@@ -103,7 +110,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
             f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}, "
-            "REVIEW_RESULT, TICKET_DIGEST",
+            "REVIEW_RESULT, TICKET_DIGEST, ENQUEUE_ENRICH, CLAIM_ENRICH, DONE_ENRICH",
             1,
         )
 
