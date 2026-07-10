@@ -36,11 +36,27 @@ floor; `list`/`search` add filter + presentation cost on top.
 | `import_tickets` (NDJSON, 1000 events) | ~25 events/sec (~40 s for 1000) |
 
 Write throughput is dominated by the **per-event git commit + lock**, not by
-reduce cost. Each write takes the store lock, appends an event, and commits it
-(and, when a sync remote exists, pushes it). This is the deliberate durability
-trade: every write is immediately persisted and shareable. For bulk loads, expect
-roughly a thousand tickets per ~40 seconds; there is intentionally no batched-commit
-fast path (it would weaken the per-write durability guarantee).
+reduce cost. Each single-event write takes the store lock, appends an event, and
+commits it (and, when a sync remote exists, pushes it). This is the deliberate
+durability trade for interactive writes: every write is immediately persisted and
+shareable.
+
+There is a batched-commit fast path
+(`rebar._store.event_append.batch_stage_and_commit`, epic cold-stall-chalk) that
+takes the store lock **once** and collapses N events into a **single** `git commit`,
+but it exists **only for bulk import** — interactive writes
+(`create`/`edit`/`transition`/`claim`/`link`/`comment`/…) keep committing
+**one-event-per-commit** and retain the per-write durability guarantee unchanged.
+Import is exempt from that guarantee because it is already a fundamentally different
+transaction: it **already defers push** (it runs with `REBAR_SYNC_PUSH=off` and pushes
+once at the end) and it is **idempotent-by-`source_id` and crash-resumable** (a re-run
+re-scans for already-imported `source_id`s and skips them). So batching import trades
+commit **granularity**, not the durability guarantee: a crash mid-import leaves either
+a whole batch's commit or none, and the re-run resumes cleanly. It is invariant-safe
+because replay, dedup, cross-clone union-merge convergence, and SNAPSHOT compaction all
+key off each event's per-event UUID, not commit boundaries — every event remains its own
+I2 uuid-named file, so a batched commit is indistinguishable from N single commits to
+every reader.
 
 ### Git object growth
 
