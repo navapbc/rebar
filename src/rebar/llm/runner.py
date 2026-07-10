@@ -477,6 +477,11 @@ _PAI_PROVIDER_PREFIX = {
 }
 
 
+# Max chars of the model's faulty prior reply echoed back in the bounded-retry reask
+# (story drake) — enough to diff a near-miss, bounded so a huge blob can't balloon the prompt.
+_FAULTY_OUTPUT_SNIPPET_CHARS = 2000
+
+
 def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits):
     """Obtain a validated structured object via the reliability stack (1268).
 
@@ -499,6 +504,12 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
         )
         run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+        # Silent-success parity (story drake): the PromptedOutput path below already checks
+        # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
+        # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
+        # check here — a length/max_tokens/content_filter/refusal finish_reason raises
+        # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
+        structured.check_stop_reason(getattr(run_result.response, "finish_reason", None))
         return run_result.output, _extract_usage(run_result)
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
@@ -526,10 +537,16 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             raise
         except StructuredOutputError as exc:
             last = exc
+            # Feed the model its OWN faulty prior reply (bounded) so it can diff its mistake
+            # — the LangChain RetryWithErrorOutputParser / Instructor pattern (story drake).
+            faulty = str(result.output)
+            if len(faulty) > _FAULTY_OUTPUT_SNIPPET_CHARS:
+                faulty = faulty[:_FAULTY_OUTPUT_SNIPPET_CHARS] + " …[truncated]"
             prompt = (
                 f"{req.instructions}\n\n{schema_hint}\n\nYour previous reply could not be "
-                f"parsed/validated ({exc}). Reply with ONLY the JSON object matching the "
-                f"schema above — no prose, no code fence."
+                f"parsed/validated ({exc}). Your previous reply was:\n{faulty}\n\n"
+                f"Reply with ONLY the JSON object matching the schema above — no prose, "
+                f"no code fence."
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
     raise last  # exhausted the bounded retry; surface the last validation error
