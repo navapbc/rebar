@@ -49,6 +49,7 @@ HEALTH_URL="${HEALTH_URL:-http://localhost:8000/health}"   # review-bot receiver
 FETCH_TIMEOUT="${FETCH_TIMEOUT:-60}"                  # a hung fetch must not hold the lock
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
+BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap (docker builder prune --keep-storage)
 
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml'
@@ -108,12 +109,31 @@ if [ "$bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${bo_next:-0}" ]; then
 fi
 [ "$bo_sha" != "$TARGET" ] && { bo_cnt=0; }
 
+# Reclaim docker garbage, best-effort (incident 2731: a failing rebuild loop left
+# multi-GB buildkit cache + dangling layers on the 30G root disk until ENOSPC
+# fail-closed the gate — and the failure path had NO reclamation at all). Bounded:
+# the buildkit cache is hard-capped at BUILD_CACHE_KEEP (keeps a warm cache for
+# fast rebuilds), dangling images are dropped; TAGGED images are never touched
+# (:prev is the rollback lifeline). Each prune is time-bounded (a wedged daemon
+# under disk pressure must not hold the deploy lock) and can NEVER alter control
+# flow or mask the caller's failure exit code — a prune failure only logs.
+prune_docker_caches() {
+  if ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
+    log "prune_docker_caches: builder prune failed (non-fatal)"
+  fi
+  if ! timeout 120 docker image prune -f >/dev/null 2>&1; then
+    log "prune_docker_caches: image prune failed (non-fatal)"
+  fi
+  return 0
+}
+
 record_backoff_failure() {
   local n=$(( ${bo_cnt:-0} + 1 ))
   local wait=$(( BACKOFF_BASE * (BACKOFF_FACTOR ** (n-1)) )); [ "$wait" -gt "$BACKOFF_CAP" ] && wait=$BACKOFF_CAP
   echo "$TARGET $n $(( $(now) + wait ))" > "$BACKOFF_FILE"
   err deploy_failed "target=$TARGET fail#$n backoff=${wait}s"
   log "deploy failed; backoff ${wait}s (fail #$n); last-known-good stays live"
+  prune_docker_caches
 }
 clear_backoff() { rm -f "$BACKOFF_FILE"; }
 
@@ -163,7 +183,7 @@ if changed "$BOT_PATHS"; then
   if [ -n "$gerrit_before" ] && [ "$gerrit_before" != "$gerrit_after" ]; then
     err blast-radius "gerrit container id changed during a review-bot deploy — investigate"
   fi
-  docker image prune -f >/dev/null 2>&1 || true
+  prune_docker_caches
   log "review-bot redeployed + healthy"
 fi
 
