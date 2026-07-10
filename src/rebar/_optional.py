@@ -7,7 +7,8 @@ Heavy capabilities live behind extras and are imported lazily, so ``import rebar
 — and even running a scripted workflow — never pulls the heavy stack:
 
   * ``[agents]``  — LLM agent steps, the review ops, the workflow agent runner
-    (the provider-agnostic pydantic-ai runtime: ``pydantic-ai-slim[anthropic]`` + json-repair).
+    (the provider-agnostic pydantic-ai runtime: ``pydantic-ai-slim[anthropic,retries]``
+    + json-repair).
   * ``[eval]``    — prompt evals (Inspect AI + promptfoo interop).
   * ``[tracing]`` — the OTLP trace sink. WRITE-ONLY by rule: OpenTelemetry is a
     sink, never read back into a rebar decision (the oracle-discipline rule).

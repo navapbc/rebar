@@ -84,6 +84,12 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
     # below. Stub the bypass off so this test builds the agent regardless of the local
     # ANTHROPIC_BASE_URL (e.g. a dev machine running a headroom proxy on 127.0.0.1).
     monkeypatch.setattr(runner_mod, "_local_proxy_bypass_base_url", lambda: None)
+    # story arcticproxy/arcticduck: the runner now wraps ANY anthropic model in the retrying
+    # transport (real pydantic_ai import). This test stubs pydantic_ai empty, so stub the
+    # builder too — return a (model, http_client) pair without importing the real SDK.
+    monkeypatch.setattr(
+        runner_mod, "_build_retrying_anthropic_model", lambda *a, **k: ("anthropic:fake", None)
+    )
     # finalize_outcome only needs to pass the payload through for this assertion.
     monkeypatch.setattr(
         runner_mod._findings,
