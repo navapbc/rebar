@@ -47,6 +47,9 @@ from typing import Any
 
 from . import evidence as ev
 from . import harness
+from .environment import BACKEND_ENV as BACKEND_ENV
+from .environment import refute_via_environment as _refute_via_environment
+from .environment import resolve_in_environment as resolve_in_environment
 
 # ── Backend identity ─────────────────────────────────────────────────────────
 
@@ -469,8 +472,14 @@ def refute_absence(
     if kind == "file":
         return _refute_file(name, ref, repo_root=repo_root)
 
-    # `member` / dotted name → T2 territory; never refute a member at T1.
+    # `member` / dotted name → T2 territory for the ctags lane; never refute a
+    # member at T1 by name-collision. But an installed third-party `module.attr`
+    # (bug 406f) IS deterministically resolvable by importing it, so consult the
+    # environment first — a real library member is CONFIRMED, not left unresolved.
     if kind == "member" or is_member_name(name):
+        env = _refute_via_environment(ref)
+        if env is not None:
+            return env
         return ev.abstain(
             "ambiguous",
             job=ev.JOB_REFUTE,
@@ -587,7 +596,15 @@ def _refute_symbol(
             detail=f"{len(defs)} definitions of {name!r} ({sites}) — cannot bind the intended one at T1",  # noqa: E501
         )
 
-    # Zero defs → NOT found. Confirm-only: abstain, never assert absence.
+    # Zero defs in the repo index. Before abstaining, consult the INSTALLED
+    # environment (bug 406f): a symbol/import that resolves from an installed
+    # third-party dependency (site-packages) or the stdlib DOES exist — the
+    # repo-scoped index simply cannot see it. Refute the asserted absence.
+    env = _refute_via_environment(ref)
+    if env is not None:
+        return env
+
+    # Still unresolved → confirm-only: abstain, never assert absence.
     return ev.abstain(
         "other",
         job=ev.JOB_REFUTE,
@@ -595,8 +612,16 @@ def _refute_symbol(
         backend=BACKEND_CTAGS,
         version=version,
         reference=_schema_safe_reference(ref),
-        detail=f"no definition of {name!r} in the repo index — cannot disprove absence (confirm-only, never asserts absent)",  # noqa: E501
+        detail=f"no definition of {name!r} in the repo index or the installed environment — cannot disprove absence (confirm-only, never asserts absent)",  # noqa: E501
     )
+
+
+# ── Environment-aware resolution (installed site-packages / stdlib) ───────────
+# The environment lane (bug 406f) lives in `.environment` to keep this module under
+# the size cap. `refute_via_environment` upgrades a not-found abstain to a `refuted`
+# when a symbol/import resolves from an installed dependency the repo index can't see;
+# `resolve_in_environment` + `BACKEND_ENV` are re-exported here so callers and tests
+# keep importing them from `.resolve` unchanged.
 
 
 # ── schema-safe reference attachment ─────────────────────────────────────────
@@ -720,7 +745,9 @@ def extract_references_from_diff(
 __all__ = [
     "BACKEND_CTAGS",
     "BACKEND_FS",
+    "BACKEND_ENV",
     "REFERENCE_KINDS",
+    "resolve_in_environment",
     "ReferenceError",
     "validate_reference",
     "is_member_name",
