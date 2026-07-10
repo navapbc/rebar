@@ -12,14 +12,46 @@ invariant I5 (single locked write path) holds unchanged.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import re as _re
 import subprocess
 import uuid as _uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from rebar import config
 from rebar._engine_support.resolver import resolve_ticket_id
+
+# ── Deferred-commit sink (epic cold-stall-chalk / B2) ─────────────────────────
+# The bulk-import batching seam. ``append_event`` is the ONE funnel every write
+# (CREATE via composer, EDIT/parent, comments + file-impact/verify via leaf) flows
+# through. When ``_batch_sink`` holds a buffer, ``append_event`` composes the event
+# and APPENDS ``(ticket_id, event)`` to it instead of committing — the caller then
+# flushes the buffer through ``event_append.batch_stage_and_commit`` (one commit per
+# chunk). Default ``None`` ⇒ every write commits one-event-per-commit exactly as
+# before, so interactive writes keep the per-write durability guarantee and ONLY the
+# importer (which sets this contextvar) is batched. State-reading guards in the
+# callers run BEFORE ``append_event``, so they are unaffected by buffering.
+_batch_sink: contextvars.ContextVar[list[tuple[str, dict]] | None] = contextvars.ContextVar(
+    "rebar_batch_sink", default=None
+)
+
+
+@contextmanager
+def batch_sink(buffer: list[tuple[str, dict]]) -> Iterator[list[tuple[str, dict]]]:
+    """Route ``append_event`` writes into *buffer* (deferred commit) for the block.
+
+    While active, every ``append_event`` call composes its event and appends
+    ``(ticket_id, event)`` to *buffer* instead of committing. The caller owns the
+    buffer and flushes it via ``batch_stage_and_commit``. Restores the prior sink on
+    exit (nestable / contextvar-scoped, so it never leaks across threads or tasks)."""
+    token = _batch_sink.set(buffer)
+    try:
+        yield buffer
+    finally:
+        _batch_sink.reset(token)
 
 
 class CommandError(Exception):
@@ -188,6 +220,14 @@ def append_event(
         "author": author(author_fallback),
         "data": data,
     }
+    # Deferred-commit sink (B2): when a batch buffer is active, hand the composed
+    # event to it instead of committing. The caller flushes the buffer via
+    # batch_stage_and_commit. Guards above (init gate, env_id/author/hlc) have run,
+    # so the buffered event is byte-identical to what write_and_push would commit.
+    sink = _batch_sink.get()
+    if sink is not None:
+        sink.append((ticket_id, event))
+        return
     try:
         _store_append.write_and_push(str(tracker), ticket_id, event)
     except (StoreError, RebaseGuard, LockTimeout) as exc:
