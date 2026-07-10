@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/scripts/autodeploy.sh","reason":"prune_docker_caches helper + failure-path and success-path calls + BUILD_CACHE_KEEP tunable"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783685928635255001,"uuid":"fc737e76-a711-47b9-b4d2-d61db6e18f0e"}
