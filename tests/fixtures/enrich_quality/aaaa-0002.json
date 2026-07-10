@@ -1,0 +1,27 @@
+{
+  "ticket_id": "aaaa-0002",
+  "gold": [
+    "BM25F",
+    "digest"
+  ],
+  "body": "Stage-1 candidate generation with BM25F over ticket digests. Brute-force field-weighted scoring, exclude the query ticket's own graph, take top 20.",
+  "digest": {
+    "problem_keywords": [
+      "bm25f",
+      "retrieval",
+      "candidate",
+      "digest"
+    ],
+    "component_or_area": "overlap retrieval",
+    "key_entities": [
+      "BM25F",
+      "OverlapCandidate",
+      "ticket_digest"
+    ],
+    "propositions": [
+      "rank candidates by field-weighted BM25F over digests",
+      "exclude the query ticket's own graph",
+      "return the top-k candidates"
+    ]
+  }
+}

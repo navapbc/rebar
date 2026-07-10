@@ -86,6 +86,35 @@ def completion_verdict_response_model() -> type:
     return CompletionVerdict
 
 
+def ticket_digest_response_model() -> type:
+    """Structured-output model for the Cupid ticket-digest op (epic only-crave-art),
+    mirroring ``ticket_digest.schema.json``: four fields, all required. pydantic is
+    imported inside the body (registration stores this builder, not a model)."""
+    from pydantic import BaseModel, Field
+
+    class TicketDigest(BaseModel):
+        problem_keywords: list[str] = Field(
+            default_factory=list, description="Salient problem/domain keywords (deduped)."
+        )
+        component_or_area: str = Field(
+            default="", description="Component / subsystem / area the ticket concerns."
+        )
+        key_entities: list[str] = Field(
+            default_factory=list,
+            description="Named entities: config keys, schema/table names, files, functions.",
+        )
+        propositions: list[str] = Field(
+            default_factory=list,
+            description="2-6 atomic problem/repro statements; the op enforces the count bound.",
+        )
+
+    return TicketDigest
+
+
 # Built-ins. ``review_result`` (the default findings shape) and ``completion_verdict``.
 register_contract("review_result", findings.findings_response_model)
 register_contract("completion_verdict", completion_verdict_response_model)
+# Cupid ticket-digest op (epic only-crave-art, ee3d). Registered here — co-located with
+# ``response_model_for`` — so importing this module to call it guarantees the digest
+# contract is registered before first use (no startup-import ordering assumption).
+register_contract("ticket_digest", ticket_digest_response_model)

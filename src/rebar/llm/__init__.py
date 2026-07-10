@@ -33,6 +33,7 @@ from rebar.llm.config import (
     agents_extra_installed,
     available_backends,
 )
+from rebar.llm.enrich import enrich
 from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
@@ -67,6 +68,7 @@ __all__ = [
     "review_code",
     "scan_epics_for_spec",
     "verify_completion",
+    "enrich",
     "review_plan",
     "claim_gate_check",
     "select_reviewers",

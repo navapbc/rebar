@@ -57,6 +57,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
@@ -81,7 +83,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_71 variables._
+_73 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -103,9 +105,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:494` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:498` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:350` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:379` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:394` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:356` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:385` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:400` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:420` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:28` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:38` — `os.environ.get(<non-literal>)`
