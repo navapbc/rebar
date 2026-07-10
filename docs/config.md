@@ -253,6 +253,39 @@ Liveness is activity-based, not a total-runtime cap: the per-request read timeou
 total-runtime timeout truncates a healthy long run. The async stream-event idle-watchdog is
 deferred pending an async-runner migration (see the liveness ADR).
 
+**Derived step caps.** The per-run step budget is DERIVED from `max_steps` (env
+`REBAR_LLM_MAX_STEPS`), not a hardcoded 50: `request_limit = max(1, ceil(min_steps/2))`
+and `tool_calls_limit = max(8, min_steps)`. The gate VERIFIER ops apply a review floor
+(`min_steps = 120`), so their concrete defaults are **`request_limit = 60`,
+`tool_calls_limit = 120`** — tune via `REBAR_LLM_MAX_STEPS`.
+
+### LLM failure taxonomy (the resolution-disposition vocabulary)
+
+When an LLM gate call fails, rebar classifies it into a **closed 8-class disposition**
+(`rebar.llm.failure.ResolutionClass`) that says *what a human/agent should do next*. The
+disposition is persisted on a degraded verdict as `coverage.resolution_class` (+ a
+`retryable` bool + a sanitized `diagnostic`) and drives the CLI exit code — the two
+**retryable** classes exit **11** ("transient — retry", see
+[exit-codes.md](exit-codes.md) + [ADR 0040](adr/0040-exit-11-block-but-retryable.md)); the
+rest map to the gate's existing INDETERMINATE exit. The diagnostic is redaction-sanitized
+before it is ever persisted ([ADR 0041](adr/0041-llm-diagnostic-sanitization.md)).
+
+| Class | Retryable | Meaning / typical trigger |
+|---|:--:|---|
+| `WAIT_AND_RETRY` | ✅ | Provider overload / rate-limit (429/529) — wait for the backoff window, then retry. |
+| `RETRY_NOW` | ✅ | Transient connection blip (network error) — retry immediately. |
+| `INCREASE_PROVIDER_LIMITS` | | Provider usage/quota ceiling hit — raise the limit or wait for the reset. |
+| `CHANGE_SETTINGS` | | A configured bound was exceeded (tokens / steps / timeout) — adjust it and retry. |
+| `CHANGE_INPUT` | | Input rejected (too large / context-length / malformed) — reduce or fix it. |
+| `CHANGE_PROVIDER_OR_MODEL` | | Model/provider unavailable, refused, or content-filtered — switch model/provider. |
+| `FIX_AGENT_DESIGN` | | Agent-construction bug (no tools / bad output contract) — fix the op wiring. |
+| `NEEDS_INVESTIGATION` | | Unclassified failure — inspect the sanitized diagnostic. |
+
+The classifier (`classify_llm_failure`) is pure, total, and never raises: an unmatched
+failure maps to `NEEDS_INVESTIGATION`. It reads an exception from any runner failure seam
+(or a `finish_reason` carried on the context) and unwraps a `tenacity.RetryError` to the
+underlying cause, so an exhausted-retry timeout still classifies `WAIT_AND_RETRY`.
+
 Env-only (NOT `[tool.rebar.llm]` keys): the secret `REBAR_LLM_API_KEY`; the
 runtime-only `REBAR_LLM_REPO_PATH` (which repo the review agent's read-only file
 tools see — an invocation-specific override, default the repo root); and the
