@@ -1,0 +1,27 @@
+{
+  "ticket_id": "aaaa-0006",
+  "gold": [
+    "reconciler",
+    "Jira"
+  ],
+  "body": "The Jira reconciler drifts when a status transition is not permitted by the target workflow. Expected: the idea status round-trips to IDEA. Actual: the transition is rejected and the ticket stays open.",
+  "digest": {
+    "problem_keywords": [
+      "reconciler",
+      "jira",
+      "status",
+      "transition"
+    ],
+    "component_or_area": "Jira reconciler",
+    "key_entities": [
+      "reconcile",
+      "IDEA",
+      "workflow-transition"
+    ],
+    "propositions": [
+      "idea status should round-trip to the Jira IDEA status",
+      "a disallowed workflow transition is rejected",
+      "the ticket stays open instead of moving"
+    ]
+  }
+}

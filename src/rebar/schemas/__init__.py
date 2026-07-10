@@ -59,6 +59,7 @@ __all__ = [
     "FSCK",
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
+    "TICKET_DIGEST",
     "PLAN_REVIEW_VERDICT",
     "CODE_REVIEW_VERDICT",
     "SIGN_RESULT",
@@ -106,6 +107,11 @@ REVIEW_RESULT = "review_result"
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
 # outputSchema); the CLI/library JSON path is pinned via the "verify_completion" key.
 COMPLETION_VERDICT = "completion_verdict"
+# rebar.llm — output of the Cupid ticket-digest enrichment op (epic only-crave-art,
+# ee3d). No CLI --output help arm (the coverage guard never drives it live); registered
+# in OUTPUT_SCHEMAS below under a synthetic "enrich" key so the every-schema-file-is-wired
+# guard sees ticket_digest, and so the runner validates enrich's structured output.
+TICKET_DIGEST = "ticket_digest"
 # rebar.llm — output of the plan-review gate (`rebar review-plan`). The inverse of
 # completion_verdict; same exemption (the MCP `review_plan` tool is NO_SCHEMA_EXEMPT
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
@@ -279,6 +285,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
     # registered here so the every-schema-file-is-wired guard sees completion_verdict.
     "verify_completion": COMPLETION_VERDICT,
+    # Cupid ticket-digest enrichment op (epic only-crave-art, ee3d): no CLI --output arm
+    # (coverage guard never drives it live); registered so the every-schema-file-is-wired
+    # guard sees ticket_digest and the runner validates enrich's structured output.
+    "enrich": TICKET_DIGEST,
     # plan-review gate: like `review`/`verify_completion`, no CLI help arm (the
     # --output coverage guard never drives it live) and the MCP tool is
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees

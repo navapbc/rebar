@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/ticket_digest.schema.json",
+  "title": "TicketDigest",
+  "description": "A compact, normalized per-ticket representation extracted once by the `rebar.llm.enrich` op (the Cupid pattern, arXiv:2308.10022). Feeds store-wide overlap detection (BM25F retrieval + pairwise judge) WITHOUT embeddings. Deterministic payload (no timestamps/uuids) so a stored digest record is stable modulo LLM wording. `propositions` are 2-6 atomic problem/repro statements; logs/stack-traces/code are discarded by the prompt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["problem_keywords", "component_or_area", "key_entities", "propositions"],
+  "properties": {
+    "problem_keywords": {
+      "type": "array",
+      "description": "Salient problem/domain keywords (deduped, lowercased where natural).",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "component_or_area": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The component / subsystem / area this ticket concerns (a short phrase)."
+    },
+    "key_entities": {
+      "type": "array",
+      "description": "Named, specific entities: config keys, schema/table names, file regions, functions, event types.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "propositions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "2-6 atomic problem/repro statements capturing what the ticket is fundamentally about.",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

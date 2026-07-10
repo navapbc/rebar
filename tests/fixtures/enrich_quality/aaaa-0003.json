@@ -1,0 +1,27 @@
+{
+  "ticket_id": "aaaa-0003",
+  "gold": [
+    "enqueue",
+    "soak"
+  ],
+  "body": "Event-sourced enrichment queue. On plan-review certification, enqueue an enrichment with a 60-minute soak. Re-certification bumps not_before forward (latest-wins). Optimistic claim under a lock.",
+  "digest": {
+    "problem_keywords": [
+      "queue",
+      "enqueue",
+      "soak",
+      "latest-wins"
+    ],
+    "component_or_area": "enrichment queue",
+    "key_entities": [
+      "ENQUEUE_ENRICH",
+      "CLAIM_ENRICH",
+      "not_before_ns"
+    ],
+    "propositions": [
+      "enqueue enrichment on certification",
+      "apply a 60 minute soak before draining",
+      "re-certification bumps the soak deadline"
+    ]
+  }
+}

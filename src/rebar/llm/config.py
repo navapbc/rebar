@@ -278,6 +278,12 @@ DEFAULT_MAX_TOKENS = 16000
 # via REBAR_LLM_MAX_STEPS; a per-op floor still wins via max(floor, configured).
 DEFAULT_MAX_ITERATIONS = 250
 DEFAULT_TIMEOUT_S = 600
+# Cross-ticket overlap detection (epic only-crave-art) — LLM-feature tunables live on
+# LLMConfig, never VerifyConfig (_config_schema.py reserves the llm.* layer). The Cupid
+# ticket-digest op (ee3d) instructs the model to emit MIN..MAX atomic propositions and
+# post-validates the count (truncate above max; flag low_proposition_count below min).
+DEFAULT_OVERLAP_PROPOSITIONS_MIN = 2
+DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -405,6 +411,26 @@ def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int)
     return default
 
 
+def _llm_float(table: dict, cli: dict, env_name: str, file_key: str, default: float):
+    """Resolve a float setting: CLI > env > file > default. An unparseable higher
+    layer falls through to the next (mirrors :func:`_llm_int`)."""
+    candidates: list = []
+    if file_key in cli:
+        candidates.append(cli[file_key])
+    env_raw = os.environ.get(env_name)
+    if env_raw is not None and env_raw.strip():
+        candidates.append(env_raw)
+    fv = table.get(file_key)
+    if fv is not None and not isinstance(fv, bool):
+        candidates.append(fv)
+    for c in candidates:
+        try:
+            return float(str(c).strip())
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
 @dataclass
 class LangfuseConfig:
     """Langfuse credentials/host, plus whether OTLP tracing is *enabled* (Langfuse is the
@@ -453,6 +479,10 @@ class LLMConfig:
     tickets_path: str | None = None
     mcp_servers: dict = field(default_factory=dict)
     langfuse: LangfuseConfig = field(default_factory=LangfuseConfig)
+    # Cross-ticket overlap detection (epic only-crave-art) — proposition-count bounds
+    # for the Cupid ticket-digest op (ee3d).
+    overlap_propositions_min: int = DEFAULT_OVERLAP_PROPOSITIONS_MIN
+    overlap_propositions_max: int = DEFAULT_OVERLAP_PROPOSITIONS_MAX
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -521,6 +551,20 @@ class LLMConfig:
             tickets_path=tickets_path,
             mcp_servers=mcp_servers,
             langfuse=LangfuseConfig.from_env(),
+            overlap_propositions_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_PROPOSITIONS_MIN",
+                "overlap_propositions_min",
+                DEFAULT_OVERLAP_PROPOSITIONS_MIN,
+            ),
+            overlap_propositions_max=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_PROPOSITIONS_MAX",
+                "overlap_propositions_max",
+                DEFAULT_OVERLAP_PROPOSITIONS_MAX,
+            ),
         )
 
 

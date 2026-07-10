@@ -1,0 +1,27 @@
+{
+  "ticket_id": "aaaa-0004",
+  "gold": [
+    "judge",
+    "shared_artifact"
+  ],
+  "body": "Stage-2 pairwise LLM overlap judge. Judge both orderings, require a cited shared artifact, default related-but-distinct without one, surface at most three link suggestions.",
+  "digest": {
+    "problem_keywords": [
+      "judge",
+      "pairwise",
+      "precision",
+      "overlap"
+    ],
+    "component_or_area": "overlap judge",
+    "key_entities": [
+      "overlap_verdict",
+      "shared_artifact",
+      "link_command"
+    ],
+    "propositions": [
+      "judge candidate pairs in both orderings",
+      "require a cited shared artifact to surface",
+      "surface at most three advisory link suggestions"
+    ]
+  }
+}
