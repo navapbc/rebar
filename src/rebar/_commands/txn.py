@@ -39,7 +39,7 @@ import uuid
 from rebar._commands._seam import CommandError
 from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import run_git_write
 from rebar.reducer import reduce_ticket
 from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 from rebar.reducer._sort import prefix_ts as _prefix_ts
@@ -112,8 +112,14 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
 
 def _git(tracker_dir: str, *args: str) -> None:
     """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
-    failure with the exact bash stderr prefix."""
-    cp = run_git(tracker_dir, *args, check=False)
+    failure with the exact bash stderr prefix.
+
+    Routed through :func:`run_git_write` so any index-mutating op (the claim/transition
+    ``add``+``commit``) self-heals git's ``.git/index.lock`` contention — a stale lock is
+    reclaimed and a contended one ridden out with a bounded backoff before this reports a
+    genuine (post-retry) failure. index.lock only appears on index-mutating commands, so a
+    read op run through here simply never trips the retry (bug fix-indexlock-retry)."""
+    cp = run_git_write(tracker_dir, *args, check=False)
     if cp.returncode != 0:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
 
