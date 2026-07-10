@@ -312,3 +312,29 @@ def test_latest_code_review_result_change_key_and_misses(store: Path) -> None:
     assert sidecar.latest_code_review_result("bogus:Ichg", repo_root=root) is None
     assert sidecar.latest_code_review_result("session:never", repo_root=root) is None
     assert sidecar.latest_code_review_result("", repo_root=root) is None
+
+
+def test_local_session_artifact_does_not_seed_change_reader(store: Path) -> None:
+    """Cross-keyspace isolation (epic super-path-bag success criterion; ADR 0037): a prior LOCAL
+    session review must NOT contaminate a Gerrit CHANGE-keyed reader call — so a local review can
+    never seed a change's FIRST Gerrit review. A `session:<id>` artifact with surfaced findings
+    exists, yet a `change:<id>` query returns None (the two keyspaces are disjoint by title scheme);
+    the same session key still resolves it, proving the artifact is present and it's the KEY TYPE —
+    not absence — that isolates it."""
+    root = str(store)
+    _emit_session_artifact(
+        root,
+        "sess-iso",
+        {
+            "verdict": "BLOCK",
+            "deps": {"a.py": "h"},
+            "blocking": [{"finding": "local-only finding", "location": "a.py:1"}],
+            "advisory": [],
+        },
+    )
+    # A change-keyed read (any change id) finds NOTHING from the local session artifact.
+    assert sidecar.latest_code_review_result("change:sess-iso", repo_root=root) is None
+    assert sidecar.latest_code_review_result("change:some-change", repo_root=root) is None
+    # Sanity: the SESSION key does resolve it — so it's the keyspace, not absence, that isolates.
+    got = sidecar.latest_code_review_result("session:sess-iso", repo_root=root)
+    assert got is not None and got["findings"][0]["finding"] == "local-only finding"
