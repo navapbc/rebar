@@ -60,6 +60,7 @@ __all__ = [
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
     "TICKET_DIGEST",
+    "OVERLAP_VERDICT",
     "PLAN_REVIEW_VERDICT",
     "CODE_REVIEW_VERDICT",
     "SIGN_RESULT",
@@ -112,6 +113,10 @@ COMPLETION_VERDICT = "completion_verdict"
 # in OUTPUT_SCHEMAS below under a synthetic "enrich" key so the every-schema-file-is-wired
 # guard sees ticket_digest, and so the runner validates enrich's structured output.
 TICKET_DIGEST = "ticket_digest"
+# rebar.llm — output of one ordered-pair call of the Stage-2 overlap judge (epic
+# only-crave-art, 9022). No CLI --output arm; registered in OUTPUT_SCHEMAS under a synthetic
+# "overlap_judge" key so the schema-coverage guard sees it and the runner validates output.
+OVERLAP_VERDICT = "overlap_verdict"
 # rebar.llm — output of the plan-review gate (`rebar review-plan`). The inverse of
 # completion_verdict; same exemption (the MCP `review_plan` tool is NO_SCHEMA_EXEMPT
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
@@ -289,6 +294,9 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # (coverage guard never drives it live); registered so the every-schema-file-is-wired
     # guard sees ticket_digest and the runner validates enrich's structured output.
     "enrich": TICKET_DIGEST,
+    # Stage-2 overlap judge (9022): synthetic key, no CLI arm; wired so the schema-coverage
+    # guard sees overlap_verdict and the runner validates the judge's structured output.
+    "overlap_judge": OVERLAP_VERDICT,
     # plan-review gate: like `review`/`verify_completion`, no CLI help arm (the
     # --output coverage guard never drives it live) and the MCP tool is
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees

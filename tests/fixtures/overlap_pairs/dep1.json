@@ -1,0 +1,16 @@
+{
+  "pair": "dep1",
+  "r1": {
+    "relation": "depends_on",
+    "shared_artifact": "enrich op",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "related_distinct",
+    "shared_artifact": "enrich op",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "depends_on"
+}

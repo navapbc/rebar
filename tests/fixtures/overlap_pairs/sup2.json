@@ -1,0 +1,16 @@
+{
+  "pair": "sup2",
+  "r1": {
+    "relation": "supersedes",
+    "shared_artifact": "reducer _version",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "related_distinct",
+    "shared_artifact": "reducer _version",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "supersedes"
+}

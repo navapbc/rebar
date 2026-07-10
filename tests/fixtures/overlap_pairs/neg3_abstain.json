@@ -1,0 +1,16 @@
+{
+  "pair": "neg3_abstain",
+  "r1": {
+    "relation": "duplicates",
+    "shared_artifact": "config-key REBAR_X",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "duplicates",
+    "shared_artifact": "config-key REBAR_X",
+    "confidence": 0.9,
+    "abstain": true
+  },
+  "gold": null
+}

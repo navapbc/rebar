@@ -296,6 +296,10 @@ DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
 # after it expires — self-healing, no separate reaper process).
 DEFAULT_OVERLAP_SOAK_MIN = 60
 DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
+# Stage-2 pairwise judge (9022): the per-ordering confidence a candidate must clear to be
+# surfaced, and the max number of advisory link suggestions surfaced per query ticket.
+DEFAULT_OVERLAP_CONF_THRESHOLD = 0.7
+DEFAULT_OVERLAP_SURFACE_CAP = 3
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -502,6 +506,9 @@ class LLMConfig:
     # Enrichment queue (e1f4).
     overlap_soak_min: int = DEFAULT_OVERLAP_SOAK_MIN
     overlap_lease_ttl_min: int = DEFAULT_OVERLAP_LEASE_TTL_MIN
+    # Stage-2 pairwise judge (9022).
+    overlap_conf_threshold: float = DEFAULT_OVERLAP_CONF_THRESHOLD
+    overlap_surface_cap: int = DEFAULT_OVERLAP_SURFACE_CAP
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -612,6 +619,20 @@ class LLMConfig:
                 "REBAR_LLM_OVERLAP_LEASE_TTL_MIN",
                 "overlap_lease_ttl_min",
                 DEFAULT_OVERLAP_LEASE_TTL_MIN,
+            ),
+            overlap_conf_threshold=_llm_float(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_CONF_THRESHOLD",
+                "overlap_conf_threshold",
+                DEFAULT_OVERLAP_CONF_THRESHOLD,
+            ),
+            overlap_surface_cap=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_SURFACE_CAP",
+                "overlap_surface_cap",
+                DEFAULT_OVERLAP_SURFACE_CAP,
             ),
         )
 

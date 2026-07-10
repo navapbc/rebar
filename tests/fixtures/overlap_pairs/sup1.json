@@ -1,0 +1,16 @@
+{
+  "pair": "sup1",
+  "r1": {
+    "relation": "supersedes",
+    "shared_artifact": "event TICKET_DIGEST",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "depends_on",
+    "shared_artifact": "event TICKET_DIGEST",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "supersedes"
+}

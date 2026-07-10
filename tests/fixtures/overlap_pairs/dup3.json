@@ -1,0 +1,16 @@
+{
+  "pair": "dup3",
+  "r1": {
+    "relation": "duplicates",
+    "shared_artifact": "file retrieve.py",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "r2": {
+    "relation": "duplicates",
+    "shared_artifact": "file retrieve.py",
+    "confidence": 0.9,
+    "abstain": false
+  },
+  "gold": "duplicates"
+}
