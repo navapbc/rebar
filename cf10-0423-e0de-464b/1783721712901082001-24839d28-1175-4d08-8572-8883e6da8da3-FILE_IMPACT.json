@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"infra/autolander/batch.py","reason":"batch failure handling"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783721712901082001,"uuid":"24839d28-1175-4d08-8572-8883e6da8da3"}
