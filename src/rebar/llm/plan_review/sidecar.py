@@ -234,6 +234,31 @@ def norm_id(finding: dict[str, Any]) -> str:
 RECALL_MIN_PRIORITY = 0.5  # "near/above the bar": the 0.60-0.70 blocking bars, minus a margin
 RECALL_CAP = 12  # cap the recalled-candidate set to bound the added Pass-2 verification cost
 
+# The decisions a finding was actually SURFACED to the client under (the lowercase strings
+# pass3_decide emits). ``build_payload`` persists the FULL finding set — blocking + advisory +
+# overflow + indeterminate + DROPPED — into ``findings`` for offline calibration, so any consumer
+# that reads a prior sidecar's ``findings`` as a RE-REVIEW SIGNAL (recall re-surfacing; the
+# rising-floor novelty prior set) MUST filter to surfaced-only first. Otherwise a finding
+# permanently dropped for convergence re-enters the prior set and re-matches on recurrence, scoring
+# LOW novelty ("carryover") and thereby ESCAPING the floor that dropped it — defeating the intended
+# permanent drop (bug old-frilly-plankton). This is the single shared vocabulary so the two
+# consumers can never disagree about which prior findings a re-review may reason against.
+SURFACED_DECISIONS = ("block", "advisory")
+
+
+def surfaced_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The prior findings a re-review is allowed to reason against: those whose ``decision`` is in
+    :data:`SURFACED_DECISIONS` (i.e. RETURNED TO THE CLIENT), from a ``latest_review_result``
+    payload. Never the dropped/indeterminate/overflow findings ``build_payload`` also persists.
+
+    The surfaced-only filter deliberately lives HERE (a shared helper over the reader's payload),
+    not inside ``latest_review_result``: the reader's contract is the full persisted set (offline
+    calibration and the remediation-eligibility existence check in ``attest.py`` read ALL findings),
+    and only a re-review SIGNAL narrows to surfaced-only. Returns ``[]`` for a missing payload."""
+    return [
+        f for f in (result or {}).get("findings") or [] if f.get("decision") in SURFACED_DECISIONS
+    ]
+
 
 def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
     """The prior-review findings worth re-checking on this ticket: from the most-recent
@@ -252,9 +277,8 @@ def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
             return []
         eligible = [
             f
-            for f in (result.get("findings") or [])
-            if f.get("decision") in ("block", "advisory")
-            and float(f.get("priority") or 0.0) >= RECALL_MIN_PRIORITY
+            for f in surfaced_findings(result)
+            if float(f.get("priority") or 0.0) >= RECALL_MIN_PRIORITY
         ]
         eligible.sort(key=lambda f: float(f.get("priority") or 0.0), reverse=True)
         return [
