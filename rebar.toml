@@ -20,6 +20,15 @@ require_completion_verification_for_close = true
 # docs/plan-review-gate.md. Turning this off is the rollback.
 require_plan_review_for_claim = true
 
+# Store-wide cross-ticket overlap detection (epic only-crave-art, ADR 0037): when on,
+# plan-review runs an advisory two-stage retrieve-then-rerank pass (BM25F candidate
+# generation with graph exclusion → bounded LLM pairwise judge over enrichment digests)
+# and surfaces `overlap[]` suggestions on the verdict. Advisory only — it NEVER blocks a
+# claim or close. Ships gated OFF by default; turned on here (rebar-ticket ade2-8c73-e010-491d).
+# Also activates the opportunistic enrichment drain on ticket write paths; scope that to
+# plan-review only with `[tool.rebar.llm] overlap_drain = "off"`. Rollback: set this to false.
+overlap_enabled = true
+
 # Commit-ticket gate (docs/commit-ticket-trailer.md): the CI `require-ticket` job (the
 # Gerrit Verified leg) requires every commit to `main` to reference a rebar ticket that
 # RESOLVES in the store — via a `rebar-ticket: <id>` trailer (or a leading `<id>:`), any of
