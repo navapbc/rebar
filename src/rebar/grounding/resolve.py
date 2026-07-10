@@ -47,6 +47,9 @@ from typing import Any
 
 from . import evidence as ev
 from . import harness
+from .environment import BACKEND_ENV as BACKEND_ENV
+from .environment import refute_via_environment as _refute_via_environment
+from .environment import resolve_in_environment as resolve_in_environment
 
 # ── Backend identity ─────────────────────────────────────────────────────────
 
@@ -469,8 +472,14 @@ def refute_absence(
     if kind == "file":
         return _refute_file(name, ref, repo_root=repo_root)
 
-    # `member` / dotted name → T2 territory; never refute a member at T1.
+    # `member` / dotted name → T2 territory for the ctags lane; never refute a
+    # member at T1 by name-collision. But an installed third-party `module.attr`
+    # (bug 406f) IS deterministically resolvable by importing it, so consult the
+    # environment first — a real library member is CONFIRMED, not left unresolved.
     if kind == "member" or is_member_name(name):
+        env = _refute_via_environment(ref)
+        if env is not None:
+            return env
         return ev.abstain(
             "ambiguous",
             job=ev.JOB_REFUTE,
@@ -524,14 +533,79 @@ def _refute_symbol(
     config: GroundingConfig | None,
     timeout: float | None,
 ) -> dict[str, Any]:
-    """Refute a bare ``symbol``/``import`` name via the ctags repo-wide index."""
+    """Refute a bare ``symbol``/``import`` name via the ctags repo-wide index,
+    falling back to the installed environment whenever the repo lane cannot SEE it.
+
+    The environment fallback (bug 406f) must run on EVERY ctags-blind path — an
+    unsupported language (which is how an absent ctags binary presents: it can parse
+    nothing), a build failure (no tool / timeout / parse error), OR zero repo defs —
+    not only the zero-defs case; otherwise a host without universal-ctags (e.g. the
+    default CI suite) would abstain on a real third-party symbol before ever
+    consulting importlib. The repo-collision ``ambiguous`` case is left as-is (the
+    symbol demonstrably exists in-repo, so it is not a 'does-not-exist' claim)."""
     cfg = config if config is not None else load_config(repo_root)
 
-    # Unsupported-language gate: if the reference declares a language ctags can't
-    # parse AND the project hasn't supplied an optlib/grammar for it, abstain
-    # with `unsupported_lang` (an exotic language fails open, never a false refute).
+    # An unsupported declared language means the ctags lane is blind (commonly:
+    # the ctags binary is absent, so it lists no languages). Skip the index and go
+    # straight to the environment fallback rather than abstaining sight-unseen.
     lang = ref.get("language")
-    if isinstance(lang, str) and lang and not _language_supported(lang, cfg, timeout=timeout):
+    lang_unsupported = bool(
+        isinstance(lang, str) and lang and not _language_supported(lang, cfg, timeout=timeout)
+    )
+
+    version: str | None = None
+    build_result: harness.RunResult | None = None
+    if not lang_unsupported:
+        if index is None:
+            index, build_result = build_index(
+                repo_root,
+                timeout=timeout,
+                optlib_dirs=cfg.ctags_optlib_dirs,
+                options=cfg.ctags_options,
+            )
+        if index is not None:
+            defs = index.lookup(name)
+            version = index.version
+            if len(defs) == 1:
+                d = defs[0]
+                cov = ev.coverage(backend=BACKEND_CTAGS, status=ev.STATUS_RAN, version=version)
+                location: dict[str, Any] = {"file": d.path}
+                if d.line:
+                    location["line_start"] = d.line
+                return ev.refuted(
+                    provenance_tier=ev.TIER_T1,
+                    coverage=cov,
+                    reference=_schema_safe_reference(ref),
+                    location=location,
+                    detail=f"unique definition of {name!r} at {d.path}"
+                    + (f":{d.line}" if d.line else "")
+                    + " — asserted absence disproved",
+                )
+            if len(defs) > 1:
+                sites = ", ".join(sorted({d.path for d in defs}))
+                return ev.abstain(
+                    "ambiguous",
+                    job=ev.JOB_REFUTE,
+                    provenance_tier=ev.TIER_T1,
+                    backend=BACKEND_CTAGS,
+                    version=version,
+                    reference=_schema_safe_reference(ref),
+                    detail=f"{len(defs)} definitions of {name!r} ({sites}) — cannot bind the intended one at T1",  # noqa: E501
+                )
+            # Zero defs in the repo index → fall through to the environment fallback.
+
+    # The ctags lane could not CONFIRM the name (unsupported language, absent ctags
+    # binary / timeout / parse error, or zero repo defs). Consult the INSTALLED
+    # environment: a symbol/import importable from a third-party dependency
+    # (site-packages) or the stdlib DOES exist — the repo-scoped index simply cannot
+    # see it. This is precise (an actual import), so it never false-refutes.
+    env = _refute_via_environment(ref)
+    if env is not None:
+        return env
+
+    # Unresolved everywhere → confirm-only abstain (never asserts an absence),
+    # carrying the reason that fits why the ctags lane could not confirm.
+    if lang_unsupported:
         return ev.abstain(
             "unsupported_lang",
             job=ev.JOB_REFUTE,
@@ -540,54 +614,13 @@ def _refute_symbol(
             reference=_schema_safe_reference(ref),
             detail=f"language {lang!r} is not supported by ctags and no project optlib/grammar is configured for it",  # noqa: E501
         )
-
-    if index is None:
-        index, result = build_index(
-            repo_root,
-            timeout=timeout,
-            optlib_dirs=cfg.ctags_optlib_dirs,
-            options=cfg.ctags_options,
-        )
-        if index is None:
-            # Fail-open: no tool / timeout / parse error → abstain (harness reason).
-            return result.as_abstain(
-                job=ev.JOB_REFUTE,
-                provenance_tier=ev.TIER_T1,
-                reference=_schema_safe_reference(ref),
-            )
-
-    defs = index.lookup(name)
-    version = index.version
-
-    if len(defs) == 1:
-        d = defs[0]
-        cov = ev.coverage(backend=BACKEND_CTAGS, status=ev.STATUS_RAN, version=version)
-        location: dict[str, Any] = {"file": d.path}
-        if d.line:
-            location["line_start"] = d.line
-        return ev.refuted(
-            provenance_tier=ev.TIER_T1,
-            coverage=cov,
-            reference=_schema_safe_reference(ref),
-            location=location,
-            detail=f"unique definition of {name!r} at {d.path}"
-            + (f":{d.line}" if d.line else "")
-            + " — asserted absence disproved",
-        )
-
-    if len(defs) > 1:
-        sites = ", ".join(sorted({d.path for d in defs}))
-        return ev.abstain(
-            "ambiguous",
+    if index is None and build_result is not None:
+        # Fail-open: no tool / timeout / parse error → the harness's closed reason.
+        return build_result.as_abstain(
             job=ev.JOB_REFUTE,
             provenance_tier=ev.TIER_T1,
-            backend=BACKEND_CTAGS,
-            version=version,
             reference=_schema_safe_reference(ref),
-            detail=f"{len(defs)} definitions of {name!r} ({sites}) — cannot bind the intended one at T1",  # noqa: E501
         )
-
-    # Zero defs → NOT found. Confirm-only: abstain, never assert absence.
     return ev.abstain(
         "other",
         job=ev.JOB_REFUTE,
@@ -595,8 +628,16 @@ def _refute_symbol(
         backend=BACKEND_CTAGS,
         version=version,
         reference=_schema_safe_reference(ref),
-        detail=f"no definition of {name!r} in the repo index — cannot disprove absence (confirm-only, never asserts absent)",  # noqa: E501
+        detail=f"no definition of {name!r} in the repo index or the installed environment — cannot disprove absence (confirm-only, never asserts absent)",  # noqa: E501
     )
+
+
+# ── Environment-aware resolution (installed site-packages / stdlib) ───────────
+# The environment lane (bug 406f) lives in `.environment` to keep this module under
+# the size cap. `refute_via_environment` upgrades a not-found abstain to a `refuted`
+# when a symbol/import resolves from an installed dependency the repo index can't see;
+# `resolve_in_environment` + `BACKEND_ENV` are re-exported here so callers and tests
+# keep importing them from `.resolve` unchanged.
 
 
 # ── schema-safe reference attachment ─────────────────────────────────────────
@@ -720,7 +761,9 @@ def extract_references_from_diff(
 __all__ = [
     "BACKEND_CTAGS",
     "BACKEND_FS",
+    "BACKEND_ENV",
     "REFERENCE_KINDS",
+    "resolve_in_environment",
     "ReferenceError",
     "validate_reference",
     "is_member_name",
