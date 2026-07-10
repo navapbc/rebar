@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Applier: the outbound-batch *sequencer* + polymorphic ``apply()`` entry point.
 
+NOTE: ``_apply_batch`` here batches **outbound Jira REST** mutations — it is NOT a
+local git-commit batcher. If you are scoping *local* store batch-writes (import etc.)
+this is the wrong system; see ``docs/architecture.md`` "Two writers, one store".
+
 ``apply()`` selects between typed single-mutation dispatch (``_apply_typed``) and
 the legacy batch path (``_apply_batch``) by argument type. ``_apply_batch`` is a
 thin sequencer — resolve transport → cross-project guard → HEAD-drift recheck
