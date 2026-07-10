@@ -58,8 +58,10 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_MODEL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_K` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_LEASE_TTL_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
@@ -84,7 +86,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_74 variables._
+_76 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -106,10 +108,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:494` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:498` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:363` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:392` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:407` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:427` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:368` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:397` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:432` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:28` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:38` — `os.environ.get(<non-literal>)`

@@ -291,6 +291,11 @@ DEFAULT_OVERLAP_PROPOSITIONS_MAX = 6
 DEFAULT_OVERLAP_K = 20
 DEFAULT_OVERLAP_MAX_DOC_FREQ = 0.5
 DEFAULT_OVERLAP_MIN_SHOULD_MATCH = 0.15
+# Enrichment queue (e1f4): the soak (debounce) between plan-review certification and drain
+# eligibility, and the claim lease TTL (a crashed drainer's claim is treated as unclaimed
+# after it expires — self-healing, no separate reaper process).
+DEFAULT_OVERLAP_SOAK_MIN = 60
+DEFAULT_OVERLAP_LEASE_TTL_MIN = 15
 # Execution backends. `pydantic_ai` is THE runtime (story d6d1 cutover dropped the
 # in-process graph stack). `fake` is the offline test seam.
 RUNNERS = ("pydantic_ai", "fake")
@@ -494,6 +499,9 @@ class LLMConfig:
     overlap_k: int = DEFAULT_OVERLAP_K
     overlap_max_doc_freq: float = DEFAULT_OVERLAP_MAX_DOC_FREQ
     overlap_min_should_match: float = DEFAULT_OVERLAP_MIN_SHOULD_MATCH
+    # Enrichment queue (e1f4).
+    overlap_soak_min: int = DEFAULT_OVERLAP_SOAK_MIN
+    overlap_lease_ttl_min: int = DEFAULT_OVERLAP_LEASE_TTL_MIN
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
@@ -590,6 +598,20 @@ class LLMConfig:
                 "REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH",
                 "overlap_min_should_match",
                 DEFAULT_OVERLAP_MIN_SHOULD_MATCH,
+            ),
+            overlap_soak_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_SOAK_MIN",
+                "overlap_soak_min",
+                DEFAULT_OVERLAP_SOAK_MIN,
+            ),
+            overlap_lease_ttl_min=_llm_int(
+                table,
+                cli,
+                "REBAR_LLM_OVERLAP_LEASE_TTL_MIN",
+                "overlap_lease_ttl_min",
+                DEFAULT_OVERLAP_LEASE_TTL_MIN,
             ),
         )
 
