@@ -75,7 +75,7 @@ Homepage = "https://github.com/navapbc/rebar"
 Repository = "https://github.com/navapbc/rebar"
 Documentation = "https://github.com/navapbc/rebar/blob/main/docs/README.md"
 Issues = "https://github.com/navapbc/rebar/blob/main/SUPPORT.md"
-Changelog = "https://github.com/navapbc/rebar/blob/main/docs/release-notes.md"
+Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]

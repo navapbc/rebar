@@ -84,6 +84,28 @@ git add pyproject.toml server.json && git commit -m "Release X.Y.Z" && git push 
 ```
 (Local sanity: `python -m build && python -m twine check dist/*`.)
 
+### 1a. Update CHANGELOG.md (before tagging)
+`CHANGELOG.md` is the **user-facing** changelog (Keep a Changelog shape),
+generated from conventional commits with **git-cliff** and then hand-curated.
+(Agent-visible *contract* changes stay in `docs/release-notes.md`.) Install the
+pinned tool once — a standalone Rust binary, **not** a pyproject dev extra:
+```bash
+pipx install git-cliff==2.13.1
+```
+Then, for the release you are cutting:
+```bash
+make changelog VERSION=vX.Y.Z   # prepends the [X.Y.Z] section from unreleased commits
+# hand-curate (~5 min) the freshly prepended top section: drop noise, tighten
+# wording, group sensibly — the generated lines are a starting point, not the entry.
+git add CHANGELOG.md && git commit --amend --no-edit   # fold into the release commit (step 1)
+```
+**Dial position: generate-then-edit.** Pure-generated output was rejected as
+ledger-like; fully hand-written prose (mypy-style) was rejected as unsustainable
+for a solo maintainer. `make changelog` is **prepend-scoped and idempotent** — it
+never regenerates the whole file, so curated history is never overwritten (re-running
+with an already-present `VERSION` is a no-op). The one-time bootstrap that generated
+the file back through v0.1.0 is not repeated.
+
 ### 2. Tag → PyPI publishes automatically
 ```bash
 git tag -a vX.Y.Z -m "nava-rebar X.Y.Z" && git push origin vX.Y.Z

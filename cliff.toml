@@ -1,0 +1,96 @@
+# git-cliff configuration — generates CHANGELOG.md from conventional commits.
+#
+# Why git-cliff (and not the alternatives we surveyed):
+#   - towncrier (pip/pytest): solves a many-contributor merge-conflict problem
+#     via per-change news fragments — double-entry ceremony rebar does not need
+#     with a single maintainer. Rejected.
+#   - PR-label generation (ruff/uv): derives the changelog from pull-request
+#     labels — rebar has no PR workflow (code review is on Gerrit). Rejected.
+#   - GitHub-Releases-only: leaves no in-repo artifact. Rejected.
+#   git-cliff converts the conventional-commit discipline rebar already pays for
+#   into a Keep-a-Changelog document (rich's CHANGELOG.md is the exemplar).
+#
+# Workflow is GENERATE-THEN-CURATE and PREPEND-SCOPED: `make changelog
+# VERSION=vX.Y.Z` runs `git cliff --unreleased --tag <VERSION> --prepend
+# CHANGELOG.md`, and the maintainer hand-curates the freshly prepended section
+# before tagging. Full-file regeneration is a one-time bootstrap only; never
+# re-run it, or curated history is overwritten. See docs/releasing.md.
+
+[remote.github]
+owner = "navapbc"
+repo = "rebar"
+
+[changelog]
+# Keep a Changelog (https://keepachangelog.com) header.
+header = """
+# Changelog
+
+All notable, user-facing changes to rebar are documented here. The format is
+based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and rebar
+aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Entries are generated from [Conventional Commits](https://www.conventionalcommits.org)
+with `git-cliff` and then hand-curated. Agent-visible contract changes live in
+[docs/release-notes.md](docs/release-notes.md).
+
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = """
+{% for release in releases -%}
+    {% if release.version -%}
+        {% if release.previous.version -%}
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+/compare/{{ release.previous.version }}...{{ release.version }}
+        {% endif -%}
+    {% else -%}
+        {% if release.previous.version -%}
+[unreleased]: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+/compare/{{ release.previous.version }}...HEAD
+        {% endif -%}
+    {% endif -%}
+{% endfor %}
+"""
+trim = true
+
+[git]
+# Parse commits as conventional commits, but KEEP unconventional/mixed-history
+# commits too (filter_unconventional = false) via the catch-all parser below.
+conventional_commits = true
+filter_unconventional = false
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"
+
+# Normative type -> section mapping (Keep a Changelog buckets). Breaking is its
+# own group, sorted first (the <!-- N --> prefix is a sort key, stripped on
+# render). First matching rule wins, so the breaking rule precedes feat/fix.
+commit_parsers = [
+  { message = "^[a-z]+(\\(.+\\))?!:", group = "<!-- 0 -->Breaking" },
+  { body = ".*BREAKING CHANGE", group = "<!-- 0 -->Breaking" },
+  { message = "^feat", group = "<!-- 1 -->Added" },
+  { message = "^fix", group = "<!-- 2 -->Fixed" },
+  { message = "^perf", group = "<!-- 3 -->Changed" },
+  { message = "^refactor", group = "<!-- 3 -->Changed" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  # Skipped types — noise, not user-facing.
+  { message = "^build", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^test", skip = true },
+  # Catch-all so mixed-history / unconventional commits are still recorded.
+  { message = ".*", group = "<!-- 5 -->Other" },
+]

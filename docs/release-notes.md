@@ -1,5 +1,9 @@
 # Release notes
 
+> **User-facing changelog: [CHANGELOG.md](../CHANGELOG.md).** This file tracks
+> agent-visible *contract* changes (event/schema/API); the user-facing changelog
+> of features and fixes lives in `CHANGELOG.md`.
+
 Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
