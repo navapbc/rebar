@@ -290,7 +290,23 @@ def manifest_material(manifest: list[str] | None) -> str | None:
 
 def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) -> dict[str, Any]:
     """Sign a passing plan-review verdict (append a ``SIGNATURE`` event). Returns the
-    signature record. Raises if signing fails (the caller decides how to surface it)."""
+    signature record. Raises if signing fails (the caller decides how to surface it).
+
+    Never-sign structural guard (story blackbear, epic jira-reb-687): a degraded / INDETERMINATE
+    verdict — or any verdict carrying a systemic-degrade ``coverage.resolution_class`` — is by
+    definition NOT a certifiable result and must never be attested. The caller only reaches here
+    on a clean PASS, so this is defense-in-depth: it makes the "degraded ⇒ unsigned" invariant
+    STRUCTURAL rather than incidental, failing closed if a future caller mistakenly signs one."""
+    from rebar.signing import SigningError
+
+    _cov = verdict.get("coverage") or {}
+    if str(verdict.get("verdict", "")).upper() != "PASS" or _cov.get("resolution_class"):
+        raise SigningError(
+            "refusing to sign a non-PASS / degraded plan-review verdict "
+            f"(verdict={verdict.get('verdict')!r}, "
+            f"resolution_class={_cov.get('resolution_class')!r})"
+        )
+
     from rebar import signing
     from rebar.llm.config import current_code_sha
 

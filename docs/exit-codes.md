@@ -9,14 +9,15 @@ for what each code means and which code each subcommand emits. It is pinned by
 This contract is **frozen** as of the 2026-06-09 breaking-change window. Changes
 to an emitted code are contract changes and must be called out in release notes.
 
-## The four codes
+## The codes
 
 | Code | Name | Meaning |
 |-----:|------|---------|
 | `0`  | success | The command did what it was asked. (Read commands that find nothing still succeed — an empty list is exit 0.) |
 | `1`  | runtime error | Ticket not found, invalid input value, a missing **required positional** argument, a failed precondition, or a per-ticket gate's **fail verdict**. The general-purpose error code. |
-| `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `clarity-check` (see the gate note below). |
+| `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `clarity-check` (see the gate note below). The plan-review gate's **INDETERMINATE** verdict (a non-retryable degrade) also exits `2` — predates and is unchanged by exit 11. |
 | `10` | concurrency mismatch | Optimistic-concurrency rejection: a state-dependent op (`transition`/`claim`/`reopen`) re-read the ticket under lock and the actual status no longer matched the expected one. **Normal under parallelism** — re-read and pick another, never force. Emitted by `_commands/txn.py` (`ConcurrencyMismatch`). |
+| `11` | transient — retry | An LLM gate (`review-plan` / `review-code` / `verify-completion` / the `close` completion gate) degraded on a **systemic, retryable** LLM failure (rate-limit / connection blip — the classifier's `WAIT_AND_RETRY` / `RETRY_NOW` disposition). The verdict is unsigned; **re-run after the backoff window** rather than treating it as a real BLOCK/FAIL. Distinct from `2` (INDETERMINATE, non-retryable) so a driving agent can auto-retry only the genuinely transient case. Additive (2026-07 window) — see "Recorded decisions". |
 
 ### Cross-cutting rules
 
@@ -153,3 +154,31 @@ cohort as "matching list/show/ready/search":
 The gate convention (clarity-check not-found = 2) and `validate`'s health-bucket
 exit were **kept as-is and documented** rather than changed, to avoid altering
 verdict/severity semantics that agents already depend on.
+
+### Exit 11 — block-but-retryable (2026-07 window, story `authorial-hated-blackbear`, epic `jira-reb-687`)
+
+The LLM gates can fail for two very different reasons: your plan/code is wrong (a
+real BLOCK/FAIL), or the **model provider** hiccuped (a rate-limit, a connection
+blip, an outage). Collapsing both onto the existing exit codes meant a driving
+agent could not tell "fix your work" from "retry in a minute". Exit **11** peels
+off the **systemic, retryable** subset — the LLM-failure classifier's
+`WAIT_AND_RETRY` / `RETRY_NOW` disposition (`coverage.resolution_class` on the
+degraded verdict; `.outcome` on a raised completion error) — into its own code.
+
+- **What emits it:** `rebar review-plan` / `review-code` (shape A — read
+  `coverage.retryable`) and `rebar verify-completion` / `rebar close`'s completion
+  gate (shape B — read the raised error's `.outcome.retryable`). A non-retryable
+  degrade still exits `2` (INDETERMINATE); a real BLOCK/FAIL still exits `1`.
+- **Why additive-safe (no consumer breaks):**
+  - The **driving agent / human** is the primary consumer (this doc): treat 11 as
+    "transient — re-run after the backoff", else fall back to any-non-zero-is-failure.
+  - **CI** (`.github/workflows/gerrit-verify.yaml`, `test.yml`) runs `make`
+    targets and never invokes the gate CLIs, so 11 is invisible to the `Verified`
+    vote — it uses plain any-non-zero-is-failure semantics.
+  - The **Gerrit review-bot** (`src/rebar/review_bot/adapter.py`) votes off the
+    code-review **verdict dict** (PASS/BLOCK/INDETERMINATE), not CLI exit codes,
+    and already tolerates unknown `coverage` keys.
+- **Rollback:** revert the CLI mapping and the retryable subset falls back to the
+  existing INDETERMINATE exit (`2` for review-plan, `1` for the close gate). The
+  verdicts' optional `coverage.resolution_class` / `retryable` fields are ignored
+  by readers — no data migration.

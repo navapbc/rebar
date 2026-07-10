@@ -1,6 +1,6 @@
 # ADR 0038 — Activity-based liveness under run_sync; async idle-watchdog deferred
 
-- **Status:** Proposed (content authored by story `chief-contained-hoopoe`; finalized/renumbered by the integrator story `authorial-hated-blackbear`, epic jira-reb-687)
+- **Status:** Accepted (authored by story `chief-contained-hoopoe`; finalized by the integrator story `authorial-hated-blackbear`, epic jira-reb-687)
 - **Date:** 2026-07-09
 
 ## Context

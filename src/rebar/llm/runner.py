@@ -162,9 +162,27 @@ class PydanticAIRunner:
 
     def preflight(self) -> None:
         """Fail fast if the ``agents`` extra (pydantic-ai-slim) is absent or the config
-        uses settings this runner does not yet honour — both offline, no model call."""
-        _import_pydantic_ai()
-        _pai_check_config(self._config)
+        uses settings this runner does not yet honour — both offline, no model call.
+
+        Attaches an ``.outcome`` disposition to a raised ``LLMError`` (story blackbear) so a
+        preflight failure surfaces the same ``resolution_class`` channel as a mid-run outage
+        (mamba's run seam) — a config error classifies non-retryable, so it maps to the
+        existing INDETERMINATE exit, never the retryable exit 11."""
+        from rebar.llm.errors import LLMError
+
+        try:
+            _import_pydantic_ai()
+            _pai_check_config(self._config)
+        except LLMError as exc:
+            from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+            try:
+                exc.outcome = classify_llm_failure(  # type: ignore[attr-defined]
+                    exc, ClassifyContext(model=self._config.model)
+                )
+            except Exception:  # noqa: BLE001 — disposition is a hint; never mask the real error
+                pass
+            raise
 
     def run(self, req: RunRequest) -> dict:
         # Guard the agents extra FIRST — before importing any pydantic_ai submodule —

@@ -172,12 +172,28 @@ def _completion_precheck(
             ticket_id, graph=False, source="attested", ref="HEAD", fetch=False, repo_root=repo_root
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
+        # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
+        # to the raised LLM error through to the process exit code. A retryable outage (429/5xx)
+        # → exit 11 ("transient — retry"), else the existing fail-closed exit 1. CommandError
+        # already carries `returncode` and transition.py returns it, so exit 11 propagates with
+        # no plumbing change. The sanitized diagnostic is also written to the session log.
+        from rebar.llm import failure as _failure
+
+        _outcome = _failure.outcome_of(exc)
+        _failure.log_degrade(_outcome, gate="completion-verify", ticket_id=ticket_id)
+        _rc = 11 if (_outcome and _outcome.retryable) else 1
+        _hint = ""
+        if _outcome is not None:
+            _msg = _failure.message_for(_outcome.resolution_class.value)
+            if _msg:
+                _hint = f" [{_outcome.resolution_class.value}: {_msg}]"
         raise CommandError(
-            f"Error: cannot close {ticket_id}: completion verification could not run ({exc}). "
+            f"Error: cannot close {ticket_id}: completion verification could not run "
+            f"({exc}).{_hint} "
             "The completion-verification gate is enabled "
             "(verify.require_completion_verification_for_close); install the 'agents' extra and "
             'set a model API key, or override with --force-close="<reason>".',
-            returncode=1,
+            returncode=_rc,
         ) from None
 
     if str(result.get("verdict", "")).upper() != "PASS":
@@ -212,6 +228,21 @@ def _completion_precheck(
     if result.get("certifiable") is False:
         return None
     return _verdict_manifest(result, ticket_id, repo_root)
+
+
+def _is_full_sha(s: object) -> bool:
+    """True for a full 40-char lowercase-hex git SHA (the shape ``head_sha`` and an attested
+    ``verified-at-sha`` both take)."""
+    return isinstance(s, str) and len(s) == 40 and all(c in "0123456789abcdef" for c in s.lower())
+
+
+def _material_drifted(verified_sha: object, fresh_sha: object) -> bool:
+    """Whether the code MATERIALLY drifted between verify and sign (story blackbear): true only
+    when BOTH are real full SHAs that differ. A non-SHA / absent ``verified-at-sha`` (an
+    unattested/local verdict, or a test's synthetic marker) is not comparable → NOT drift, so the
+    normal sign-on-PASS path is preserved. Keeps the recheck sound in attested mode, where the
+    manifest's verified-at-sha is HEAD-at-verify and equals a fresh HEAD read unless HEAD moved."""
+    return _is_full_sha(verified_sha) and _is_full_sha(fresh_sha) and verified_sha != fresh_sha
 
 
 def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]:
@@ -345,11 +376,29 @@ def close_ticket(
     # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
     # the trustworthy record can't be written.
     if target_status == "closed" and verified_manifest is not None:
+        import sys
+
         from rebar import signing as _signing
 
-        _signing.sign_manifest(
-            ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
-        )
+        # Pre-sign fingerprint recheck (story blackbear): the verifier ran OUTSIDE the write lock,
+        # and transport retries + timeouts widen the verify -> close -> sign window. The close gate
+        # verifies an attested snapshot of HEAD, so the manifest's `verified-at-sha:` IS the HEAD
+        # SHA at verify time; re-read HEAD now and, if it MOVED, the code drifted under us — do NOT
+        # attest stale state. The ticket already closed (the transition committed above), so this is
+        # the same closed-without-signature outcome as --force-close: warn on stderr and skip
+        # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
+        _verified_sha = _signing.verified_at_sha_from_manifest(verified_manifest)
+        _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
+        if _material_drifted(_verified_sha, _fresh_sha):
+            sys.stderr.write(
+                f"Warning: closed {ticket_id} WITHOUT a completion signature — the code drifted "
+                f"between verify ({str(_verified_sha)[:12]}) and sign ({str(_fresh_sha)[:12]}); "
+                "not attesting stale state. Re-close to certify against the current tree.\n"
+            )
+        else:
+            _signing.sign_manifest(
+                ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
+            )
 
     # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
     # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +
