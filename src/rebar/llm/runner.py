@@ -257,6 +257,11 @@ class PydanticAIRunner:
         ran_model = (
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
+        # Agent-build invariant (story anole): for a tool-using op on a REAL model object,
+        # fail fast if the provider can't call tools (else pydantic-ai silently drops them).
+        # Gated on model_override is None (the test double is never checked) and tools present.
+        if self._model_override is None and tools:
+            _check_tool_capability(model, resolved)
         kwargs: dict[str, Any] = {
             "system_prompt": req.system_prompt,
             "tools": tools,
@@ -349,6 +354,10 @@ class PydanticAIRunner:
                     Agent, model, resolved, req, kwargs, usage_limits
                 )
                 outcome = {"structured_response": structured}
+            # Agent-build invariant (story anole): telemetry warning on a REAL run whose
+            # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
+            if self._model_override is None:
+                _warn_if_zeroed_usage(usage)
         except UsageLimitExceeded as exc:
             logger.warning(
                 "llm call [%s] mode=%s model=%s hit step budget "
@@ -663,6 +672,44 @@ def _local_proxy_bypass_base_url() -> str | None:
     if host in _LOOPBACK_HOSTS or host.endswith(".localhost"):
         return _DIRECT_ANTHROPIC_BASE_URL
     return None
+
+
+# Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,
+# never per call.
+_TOOL_CAPABILITY_CHECKED: set[str] = set()
+
+
+def _check_tool_capability(model, resolved: str) -> None:
+    """Fail fast if a tool-using op is about to run on a model that does NOT support tool
+    calling (pydantic-ai #6186 silently drops the tools). Reads the CONCRETE, verified
+    signal ``model.profile.supports_tools`` (a bool on the AnthropicModel object). Cached per
+    resolved model string — a hot loop pays nothing. Defensive: a missing/None profile is a
+    safe skip (True/None passes; only an explicit False raises)."""
+    if resolved in _TOOL_CAPABILITY_CHECKED:
+        return
+    _TOOL_CAPABILITY_CHECKED.add(resolved)
+    supports = getattr(getattr(model, "profile", None), "supports_tools", None)
+    if supports is False:
+        raise LLMConfigError(
+            f"model {resolved!r} does not support tool calling, but a tool-using gate op "
+            "would silently drop its tools — choose a tool-calling model/provider"
+        )
+
+
+def _warn_if_zeroed_usage(usage: dict) -> None:
+    """Telemetry-only WARNING (never a block) when a REAL run reports all-zero token usage
+    despite having made a request — the #5360 zeroed-adapter signal. Observability, not
+    load-bearing; a genuinely tiny run is at worst a benign warning."""
+    if (
+        usage.get("requests", 0) > 0
+        and usage.get("input_tokens", 0) == 0
+        and usage.get("output_tokens", 0) == 0
+    ):
+        logger.warning(
+            "llm usage looks zeroed/implausible (requests=%s, input=0, output=0) — the "
+            "provider adapter may be under-reporting usage",
+            usage.get("requests"),
+        )
 
 
 # HTTP statuses the transport retries. 529 (Anthropic overloaded) is included explicitly —
