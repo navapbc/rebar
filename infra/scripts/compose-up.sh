@@ -21,6 +21,28 @@ GERRIT_IMAGE="gerritcodereview/gerrit:3.14.1"
 SITE_HOST_DIR="/var/gerrit/site"
 GERRIT_UID=1000 # the `gerrit` user inside the image
 
+# The stateful site subdirs — the SINGLE source of truth for what gets a host dir
+# AND an external bind volume. Every `external: true` volume in docker-compose.yml
+# must be derivable from this list (CI enforces the pairing: config-check.sh check 5
+# diffs the compose file's external volumes against `--print-volumes` output, so a
+# compose edit that adds a volume without extending this list cannot reach main —
+# the incident-2731 drift class).
+SITE_SUBDIRS="git index cache db etc logs plugins reviewbot reviewbot-tickets"
+
+# Volume name for a site subdir: docker volume names cannot carry the hyphenated
+# host-dir spelling one-for-one (gerrit_reviewbot_tickets binds reviewbot-tickets),
+# so the derivation lives here, once: gerrit_ prefix + hyphens -> underscores.
+volume_for_subdir() { printf 'gerrit_%s\n' "${1//-/_}"; }
+
+# Side-effect-free enumeration mode, consumed by config-check.sh check 5 (the CI
+# drift gate). MUST stay above every side-effecting section (dnf/systemctl/docker/
+# fetch-secrets): it prints the external volume names this script would create,
+# one per line, and exits.
+if [ "${1:-}" = "--print-volumes" ]; then
+  for d in ${SITE_SUBDIRS}; do volume_for_subdir "${d}"; done
+  exit 0
+fi
+
 cd "${REPO_ROOT}"
 
 # --- 1. Ensure Docker + the compose plugin are installed and running -------
@@ -58,7 +80,7 @@ fi
 # copy the image's baked plugins on first run (so an empty mounted plugins dir does
 # not hide them — S4a then drops webhooks/events-log here and they persist), and
 # chown to the in-image gerrit uid so the container can write.
-for d in git index cache db etc logs plugins reviewbot; do
+for d in ${SITE_SUBDIRS}; do
   mkdir -p "${SITE_HOST_DIR}/${d}"
 done
 
@@ -66,8 +88,8 @@ done
 # subdir, each a local `bind` volume onto the EBS-backed host path. external:true in
 # the compose file means `docker compose down -v` cannot destroy them. Idempotent:
 # `volume inspect || volume create`.
-for d in git index cache db etc logs plugins reviewbot; do
-  vol="gerrit_${d}"
+for d in ${SITE_SUBDIRS}; do
+  vol="$(volume_for_subdir "${d}")"
   docker volume inspect "${vol}" >/dev/null 2>&1 || \
     docker volume create \
       --driver local \

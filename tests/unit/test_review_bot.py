@@ -1071,3 +1071,37 @@ def test_voter_treats_409_change_closed_as_terminal(monkeypatch, tmp_path):
     assert res["status"] == "skipped"  # terminal, NOT "error"
     assert errors == []  # no voter_error emitted / no voter_errors increment
     assert store.already_voted("rebar~main~Iabc", "rev1")  # recorded → never retried
+
+
+# ── app lifespan: snapshot janitor wiring (incident 2731 / bug e7f4) ────────
+def test_lifespan_starts_and_stops_snapshot_janitor(monkeypatch):
+    """The receiver's lifespan must start the snapshot-cache janitor (the reclamation
+    that incident 2731 showed was dead code in production) and signal its stop event
+    on shutdown. Requires the ``reviewbot`` extra (fastapi); skipped without it."""
+    pytest.importorskip("fastapi")
+    import threading
+
+    import rebar._snapshot as snap
+    from rebar.review_bot import app as appmod
+
+    stop = threading.Event()
+    started: list[bool] = []
+
+    def fake_start(**_kw):
+        started.append(True)
+        return threading.Thread(target=lambda: None), stop
+
+    monkeypatch.setattr(snap, "start_background_janitor", fake_start)
+
+    async def fake_reconcile_loop(*, config=None):  # never touches Gerrit
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", fake_reconcile_loop)
+
+    async def drive():
+        async with appmod.lifespan(appmod.app):
+            assert started, "janitor was not started on startup"
+            assert not stop.is_set()
+        assert stop.is_set(), "janitor stop event not signalled on shutdown"
+
+    asyncio.run(drive())
