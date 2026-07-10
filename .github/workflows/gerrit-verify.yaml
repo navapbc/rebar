@@ -205,6 +205,22 @@ jobs:
             exit 1
           fi
 
+      # Env-var registry drift gate in the Verified gate too (mirrors test.yml):
+      # docs/env-vars.md is DERIVED from the env-var reads under src/rebar. A stale
+      # committed registry previously landed because this gate ran ONLY in the
+      # post-merge branch CI, not the pre-merge Verified gate — closing that hole.
+      - name: Env-var registry drift gate
+        shell: bash
+        run: |
+          python scripts/gen_env_registry.py
+          if ! git diff --exit-code -- docs/env-vars.md; then
+            echo "::error::docs/env-vars.md is stale — regenerate it with"
+            echo "  python scripts/gen_env_registry.py"
+            echo "and commit the result (it is derived from env-var reads under src/rebar)."
+            exit 1
+          fi
+          echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
+
       - name: Security-rules freshness gate (warn-only)
         shell: bash
         run: python -m rebar.grounding.detectors.security_pin
@@ -216,6 +232,14 @@ jobs:
             echo "::error::criteria_routing.json out of parity with CANONICAL_LLM."
             exit 1
           fi
+
+      # server.json env-contract drift gate in the Verified gate too (mirrors test.yml):
+      # server.json is the MCP front-door manifest; rebar.mcp_server.MCP_ENV_VARS is the
+      # single source of truth for the env gates. Fails when the manifest's advertised
+      # env-var set diverges from that canonical list — was previously only post-merge.
+      - name: server.json env-contract drift gate
+        shell: bash
+        run: python scripts/check_server_manifest.py
 
       # Public-types drift gate in the Verified gate too (story 3a10): src/rebar/types.py
       # is DERIVED from the canonical JSON Schemas. Mirrors test.yml — a stale committed
@@ -231,6 +255,14 @@ jobs:
 
       - name: lint (ruff check + format --check, gating)
         run: make lint
+
+      # pre-commit (all hooks, all files) in the Verified gate too (mirrors test.yml):
+      # runs the EXACT hooks in .pre-commit-config.yaml (check-yaml/toml/merge-conflict/
+      # added-large-files + the make lint/typecheck hooks), so the hook set a contributor
+      # commits through is enforced pre-merge, not just post-merge. Belt-and-suspenders:
+      # a green commit hook == green Verified gate.
+      - name: pre-commit (all hooks, all files, gating)
+        run: pre-commit run --all-files --show-diff-on-failure
 
       - name: mypy — full library (gating)
         run: make typecheck
