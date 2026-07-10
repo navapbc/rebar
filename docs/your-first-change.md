@@ -12,7 +12,7 @@ rebar does **not** use GitHub pull requests. Code review happens on a self-hoste
 **Gerrit** server, and GitHub is a **read-only mirror** of `main`. Every change is
 gated by **two bot votes** before it can land — an LLM code review and CI. You don't
 need to understand the vote details yet; when you get a vote, the short version below
-tells you what to do, and [CONTRIBUTING.md §2c](../CONTRIBUTING.md) has the full
+tells you what to do, and [docs/review-policy.md](review-policy.md) has the full
 semantics.
 
 The flow has two layers, borrowed from every Gerrit project's onboarding: a
@@ -85,7 +85,7 @@ You only do this the first time.
    - **A `Verified` −1** → CI failed. Open the linked run; if it looks like a flake,
      comment **`recheck`** to re-run CI. If it's a real failure, fix and re-push.
 
-     For what each vote means in full, read [CONTRIBUTING.md §2c](../CONTRIBUTING.md)
+     For what each vote means in full, read [docs/review-policy.md](review-policy.md)
      — it's the single source for vote semantics, so this tutorial won't restate the
      details here.
 6. **Amend and re-push** to update the same change (thanks to the `Change-Id`, this

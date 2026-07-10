@@ -115,25 +115,18 @@ change the review verdict. **Only the two bots and administrators may cast eithe
 so you cannot self-approve or self-verify your own change. (Both labels block submit today —
 the `Verified` requirement was activated 2026-07-02; see the status note above.)
 
-**Reading a `-1`.** An `LLM-Review` `-1` comes in two flavors — check the tag on the bot's
-message:
+**Reading a `-1` (quick version).** An `LLM-Review` `-1` is either a **finding** in
+your code (`[LLM-Review: BLOCK — finding]`, with inline comments → fix, amend, re-push,
+§2d) or a **coverage-gap** infra veto (`[LLM-Review: BLOCK — coverage-gap (…)]` → the
+review couldn't fully run; **not your code** — a maintainer re-triggers it once infra
+recovers, don't "fix" your diff). A `Verified` `-1` means CI failed: open the linked
+run, fix a real failure and re-push (§2d), or comment **`recheck`** to re-run CI on the
+same patchset for a flake.
 
-| Bot message tag | Meaning | What to do |
-|---|---|---|
-| `[LLM-Review: BLOCK — finding]` with inline comments | **Real finding(s)** in your code | Fix the code, amend, re-push (§2d). |
-| `[LLM-Review: BLOCK — coverage-gap (llm-unavailable / scanner / gate-disabled / review-error)]` | **Infra veto, not your code** — the review couldn't fully run (LLM down, a scanner failed, the gate was disabled, or a review error). Fail-closed by design. | Not a code problem. Re-trigger the review once the infra recovers (re-push the same commit, or ask an admin). Don't "fix" your diff — there's nothing wrong with it. |
-
-This distinction is deliberate: a coverage-gap `-1` means "we could not prove your change
-is safe," not "your change is bad."
-
-**A `Verified` `-1` (CI failed).** Open the linked run to see which check failed, then:
-
-- **Real test/lint/type failure** → fix the code, amend, and re-push (§2d). Each new
-  patchset drops the old `Verified` and triggers a fresh run automatically.
-- **A flaky/transient failure** (not your code) → comment **`recheck`** on the change to
-  re-run CI on the *same* patchset without amending. A new run dispatches and re-votes.
-  (You can also just push a new patchset; the in-flight run for the change is cancelled so
-  only the newest patchset's run survives.)
+> **Full vote semantics live in one place:** [docs/review-policy.md](docs/review-policy.md)
+> has the complete tag table (every coverage-gap sub-reason and the merge-change
+> variants, transcribed from the code), who may vote, the dispute / override path, and
+> the responsibility clause. This §2c is the in-flow summary; that doc is authoritative.
 
 ### 2d. Address findings and re-push
 Amend the **same** commit (keep the `Change-Id` so Gerrit updates the existing change
