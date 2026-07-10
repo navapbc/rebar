@@ -204,7 +204,14 @@ def _maybe_apply_rising_floor(
         return  # evidence gate: inert until the novelty discriminator has cleared its bar
     advisory = verdict.get("advisory") or []
     prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
-    prior_findings = (prior or {}).get("findings") or []
+    # SURFACED-ONLY (bug old-frilly-plankton): score novelty ONLY against findings that were
+    # RETURNED TO THE CLIENT (block/advisory), never against previously-dropped findings. The
+    # sidecar persists dropped findings too, so reading ``findings`` unfiltered would let a finding
+    # permanently floored for convergence re-enter the prior set, re-match on recurrence, score as
+    # low-novelty "carryover", and thereby ESCAPE the floor that dropped it. This mirrors the same
+    # decision filter ``prior_concerns()`` already applies on the recall path (they now share
+    # ``surfaced_findings`` so the two prior-set consumers cannot disagree).
+    prior_findings = sidecar.surfaced_findings(prior)
     if not advisory or not prior_findings:
         return
     novelty_map = _score_floor_novelty(

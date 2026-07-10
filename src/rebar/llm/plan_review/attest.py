@@ -438,6 +438,12 @@ def remediation_mode_candidate(
         # the newest USABLE v1 payload (walk-back over malformed/foreign-schema files), whereas
         # the window below reads the newest FILE's timestamp; they can differ if the newest file
         # is unusable — benign here (both only gate eligibility, conservatively).
+        # AUDIT (bug old-frilly-plankton): this is an EXISTENCE gate ("did a substantive prior
+        # review run?"), NOT a novelty prior set — it never feeds findings into novelty scoring, so
+        # it deliberately reads ALL findings (a review that floored everything still ran and is a
+        # valid convergence anchor). Do NOT narrow this to ``surfaced_findings`` — that would change
+        # eligibility semantics. The surfaced-only filter belongs only where prior findings become a
+        # novelty SIGNAL (``_maybe_apply_rising_floor`` / ``prior_concerns``).
         prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
         reasons["prior_sidecar"] = bool(
             prior and any((f.get("finding") or "").strip() for f in prior.get("findings", []) or [])

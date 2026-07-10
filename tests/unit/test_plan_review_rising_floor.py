@@ -103,7 +103,9 @@ def _patch(monkeypatch, *, novelty_drop_active, injected_map):
     monkeypatch.setattr(
         sidecar,
         "latest_review_result",
-        lambda tid, repo_root=None: {"findings": [{"finding": "x"}]},
+        # A prior SURFACED finding (decision="advisory") — surfaced_findings must keep it so the
+        # floor has a non-empty prior set and stays live (bug old-frilly-plankton filter).
+        lambda tid, repo_root=None: {"findings": [{"finding": "x", "decision": "advisory"}]},
     )
     monkeypatch.setattr(
         plan_review,
@@ -162,3 +164,58 @@ def test_config_defaults() -> None:
     assert vc.novelty_drop_threshold == 0.7
     assert vc.novelty_priority_floor == 0.4
     assert vc.novelty_drop_active is False  # inert by default (the evidence gate)
+
+
+# ── surfaced-only prior set (bug old-frilly-plankton) ─────────────────────────────────────────
+def test_surfaced_findings_keeps_only_client_returned_decisions() -> None:
+    """``surfaced_findings`` keeps block/advisory, drops the dropped/indeterminate/overflow ones
+    ``build_payload`` also persists — so a previously-DROPPED finding can never re-enter a prior
+    set. None/empty payloads degrade to ``[]``."""
+    payload = {
+        "findings": [
+            {"id": "b", "decision": "block"},
+            {"id": "a", "decision": "advisory"},
+            {"id": "d", "decision": "dropped", "drop_reason": "novelty"},
+            {"id": "i", "decision": "indeterminate"},
+            {"id": "o", "decision": "overflow"},
+            {"id": "n"},  # no decision key at all
+        ]
+    }
+    assert [f["id"] for f in sidecar.surfaced_findings(payload)] == ["b", "a"]
+    assert sidecar.surfaced_findings(None) == []
+    assert sidecar.surfaced_findings({}) == []
+
+
+def test_dropped_prior_findings_never_reach_the_novelty_scorer(monkeypatch) -> None:
+    """REGRESSION (bug old-frilly-plankton): a finding permanently DROPPED for convergence must not
+    re-enter the novelty prior set. ``_maybe_apply_rising_floor`` must feed ``_score_floor_novelty``
+    the SURFACED-only prior findings — else the recurring dropped finding matches its own prior
+    record, scores low-novelty 'carryover', and escapes the floor that dropped it."""
+    # A prior sidecar holding BOTH a surfaced advisory AND a previously-floored (dropped) finding.
+    prior_payload = {
+        "findings": [
+            {"id": "surfaced1", "finding": "kept concern", "decision": "advisory"},
+            {
+                "id": "floored1",
+                "finding": "repeat noise",
+                "decision": "dropped",
+                "drop_reason": "novelty",
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        core_config, "load_config", lambda repo_root=None: _cfg(novelty_drop_active=True)
+    )
+    monkeypatch.setattr(sidecar, "latest_review_result", lambda tid, repo_root=None: prior_payload)
+    captured: dict[str, object] = {}
+
+    def _capture(advisory, prior_findings, *, ctx, cfg, runner, repo_root):
+        captured["prior_findings"] = prior_findings
+        return {}
+
+    monkeypatch.setattr(plan_review, "_score_floor_novelty", _capture)
+    plan_review._maybe_apply_rising_floor(
+        "T", _verdict(), {"eligible": True}, ctx=_ctx(), cfg=_cfg(), runner=object(), repo_root=None
+    )
+    ids = [f["id"] for f in captured["prior_findings"]]  # type: ignore[union-attr]
+    assert ids == ["surfaced1"], "dropped prior finding leaked into the novelty prior set"
