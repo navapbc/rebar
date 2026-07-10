@@ -15,8 +15,9 @@ PR merges to GitHub `main`.
 
 ### How to land your change
 
-Please follow the full flow in **[CONTRIBUTING.md](../CONTRIBUTING.md)**. The
-short version:
+New here? The friendly walkthrough is
+**[docs/your-first-change.md](../docs/your-first-change.md)**; the full reference is
+**[CONTRIBUTING.md](../CONTRIBUTING.md)**. The short version:
 
 1. Sign in to `https://rebar.solutions.navateam.com` (GitHub OAuth), generate an
    HTTP password, and clone from Gerrit.

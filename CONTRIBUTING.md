@@ -24,6 +24,11 @@ Gerrit-submitted change replicates out. Direct pushes and pull-request merges to
 If you only read the code (no contributions), just use the GitHub mirror as usual — you
 don't need Gerrit.
 
+> **First time contributing? Start with the friendly walkthrough:
+> [docs/your-first-change.md](docs/your-first-change.md).** It walks you through one
+> change end to end (account → clone → commit → push → votes → submit). This document
+> is the complete reference behind that tutorial.
+
 ---
 
 ## 1. One-time setup
