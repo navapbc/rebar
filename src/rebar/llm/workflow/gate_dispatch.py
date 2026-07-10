@@ -469,6 +469,9 @@ class CodeReviewRequest:
     # target_ticket), the gate resolves-or-creates a `code-review: session:<id>` artifact, stamps
     # verdict["session_id"], and emits onto it — giving `rebar review-code` cross-run memory.
     session_id: str | None = None
+    # Gerrit change id (story blameless-grindable-noctule): selects the `change:<id>` novelty
+    # keyspace for the region-gated floor when the review-bot supplies it (local uses session_id).
+    change_id: str = ""
     repo_root: Any = None
     enabled: bool | None = None
 
@@ -681,6 +684,28 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
             verdict["deps"] = _sidecar.reviewed_file_hashes(_dep_paths, repo_root=request.repo_root)
         except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
             verdict.setdefault("deps", {})
+        # Region-gated novelty floor (story blameless-grindable-noctule): narrow the advisory set
+        # against this key's prior SURFACED findings + deps BEFORE the emit, so the persisted
+        # payload
+        # already reflects the convergence. Keyed by the TYPED keyspace — session (local) or change
+        # (Gerrit). Gated on verify.novelty_drop_active + self-gates inert with no prior memory;
+        # any error leaves the verdict unfiltered (no drops).
+        _novelty_key = None
+        if request.session_id:
+            _novelty_key = f"session:{request.session_id}"
+        elif request.change_id:
+            _novelty_key = f"change:{request.change_id}"
+        if _novelty_key:
+            from rebar.llm.code_review import workflow_ops as _wops
+
+            _wops.apply_region_gated_floor(
+                verdict,
+                key=_novelty_key,
+                cfg=cfg,
+                runner=runner_sel,
+                repo_root=request.repo_root,
+                diff_text=prep.dc.diff_text,
+            )
         # Emit the durable artifact. An explicit target_ticket (ticket-scoped review) emits
         # directly; otherwise the LOCAL session path (story paradoxal-balsamic-bubblefish)
         # resolves-or-creates a session-keyed artifact so `review-code` gains memory. Best-effort.
