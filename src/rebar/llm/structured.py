@@ -125,7 +125,7 @@ def _first_json_object(text: str) -> Any | None:
     return None  # no balanced object parses (e.g. a truncated stream)
 
 
-def tolerant_parse(text: str) -> Any:
+def tolerant_parse(text: str, schema: Any = None) -> Any:
     """Deterministically parse near-miss model output into a Python object (layer 2).
 
     Order (all NO-LLM): strict ``json.loads`` → fenced block → the FIRST balanced
@@ -133,7 +133,12 @@ def tolerant_parse(text: str) -> Any:
     ``json-repair`` (trailing commas, unclosed braces, single/smart quotes) as the
     last resort. Raises :class:`StructuredOutputError` only when nothing is parseable
     (e.g. a truncated stream with no balanced object — caught upstream by the
-    ``max_tokens`` stop-reason guard)."""
+    ``max_tokens`` stop-reason guard).
+
+    ``schema`` (story drake): when a Pydantic model is supplied, json-repair is given it
+    for schema-GUIDED deterministic repair (it can coerce/fill toward the target shape
+    before any LLM reask). Best-effort: a schema-guided repair that raises falls back to
+    the schema-less call, so it never regresses today's behavior."""
     if not isinstance(text, str) or not text.strip():
         raise StructuredOutputError("empty model output (nothing to parse)")
     candidates = [text]
@@ -158,10 +163,22 @@ def tolerant_parse(text: str) -> Any:
             f"output is not valid JSON and json-repair is unavailable: {text[:120]!r}"
         ) from exc
     for cand in candidates:
-        repaired = repair_json(cand, return_objects=True)
+        repaired = _repair(repair_json, cand, schema)
         if repaired not in ("", None, [], {}):
             return repaired
     raise StructuredOutputError(f"output could not be parsed even after repair: {text[:120]!r}")
+
+
+def _repair(repair_json, cand: str, schema: Any):
+    """Schema-guided json-repair (story drake) with a safe fallback: when a ``schema`` is
+    supplied, pass it so json-repair coerces toward the target shape; if that raises (a
+    json-repair edge case), fall back to the schema-less repair so behavior never regresses."""
+    if schema is not None:
+        try:
+            return repair_json(cand, return_objects=True, schema=schema)
+        except Exception:  # noqa: BLE001 — schema-guided repair is best-effort; fall back
+            pass
+    return repair_json(cand, return_objects=True)
 
 
 def validate_to(model_cls, data: Any):
@@ -203,7 +220,7 @@ def parse_structured(text: str, model_cls):
     """The deterministic layers (2)+(3) as one call: tolerant-parse then validate.
     Returns a validated ``model_cls`` instance, or raises :class:`StructuredOutputError`
     (the signal a caller turns into a single bounded retry — layer 4)."""
-    return validate_to(model_cls, tolerant_parse(text))
+    return validate_to(model_cls, tolerant_parse(text, schema=model_cls))
 
 
 # Stop/finish reasons that are NOT a usable structured answer and must never be read
