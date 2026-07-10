@@ -414,6 +414,12 @@ def _review_plan(argv: list[str]) -> int:
         "--no-sign", action="store_true", help="run the review but do NOT sign an attestation"
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-run the review even if a current attestation exists "
+        "(bypass the idempotence short-circuit)",
+    )
+    parser.add_argument(
         "--check", action="store_true", help="print backend/credential availability and exit"
     )
     _add_ref_source(parser)
@@ -429,7 +435,11 @@ def _review_plan(argv: list[str]) -> int:
     ensure_initialized(init_only=True)
     try:
         result = llm.review_plan(
-            args.ticket_id, ref=args.ref, source=args.source, sign=not args.no_sign
+            args.ticket_id,
+            ref=args.ref,
+            source=args.source,
+            sign=not args.no_sign,
+            force=args.force,
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")

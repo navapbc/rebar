@@ -981,3 +981,82 @@ def test_block_verdict_cannot_satisfy_the_claim_gate(rebar_repo: Path) -> None:
         rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
     assert ei.value.returncode == 1
     assert _status(tid, rebar_repo) == "open"  # never claimed off a BLOCK
+
+
+# ── idempotence short-circuit (feature b3e5) ────────────────────────────────────
+class _CountingFake(_GateFake):
+    """A ``_GateFake`` that counts how many times the runner is invoked, so a test can
+    assert the multi-pass LLM review did (or did NOT) run on a given ``review_plan`` call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def run(self, req) -> dict:  # type: ignore[override]
+        self.calls += 1
+        return super().run(req)
+
+
+def test_idempotent_second_review_skips_the_llm(rebar_repo: Path) -> None:
+    # A first signing review runs the LLM and signs. A SECOND review on the UNCHANGED
+    # ticket must NOT invoke the LLM again — it short-circuits and reuses the attestation.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    runner = _CountingFake()
+    v1 = _review(tid, rebar_repo, runner=runner)
+    assert v1["verdict"] == "PASS" and v1["signature"]["signed"]
+    first = runner.calls
+    assert first > 0  # the first review actually ran the passes
+
+    v2 = _review(tid, rebar_repo, runner=runner)
+    assert runner.calls == first  # no further LLM calls on the 2nd review
+    assert v2["verdict"] == "PASS"
+    assert v2["coverage"]["idempotent_skip"] is True
+    assert v2["coverage"]["llm_ran"] is False
+    assert v2["signature"]["signed"] is True  # reuses the current attestation
+
+
+def test_force_reruns_the_llm_on_an_unchanged_ticket(rebar_repo: Path) -> None:
+    # --force bypasses the idempotence short-circuit and forces a full re-review.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    runner = _CountingFake()
+    _review(tid, rebar_repo, runner=runner)
+    first = runner.calls
+
+    v2 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(rebar_repo), force=True)
+    assert runner.calls > first  # the LLM ran again under --force
+    assert v2["coverage"].get("idempotent_skip") is not True
+
+
+def test_material_change_reruns_the_llm(rebar_repo: Path) -> None:
+    # A MATERIAL edit invalidates the attestation (fingerprint changes), so the 2nd review
+    # is NOT idempotent and re-runs the LLM.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    runner = _CountingFake()
+    _review(tid, rebar_repo, runner=runner)
+    first = runner.calls
+
+    new_desc = _DESC + "\n\n## Extra\nAdditional scope detail that materially changes the plan.\n"
+    rebar.edit_ticket(tid, description=new_desc, repo_root=str(rebar_repo))
+
+    v2 = _review(tid, rebar_repo, runner=runner)
+    assert runner.calls > first  # fingerprint changed → full re-review
+    assert v2["coverage"].get("idempotent_skip") is not True
+
+
+def test_skip_path_still_satisfies_the_claim_gate(rebar_repo: Path) -> None:
+    # The skip did not weaken the gate: after a reuse (skip) review, the attestation is
+    # still valid and a claim succeeds.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]  # sign
+    v2 = _review(tid, rebar_repo)  # skip path
+    assert v2["coverage"]["idempotent_skip"] is True
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
