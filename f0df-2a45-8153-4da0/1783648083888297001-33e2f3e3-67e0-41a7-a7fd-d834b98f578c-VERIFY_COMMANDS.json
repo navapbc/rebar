@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"make lint","dd_id":"DD1","dd_text":"Lint + format check passes (ruff)"},{"command":"make typecheck","dd_id":"DD2","dd_text":"Type check passes (mypy)"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783648083888297001,"uuid":"33e2f3e3-67e0-41a7-a7fd-d834b98f578c"}
