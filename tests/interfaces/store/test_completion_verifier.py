@@ -135,6 +135,69 @@ def test_op_normalizes_verdict_casing(rebar_repo: Path) -> None:
     assert _verify(rebar_repo, tid, {"verdict": "garbage", "findings": []})["verdict"] == "FAIL"
 
 
+def test_fail_verdict_carries_remediation_guidance(rebar_repo: Path) -> None:
+    """Every FAIL verdict carries remediation guidance that points at the ticket-comments
+    evidence channel — generic, and without steering the caller toward bypassing the gate."""
+    from rebar.llm.completion import COMPLETION_REMEDIATION_GUIDANCE
+
+    r = _verify(
+        rebar_repo,
+        _seed(rebar_repo),
+        {
+            "verdict": "FAIL",
+            "findings": [
+                {
+                    "criterion": "AC1",
+                    "detail": "not met",
+                    "severity": "high",
+                    "dimension": "completion",
+                }
+            ],
+        },
+    )
+    guidance = r.get("remediation")
+    assert guidance, "a FAIL verdict must carry remediation guidance"
+    assert guidance == COMPLETION_REMEDIATION_GUIDANCE
+    lowered = guidance.lower()
+    # Names the intended channel: documenting evidence as a comment on the ticket.
+    assert "comment" in lowered
+    assert "evidence" in lowered
+    # Steers to the evidence channel only — does not advertise a way to bypass the gate.
+    assert "force" not in lowered
+    # Generic, not over-fitted to any one incident.
+    for token in ("epic", "dependabot", "contributing", "child ticket", "governance"):
+        assert token not in lowered
+
+
+def test_pass_verdict_has_no_remediation(rebar_repo: Path) -> None:
+    """A PASS has nothing to remediate, so it never carries the guidance field."""
+    r = _verify(rebar_repo, _seed(rebar_repo), {"verdict": "PASS", "findings": []})
+    assert r["verdict"] == "PASS"
+    assert "remediation" not in r
+
+
+def test_deterministic_child_failure_carries_remediation() -> None:
+    """The deterministic child-closure FAIL (no LLM) also carries the guidance — the single
+    reconcile_verdict chokepoint means the same coaching rides both failure paths."""
+    from types import SimpleNamespace
+
+    from rebar.llm.completion import COMPLETION_REMEDIATION_GUIDANCE, deterministic_child_failure
+
+    child_findings = [
+        {
+            "criterion": "direct child X is closed",
+            "detail": "child X is 'open', not closed.",
+            "severity": "high",
+            "dimension": "completion",
+        }
+    ]
+    verdict = deterministic_child_failure(
+        "parent-id", child_findings, SimpleNamespace(repo_path=None)
+    )
+    assert verdict["verdict"] == "FAIL"
+    assert verdict.get("remediation") == COMPLETION_REMEDIATION_GUIDANCE
+
+
 def test_child_closure_trust(rebar_repo: Path) -> None:
     """Epic-level verdict trust: a parent is FAIL unless every DIRECT child is closed WITH a
     certified signature — without recursing or re-verifying child criteria. The LLM verdict on

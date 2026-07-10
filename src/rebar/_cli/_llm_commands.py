@@ -511,3 +511,7 @@ def _render_verdict_text(result: dict) -> None:
                 sys.stdout.write(f"    @ {c.get('url', '')}\n")
             else:
                 sys.stdout.write(f"    - {c.get('description', '')}\n")
+    # Remediation guidance rides on FAIL verdicts (reconcile_verdict): point the reader at the
+    # evidence channel — documenting proof of a met requirement as a comment on the ticket.
+    if result.get("remediation"):
+        sys.stdout.write(f"\n{result['remediation']}\n")

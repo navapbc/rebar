@@ -20,6 +20,10 @@
       "type": "string",
       "description": "Optional verifier summary; carries the no-explicit-criteria PASS rationale when applicable."
     },
+    "remediation": {
+      "type": "string",
+      "description": "Guidance carried on a FAIL verdict (set by the operation's `reconcile_verdict`): how to satisfy the unmet criteria, including documenting evidence that meets a requirement as a comment on the ticket — the verifier reads a ticket's comments, so recorded evidence is taken into account on the next verification. Absent on PASS (nothing to remediate)."
+    },
     "target": {
       "type": "object",
       "additionalProperties": true,

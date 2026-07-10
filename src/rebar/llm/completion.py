@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # leading-underscore privates) so a MANDATORY gate does not depend on another module's
 # underscore-privates — a rename here is a visible contract change, not a silent break.
 __all__ = [
+    "COMPLETION_REMEDIATION_GUIDANCE",
     "child_closure_findings",
     "deterministic_child_failure",
     "reconcile_verdict",
@@ -43,6 +44,26 @@ __all__ = [
 
 _REVIEWER_ID = "completion-verifier"
 _OUTPUT_SCHEMA = "completion_verdict"
+
+# Generic remediation guidance carried on EVERY FAIL verdict (attached in reconcile_verdict, the
+# one chokepoint both the agentic and the deterministic child-closure verdicts pass through). Its
+# job is to point the caller at the intended channel for a requirement that is *already met but
+# not discoverable from the code alone*: record the supporting evidence as a comment on the
+# ticket. The completion verifier can read a ticket's comments (its read-only show_ticket tool),
+# so evidence documented there is taken into account on the next verification. Kept deliberately
+# generic — it describes the evidence channel for any unmet criterion, not any single situation —
+# and it names only that channel, so the caller's attention lands on documenting evidence (or
+# finishing genuinely incomplete work) rather than on any way of bypassing the gate.
+COMPLETION_REMEDIATION_GUIDANCE = (
+    "How to resolve the unmet criteria: for each one, decide whether the work is genuinely "
+    "incomplete or simply undocumented. If a requirement is already satisfied but the proof "
+    "is not discoverable from the code alone, add a comment to this ticket that documents the "
+    "evidence — cite the concrete artifacts that meet the requirement (file paths and line "
+    "ranges, commands and their output, links, or the reasoning that ties the work to the "
+    "criterion). The completion verifier reads this ticket's comments, so evidence you record "
+    "there is taken into account on the next verification. For any criterion whose work is "
+    "genuinely unfinished, complete it, then re-verify."
+)
 # Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
 # blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
@@ -206,6 +227,16 @@ def reconcile_verdict(result: dict) -> None:
         ]
     result["verdict"] = verdict
     result["findings"] = items
+    # Coach the caller toward the evidence channel on ANY failure: a criterion that is already
+    # met but not visible in the code can be satisfied by DOCUMENTING the evidence as a comment
+    # on the ticket (the verifier reads ticket comments). Set here — the single chokepoint both
+    # the agentic verdict and the deterministic child-closure verdict pass through — so every FAIL
+    # carries it uniformly. A PASS has nothing to remediate, so it never carries the field (and a
+    # verdict flipped PASS->... stays consistent: only FAIL gets guidance).
+    if verdict == "FAIL":
+        result["remediation"] = COMPLETION_REMEDIATION_GUIDANCE
+    else:
+        result.pop("remediation", None)
 
 
 def deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg) -> dict:
