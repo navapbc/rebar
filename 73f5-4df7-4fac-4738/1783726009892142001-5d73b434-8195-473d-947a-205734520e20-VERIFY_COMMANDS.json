@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"verify_commands":[{"command":"land --help | grep -qE \"merged|needs_rebase|ci_failed|review_failed\"","dd_id":"S4-DD1","dd_text":"land returns typed outcome JSON + distinct exit code"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1783726009892142001,"uuid":"5d73b434-8195-473d-947a-205734520e20"}
