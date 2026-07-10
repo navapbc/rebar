@@ -465,6 +465,10 @@ class CodeReviewRequest:
     commit_message: str = ""
     runner: Any = None
     target_ticket: str | None = None
+    # Local session key (story paradoxal-balsamic-bubblefish): when set (and no explicit
+    # target_ticket), the gate resolves-or-creates a `code-review: session:<id>` artifact, stamps
+    # verdict["session_id"], and emits onto it — giving `rebar review-code` cross-run memory.
+    session_id: str | None = None
     repo_root: Any = None
     enabled: bool | None = None
 
@@ -476,6 +480,81 @@ class _CodeReviewPrep(NamedTuple):
     inputs: dict[str, Any]
     context_overrides: dict[str, Any] | None
     t_total: float
+
+
+def _resolve_or_create_session_artifact(
+    session_id: str, *, head: str = "HEAD", repo_root: Any = None
+) -> str | None:
+    """Resolve-or-create the LOCAL session-keyed ``code_review`` artifact ticket for ``session_id``
+    and best-effort ``relates_to``-link the work ticket from ``head``'s ``rebar-ticket:`` trailer.
+    Returns the artifact id, or ``None`` on any failure. Idempotent per session id (mirrors
+    ``voter.emit_code_review_artifact``): a title match REUSES the existing artifact so two reviews
+    under one session append to the SAME memory. Never raises — the artifact is best-effort, so a
+    store failure must not fail the review (only local convergence memory is lost)."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        import rebar
+
+        title = f"code-review: session:{session_id}"
+        artifact_id: str | None = None
+        try:
+            for t in rebar.list_tickets(ticket_type="code_review", repo_root=repo_root) or []:
+                if str(t.get("title") or "") == title:
+                    artifact_id = str(t.get("ticket_id") or t.get("id") or "") or None
+                    break
+        except Exception:  # noqa: BLE001 — a lookup failure just means we create a fresh artifact
+            artifact_id = None
+        if not artifact_id:
+            created = rebar.create_ticket(
+                "code_review",
+                title,
+                description=(
+                    f"Local code-review artifact for session {session_id}. Holds the surfaced "
+                    "findings + reviewed-file content-hash map that the region-gated novelty floor "
+                    "converges against across `rebar review-code` runs in this session."
+                ),
+                return_alias=True,
+                repo_root=repo_root,
+            )
+            artifact_id = str(created["id"] if isinstance(created, dict) else created)
+        _link_session_artifact(artifact_id, head=head, repo_root=repo_root)
+        return artifact_id
+    except Exception:  # noqa: BLE001 — best-effort local memory; never fails the review
+        logger.warning("local session code_review artifact resolve/create failed", exc_info=True)
+        return None
+
+
+def _link_session_artifact(artifact_id: str, *, head: str = "HEAD", repo_root: Any = None) -> None:
+    """Best-effort ``relates_to`` link from the session artifact to the work ticket named in
+    ``head``'s ``rebar-ticket:`` trailer (searchability). A trailerless/unresolved review still
+    persists — the link is optional and never fails the review. Mirrors the voter's trailer path."""
+    import logging
+    import subprocess
+
+    logger = logging.getLogger(__name__)
+    try:
+        import rebar
+        from rebar import config as _config
+        from rebar._commands.verify_commit import extract_ticket_refs
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        root = str(_config.repo_root(repo_root))
+        msg = subprocess.run(
+            ["git", "-C", root, "log", "-1", "--format=%B", head or "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        tracker = str(_config.tracker_dir(repo_root))
+        for ref in extract_ticket_refs(msg) or []:
+            resolved = resolve_ticket_id(ref, tracker)
+            if resolved:
+                rebar.link(artifact_id, resolved, "relates_to", repo_root=repo_root)
+                return
+    except Exception:  # noqa: BLE001 — the relates_to link is optional; never fails the review
+        logger.warning("session artifact relates_to link skipped", exc_info=True)
 
 
 def produce_code_review_verdict(request: CodeReviewRequest) -> dict[str, Any]:
@@ -602,8 +681,17 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
             verdict["deps"] = _sidecar.reviewed_file_hashes(_dep_paths, repo_root=request.repo_root)
         except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
             verdict.setdefault("deps", {})
-        if request.target_ticket:
-            _sidecar.emit(verdict, target_ticket=request.target_ticket, repo_root=request.repo_root)
+        # Emit the durable artifact. An explicit target_ticket (ticket-scoped review) emits
+        # directly; otherwise the LOCAL session path (story paradoxal-balsamic-bubblefish)
+        # resolves-or-creates a session-keyed artifact so `review-code` gains memory. Best-effort.
+        target = request.target_ticket
+        if not target and request.session_id:
+            verdict["session_id"] = request.session_id
+            target = _resolve_or_create_session_artifact(
+                request.session_id, head=request.head, repo_root=request.repo_root
+            )
+        if target:
+            _sidecar.emit(verdict, target_ticket=target, repo_root=request.repo_root)
         return verdict
     return _degraded_code_review_verdict(
         error=(res.error or "code-review workflow LLM tier failed"),
