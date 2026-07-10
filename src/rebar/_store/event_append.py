@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from typing import Any
 
 from rebar._store import lock as _lock
@@ -78,15 +79,15 @@ def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
     return f"{timestamp}-{uuid_str}-{event_type}.json"
 
 
-def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
-    """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
-
-    Returns 0 on success; raises :class:`StoreError` (1), :class:`RebaseGuard` (75),
-    or :class:`LockTimeout` (1) with the exact bash stderr."""
-    tracker = _lock.canonical_tracker(tracker)
+def _ensure_initialized(tracker: str) -> None:
+    """Raise :class:`StoreError` (1) if *tracker* is not an initialized store."""
     if not os.path.isdir(tracker) or not os.path.exists(os.path.join(tracker, ".git")):
         raise StoreError("Error: ticket system not initialized. Run 'ticket init' first.", 1)
 
+
+def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
+    """Return ``(event_type, timestamp, uuid_str)`` for a well-formed event, else
+    raise :class:`StoreError` (1) with the exact bash stderr. No disk/lock effect."""
     event_type = str(event.get("event_type", "")).upper()
     timestamp, uuid_str = event.get("timestamp"), event.get("uuid")
     if not event_type or timestamp is None or not uuid_str:
@@ -101,13 +102,18 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
             "REVIEW_RESULT",
             1,
         )
+    return event_type, timestamp, uuid_str
 
+
+def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> tuple[str, str, str]:
+    """Validate the event, ensure its ticket dir, and stage its CANONICAL bytes to a
+    same-filesystem temp (the atomic-rename source). Returns ``(staging, final_path,
+    relative_path)``. Raises :class:`StoreError` (1); no lock is held here."""
+    event_type, timestamp, uuid_str = _validate_event(event)
     ticket_dir = os.path.join(tracker, ticket_id)
     os.makedirs(ticket_dir, exist_ok=True)
     final_path = os.path.join(ticket_dir, event_filename(timestamp, uuid_str, event_type))
     relative_path = os.path.relpath(final_path, tracker)
-
-    # Stage canonical bytes to a same-filesystem temp (atomic rename target).
     fd, staging = tempfile.mkstemp(prefix=".tmp-event-", dir=tracker)
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -115,7 +121,19 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
     except OSError as exc:
         _silent_unlink(staging)
         raise StoreError("Error: failed to write staging temp file", 1) from exc
+    return staging, final_path, relative_path
 
+
+def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
+    """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
+
+    Returns 0 on success; raises :class:`StoreError` (1), :class:`RebaseGuard` (75),
+    or :class:`LockTimeout` (1) with the exact bash stderr."""
+    tracker = _lock.canonical_tracker(tracker)
+    _ensure_initialized(tracker)
+    staging, final_path, relative_path = _prepare_event(tracker, ticket_id, event)
+
+    event_type = str(event["event_type"]).upper()
     commit_msg = f"ticket: {event_type} {ticket_id}"
     try:
         with _lock.write_lock(tracker, dual_window=True):
@@ -158,7 +176,7 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
                 # makes git refuse the commit entirely. Self-heal regenerable paths to
                 # HEAD and retry; surface an actionable error for a non-regenerable one.
-                healed, detail = _recover_from_unmerged(tracker, relative_path, commit_msg)
+                healed, detail = _recover_from_unmerged(tracker, [relative_path], commit_msg)
                 if not healed:
                     # Drop the staged blob from the index too (not just disk) so the failed
                     # event cannot be committed by the next successful write.
@@ -181,6 +199,104 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
     return 0
 
 
+def batch_stage_and_commit(
+    tracker: str | os.PathLike, items: Iterable[tuple[str, dict[str, Any]]]
+) -> int:
+    """Commit MANY events under ONE lock acquire + ONE ``git commit`` (all-or-nothing).
+
+    *items* is an iterable of ``(ticket_id, event)`` pairs. Every event is validated
+    and canonical-staged (the same byte contract as :func:`stage_and_commit`) BEFORE
+    the lock is taken; then, holding the single write lock (I5) exactly ONCE, each
+    staged temp is atomically renamed into its I2 path (``{ticket}/{ts}-{uuid}-{TYPE}
+    .json``), a single ``git add`` stages them all, and ONE ``git commit`` seals the
+    batch. Returns the number of events committed (``0`` for an empty batch — a no-op
+    that takes no lock and makes no commit).
+
+    **Batch atomicity is all-or-nothing per commit.** Because replay/dedup/union-merge
+    /compaction key off each event's UUID and NOT commit boundaries, collapsing N
+    commits into 1 is invisible to readers — but a *partial* batch is not. So any
+    failure (validation, rename, ``git add``, or a non-recoverable ``git commit``)
+    rolls the batch back completely: every already-renamed final is unstaged from the
+    index AND unlinked from the worktree, leaving the store exactly as it was. A
+    crash mid-batch (before the commit) leaves at most orphaned worktree files that
+    are never in any commit; the next writer's ``git add``/``commit`` only touches its
+    own paths, and a re-run re-emits the whole batch. The lock is NOT re-entrant, so
+    this MUST acquire it once and loop the renames inside — it never calls
+    :func:`stage_and_commit` per event.
+
+    Raises :class:`StoreError` (1), :class:`RebaseGuard` (75), or :class:`LockTimeout`
+    (1) with the exact bash stderr, same as the single-event path."""
+    tracker = _lock.canonical_tracker(tracker)
+    _ensure_initialized(tracker)
+
+    # Validate + stage every event up front (fail fast, before the lock). On any
+    # failure here, unlink the temps staged so far — nothing has been renamed yet.
+    prepared: list[tuple[str, str, str]] = []  # (staging, final_path, relative_path)
+    try:
+        for ticket_id, event in items:
+            prepared.append(_prepare_event(tracker, ticket_id, event))
+    except BaseException:
+        for staging, _final, _rel in prepared:
+            _silent_unlink(staging)
+        raise
+
+    if not prepared:
+        return 0
+
+    commit_msg = f"ticket: batch {len(prepared)} events"
+    relpaths = [rel for _s, _f, rel in prepared]
+    renamed: list[tuple[str, str]] = []  # (final_path, relative_path) already in place
+    try:
+        with _lock.write_lock(tracker, dual_window=True):
+            _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
+            for staging, final_path, relative_path in prepared:
+                try:
+                    os.replace(staging, final_path)  # atomic rename
+                except OSError as exc:
+                    _rollback_batch(tracker, renamed)
+                    raise StoreError("Error: atomic rename failed", 1) from exc
+                renamed.append((final_path, relative_path))
+            add = subprocess.run(
+                ["git", "-C", tracker, "add", "--", *relpaths],
+                capture_output=True,
+                text=True,
+            )
+            if add.returncode != 0:
+                _rollback_batch(tracker, renamed)
+                add_err = (add.stderr or add.stdout).strip()
+                raise StoreError(
+                    "Error: git commit failed while holding lock"
+                    + (f": {add_err}" if add_err else ""),
+                    1,
+                )
+            commit = subprocess.run(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+                capture_output=True,
+                text=True,
+            )
+            if commit.returncode != 0:
+                healed, detail = _recover_from_unmerged(tracker, relpaths, commit_msg)
+                if not healed:
+                    _rollback_batch(tracker, renamed)
+                    git_err = (commit.stderr or commit.stdout).strip()
+                    raise StoreError(
+                        detail
+                        or (
+                            "Error: git commit failed while holding lock"
+                            + (f": {git_err}" if git_err else "")
+                        ),
+                        1,
+                    )
+    except (RebaseGuard, LockTimeout):
+        for staging, _final, _rel in prepared:
+            _silent_unlink(staging)
+        raise
+    finally:
+        for staging, _final, _rel in prepared:
+            _silent_unlink(staging)  # no-op once renamed
+    return len(prepared)
+
+
 def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
     """Locked canonical commit, then the best-effort push (mirrors write_commit_event)."""
     rc = stage_and_commit(tracker, ticket_id, event)
@@ -188,6 +304,32 @@ def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, 
 
     push.push_tickets_branch(_lock.canonical_tracker(tracker))
     return rc
+
+
+def batch_write_and_push(
+    tracker: str | os.PathLike, items: Iterable[tuple[str, dict[str, Any]]]
+) -> int:
+    """Batched commit (:func:`batch_stage_and_commit`), then ONE best-effort push.
+
+    The bulk analogue of :func:`write_and_push`: instead of one push per event, the
+    whole batch commits under a single lock and a single push follows. An empty batch
+    commits nothing and skips the push. Returns the number of events committed."""
+    n = batch_stage_and_commit(tracker, items)
+    if n:
+        from rebar._store import push
+
+        push.push_tickets_branch(_lock.canonical_tracker(tracker))
+    return n
+
+
+def _rollback_batch(tracker: str, renamed: list[tuple[str, str]]) -> None:
+    """Undo a failed batch: unstage every already-renamed event from the index and
+    unlink it from the worktree, so a partial batch leaves NO phantom event (neither
+    staged nor committable by the next write) and no orphaned worktree file."""
+    for _final_path, relative_path in renamed:
+        _unstage(tracker, relative_path)
+    for final_path, _relative_path in renamed:
+        _silent_unlink(final_path)
 
 
 def _silent_unlink(path: str) -> None:
@@ -223,7 +365,7 @@ _REGENERABLE_PREFIX = ".bridge_state/"
 
 
 def _recover_from_unmerged(
-    tracker: str, event_relpath: str, commit_msg: str
+    tracker: str, event_relpaths: list[str], commit_msg: str
 ) -> tuple[bool, str | None]:
     """Recover a commit that ``git`` refused because of a PRE-EXISTING unmerged (UU)
     index entry (bug 6818). A stranded stash/merge conflict leaves an unmerged index
@@ -264,7 +406,9 @@ def _recover_from_unmerged(
     subprocess.run(
         ["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged], capture_output=True, text=True
     )
-    subprocess.run(["git", "-C", tracker, "add", event_relpath], capture_output=True, text=True)
+    subprocess.run(
+        ["git", "-C", tracker, "add", "--", *event_relpaths], capture_output=True, text=True
+    )
     retry = subprocess.run(
         ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
         capture_output=True,
