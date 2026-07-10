@@ -186,14 +186,17 @@ def _completion_precheck(
             f"  - {(f.get('criterion') or f.get('dimension') or '?')}: {f.get('detail', '')}"
             for f in items[:20]
         ]
-        raise CommandError(
+        # Surface the verdict's remediation guidance (set by reconcile_verdict on every FAIL) so
+        # the caller is pointed at the evidence channel — documenting proof that a requirement is
+        # met as a comment on the ticket — rather than left with only the bare list of criteria.
+        guidance = result.get("remediation")
+        message = (
             f"Error: completion verification FAILED for {ticket_id} — {len(items)} unmet "
-            "criteria; not closing.\n"
-            + "\n".join(lines)
-            + '\n  Address the criteria above, or override with --force-close="<reason>" '
-            "(closes without a completion signature).",
-            returncode=1,
+            "criteria; not closing.\n" + "\n".join(lines)
         )
+        if guidance:
+            message += "\n\n  " + guidance
+        raise CommandError(message, returncode=1)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
     # verdict suppresses signing; the default close path is attested and signs (a verdict with
