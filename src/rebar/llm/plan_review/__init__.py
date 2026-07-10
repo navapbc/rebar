@@ -493,6 +493,23 @@ def _run_plan_review(
     else:
         verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})
 
+    # Store-wide cross-ticket overlap (epic only-crave-art, story 0f70) — ADVISORY ONLY.
+    # Runs AFTER sidecar.emit + signing, so the sidecar, coverage counts, and attestation are
+    # byte-identical whether overlap is on or off (the overlap results ride in a SEPARATE
+    # `overlap[]` key that is never a blocking/advisory finding and never affects the verdict
+    # or the claim gate). Gated OFF by default (verify.overlap_enabled); gated to real runs
+    # (emit_sidecar) not pure-read; and graceful-skips (→ []) when the LLM/agents extra/key is
+    # absent. `overlap[]` is added ONLY when enabled, so the verdict shape is unchanged when off.
+    if emit_sidecar:
+        from rebar import config as _overlap_config
+
+        if _overlap_config.load_config(repo_root).verify.overlap_enabled:
+            from rebar.llm.overlap.wire import overlap_findings
+
+            verdict["overlap"] = overlap_findings(
+                ticket_id, repo_root=repo_root, config=cfg, runner=runner
+            )
+
     # Validate the assembled verdict against its documented contract (shape-only,
     # permissive) — the same final re-validation the completion op does. Pins the
     # CLI/library `--output json` shape to plan_review_verdict.schema.json.
