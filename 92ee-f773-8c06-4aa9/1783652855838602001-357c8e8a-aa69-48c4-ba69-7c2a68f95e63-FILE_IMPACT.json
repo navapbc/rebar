@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"tests/interfaces/store/test_ensure_drift_matrix.py","reason":"new hermetic drift-matrix integration tests"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783652855838602001,"uuid":"357c8e8a-aa69-48c4-ba69-7c2a68f95e63"}
