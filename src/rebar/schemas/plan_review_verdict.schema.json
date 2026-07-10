@@ -46,7 +46,16 @@
     "coverage": {
       "type": "object",
       "additionalProperties": true,
-      "description": "What ran: the DET-floor per-check coverage, the criteria routing, chunk count, llm_ran, and the verdict counts - recorded on the attestation so the review's completeness is visible."
+      "description": "What ran: the DET-floor per-check coverage, the criteria routing, chunk count, llm_ran, and the verdict counts - recorded on the attestation so the review's completeness is visible.",
+      "properties": {
+        "resolution_class": {
+          "type": "string",
+          "enum": ["WAIT_AND_RETRY", "RETRY_NOW", "INCREASE_PROVIDER_LIMITS", "CHANGE_SETTINGS", "CHANGE_INPUT", "CHANGE_PROVIDER_OR_MODEL", "FIX_AGENT_DESIGN", "NEEDS_INVESTIGATION"],
+          "description": "Systemic-degrade disposition (story blackbear): the closed resolution-class the LLM-failure classifier assigned. Present only on a degraded/INDETERMINATE verdict; absent on a normal verdict."
+        },
+        "retryable": { "type": "boolean", "description": "Whether resolution_class is transient/retryable (drives CLI exit 11); mirrors LLMOutcome.retryable." },
+        "diagnostic": { "type": "object", "additionalProperties": true, "description": "Sanitized, redacted failure diagnostic (no secrets/PII); present with resolution_class." }
+      }
     },
     "material_fingerprint": {
       "type": ["string", "null"],

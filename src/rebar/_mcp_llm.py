@@ -18,6 +18,23 @@ from __future__ import annotations
 from rebar._mcp_models import tool_annotation_presets
 
 
+def _structured_llm_failure(exc: Exception) -> dict:
+    """Convert a raised ``LLMError`` into a STRUCTURED MCP tool RESULT (story
+    authorial-hated-blackbear) rather than letting it propagate as an opaque FastMCP tool
+    error. The driving agent can then branch on ``retryable`` (retry vs. escalate) instead of
+    string-parsing an error. Carries the classifier disposition (``resolution_class`` /
+    ``diagnostic``) when the raised error had one attached (mamba's run seam / preflight)."""
+    from rebar.llm.failure import outcome_of
+
+    o = outcome_of(exc)
+    return {
+        "error": str(exc),
+        "resolution_class": o.resolution_class.value if o is not None else None,
+        "retryable": bool(o.retryable) if o is not None else False,
+        "diagnostic": o.diagnostic if o is not None else None,
+    }
+
+
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
     _allow_llm = ctx.allow_llm
@@ -85,9 +102,12 @@ def register_llm_tools(mcp, ctx) -> None:
             )
         import rebar.llm
 
-        return rebar.llm.review_code(
-            base=base, head=head, reviewers=reviewers, ref=ref, source=source
-        )
+        try:
+            return rebar.llm.review_code(
+                base=base, head=head, reviewers=reviewers, ref=ref, source=source
+            )
+        except rebar.llm.LLMError as exc:
+            return _structured_llm_failure(exc)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def scan_spec(
@@ -152,7 +172,10 @@ def register_llm_tools(mcp, ctx) -> None:
             )
         import rebar.llm
 
-        return rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
+        try:
+            return rebar.llm.verify_completion(ticket_id, graph=graph, ref=ref, source=source)
+        except rebar.llm.LLMError as exc:
+            return _structured_llm_failure(exc)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_plan(ticket_id: str, ref: str | None = None, source: str | None = None) -> dict:
@@ -180,6 +203,9 @@ def register_llm_tools(mcp, ctx) -> None:
         import rebar.llm
 
         ro = _readonly()
-        return rebar.llm.review_plan(
-            ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro
-        )
+        try:
+            return rebar.llm.review_plan(
+                ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro
+            )
+        except rebar.llm.LLMError as exc:
+            return _structured_llm_failure(exc)

@@ -96,6 +96,10 @@ def _verdict_to_review_result(
     )
     # Attach the typed gate verdict for callers that want it (coaching/coverage/the partition).
     result["verdict"] = verdict
+    # Preserve the gate verdict's `coverage` at the TOP LEVEL too (story blackbear) — including
+    # the systemic-degrade `resolution_class`/`retryable`/`diagnostic` — so the `_review_code`
+    # CLI can map a retryable code-review outage → exit 11 without reaching into the nested dict.
+    result["coverage"] = verdict.get("coverage") or {}
     return result
 
 

@@ -1,6 +1,6 @@
 # ADR 0037 — Transport-layer retry for LLM gate calls (SDK max_retries=0)
 
-- **Status:** Proposed (stub authored by story `morbid-uncultured-arcticduck`; finalized/renumbered by the integrator story `authorial-hated-blackbear`, epic jira-reb-687)
+- **Status:** Accepted (authored by story `morbid-uncultured-arcticduck`; finalized by the integrator story `authorial-hated-blackbear`, epic jira-reb-687)
 - **Date:** 2026-07-09
 
 ## Context

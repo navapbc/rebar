@@ -279,3 +279,86 @@ def classify_llm_failure(
         except Exception:  # noqa: BLE001 — even type() is defended
             placeholder = {"message": "diagnostic unavailable"}
         return LLMOutcome(ResolutionClass.NEEDS_INVESTIGATION, placeholder, retryable=False)
+
+
+# ── Disposition surfacing (story authorial-hated-blackbear, epic jira-reb-687) ──
+# The human-facing message per class, printed to stderr by the gate CLIs. The retryable
+# pair (WAIT_AND_RETRY/RETRY_NOW) drive exit 11; the rest map to the existing INDETERMINATE
+# exit. Keyed by the class VALUE (== name) so it is readable straight off a persisted
+# `coverage.resolution_class` string, with no enum round-trip.
+RESOLUTION_MESSAGES: dict[str, str] = {
+    ResolutionClass.WAIT_AND_RETRY.value: (
+        "Transient provider overload/rate-limit — wait for the backoff window, then retry."
+    ),
+    ResolutionClass.RETRY_NOW.value: "Transient connection blip — retry immediately.",
+    ResolutionClass.INCREASE_PROVIDER_LIMITS.value: (
+        "Provider usage/quota ceiling hit — raise the provider limit or wait for the reset."
+    ),
+    ResolutionClass.CHANGE_SETTINGS.value: (
+        "The request exceeded a configured bound (tokens/steps/timeout) — adjust it and retry."
+    ),
+    ResolutionClass.CHANGE_INPUT.value: (
+        "The input was rejected (too large / malformed) — reduce or fix it and retry."
+    ),
+    ResolutionClass.CHANGE_PROVIDER_OR_MODEL.value: (
+        "The model/provider is unavailable or refused — switch model/provider."
+    ),
+    ResolutionClass.FIX_AGENT_DESIGN.value: (
+        "An agent-construction bug (no tools / bad output contract) — fix the op wiring."
+    ),
+    ResolutionClass.NEEDS_INVESTIGATION.value: (
+        "Unclassified failure — inspect the sanitized diagnostic."
+    ),
+}
+
+
+def message_for(resolution_class: str | None) -> str | None:
+    """The human-facing stderr message for a persisted `coverage.resolution_class` value
+    (a plain string), or ``None`` when the class is absent/unknown."""
+    if not resolution_class:
+        return None
+    return RESOLUTION_MESSAGES.get(resolution_class)
+
+
+def resolution_fields(outcome: LLMOutcome | None) -> dict:
+    """The `coverage` fields a degraded verdict carries for an ``LLMOutcome`` — the persisted
+    disposition the CLIs read: ``resolution_class`` (str), ``retryable`` (bool), ``diagnostic``
+    (sanitized dict). Returns ``{}`` when there is no outcome (e.g. a string-error degrade path
+    that never classified), so the caller writes nothing and the verdict stays a plain
+    INDETERMINATE. This is the single writer of the disposition shape onto ``coverage``."""
+    if outcome is None:
+        return {}
+    return {
+        "resolution_class": outcome.resolution_class.value,
+        "retryable": outcome.retryable,
+        "diagnostic": outcome.diagnostic,
+    }
+
+
+def outcome_of(error: object) -> LLMOutcome | None:
+    """The `.outcome` an ``LLMOutcome`` producer attached to a raised error (mamba's run seam,
+    the preflight seam), or ``None`` when the error carries none (a string, or an unclassified
+    raise). Never raises."""
+    return getattr(error, "outcome", None)
+
+
+def log_degrade(outcome: LLMOutcome | None, *, gate: str, ticket_id: str | None = None) -> None:
+    """Best-effort: append the SANITIZED diagnostic of a degraded gate run to the session log,
+    so an operator can later surface the failure by keyword. A no-op when there is no outcome.
+    NEVER raises — a session-log write failure must not fail the gate (the whole point of the
+    degrade path is to fail *softly*); the import is lazy so importing this module stays light."""
+    if outcome is None:
+        return
+    try:
+        import json as _json
+
+        import rebar as _rebar
+
+        entry = _json.dumps(outcome.diagnostic, sort_keys=True, default=str)
+        _rebar.append_session_log(
+            entry,
+            summary=f"llm-degrade {outcome.resolution_class.value} on {gate}",
+            relates_to=ticket_id,
+        )
+    except Exception:  # noqa: BLE001 — telemetry is strictly best-effort; never fail the gate
+        pass

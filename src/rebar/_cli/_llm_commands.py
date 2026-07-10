@@ -72,6 +72,48 @@ def _render_source_line(result: dict) -> None:
     sys.stdout.write(f"source: {src}{tail}\n")
 
 
+def _llm_error_exit_code(exc: Exception) -> int:
+    """Exit code for a RAISED ``LLMError`` (story blackbear): a retryable disposition attached by
+    the classifier (`.outcome.retryable`) → exit 11 ("transient — retry"); else 1 (fail-closed).
+    Used where a gate call raises rather than returning a degraded verdict dict."""
+    from rebar.llm.failure import outcome_of
+
+    o = outcome_of(exc)
+    if o is not None and getattr(o, "retryable", False):
+        from rebar.llm.failure import message_for
+
+        msg = message_for(o.resolution_class.value)
+        if msg:
+            sys.stderr.write(f"llm-degrade: {o.resolution_class.value} — {msg}\n")
+        return 11
+    return 1
+
+
+def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
+    """Map a shape-A gate result to an exit code, honouring the systemic-degrade disposition
+    (story authorial-hated-blackbear). A PASS is 0. Otherwise, a persisted retryable disposition
+    (``coverage.retryable``, set from the classifier's ``LLMOutcome``) → exit 11
+    ("transient — retry"); a non-retryable INDETERMINATE → ``indeterminate_code`` (the gate's
+    existing INDETERMINATE exit, UNCHANGED); any other non-PASS → 1. The class-specific message
+    is printed to stderr as a side effect so the driving agent sees what to do."""
+    coverage = result.get("coverage") or {}
+    rc = coverage.get("resolution_class")
+    if rc:
+        from rebar.llm.failure import message_for
+
+        msg = message_for(rc)
+        sys.stderr.write(f"llm-degrade: {rc} — {msg}\n" if msg else f"llm-degrade: {rc}\n")
+    # `verdict` is a string on the plan-review result and the WHOLE nested gate verdict dict on
+    # the code-review review_result (`shim._verdict_to_review_result` attaches it) — accept both.
+    v = result.get("verdict")
+    verdict = str((v.get("verdict", "") if isinstance(v, dict) else v) or "").upper()
+    if verdict == "PASS":
+        return 0
+    if coverage.get("retryable"):
+        return 11
+    return indeterminate_code if verdict == "INDETERMINATE" else 1
+
+
 def _review(argv: list[str]) -> int:
     """``rebar review`` → rebar.llm.review_ticket (native; not a dispatcher arm).
 
@@ -191,7 +233,7 @@ def _review_code(argv: list[str]) -> int:
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
-        return 1
+        return _llm_error_exit_code(exc)
     except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -200,7 +242,8 @@ def _review_code(argv: list[str]) -> int:
     else:
         _render_review_text(result)
         _render_source_line(result)
-    return 0
+    # PASS/advisory→0, retryable systemic degrade→11, INDETERMINATE→2 (story blackbear).
+    return _disposition_exit_code(result, indeterminate_code=2)
 
 
 def _scan_spec(argv: list[str]) -> int:
@@ -304,7 +347,8 @@ def _verify_completion(argv: list[str]) -> int:
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
-        return 1
+        # Shape B (story blackbear): a retryable outage → exit 11 ("transient — retry"), else 1.
+        return _llm_error_exit_code(exc)
     except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -398,8 +442,8 @@ def _review_plan(argv: list[str]) -> int:
     else:
         _render_plan_review_text(result)
         _render_source_line(result)
-    verdict = result.get("verdict")
-    return 0 if verdict == "PASS" else (2 if verdict == "INDETERMINATE" else 1)
+    # PASS→0, retryable systemic degrade→11, INDETERMINATE→2 (unchanged), BLOCK→1 (story blackbear).
+    return _disposition_exit_code(result, indeterminate_code=2)
 
 
 def _render_plan_review_text(result: dict) -> None:
