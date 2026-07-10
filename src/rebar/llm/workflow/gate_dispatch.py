@@ -395,17 +395,25 @@ def _degraded_plan_review_verdict(
     shape ``run_review`` produces (DET floor ran, LLM did not): DET findings partitioned,
     ``coverage.llm_unavailable=True`` (so ``finalize_verdict`` ⇒ INDETERMINATE and
     ``review_plan`` never signs it)."""
+    from rebar.llm import failure as _failure
     from rebar.llm.plan_review import det_floor, orchestrator
 
     det_results = det_floor.run_det_floor(ctx)
     det_blocks = det_floor.det_blocking_findings(det_results)
     det_advisories = det_floor.det_advisory_findings(det_results)
+    # Disposition (story blackbear): when the raised error carries an ``.outcome`` (the genuine
+    # outage paths — preflight / mid-run LLMUnavailableError), persist resolution_class/retryable/
+    # diagnostic onto coverage so the CLI can map a retryable outage → exit 11. A string-error
+    # tail (finders produced nothing) carries no outcome → no disposition → plain INDETERMINATE.
+    outcome = _failure.outcome_of(error)
     coverage = {
         "det": det_floor.det_coverage(det_results),
         "llm_ran": False,
         "llm_unavailable": True,
         "llm_error": str(error),
+        **_failure.resolution_fields(outcome),
     }
+    _failure.log_degrade(outcome, gate="plan-review", ticket_id=getattr(ctx, "ticket_id", None))
     parts = orchestrator.partition_findings(
         det_blocks, det_advisories, [], advisory_cap=advisory_cap
     )
@@ -441,13 +449,24 @@ def _inert_code_review_verdict() -> dict[str, Any]:
 
 
 def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str, Any]:
-    """Unsigned INDETERMINATE degrade (outage / mid-run failure) — never a hollow PASS."""
+    """Unsigned INDETERMINATE degrade (outage / mid-run failure) — never a hollow PASS. Carries
+    the LLM disposition (story blackbear) when the raised error classified one, so the CLI can
+    map a retryable code-review outage → exit 11 the same way plan-review does."""
+    from rebar.llm import failure as _failure
+
+    outcome = _failure.outcome_of(error)
+    _failure.log_degrade(outcome, gate="code-review")
     return {
         "verdict": "INDETERMINATE",
         "blocking": [],
         "advisory": [],
         "coaching": [],
-        "coverage": {"llm_ran": False, "llm_unavailable": True, "llm_error": str(error)},
+        "coverage": {
+            "llm_ran": False,
+            "llm_unavailable": True,
+            "llm_error": str(error),
+            **_failure.resolution_fields(outcome),
+        },
         "runner": runner_name,
     }
 

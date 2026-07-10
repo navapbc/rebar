@@ -38,6 +38,9 @@ def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
         "REBAR_LLM_MAX_STEPS",
         "REBAR_LLM_MAX_ITERS",
         "REBAR_LLM_TIMEOUT",
+        "REBAR_LLM_RETRY_MAX_ATTEMPTS",
+        "REBAR_LLM_RETRY_MAX_WAIT_S",
+        "REBAR_LLM_TOOL_TIMEOUT_S",
         "REBAR_LLM_MCP_SERVERS",
         "REBAR_LLM_REPO_PATH",
     ):

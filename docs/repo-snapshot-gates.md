@@ -40,6 +40,22 @@ precedence: `REBAR_GATE_REF` / `REBAR_GATE_SOURCE` env > the `[snapshot]` config
 (`ref` / `source`) > the built-in `origin/main` / `attested`. (`review-code` defaults its
 `ref` to the reviewed `head` rather than `origin/main`, so its file context matches the diff.)
 
+### Reviewing code that is committed but not yet landed — use `--ref HEAD`
+
+The default `origin/main` ref verifies **merged** code, which is what you want for a change
+that stands alone. But when a review **depends on code you have committed locally but not yet
+landed on `origin/main`** — a stacked change built atop other un-merged commits, or work on a
+feature branch — the default ref materializes a snapshot that **predates** your local commits.
+The gate then reads source that lacks the symbols those commits add and reports them as
+**`<symbol> does not exist` false findings** (a plan that references a function only present in
+an earlier commit of your own stack looks unimplementable).
+
+**Fix: pass `--ref HEAD`** (e.g. `rebar review-plan <id> --ref HEAD`). `HEAD` resolves from the
+local object DB — no fetch — so the snapshot includes your committed-but-unlanded code and the
+findings reflect the tree you are actually building on. The resulting attestation is accepted
+by `claim` exactly like an `origin/main` one. Reach for it whenever a gate flags symbols you
+know you committed in the same stack; keep the `origin/main` default for standalone changes.
+
 `REBAR_ROOT` only locates the **object DB** to fetch from; in attested mode it does NOT
 determine which code is read — the snapshot at `ref` does. This is the cwd/branch decoupling.
 

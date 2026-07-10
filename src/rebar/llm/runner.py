@@ -162,9 +162,27 @@ class PydanticAIRunner:
 
     def preflight(self) -> None:
         """Fail fast if the ``agents`` extra (pydantic-ai-slim) is absent or the config
-        uses settings this runner does not yet honour — both offline, no model call."""
-        _import_pydantic_ai()
-        _pai_check_config(self._config)
+        uses settings this runner does not yet honour — both offline, no model call.
+
+        Attaches an ``.outcome`` disposition to a raised ``LLMError`` (story blackbear) so a
+        preflight failure surfaces the same ``resolution_class`` channel as a mid-run outage
+        (mamba's run seam) — a config error classifies non-retryable, so it maps to the
+        existing INDETERMINATE exit, never the retryable exit 11."""
+        from rebar.llm.errors import LLMError
+
+        try:
+            _import_pydantic_ai()
+            _pai_check_config(self._config)
+        except LLMError as exc:
+            from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+            try:
+                exc.outcome = classify_llm_failure(  # type: ignore[attr-defined]
+                    exc, ClassifyContext(model=self._config.model)
+                )
+            except Exception:  # noqa: BLE001 — disposition is a hint; never mask the real error
+                pass
+            raise
 
     def run(self, req: RunRequest) -> dict:
         # Guard the agents extra FIRST — before importing any pydantic_ai submodule —
@@ -230,24 +248,46 @@ class PydanticAIRunner:
         # INDETERMINATE. Pin an Anthropic model to the DIRECT public API so rebar bypasses
         # the local proxy; real (non-loopback) gateways and the test model_override path are
         # left untouched, and REBAR_LLM_ALLOW_LOCAL_PROXY=1 opts back in.
+        # The retrying httpx.AsyncClient to close on teardown (story arcticduck); None on the
+        # non-anthropic / model_override paths, which build no client here.
+        _http_client = None
         if self._model_override is None and resolved.startswith("anthropic"):
+            # ONE unified construction for ANY anthropic model (normal AND loopback-bypass):
+            # both get the retrying transport with SDK max_retries=0. `_direct` (None on the
+            # normal path) only varies the base_url. Before this, the normal path let
+            # pydantic-ai build its own provider with the SDK default retries and no transport.
             _direct = _local_proxy_bypass_base_url()
-            if _direct:
-                from pydantic_ai.models.anthropic import AnthropicModel
-                from pydantic_ai.providers.anthropic import AnthropicProvider
+            _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
+            # Per-request READ timeout (story hoopoe): the transport-level bound on a hung
+            # model, reusing cfg.timeout_s. This is authoritative on the anthropic path (our
+            # custom client); non-anthropic providers keep the model_settings['timeout'] below.
+            import httpx as _httpx
 
-                _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
-                model = AnthropicModel(_name, provider=AnthropicProvider(base_url=_direct))
+            _http_timeout = _httpx.Timeout(
+                read=float(cfg.timeout_s), connect=10.0, write=30.0, pool=10.0
+            )
+            model, _http_client = _build_retrying_anthropic_model(
+                _name, base_url=_direct, cfg=cfg, http_timeout=_http_timeout
+            )
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
         # for an injected test model), not the bare config model — so a parity diff sees
         # exactly what ran.
         ran_model = (
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
+        # Agent-build invariant (story anole): for a tool-using op on a REAL model object,
+        # fail fast if the provider can't call tools (else pydantic-ai silently drops them).
+        # Gated on model_override is None (the test double is never checked) and tools present.
+        if self._model_override is None and tools:
+            _check_tool_capability(model, resolved)
         kwargs: dict[str, Any] = {
             "system_prompt": req.system_prompt,
             "tools": tools,
             "toolsets": toolsets,
+            # Per-tool execution timeout (story hoopoe): bounds a hung ASYNC/MCP tool. A
+            # no-op on single_turn (tools=[]) and for sync in-process tools (async cancel
+            # can't interrupt a blocking call — those are bounded by the derived step caps).
+            "tool_timeout": float(cfg.llm_tool_timeout_s),
         }
         # Prompt caching (story 0250) — anthropic-GATED. The stable bytes re-sent across
         # the container fan-out (the WHOLE parent plan) live in `system_prompt`;
@@ -332,6 +372,10 @@ class PydanticAIRunner:
                     Agent, model, resolved, req, kwargs, usage_limits
                 )
                 outcome = {"structured_response": structured}
+            # Agent-build invariant (story anole): telemetry warning on a REAL run whose
+            # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
+            if self._model_override is None:
+                _warn_if_zeroed_usage(usage)
         except UsageLimitExceeded as exc:
             logger.warning(
                 "llm call [%s] mode=%s model=%s hit step budget "
@@ -362,7 +406,26 @@ class PydanticAIRunner:
                 time.monotonic() - _t0,
                 exc,
             )
-            raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
+            err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+            # Attach the classified disposition as METADATA (story civilized-immediate-mamba).
+            # This does NOT change the raised type — every existing `except LLMUnavailableError`
+            # still catches, and the per-seam wiring + exit-code use is story blackbear's. Kept
+            # total (classify_llm_failure never raises), so enriching the error can't mask it.
+            from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+            err.outcome = classify_llm_failure(exc, ClassifyContext(model=ran_model))  # type: ignore[attr-defined]
+            raise err from exc
+        finally:
+            # Close the per-run retrying httpx.AsyncClient (story arcticduck). aclose() is
+            # async; after run_sync()'s own loop is gone, the stdlib asyncio.run() closes the
+            # pool from this synchronous caller. Best-effort — cleanup never fails the run.
+            if _http_client is not None:
+                import asyncio
+
+                try:
+                    asyncio.run(_http_client.aclose())
+                except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
+                    logger.warning("llm transport client aclose failed on teardown", exc_info=True)
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
             "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
@@ -441,6 +504,11 @@ _PAI_PROVIDER_PREFIX = {
 }
 
 
+# Max chars of the model's faulty prior reply echoed back in the bounded-retry reask
+# (story drake) — enough to diff a near-miss, bounded so a huge blob can't balloon the prompt.
+_FAULTY_OUTPUT_SNIPPET_CHARS = 2000
+
+
 def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits):
     """Obtain a validated structured object via the reliability stack (1268).
 
@@ -463,6 +531,12 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
         )
         run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+        # Silent-success parity (story drake): the PromptedOutput path below already checks
+        # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
+        # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
+        # check here — a length/max_tokens/content_filter/refusal finish_reason raises
+        # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
+        structured.check_stop_reason(getattr(run_result.response, "finish_reason", None))
         return run_result.output, _extract_usage(run_result)
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
@@ -490,10 +564,16 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             raise
         except StructuredOutputError as exc:
             last = exc
+            # Feed the model its OWN faulty prior reply (bounded) so it can diff its mistake
+            # — the LangChain RetryWithErrorOutputParser / Instructor pattern (story drake).
+            faulty = str(result.output)
+            if len(faulty) > _FAULTY_OUTPUT_SNIPPET_CHARS:
+                faulty = faulty[:_FAULTY_OUTPUT_SNIPPET_CHARS] + " …[truncated]"
             prompt = (
                 f"{req.instructions}\n\n{schema_hint}\n\nYour previous reply could not be "
-                f"parsed/validated ({exc}). Reply with ONLY the JSON object matching the "
-                f"schema above — no prose, no code fence."
+                f"parsed/validated ({exc}). Your previous reply was:\n{faulty}\n\n"
+                f"Reply with ONLY the JSON object matching the schema above — no prose, "
+                f"no code fence."
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
     raise last  # exhausted the bounded retry; surface the last validation error
@@ -610,6 +690,119 @@ def _local_proxy_bypass_base_url() -> str | None:
     if host in _LOOPBACK_HOSTS or host.endswith(".localhost"):
         return _DIRECT_ANTHROPIC_BASE_URL
     return None
+
+
+# Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,
+# never per call.
+_TOOL_CAPABILITY_CHECKED: set[str] = set()
+
+
+def _check_tool_capability(model, resolved: str) -> None:
+    """Fail fast if a tool-using op is about to run on a model that does NOT support tool
+    calling (pydantic-ai #6186 silently drops the tools). Reads the CONCRETE, verified
+    signal ``model.profile.supports_tools`` (a bool on the AnthropicModel object). Cached per
+    resolved model string — a hot loop pays nothing. Defensive: a missing/None profile is a
+    safe skip (True/None passes; only an explicit False raises)."""
+    if resolved in _TOOL_CAPABILITY_CHECKED:
+        return
+    _TOOL_CAPABILITY_CHECKED.add(resolved)
+    supports = getattr(getattr(model, "profile", None), "supports_tools", None)
+    if supports is False:
+        raise LLMConfigError(
+            f"model {resolved!r} does not support tool calling, but a tool-using gate op "
+            "would silently drop its tools — choose a tool-calling model/provider"
+        )
+
+
+def _warn_if_zeroed_usage(usage: dict) -> None:
+    """Telemetry-only WARNING (never a block) when a REAL run reports all-zero token usage
+    despite having made a request — the #5360 zeroed-adapter signal. Observability, not
+    load-bearing; a genuinely tiny run is at worst a benign warning."""
+    if (
+        usage.get("requests", 0) > 0
+        and usage.get("input_tokens", 0) == 0
+        and usage.get("output_tokens", 0) == 0
+    ):
+        logger.warning(
+            "llm usage looks zeroed/implausible (requests=%s, input=0, output=0) — the "
+            "provider adapter may be under-reporting usage",
+            usage.get("requests"),
+        )
+
+
+# HTTP statuses the transport retries. 529 (Anthropic overloaded) is included explicitly —
+# pydantic-ai's sample retry list omits it. Status codes are not exceptions by default, so
+# `validate_response` raises for them (below) to make the retry predicate fire.
+_RETRY_STATUSES = frozenset({429, 529, 500, 502, 503, 504})
+
+
+def _build_retrying_anthropic_model(
+    name: str, *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None
+):
+    """Build an ``AnthropicModel`` whose ``AsyncAnthropic`` client carries a retrying
+    ``AsyncTenacityTransport`` (story morbid-uncultured-arcticduck). Retry is owned SOLELY by
+    the transport (SDK ``max_retries=0``); a construction-time guard fails fast rather than
+    silently regress to SDK-managed retries. Returns ``(model, http_client)`` — the caller
+    closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``.
+
+    ``base_url=None`` uses the Anthropic SDK default (the normal path); a non-empty value is
+    the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
+    ``httpx.Timeout`` when present, else a bounded default from ``cfg.timeout_s`` (never
+    unbounded). A transient ``{429,529,5xx}``/``httpx.TimeoutException``/``httpx.NetworkError``
+    blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed;
+    ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else exponential backoff."""
+    import httpx
+    from anthropic import AsyncAnthropic
+    from pydantic_ai.models.anthropic import AnthropicModel
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+    from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
+    from tenacity import retry_if_exception_type, stop_after_attempt
+
+    def _validate_response(response: httpx.Response) -> None:
+        if response.status_code in _RETRY_STATUSES:
+            response.raise_for_status()
+
+    def _before_sleep(state) -> None:
+        sleep = getattr(getattr(state, "next_action", None), "sleep", None)
+        logger.warning(
+            "llm transport retry: attempt %d failed, sleeping %.1fs before retry",
+            state.attempt_number,
+            float(sleep or 0.0),
+        )
+
+    attempts = max(1, int(cfg.llm_retry_max_attempts))
+    transport = AsyncTenacityTransport(
+        config=RetryConfig(
+            retry=(
+                retry_if_exception_type(httpx.HTTPStatusError)
+                | retry_if_exception_type(httpx.TimeoutException)
+                | retry_if_exception_type(httpx.NetworkError)
+            ),
+            wait=wait_retry_after(fallback_strategy=None, max_wait=float(cfg.llm_retry_max_wait_s)),
+            stop=stop_after_attempt(attempts),
+            reraise=True,
+            before_sleep=_before_sleep,
+        ),
+        # ``_wrapped_transport`` is a test seam (a MockTransport); production uses the real
+        # httpx transport.
+        wrapped=_wrapped_transport
+        if _wrapped_transport is not None
+        else httpx.AsyncHTTPTransport(),
+        validate_response=_validate_response,
+    )
+    timeout = http_timeout if http_timeout is not None else httpx.Timeout(float(cfg.timeout_s))
+    http_client = httpx.AsyncClient(transport=transport, timeout=timeout)
+    anthropic_client = AsyncAnthropic(
+        base_url=base_url or None, max_retries=0, http_client=http_client
+    )
+    # Construction-time guard: never silently regress to SDK-managed retries.
+    if anthropic_client.max_retries != 0:
+        raise LLMConfigError(
+            "transport-retry guard: AsyncAnthropic.max_retries must be 0 "
+            "(retry is owned by the httpx transport, not the SDK)"
+        )
+    model = AnthropicModel(name, provider=AnthropicProvider(anthropic_client=anthropic_client))
+    return model, http_client
 
 
 def _pai_model(cfg: LLMConfig):

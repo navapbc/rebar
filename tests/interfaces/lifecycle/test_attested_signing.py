@@ -228,3 +228,87 @@ def test_in_toto_subject_shape():
     # The HMAC manifest step round-trips to the same SHA the in-toto subject carries.
     step = signing.verified_at_sha_step("abc123")
     assert signing.verified_at_sha_from_manifest([step]) == subj["subject"][0]["digest"]["sha1"]
+
+
+# --------------------------------------------------------------------------------------
+# Story blackbear — END-TO-END pre-sign fingerprint-mismatch: HEAD moved between verify
+# and sign, so the close SKIPS signing but the ticket STILL closes (exit 0) with a
+# stderr warning. Exercises the real close_ticket flow, not just the _material_drifted
+# unit (that unit lives in tests/unit/test_llm_disposition_plumbing.py).
+# --------------------------------------------------------------------------------------
+def test_presign_sha_drift_closes_without_signature_and_warns(
+    rebar_repo: Path, monkeypatch, capsys
+):
+    """The attested verdict pins a REAL 40-hex SHA that differs from the repo's fresh HEAD
+    (simulating HEAD moving between verify and sign). ``_material_drifted`` trips on the
+    pre-sign recheck, so close_ticket closes the ticket (exit 0) but does NOT write a
+    completion signature and emits a stderr drift warning. (Contrast the other attested
+    tests, whose synthetic non-40-hex markers are NOT drift and DO sign — see below.)"""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    # A plausible full 40-char hex SHA that cannot equal the freshly-read HEAD sha.
+    stale_sha = "b" * 40
+    assert stale_sha != signing.head_sha(rebar_repo)  # guard: genuinely a mismatch
+    monkeypatch.setattr(rebar.llm, "verify_completion", _verdict("attested", stale_sha))
+    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    # (a) the ticket still closes successfully (no raise / exit 0).
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "closed"
+    # (b) NO completion signature was written (the drift skipped signing).
+    sig = rebar.verify_signature(tid, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert sig["verdict"] == "unsigned"
+    # (c) a stderr warning about the drift was emitted.
+    err = capsys.readouterr().err
+    assert "WITHOUT a completion signature" in err
+    assert "drifted between verify" in err
+
+
+# --------------------------------------------------------------------------------------
+# Story blackbear — verify runs OUTSIDE the write lock: close_ticket runs the completion
+# precheck (_completion_precheck) BEFORE txn.transition_core (the locked write). Asserts
+# the verify->lock ordering directly (stronger than sign-after-close, which only orders
+# the SIGNATURE commit after the STATUS commit).
+# --------------------------------------------------------------------------------------
+def test_completion_verify_runs_before_and_outside_the_write_lock(rebar_repo: Path, monkeypatch):
+    """Spy on ``_completion_precheck`` and ``txn.transition_core`` to record call order, and —
+    inside the precheck spy — assert the tickets write lock is ACQUIRABLE (hence not yet held),
+    proving verify runs before AND outside the locked write."""
+    import rebar._commands.transition_close as tc
+    from rebar import config as _cfg
+    from rebar._store import lock as _lock
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", _verdict("attested", "syntheticmarker"))
+
+    calls: list[str] = []
+    real_precheck = tc._completion_precheck
+    real_core = tc.txn.transition_core
+    tracker = str(_cfg.tracker_dir(str(rebar_repo)))
+
+    def spy_precheck(*a, **kw):
+        calls.append("verify")
+        # Verify is NOT inside the write lock: the lock must be free right now. If verify
+        # held (or ran under) the lock, this acquire would block for its full budget.
+        handle = _lock.acquire(tracker, timeout=2, attempts=1)
+        handle.release()
+        return real_precheck(*a, **kw)
+
+    def spy_core(*a, **kw):
+        calls.append("lock")
+        return real_core(*a, **kw)
+
+    monkeypatch.setattr(tc, "_completion_precheck", spy_precheck)
+    monkeypatch.setattr(tc.txn, "transition_core", spy_core)
+
+    tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+
+    # verify was invoked, ran before the locked write, and (synthetic marker => not drift)
+    # the close still signed normally afterwards.
+    assert calls == ["verify", "lock"], f"verify must precede the locked write, got {calls}"
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "closed"
+    sig = rebar.verify_signature(tid, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert sig["verdict"] == "certified"

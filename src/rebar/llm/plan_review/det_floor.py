@@ -104,6 +104,17 @@ class PlanContext:
     state: dict[str, Any] = field(default_factory=dict)
     children: list[dict[str, Any]] = field(default_factory=list)
     repo_root: str | None = None
+    # The TICKET-STORE read root — distinct from ``repo_root`` (the CODE root). In an
+    # attested gate the ticket store lives on the orphan ``tickets`` branch and is
+    # materialized SEPARATELY (``current_tickets_root()`` / ``cfg.tickets_path``), so it
+    # is ABSENT from the code snapshot. Downstream ticket reads (linked session logs,
+    # prior REVIEW_RESULT concerns) MUST resolve against this root, not ``repo_root`` —
+    # else ``tracker_dir(<code-snapshot>)`` points at a missing ``.tickets-tracker`` and
+    # the read spuriously "cannot list"s / silently drops context. Captured on the
+    # assembling thread (where the ContextVar is set) so it survives the pass-1 worker
+    # threads that a ContextVar would NOT be inherited by. ``None`` → the live checkout
+    # store (local / non-attested), which is the correct default there.
+    tickets_root: str | None = None
     largest_window_tokens: int = DEFAULT_LARGEST_WINDOW_TOKENS
     # Centrality / blast-radius signal in [0,1], computed at plan time from the ticket
     # graph (dependents + children) — scales review depth + the budget cap (a central,

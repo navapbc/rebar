@@ -234,8 +234,24 @@ base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible
 max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
 max_steps      = 50                  # env REBAR_LLM_MAX_STEPS; ~2 steps per tool call
 timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)
+llm_retry_max_attempts = 4           # env REBAR_LLM_RETRY_MAX_ATTEMPTS; transport retries per call (<=1 disables → fail-fast)
+llm_retry_max_wait_s   = 60          # env REBAR_LLM_RETRY_MAX_WAIT_S; caps the Retry-After / backoff wait
+llm_tool_timeout_s     = 120         # env REBAR_LLM_TOOL_TIMEOUT_S; per-tool timeout (bounds async/MCP tools)
 mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
 ```
+
+Transient-failure retry (`llm_retry_*`) is owned at the httpx transport layer for Anthropic
+calls (the SDK's own retries are disabled, `max_retries=0`): a `{429,529,5xx}` / timeout /
+network blip is re-sent below the agent loop, so completed tool calls are never re-executed.
+`Retry-After` is honored (capped at `llm_retry_max_wait_s`), else exponential backoff. Set
+`llm_retry_max_attempts = 1` to disable retry (fail-fast back-out, no code revert). See
+[ADR 0037](adr/0037-transport-retry.md).
+
+Liveness is activity-based, not a total-runtime cap: the per-request read timeout (reuses
+`timeout` above) bounds a hung model, and `llm_tool_timeout_s` bounds a hung ASYNC/MCP tool
+(a no-op for sync in-process tools, which are bounded by the derived step caps). No hard
+total-runtime timeout truncates a healthy long run. The async stream-event idle-watchdog is
+deferred pending an async-runner migration (see the liveness ADR).
 
 Env-only (NOT `[tool.rebar.llm]` keys): the secret `REBAR_LLM_API_KEY`; the
 runtime-only `REBAR_LLM_REPO_PATH` (which repo the review agent's read-only file

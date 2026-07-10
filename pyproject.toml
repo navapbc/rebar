@@ -105,8 +105,10 @@ agents = [
     # pydantic-ai (no langchain-mcp-adapters). The tolerant structured-output parse uses
     # json-repair (no LLM). Tracing is the optional `[tracing]` OTel exporter (Langfuse is
     # an OTLP endpoint, not an SDK dep here).
-    "pydantic-ai-slim[anthropic]>=1,<2",
-    "json-repair>=0.30",
+    # `[retries]` adds pydantic_ai.retries (AsyncTenacityTransport + wait_retry_after) and
+    # pulls in tenacity — the transport-layer LLM retry (epic jira-reb-687 / story arcticduck).
+    "pydantic-ai-slim[anthropic,retries]>=1,<2",
+    "json-repair>=0.61",  # >=0.61 for repair_json(schema=…) schema-guided repair (story drake)
     "pydantic>=2",
 ]
 # Additional model providers are opt-in (keep the default extra lean):
