@@ -10,7 +10,12 @@
 .DEFAULT_GOAL := help
 sources = src tests
 
-.PHONY: help install hooks format lint typecheck config-check check test vendor-security-rules
+# Pinned git-cliff (standalone Rust binary; install with `pipx install
+# git-cliff==$(GIT_CLIFF_VERSION)`, NOT a pyproject dev extra). The `changelog`
+# target refuses to run on a mismatched version so generated output is reproducible.
+GIT_CLIFF_VERSION := 2.13.1
+
+.PHONY: help install hooks format lint typecheck config-check check test vendor-security-rules changelog
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -68,6 +73,21 @@ check: lint typecheck  ## Run every check-only gate (no mutation).
 
 test:  ## Run the default test suite (excludes integration + external).
 	pytest -m "not integration and not external" -q
+
+changelog:  ## Prepend the unreleased CHANGELOG.md section for a release: make changelog VERSION=vX.Y.Z (generate-then-curate; never a full regen).
+	@command -v git-cliff >/dev/null 2>&1 || { echo "error: git-cliff not installed — run: pipx install git-cliff==$(GIT_CLIFF_VERSION)"; exit 1; }
+	@have="$$(git-cliff --version | awk '{print $$2}')"; \
+	 if [ "$$have" != "$(GIT_CLIFF_VERSION)" ]; then \
+	   echo "error: git-cliff $$have does not match the pin $(GIT_CLIFF_VERSION) — run: pipx install git-cliff==$(GIT_CLIFF_VERSION)"; exit 1; \
+	 fi
+	@if [ -z "$(VERSION)" ]; then echo "error: VERSION is required, e.g. make changelog VERSION=v0.8.0"; exit 1; fi
+	@ver="$$(printf '%s' '$(VERSION)' | sed 's/^v//')"; \
+	 if grep -q "^## \[$$ver\]" CHANGELOG.md; then \
+	   echo "CHANGELOG.md already has a [$$ver] section — nothing to do (idempotent; re-run is a no-op)."; \
+	 else \
+	   git cliff --unreleased --tag $(VERSION) --prepend CHANGELOG.md && \
+	   echo "Prepended the [$$ver] section — now HAND-CURATE the top block before committing and tagging."; \
+	 fi
 
 # epic b744 / WS5: refresh the VENDORED, PINNED High/Critical security rule subset
 # (src/rebar/grounding/detectors/builtin/security_*.yaml). The rules are vendored (not a live
