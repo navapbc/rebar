@@ -78,8 +78,13 @@ def test_pydantic_review_ticket_opus(rebar_repo: Path) -> None:
 
 
 @_skip
-def test_pydantic_review_code(rebar_repo: Path) -> None:
+def test_pydantic_review_code(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import rebar.llm as llm
+
+    # review_code is an OFF-BY-DEFAULT four-pass gate (epic b744): disabled it returns an
+    # inert empty result (runner="code-review-disabled"). Enable the capability so this
+    # LIVE test exercises the real gated path on the supplied diff.
+    monkeypatch.setenv("REBAR_VERIFY_ENABLE_CODE_REVIEW", "1")
 
     diff = (
         "--- a/auth.py\n+++ b/auth.py\n@@ -0,0 +1,2 @@\n+def check(t):\n+    return True  # TODO\n"
@@ -90,9 +95,13 @@ def test_pydantic_review_code(rebar_repo: Path) -> None:
         diff_text=diff,
         changed_files=["auth.py"],
         reviewers=["code-quality"],
+        repo_root=str(rebar_repo),
         config=_cfg(rebar_repo, _SONNET),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
+    # The enabled four-pass gate runs via the pydantic_ai runner and reports it as the
+    # provenance (NOT the inert "code-review-disabled" of the default-off path) — this is
+    # the live pydantic_ai-runner validation this cutover test exists for.
     assert result["runner"] == "pydantic_ai"
     assert isinstance(result["findings"], list)
 
@@ -154,6 +163,10 @@ def test_pydantic_text_mode(rebar_repo: Path) -> None:
         config=cfg,
         mode="text",
         reviewers=[],
+        # A text reply reads nothing, so run WITHOUT filesystem tools. Agentic mode (the
+        # default) would wire read-only fs tools and trip the repo-snapshot gate added in
+        # b25fafcd1 (epic raze-vet-ditch) — single_turn is the faithful text-path exercise.
+        execution_mode="single_turn",
     )
     out = runner.run(req)
     assert out["runner"] == "pydantic_ai"

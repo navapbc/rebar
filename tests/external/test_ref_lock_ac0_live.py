@@ -28,11 +28,19 @@ import pytest
 pytestmark = pytest.mark.external
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REF_LOCK_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "_ref_lock.py"
+ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
+REF_LOCK_PATH = ENGINE_DIR / "rebar_reconciler" / "_ref_lock.py"
 REMOTE = os.environ.get("REBAR_AC0_REMOTE", "origin")
 
 
 def _load_ref_lock() -> ModuleType:
+    # _ref_lock loads by file path, but its git ops defer-import the sibling package
+    # (``from rebar_reconciler import git_adapter``, added in d9e0f0e7). The bare
+    # ``rebar_reconciler`` name only resolves with src/rebar/_engine on sys.path — the
+    # same setup the other reconciler-touching external tests already carry
+    # (test_link_sync_roundtrip_live._ensure_engine_on_path).
+    if str(ENGINE_DIR) not in sys.path:
+        sys.path.insert(0, str(ENGINE_DIR))
     spec = importlib.util.spec_from_file_location("rebar_reconciler_ref_lock_live", REF_LOCK_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
