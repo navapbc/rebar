@@ -56,6 +56,42 @@ DEFAULT_PORT = 8000
 #: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
 WORKER_COUNT = 1
 
+#: Wall-clock cap (seconds) on a SINGLE review before the worker abandons it and moves
+#: to the next event. The single background worker drains the queue serially, so a review
+#: that hangs indefinitely (a clone/subprocess/LLM call blocked forever — as happened when
+#: the root disk filled mid-clone, incident 2731) would otherwise wedge the worker on one
+#: ``await`` and every subsequent change would silently back up behind it. The per-event
+#: try/except only guards against EXCEPTIONS, not a HANG — hence this bounded timeout.
+#: Reviews take seconds–minutes, so the default is deliberately generous (20 min); override
+#: with the ``REVIEW_TIMEOUT_SECONDS`` env var.
+DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
+
+
+def _review_timeout_seconds() -> float:
+    """Per-review wall-clock timeout from ``REVIEW_TIMEOUT_SECONDS`` (default
+    ``DEFAULT_REVIEW_TIMEOUT_SECONDS``). A missing / unparseable / non-positive value falls
+    back to the default (a 0 or negative timeout would abandon every review immediately)."""
+    raw = os.environ.get("REVIEW_TIMEOUT_SECONDS")
+    if not raw:
+        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+    try:
+        val = float(raw.strip())
+    except ValueError:
+        logger.warning(
+            "REVIEW_TIMEOUT_SECONDS=%r is not a number; using %d",
+            raw,
+            DEFAULT_REVIEW_TIMEOUT_SECONDS,
+        )
+        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+    if val <= 0:
+        logger.warning(
+            "REVIEW_TIMEOUT_SECONDS=%r is not positive; using %d",
+            raw,
+            DEFAULT_REVIEW_TIMEOUT_SECONDS,
+        )
+        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+    return val
+
 
 def _config() -> ReceiverConfig:
     """Process-wide receiver config (env/SSM-sourced). Resolved fresh per app build so
@@ -99,17 +135,47 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
-    """Drain the review queue, running one review→vote per event. A per-event failure
-    is logged and the worker continues (it must never die and starve the queue)."""
+    """Drain the review queue, running one review→vote per event under a bounded timeout.
+
+    A per-event FAILURE is logged and a per-event HANG (a review exceeding
+    ``REVIEW_TIMEOUT_SECONDS`` — a blocked clone/subprocess/LLM call) is timed out,
+    abandoned, and recorded as a countable ``VOTER_ERROR`` timeout marker; either way the
+    worker continues to the next event. It must never die AND never stall on one event and
+    starve the queue (bug 9d7c — the single worker silently backing up behind a hung review
+    when the disk filled mid-clone)."""
+    review_timeout = _review_timeout_seconds()
     while True:
         event = await queue.get()
         try:
             # A manual /rerun enqueues the event with a _rebar_force marker so the
             # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
             force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
-            await _voter.review_and_vote(event, config=cfg, force=force)
+            await asyncio.wait_for(
+                _voter.review_and_vote(event, config=cfg, force=force),
+                timeout=review_timeout,
+            )
         except asyncio.CancelledError:
             raise
+        except (asyncio.TimeoutError, TimeoutError):
+            # A hung review — wait_for has already cancelled the inner coroutine. Abandon it
+            # (fail-closed: the change simply goes un-voted this pass and is picked up by the
+            # backfill reconciler) and keep draining. Emit the greppable VOTER_ERROR marker so
+            # the timeout is counted on rebar/host:voter_errors like any other fail-closed event.
+            change = event.get("change") if isinstance(event, dict) else None
+            change_id = change.get("id") if isinstance(change, dict) else None
+            _voter._voter_error(
+                change_id=change_id,
+                error=(
+                    f"review timed out after {review_timeout}s — abandoned to keep the queue "
+                    "draining (hung clone/subprocess/LLM); the backfill reconciler will retry"
+                ),
+            )
+            logger.error(
+                "review-bot worker: review timed out after %ss — abandoning change %s and "
+                "continuing (REVIEW_TIMEOUT_SECONDS)",
+                review_timeout,
+                change_id,
+            )
         except Exception:  # noqa: BLE001 — a single bad event must not kill the worker
             logger.exception("review-bot worker: review_and_vote raised")
         finally:

@@ -300,3 +300,54 @@ is reachable read-only on demand (`aws ssm send-command … AWS-RunShellScript` 
 adds cost + a log-shipping agent for a single-host, low-volume service. Revisit if remote
 diagnosis frequency grows or the host becomes multi-instance — the follow-up would be a
 CloudWatch agent config + a `/rebar/reviewbot` log group in `infra/terraform`.
+
+## Disk full — snapshot-leak recovery (incident 2731 / bug 9d7c)
+
+**Symptom.** The `rebar-root-disk-pressure` alarm (`monitoring_autodeploy.tf` —
+`rebar/host:root_disk_used_percent` > 85%) pages, and/or `rebar/host:voter_errors`
+spikes with clone/checkout failures in journald. Every review clones the change into
+the content-addressed snapshot store on the **ROOT** disk (`/tmp/rebar-gate-snapshots`)
+and builds docker images/build-cache there too; when the root filesystem fills, a clone
+or subprocess can **hang** or fail mid-review and each `LLM-Review` vote fail-closes.
+
+**Automated defenses now in place (verify first, then recover manually only if needed).**
+
+- **Snapshot-cache janitor.** The receiver's FastAPI lifespan starts a background
+  snapshot-cache janitor (`rebar._snapshot.start_background_janitor`) that reclaims
+  `/tmp/rebar-gate-snapshots` on a free-space watermark + max-age policy (tunables via
+  `REBAR_GATE_*` env / the `[snapshot]` config table). Before this, the reclamation code
+  existed but no production process ran it and the store grew unboundedly (694M observed).
+  Confirm it started: `journalctl CONTAINER_NAME=compose-review-bot-1 --no-pager -o cat | grep -i 'snapshot' | tail`.
+- **Root-disk-pressure alarm.** `rebar-root-disk-pressure` (above) now pages on sustained
+  root-fs pressure (2-of-3 5-min periods > 85%) so exhaustion is caught before it silently
+  fail-closes the gate.
+- **Hung-review timeout.** The single background worker wraps each review in a bounded
+  wall-clock timeout (`REVIEW_TIMEOUT_SECONDS`, default 1200s / 20 min — see
+  `src/rebar/review_bot/app.py`). A review that hangs indefinitely (a clone/subprocess/LLM
+  call blocked — as when the disk filled mid-clone) is abandoned with a countable
+  `VOTER_ERROR` timeout marker and the worker moves on to the next change, so one hung
+  review can no longer silently wedge the worker and back the whole queue up behind it.
+  Lower it temporarily (e.g. `REVIEW_TIMEOUT_SECONDS=300`) if reviews are wedging under
+  active disk pressure; restore the default once healthy.
+
+**Manual recovery (when the box has already filled).** Reclaim root-disk space, clear the
+leaked snapshot store, and restart the receiver so the janitor + worker come back clean:
+
+```bash
+# 1. Reclaim docker image / build-cache storage on the root disk.
+docker builder prune -f          # add `docker image prune -af` if images dominate
+
+# 2. Clear the leaked snapshot store (safe: content-addressed cache, rebuilt on demand).
+rm -rf /tmp/rebar-gate-snapshots/*
+
+# 3. Restart the review-bot service so the lifespan re-launches the janitor + worker.
+(cd infra/compose && docker compose up -d review-bot)
+
+# 4. Confirm recovery.
+df -h /                          # root fs back under the 85% alarm threshold
+curl -s localhost:8000/health    # (or /review/health via nginx) → {"status":"ok"}
+```
+
+Then `/rerun` any changes whose `LLM-Review` fail-closed during the outage (see "Manually
+re-run a review" above) — the janitor keeps the store bounded thereafter, and the
+`rebar-root-disk-pressure` alarm clears once `df` drops back under 85%.

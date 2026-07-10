@@ -88,12 +88,13 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `REVIEW_BOT_PORT` | `src/rebar/review_bot/app.py` |  |
+| `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/app.py` |  |
 | `SCRATCH_BASE_DIR` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SCRATCH_BASE_DIR` |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_83 variables._
+_84 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
