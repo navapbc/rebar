@@ -59,8 +59,16 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-**hello@navapbc.com**.
+reported to the **lead maintainer** (see [`MAINTAINERS.md`](MAINTAINERS.md)),
+who is responsible for enforcement, at **hello@navapbc.com**.
+
+**If a report concerns the lead maintainer themselves**, contact the Nava PBC
+backstop at **hello@navapbc.com** instead — this address reaches Nava PBC, not
+the lead maintainer personally, so it is a route independent of the person the
+report is about. (Nava has not yet designated a *distinct named* backstop
+address; until it does, this shared Nava address is the backstop — see
+[`GOVERNANCE.md`](GOVERNANCE.md) §6.)
+
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
