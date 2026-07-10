@@ -362,7 +362,15 @@ class PydanticAIRunner:
                 time.monotonic() - _t0,
                 exc,
             )
-            raise LLMUnavailableError(f"the LLM provider call failed: {exc}") from exc
+            err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+            # Attach the classified disposition as METADATA (story civilized-immediate-mamba).
+            # This does NOT change the raised type — every existing `except LLMUnavailableError`
+            # still catches, and the per-seam wiring + exit-code use is story blackbear's. Kept
+            # total (classify_llm_failure never raises), so enriching the error can't mask it.
+            from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+            err.outcome = classify_llm_failure(exc, ClassifyContext(model=ran_model))  # type: ignore[attr-defined]
+            raise err from exc
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
             "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
