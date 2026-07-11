@@ -28,7 +28,7 @@ import time
 import uuid
 
 from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
 
@@ -77,7 +77,7 @@ repos: []
 
 
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    return run_git(cwd, *args, check=False)
+    return run_git_write(cwd, *args, check=False)
 
 
 def _git_ok(cwd: str, *args: str) -> bool:
