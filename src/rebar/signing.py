@@ -549,14 +549,33 @@ def _resolve_and_reduce(ticket_id: str, repo_root):
     return resolved, state, signing_key(tracker, create_if_missing=False)
 
 
+def most_recent_attestation(state: dict):
+    """The most-recent signed attestation of ANY kind — the semantics the legacy
+    single-slot ``state['signature']`` mirror provided, now sourced from the kind-keyed
+    ``state['attestations']`` map (352b contract phase). "Most recent" = the record with
+    the greatest ``signed_at`` (ties broken by iteration/replay order, so the last-processed
+    wins — matching the mirror's last-writer-wins).
+
+    Falls back to the legacy ``state['signature']`` mirror only when the map is absent/empty
+    — e.g. a pre-attestations snapshot the read-side fold-in did not populate. Post-feature
+    snapshots always carry ``attestations`` (and old snapshots are folded into it on read),
+    so the fallback is a defensive belt-and-suspenders, not the common path."""
+    att = state.get("attestations")
+    if isinstance(att, dict) and att:
+        # max() keeps the LAST max on ties (stable), i.e. the last-processed of equal
+        # signed_at — preserving the mirror's replay-order last-writer-wins.
+        return max(att.values(), key=lambda r: (r or {}).get("signed_at") or "")
+    return state.get("signature")
+
+
 def _record_for_kind(state: dict, kind: str | None):
-    """The signature record to verify for ``kind``. ``kind=None`` returns the legacy
-    most-recent ``state['signature']`` mirror (EXACT pre-attestations behavior — verify the
-    latest signature of any kind). An explicit kind returns ``state['attestations'][kind]``
-    STRICTLY (None when that kind is absent → an honest ``unsigned``); the mirror — which may
-    be a different kind — is never substituted for a requested kind."""
+    """The signature record to verify for ``kind``. ``kind=None`` returns the most-recent
+    attestation of any kind (via :func:`most_recent_attestation` — the pre-attestations
+    "verify the latest signature" behavior, now map-sourced). An explicit kind returns
+    ``state['attestations'][kind]`` STRICTLY (None when that kind is absent → an honest
+    ``unsigned``); a different-kind record is never substituted for a requested kind."""
     if kind is None:
-        return state.get("signature")
+        return most_recent_attestation(state)
     att = state.get("attestations")
     return att.get(kind) if isinstance(att, dict) else None
 

@@ -327,6 +327,16 @@ class CompactConfig:
     # event that merges in later replays on top instead of being silently dropped by the
     # snapshot's positional skip. Default 1800 s (30 min) in ns.
     COMPACTION_HORIZON_NS: int = 1_800_000_000_000
+    # Contract phase of the additive-attestations rollout (epic dark-acme-lumen, task
+    # 352b). The legacy single-slot ``state['signature']`` mirror is a back-compat
+    # projection of the most-recent attestation; the kind-keyed ``state['attestations']``
+    # map is now authoritative and every in-tree consumer reads it. In the CONTRACT phase
+    # (this default, False) a new SNAPSHOT's compiled_state OMITS the legacy ``signature``
+    # mirror — new snapshots carry only ``attestations``. Set True to ROLL BACK (re-emit
+    # the mirror in new snapshots) if a pre-attestations clone that reads ``signature``
+    # is found still live. Dropping the mirror is safe only once no such clone remains
+    # (the readiness gate); see docs/migrations.md "Legacy signature-mirror retirement".
+    emit_legacy_signature_mirror: bool = False
 
 
 @dataclass
@@ -467,6 +477,7 @@ _SECTIONS: dict[str, dict] = {
     "compact": {
         "threshold": lambda v, k: _as_int(v, k, minimum=1),
         "COMPACTION_HORIZON_NS": lambda v, k: _as_int(v, k, minimum=0),
+        "emit_legacy_signature_mirror": lambda v, k: _as_bool(v, k),
     },
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),

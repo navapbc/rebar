@@ -359,7 +359,7 @@ def _signature_gate(
     from rebar import signing as _signing
 
     key = _signing.signing_key(tracker_dir, create_if_missing=False)
-    result = _signing.verify_record(state.get("signature"), ticket_id, key)
+    result = _signing.verify_record(_signing.most_recent_attestation(state), ticket_id, key)
     if not result["verified"]:
         raise CommandError(
             f"Error: closing a {ticket_type} requires a certified signature "

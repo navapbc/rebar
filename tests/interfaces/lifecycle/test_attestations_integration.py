@@ -74,19 +74,7 @@ def test_resign_replaces_within_kind_only(store: Path) -> None:
 
 
 # ── compaction round-trip + cross-version snapshot mirror ───────────────────────
-def test_compaction_preserves_all_kinds_and_carries_mirror(
-    store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")  # 3 events > 1 → force a SNAPSHOT
-    tid = rebar.create_ticket("task", "compact", repo_root=str(store))
-    _sign(store, tid, "plan-review", material="m")
-    _sign(store, tid, "completion-verifier")
-    rebar.compact(tid, repo_root=str(store))
-    state = rebar.show_ticket(tid, repo_root=str(store))
-    assert set(state["attestations"]) == {"plan-review", "completion-verifier"}
-
-    # The new SNAPSHOT must carry BOTH the attestations map AND the legacy `signature` mirror,
-    # so a rolled-back / not-yet-upgraded clone reading it still sees one attestation.
+def _snapshot_compiled_state(store: Path, tid: str):
     tdir = _tdir(store, tid)
     snap = None
     for f in tdir.glob("*.json"):
@@ -94,6 +82,41 @@ def test_compaction_preserves_all_kinds_and_carries_mirror(
         if ev.get("event_type") == "SNAPSHOT":
             snap = ev["data"]["compiled_state"]
     assert snap is not None, "no SNAPSHOT event written"
+    return snap
+
+
+def test_compaction_drops_legacy_mirror_by_default(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Contract phase (352b): a new SNAPSHOT carries only the kind-keyed attestations map;
+    # the legacy `signature` mirror is dropped by default.
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")  # 3 events > 1 → force a SNAPSHOT
+    tid = rebar.create_ticket("task", "compact", repo_root=str(store))
+    _sign(store, tid, "plan-review", material="m")
+    _sign(store, tid, "completion-verifier")
+    rebar.compact(tid, repo_root=str(store))
+    state = rebar.show_ticket(tid, repo_root=str(store))
+    # Both kinds survive in the authoritative map through compaction...
+    assert set(state["attestations"]) == {"plan-review", "completion-verifier"}
+
+    snap = _snapshot_compiled_state(store, tid)
+    # ...but the SNAPSHOT no longer carries the legacy single-slot mirror.
+    assert "attestations" in snap and "signature" not in snap
+    assert set(snap["attestations"]) == {"plan-review", "completion-verifier"}
+
+
+def test_compaction_keeps_mirror_on_rollback(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Rollback (352b): set compact.emit_legacy_signature_mirror=true → the SNAPSHOT keeps
+    # the legacy `signature` mirror (most-recent attestation of any kind), so a not-yet-
+    # upgraded clone reading it still sees one attestation.
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    monkeypatch.setenv("REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR", "true")
+    tid = rebar.create_ticket("task", "compact", repo_root=str(store))
+    _sign(store, tid, "plan-review", material="m")
+    _sign(store, tid, "completion-verifier")
+    rebar.compact(tid, repo_root=str(store))
+
+    snap = _snapshot_compiled_state(store, tid)
     assert "attestations" in snap and "signature" in snap
     assert snap["signature"]["manifest"][0].startswith("completion-verifier")  # most-recent mirror
 

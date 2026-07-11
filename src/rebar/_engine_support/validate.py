@@ -111,7 +111,7 @@ def signature_findings(tracker: str) -> list:
             state = reduce_ticket(tdir)
         except Exception:  # noqa: BLE001 — never let one bad ticket fail the scan
             continue
-        record = (state or {}).get("signature")
+        record = signing.most_recent_attestation(state or {})
         if not record:
             continue
         verdict = signing.verify_record(record, name, key).get("verdict")
