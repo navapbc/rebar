@@ -84,16 +84,86 @@ def test_repair_json_falls_back_when_schema_call_raises(monkeypatch):
 
 
 # ── Bounded faulty prior output in the reask ──────────────────────────────────
-def test_reask_prompt_includes_bounded_prior_output():
-    """The runner's bounded-retry reask echoes the model's own faulty reply (truncated to
-    the named constant) so it can diff its mistake."""
-    from rebar.llm import runner as runner_mod
+def _capturing_model(texts):
+    """A FunctionModel that returns ``texts[i]`` on the i-th call (clamping to the last)
+    and CAPTURES the user-visible prompt text it received on each call. ``state["i"]``
+    counts model calls; ``state["prompts"][i]`` is the concatenated prompt text of call i.
+    Offline — no network, no billable call."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
 
-    assert runner_mod._FAULTY_OUTPUT_SNIPPET_CHARS == 2000
-    import inspect
+    state: dict = {"i": 0, "prompts": []}
 
-    src = inspect.getsource(runner_mod._pai_structured)
-    # The reask constructs the prompt from the truncated faulty output.
-    assert "_FAULTY_OUTPUT_SNIPPET_CHARS" in src
-    assert "Your previous reply was:" in src
-    assert "[truncated]" in src
+    def gen(messages, info):
+        chunks = []
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                content = getattr(part, "content", None)
+                if isinstance(content, str):
+                    chunks.append(content)
+        state["prompts"].append("\n".join(chunks))
+        idx = min(state["i"], len(texts) - 1)
+        state["i"] += 1
+        return ModelResponse(parts=[TextPart(texts[idx])])
+
+    return FunctionModel(gen), state
+
+
+def _structured_req():
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import RunRequest
+
+    return RunRequest(
+        system_prompt="x",
+        instructions="y",
+        config=LLMConfig(repo_path="."),
+        reviewers=["v"],
+        mode="structured",
+        output_schema="completion_verdict",
+    )
+
+
+def test_reask_echoes_the_models_own_faulty_prior_reply():
+    """Behavioral: a turn-1 reply that fails structured parse triggers a SECOND model call
+    whose prompt echoes the model's OWN faulty prior reply, and the run then recovers."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner
+
+    # A non-JSON reply that fails the structured parse. The unique sentinel sits well past
+    # the first ~120 chars so it can ONLY reach the reask via the faulty-echo, not via the
+    # parse error's short input snippet — making this a genuine guard on the echo itself.
+    faulty = "not valid json " * 20 + "REASK_ECHO_SENTINEL_XYZ"
+    model, state = _capturing_model(
+        [faulty, '{"verdict": "PASS", "findings": [], "summary": "ok"}']
+    )
+    out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_structured_req())
+
+    # 1. A retry actually happened: the model was called TWICE.
+    assert state["i"] == 2
+    # 2. The turn-2 reask prompt echoes the model's own turn-1 faulty reply verbatim.
+    assert faulty in state["prompts"][1]
+    # 4. The overall call still returns a valid parsed result after the good turn-2.
+    assert out["verdict"] == "PASS"
+
+
+def test_reask_bounds_a_huge_faulty_prior_reply():
+    """Behavioral: an oversized turn-1 faulty reply is echoed BOUNDED (truncated) into the
+    reask — the full blob is not passed back whole, and a ``[truncated]`` marker appears."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner
+
+    # A distinctive, clearly-non-JSON blob far longer than the echo bound, using a rare
+    # char so we can count how much of it survives into the reask.
+    huge = "Z" * 5000
+    model, state = _capturing_model([huge, '{"verdict": "PASS", "findings": [], "summary": "ok"}'])
+    out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_structured_req())
+
+    assert state["i"] == 2
+    reask = state["prompts"][1]
+    # 3. The echo is BOUNDED: the full 5000-char blob is NOT passed back whole, the echoed
+    # portion is capped (~2000 chars + marker), and a truncation marker is present.
+    assert huge not in reask
+    assert reask.count("Z") <= 2500  # bounded near the ~2000 cap, nowhere near the 5000 blob
+    assert "[truncated]" in reask
+    # 4. The call still recovers to a valid parsed result on the good turn-2.
+    assert out["verdict"] == "PASS"
