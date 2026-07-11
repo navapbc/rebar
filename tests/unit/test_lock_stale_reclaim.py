@@ -12,9 +12,11 @@ exclusion is preserved.
 
 from __future__ import annotations
 
+import errno as _errno
 import os
 import socket
 import subprocess
+import time as _time
 
 import pytest
 
@@ -76,3 +78,84 @@ def test_acquire_does_not_reclaim_foreign_host_owner(tmp_path):
     with pytest.raises(_lock.LockTimeout):
         _lock.acquire(str(tmp_path), timeout=1, attempts=1)
     assert os.path.isdir(os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME))
+
+
+# ── Direct _acquire_fcntl errno discrimination (story sulfureous-albino-fallowdeer) ──
+#
+# `_acquire_fcntl` used to catch EVERY OSError identically and wait out the deadline, so a
+# genuine system fault (ENOLCK/EIO/EBADF) was masked as a spurious LockTimeout. It now branches
+# on errno: contention (EAGAIN/EACCES) waits until the deadline then returns -1; any other errno
+# is re-raised immediately with its identity. The fd is closed on every failure path.
+
+
+def _raise_errno(err: int):
+    """A fake ``fcntl.flock`` that always raises ``OSError(err, …)``."""
+
+    def _flock(fd, op):  # noqa: ANN001
+        raise OSError(err, os.strerror(err))
+
+    return _flock
+
+
+def test_acquire_fcntl_contention_waits_then_returns_minus_one(tmp_path, monkeypatch):
+    """EAGAIN contention: retry until the deadline, then return -1 (unchanged behavior)."""
+    lock_path = os.path.join(str(tmp_path), "wl")
+
+    def _always_eagain(fd, op):
+        raise OSError(_errno.EAGAIN, "resource temporarily unavailable")
+
+    monkeypatch.setattr(_lock.fcntl, "flock", _always_eagain)
+    deadline = _time.monotonic() + 0.15
+    fd = _lock._acquire_fcntl(lock_path, deadline)
+    assert fd == -1, "sustained contention past the deadline returns the -1 sentinel"
+
+
+def test_acquire_fcntl_unexpected_errno_raises_immediately(tmp_path, monkeypatch):
+    """A non-contention errno (ENOLCK) is re-raised at once with its errno, NOT masked as -1."""
+    lock_path = os.path.join(str(tmp_path), "wl")
+
+    def _enolck(fd, op):
+        raise OSError(_errno.ENOLCK, "no locks available")
+
+    monkeypatch.setattr(_lock.fcntl, "flock", _enolck)
+    # A far-future deadline: the OLD code would wait ~here for it; the fix raises promptly.
+    deadline = _time.monotonic() + 30
+    t0 = _time.monotonic()
+    with pytest.raises(OSError) as exc:
+        _lock._acquire_fcntl(lock_path, deadline)
+    assert exc.value.errno == _errno.ENOLCK
+    assert _time.monotonic() - t0 < 1.0, "must surface immediately, not wait out the deadline"
+
+
+def test_acquire_fcntl_closes_fd_on_timeout(tmp_path, monkeypatch):
+    """The fd opened at the top is closed on the -1 (timeout) path."""
+    lock_path = os.path.join(str(tmp_path), "wl")
+    closed: list[int] = []
+    real_close = _lock.os.close
+
+    def _spy_close(fd):  # noqa: ANN001
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(_lock.fcntl, "flock", _raise_errno(_errno.EAGAIN))
+    monkeypatch.setattr(_lock.os, "close", _spy_close)
+    fd = _lock._acquire_fcntl(lock_path, _time.monotonic() + 0.1)
+    assert fd == -1
+    assert closed, "the opened fd must be closed on the timeout path"
+
+
+def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
+    """The fd is closed on the re-raise (unexpected errno) path too."""
+    lock_path = os.path.join(str(tmp_path), "wl")
+    closed: list[int] = []
+    real_close = _lock.os.close
+
+    def _spy_close(fd):  # noqa: ANN001
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(_lock.fcntl, "flock", _raise_errno(_errno.EIO))
+    monkeypatch.setattr(_lock.os, "close", _spy_close)
+    with pytest.raises(OSError):
+        _lock._acquire_fcntl(lock_path, _time.monotonic() + 30)
+    assert closed, "the opened fd must be closed on the re-raise path"
