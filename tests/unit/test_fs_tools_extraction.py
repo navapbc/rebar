@@ -10,20 +10,24 @@ import subprocess
 import sys
 
 
-def test_fs_tools_exposes_the_shared_cluster() -> None:
-    from rebar.llm import fs_tools
+def test_fs_tools_cluster_is_reused_by_identity_and_drives_discovery(tmp_path) -> None:
+    from rebar.llm import fs_tools, pai_tools
 
-    # The runner-agnostic primitives pai_tools builds its file tools on.
-    for sym in (
-        "_safe_path",
-        "_git_tracked",
-        "_discovery_filter",
-        "_within_root",
-        "_SCAN_MAX_FILES",
-        "_NOISE_DIRS",
-        "_NOISE_SUFFIXES",
-    ):
-        assert hasattr(fs_tools, sym), f"fs_tools missing shared symbol {sym}"
+    # (1) pai_tools builds its file tools on the SAME primitive objects — reuse by
+    # IDENTITY (`is`), not a re-implemented copy. A name-existence probe would pass
+    # even if pai_tools forked its own path/discovery hardening; identity would not.
+    assert pai_tools._safe_path is fs_tools._safe_path
+    assert pai_tools._within_root is fs_tools._within_root
+    assert pai_tools._discovery_filter is fs_tools._discovery_filter
+    assert pai_tools._SCAN_MAX_FILES is fs_tools._SCAN_MAX_FILES
+
+    # (2) The noise constants (_NOISE_DIRS / _NOISE_SUFFIXES) and _git_tracked are
+    # exercised through their EFFECT on the seam that consumes them, _discovery_filter,
+    # rather than asserted as literal frozenset contents.
+    skip_dir, skip_file = fs_tools._discovery_filter(str(tmp_path))
+    assert skip_dir("node_modules") is True  # a _NOISE_DIRS member is hidden
+    assert skip_dir("src") is False  # an ordinary source dir is kept
+    assert skip_file(str(tmp_path / "x.min.js"), "x.min.js") is True  # a _NOISE_SUFFIXES file
 
 
 def test_pai_tools_consume_the_shared_cluster() -> None:

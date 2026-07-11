@@ -271,20 +271,48 @@ def test_pass_n_plus_1_succeeds_with_no_residual_state(tmp_path, applier, concur
     )
 
 
-def test_exit_reschedule_constant_is_distinct(applier):
-    """EXIT_RESCHEDULE constant is 75 (distinct from 0=success and 1=error).
+def test_run_pass_returns_exit_reschedule_when_reconcile_signals_reschedule(
+    tmp_path, monkeypatch, applier
+):
+    """The reschedule EXIT CODE is asserted by its EFFECT, not its literal value.
 
-    This value is used by callers to distinguish a reschedule signal from a
-    generic error exit, ensuring the scheduler can take the correct action.
+    Drive the real ``run_pass`` orchestrator with a reconcile whose
+    ``reconcile_once`` raises the applier's ``RescheduleError`` (the exhaustion
+    signal). ``run_pass`` classifies that and RETURNS its reschedule exit code —
+    we assert the returned code IS ``applier.EXIT_RESCHEDULE`` and is distinct
+    from the success (0) and generic-error (1) codes that share the same seam.
     """
-    assert hasattr(applier, "EXIT_RESCHEDULE"), (
-        "applier module must export EXIT_RESCHEDULE constant"
+    import rebar_reconciler.__main__ as main_mod
+
+    # A fake reconcile module whose reconcile_once raises the REAL RescheduleError
+    # (same class object run_pass will isinstance-check, since we hand run_pass the
+    # same applier fixture below).
+    fake_reconcile = types.ModuleType("reconcile_reschedule_fake")
+
+    def _raise_reschedule(*_args, **_kwargs):
+        raise applier.RescheduleError(attempt_count=3, last_error="exhausted 3 attempts")
+
+    fake_reconcile.reconcile_once = _raise_reschedule
+
+    real_try_load = main_mod._try_load_step
+
+    def _patched_try_load(name):
+        if name == "reconcile":
+            return fake_reconcile
+        if name == "applier":
+            return applier
+        return real_try_load(name)
+
+    monkeypatch.setattr(main_mod, "_try_load_step", _patched_try_load)
+
+    rc = main_mod.run_pass(repo_root=tmp_path, pass_id="2026-05-22-pass-reschedule-exit")
+
+    assert rc == applier.EXIT_RESCHEDULE, (
+        f"run_pass must return the reschedule exit code on RescheduleError, got {rc}"
     )
-    assert applier.EXIT_RESCHEDULE == 75, (
-        f"EXIT_RESCHEDULE must be 75, got {applier.EXIT_RESCHEDULE}"
-    )
-    assert applier.EXIT_RESCHEDULE != 0, "EXIT_RESCHEDULE must be non-zero"
-    assert applier.EXIT_RESCHEDULE != 1, "EXIT_RESCHEDULE must be distinct from generic error (1)"
+    # The reschedule code is observably distinct from the success/error codes
+    # emitted by the very same run_pass return-code seam.
+    assert rc != 0 and rc != 1
 
 
 def test_reschedule_error_attributes(applier):

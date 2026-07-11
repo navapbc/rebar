@@ -11,7 +11,9 @@ Proving command:
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,16 +101,79 @@ def test_code_review_is_searchable(store: Path) -> None:
     assert art in hits
 
 
-def test_code_review_excluded_from_jira_sync() -> None:
-    # The reconciler config loads with its own sys.path (bash->Python strangler engine), so assert
-    # the exclusion at the source level: code_review is in EXCLUDED_SYNC_TYPES and NOT in either
-    # local->Jira type map (so any leak past the filter surfaces rather than silently syncing).
-    from pathlib import Path
+def _load_outbound_differ():
+    """Load outbound_differ standalone (the bash->Python strangler engine sets its own
+    sys.path), returning the module so we can drive its real type-filtering path."""
+    engine_dir = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
+    if str(engine_dir) not in sys.path:
+        sys.path.insert(0, str(engine_dir))
+    # Under pytest, tests/unit/rebar_reconciler/__init__.py is itself importable as
+    # the top-level ``rebar_reconciler`` package and SHADOWS the engine package of the
+    # same name (which lacks _loader.py etc.). Extend that package's __path__ with the
+    # engine dir so outbound_differ's own ``from rebar_reconciler.<x> import ...`` fall
+    # through to the real engine modules — the pattern the reconciler conftest uses.
+    import rebar_reconciler  # noqa: PLC0415 — path is only valid after the insert above
 
-    cfg = Path("src/rebar/_engine/rebar_reconciler/config.py").read_text()
-    assert '"code_review"' in cfg and "EXCLUDED_SYNC_TYPES" in cfg
-    for m in ("outbound_fields.py", "reconcile_check.py"):
-        assert "code_review" not in Path(f"src/rebar/_engine/rebar_reconciler/{m}").read_text()
+    engine_pkg = str(engine_dir / "rebar_reconciler")
+    if engine_pkg not in rebar_reconciler.__path__:
+        rebar_reconciler.__path__.append(engine_pkg)
+    spec = importlib.util.spec_from_file_location(
+        "outbound_differ_code_review", Path(engine_pkg) / "outbound_differ.py"
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("outbound_differ_code_review", mod)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _StubBindingStore:
+    """Nothing bound — so a syncable ticket would normally emit a CREATE."""
+
+    def get_jira_key(self, local_id: str) -> str | None:
+        return None
+
+    def is_bound(self, local_id: str) -> bool:
+        return False
+
+
+def _local_ticket(ticket_id: str, ticket_type: str) -> dict:
+    return {
+        "ticket_id": ticket_id,
+        "title": f"{ticket_type} ticket",
+        "description": "body",
+        "status": "open",
+        "priority": 2,
+        "ticket_type": ticket_type,
+        "assignee": "alice",
+        "tags": [],
+        "comments": [],
+        "deps": [],
+    }
+
+
+def test_code_review_excluded_from_jira_sync() -> None:
+    """Behavioral: RUN the reconciler's outbound diff over a store holding a code_review
+    ticket + a sibling task. The code_review must yield ZERO outbound mutations (it never
+    enters the Jira sync set) while the task still produces a CREATE — a surgical exclusion
+    observed in the emitted mutation list, not a source-string grep."""
+    outbound_differ = _load_outbound_differ()
+
+    art = _local_ticket("local-cr-1", "code_review")
+    task = _local_ticket("local-task-1", "task")
+
+    result, _ = outbound_differ.compute_outbound_mutations(
+        local_tickets=[art, task],
+        jira_snapshot={},
+        binding_store=_StubBindingStore(),
+    )
+
+    cr_mutations = [m for m in result if m.local_id == "local-cr-1"]
+    task_mutations = [m for m in result if m.local_id == "local-task-1"]
+    assert cr_mutations == [], f"code_review must never sync outbound; got {cr_mutations}"
+    assert any(m.action == "create" for m in task_mutations), (
+        "the sibling task must still CREATE — the exclusion must be surgical, not a global no-op"
+    )
 
 
 def test_code_review_cannot_be_transitioned(store: Path) -> None:
