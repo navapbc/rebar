@@ -116,11 +116,33 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.overlap_min_should_match == 0.42
 
 
-def test_field_weights_constant() -> None:
-    # Field weights are a code constant, not a config knob; problem/area weighted high.
-    assert R._FIELD_WEIGHTS["problem_keywords"] == 3.0
-    assert R._FIELD_WEIGHTS["component_or_area"] == 3.0
-    assert R._FIELD_WEIGHTS["key_entities"] == 1.0
+def test_field_weights_drive_ranking() -> None:
+    # Assert the field weights via their EFFECT on ranking, not their literal values.
+    # Two docs share the SAME query term "alpha", but one carries it in a HIGH-weight
+    # field (problem_keywords=3.0) and the other in a LOW-weight field (propositions=1.0).
+    # The higher-weighted field must produce the higher BM25F score and rank first —
+    # and the doc ids are chosen so that if the weights were EQUAL the score tie would
+    # break alphabetically to the OTHER doc, so the ordering flips iff weighting works.
+    query = _digest(["alpha"], "x", ["E"], ["p one"])
+    corpus = {
+        "z_high": _digest(["alpha"], "", [], []),  # term in problem_keywords (weight 3.0)
+        "a_low": _digest([], "", [], ["alpha"]),  # term in propositions   (weight 1.0)
+    }
+    out = retrieve(
+        query,
+        corpus,
+        exclude=set(),
+        config=LLMConfig(overlap_k=20, overlap_min_should_match=0.1, overlap_max_doc_freq=1.0),
+    )
+    ids = [c.ticket_id for c in out]
+    assert ids == ["z_high", "a_low"], (
+        "the high-weighted field must rank first; equal weights would tie and sort "
+        f"alphabetically to a_low. got {ids}"
+    )
+    by_id = {c.ticket_id: c.score for c in out}
+    assert by_id["z_high"] > by_id["a_low"]
+
+    # The weights are an algorithmic constant, deliberately NOT a per-invocation config knob.
     assert not hasattr(LLMConfig(), "overlap_field_weights")
 
 
