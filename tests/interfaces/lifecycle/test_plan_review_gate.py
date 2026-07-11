@@ -1162,3 +1162,153 @@ def test_sign_review_cli_success_and_refusal(rebar_repo: Path, capsys) -> None:
     other = _make(rebar_repo)  # never reviewed → refusal
     assert _cli.main(["sign-review", other, "-o", "text"]) == 1
     assert "refused" in capsys.readouterr().err.lower()  # text refusal goes to stderr
+
+
+# ── bug 406f: a plan naming a REAL third-party symbol yields no absence-BLOCK ────
+#
+# End-to-end pipeline regression (finder → verify → decide → verdict), NOT a
+# resolver-level unit test. A Pass-1 finder flags a "symbol does not exist /
+# hallucinated" BLOCK-class finding on a third-party symbol the plan names. The
+# Pass-2 verifier (which the real gate runs AGENTICALLY with the `resolve_symbol`
+# tool) re-grounds the cited symbol against the merged grounding oracle: because the
+# symbol IS importable, the oracle REFUTES the asserted absence, the verifier marks
+# `cited_reference_accurate=no`, and Pass-3 DROPS the finding — so no absence-BLOCK
+# survives in `verdict["blocking"]`. Deterministic: no live LLM; the oracle's
+# environment resolution runs even on ctags-blind hosts (the default CI condition).
+#
+# `yaml.safe_load` is used deliberately — PyYAML is a CORE dependency (installed on
+# every CI job), so the third-party path is exercised everywhere, not only on
+# `[agents]` jobs.
+
+_TP_SYMBOL = "yaml.safe_load"  # a real, importable core-dependency member
+_ABSENT_SYMBOL = "yaml.this_symbol_does_not_exist_zzz406f"  # importable module, missing attr
+
+_PLAN_WITH_TP_SYMBOL = (
+    "Body with enough length to be a real plan, describing the change in detail so the gate has "
+    "something to review and the clarity heuristic is satisfied across the board here. The plan "
+    f"parses config by calling `{_TP_SYMBOL}` on the untrusted input stream.\n\n"
+    "## Acceptance Criteria\n- [ ] config is parsed safely\n- [ ] another verifiable check\n\n"
+    "## Why\nx\n## What\ny\n## Scope\nz\n"
+)
+
+
+def _absence_finding(symbol: str) -> dict:
+    """A BLOCK-class 'symbol does not exist / hallucinated' finding on E4 (a
+    codebase-grounded, blocking-enabled criterion), citing ``symbol`` in evidence."""
+    return {
+        "finding": f"The plan references `{symbol}`, but this symbol does not exist in the "
+        "codebase — it looks hallucinated / a missing edit target.",
+        "criteria": ["E4"],
+        "evidence": [f"symbol:{symbol}", "no definition found via Grep of the repo tree"],
+        "location": "plan description",
+        "checklist_item": f"- [ ] confirm `{symbol}` exists before committing to it",
+        "impact": "Committing to a nonexistent symbol would break the build.",
+    }
+
+
+class _GroundingVerifierFake(_GateFake):
+    """A ``_GateFake`` whose Pass-2 verifier RE-GROUNDS each finding's cited symbol
+    against the real grounding oracle — the deterministic stand-in for the agentic
+    verifier's ``resolve_symbol`` tool. When the oracle REFUTES the asserted absence
+    (the symbol is importable), it marks ``cited_reference_accurate=no`` (the veto
+    Pass-3 drops on); otherwise it returns a high-severity accurate verification so a
+    genuinely-absent symbol still BLOCKs."""
+
+    _SYMBOL_RE = re.compile(r"symbol:([^\s|]+)")
+    _INDEX_RE = re.compile(r"### finding index (\d+)")
+
+    def __init__(self, *, finder_findings=None, repo_root: str = "."):
+        super().__init__(finder_findings=finder_findings)
+        self._repo_root = repo_root
+
+    @staticmethod
+    def _verification(index: int, cited_reference_accurate: str) -> dict:
+        # High PLAN-severity so a NON-dropped finding clears E4's 0.75 block threshold —
+        # the negative control must be able to actually BLOCK. `impact_plan` reads the
+        # plan-severity axes (NOT the code-review keys); `divergent_implementation`
+        # (a hard-override axis: "the plan will build the wrong thing") set to "high"
+        # yields impact 1.0, so priority = validity × impact clears the threshold.
+        return {
+            "index": index,
+            "severity_attributes": {
+                "divergent_implementation": "high",
+            },
+            "binary": {
+                "cited_reference_accurate": cited_reference_accurate,
+                "is_verifiable": "yes",
+                "evidence_entails_finding": "yes",
+                "path_reachable": "yes",
+                "impact_follows_necessarily": "yes",
+                "no_viable_alternative_explanation": "yes",
+                "no_existing_mitigation": "yes",
+                "severity_claim_justified": "yes",
+            },
+        }
+
+    def run(self, req) -> dict:  # type: ignore[override]
+        if req.output_schema != "plan_review_verification":
+            return super().run(req)
+        from rebar import grounding
+        from rebar.llm import findings as _f
+
+        verifs = []
+        for block in re.split(r"(?=### finding index \d+)", req.instructions or ""):
+            im = self._INDEX_RE.search(block)
+            if not im:
+                continue
+            idx = int(im.group(1))
+            sym = self._SYMBOL_RE.search(block)
+            cra = "na"
+            if sym:
+                # Exactly what the agentic verifier does via resolve_symbol: consult
+                # the installed environment to see whether the "absent" symbol exists.
+                ev = grounding.refute_absence(
+                    {"kind": "member", "name": sym.group(1), "language": "python"},
+                    repo_root=self._repo_root,
+                )
+                cra = "no" if ev.get("outcome") == "refuted" else "yes"
+            verifs.append(self._verification(idx, cra))
+        payload = _f.validate_structured({"verifications": verifs}, "plan_review_verification")
+        return {**payload, "runner": self.name, "model": None, "trace_id": None}
+
+
+def test_third_party_symbol_absence_finding_is_refuted_no_block(rebar_repo: Path) -> None:
+    """AC (406f): a plan naming a known-importable third-party symbol produces NO
+    absence/does-not-exist BLOCK — the grounding refutation drops the finding."""
+    _commit(rebar_repo)
+    tid = _make(rebar_repo, desc=_PLAN_WITH_TP_SYMBOL)
+    runner = _GroundingVerifierFake(
+        finder_findings=[_absence_finding(_TP_SYMBOL)], repo_root=str(rebar_repo)
+    )
+    verdict = _review(tid, rebar_repo, runner=runner)
+
+    # No blocking finding of the absence/does-not-exist class survives.
+    def _is_absence_block(f: dict) -> bool:
+        return "does not exist" in f.get("finding", "") or "hallucinat" in f.get("finding", "")
+
+    assert not any(_is_absence_block(f) for f in verdict["blocking"]), (
+        f"a third-party symbol wrongly produced an absence-BLOCK: {verdict['blocking']}"
+    )
+    assert verdict["verdict"] == "PASS"
+    # The finding was DROPPED by the cited-reference-inaccurate veto (grounding refuted it).
+    dropped_reasons = [f.get("reason") for f in verdict["dropped"]]
+    assert "veto:cited-reference-inaccurate" in dropped_reasons, (
+        f"absence finding not dropped by grounding refutation: {verdict['dropped']}"
+    )
+
+
+def test_genuinely_absent_symbol_still_blocks_control(rebar_repo: Path) -> None:
+    """Non-vacuity control: the SAME finder finding on a genuinely-absent symbol (the
+    oracle cannot refute it) DOES block — proving the pipeline can emit an
+    absence-BLOCK and that grounding refutation is what spares the real symbol."""
+    _commit(rebar_repo)
+    tid = _make(rebar_repo, desc=_PLAN_WITH_TP_SYMBOL)
+    runner = _GroundingVerifierFake(
+        finder_findings=[_absence_finding(_ABSENT_SYMBOL)], repo_root=str(rebar_repo)
+    )
+    verdict = _review(tid, rebar_repo, runner=runner)
+    assert verdict["verdict"] == "BLOCK"
+    assert any("does not exist" in f.get("finding", "") for f in verdict["blocking"]), (
+        "expected the absence finding to BLOCK for a truly-absent symbol; "
+        f"blocking={verdict['blocking']}"
+    )
