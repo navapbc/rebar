@@ -1,21 +1,15 @@
 name: optionality
 
 # Enforce that rebar's runtime stays LEAN (epic a88f / WS-J3). Extras can only ADD
-# dependencies, so without CI the base silently grows heavy. This workflow makes
-# the optionality contract automatic:
-#
-#   * import-linter  — no module under src/rebar imports the heavy
-#     [agents]/[eval]/[tracing] stack at module scope (the AST guard, run as the
-#     in-suite tests/unit/test_core_optionality.py + a clean-wheel runtime check).
-#   * clean-core-wheel — the built wheel installs with NO extras; `import rebar`
-#     and a core command work; the heavy deps are NOT importable.
-#   * per-extra + union — each extra installs on its own, and the union
-#     [agents,eval,tracing] resolves (catches a ResolutionImpossible early).
+# dependencies, so without CI the base silently grows heavy. The checks themselves live
+# in the reusable ._optionality.yml (workflow_call) so the SAME job definitions run here
+# (push / pull_request) AND in the Verified gate (gerrit-verify.yaml, on the patchset) —
+# no drift. This lane checks out the branch head (no gerrit-refspec) and casts no vote;
+# gerrit-verify is the sole Verified source (see fern-belief-gap).
 
 on:
   push:
-    # every branch EXCEPT the S3-replicated feature/** (redundant mirror CI; casts no
-    # Verified vote — gerrit-verify is the sole Verified source; see fern-belief-gap).
+    # every branch EXCEPT the S3-replicated feature/** (redundant mirror CI).
     branches-ignore: ["feature/**"]
   pull_request: {}
   workflow_dispatch: {}
@@ -24,125 +18,6 @@ permissions:
   contents: read
 
 jobs:
-  import-linter:
-    name: import-linter (no module-scope heavy imports)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install (dev)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
-      - name: Static optionality guard (AST + lean-runtime)
-        run: |
-          python -m pytest -q tests/unit/test_core_optionality.py tests/unit/test_optional.py
-
-  clean-core-wheel:
-    name: clean core wheel (no extras → heavy deps absent)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Build the wheel
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build --wheel
-      - name: Install the wheel with NO extras, in a clean venv
-        run: |
-          python -m venv /tmp/clean
-          /tmp/clean/bin/pip install --upgrade pip
-          /tmp/clean/bin/pip install dist/*.whl
-      - name: import rebar + a core command work; heavy deps are NOT importable
-        run: |
-          /tmp/clean/bin/python - <<'PY'
-          import importlib.util as u
-          import rebar  # core import works (only pyyaml is a runtime dep)
-          # A lean-runtime workflow capability works with no extras: a valid
-          # workflow PASSES validation (jsonschema absent -> structural check +
-          # a non-blocking "install jsonschema" warning).
-          from rebar.llm.workflow import lint
-          wf = 'schema_version: "1"\nname: x\nsteps:\n  - id: a\n    uses: u\n'
-          assert lint.lint_passes(lint.lint_workflow(wf)), "lean-core validate failed"
-          # The heavy [agents]/[eval]/[tracing] stack must NOT be importable here.
-          for mod in ("langchain", "langgraph", "anthropic", "inspect_ai", "opentelemetry"):
-              assert u.find_spec(mod) is None, f"{mod} importable in a no-extras install!"
-          print("clean-core-wheel OK")
-          PY
-      - name: a core CLI command runs on the clean wheel
-        run: |
-          /tmp/clean/bin/rebar --help >/dev/null
-      # The LLM-optionality *degradation* tests (skipif the agents extra is
-      # installed) verify every interface fails loudly+cleanly when the stack is
-      # ABSENT. The main test.yml lane installs [dev] -> [agents], so they always
-      # skip there; this no-extras clean venv is the one place they can run. Install
-      # only the light test deps (pytest + jsonschema + mcp/FastMCP) — NOT the agents
-      # stack — so agents_extra_installed() stays False and the skipif tests execute.
-      # Story alive-ogre-tiger (epic clumsy-jab-yacht).
-      - name: degradation-path tests run with NO agents extra
-        run: |
-          /tmp/clean/bin/pip install pytest jsonschema mcp
-          /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
-          # F2: drive the completion close-gate fail-closed path with the [agents] extra
-          # genuinely ABSENT (not just a monkeypatched error) — the lean lane is the one
-          # place it runs for real. The test monkeypatches the verifier, so it needs no
-          # extra; running it HERE proves the fail-closed close survives a real lean install.
-          /tmp/clean/bin/python -m pytest \
-            tests/interfaces/store/test_llm_optionality.py \
-            tests/interfaces/lifecycle/test_completion_gate.py::test_gate_missing_llm_fails_closed \
-            -m "not external" -rs
-
-  per-extra:
-    name: extra "${{ matrix.extra }}" installs
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        extra: [agents, eval, tracing, mcp, grounding]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install nava-rebar[${{ matrix.extra }}]
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[${{ matrix.extra }}]"
-      - name: import rebar with the extra present
-        run: |
-          python - <<'PY'
-          import rebar  # installing the extra must not break the core import
-          from rebar import _optional
-
-          extra = "${{ matrix.extra }}"
-          if extra in _optional.EXTRAS:
-              assert _optional.extra_installed(extra), f"{extra}: installed but _optional did not detect it"
-              print(extra, "installed + detected")
-          else:
-              # mcp has no _optional detection probe (it is the server transport, not a
-              # lean-runtime feature gate); `import rebar` succeeding + the boot check below
-              # are its validations.
-              print(extra, "installed (no _optional probe)")
-          PY
-      - name: rebar-mcp boots (mcp extra only)
-        if: matrix.extra == 'mcp'
-        run: rebar-mcp --help >/dev/null
-
-  union:
-    name: union [agents,eval,tracing] resolves
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install the union of all extras (catch ResolutionImpossible)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[agents,eval,tracing]"
-      - name: import rebar with the full stack present
-        run: python -c "import rebar; print('union OK')"
+  optionality:
+    # No inputs → the reusable workflow does a branch-head actions/checkout.
+    uses: ./.github/workflows/_optionality.yml

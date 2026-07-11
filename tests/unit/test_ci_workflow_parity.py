@@ -18,6 +18,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
+_OPTIONALITY_YML = _ROOT / ".github" / "workflows" / "optionality.yml"
+_REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
 
 # Each gating check keyed by a STABLE command signature (not the step name — names differ
 # in wording between the two files, e.g. the pip-audit step). Every signature here must
@@ -81,4 +83,38 @@ def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
         "script-driven gate(s) run in test.yml (post-merge) but not in the Verified gate "
         f"(gerrit-verify.yaml): {sorted(missing)}. Add them to gerrit-verify.yaml so they "
         "gate pre-merge, or record a reasoned exception in _INTENTIONAL_SCRIPT_ASYMMETRIES."
+    )
+
+
+def test_optionality_contract_gates_the_verified_path() -> None:
+    """The lean-runtime / clean-core-wheel / packaging (optionality) contract must run in the
+    Verified gate ON THE PATCHSET, not only post-merge. A module-scope heavy-import regression
+    (pydantic_ai/httpx) once reached main precisely because gerrit-verify installs .[dev] (heavy
+    stack present) and never exercised the no-extras clean wheel. Lock in the wiring: gerrit-verify
+    invokes the reusable optionality workflow with the Gerrit refspec (so it checks out the
+    patchset), and the push/PR lane delegates to the SAME reusable workflow (no drift)."""
+    gerrit_yml = _read(_GERRIT_YML)
+    optionality_yml = _read(_OPTIONALITY_YML)
+    assert _REUSABLE_OPTIONALITY in gerrit_yml, (
+        "gerrit-verify.yaml does not invoke the reusable optionality workflow "
+        f"({_REUSABLE_OPTIONALITY}) — the clean-wheel/packaging contract would only fail "
+        "post-merge. Add an `optionality` job that `uses` it with the Gerrit refspec."
+    )
+    # The patchset (not the branch head / main) must be what optionality verifies in the gate.
+    assert "GERRIT_REFSPEC" in gerrit_yml, (
+        "the Verified-lane optionality job must pass GERRIT_REFSPEC so it checks out the exact "
+        "patchset (a plain checkout under workflow_dispatch resolves to main → silent false PASS)."
+    )
+    # The vote must wait for optionality so the run-conclusion snapshot sees a terminal result.
+    vote_needs_optionality = (
+        "build-and-test, optionality" in gerrit_yml or "optionality, build-and-test" in gerrit_yml
+    )
+    assert vote_needs_optionality, (
+        "the `vote` job must list `optionality` in its `needs` so its conclusion is folded into "
+        "the Verified vote (otherwise the run-conclusion snapshot can miss it)."
+    )
+    # Both lanes share one definition — no drift between push/PR and Verified.
+    assert _REUSABLE_OPTIONALITY in optionality_yml, (
+        "optionality.yml (push/PR lane) must delegate to the same reusable workflow so its checks "
+        "cannot drift from the Verified-lane checks."
     )

@@ -315,10 +315,30 @@ jobs:
           pytest -m integration -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
 
+  optionality:
+    # Run the lean-runtime / clean-core-wheel / per-extra / union contract ON THE PATCHSET,
+    # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
+    # installs .[dev], so the heavy stack is present there and never exercises the clean wheel).
+    # Reuses the SAME jobs the push/PR lane runs (no drift). Passes the Gerrit coordinates as
+    # non-secret inputs → the reusable workflow checks out the exact patchset via
+    # checkout-gerrit-change-action; it inherits NO secrets (the vote key stays in this file).
+    # Independent of clear-vote/require-ticket so it runs fully parallel with build-and-test; its
+    # conclusion reaches the vote below because `vote` needs it (see the run-conclusion note).
+    name: optionality (lean-runtime + packaging on the patchset)
+    uses: ./.github/workflows/_optionality.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
   vote:
     name: cast Verified
     if: ${{ always() }}
-    needs: [clear-vote, require-ticket, build-and-test]
+    # optionality is in `needs` so its job(s) are TERMINAL before workflow-conclusion snapshots
+    # this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read enabled
+    # by `permissions: actions: read`) folds the reusable workflow's job conclusions into
+    # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
+    needs: [clear-vote, require-ticket, build-and-test, optionality]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
