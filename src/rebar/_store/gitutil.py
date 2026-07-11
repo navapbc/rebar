@@ -48,7 +48,18 @@ def run_git(
     process CWD (some callers verify commits relative to the caller's directory
     rather than a fixed repo). ``input_data`` (when set) is fed to git's stdin —
     forwarded to :func:`subprocess.run`'s ``input`` for e.g. ``git hash-object``.
+
+    Contract note: with ``text=True`` (the default), ``input_data`` must be ``str`` —
+    :func:`subprocess.run` encodes text-mode stdin. Passing ``bytes`` with ``text=True``
+    would otherwise fail deep in the stdlib with an opaque ``AttributeError: 'bytes'
+    object has no attribute 'encode'``; this wrapper raises a clear :class:`TypeError`
+    instead. Binary stdin requires ``text=False`` (then stdout/stderr are ``bytes`` too).
     """
+    if text and isinstance(input_data, bytes):
+        raise TypeError(
+            "run_git: bytes input_data requires text=False (binary stdin cannot be "
+            "encoded in text mode); pass text=False for binary stdin, or a str for text mode."
+        )
     argv = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
     return subprocess.run(
         argv,
