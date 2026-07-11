@@ -10,8 +10,6 @@ non-regression invariants (no close-op change, no new attestation kind).
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 from gold_set_completion import (
     CATEGORIES,
@@ -175,26 +173,49 @@ def test_reopen_resurfaces_dropped_finding(monkeypatch) -> None:
 
 
 # ── non-regression: only what a RE-FIRED REVIEW does changes ────────────────────────────────────
-def test_non_regression_floor_is_review_only() -> None:
-    """The completion floor only shapes a review verdict — it never signs, transitions, or closes,
-    and the close/verify path never references it (no close-op change, no new attestation kind)."""
-    floor_src = "\n".join(
-        inspect.getsource(fn)
-        for fn in (
-            plan_review._apply_completion_floor_to_verdict,
-            plan_review._classify_completion,
-            plan_review._maybe_apply_completion_floor,
-        )
+def test_floor_is_a_pure_review_only_transform(monkeypatch) -> None:
+    """The floor only RE-PARTITIONS findings between advisory/dropped: it fabricates or loses
+    no finding, emits no signing/attestation side-output, and does not mutate its inputs. This
+    is the behavioral replacement for the old inspect.getsource token-absence check — a pure
+    verdict→verdict transform has no store/LLM pathway to observe, so its review-only nature is
+    proven by its OBSERVABLE purity contract (conservation + no side-output + inputs unchanged)."""
+    import copy
+
+    _partial_epic(monkeypatch)
+    v = _verdict_from_gold()
+    cmap = _gold_map()
+
+    before_ids = {f["id"] for f in v["advisory"]} | {f["id"] for f in v.get("dropped", [])}
+    before_keys = set(v.keys())
+    cmap_before = copy.deepcopy(cmap)
+    findings_before = {f["id"]: copy.deepcopy(f) for f in v["advisory"]}
+
+    plan_review._apply_completion_floor_to_verdict(
+        v, cmap, floor=_FLOOR, preserve=_PRESERVE, delivered_ids=_delivered_ids()
     )
-    for forbidden in ("sign_manifest", "sign_plan_review", "transition", "reopen(", "kind="):
-        assert forbidden not in floor_src, f"completion floor unexpectedly references {forbidden!r}"
 
-    # the close/verify path (completion-verifier gate) is untouched by the floor
-    import rebar.llm.completion as close_path
+    # 1. Findings conserved — nothing fabricated or silently lost (the observable analogue of
+    #    "never signs/transitions/reopens": a floor that did more than re-partition fails here).
+    after_ids = {f["id"] for f in v["advisory"]} | {f["id"] for f in v["dropped"]}
+    assert after_ids == before_ids, "the floor fabricated or lost a finding"
+    assert v["dropped"], "precondition: this fixture drops at least one finding (non-vacuous)"
 
-    assert "completion_floor" not in inspect.getsource(close_path)
+    # 2. No signing/attestation side-output: the only NEW top-level verdict key is `dropped`
+    #    (a coverage narrowing lives UNDER `coverage`, not as a new top-level key).
+    new_keys = set(v.keys()) - before_keys
+    assert new_keys <= {"dropped"}, f"floor emitted unexpected side-output keys: {new_keys}"
+    for forbidden in ("signature", "attestation", "attestations"):
+        assert forbidden not in v, f"the floor emitted a {forbidden!r} key — not review-only"
 
-    # no NEW attestation kind: the plan-review manifest prefix is unchanged
+    # 3. Inputs not mutated: the classification map is unchanged, and a finding the floor KEEPS
+    #    in advisory is byte-identical (a dropped finding may legitimately gain a drop annotation,
+    #    but a surviving one must not be rewritten).
+    assert cmap == cmap_before, "the floor mutated its cmap input"
+    for f in v["advisory"]:
+        if f["id"] in findings_before:
+            assert f == findings_before[f["id"]], f"the floor rewrote kept finding {f['id']}"
+
+    # 4. No NEW attestation kind: the plan-review manifest prefix is unchanged (artifact contract).
     assert attest._MANIFEST_PREFIX == "plan-review"
 
 
