@@ -22,17 +22,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
-import httpx
-from pydantic_ai.exceptions import (
-    ContentFilterError,
-    FallbackExceptionGroup,
-    IncompleteToolCall,
-    ModelAPIError,
-    ModelHTTPError,
-    UsageLimitExceeded,
-    UserError,
-)
+# `httpx` + `pydantic_ai` are [agents]-extra deps, NOT core. They are imported LAZILY
+# (call-boundary) inside `_map` / `_base_diagnostic` so this boundary module imports
+# cleanly under a no-extras core install — the optionality contract, enforced by
+# tests/unit/test_core_optionality.py. Classification only runs when a real LLM failure
+# occurred (extra present); when the stack is ABSENT the classifier degrades to
+# NEEDS_INVESTIGATION rather than raising ModuleNotFoundError (the totality guarantee).
 
 
 class ResolutionClass(str, Enum):
@@ -169,7 +166,7 @@ def _unwrap_retry_error(exc: BaseException | None) -> BaseException | None:
     return exc
 
 
-def _http_error_body(exc: ModelHTTPError) -> dict:
+def _http_error_body(exc: Any) -> dict:  # exc is a pydantic_ai ModelHTTPError (lazy-typed)
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         err = body.get("error")
@@ -188,6 +185,12 @@ def _base_diagnostic(exc: BaseException | None, ctx: ClassifyContext) -> dict:
         "trace_id": ctx.trace_id,
         "finish_reason": ctx.finish_reason,
     }
+    try:
+        from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+    except ImportError:
+        # [agents] stack absent — no pydantic_ai exception can be present; return the
+        # base diagnostic unenriched (the exception is a rebar-typed / stdlib error).
+        return diag
     if isinstance(exc, ModelHTTPError):
         diag["status_code"] = exc.status_code
         err = _http_error_body(exc)
@@ -202,7 +205,7 @@ def _base_diagnostic(exc: BaseException | None, ctx: ClassifyContext) -> dict:
     return diag
 
 
-def _map_http(exc: ModelHTTPError) -> ResolutionClass:
+def _map_http(exc: Any) -> ResolutionClass:  # exc is a pydantic_ai ModelHTTPError (lazy-typed)
     status = exc.status_code
     err = _http_error_body(exc)
     code = (err.get("type") or err.get("code") or "").lower()
@@ -232,6 +235,22 @@ def _map(exc: BaseException | None, ctx: ClassifyContext) -> ResolutionClass:
     if ctx.finish_reason in ("content_filter",):
         return ResolutionClass.CHANGE_INPUT
     if exc is None:
+        return ResolutionClass.NEEDS_INVESTIGATION
+    try:
+        import httpx
+        from pydantic_ai.exceptions import (
+            ContentFilterError,
+            FallbackExceptionGroup,
+            IncompleteToolCall,
+            ModelAPIError,
+            ModelHTTPError,
+            UsageLimitExceeded,
+            UserError,
+        )
+    except ImportError:
+        # [agents] stack absent — none of the typed arms below can match. A no-extras
+        # caller (e.g. runner.preflight classifying a missing-extra LLMConfigError) lands
+        # here; classify as NEEDS_INVESTIGATION (non-retryable), never raise.
         return ResolutionClass.NEEDS_INVESTIGATION
     # httpx transport errors (caught directly; ConnectTimeout is NOT a ConnectError).
     # ORDER MATTERS: ModelHTTPError IS-A ModelAPIError, so it is matched first (below).

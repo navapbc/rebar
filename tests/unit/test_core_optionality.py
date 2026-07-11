@@ -34,6 +34,11 @@ _HEAVY = (
     "deepagents",
     "inspect_ai",
     "opentelemetry",
+    # [agents] extra — the provider-agnostic in-process runtime (story d6d1 cutover
+    # dropped LangChain/LangGraph for pydantic-ai). `httpx` arrives transitively via
+    # pydantic-ai; neither is a core dep, so both must stay lazy (call-boundary).
+    "pydantic_ai",
+    "httpx",
     # [grounding] extra — the in-process structural-parsing binding. The grounding
     # contract + harness are stdlib-only; tree-sitter must stay lazy (worker boundary).
     "tree_sitter",
