@@ -12,6 +12,7 @@ from __future__ import annotations
 # end of the package init (after the package is otherwise importable) because
 # ``hmac_legacy`` imports ``from rebar.attest import dsse, registry`` — those
 # submodules must be importable before this runs.
-from rebar.attest import hmac_legacy
+from rebar.attest import hmac_legacy, sshsig
 
 hmac_legacy.register_legacy_schemes()
+sshsig.register_sshsig_scheme()
