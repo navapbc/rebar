@@ -68,6 +68,18 @@ def _sync_before_compact(tracker: str) -> None:
     reads.ensure_fresh(tracker)
 
 
+def _snapshot_strip_keys(emit_legacy_mirror: bool) -> set[str]:
+    """Keys to drop from a SNAPSHOT's compiled_state before persisting. ``updated_at`` is
+    always dropped (a derived presentation field re-computed every replay). In the 352b
+    contract phase the legacy ``signature`` mirror is ALSO dropped (new snapshots carry only
+    the kind-keyed ``attestations`` map); ``emit_legacy_mirror=True`` rolls that back and
+    keeps writing the mirror. See CompactConfig.emit_legacy_signature_mirror."""
+    keys = {"updated_at"}
+    if not emit_legacy_mirror:
+        keys.add("signature")
+    return keys
+
+
 def _compact_locked(
     tracker: str,
     ticket_id: str,
@@ -75,6 +87,7 @@ def _compact_locked(
     threshold: int,
     no_commit: bool,
     horizon: int = 0,
+    emit_legacy_mirror: bool = False,
 ) -> int:
     """The locked compaction critical section. Returns 0 on success (prints
     EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
@@ -162,9 +175,11 @@ def _compact_locked(
         # ``updated_at`` is a derived presentation field (P1.1), re-computed on
         # every replay. It must NOT enter the SNAPSHOT's compiled_state, or it
         # would (a) ride into event-log bytes and (b) be restored stale by
-        # process_snapshot. Copy-and-drop it so the cache object is untouched and
-        # the SNAPSHOT bytes stay byte-identical to pre-P1.1.
-        compiled_state = {k: v for k, v in compiled_state.items() if k != "updated_at"}
+        # process_snapshot. Copy-and-drop it so the cache object is untouched.
+        # The legacy ``signature`` mirror is dropped here too in the 352b contract
+        # phase (unless rolled back) — new snapshots carry only ``attestations``.
+        _strip = _snapshot_strip_keys(emit_legacy_mirror)
+        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
             sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
@@ -272,7 +287,12 @@ def _read_event_uuid(path: str) -> str:
 
 
 def rebuild_snapshot_from_full_log(
-    tracker: str, ticket_id: str, ticket_dir: str, *, no_commit: bool = False
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    *,
+    no_commit: bool = False,
+    emit_legacy_mirror: bool | None = None,
 ) -> bool:
     """RC2b Option 1 (rebuild-on-stray): recompute a ticket's SNAPSHOT from the FULL
     ordered event log INCLUDING ``*.retired`` sources, folding a merged-in pre-snapshot
@@ -303,7 +323,17 @@ def rebuild_snapshot_from_full_log(
         if compiled_state is None or compiled_state.get("status") in ("error", "fsck_needed"):
             logger.warning("fsck: snapshot rebuild for %s aborted (reduce failed)", ticket_id)
             return False
-        compiled_state = {k: v for k, v in compiled_state.items() if k != "updated_at"}
+        # Honor the 352b contract flag on the fsck-repair rebuild too, so a rollback
+        # (emit_legacy_signature_mirror=true) keeps the mirror in rebuilt snapshots.
+        # Resolve from config when the caller did not specify (fsck callers don't).
+        if emit_legacy_mirror is None:
+            try:
+                _root = os.path.dirname(os.path.realpath(tracker))
+                emit_legacy_mirror = config.load_config(_root).compact.emit_legacy_signature_mirror
+            except Exception:  # noqa: BLE001 — fail toward the contract default (drop)
+                emit_legacy_mirror = False
+        _strip = _snapshot_strip_keys(emit_legacy_mirror)
+        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
 
         # Every raw (non-snapshot) event becomes a source of the new SNAPSHOT; the live
         # ones are retired, superseded snapshot(s) are retired too.
@@ -429,6 +459,7 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         _cfg = config.load_config(repo_root).compact
         threshold = _cfg.threshold
         horizon = _cfg.COMPACTION_HORIZON_NS
+        emit_legacy_mirror = _cfg.emit_legacy_signature_mirror
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
@@ -476,7 +507,9 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stdout.write(f"below threshold ({preflock} <= {threshold}) — skipping compaction\n")
         return 0
 
-    rc = _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit, horizon)
+    rc = _compact_locked(
+        tracker, ticket_id, ticket_dir, threshold, no_commit, horizon, emit_legacy_mirror
+    )
     # A successful compaction commits a SNAPSHOT inline (not via write_and_push), so
     # push it best-effort — unless --no-commit (nothing committed) or --skip-sync
     # (the caller owns sync: compact-on-close passes it and the transition pushes;

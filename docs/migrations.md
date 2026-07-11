@@ -123,3 +123,54 @@ version** that fails **closed** when a store is newer than the running binary (s
 refuses rather than corrupts). That A-tier ledger is future work; the `gc-config` unit is the
 canonical example of a change that fits School B today but would move under an A-tier version
 gate if it ever became unsafe to re-run. (See the `doctor` idea `dabb`.)
+
+## Legacy signature-mirror retirement (352b)
+
+The additive-attestations rollout (epic dark-acme-lumen) kept a legacy single-slot
+`state['signature']` mirror alongside the authoritative kind-keyed `state['attestations']`
+map, as the *expand* half of an expand/contract. Task **352b** ships the **contract** half:
+new SNAPSHOTs stop carrying the mirror.
+
+**What changed (introduced in 0.7.x, after 0.7.1).**
+
+- **Consumers migrated (expand reinforcement).** Every in-tree reader of the legacy mirror now
+  goes through `rebar.signing.most_recent_attestation(state)`, which returns the most-recent
+  attestation of any kind from the `attestations` map (greatest `signed_at`, ties → last
+  processed — exactly the old mirror's last-writer-wins), falling back to `state['signature']`
+  only when the map is absent. Migrated: `signing._record_for_kind` (the `kind=None` /
+  verify-latest path), `_engine_support/validate.py` (store-health signature check),
+  `_commands/txn.py` (the `require_signature_for_close` gate).
+- **Contract: new snapshots omit the mirror.** `compact.py` strips the legacy `signature`
+  key from a SNAPSHOT's `compiled_state` (alongside the always-derived `updated_at`), so a
+  freshly compacted or fsck-rebuilt ticket carries only `attestations`. Old snapshots that
+  still hold only the mirror are upgraded on read by the existing fold-in
+  (`_processors.py`), so migrated consumers always find a record.
+
+**The readiness gate (AC1) — why this is a one-way door.** A pre-attestations clone (code
+older than the attestations release) reads `state['signature']` directly and has no
+`attestations` map to fall back to. If such a clone reads a *new* (mirror-less) snapshot, its
+verify / close gate sees no signature. Therefore the mirror must not be dropped until **every
+clone and reconcile host is on ≥ the attestations release**. This deployment satisfies the
+gate: the fleet auto-updates hourly to `origin/main`, so no pre-attestations binary remains
+live. Confirm before shipping to any *other* environment (upgrade reconcile hosts first, as
+`fsck` already warns for newer-than-binary event types).
+
+**Rollback (AC2).** The drop is fully reversible by configuration — **no code downgrade
+needed**. Set:
+
+```toml
+[tool.rebar.compact]
+emit_legacy_signature_mirror = true
+```
+
+(or env `REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR=true`). The **next compaction** of a
+ticket re-emits the mirror in its snapshot; run `rebar compact <id>` (or let the threshold
+trigger) to restore the mirror on a specific ticket immediately. **Named rollback target:**
+`compact.emit_legacy_signature_mirror = true` on the **0.7.x** line (the release that
+introduces the flag) — an operator who discovers a lingering pre-attestations reader flips
+this key and re-compacts, with no binary rollback.
+
+**A note on removing the read-side fold-in.** 352b intentionally **keeps** the
+`_processors.py` old-snapshot fold-in. Removing it is a *further* contract step that is safe
+only once no snapshot predating the `attestations` map remains in any store — a separate
+readiness condition from the write-side drop. It is cheap and lossless to keep, so it stays.
