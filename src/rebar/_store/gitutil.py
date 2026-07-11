@@ -85,6 +85,13 @@ def _is_index_lock_error(text: str) -> bool:
     return "index.lock" in low and ("file exists" in low or "another git process" in low)
 
 
+# Test seam: a no-arg callable (default ``None`` = disabled) invoked inside
+# ``_reclaim_if_stale_index_lock`` at the TOCTOU window — after the lock is judged stale and
+# before the guarded unlink — so a test can deterministically inject a peer replacing the
+# lock in that window (no sleeps). Production leaves this ``None``.
+_reclaim_probe: Callable[[], None] | None = None
+
+
 def _reclaim_if_stale_index_lock(tracker: str) -> None:
     """Remove the tracker's git ``index.lock`` ONLY IF provably stale (mtime age >
     ``_INDEX_LOCK_STALE_S``). Best-effort and safe: a young/live lock (age <= threshold,
@@ -97,14 +104,29 @@ def _reclaim_if_stale_index_lock(tracker: str) -> None:
         return
     lock_file = os.path.join(git_dir, "index.lock")
     try:
-        age = time.time() - os.path.getmtime(lock_file)
+        st = os.stat(lock_file)
     except OSError:
         return  # no lock file (or unstat-able) → nothing to reclaim
-    if age > _INDEX_LOCK_STALE_S:
-        try:
-            os.remove(lock_file)
-        except OSError:
-            pass
+    if time.time() - st.st_mtime <= _INDEX_LOCK_STALE_S:
+        return  # young/live lock → never reclaim
+    if _reclaim_probe is not None:
+        _reclaim_probe()
+    # Re-validate identity (device+inode) AND age at the moment of removal: a peer may
+    # have removed our stale lock and dropped a fresh LIVE one at the same path in the
+    # window since the stat above (the TOCTOU). Only unlink if it is STILL the same file
+    # AND still stale — otherwise abort, leaving the peer's fresh lock intact.
+    try:
+        st2 = os.stat(lock_file)
+    except OSError:
+        return  # already gone (a peer reclaimed it first) → nothing to do
+    if (st2.st_dev, st2.st_ino) != (st.st_dev, st.st_ino):
+        return  # replaced by a different file (a fresh lock) → do NOT remove
+    if time.time() - st2.st_mtime <= _INDEX_LOCK_STALE_S:
+        return  # refreshed in place → now live → do NOT remove
+    try:
+        os.remove(lock_file)
+    except OSError:
+        pass
 
 
 def _with_index_lock_retry(
