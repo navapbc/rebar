@@ -10,6 +10,8 @@ blocks (stays fail-open).
 from __future__ import annotations
 
 import tempfile
+import types as _types
+import unicodedata as _ud
 from pathlib import Path
 
 import pytest
@@ -414,3 +416,65 @@ def test_freshness_gate_main_is_warn_only_exit_zero(capsys):
     assert security_pin.main() == 0
     out = capsys.readouterr().out
     assert "freshness" in out.lower() or "::warning" in out
+
+
+# ── diff-scope path canonicalization (story beaten-tame-cardinal) ──────────────
+#
+# The diff-scope filter used to keep a MATCH only when location.file was byte-equal to a
+# changed_files entry. A location and a changed-file entry that denote the SAME file with a
+# different spelling (./app.py, an absolute path under repo_root, repeated separators, a unicode
+# NFD/NFC variant) compared unequal, silently dropping a real high-severity match. Both sides are
+# now canonicalized (relativize-under-repo_root -> normpath -> NFC) before the membership test.
+
+
+def _security_match_lands(monkeypatch, *, location_file, changed_files, repo_root):
+    """True iff a single mocked security MATCH at ``location_file`` survives the diff-scope
+    filter into some criterion's `matches` bucket, driven through the real run_detectors."""
+    from rebar.grounding import engine_b
+    from rebar.llm.code_review import detectors
+
+    rec = {
+        "detector_id": "rebar.builtin.security.python-eval-exec-injection",
+        "outcome": "match",
+        "location": {"file": location_file},
+    }
+    monkeypatch.setattr(
+        engine_b, "scan", lambda root, registry=None: _types.SimpleNamespace(records=[rec])
+    )
+    out = detectors.run_detectors(changed_files=changed_files, repo_root=repo_root)
+    return any(bucket["matches"] for bucket in out.values())
+
+
+def test_diff_scope_matches_dotslash_variant(monkeypatch, tmp_path):
+    assert _security_match_lands(
+        monkeypatch, location_file="./app.py", changed_files=["app.py"], repo_root=str(tmp_path)
+    ), "./app.py must match the changed file app.py"
+
+
+def test_diff_scope_matches_absolute_under_repo_root(monkeypatch, tmp_path):
+    abs_loc = str(tmp_path / "app.py")
+    assert _security_match_lands(
+        monkeypatch, location_file=abs_loc, changed_files=["app.py"], repo_root=str(tmp_path)
+    ), "an absolute path under repo_root must match its relative changed-file entry"
+
+
+def test_diff_scope_matches_repeated_separators(monkeypatch, tmp_path):
+    assert _security_match_lands(
+        monkeypatch, location_file="a//b.py", changed_files=["a/b.py"], repo_root=str(tmp_path)
+    ), "a//b.py must match a/b.py"
+
+
+def test_diff_scope_matches_unicode_nfd_vs_nfc(monkeypatch, tmp_path):
+    # "café.py": NFC (composed é) vs NFD (e + combining accent) — the same filename.
+    name_nfc = _ud.normalize("NFC", "café.py")
+    name_nfd = _ud.normalize("NFD", "café.py")
+    assert name_nfc != name_nfd  # genuinely different byte spellings
+    assert _security_match_lands(
+        monkeypatch, location_file=name_nfd, changed_files=[name_nfc], repo_root=str(tmp_path)
+    ), "an NFD location must match its NFC changed-file entry (same file)"
+
+
+def test_diff_scope_still_rejects_a_genuinely_different_file(monkeypatch, tmp_path):
+    assert not _security_match_lands(
+        monkeypatch, location_file="other.py", changed_files=["app.py"], repo_root=str(tmp_path)
+    ), "a different file must NOT match after canonicalization"
