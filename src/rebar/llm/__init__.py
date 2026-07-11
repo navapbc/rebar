@@ -43,7 +43,7 @@ from rebar.llm.errors import (
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
 from rebar.llm.operations import review_ticket, select_reviewers
-from rebar.llm.plan_review import claim_gate_check, review_plan
+from rebar.llm.plan_review import claim_gate_check, resign_plan_review, review_plan
 from rebar.llm.prompting.prompt_library import (
     InvalidPromptIdError,
     LibraryWriteError,
@@ -70,6 +70,7 @@ __all__ = [
     "verify_completion",
     "enrich",
     "review_plan",
+    "resign_plan_review",
     "claim_gate_check",
     "select_reviewers",
     "aggregate_findings",
