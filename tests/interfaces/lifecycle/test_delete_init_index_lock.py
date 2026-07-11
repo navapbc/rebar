@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -77,3 +78,42 @@ def test_init_git_commit_reclaims_stale_index_lock(tmp_path: Path) -> None:
     cp = _init._git(tracker, "commit", "-q", "--no-verify", "-m", "probe: init _git self-heal")
     assert cp.returncode == 0, "init._git must self-heal a stale index.lock, not fail hard"
     assert not lock.exists(), "the stale lock should have been reclaimed by init._git"
+
+
+def _plant_fresh_lock(tracker: str) -> Path:
+    """A *fresh* (young) index.lock — a live peer mid-write, NOT reclaimable-as-stale.
+    A background timer releases it mid-backoff so the retry loop must ride it out."""
+    p = subprocess.run(
+        ["git", "-C", tracker, "rev-parse", "--git-path", "index.lock"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    lock = Path(p) if os.path.isabs(p) else Path(tracker) / p
+    lock.write_text("")  # fresh mtime
+    threading.Timer(0.4, lambda: lock.exists() and lock.unlink()).start()
+    return lock
+
+
+def test_delete_rides_out_contended_index_lock(tmp_path: Path) -> None:
+    """A CONTENDED lock (a live peer that releases it shortly after) is ridden out by the
+    retry loop on the delete path — not reclaimed as stale, but retried until it clears."""
+    repo = _init_repo(tmp_path, "delc")
+    tid = rebar.create_ticket("task", "doomed", repo_root=str(repo))
+    _plant_fresh_lock(_tracker(repo))
+
+    rc = _delete.delete_cli([tid, "--user-approved"], repo_root=str(repo))
+    assert rc == 0, "delete must ride out a contended index.lock via retry backoff"
+    assert (Path(_tracker(repo)) / tid / ".tombstone.json").is_file()
+
+
+def test_init_git_rides_out_contended_index_lock(tmp_path: Path) -> None:
+    """init._git rides out a contended index.lock released mid-backoff (retry loop)."""
+    repo = _init_repo(tmp_path, "inic")
+    tracker = _tracker(repo)
+    (Path(tracker) / ".init-contended-probe").write_text("x")
+    _init._git(tracker, "add", "--", ".init-contended-probe")
+    _plant_fresh_lock(tracker)
+
+    cp = _init._git(tracker, "commit", "-q", "--no-verify", "-m", "probe: init _git ride-out")
+    assert cp.returncode == 0, "init._git must ride out a contended index.lock via retry"
