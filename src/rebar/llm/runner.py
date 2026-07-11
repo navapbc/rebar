@@ -543,7 +543,7 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
         # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
         # check here — a length/max_tokens/content_filter/refusal finish_reason raises
         # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
-        structured.check_stop_reason(getattr(run_result.response, "finish_reason", None))
+        structured.check_response(run_result.response)
         return run_result.output, _extract_usage(run_result)
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
@@ -561,7 +561,7 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
             # A refused / TRUNCATED turn is surfaced as a clear error BEFORE the tolerant
             # parse — else json-repair would "fix" a truncated fragment into a
             # plausible-but-wrong object (the false-accept the stop-reason guard prevents).
-            structured.check_stop_reason(getattr(result.response, "finish_reason", None))
+            structured.check_response(result.response)
             parsed = structured.parse_structured(str(result.output), model_cls)
             return parsed, _extract_usage(result)
         except UnretryableOutputError:
