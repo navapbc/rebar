@@ -1060,3 +1060,105 @@ def test_skip_path_still_satisfies_the_claim_gate(rebar_repo: Path) -> None:
     assert v2["coverage"]["idempotent_skip"] is True
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "in_progress"
+
+
+# ── cheap re-sign path (ticket middle-actinium-thrush) ──────────────────────────
+def _review_no_sign(tid: str, repo: Path, runner=_CLEAN):
+    """Simulate 'review computed a signable PASS but the SIGN step failed to persist the
+    attestation': run the full review (which emits the REVIEW_RESULT sidecar) but do NOT
+    sign, so the ticket carries the recorded verdict yet no attestation."""
+    return rebar.llm.review_plan(tid, runner=runner, sign=False, repo_root=str(repo))
+
+
+def test_resign_recovers_lost_attestation_without_llm(rebar_repo: Path, monkeypatch) -> None:
+    # The core AC: a computed PASS whose signature was lost is recovered CHEAPLY — the sidecar
+    # is re-signed with NO LLM call, so the claim gate (which failed) then passes.
+    from rebar.llm.plan_review import attest
+    from rebar.llm.workflow import gate_dispatch
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    runner = _CountingFake()
+    v = _review_no_sign(tid, rebar_repo, runner=runner)
+    assert v["verdict"] == "PASS" and v["sidecar_emitted"] is True
+    assert v["signature"]["signed"] is False  # the "sign failed / not signed" state
+    calls_after_review = runner.calls
+    assert calls_after_review > 0  # the review actually ran the passes
+
+    # With no valid attestation, the claim gate FAILS.
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is False
+
+    # Poison the multi-pass pipeline: the cheap re-sign must NEVER run the LLM review.
+    def _boom(*a, **k):
+        raise AssertionError("sign-review must NOT run the multi-pass LLM review")
+
+    monkeypatch.setattr(gate_dispatch, "produce_plan_review_verdict", _boom)
+
+    res = rebar.llm.resign_plan_review(tid, repo_root=str(rebar_repo))
+    assert res["ok"] is True and res["signed"] is True
+    assert runner.calls == calls_after_review  # the re-sign invoked NO runner
+
+    # The attestation is now persisted → the claim gate PASSES and a claim succeeds.
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is True
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_resign_refuses_when_plan_changed(rebar_repo: Path) -> None:
+    # The staleness guard: a material edit AFTER the review makes the recorded verdict stale,
+    # so the cheap re-sign REFUSES (no signature written) rather than sign a stale verdict.
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    _review_no_sign(tid, rebar_repo)
+    rebar.edit_ticket(
+        tid,
+        description=_DESC + "\nNEW materially-different requirement.",
+        repo_root=str(rebar_repo),
+    )
+    res = rebar.llm.resign_plan_review(tid, repo_root=str(rebar_repo))
+    assert res["ok"] is False and res["signed"] is False
+    assert "changed" in res["reason"].lower()  # names the stale-plan cause
+    # No signature written → the claim gate stays blocked.
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is False
+    with pytest.raises(rebar.RebarError):
+        rebar.claim(tid, repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_resign_refuses_when_no_pass_sidecar(rebar_repo: Path) -> None:
+    # No sidecar at all → refuse; a BLOCK sidecar → refuse (never sign a non-PASS).
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    never_reviewed = _make(rebar_repo)
+    res = rebar.llm.resign_plan_review(never_reviewed, repo_root=str(rebar_repo))
+    assert res["ok"] is False and res["signed"] is False
+    assert "no REVIEW_RESULT sidecar" in res["reason"]
+
+    blocked = _make(rebar_repo, desc=_NO_AC_DESC)  # DET floor BLOCKS → sidecar records BLOCK
+    v = rebar.llm.review_plan(blocked, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert v["verdict"] == "BLOCK"
+    res = rebar.llm.resign_plan_review(blocked, repo_root=str(rebar_repo))
+    assert res["ok"] is False and res["signed"] is False
+    assert "not a signable PASS" in res["reason"]
+
+
+def test_sign_review_cli_success_and_refusal(rebar_repo: Path, capsys) -> None:
+    # The `rebar sign-review` CLI: exit 0 on a successful cheap re-sign (claim gate then
+    # passes), exit 1 on a refusal (a ticket that was never reviewed).
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    _review_no_sign(tid, rebar_repo)
+    assert _cli.main(["sign-review", tid]) == 0
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is True
+
+    capsys.readouterr()  # drain the success output
+    other = _make(rebar_repo)  # never reviewed → refusal
+    assert _cli.main(["sign-review", other, "-o", "text"]) == 1
+    assert "refused" in capsys.readouterr().err.lower()  # text refusal goes to stderr

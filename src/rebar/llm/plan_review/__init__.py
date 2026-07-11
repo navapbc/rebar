@@ -30,10 +30,11 @@ from rebar.llm.runner import Runner
 
 from . import attest, orchestrator, sidecar
 from .attest import claim_gate_check
+from .resign import resign_plan_review
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["review_plan", "claim_gate_check", "registry_coverage"]
+__all__ = ["review_plan", "resign_plan_review", "claim_gate_check", "registry_coverage"]
 
 
 def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
