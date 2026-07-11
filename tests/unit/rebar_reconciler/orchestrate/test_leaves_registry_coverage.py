@@ -1,9 +1,13 @@
-"""Structural registry-coverage test for applier._LEAVES.
+"""SUPPLEMENTAL structural guard for applier._LEAVES (NOT the coverage claim).
 
-Iterates every (direction, action) entry in the _LEAVES dispatch table and
-asserts each leaf has a real body. The test fails today (5 of 12 leaves are
-no-op stubs returning ``ApplyResult(direction, action, {})``); it MUST pass
-once story bd19-d744-b8c7-4079 is implemented.
+The authoritative per-leaf coverage now lives in ``test_leaves_effect_matrix.py``
+— a behavioral effect matrix that drives every leaf and asserts its exact
+target/fields/ApplyResult/follow-on/error path. This module is retained only as a
+cheap, fast structural tripwire: it catches a leaf that regresses to a pure no-op
+stub body. It deliberately does NOT claim to prove a leaf is *correct* (its AST /
+regex heuristic passes while a leaf sends the wrong target, drops a field, returns
+the wrong follow-on, or swallows an error — which is exactly why the effect matrix
+exists). Treat a pass here as "the body is non-empty," nothing more.
 
 A leaf "has a real body" iff EITHER:
   * the function body has ≥3 statements (counted from the AST, excluding the
@@ -78,8 +82,10 @@ def _effective_statement_count(src: str) -> int:
     return len(body)
 
 
-def test_every_leaf_has_real_body(applier):
-    """Every entry in _LEAVES must point at a non-stub function body."""
+def test_every_leaf_has_nonstub_body_structural_guard(applier):
+    """SUPPLEMENTAL structural tripwire: every entry in _LEAVES points at a
+    non-stub function body. This is NOT the coverage claim — see the module
+    docstring and ``test_leaves_effect_matrix.py`` for the behavioral matrix."""
     leaves = applier._LEAVES
     assert leaves, "_LEAVES registry is empty"
 
