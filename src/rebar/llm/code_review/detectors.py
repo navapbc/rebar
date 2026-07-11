@@ -29,6 +29,26 @@ SECRET_DETECTION = "secret-detection"
 HIGH_CRITICAL_SECURITY = "high-critical-security"
 
 
+def _canonical_path(p: str, repo_root: Any) -> str:
+    """Canonical textual form of a path for diff-scope membership, so the SAME file compares
+    equal across spellings: NFC-normalize unicode, relativize an absolute path that is under
+    ``repo_root``, then ``os.path.normpath`` (collapses ``./`` and repeated separators). Pure —
+    no filesystem access (a diff-scope path need not exist on disk); symlink / inode identity is
+    intentionally OUT OF SCOPE (that would require realpath and the file existing)."""
+    import os
+    import unicodedata
+
+    s = unicodedata.normalize("NFC", str(p))
+    if os.path.isabs(s) and repo_root:
+        try:
+            rel = os.path.relpath(s, str(repo_root))
+            if not rel.startswith(".."):  # only relativize when genuinely under repo_root
+                s = rel
+        except ValueError:  # e.g. different drives on Windows
+            pass
+    return os.path.normpath(s)
+
+
 def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
     """Run the DET-criteria detectors (a registry slice — not the whole grounding suite) over
     ``repo_root`` and bucket their evidence per criterion: ``{criterion: {abstained: [...],
@@ -55,7 +75,10 @@ def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[st
     if not selected:
         return {}
     result = engine_b.scan(repo_root, registry=Registry(detectors=selected))
-    changed = set(changed_files or [])
+    # Canonicalize BOTH sides of the diff-scope membership so the same file matches across
+    # spellings (./x, absolute-under-root, repeated separators, unicode NFD/NFC) — bug beaten-
+    # tame-cardinal, where a variant location.file silently dropped a real high-severity match.
+    changed = {_canonical_path(c, repo_root) for c in (changed_files or [])}
     out: dict[str, dict] = {}
     for rec in result.records:
         did = rec.get("detector_id") or ""
@@ -71,7 +94,7 @@ def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[st
             # diff-scope: a MATCH counts ONLY when it lands on a changed file (the location is
             # relativized to repo_root upstream). Empty changed_files (no diff) ⇒ no match counts
             # — there is nothing changed to flag; abstains stay whole-scan (kept above).
-            if loc and loc in changed:
+            if loc and _canonical_path(loc, repo_root) in changed:
                 bucket["matches"].append(rec)
     return out
 
