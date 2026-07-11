@@ -303,6 +303,19 @@ least one bullet/checklist line. A ticket missing the `## Acceptance Criteria`
 checklist fails both gates regardless of how rich the rest of the description is.
 (`session_log` is exempt from all of this — see the Session logs section above.)
 
+**Marking operator-attested criteria (`[operator-attested]`).** The completion verifier
+recognizes two criterion kinds (ADR 0043). By default every AC item is
+**codebase-verifiable** — the verifier proves it against real code and never trusts the
+checkbox. When a criterion's "done" evidence inherently lives OUTSIDE the codebase (a deploy,
+a live E2E run, a console setting, an operator drill), tag it by starting the checkbox text
+with `[operator-attested]` — e.g. `- [ ] [operator-attested] the fix is deployed to prod and
+the gate passes`. For a tagged criterion the admissible evidence is a **concrete attestation
+recorded on the ticket** (a comment naming a specific: a change URL/id, a vote/log/console
+outcome, a timestamp); a blank or hand-wavy "done" still FAILs (and the finding's
+`remediation` tells you what proof to record). Matching is exact + case-insensitive; anything
+untagged or malformed falls back to codebase-verifiable, so existing tickets are unaffected.
+This lets genuinely operational work close **signed** instead of needing `--force-close`.
+
 Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
 (DD-level verification) so downstream scheduling and verification work.
