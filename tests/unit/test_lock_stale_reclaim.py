@@ -260,3 +260,35 @@ def test_unreadable_owner_file_is_never_stale(tmp_path):
     os.mkdir(lock_dir)
     os.mkdir(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE))  # a dir where a file is expected
     assert _lock._mkdir_lock_is_stale(lock_dir) is False
+
+
+# ── The dual-window lock is a permanent contract (story sublime-phlegmy-oropendola) ──
+#
+# By default `acquire` takes BOTH legs — the fcntl `.ticket-write.lock` file AND the atomic
+# mkdir `.ticket-write.lock.d` dir (the portable second window). This is a standing contract,
+# not migration residue; the writer-storm gate depends on "the mkdir leg is always taken".
+# `dual_window=False` is an fcntl-only opt-out. These tests enforce that contract behaviorally.
+
+
+def test_default_write_lock_takes_both_fcntl_and_mkdir_legs(tmp_path):
+    """The default lock holds BOTH the fcntl file and the mkdir dir (the permanent contract)."""
+    tracker = str(tmp_path)
+    handle = _lock.acquire(tracker, timeout=1, attempts=1)
+    try:
+        assert os.path.exists(os.path.join(tracker, _lock.WRITE_LOCK_NAME)), "fcntl leg missing"
+        assert os.path.isdir(os.path.join(tracker, _lock.MKDIR_LOCK_NAME)), "mkdir leg missing"
+    finally:
+        handle.release()
+    # The mkdir dir is released on release() (fcntl fd is closed too).
+    assert not os.path.isdir(os.path.join(tracker, _lock.MKDIR_LOCK_NAME))
+
+
+def test_dual_window_false_takes_only_the_fcntl_leg(tmp_path):
+    """The fcntl-only opt-out takes the fcntl leg but NOT the mkdir leg."""
+    tracker = str(tmp_path)
+    handle = _lock.acquire(tracker, timeout=1, attempts=1, dual_window=False)
+    try:
+        assert os.path.exists(os.path.join(tracker, _lock.WRITE_LOCK_NAME)), "fcntl leg missing"
+        assert not os.path.isdir(os.path.join(tracker, _lock.MKDIR_LOCK_NAME)), "mkdir leg taken"
+    finally:
+        handle.release()
