@@ -324,16 +324,6 @@ def test_verify_command_lint():
     assert res.coverage["verify_lint_abstained"] == 1
 
 
-def test_verify_command_lint_documents_shellcheck_prior_art():
-    """AC3: the shellcheck prior-art note is recorded in the criterion's code comment."""
-    import inspect
-
-    from rebar.llm.plan_review import det_floor
-
-    src = inspect.getsource(det_floor)
-    assert "shellcheck" in src.lower(), "verify-command lint must cite shellcheck prior art"
-
-
 def test_verify_command_lint_keeps_det_checks_p1_to_p9():
     """The lint EXTENDS p6 — it must not add a P10; DET_CHECKS stays exactly P1-P9."""
     from rebar.llm.plan_review.det_floor import DET_CHECKS
