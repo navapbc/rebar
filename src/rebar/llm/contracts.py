@@ -61,6 +61,16 @@ def completion_verdict_response_model() -> type:
             default_factory=list, description="Evidence: file+line / url / freeform source."
         )
         title: str | None = Field(default=None, description="Optional short headline.")
+        remediation: str | None = Field(
+            default=None,
+            description=(
+                "Optional per-finding next move. For an operator-attested criterion judged "
+                "NOT MET, the concrete step that would make it pass: record proof as a "
+                "ticket comment/artifact naming the reference (change URL/id), the observed "
+                "outcome (votes/logs/console), and when. Distinct from the generic "
+                "top-level verdict `remediation`."
+            ),
+        )
 
     class CompletionVerdict(BaseModel):
         """Structured output of the completion verifier: a PASS/FAIL verdict and, on FAIL,

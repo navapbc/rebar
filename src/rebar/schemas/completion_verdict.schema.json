@@ -13,7 +13,7 @@
     },
     "findings": {
       "type": "array",
-      "description": "One finding per FAILING criterion (empty on PASS). Reuses the canonical `finding` shape; the failing requirement rides on `finding.criterion` (an additional property).",
+      "description": "One finding per FAILING criterion (empty on PASS). Reuses the canonical `finding` shape; the failing requirement rides on `finding.criterion` (an additional property). A finding may also carry an optional `remediation` string — a per-finding next move (for an operator-attested criterion judged NOT MET: record proof as a ticket comment/artifact naming the reference, observed outcome, and when) — distinct from the top-level generic `remediation`.",
       "items": { "$ref": "common.schema.json#/$defs/finding" }
     },
     "summary": {
