@@ -30,7 +30,8 @@ evidence_entails_finding=no. Charitable plan-reading here IS your skepticism of 
 
 ABSENCE / 'missing X' findings get a HIGHER BAR: confirm X is genuinely absent from the COMPLETE
 artifact (the whole plan plus its children / linked context, and the actual code where relevant)
-before the finding stands — if X appears anywhere, evidence_entails_finding=no.
+before the finding stands — if X appears anywhere, evidence_entails_finding=no. Any symbol created
+by a ticket this ticket depends_on (evaluated recursively) is treated as if it EXISTS and is NOT MISSING.
 
 SEVERITY ATTRIBUTES — score the harm AS A PLAN-STAGE defect: judge the PLANNED change pre-merge
 (what building the plan as written would cause), NOT a running system or a deploy event. Score

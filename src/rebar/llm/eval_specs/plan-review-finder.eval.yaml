@@ -393,6 +393,29 @@ dataset:
       grounded rationale. Both removal-rationale and E5 (changed-behavior-tests) fire; the Pass-4
       coaching pass GROUPS them (move 6, specification-by-example) rather than double-reporting.
 
+  # ── G1G2 upstream-dependency carve-out (bug: forward-ref FPs on greenfield epics) ──
+  - id: FP-G1G2-upstream-dep-provided-symbol
+    corpus: rebar
+    criterion: G1G2
+    expect: pass
+    mode: upstream-dependency-forward-artifact
+    input: >
+      A story whose "## Dependencies" section states it depends_on ticket abcd, which creates
+      the `Autosubmit` Gerrit label; this story's plan references `Autosubmit` (a symbol not yet
+      in the codebase because abcd builds it). G1G2 must NOT flag `Autosubmit` as a
+      missing/hallucinated artifact — a symbol created by a depends_on ancestor (evaluated
+      recursively) is treated as existing.
+  - id: R-G1G2-forward-ref-no-producer
+    corpus: rebar
+    criterion: G1G2
+    expect: finding
+    input: >
+      A story references `docs/adr/0042-foo.md` as an existing document to cite in a `--help`
+      string, but no ticket it depends_on creates ADR-0042 — it is authored by a DOWNSTREAM
+      sibling that itself depends_on this story. The artifact does not exist and no upstream
+      dependency provides it: a forward reference. G1G2 SHOULD fire (a forward reference must not
+      be made until the artifact is created).
+
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus).
 gold_set:
@@ -404,3 +427,5 @@ gold_set:
     label: not_useful
   - input: "A real missing-testing-plan finding on a payments webhook with a path."
     label: useful
+  - input: "G1G2 flagging a symbol as missing when a depends_on ancestor creates it."
+    label: not_useful
