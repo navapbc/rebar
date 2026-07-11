@@ -9,6 +9,7 @@ blocks (stays fail-open).
 
 from __future__ import annotations
 
+import os
 import tempfile
 import types as _types
 import unicodedata as _ud
@@ -32,13 +33,85 @@ def test_security_detectors_register_on_sarif_and_opengrep():
     )  # the semgrep High/Critical rules
 
 
-def test_security_rule_yaml_files_are_present_and_nonempty():
-    # the vendored-rules freshness anchor: a botched `make vendor-security-rules` that empties the
-    # subset is caught (the rules must exist + declare the rebar.builtin.security.* ids).
-    d = Path("src/rebar/grounding/detectors/builtin")
-    assert (d / "security_secrets_gitleaks.yaml").read_text().strip()
-    body = (d / "security_owasp_cwe.yaml").read_text()
-    assert "rebar.builtin.security." in body and "rules:" in body
+# ── vendored SECURITY families: the pinned loaded contract ─────────────────────────
+#
+# The EXACT detectors each vendored SECURITY-family YAML contributes, keyed by source
+# filename → {detector id: (backend, declared severity)}. These values were read once
+# from what ``load_registry()`` actually loads and are hard-coded here as the contract,
+# so any silent change to an id / backend / severity in a vendored rule fails the
+# positive test below (proved by the teeth check on ticket 6b2c).
+_SECURITY_FAMILY_CONTRACT: dict[str, dict[str, tuple[str, str | None]]] = {
+    "security_iac_public_exposure.yaml": {
+        "rebar.builtin.iac.public-exposure.tf-ingress-open-ipv4": ("opengrep", "ERROR"),
+        "rebar.builtin.iac.public-exposure.tf-ingress-open-ipv6": ("opengrep", "ERROR"),
+        "rebar.builtin.iac.public-exposure.tf-associate-public-ip": ("opengrep", "ERROR"),
+        "rebar.builtin.iac.public-exposure.tf-public-lb": ("opengrep", "ERROR"),
+        "rebar.builtin.iac.public-exposure.compose-nonloopback-bind": ("opengrep", "ERROR"),
+    },
+    "security_owasp_cwe.yaml": {
+        "rebar.builtin.security.python-eval-exec-injection": ("opengrep", "ERROR"),
+        "rebar.builtin.security.python-subprocess-shell-true": ("opengrep", "ERROR"),
+        "rebar.builtin.security.python-yaml-unsafe-load": ("opengrep", "ERROR"),
+    },
+    "security_secrets_gitleaks.yaml": {
+        "rebar.builtin.security.secrets-gitleaks": ("sarif", None),
+    },
+}
+
+
+def _declared_severity(detector) -> str | None:
+    """Where a vendored rule's severity lives once loaded: the top-level ``severity``
+    key of the parsed rule (opengrep rules declare ``severity: ERROR``; the SARIF
+    gitleaks sentinel carries none → ``None``)."""
+    return detector.rule.get("severity")
+
+
+@pytest.mark.parametrize("family_file", sorted(_SECURITY_FAMILY_CONTRACT))
+def test_vendored_security_family_loads_pinned_contract(family_file):
+    # POSITIVE: load_registry() must load each SECURITY family to EXACTLY the pinned
+    # {id: (backend, severity)} contract — same id set, same backends, same severities.
+    from rebar.grounding.detectors import load_registry
+
+    expected = _SECURITY_FAMILY_CONTRACT[family_file]
+    loaded = [d for d in load_registry() if os.path.basename(d.source_path) == family_file]
+    got = {d.id: (d.backend, _declared_severity(d)) for d in loaded}
+    assert got == expected
+
+
+def test_detectors_from_file_fails_closed_on_broken_yaml(tmp_path):
+    # FAIL-CLOSED (file-level): invalid YAML yields zero detectors AND a non-None
+    # parse-error reason — never a raise, never a silently-loaded detector.
+    from rebar.grounding.detectors.registry import _detectors_from_file
+
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("rules: [unclosed\n")
+    detectors, reason = _detectors_from_file(broken)
+    assert detectors == []
+    assert reason == "parse_error"
+
+
+def test_detectors_from_file_skips_rule_missing_id_keeps_others(tmp_path):
+    # FAIL-CLOSED (per-rule): a rule with no id is silently skipped while the file's
+    # other well-formed rules still load. (parse_drops is file-level, so a per-rule
+    # skip is intentionally NOT recorded there — we don't assert it.)
+    import yaml
+
+    from rebar.grounding.detectors import load_registry
+    from rebar.grounding.detectors.registry import _detectors_from_file
+
+    family = "security_owasp_cwe.yaml"
+    full_ids = set(_SECURITY_FAMILY_CONTRACT[family])
+    src = next(
+        Path(d.source_path) for d in load_registry() if os.path.basename(d.source_path) == family
+    )
+    doc = yaml.safe_load(src.read_text())
+    dropped_id = doc["rules"][0].pop("id")  # break exactly one rule
+    assert dropped_id in full_ids
+    mangled = tmp_path / family
+    mangled.write_text(yaml.safe_dump(doc))
+    detectors, _ = _detectors_from_file(mangled)
+    got = {d.id for d in detectors}
+    assert got == full_ids - {dropped_id}
 
 
 # ── the SARIF backend: dispatch + fail-OPEN abstain ──────────────────────────────────────────
