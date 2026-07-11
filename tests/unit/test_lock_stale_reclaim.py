@@ -206,3 +206,57 @@ def test_realpath_acquirer_blocked_by_symlink_holder(tmp_path):
         handle.release()
     freed = _lock.acquire(real, timeout=1, attempts=1)
     freed.release()
+
+
+# ── Malformed / unreadable mkdir owner-stamp forms (story innovative-halfcrazed-monkey) ──
+#
+# `_mkdir_lock_is_stale` must be CONSERVATIVE: an absent, malformed, foreign-host, or
+# unreadable owner stamp must NEVER be judged stale (reclaimable) — only a stamp that proves a
+# dead PID on THIS host may. These table-driven cases pin every malformed/unreadable branch.
+
+
+def _seed_owner_stamp(tmp_path, content: str | None) -> str:
+    """Create a held mkdir lock dir with *content* as its owner file (None = no owner file)."""
+    lock_dir = os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME)
+    os.mkdir(lock_dir)
+    if content is not None:
+        with open(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    return lock_dir
+
+
+@pytest.mark.parametrize(
+    "label,stamp",
+    [
+        ("empty", ""),
+        ("missing_colon", "hostnamewithnocolon"),
+        ("empty_host", ":12345"),
+        ("empty_pid", f"{socket.gethostname()}:"),
+        ("nonnumeric_pid", f"{socket.gethostname()}:notanumber"),
+        ("negative_pid", f"{socket.gethostname()}:-1"),
+        ("zero_pid", f"{socket.gethostname()}:0"),
+        ("extra_delimiters", f"{socket.gethostname()}:123:456"),
+        ("foreign_host", "some-other-host:1"),
+        # A reader catching the stamp write mid-flight sees the hostname before the ':pid':
+        ("partial_midwrite", socket.gethostname()),
+    ],
+)
+def test_malformed_owner_stamp_is_never_stale(tmp_path, label, stamp):
+    """No malformed/foreign/partial stamp is ever judged stale (conservative — no reclaim)."""
+    lock_dir = _seed_owner_stamp(tmp_path, stamp)
+    assert _lock._mkdir_lock_is_stale(lock_dir) is False, f"{label!r} must not be reclaimable"
+
+
+def test_absent_owner_file_is_never_stale(tmp_path):
+    """A mkdir lock with NO owner file (e.g. a bash-style lock) is never reclaimable."""
+    lock_dir = _seed_owner_stamp(tmp_path, None)
+    assert _lock._mkdir_lock_is_stale(lock_dir) is False
+
+
+def test_unreadable_owner_file_is_never_stale(tmp_path):
+    """An owner path that cannot be read as a file (here: a directory in its place → an
+    OSError on open) is never reclaimable — the read-error branch is conservative."""
+    lock_dir = os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME)
+    os.mkdir(lock_dir)
+    os.mkdir(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE))  # a dir where a file is expected
+    assert _lock._mkdir_lock_is_stale(lock_dir) is False
