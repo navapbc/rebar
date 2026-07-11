@@ -9,6 +9,11 @@ and lose events. With the unified lock every writer takes BOTH mechanisms, so al
 events must land and ``fsck`` stays clean. Only the Python core remains, so these
 tests no longer select an impl (the former ``REBAR_WRITE_CORE`` switch is gone).
 
+The dual fcntl+mkdir acquisition is now the **permanent** write-lock contract (see
+``rebar._store.lock`` and ``docs/concurrency.md`` I5), not migration residue: the
+mkdir leg is deliberately retained as the portable second window (atomic on POSIX /
+no-flock hosts), and this gate depends on it always being taken.
+
 These drive the live editable ``rebar`` (the published-vs-working-tree note: the
 suite is skipped unless an on-PATH ``rebar`` resolves the working tree's
 ``rebar._store``)."""
