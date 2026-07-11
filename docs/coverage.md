@@ -86,6 +86,9 @@ sources the tool set from `list_tools()` and asserts a **total, disjoint
 partition** over the classification sets, so a new tool returning structured data
 with no `outputSchema` fails the guard rather than slipping through.
 
-Jira link/relation round-trips are intentionally absent: link sync is not yet a
-reconciler capability (tracked as a separate story), so a round-trip test would
-be premature.
+Jira link/relation round-trips ARE covered: link sync is a reconciler capability
+(story 25ae — the reconciler maps a local ticket's `deps` links to Jira
+relationships via `client.set_relationship`), and the round-trips are exercised by
+`tests/integration/rebar_reconciler/test_link_sync.py`. (This entry previously said
+link sync was "not yet a reconciler capability"; that is stale — it is implemented
+and tested.)
