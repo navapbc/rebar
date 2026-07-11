@@ -29,13 +29,13 @@ from rebar.graph._unblock import batch_close_operations
 logger = logging.getLogger(__name__)
 
 
-def _referencing_commit_exists(resolved_id: str, tracker: str, repo_root) -> bool:
-    """True if any commit reachable from the code repo's history references ``resolved_id``
-    via a ``rebar-ticket:`` trailer (or a leading ``<id>:`` subject token).
+def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
+    """True if any commit reachable from the code repo's history references ANY of
+    ``accepted_ids`` via a ``rebar-ticket:`` trailer (or a leading ``<id>:`` subject token).
 
     Each extracted candidate is put through the SAME shared resolver the commit-ticket gate
     uses (:func:`resolve_ticket_id`), so every id form — full / short / alias / Jira key /
-    prefix — matches the ticket being closed. Resolves are cached across commits. A git
+    prefix — matches any of the accepted ids. Resolves are cached across commits. A git
     failure (not a repo, no commits) yields ``False`` (no referencing commit found)."""
     from rebar._commands.verify_commit import extract_ticket_refs
     from rebar._engine_support.resolver import resolve_ticket_id
@@ -52,7 +52,7 @@ def _referencing_commit_exists(resolved_id: str, tracker: str, repo_root) -> boo
         for ref in extract_ticket_refs(message):
             if ref not in resolved_cache:
                 resolved_cache[ref] = resolve_ticket_id(ref, tracker)
-            if resolved_cache[ref] == resolved_id:
+            if resolved_cache[ref] in accepted_ids:
                 return True
     return False
 
@@ -128,6 +128,7 @@ def _completion_precheck(
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
     # not landed and completion cannot be confirmed — fail fast (no LLM call).
     from rebar._engine_support import field_reads
+    from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
     tracker = str(config.tracker_dir(repo_root))
@@ -137,12 +138,23 @@ def _completion_precheck(
     # is the same resolution ``transition_compute`` uses for ``repo_root_str``.
     code_root = os.path.dirname(tracker)
     resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
+    # Credit the ticket's ENTIRE descendant subtree: a parent (epic/story) whose code was
+    # delivered by its children carries no commit referencing its OWN id, only the child ids.
+    # Accept a referencing commit for the ticket or any of its descendants (transitive).
+    accepted_ids = {resolved_id}
+    descendants = list_descendants(ticket_id, tracker)
+    for bucket in ("epics", "stories", "tasks", "bugs"):
+        for desc_id in descendants.get(bucket, []):
+            desc_resolved = resolve_ticket_id(desc_id, tracker)
+            if desc_resolved is not None:
+                accepted_ids.add(desc_resolved)
     if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(
-        resolved_id, tracker, code_root
+        accepted_ids, tracker, code_root
     ):
         raise CommandError(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
-            f"commit references it. Add a 'rebar-ticket: {resolved_id}' trailer to the commit "
+            f"commit references it (nor any of its descendants). Add a "
+            f"'rebar-ticket: {resolved_id}' trailer to the commit "
             'that implements it, then retry (or override with --force-close="<reason>"). '
             "Completion verification cannot confirm the work landed without a referencing commit.",
             returncode=1,
