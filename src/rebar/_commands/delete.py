@@ -32,7 +32,7 @@ from rebar._engine_support.output import OutputFormatError, error_envelope, pars
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import hlc
 from rebar._store.canonical import canonical_str
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import run_git_write
 from rebar.graph._unblock import batch_close_operations
 from rebar.reducer import reduce_all_tickets
 from rebar.reducer.marker import write_marker
@@ -160,7 +160,7 @@ def _git(tracker: str, *args: str):
     success on an uncommitted store (bash ran under ``set -e``)."""
     from rebar._commands._seam import CommandError
 
-    cp = run_git(tracker, *args, check=False)
+    cp = run_git_write(tracker, *args, check=False)
     if cp.returncode != 0:
         raise CommandError(
             f"Error: git operation failed during delete: {cp.stderr.strip()}", returncode=2
