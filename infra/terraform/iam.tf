@@ -126,3 +126,73 @@ resource "aws_iam_role_policy_attachment" "dlm_managed" {
   role       = aws_iam_role.dlm.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
 }
+
+# --- GitHub Actions OIDC role: terraform-plan drift detection (ticket c7d4) --
+# SINGLE-OWNER: this ticket (c7d4) owns the drift-detection CI role. Assumed by
+# .github/workflows/terraform-drift.yml via GitHub's OIDC provider to run READ-ONLY
+# `terraform plan` on infra/terraform/**, so committed HCL that sits un-applied surfaces
+# as a failing check (the root cause behind dc3f: manual applies drift silently).
+#
+# The OIDC provider (token.actions.githubusercontent.com) already exists in the account.
+# Trust is scoped to THIS repo. Permissions = AWS-managed ReadOnlyAccess (covers S3 state
+# read + ssm:GetParameter + every data-source read a plan performs) PLUS one inline
+# statement for kms:Decrypt-via-SSM, which ReadOnlyAccess deliberately omits and the
+# alert-endpoint SecureString data source (aws_ssm_parameter.alert_endpoint) needs. The CI
+# runs `terraform plan -lock=false`, so NO state writes (and no S3 PutObject) are required.
+data "aws_iam_policy_document" "gha_terraform_plan_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    # Scope to this repo (any ref/branch/PR). Narrow further with a specific ref if the
+    # drift job is ever pinned to one branch.
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:navapbc/rebar:*"]
+    }
+  }
+}
+
+resource "aws_iam_role" "gha_terraform_plan" {
+  name               = "rebar-terraform-plan"
+  assume_role_policy = data.aws_iam_policy_document.gha_terraform_plan_assume.json
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "c7d4"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "gha_terraform_plan_readonly" {
+  role       = aws_iam_role.gha_terraform_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+# kms:Decrypt is NOT in ReadOnlyAccess; the plan reads the alert-endpoint SecureString
+# (with_decryption = true) via SSM, so grant Decrypt constrained to the SSM service.
+data "aws_iam_policy_document" "gha_terraform_plan_kms" {
+  statement {
+    sid       = "DecryptSecureStringsViaSSM"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "gha_terraform_plan_kms" {
+  name   = "rebar-terraform-plan-kms"
+  role   = aws_iam_role.gha_terraform_plan.id
+  policy = data.aws_iam_policy_document.gha_terraform_plan_kms.json
+}

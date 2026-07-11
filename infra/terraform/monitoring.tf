@@ -196,3 +196,51 @@ locals {
   monitoring_region     = var.aws_region
   monitoring_account_id = data.aws_caller_identity.current.account_id
 }
+
+# --- Alarm 4: Gerrit DATA-volume disk pressure (ticket c7d4) ----------------
+# The /var/gerrit data volume filling is a top outage risk — git repos, All-Projects,
+# and the review DB live there. observability.sh publishes rebar/host:disk_used_percent
+# with a `mount` dimension per filesystem; this alarm watches mount=/var/gerrit.
+#
+# ADOPTS a pre-existing, UNMANAGED live alarm (rebar-gerrit-data-disk-high) that was
+# created out-of-band with an EMPTY alarm_actions list (so it never notified). Bringing
+# it under IaC also WIRES it to the SNS topic, closing the silent-alarm gap. Companion
+# to rebar-root-disk-pressure (monitoring_autodeploy.tf), which watches the ROOT disk
+# (root_disk_used_percent); this one watches the DATA volume (disk_used_percent).
+#
+# POST-MERGE ADOPTION: the live alarm already exists, so after this merges an operator
+# imports it before apply so state matches reality (see ticket c7d4):
+#   terraform import aws_cloudwatch_metric_alarm.gerrit_data_disk_high rebar-gerrit-data-disk-high
+#   terraform apply   # sets alarm_actions/ok_actions on the adopted alarm
+# (CloudWatch PutMetricAlarm is an idempotent upsert, so an un-imported apply would also
+# adopt-by-overwrite; import is preferred so the first plan shows only the actions diff.)
+resource "aws_cloudwatch_metric_alarm" "gerrit_data_disk_high" {
+  alarm_name        = "rebar-gerrit-data-disk-high"
+  alarm_description = "Gerrit data volume (/var/gerrit) disk usage >= 85%. observability.sh publishes rebar/host:disk_used_percent per mount; exhaustion of this volume takes Gerrit down (git repos + review DB live here)."
+
+  namespace   = "rebar/host"
+  metric_name = "disk_used_percent"
+  statistic   = "Maximum"
+
+  dimensions = {
+    InstanceId = data.aws_instance.gerrit.id
+    mount      = "/var/gerrit"
+  }
+
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 85
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+
+  # Missing data = the probe/host is gone, which the S7 gate-down alarm already pages
+  # on (treat_missing_data = breaching there); don't double-page on host loss here.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "c7d4"
+  }
+}

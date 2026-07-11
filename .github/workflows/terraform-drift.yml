@@ -1,0 +1,53 @@
+# Terraform drift detection (ticket c7d4). Runs read-only `terraform plan` on any change
+# under infra/terraform/** and on a daily schedule, and FAILS when the plan is non-empty
+# (committed HCL that has not been applied, or live infra that has drifted from HCL). This
+# closes the gap behind dc3f: applies are manual (infra/runbooks/provision-restore.md), so
+# without this check committed infra could sit un-applied and unnoticed.
+#
+# Auth: GitHub OIDC -> the rebar-terraform-plan IAM role (infra/terraform/iam.tf), which is
+# ReadOnlyAccess + kms:Decrypt-via-SSM. `-lock=false` keeps the plan strictly read-only (no
+# S3 state-lock write needed). No AWS static keys are stored in the repo.
+name: terraform-drift
+
+on:
+  pull_request:
+    paths: ['infra/terraform/**']
+  push:
+    branches: [main]
+    paths: ['infra/terraform/**']
+  schedule:
+    - cron: '17 6 * * *'   # daily drift sweep even without a code change
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required for OIDC AssumeRoleWithWebIdentity
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::896586841071:role/rebar-terraform-plan
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform plan (fail on drift)
+        # -detailed-exitcode: 0 = no changes, 2 = a diff (un-applied drift) -> the step
+        # exits non-zero and FAILS the check; 1 = error. -lock=false keeps it read-only.
+        run: terraform plan -input=false -lock=false -detailed-exitcode
