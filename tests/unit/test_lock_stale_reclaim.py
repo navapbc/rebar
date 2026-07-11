@@ -159,3 +159,50 @@ def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         _lock._acquire_fcntl(lock_path, _time.monotonic() + 30)
     assert closed, "the opened fd must be closed on the re-raise path"
+
+
+# ── canonical_tracker symlink/realpath lock identity (story elliptic-secondbest-nuthatch) ──
+#
+# `acquire` canonicalizes the tracker path with `canonical_tracker` (os.path.realpath), so a
+# symlinked-path caller and a real-path caller contend on the SAME `.ticket-write.lock` /
+# `.ticket-write.lock.d`. These tests prove that mutual exclusion holds across the two path
+# spellings, in both directions. Determinism: the two acquirers are independent `acquire()`
+# calls (separate fcntl open-file-descriptions + separate os.mkdir), which contend regardless
+# of process; the second uses a bounded `timeout=1, attempts=1`, so the held lock GUARANTEES a
+# LockTimeout (not a sleep-timing race). Were canonicalization absent, the two paths would key
+# different lock files, the second acquire would succeed, and the assertion would fail.
+
+
+def _tracker_and_symlink(tmp_path) -> tuple[str, str]:
+    real = os.path.join(str(tmp_path), "tracker")
+    os.mkdir(real)
+    link = os.path.join(str(tmp_path), "tracker-link")
+    os.symlink(real, link)
+    return real, link
+
+
+def test_symlink_acquirer_blocked_by_realpath_holder(tmp_path):
+    """Hold via the real path; a second acquire via a symlink to the tracker is blocked."""
+    real, link = _tracker_and_symlink(tmp_path)
+    handle = _lock.acquire(real, timeout=1, attempts=1)
+    try:
+        with pytest.raises(_lock.LockTimeout):
+            _lock.acquire(link, timeout=1, attempts=1)
+    finally:
+        handle.release()
+    # After release, the symlink caller can take the same lock.
+    freed = _lock.acquire(link, timeout=1, attempts=1)
+    freed.release()
+
+
+def test_realpath_acquirer_blocked_by_symlink_holder(tmp_path):
+    """Reverse direction: hold via the symlink; a second acquire via the real path is blocked."""
+    real, link = _tracker_and_symlink(tmp_path)
+    handle = _lock.acquire(link, timeout=1, attempts=1)
+    try:
+        with pytest.raises(_lock.LockTimeout):
+            _lock.acquire(real, timeout=1, attempts=1)
+    finally:
+        handle.release()
+    freed = _lock.acquire(real, timeout=1, attempts=1)
+    freed.release()
