@@ -221,9 +221,13 @@ def test_mcp_operations_registered_and_gated_off_by_default(
 def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Even with the gate explicitly opened, a missing extra must surface as a
-    tool error (the typed LLMError, transport-wrapped) — never a billable call,
-    never a silent empty result."""
+    """Even with the gate explicitly opened, a missing extra must surface — never a
+    billable call, never a silent empty result. The public tools split into two
+    contracts (story authorial-hated-blackbear): review_ticket/scan_spec RAISE the
+    typed LLMError (transport-wrapped); the gate-shaped tools (review_code,
+    verify_completion, review_plan) instead RETURN a STRUCTURED degrade dict so the
+    driving agent/close-gate can branch on it. Both surface the missing 'agents' extra;
+    neither is silent."""
     import asyncio
 
     from adapters import _unwrap
@@ -235,13 +239,13 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     # (rather than failing earlier at git range resolution) — proving review_code,
     # too, degrades on the missing extra rather than for an unrelated reason.
     _two_commits(rebar_repo)
+    # ── Contract A: tools that RAISE the typed LLMError on a missing extra. ──
+    # review_code EXCLUDED: fail-safe (WS4) — returns an inert disabled result, see
+    # test_review_code_is_fail_safe_without_extra. verify_completion EXCLUDED: it is a
+    # gate-shaped tool that returns a STRUCTURED degrade dict (Contract B, below), not a raise.
     forced = {
         "review_ticket": {"ticket_id": epic},
-        # review_code EXCLUDED: it is fail-safe (WS4) — with the gate opened but the code-review
-        # capability off/degraded it returns a valid (inert/degraded) review_result, it does not
-        # raise. Its contract is asserted by test_review_code_is_fail_safe_without_extra.
         "scan_spec": {"spec_text": "the spec"},
-        "verify_completion": {"ticket_id": epic},
     }
     for name, args in forced.items():
         with pytest.raises(Exception) as exc:  # noqa: B017
@@ -250,6 +254,15 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
         # (the gate is open here) or for some unrelated reason.
         msg = str(exc.value).lower()
         assert "agents" in msg and "disabled" not in msg, str(exc.value)
+
+    # ── Contract B: verify_completion RETURNS a structured degrade dict (never raises,
+    # never a billable call, never a silent empty result). It carries the classifier
+    # disposition so the close gate can fail-closed on it programmatically. ──
+    verdict = _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": epic})))
+    assert isinstance(verdict, dict), verdict
+    err = str(verdict.get("error", "")).lower()
+    assert "agents" in err and "disabled" not in err, verdict
+    assert verdict.get("resolution_class"), verdict  # classifier disposition present, not silent
 
 
 # ── Guard: the matrix above must enumerate every public LLM operation ──────────
