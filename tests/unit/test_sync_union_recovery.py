@@ -96,3 +96,52 @@ def test_unrelated_history_survives_gc_prune_after_union(unrelated_origin) -> No
         )
     assert (tracker / "1111-dddd-eeee-ffff").is_dir()
     assert (tracker / "0000-aaaa-bbbb-cccc").is_dir()
+
+
+# ── Detached-HEAD-local-ahead preservation (story archaic-elegant-bovine, WS3) ──
+#
+# The tracker worktree can be in a detached-HEAD-local-ahead state: a local commit advances
+# HEAD but not refs/heads/tickets. `_do_reconverge` measures local-ahead by HEAD
+# (`sync.py`: `rev-list {remote}..HEAD`), NOT the lagging branch ref — so the un-pushed local
+# commit is never `reset --hard`'d away. This pins that data-safety guard.
+
+
+def test_sync_preserves_detached_head_local_ahead_commit(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    tracker = tmp_path / "tracker"
+    _new_tickets_repo(origin)
+    _commit_event(origin, "0000-base-0000-0000", '{"e":"base"}')  # shared base
+
+    # Tracker is CLONED from origin (shares history; gets origin remote + origin/tickets).
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
+    _git(tracker, "config", "user.email", "t@t")
+    _git(tracker, "config", "user.name", "t")
+
+    # Origin advances beyond the shared base.
+    origin_sha = _commit_event(origin, "2222-orig-2222-2222", '{"e":"origin"}')
+
+    # Tracker goes DETACHED at the base, then commits locally: HEAD advances past base while
+    # refs/heads/tickets still points at base (the detached-HEAD-local-ahead state).
+    _git(tracker, "checkout", "--detach", "HEAD")
+    local_sha = _commit_event(tracker, "1111-local-1111-1111", '{"e":"local"}')
+    assert _git(tracker, "rev-parse", "tickets").stdout.strip() != local_sha, (
+        "precondition: the branch ref must lag HEAD (detached-local-ahead)"
+    )
+
+    sync.reconverge(tracker)
+
+    # The local commit must survive — reachable from HEAD, NOT orphaned by a reset --hard.
+    assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0, (
+        "detached-HEAD local commit was orphaned — the WS3 (branch-ref) data-loss regression"
+    )
+    assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode == 0, (
+        "origin commit not reachable after reconverge"
+    )
+    assert (tracker / "1111-local-1111-1111").is_dir(), "local event dir lost"
+    assert (tracker / "2222-orig-2222-2222").is_dir(), "origin event dir not adopted"
+
+    # And it stays reachable through an aggressive prune (not merely un-GC'd yet).
+    _git(tracker, "gc", "--prune=now", "--quiet")
+    assert _git(tracker, "cat-file", "-e", local_sha).returncode == 0, (
+        "local commit was collectible — it was orphaned, not merged"
+    )
