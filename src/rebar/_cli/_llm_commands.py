@@ -257,6 +257,12 @@ def _review_code(argv: list[str]) -> int:
     else:
         _render_review_text(result)
         _render_source_line(result)
+    # review-code is the off-by-default fail-safe capability (WS4): when disabled it returns an
+    # INERT empty result (no verdict, no findings, zero LLM calls) — that is a clean success, not
+    # a degradation, so exit 0. Without this the generic _disposition_exit_code would treat the
+    # verdict-less result as a non-PASS and exit 1, breaking automation that checks exit codes.
+    if result.get("runner") == "code-review-disabled":
+        return 0
     # PASS/advisory→0, retryable systemic degrade→11, INDETERMINATE→2 (story blackbear).
     return _disposition_exit_code(result, indeterminate_code=2)
 
