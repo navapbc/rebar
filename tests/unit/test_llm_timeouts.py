@@ -313,11 +313,17 @@ def test_runner_sets_tool_timeout_on_the_agent(monkeypatch):
     assert captured["tool_timeout"] == 77.0
 
 
-# ── No total-runtime timeout / no total-runtime timer in the gate path ────────
-def test_no_total_runtime_timeout_mechanism():
-    """Structural guard: the runner introduces NO total-runtime timer (no signal.alarm,
-    no wall-clock deadline thread) — liveness is per-request + per-tool + step caps only.
-    The single asyncio.run is the client-teardown aclose, not a run-bounding loop."""
+# ── No total-runtime timer in the gate path (SUPPLEMENTAL structural guard) ────
+def test_no_total_runtime_timer_mechanism():
+    """SUPPLEMENTAL structural guard — NOT counted as behavioral liveness coverage. The
+    runner introduces no total-runtime wall-clock KILL primitive (no ``signal.alarm``
+    SIGALRM, no ``threading.Timer`` deadline). The actual liveness contract (per-request
+    read timeout, per-tool timeout, step caps) is exercised behaviorally by the
+    read-timeout / tool-timeout probe tests elsewhere in this module; this guard only pins
+    the negative-space invariant that no NEW wall-clock timer primitive has crept in. The
+    brittle exact ``asyncio.run(...)`` source-string assertion was removed (a rename of the
+    teardown call must not fail this guard) — teardown correctness is a behavioral concern,
+    not a source-token one."""
     import inspect
 
     import rebar.llm.runner as runner_mod
@@ -325,6 +331,3 @@ def test_no_total_runtime_timeout_mechanism():
     src = inspect.getsource(runner_mod)
     assert "signal.alarm" not in src  # no SIGALRM wall-clock kill
     assert "Timer(" not in src  # no threading.Timer wall-clock deadline
-    # The only asyncio.run CALL is the client-teardown aclose (story arcticduck), not a
-    # run-bounding loop.
-    assert "asyncio.run(_http_client.aclose())" in src
