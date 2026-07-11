@@ -120,3 +120,18 @@ assumption before it becomes code.
   protocol, the grounding citations, or the journey; the user wants the decisions and the
   open inferences, not a transcript.
 - **End with the concrete next action.**
+
+### Before recording tickets, read the project's plan-review gate
+
+When the design will be recorded as tickets (e.g. rebar epics/stories/tasks), the concrete
+next action is to CREATE those tickets — and before you do, **read the project's plan-review
+gate documentation** so every ticket is authored to pass it. In this project that is
+`docs/plan-review-gate.md` and `docs/plan-review-criteria-guide.md`. Shape each ticket to the
+gate's **blocking** criteria — cross-section coherence, no unresolved/placeholder decisions,
+measurable in-session acceptance criteria, single-concern decomposition, a sound approach with
+a stated positive rationale, compat/rollback for any migration, and maintainability/ADR — and
+its **overlays** (security trust-boundary, infra endpoint-auth, prior-art, migration-safety,
+new-prohibition consumer scan, CI-trigger). Then run the plan-review gate on each ticket
+(`rebar review-plan <id>`) and remediate findings before claiming. Reading the gate first is
+standard process: it is far cheaper to author to the criteria than to remediate a BLOCK after
+the fact.
