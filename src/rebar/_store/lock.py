@@ -4,23 +4,23 @@ Unifies the three historical lock acquisitions — bash ``_flock_stage_commit``
 (``ticket-lib.sh``), ``ticket_txn.py``, and ``event_append.write_lock`` — into a
 single implementation so the whole system holds ONE lock (invariant I5).
 
-**The dual-window interop rule (docs/bash-migration.md §6).** While any bash core
-may still run (the whole Tier D window), the Python lock acquires BOTH mechanisms
-in a fixed order — ``fcntl.flock(LOCK_EX)`` on ``.ticket-write.lock`` FIRST, then
-the mkdir lock ``.ticket-write.lock.d`` — releasing in reverse (mkdir leg in a
-``finally``). Bash ``_flock_stage_commit`` holds at most ONE mechanism (util-linux
-``flock(1)`` *or* the mkdir fallback), so:
+**The dual-window contract (permanent).** By default the lock acquires BOTH
+mechanisms in a fixed order — ``fcntl.flock(LOCK_EX)`` on ``.ticket-write.lock``
+FIRST, then the mkdir lock ``.ticket-write.lock.d`` — releasing in reverse (mkdir
+leg in a ``finally``). This is a **standing, intentional contract**, not migration
+residue: the fcntl leg is the fast kernel-backed lock (auto-released if the holder
+dies) and the mkdir leg is the **portable second window** — ``mkdir`` is atomic on
+POSIX, so mutual exclusion holds even where util-linux ``flock`` is absent (default
+macOS), and the mkdir stamp is what backs the foreign-host / shared-filesystem
+reclamation logic (``_mkdir_lock_is_stale``). Because neither leg waits on the other
+across processes there is no hold-and-wait cycle ⇒ deadlock-free. The dual acquisition
+is also what closed the historical ``stiff-mop-lane`` gap, and it remains the durable
+mechanism the writer-storm gate depends on (``the mkdir leg is always taken``).
 
-* on a ``flock(1)`` host, Python's ``fcntl.flock`` contends with bash's ``flock(1)``
-  (same ``flock(2)`` syscall, same file); the mkdir leg is uncontended overhead;
-* on a ``flock(1)``-less host (bash falls back to mkdir), Python's mkdir leg
-  contends with bash's mkdir; the fcntl leg is uncontended.
-
-Either way mutual exclusion holds, and because bash never waits on a second
-mechanism there is no hold-and-wait cycle ⇒ deadlock-free. This closes the
-``stiff-mop-lane`` gap (fcntl-only Python vs mkdir-only bash on macOS). After the
-bash core is retired, ``dual_window`` flips to ``False`` permanently and the system
-converges on plain ``fcntl.flock``.
+``dual_window=True`` is the permanent default. ``dual_window=False`` remains an
+fcntl-only escape hatch for callers that deliberately want the single kernel leg
+(e.g. a caller certain of a local ``flock``-capable filesystem); it is an opt-out,
+not a migration end-state.
 """
 
 from __future__ import annotations
