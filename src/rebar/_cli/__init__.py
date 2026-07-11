@@ -30,6 +30,7 @@ from rebar._cli._llm_commands import (
     _review_code,
     _review_plan,
     _scan_spec,
+    _sign_review,
     _verify_completion,
 )
 from rebar._cli._workflow_commands import _workflow
@@ -389,6 +390,11 @@ def main(argv: list[str] | None = None) -> int:
     # review-plan intercept (native rebar.llm plan-review gate; owns its --help).
     if argv and argv[0] == "review-plan":
         return _review_plan(argv[1:])
+
+    # sign-review intercept (cheap re-sign of a plan-review attestation from the last
+    # REVIEW_RESULT sidecar; NO LLM. Owns its --help like review-plan).
+    if argv and argv[0] == "sign-review":
+        return _sign_review(argv[1:])
 
     # enrich intercept (cross-ticket overlap drain + status; native rebar.llm, epic
     # only-crave-art). `rebar enrich [--drain|--once|status]`.

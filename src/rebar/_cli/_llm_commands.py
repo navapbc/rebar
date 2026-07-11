@@ -471,6 +471,50 @@ def _review_plan(argv: list[str]) -> int:
     return _disposition_exit_code(result, indeterminate_code=2)
 
 
+def _sign_review(argv: list[str]) -> int:
+    """``rebar sign-review`` → rebar.llm.resign_plan_review (native; owns its --help).
+
+    The CHEAP recovery path (ticket middle-actinium-thrush): (re)persist the plan-review
+    attestation for an ALREADY-COMPUTED, still-valid PASS verdict from the latest
+    ``REVIEW_RESULT`` sidecar — WITHOUT re-running the multi-pass LLM review. No LLM, no
+    network, no 'agents' extra. REFUSES (exit 1) when there is no PASS sidecar, or the plan
+    changed since the review (stale). Exit 0 on a successful re-sign."""
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="rebar sign-review",
+        description="Cheaply (re)persist the plan-review attestation for an already-computed, "
+        "still-valid PASS verdict from the latest REVIEW_RESULT sidecar — WITHOUT re-running the "
+        "multi-pass LLM review. Use it to recover a signature that a `rebar review-plan` computed "
+        "but failed to persist (e.g. a transient git index.lock). Refuses to sign a non-PASS or a "
+        "verdict that is stale because the plan changed since the review.",
+    )
+    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
+    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    args = parser.parse_args(argv)
+
+    if not args.ticket_id:
+        parser.error("ticket_id is required")
+    ensure_initialized(init_only=True)
+    from rebar import llm
+
+    result = llm.resign_plan_review(args.ticket_id)
+    if args.output == "json":
+        sys.stdout.write(_json.dumps(result) + "\n")
+    else:
+        if result.get("ok"):
+            sys.stdout.write(
+                f"SIGN REVIEW: signed plan-review attestation for {result.get('ticket_id')}\n"
+                f"  {result.get('reason', '')}\n"
+            )
+        else:
+            sys.stderr.write(
+                f"SIGN REVIEW: refused for {result.get('ticket_id')} — {result.get('reason', '')}\n"
+            )
+    # Exit 0 on a successful re-sign; non-zero on any refusal (absent / non-PASS / stale).
+    return 0 if result.get("ok") else 1
+
+
 def _render_plan_review_text(result: dict) -> None:
     """Human-readable plan-review summary (verdict + blocking/advisory + coaching)."""
     v = result.get("verdict", "?")

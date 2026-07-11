@@ -218,3 +218,25 @@ def register_llm_tools(mcp, ctx) -> None:
             )
         except rebar.llm.LLMError as exc:
             return _structured_llm_failure(exc)
+
+    @mcp.tool(annotations=_ANN["MUTATE"])
+    def sign_review(ticket_id: str) -> dict:
+        """Cheaply (re)persist the plan-review attestation for an already-computed, still-valid
+        PASS verdict from the latest REVIEW_RESULT sidecar -> {ok, signed, ticket_id, verdict,
+        reason, signature?}. WITHOUT re-running the multi-pass LLM review (no LLM, no network).
+
+        The recovery path (ticket middle-actinium-thrush) for a review_plan that computed a
+        signable PASS but failed to persist the signature the claim gate consumes. REFUSES
+        (ok=False) with a reason when there is no PASS sidecar, or the plan changed since the
+        review (stale — run review_plan for a fresh verdict). NEVER signs a non-PASS / degraded /
+        stale verdict.
+
+        Unlike review_plan this is NOT gated on REBAR_MCP_ALLOW_LLM (it makes no LLM call), but it
+        WRITES a SIGNATURE event, so it is disabled in REBAR_MCP_READONLY mode."""
+        if _readonly():
+            raise ValueError(
+                "sign_review is disabled: it writes a SIGNATURE event (readonly mode)."
+            )
+        import rebar.llm
+
+        return rebar.llm.resign_plan_review(ticket_id)
