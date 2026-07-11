@@ -105,19 +105,27 @@ rollback if the parent succeeds and the child then fails: an ancestor sitting in
 `_resolve_open_parent` helper.
 
 ### I5 — Single locked write path
-All writes go through the flock-guarded append+commit path: atomic
-tmp-then-rename + `git add <event>` + `git commit`, all under
-`.tickets-tracker/.ticket-write.lock` (`_flock_stage_commit`,
-`ticket-lib.sh:270-...`, FD 200 at `:353`/`:493`). No side-channel writes. The
-reconciler's event-file write shares this lock via the `event_append` module
-(`write_lock` / `append_event`) rather than writing unserialized.
+All writes go through the lock-guarded append+commit path: atomic
+tmp-then-rename + `git add <event>` + `git commit`, all under the tickets-tracker
+write lock held by `rebar._store.lock` (`write_lock` / `acquire`). No side-channel
+writes. The reconciler's event-file write shares this lock via the `event_append`
+module (`write_lock` / `append_event`) rather than writing unserialized. (The
+former bash `_flock_stage_commit` write core has been retired; only this Python
+lock remains.)
 
-**No-flock platforms.** Where util-linux `flock` is absent (default macOS),
-`_flock_stage_commit` falls back to an **atomic `mkdir` lock** (`mkdir` is atomic
-on POSIX). Its behaviour under many concurrent local agents is pinned by the
+**The dual-window lock (permanent contract).** By default the lock takes BOTH a
+`fcntl.flock(LOCK_EX)` on `.ticket-write.lock` AND an atomic `mkdir` lock at
+`.ticket-write.lock.d` (acquired fcntl-first, released mkdir-first). This is an
+intentional, standing contract — not a migration residue. The fcntl leg is the fast
+kernel-backed lock; the **mkdir leg is the portable second window** — `mkdir` is
+atomic on POSIX, so mutual exclusion holds even where util-linux `flock` is absent
+(default macOS), and the mkdir owner-stamp backs the foreign-host / shared-filesystem
+reclamation check. Its behaviour under many concurrent local agents is pinned by the
 writer-storm regression test
 (`tests/integration/test_store_concurrency.py::test_concurrent_writer_storm_no_loss`):
-N concurrent writers lose **zero** events. Lost events fail the test.
+N concurrent writers lose **zero** events, because every writer takes both legs.
+Lost events fail the test. Callers may pass `dual_window=False` for an fcntl-only
+lock, but that is an opt-out, not the default.
 
 ### I6 — No NEW cross-client lock; no shared mutable index
 Cross-client coordination is **only** git merge-as-union + optimistic
