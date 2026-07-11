@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"src/rebar/attest/","reason":"new DSSE+SSHSIG+scheme-registry substrate"},{"path":"src/rebar/signing.py","reason":"register existing HMAC as legacy scheme"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783735700546472001,"uuid":"31fa83f9-96fe-4a3b-91f2-52f57987dcd6"}
