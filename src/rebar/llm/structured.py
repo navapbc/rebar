@@ -262,6 +262,37 @@ def check_stop_reason(stop_reason: str | None) -> None:
         raise StructuredOutputError(_BAD_STOP_REASONS[stop_reason])
 
 
+def check_response(response: Any) -> None:
+    """Fail-closed guard for a COMPLETED model turn (task 8303, refusal-as-content). Raises
+    :class:`UnretryableOutputError` on any refusal/truncation signal so a refusal is NEVER
+    returned as a usable structured result (the silent-success failure of pydantic-ai #5221,
+    where a content-policy refusal comes back as a normal-looking text part).
+
+    Two layers, so the guarantee does not depend on a single provider-adapter detail:
+
+    1. The normalized ``response.finish_reason`` via :func:`check_stop_reason`. On the current
+       Anthropic path this ALREADY closes the gap: pydantic-ai maps Anthropic
+       ``stop_reason='refusal'`` to ``finish_reason='content_filter'`` (in this repo's
+       ``_UNRETRYABLE_STOP_REASONS``), and OpenAI surfaces ``content_filter`` directly.
+    2. **Defense in depth:** a raw refusal/truncation signal in ``response.provider_details``
+       — pydantic-ai stashes the raw provider ``finish_reason`` there and, for a refusal, a
+       ``'refusal'`` explanation key (Anthropic ``stop_details``). This catches a refusal even
+       if a future adapter stops mapping it onto ``finish_reason`` (leaving it ``None``/
+       ``stop``) — the exact #5221 shape — so rebar stays fail-closed regardless.
+
+    A clean turn (normal finish_reason, no refusal signal) passes. Use this at every point the
+    runner is about to RETURN or PARSE a model turn's output as a structured result."""
+    check_stop_reason(getattr(response, "finish_reason", None))
+    details = getattr(response, "provider_details", None)
+    if isinstance(details, dict):
+        raw = details.get("finish_reason")
+        if raw in _UNRETRYABLE_STOP_REASONS or "refusal" in details:
+            msg = _BAD_STOP_REASONS.get(raw) if isinstance(raw, str) else None
+            raise UnretryableOutputError(
+                msg or "the model refused to answer (provider refusal signal in provider_details)"
+            )
+
+
 # Default bounded retry budget for the structured-output path (layer 4): ONE retry to
 # the SAME model with the validation error fed back (Pydantic AI's default budget is 1;
 # the research recommends raising it to ~2). The deterministic validator is the arbiter.
