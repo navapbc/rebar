@@ -133,7 +133,14 @@ def _acquire_fcntl(lock_path: str, deadline: float) -> int:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fd
-        except OSError:
+        except OSError as exc:
+            # Only genuine contention (the lock is held elsewhere) is waited out; any other
+            # errno (ENOLCK/EIO/EBADF/…) is a real fault that must surface with its identity
+            # rather than be masked as a spurious 30-60s LockTimeout. (EINTR does not reach
+            # here: PEP 475 retries the interrupted syscall at the C level.)
+            if exc.errno not in (errno.EAGAIN, errno.EACCES):
+                os.close(fd)
+                raise
             if time.monotonic() >= deadline:
                 os.close(fd)
                 return -1
