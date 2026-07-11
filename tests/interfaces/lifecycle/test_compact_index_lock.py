@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -65,3 +66,20 @@ def test_compact_reclaims_stale_index_lock(rebar_repo: Path) -> None:
     assert rc == 0, "compaction must self-heal a stale index.lock, not fail hard"
     assert _has_snapshot(rebar_repo, tid), "a SNAPSHOT should have been written"
     assert not lock.exists(), "the stale lock should have been reclaimed by the compact write"
+
+
+def test_compact_rides_out_contended_index_lock(rebar_repo: Path) -> None:
+    """A CONTENDED (live/young) index.lock released mid-backoff is ridden out by the retry
+    loop on the compact write path — the ride-out counterpart to the stale-reclaim test
+    above (ticket 3b4e requires both scenarios per newly-covered path)."""
+    tid = _seed(rebar_repo, "compactable-contended")
+    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
+    rebar.comment(tid, "note", repo_root=str(rebar_repo))
+
+    lock = _index_lock_path(_tracker(rebar_repo))
+    lock.write_text("")  # a fresh lock: a live peer mid-write
+    threading.Timer(0.4, lambda: lock.exists() and lock.unlink()).start()
+
+    rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
+    assert rc == 0, "compaction must ride out a contended index.lock via retry backoff"
+    assert _has_snapshot(rebar_repo, tid), "a SNAPSHOT should have been written"
