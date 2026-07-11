@@ -129,6 +129,15 @@ def _reclaim_if_stale_index_lock(tracker: str) -> None:
         pass
 
 
+# Test seam: a callable (default ``None`` = disabled) invoked after EVERY ``run_once()``
+# attempt inside ``_with_index_lock_retry`` with ``(attempt_number, result)`` — the initial
+# pre-loop call fires as attempt 1, each in-loop retry as 2, 3, …. It lets a test count the
+# real attempts and release a planted lock ONLY after the first failure is confirmed (a
+# deterministic alternative to timer-based lock release). Production leaves this ``None`` so
+# the call is skipped and behavior is unchanged.
+_retry_probe: Callable[[int, subprocess.CompletedProcess], None] | None = None
+
+
 def _with_index_lock_retry(
     tracker: str, run_once: Callable[[], subprocess.CompletedProcess]
 ) -> subprocess.CompletedProcess:
@@ -140,6 +149,8 @@ def _with_index_lock_retry(
     is the composition seam: a caller that also retries a DIFFERENT signature (e.g.
     event_append's object-DB ``git add`` retry) passes its own inner loop as *run_once*."""
     result = run_once()
+    if _retry_probe is not None:
+        _retry_probe(1, result)
     for attempt in range(1, _INDEX_LOCK_ATTEMPTS):
         if result.returncode == 0:
             return result
@@ -148,6 +159,8 @@ def _with_index_lock_retry(
         _reclaim_if_stale_index_lock(tracker)
         time.sleep(_INDEX_LOCK_BACKOFF_S * attempt)
         result = run_once()
+        if _retry_probe is not None:
+            _retry_probe(attempt + 1, result)
     return result
 
 
