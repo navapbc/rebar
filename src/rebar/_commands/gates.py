@@ -115,7 +115,7 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
         "ticket_type", ""
     )
-    if ticket_type in ("bug", "session_log", "code_review"):
+    if ticket_type in ("bug", "session_log", "code_review", "identity"):
         return None  # exempt from the plan-review gate
     if force_reason:
         # Audit the bypass (best-effort) so a forced start is a durable signal.

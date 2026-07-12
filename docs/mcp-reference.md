@@ -57,6 +57,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `comment_ticket` | Append a comment to a ticket. |
 | `compact_ticket` | Compact a ticket's event log (or all tickets if id omitted). |
 | `create_idea` | Capture an undesigned idea: create an epic in status 'idea' atomically. |
+| `create_identity` | Create an identity entity: a gate-/graph-exempt ticket recording a |
 | `create_ticket` | Create a ticket; returns {id, alias} (agents get the alias without |
 | `edit_ticket` | Edit ticket fields (title/priority/assignee/description/ticket_type). |
 | `link_tickets` | Link two tickets (one of the six canonical relations: blocks | |
@@ -80,4 +81,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_ticket / review_code / scan_spec / verify_completion / review_plan); off by default. |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
 
-_47 tools._
+_48 tools._
