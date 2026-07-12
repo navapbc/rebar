@@ -31,6 +31,96 @@ def _fold_author_attribution(target: dict, event: dict) -> None:
             target[_key] = _val
 
 
+def keys_valid_at_epoch(keyring: list, epoch: int) -> list[str]:
+    """Public keys of the keyring records whose ``[added_epoch, revoked_epoch)`` window
+    contains ``epoch`` (open at revoke: valid iff ``added_epoch <= epoch < revoked_epoch``,
+    or ``revoked_epoch is None``). Epic gnu-whale-ichor / e165 — the epoch-scoped trust
+    root. Preserves keyring order; skips malformed records defensively."""
+    out: list[str] = []
+    for rec in keyring or []:
+        if not isinstance(rec, dict):
+            continue
+        pub = rec.get("public_key")
+        added = rec.get("added_epoch")
+        revoked = rec.get("revoked_epoch")
+        if not isinstance(pub, str) or not isinstance(added, int):
+            continue
+        if added <= epoch and (revoked is None or (isinstance(revoked, int) and epoch < revoked)):
+            out.append(pub)
+    return out
+
+
+def _rederive_keyring_keys(state: dict) -> None:
+    """Re-derive ``state['keys']`` from the keyring at the LATEST epoch so existing
+    ``keys`` readers (authorship trust root, show) keep working. The latest consumed
+    epoch is ``keyring_epoch - 1`` (the cursor points at the NEXT, not-yet-used epoch).
+    A cursor of 0 means no epoch has been consumed → no currently-valid keys."""
+    epoch = int(state.get("keyring_epoch") or 0) - 1
+    keyring = state.get("keyring") or []
+    if epoch < 0:
+        state["keys"] = []
+    else:
+        state["keys"] = keys_valid_at_epoch(keyring, epoch)
+
+
+def process_key_event(state: dict, event: dict, data: dict, event_type: str) -> None:
+    """Apply a KEY_ADD / KEY_REVOKE event to an identity's epoch-scoped keyring
+    (epic gnu-whale-ichor / e165).
+
+    ``state['keyring_epoch']`` is a NEXT-EPOCH CURSOR (not a per-key id). Each key
+    lifecycle STEP consumes exactly one epoch: the record is written at the CURRENT
+    cursor value, THEN the cursor is incremented by 1 (so multiple keys may share an
+    epoch only when they were seeded together at genesis, never via separate events).
+
+    * ``KEY_ADD``  — append ``{public_key, added_epoch: <cursor>, revoked_epoch: None}``.
+    * ``KEY_REVOKE`` — set ``revoked_epoch = <cursor>`` on the matching STILL-VALID
+      record (``public_key`` matches and ``revoked_epoch is None``); a revoke naming an
+      unknown / already-revoked key folds no window change but still consumes its step.
+
+    After folding, ``state['keys']`` is re-derived from the records valid at the latest
+    epoch so downstream ``keys`` consumers are unaffected by the keyring representation.
+    """
+    public_key = data.get("public_key")
+    keyring = state.setdefault("keyring", [])
+    cursor = int(state.get("keyring_epoch") or 0)
+    if event_type == "KEY_ADD":
+        if isinstance(public_key, str) and public_key:
+            keyring.append({"public_key": public_key, "added_epoch": cursor, "revoked_epoch": None})
+    elif event_type == "KEY_REVOKE":
+        if isinstance(public_key, str) and public_key:
+            for rec in keyring:
+                if (
+                    isinstance(rec, dict)
+                    and rec.get("public_key") == public_key
+                    and rec.get("revoked_epoch") is None
+                ):
+                    rec["revoked_epoch"] = cursor
+                    break
+    # Each KEY event is exactly ONE lifecycle step — advance the cursor unconditionally
+    # (even a no-op revoke consumes its epoch, so epoch identity stays event-count stable).
+    state["keyring_epoch"] = cursor + 1
+    _rederive_keyring_keys(state)
+
+
+def _bootstrap_genesis_keyring(state: dict) -> None:
+    """Seed an ``identity``'s keyring from a static ``keys`` list carried on its CREATE
+    (ddbe). Genesis is ONE step: every key shares epoch 0 and the cursor advances to 1.
+    An identity created with NO keys keeps ``keyring=[]`` / ``keyring_epoch=0`` (its first
+    KEY_ADD is then the TOFU epoch-0 step), so both pre-existing (keys-at-create) and new
+    identities converge on the same epoch model."""
+    keys = state.get("keys")
+    if state.get("ticket_type") != "identity" or not isinstance(keys, list) or not keys:
+        return
+    ring = [
+        {"public_key": k, "added_epoch": 0, "revoked_epoch": None}
+        for k in keys
+        if isinstance(k, str) and k
+    ]
+    if ring:
+        state["keyring"] = ring
+        state["keyring_epoch"] = 1
+
+
 def process_create(
     state: dict,
     event: dict,
@@ -120,6 +210,10 @@ def process_create(
         _id_val = data.get(_id_key)
         if _id_val is not None:
             state[_id_key] = _id_val
+    # Genesis keyring bootstrap (epic gnu-whale-ichor / e165): an identity whose CREATE
+    # carried a static `keys` list seeds one epoch-0 keyring record per key (genesis is ONE
+    # step; cursor -> 1). A keyless identity keeps the seeded empty keyring / cursor 0.
+    _bootstrap_genesis_keyring(state)
     return None
 
 
@@ -690,3 +784,13 @@ def process_snapshot(state: dict, data: dict) -> None:
             kind = attestation_kind(sig.get("manifest"), {})
             if kind is not None:
                 state.setdefault("attestations", {})[kind] = sig
+
+    # Keyring migration (epic gnu-whale-ichor / e165): a SNAPSHOT written before the
+    # epoch-scoped keyring existed carries no `keyring`. Post-feature SNAPSHOTs carry
+    # `keyring` + `keyring_epoch` and are restored verbatim above (a no-op here). For a
+    # pre-feature identity snapshot that still holds a static `keys` list, seed a genesis
+    # keyring (all keys at epoch 0, cursor -> 1) so epoch-scoped verification keeps working;
+    # the epoch is NOT derived from any replay index (that would be unstable). A non-identity
+    # / keyless pre-feature snapshot keeps the make_initial_state seed (empty ring, cursor 0).
+    if "keyring" not in compiled_state:
+        _bootstrap_genesis_keyring(state)
