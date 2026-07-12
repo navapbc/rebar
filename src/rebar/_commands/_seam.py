@@ -13,6 +13,7 @@ locked write path) holds unchanged.
 from __future__ import annotations
 
 import contextvars
+import logging
 import os
 import re as _re
 import subprocess
@@ -23,6 +24,8 @@ from pathlib import Path
 
 from rebar import config
 from rebar._engine_support.resolver import resolve_ticket_id
+
+logger = logging.getLogger(__name__)
 
 # ── Deferred-commit sink (epic cold-stall-chalk / B2) ─────────────────────────
 # The bulk-import batching seam. ``append_event`` is the ONE funnel every write
@@ -233,6 +236,95 @@ def current_tags(ticket_id: str, tracker: Path) -> list[str]:
         return []
 
 
+# Gate-exempt ticket types for the identity write-gate (mirrors the file-impact /
+# lifecycle exemptions in composer/transition): these are gate-/graph-exempt entities, so
+# requiring an authenticated signature on them would make bootstrapping an identity — or
+# writing a session_log / code_review artifact — impossible under the gate.
+_AUTHORSHIP_GATE_EXEMPT_TYPES = ("session_log", "code_review", "identity")
+
+
+def _event_ticket_type(ticket_id, event_type, data, tracker) -> str | None:
+    """Best-effort ticket type for the write-gate exemption check. A CREATE carries the
+    type in its data; for a later event we reduce the existing ticket. Any failure yields
+    ``None`` (the gate then treats it as non-exempt — fail toward enforcement). Only reached
+    on the cannot-sign path under an opted-in gate, so the reduce is off the hot path."""
+    if event_type == "CREATE":
+        t = data.get("ticket_type")
+        return t if isinstance(t, str) else None
+    try:
+        from rebar.reducer import reduce_ticket
+
+        state = reduce_ticket(os.path.join(str(tracker), ticket_id))
+        t = state.get("ticket_type") if isinstance(state, dict) else None
+        return t if isinstance(t, str) else None
+    except Exception:  # noqa: BLE001 — an unreadable ticket is simply "type unknown" (non-exempt)
+        return None
+
+
+def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_root) -> None:
+    """Optional write-time authorship signing + the opt-in UX write-gate (epic
+    gnu-whale-ichor / 3183).
+
+    Signing is BEST-EFFORT: when a current identity resolves (``author_id`` is on the
+    envelope) AND ``identity.signing_key`` is configured, sign the event's CANONICAL bytes
+    (the envelope WITHOUT ``author_sig``) as an authorship attestation and store the DSSE
+    envelope under ``author_sig``. No identity / no key ⇒ the event is written UNSIGNED; a
+    signing FAILURE is logged and the event is written unsigned too — signing NEVER breaks a
+    write.
+
+    The ONE exception is the UX WRITE-GATE: when ``identity.require_authenticated`` is on and
+    the event CANNOT be signed (no resolvable identity or no signing key), a non-exempt ticket
+    type is REFUSED with a clear message. This gate is a CONVENIENCE (fast local feedback), NOT
+    the security boundary — the real enforcement is the merge-gate ``rebar verify-authorship``,
+    which re-verifies signatures against the epoch-scoped keyring in CI. A determined writer can
+    bypass this local gate, but cannot forge a signature the merge-gate will accept.
+    """
+    try:
+        cfg = config.load_config(repo_root)
+        require_auth = cfg.identity.require_authenticated
+        signing_key = cfg.identity.signing_key
+    except Exception:  # noqa: BLE001 — a malformed config must never break an unrelated write
+        return
+
+    # Fast path: nothing configured ⇒ no signing, no gate (the overwhelming common case).
+    if not require_auth and not signing_key:
+        return
+
+    author_id = event.get("author_id")
+    if author_id and signing_key:
+        try:
+            from rebar.attest import authorship, dsse
+
+            envelope = authorship.sign_event_authorship(
+                event, signing_key, principal=str(author_id)
+            )
+            event["author_sig"] = dsse.encode(
+                envelope.payload_type,
+                envelope.payload,
+                [{"keyid": s.keyid, "sig": s.sig} for s in envelope.signatures],
+            )
+        except Exception:  # noqa: BLE001 — a signing failure never breaks the write; the merge-gate flags it
+            logger.warning(
+                "authorship: could not sign event %s for %s — writing unsigned",
+                event.get("uuid"),
+                ticket_id,
+                exc_info=True,
+            )
+        # Signed (or a failure logged + written unsigned). The write-gate below fires only on
+        # a MISSING identity/key, not on a signing failure when both are present, so return.
+        return
+
+    # Cannot sign: no resolvable identity or no signing_key configured.
+    if require_auth:
+        ttype = _event_ticket_type(ticket_id, event_type, data, tracker)
+        if ttype not in _AUTHORSHIP_GATE_EXEMPT_TYPES:
+            raise CommandError(
+                "Error: identity.require_authenticated is on but this event cannot be "
+                "signed. Configure your identity (`rebar identity use <id>`) and "
+                "identity.signing_key (path to your SSH signing key), then retry."
+            )
+
+
 def append_event(
     ticket_id: str,
     event_type: str,
@@ -280,6 +372,12 @@ def append_event(
     # directly-committed one. Canonical serialization sorts keys, so envelope order is
     # irrelevant to the on-disk bytes.
     event.update(attribution_fields(repo_root))
+    # Optional write-time authorship signing + the opt-in UX write-gate (epic
+    # gnu-whale-ichor / 3183). Runs AFTER attribution (so `author_id` is available to sign
+    # with) and BEFORE the batch-sink branch (so a buffered event is byte-identical to a
+    # directly-committed one). Best-effort signing; may raise CommandError ONLY when the
+    # write-gate is on and the event cannot be signed for a non-exempt type.
+    _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
     # Deferred-commit sink (B2): when a batch buffer is active, hand the composed
     # event to it instead of committing. The caller flushes the buffer via
     # batch_stage_and_commit. Guards above (init gate, env_id/author/hlc) have run,
