@@ -50,6 +50,10 @@ INTERCEPT_COMMANDS: dict[str, str] = {
         "(`rebar enrich [--drain|--once|status]`)."
     ),
     "explain": ("Explain a review criterion by id — a pure registry/guide read, no LLM call."),
+    "identity": (
+        "Manage authenticated identities: create an identity entity, set the current "
+        "self-identity, and add/revoke its signing keys (`identity key add|revoke`)."
+    ),
     "jira-onboard": (
         "Interactive Jira onboarding wizard: detect, prompt for, persist, and validate "
         "the Jira connection settings."
