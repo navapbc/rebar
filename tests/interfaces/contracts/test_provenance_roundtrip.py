@@ -53,4 +53,7 @@ def test_create_without_source_has_no_provenance(rebar_repo: Path) -> None:
 
     for key in ("source_id", "source_created_at", "source_author", "source_env"):
         assert key not in state
-    assert set(state["comments"][0]) == {"body", "author", "timestamp"}
+    # epic gnu-whale-ichor (4e9d): the reducer surfaces a denormalized author_email
+    # onto every comment entry (present-only; author_id only when an identity resolves,
+    # which this no-identity fixture does not).
+    assert set(state["comments"][0]) == {"body", "author", "author_email", "timestamp"}
