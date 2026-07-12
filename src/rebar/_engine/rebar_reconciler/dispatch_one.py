@@ -490,9 +490,16 @@ def update_one(
     # report the attempted local status (bug 85a1 follow-up).
     _attempted_status = fields.get("status")
     issue_key = mutation.get("key")
+    # 264f: the accountId fast-path sentinel rides INSIDE the fields dict (the frozen
+    # OutboundMutation has no field for it). Pop it here — before the allowlist filter —
+    # and forward it as a bool kwarg so acli submits the resolved accountId directly.
+    _assignee_is_account_id = bool(fields.pop("_assignee_is_account_id", False))
     _has_parent_op = _update_one_apply_parent(fields, issue_key, client)
+    _update_one_apply_reporter(fields, issue_key, client)
     fields = _update_one_filter_fields(fields, mutation)
-    result = _update_one_scalar_update(client, issue_key, fields, _has_parent_op, _attempted_status)
+    result = _update_one_scalar_update(
+        client, issue_key, fields, _has_parent_op, _attempted_status, _assignee_is_account_id
+    )
 
     _labels_computed, _labels_applied = _update_one_dispatch_labels(mutation, client, issue_key)
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
@@ -573,6 +580,92 @@ def _update_one_apply_parent(fields, issue_key, client) -> bool:
     return _has_parent_op
 
 
+def _jira_account_id_for(local_ref):
+    """Resolve a local reporter string (identity id / email) to a Jira accountId via
+    rebar core's identity seam (flow layer may import core), or ``None`` on any miss."""
+    if not local_ref or not isinstance(local_ref, str):
+        return None
+    try:
+        from rebar._commands import identity as _identity
+
+        return _identity.jira_account_id(local_ref)
+    except Exception:  # noqa: BLE001 — best-effort; an unresolvable reporter is a miss
+        return None
+
+
+def _load_alert_store():
+    """Lazy-load the sibling alert_store module by file path (the run_differs / fetcher
+    pattern) so a file-path-spec-loaded dispatch_one still resolves it."""
+    from rebar_reconciler._loader import lazy_load
+
+    return lazy_load("rebar_reconciler.alert_store", "alert_store.py")
+
+
+def _record_reporter_alert(kind: str, jira_key, reason: str) -> None:
+    """Best-effort soft-fail alert for the reporter REST sub-call (264f). Resolves
+    repo_root via ``rebar.config.repo_root()`` and appends a record through the
+    lazily-loaded alert_store. Fully fail-open — observability never breaks the sync."""
+    try:
+        import rebar
+
+        repo_root = Path(rebar.config.repo_root())
+    except Exception:  # noqa: BLE001 — no store → nothing to record; never break the pass
+        return
+    try:
+        alert_store = _load_alert_store()
+        alert_store.append(
+            {
+                "kind": kind,
+                "jira_key": jira_key,
+                "field": "reporter",
+                "reason": reason,
+                "timestamp_ns": time.time_ns(),
+            },
+            repo_root=repo_root,
+        )
+    except Exception:  # noqa: BLE001 — best-effort alert write; non-fatal
+        pass
+
+
+def _update_one_apply_reporter(fields, issue_key, client) -> None:
+    """Phase: apply the reporter via a dedicated REST sub-call (264f).
+
+    Pops ``reporter`` off ``fields`` BEFORE the allowlist filter (so it never reaches
+    the scalar edit and need not be allowlisted), resolves the local reporter string to
+    a Jira accountId via the identity seam, and on success routes it through
+    ``client.set_reporter(issue_key, account_id)`` (REST PUT reporter.accountId).
+
+    Soft degradation (the sync never hard-fails on reporter, and other fields still
+    apply): an unresolvable reporter is SKIPPED with an ``outbound-reporter-unresolved``
+    alert; an ``HTTPError`` from ``set_reporter`` (a 4xx = Modify-Reporter not granted)
+    is caught and recorded as ``outbound-reporter-not-permitted``, then execution
+    continues."""
+    if "reporter" not in fields:
+        return
+    reporter = fields.pop("reporter", None)
+    if not reporter:
+        return
+    account_id = _jira_account_id_for(reporter)
+    if account_id is None:
+        _record_reporter_alert(
+            "outbound-reporter-unresolved",
+            issue_key,
+            f"reporter {reporter!r} maps to no identity/accountId; skipped",
+        )
+        return
+    try:
+        client.set_reporter(issue_key, account_id)
+    except urllib.error.HTTPError as exc:
+        # 4xx = Modify-Reporter permission not granted (the common case); any HTTP
+        # failure on the reporter sub-call degrades softly so the rest of the update
+        # (and the pass) still succeeds.
+        _record_reporter_alert(
+            "outbound-reporter-not-permitted",
+            issue_key,
+            f"set_reporter HTTP {exc.code}: {exc.reason}",
+        )
+
+
 def _update_one_filter_fields(fields, mutation) -> dict:
     """Phase: log + strip fields ACLI's edit endpoint rejects, return the allowlisted set."""
     _stripped = {k: v for k, v in fields.items() if k not in _OUTBOUND_BATCH_ALLOWLIST}
@@ -585,9 +678,15 @@ def _update_one_filter_fields(fields, mutation) -> dict:
     return {k: v for k, v in fields.items() if k in _OUTBOUND_BATCH_ALLOWLIST}
 
 
-def _update_one_scalar_update(client, issue_key, fields, _has_parent_op, _attempted_status):
+def _update_one_scalar_update(
+    client, issue_key, fields, _has_parent_op, _attempted_status, assignee_is_account_id=False
+):
     """Phase: the scalar client.update_issue call + the 400 illegal-transition
-    comment-fallback. Returns the update result (or None)."""
+    comment-fallback. Returns the update result (or None).
+
+    ``assignee_is_account_id`` (264f) is forwarded to ``client.update_issue`` so that
+    when the assignee is an already-resolved accountId (identity fast path) acli submits
+    it directly and skips the assignable search."""
     # When the only changed field was parent (the common reparent case), the
     # allowlisted set is now empty AND set_parent already did the work — skip
     # the otherwise-empty client.update_issue call so we don't issue a no-op
@@ -602,7 +701,11 @@ def _update_one_scalar_update(client, issue_key, fields, _has_parent_op, _attemp
         pass  # parent handled via set_parent; no scalar fields to edit
     else:
         try:
-            result = _call_with_retry(client.update_issue, issue_key, **fields)
+            # 264f: only forward the flag when True — the default (False) is omitted so
+            # the common update carries exactly its mapped fields (no bogus kwarg leaks
+            # into stubs / the ACLI boundary).
+            _extra = {"assignee_is_account_id": True} if assignee_is_account_id else {}
+            result = _call_with_retry(client.update_issue, issue_key, **_extra, **fields)
         except JiraAPIError as exc:
             if not _is_illegal_transition_400(exc):
                 raise
