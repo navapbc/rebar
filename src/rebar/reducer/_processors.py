@@ -93,6 +93,14 @@ def process_create(
         _src_val = data.get(_src_key)
         if _src_val is not None:
             state[_src_key] = _src_val
+    # Identity entity payload (epic gnu-whale-ichor): an `identity` ticket's CREATE
+    # carries email / mappings / keys. Surface them additively — present only when the
+    # CREATE carried them, so a non-identity ticket's state is byte-for-byte unchanged
+    # (mirrors the source_* handling above).
+    for _id_key in ("email", "mappings", "keys"):
+        _id_val = data.get(_id_key)
+        if _id_val is not None:
+            state[_id_key] = _id_val
     return None
 
 

@@ -20,7 +20,7 @@ from .marker import remove_marker
 # The NON-GRAPH ARTIFACT ticket types — verbose/bulk bodies (session_log, code_review) kept OUT
 # of the dependency-graph / store-health hot paths and default `list` (searchable via search/show).
 # The `exclude_session_logs` reducer flag drops exactly these (the flag name predates code_review).
-_NON_GRAPH_ARTIFACT_TYPES = ("session_log", "code_review")
+_NON_GRAPH_ARTIFACT_TYPES = ("session_log", "code_review", "identity")
 
 
 def _is_net_archived(ticket_dir: str) -> bool:
