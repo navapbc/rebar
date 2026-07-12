@@ -31,19 +31,19 @@ from rebar._engine_support.resolver import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
 
-_TYPES = ("bug", "epic", "story", "task", "session_log", "code_review")
+_TYPES = ("bug", "epic", "story", "task", "session_log", "code_review", "identity")
 
 # Ticket types exempt from the plan-review file-impact-coverage gate (P9). Kept in
 # lockstep with the gate's own exemption at
 # rebar.llm.plan_review.orchestrator (bug/session_log short-circuit before P9). The
 # create-time warning below mirrors it so a freshly-created work ticket is nudged to
 # record file_impact early, before `review-plan` flags it.
-_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log", "code_review")
+_FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
 
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
     "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>]\n"
-    "  ticket_type: bug | epic | story | task | session_log | code_review\n"
+    "  ticket_type: bug | epic | story | task | session_log | code_review | identity\n"
     "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)"
 )
 
@@ -81,6 +81,7 @@ def create_core(
     tags=None,
     source: dict | None = None,
     status: str | None = None,
+    identity: dict | None = None,
     repo_root=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
@@ -105,7 +106,7 @@ def create_core(
     if ticket_type not in _TYPES:
         raise CommandError(
             f"Error: invalid ticket type '{ticket_type}'. "
-            "Must be one of: bug, epic, story, task, session_log, code_review",
+            "Must be one of: bug, epic, story, task, session_log, code_review, identity",
             error_code="invalid_ticket_type",
             input_str=ticket_type,
         )
@@ -175,6 +176,16 @@ def create_core(
             _src_val = source.get(_src_key)
             if _src_val is not None:
                 data[_src_key] = _src_val
+    # Identity entity payload (epic gnu-whale-ichor): an `identity` ticket carries an
+    # `email` plus `mappings` (external-provider account ids) and `keys` (OpenSSH
+    # authorized-keys lines) on its CREATE event so the reducer surfaces them in
+    # compiled state. Threaded additively like `source` above, so a normal create is
+    # unchanged. Only recognised keys are copied (never the raw dict).
+    if identity:
+        for _id_key in ("email", "mappings", "keys"):
+            _id_val = identity.get(_id_key)
+            if _id_val is not None:
+                data[_id_key] = _id_val
 
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     return {"id": ticket_id, "alias": alias or None, "title": title}
@@ -398,7 +409,7 @@ def edit_core(
             if value not in _TYPES:
                 raise CommandError(
                     f"Error: invalid ticket type '{value}'. "
-                    "Must be one of: bug, epic, story, task, session_log, code_review"
+                    "Must be one of: bug, epic, story, task, session_log, code_review, identity"
                 )
             out["ticket_type"] = value
         elif key == "parent":

@@ -165,6 +165,57 @@ def idea(
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
+def create_identity(
+    name: str,
+    email: str,
+    mappings: list[dict] | None = None,
+    keys: list[str] | None = None,
+    *,
+    repo_root=None,
+    return_alias: bool = False,
+) -> str | CreateResult:
+    """Mint an ``identity`` entity ticket in one CREATE event; return its id.
+
+    ``name`` becomes the title; ``email`` / ``mappings`` (``{provider, external_id}``)
+    / ``keys`` (OpenSSH authorized-keys lines) ride the CREATE payload and surface in
+    compiled state. Returns the canonical 16-hex id (default), or ``{"id", "alias"}``
+    with ``return_alias=True`` — same shape as :func:`create_ticket`.
+    """
+    from rebar._commands import identity as _identity
+    from rebar._commands._seam import CommandError
+
+    try:
+        res = _identity.create_identity_core(
+            name, email, mappings=mappings, keys=keys, repo_root=repo_root
+        )
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar identity create failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+    if not return_alias:
+        return res["id"]
+    return {"id": res["id"], "alias": res["alias"] or ""}
+
+
+def use_identity(identity_id: str, *, repo_root=None) -> None:
+    """Point ``.rebar/current_identity`` at ``identity_id`` (a local, git-ignored
+    pointer — never propagated across machines)."""
+    from rebar._commands import identity as _identity
+
+    _identity.use_identity(identity_id, repo_root=repo_root)
+
+
+def resolve_current_identity(*, repo_root=None) -> str | None:
+    """Resolve the current self-identity (opt-in; returns ``None`` on any miss, never
+    raises). Prefers the ``.rebar/current_identity`` pointer, else a case-insensitive
+    ``git config user.email`` match against identity tickets."""
+    from rebar._commands import identity as _identity
+
+    return _identity.resolve_current_identity(repo_root=repo_root)
+
+
 def transition(
     ticket_id: str,
     current_status: str,
