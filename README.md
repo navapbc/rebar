@@ -330,7 +330,8 @@ rebar search <query>                          # full-text over titles/descriptio
 rebar ready                                   # tickets with all blockers closed
 rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
 rebar scratch <set|get|clear> <id> ...        # per-ticket scratch channel for subagents
-rebar session-log "<entry>"                   # append to the current session_log (auto-rotates per session)
+rebar session-log append "<entry>"            # append to the current session_log (auto-rotates per session)
+rebar session-log start --summary "<title>"   # rotate to a fresh session_log
 rebar session-logs [--limit=<n>]              # list the newest session_log tickets, newest first
 rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
 rebar review-plan <id>                        # plan-review gate: DET floor + 3-pass advisory; signs an attestation (exit 0=PASS,1=BLOCK,2=INDETERMINATE)
