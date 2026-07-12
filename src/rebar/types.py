@@ -234,7 +234,7 @@ class VerifySignatureResult(TypedDict):
     signed_at: int | None
     head_sha: str | None
     verified: bool
-    verdict: Literal["unsigned", "foreign_key", "certified", "mismatch"]
+    verdict: Literal["unsigned", "foreign_key", "certified", "mismatch", "key_not_valid_at_era"]
     reason: str
     ticket_id: str
     rebar_version: NotRequired[str | None]

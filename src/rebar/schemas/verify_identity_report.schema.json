@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/verify_identity_report.schema.json",
+  "title": "VerifyIdentityReportEntry",
+  "description": "One entry in the `rebar verify-identity --format json` report array (epic gnu-whale-ichor, AC7). The report holds one object per NON-`verified` in-scope mutating event; `verified` events are omitted. `commit` is the event's resolved introducing tracker-branch commit (null when unresolvable); `author` is the event's author_id (null for a ledger entry, where the author is recovered from the signature at verify time). `display` is the three-way grouping and `verdict` the raw classification. `grandfathered` is true when the event's commit predates the `--since` / identity.enforce_since boundary, so it is reported but does not fail the gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_uuid", "ticket_id", "commit", "author", "verdict", "display", "grandfathered"],
+  "properties": {
+    "event_uuid": { "type": "string" },
+    "ticket_id": { "type": "string" },
+    "commit": { "type": ["string", "null"] },
+    "author": { "type": ["string", "null"] },
+    "verdict": { "type": "string" },
+    "display": { "type": "string", "enum": ["verified", "unverified", "unsigned"] },
+    "grandfathered": { "type": "boolean" }
+  }
+}

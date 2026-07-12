@@ -403,7 +403,7 @@ Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match
 
 ## Intercept-arm commands
 
-The 17 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
+The 19 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
 
 | Command | Description |
 |---------|-------------|
@@ -421,6 +421,8 @@ The 17 advanced commands handled before the dispatcher. Each owns its own `--hel
 | `review-plan` | Run the plan-review gate on a ticket; on a non-blocking PASS it signs the plan-review attestation the claim gate consumes. |
 | `scan-spec` | Scan prose/spec text for spec-implied work in batches, emitting findings. |
 | `sign-review` | Re-sign a plan-review attestation from the last REVIEW_RESULT sidecar (cheap; no LLM call). |
+| `verify-authorship` | Back-compat alias for `verify-identity` (the authenticated-authorship merge-gate); dispatches identically. |
 | `verify-commit-ticket` | Verify a commit message references a rebar ticket that resolves in the store (the commit-ticket gate). |
 | `verify-completion` | Run the completion-verifier agent to check a ticket's completion criteria are demonstrably met by the implementation. |
+| `verify-identity` | The authenticated-authorship merge-gate: verify each mutating event's in-toto authorship signature against the author identity's commit-anchored keyring (`--require-authenticated`, `--since` grandfathering, `--format json` report). |
 | `workflow` | Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine DSL toolchain). |

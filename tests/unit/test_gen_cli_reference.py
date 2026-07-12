@@ -44,8 +44,10 @@ _LADDER = {
     "review-plan",
     "scan-spec",
     "sign-review",
+    "verify-authorship",  # epic gnu-whale-ichor / AC7: back-compat alias for verify-identity
     "verify-commit-ticket",
     "verify-completion",
+    "verify-identity",  # epic gnu-whale-ichor / AC7: authenticated-authorship merge-gate
     "workflow",
 }
 

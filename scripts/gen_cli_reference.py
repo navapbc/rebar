@@ -82,6 +82,10 @@ INTERCEPT_COMMANDS: dict[str, str] = {
         "Re-sign a plan-review attestation from the last REVIEW_RESULT sidecar (cheap; no LLM "
         "call)."
     ),
+    "verify-authorship": (
+        "Back-compat alias for `verify-identity` (the authenticated-authorship merge-gate); "
+        "dispatches identically."
+    ),
     "verify-commit-ticket": (
         "Verify a commit message references a rebar ticket that resolves in the store "
         "(the commit-ticket gate)."
@@ -89,6 +93,11 @@ INTERCEPT_COMMANDS: dict[str, str] = {
     "verify-completion": (
         "Run the completion-verifier agent to check a ticket's completion criteria are "
         "demonstrably met by the implementation."
+    ),
+    "verify-identity": (
+        "The authenticated-authorship merge-gate: verify each mutating event's in-toto "
+        "authorship signature against the author identity's commit-anchored keyring "
+        "(`--require-authenticated`, `--since` grandfathering, `--format json` report)."
     ),
     "workflow": (
         "Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine "

@@ -380,6 +380,19 @@ def ensure_identity_for(
     return res["id"]
 
 
+def create_placeholder(
+    provider: str,
+    external_id: str,
+    display_name: str,
+    *,
+    repo_root=None,
+) -> str:
+    """Resolve-or-mint the placeholder identity for ``(provider, external_id)``; return its id
+    (117b). A thin, intention-revealing alias for :func:`ensure_identity_for` — same
+    idempotent resolve-first-else-mint semantics, never raises on a lookup problem."""
+    return ensure_identity_for(provider, external_id, display_name, repo_root=repo_root)
+
+
 def _identity_state(identity_id: str, *, repo_root=None) -> dict:
     """Reduced state of an existing ``identity`` ticket, or raise :class:`CommandError`.
 

@@ -416,6 +416,20 @@ def main(argv: list[str] | None = None) -> int:
 
         return verify_commit.cli(argv[1:])
 
+    # verify-identity intercept (authenticated-authorship merge-gate; owns its --help). A
+    # pure intercept like verify-commit-ticket: no help/*.txt, no dispatch arm. `verify-identity`
+    # is the canonical name; `verify-authorship` is a back-compat alias (both dispatch here).
+    # BOTH use the equality-test form so the gen_cli_reference drift regex detects them and the
+    # curated CLI reference documents the command + its alias (epic gnu-whale-ichor / AC7).
+    if argv and argv[0] == "verify-identity":
+        from rebar._commands import verify_authorship
+
+        return verify_authorship.cli(argv[1:])
+    if argv and argv[0] == "verify-authorship":  # back-compat alias for verify-identity
+        from rebar._commands import verify_authorship
+
+        return verify_authorship.cli(argv[1:])
+
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":
         return _workflow(argv[1:])

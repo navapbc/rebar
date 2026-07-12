@@ -217,6 +217,21 @@ def ensure_identity_for(
     return _identity.ensure_identity_for(provider, external_id, display_name, repo_root=repo_root)
 
 
+def create_placeholder(
+    provider: str,
+    external_id: str,
+    display_name: str,
+    *,
+    repo_root=None,
+) -> str:
+    """Resolve-or-mint the placeholder identity for ``(provider, external_id)``; return its id
+    (117b). A thin alias for :func:`ensure_identity_for` — see
+    :func:`rebar._commands.identity.create_placeholder`."""
+    from rebar._commands import identity as _identity
+
+    return _identity.create_placeholder(provider, external_id, display_name, repo_root=repo_root)
+
+
 def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None) -> None:
     """Add ``public_key`` to an identity's epoch-scoped keyring (epic gnu-whale-ichor).
 

@@ -1,0 +1,38 @@
+name: verify-identity
+
+# Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). Re-verifies every
+# in-scope mutating event's signature against its author identity's commit-ancestry-scoped
+# keyring, so a forged / unsigned / wrong-key event cannot land on `main`. `--require-authenticated`
+# forces enforcement on in CI regardless of config; `--since` (read from the ENFORCE_SINCE repo/
+# env var, default empty) grandfathers events introduced before that boundary.
+
+on:
+  push:
+    branches-ignore: ["feature/**"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-identity:
+    name: verify-identity (authenticated-authorship gate)
+    runs-on: ubuntu-latest
+    env:
+      # Grandfather boundary — a git ref on the tracker branch. Set the ENFORCE_SINCE repo
+      # variable to enable grandfathering; empty (default) enforces every in-scope event.
+      ENFORCE_SINCE: ${{ vars.ENFORCE_SINCE }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install rebar
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: verify-identity (gating)
+        run: rebar verify-identity --require-authenticated --since "${ENFORCE_SINCE}"
