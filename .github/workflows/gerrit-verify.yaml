@@ -373,14 +373,46 @@ jobs:
       gerrit-project: ${{ inputs.GERRIT_PROJECT }}
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
+  # Golden-path on a CLEAN (non-editable) install ON THE PATCHSET (ticket 0435): the README
+  # quickstart (scripts/check_readme_quickstart.py) runs against a WHEEL-installed rebar
+  # (`pip install .`), so packaging/entry-point regressions the editable install in
+  # build-and-test cannot catch BLOCK Verified pre-merge.
+  golden-path:
+    name: golden-path (clean install)
+    needs: [clear-vote, require-ticket]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.12"
+      - name: Ensure jq is installed
+        run: sudo apt-get update && sudo apt-get install -y jq && jq --version
+      - name: Install rebar from a built wheel (clean, non-editable)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: README quickstart golden-path (against the installed rebar)
+        run: python scripts/check_readme_quickstart.py
+
   vote:
     name: cast Verified
     if: ${{ always() }}
-    # optionality is in `needs` so its job(s) are TERMINAL before workflow-conclusion snapshots
-    # this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read enabled
-    # by `permissions: actions: read`) folds the reusable workflow's job conclusions into
+    # optionality/golden-path are in `needs` so their jobs are TERMINAL before workflow-conclusion
+    # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
+    # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, build-and-test, optionality]
+    needs: [clear-vote, require-ticket, build-and-test, optionality, golden-path]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion

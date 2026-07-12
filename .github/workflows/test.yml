@@ -428,3 +428,30 @@ jobs:
         run: >-
           pytest -m external -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp-ext"
+
+  # Golden-path on a CLEAN (non-editable) install (ticket 0435): the README quickstart
+  # and the full CLI probe run against a WHEEL-installed rebar (`pip install .`), so
+  # packaging/entry-point regressions (MANIFEST, package data, console-script
+  # registration) — which the editable install in the `test` job cannot catch — fail the
+  # build.
+  golden-path:
+    name: golden-path (clean install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Ensure jq is installed
+        run: sudo apt-get update && sudo apt-get install -y jq && jq --version
+      - name: Install rebar from a built wheel (clean, non-editable)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: README quickstart golden-path (against the installed rebar)
+        run: python scripts/check_readme_quickstart.py
