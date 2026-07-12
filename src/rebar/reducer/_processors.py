@@ -31,6 +31,77 @@ def _fold_author_attribution(target: dict, event: dict) -> None:
             target[_key] = _val
 
 
+def _rederive_keyring_keys(state: dict) -> None:
+    """Re-derive ``state['keys']`` from the keyring so existing ``keys`` readers
+    (authorship trust root, show) keep working: the CURRENTLY-valid keys are the public
+    keys of records with ``revoked_at is None``. Preserves keyring order; skips malformed
+    records defensively (epic gnu-whale-ichor — position-based keyring)."""
+    keys: list[str] = []
+    for rec in state.get("keyring") or []:
+        if not isinstance(rec, dict):
+            continue
+        pub = rec.get("public_key")
+        if isinstance(pub, str) and pub and rec.get("revoked_at") is None:
+            keys.append(pub)
+    state["keys"] = keys
+
+
+def process_key_event(state: dict, event: dict, data: dict, event_type: str) -> None:
+    """Apply a KEY_ADD / KEY_REVOKE event to an identity's POSITION-based keyring
+    (epic gnu-whale-ichor — the git-commit-ancestry validity model).
+
+    A keyring record is ``{public_key, added_at: <position>, revoked_at: <position|None>}``
+    where a POSITION is the event's ``{timestamp}-{uuid}`` filename prefix — the immutable
+    anchor a verifier later resolves to the introducing tickets-branch commit. There is NO
+    epoch cursor: the event's own position IS the ordinal.
+
+    * ``KEY_ADD``  — append ``{public_key, added_at: <this event's position>, revoked_at:
+      None}``.
+    * ``KEY_REVOKE`` — set ``revoked_at = <this event's position>`` on the first matching
+      STILL-VALID record (``public_key`` matches and ``revoked_at is None``); a revoke naming
+      an unknown / already-revoked key folds no change.
+
+    After folding, ``state['keys']`` is re-derived from the currently-valid records so
+    downstream ``keys`` consumers are unaffected by the keyring representation.
+    """
+    public_key = data.get("public_key")
+    keyring = state.setdefault("keyring", [])
+    position = f"{event.get('timestamp')}-{event.get('uuid')}"
+    if event_type == "KEY_ADD":
+        if isinstance(public_key, str) and public_key:
+            keyring.append({"public_key": public_key, "added_at": position, "revoked_at": None})
+    elif event_type == "KEY_REVOKE":
+        if isinstance(public_key, str) and public_key:
+            for rec in keyring:
+                if (
+                    isinstance(rec, dict)
+                    and rec.get("public_key") == public_key
+                    and rec.get("revoked_at") is None
+                ):
+                    rec["revoked_at"] = position
+                    break
+    _rederive_keyring_keys(state)
+
+
+def _bootstrap_genesis_keyring(state: dict, create_position: str) -> None:
+    """Seed an ``identity``'s keyring from a static ``keys`` list carried on its CREATE
+    (epic gnu-whale-ichor). Every genesis key is recorded as added at ``create_position``
+    (the CREATE event's ``{timestamp}-{uuid}`` prefix), so a genesis key's add-commit
+    resolves to the CREATE commit — NOT a magic sentinel. An identity created with NO keys
+    keeps ``keyring=[]`` (its first KEY_ADD is then the TOFU add), so both pre-existing
+    (keys-at-create) and new identities converge on the same position model."""
+    keys = state.get("keys")
+    if state.get("ticket_type") != "identity" or not isinstance(keys, list) or not keys:
+        return
+    ring = [
+        {"public_key": k, "added_at": create_position, "revoked_at": None}
+        for k in keys
+        if isinstance(k, str) and k
+    ]
+    if ring:
+        state["keyring"] = ring
+
+
 def process_create(
     state: dict,
     event: dict,
@@ -120,6 +191,11 @@ def process_create(
         _id_val = data.get(_id_key)
         if _id_val is not None:
             state[_id_key] = _id_val
+    # Genesis keyring bootstrap (epic gnu-whale-ichor): an identity whose CREATE carried a
+    # static `keys` list seeds one position-based keyring record per key, each added at the
+    # CREATE event's position so its add-commit resolves to the CREATE commit. A keyless
+    # identity keeps the seeded empty keyring.
+    _bootstrap_genesis_keyring(state, f"{event.get('timestamp')}-{event.get('uuid')}")
     return None
 
 
@@ -690,3 +766,19 @@ def process_snapshot(state: dict, data: dict) -> None:
             kind = attestation_kind(sig.get("manifest"), {})
             if kind is not None:
                 state.setdefault("attestations", {})[kind] = sig
+
+    # Keyring migration (epic gnu-whale-ichor — position-based keyring, SCHEMA_VERSION 5):
+    # a SNAPSHOT written before the position-based keyring existed either carries no
+    # `keyring` at all, OR carries stale epoch-era records ({added_epoch, revoked_epoch}
+    # with no `added_at`) plus a `keyring_epoch` cursor. In BOTH cases do NOT trust the
+    # stale fields: drop the legacy cursor and re-seed a genesis keyring from the identity's
+    # static `keys` (every key added at the CREATE position), so position-based verification
+    # keeps working. A post-feature SNAPSHOT carries position-based records (each with
+    # `added_at`) and is restored verbatim above (a no-op here).
+    _restored_ring = state.get("keyring") or []
+    _stale_epoch_era = any(
+        isinstance(rec, dict) and "added_at" not in rec for rec in _restored_ring
+    )
+    if "keyring" not in compiled_state or _stale_epoch_era:
+        state.pop("keyring_epoch", None)
+        _bootstrap_genesis_keyring(state, str(state.get("created_at") or ""))
