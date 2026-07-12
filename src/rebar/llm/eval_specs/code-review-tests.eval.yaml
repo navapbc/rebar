@@ -196,6 +196,90 @@ dataset:
       +    monkeypatch.setattr(fetch, "_http", client)
       +    assert fetch("/x").status == 200 and client.call_count == 2
 
+  # ── non-gating / fault-realism antipatterns (task e8d3) ──────────────────────
+  - id: R-non-gating-skip
+    corpus: dso
+    expect: finding
+    mode: non-gating-test
+    note: >-
+      Unconditional suppression — a bare skip on a new test. Flaggable from the diff
+      alone (no CI context needed); the test never runs where it gates.
+    diff: |
+      --- a/tests/test_compact.py
+      +++ b/tests/test_compact.py
+      @@ -1,3 +1,7 @@
+      +@pytest.mark.skip(reason="flaky")
+      +def test_compact_retires_sources():
+      +    result = compact(store, "t1")
+      +    assert result.retired == 3
+  - id: R-sleep-only-race
+    corpus: dso
+    expect: finding
+    mode: unrealistic-fault-injection
+    note: >-
+      Concurrency test whose only synchronization is a timing sleep — the race window
+      is timing-dependent, so the test is flaky by construction.
+    diff: |
+      --- a/tests/test_lock.py
+      +++ b/tests/test_lock.py
+      @@ -1,3 +1,9 @@
+      +def test_concurrent_claims_conflict():
+      +    t = threading.Thread(target=lambda: store.claim("t1", "a"))
+      +    t.start()
+      +    time.sleep(0.5)  # hope the thread got there first
+      +    with pytest.raises(ConcurrencyError):
+      +        store.claim("t1", "b")
+  - id: R-fault-wrong-seam
+    corpus: dso
+    expect: finding
+    mode: unrealistic-fault-injection
+    note: >-
+      Rollback contract "tested" by making the top-level command raise before any rename
+      runs — the rollback loop never executes, so the test proves nothing about recovery.
+    diff: |
+      --- a/tests/test_compact_rollback.py
+      +++ b/tests/test_compact_rollback.py
+      @@ -1,3 +1,8 @@
+      +def test_compact_rolls_back_on_failure(monkeypatch):
+      +    monkeypatch.setattr(compactor, "run", _raise_oserror)
+      +    with pytest.raises(OSError):
+      +        compact(store, "t1")
+      +    # asserts only the exception; rollback loop never ran
+  # ── no-fire: suppression/fault-injection guards (task e8d3) ──────────────────
+  - id: FP-strict-xfail-with-reason
+    corpus: dso
+    expect: pass
+    mode: strict-xfail-valid
+    note: >-
+      Strict xfail with a reason naming a concrete removal condition — a documented,
+      self-expiring expectation, NOT a silent suppression. The overlay must NOT flag it.
+    diff: |
+      --- a/tests/test_bridge_probe.py
+      +++ b/tests/test_bridge_probe.py
+      @@ -1,3 +1,7 @@
+      +@pytest.mark.xfail(strict=True, reason="remove when JIRA-412 label API ships")
+      +def test_probe_reports_label_capability():
+      +    caps = bridge_probe(fake_jira)
+      +    assert caps.labels is True
+  - id: FP-sleep-as-secondary
+    corpus: dso
+    expect: pass
+    mode: sleep-secondary-valid
+    note: >-
+      Race test synchronized by a deterministic marker file; the short sleep is only a
+      settling wait after the primary mechanism fires. The overlay must NOT flag it.
+    diff: |
+      --- a/tests/test_push_race.py
+      +++ b/tests/test_push_race.py
+      @@ -1,3 +1,10 @@
+      +def test_detached_push_survives_parent_exit(tmp_path):
+      +    marker = tmp_path / "child-entered-push"
+      +    child = spawn_pusher(marker)
+      +    wait_for_file(marker, timeout=10)  # deterministic barrier
+      +    parent_exit()
+      +    time.sleep(0.1)  # settle fs buffers after the barrier fired
+      +    assert commit_reachable(remote, sha)
+
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
     label: useful

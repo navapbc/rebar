@@ -36,6 +36,17 @@ genuinely broken test — judge test quality on its own terms.
   implementation, not its behavior).
 - **existence-only**: a standalone `test -f <file>` (or equivalent) with no structural-contract
   purpose — a change-detector that breaks on a rename.
+- **non-gating test**: a new/changed test suppressed where it gates. An UNCONDITIONAL
+  suppression (bare `skip`, `skipif(True)`/constant-true condition, or a non-strict `xfail`
+  with no environment dependence) is flaggable from the diff alone. An ENVIRONMENT-DEPENDENT
+  condition (platform / optional-dependency / env-var guard) is judged against the project's
+  CI context read with your file tools (workflow files, the Makefile test target); when that
+  context is not determinable, do NOT flag (fail-open applies only to this class).
+- **unrealistic fault injection**: a recovery/cleanup/rollback contract "tested" by injecting
+  the fault OUTSIDE the seam under test (e.g. a top-level wrapper made to raise when the
+  contract is mid-operation rollback), so the recovery code never executes. Litmus: *does the
+  injected failure occur at the operation the contract covers, forcing the recovery path to
+  run?* Also flag a concurrency/race test whose PRIMARY synchronization is a timing sleep.
 
 **False-positive GUARDS — do NOT flag these (they are VALID by the standard):**
 - **Four-Criterion Test.** Raise a test-coupling finding above a `minor` suggestion ONLY when at
@@ -59,7 +70,13 @@ genuinely broken test — judge test quality on its own terms.
   COMMAND OUTPUT (stdout/stderr/exit code of the EXECUTED unit); (iv) table-driven / equivalence /
   classifier tests, including exact-value assertions on a pure function's output that "look
   tautological"; (v) exit-code / emitted-signal assertions; (vi) mocks at the EXTERNAL boundary;
-  (vii) bare coverage-gap demands ("no test for X") without a concrete failure path — not blocking.
+  (vii) bare coverage-gap demands ("no test for X") without a concrete failure path — not blocking;
+  (viii) a skip guarding an optional platform/dependency that the CI context DOES exercise, and a
+  strict xfail (`strict=True`) whose `reason=` (or an adjacent comment/linked ticket) names a
+  concrete removal condition — a bare non-strict xfail, or a strict one with no stated reason,
+  remains flaggable; (ix) a fault injected at the real boundary (monkeypatching the actual failing
+  call at the point the contract covers), and a short sleep used as a SECONDARY settling wait
+  alongside a deterministic primary mechanism (barrier, pipe, marker file, event).
 
 For each finding, conform to the evidence-record contract:
 - `finding`: the issue, as one specific, actionable claim.
