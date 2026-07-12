@@ -103,7 +103,12 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
 
 
 def _write_unlink(
-    source_dir: Path, target_id: str, link_uuid: str, env_id: str, author: str
+    source_dir: Path,
+    target_id: str,
+    link_uuid: str,
+    env_id: str,
+    author: str,
+    attribution: dict | None = None,
 ) -> str | None:
     if not source_dir.is_dir():
         return None
@@ -117,12 +122,18 @@ def _write_unlink(
         "author": author,
         "data": {"link_uuid": link_uuid, "target_id": target_id},
     }
+    # Denormalized author attribution (epic gnu-whale-ichor): author_email / author_id
+    # alongside `author`; absent -> unchanged envelope (back-compat).
+    if attribution:
+        event.update(attribution)
     dest = source_dir / f"{ts}-{ev_uuid}-UNLINK.json"
     dest.write_text(canonical_str(event), encoding="utf-8")
     return str(dest)
 
 
-def scan_and_write_unlinks(tracker: str, deleted_id: str, env_id: str, author: str) -> list[str]:
+def scan_and_write_unlinks(
+    tracker: str, deleted_id: str, env_id: str, author: str, attribution: dict | None = None
+) -> list[str]:
     """Write UNLINK events for every net-active LINK referencing ``deleted_id``;
     return the written file paths (port of ticket-delete-unlink-scan.py)."""
     tracker_path = Path(tracker)
@@ -139,7 +150,7 @@ def scan_and_write_unlinks(tracker: str, deleted_id: str, env_id: str, author: s
                 link_uuid = dep.get("link_uuid", "")
                 target_id = dep.get("target_id", "")
                 if link_uuid and target_id:
-                    p = _write_unlink(source_dir, target_id, link_uuid, env_id, author)
+                    p = _write_unlink(source_dir, target_id, link_uuid, env_id, author, attribution)
                     if p:
                         written.append(p)
         else:
@@ -147,7 +158,9 @@ def scan_and_write_unlinks(tracker: str, deleted_id: str, env_id: str, author: s
                 if dep.get("target_id") == deleted_id:
                     link_uuid = dep.get("link_uuid", "")
                     if link_uuid:
-                        p = _write_unlink(source_dir, deleted_id, link_uuid, env_id, author)
+                        p = _write_unlink(
+                            source_dir, deleted_id, link_uuid, env_id, author, attribution
+                        )
                         if p:
                             written.append(p)
     return written
@@ -196,7 +209,14 @@ def _children(tracker: str, parent_id: str) -> list[str]:
     return children
 
 
-def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, data: dict) -> str:
+def _write_event(
+    ticket_dir: str,
+    event_type: str,
+    env_id: str,
+    author: str,
+    data: dict,
+    attribution: dict | None = None,
+) -> str:
     ts = hlc.next_tick(os.path.dirname(ticket_dir), os.path.basename(ticket_dir))
     ev = str(uuid.uuid4())
     event = {
@@ -207,6 +227,9 @@ def _write_event(ticket_dir: str, event_type: str, env_id: str, author: str, dat
         "author": author,
         "data": data,
     }
+    # Denormalized author attribution (epic gnu-whale-ichor) — see _write_unlink.
+    if attribution:
+        event.update(attribution)
     path = os.path.join(ticket_dir, f"{ts}-{ev}-{event_type}.json")
     with open(path, "w", encoding="utf-8") as f:
         f.write(canonical_str(event))
@@ -279,6 +302,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
     env_id = _seam.env_id(Path(tracker))
     author = _seam.author("Unknown")
+    attribution = _seam.attribution_fields(repo_root)
 
     # The atomic write+commit aborts loudly on any git failure (a failed commit must
     # NOT report success and leave the store half-deleted). On failure, roll back the
@@ -287,7 +311,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     unlink_paths: list[str] = []
     written: list[str] = []
     try:
-        unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author)
+        unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author, attribution)
         written.extend(p for p in unlink_paths if p)
 
         if already_tombstoned:
@@ -308,9 +332,11 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
                 push.push_after_commit(tracker)
             return 0
 
-        status_path = _write_event(ticket_dir, "STATUS", env_id, author, {"status": "deleted"})
+        status_path = _write_event(
+            ticket_dir, "STATUS", env_id, author, {"status": "deleted"}, attribution
+        )
         written.append(status_path)
-        archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {})
+        archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {}, attribution)
         written.append(archived_path)
         tombstone_path = os.path.join(ticket_dir, ".tombstone.json")
         with open(tombstone_path, "w", encoding="utf-8") as f:

@@ -16,6 +16,21 @@ from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
 logger = logging.getLogger(__name__)
 
 
+def _fold_author_attribution(target: dict, event: dict) -> None:
+    """Surface denormalized author attribution PRESENT-ONLY (epic gnu-whale-ichor).
+
+    Copies ``author_email`` / ``author_id`` from the event ENVELOPE onto ``target``
+    only when the event carries them — so a pre-change event (no such keys) reduces to
+    byte-identical state and no new keys appear anywhere. Mirrors the ``source_*``
+    present-only handling. ``target`` is top-level state for a CREATE, or a per-entry
+    record (comment / revert / signature) for the other stamping sites.
+    """
+    for _key in ("author_email", "author_id"):
+        _val = event.get(_key)
+        if _val is not None:
+            target[_key] = _val
+
+
 def process_create(
     state: dict,
     event: dict,
@@ -57,6 +72,10 @@ def process_create(
     # is byte-for-byte unchanged.
     state["status"] = data.get("status", state["status"])
     state["author"] = event.get("author")
+    # Denormalized author attribution (epic gnu-whale-ichor): surface top-level
+    # author_email (always, for a post-change CREATE) + author_id (when resolved),
+    # present-only so a pre-change CREATE reduces byte-identically.
+    _fold_author_attribution(state, event)
     state["created_at"] = event.get("timestamp")
     state["env_id"] = event.get("env_id")
     state["parent_id"] = data.get("parent_id") or None
@@ -248,6 +267,8 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
         "author": event.get("author"),
         "timestamp": event.get("timestamp"),
     }
+    # Denormalized author attribution (epic gnu-whale-ichor): present-only on the entry.
+    _fold_author_attribution(_entry, event)
     _jira_comment_id = data.get("jira_comment_id")
     if _jira_comment_id is not None:
         _entry["jira_comment_id"] = str(_jira_comment_id)
@@ -364,16 +385,17 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
     archived on a deleted ticket would resurrect it into the listing — review
     H1.) The status!="deleted" guard on the whole block enforces this.
     """
-    state["reverts"].append(
-        {
-            "uuid": event_uuid,
-            "target_event_uuid": data.get("target_event_uuid"),
-            "target_event_type": data.get("target_event_type"),
-            "reason": data.get("reason", ""),
-            "timestamp": event.get("timestamp"),
-            "author": event.get("author"),
-        }
-    )
+    _revert_record = {
+        "uuid": event_uuid,
+        "target_event_uuid": data.get("target_event_uuid"),
+        "target_event_type": data.get("target_event_type"),
+        "reason": data.get("reason", ""),
+        "timestamp": event.get("timestamp"),
+        "author": event.get("author"),
+    }
+    # Denormalized author attribution (epic gnu-whale-ichor): present-only on the record.
+    _fold_author_attribution(_revert_record, event)
+    state["reverts"].append(_revert_record)
     if (
         data.get("target_event_type") == "ARCHIVED"
         and state.get("archived")
@@ -497,6 +519,8 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
         # blank/retired/unkindable event.
         "kind": kind,
     }
+    # Denormalized author attribution (epic gnu-whale-ichor): present-only on the record.
+    _fold_author_attribution(record, event)
     # Mirror: unchanged single-slot semantics (back-compat for existing consumers).
     state["signature"] = record
     # Map: additive, kind-keyed; skip blank/retired/unkindable events (no key derivable).

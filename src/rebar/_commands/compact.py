@@ -221,6 +221,10 @@ def _compact_locked(
                 "compacted_at": snapshot_ts,
             },
         }
+        # Denormalized author attribution (epic gnu-whale-ichor): stamp author_email /
+        # author_id on the SNAPSHOT envelope. No repo_root param here, so derive it from
+        # the tracker (mirrors the derivation in rebuild_snapshot_from_full_log).
+        snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
         final_path = os.path.join(
             ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
         )
@@ -416,6 +420,9 @@ def rebuild_snapshot_from_full_log(
                 "compacted_at": snapshot_ts,
             },
         }
+        # Denormalized author attribution (epic gnu-whale-ichor) — derive repo_root from
+        # the tracker (no repo_root param on this fsck-repair path).
+        snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
 
         # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
         try:
