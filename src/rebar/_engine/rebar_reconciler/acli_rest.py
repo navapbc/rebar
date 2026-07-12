@@ -19,6 +19,7 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -163,6 +164,45 @@ class AcliRestMixin:
         """
         path = f"/rest/api/3/issue/{jira_key}/properties/{property_key}"
         self._direct_rest_put_raw(path, value)
+
+    def set_reporter(self, jira_key: str, account_id: str) -> None:
+        """Set a Jira issue's reporter to ``account_id`` via REST (264f).
+
+        Uses ``_direct_rest_put_raw`` (NOT ``_direct_rest_put``, which wraps the body as
+        ``{"value": ...}`` for the issue-properties API) so the issue-edit body is sent
+        verbatim: ``PUT /rest/api/3/issue/{key}`` with
+        ``{"fields": {"reporter": {"accountId": account_id}}}``. Raises
+        ``urllib.error.HTTPError`` on a non-2xx response (a 4xx = Modify-Reporter not
+        granted); the caller (dispatch's ``_update_one_apply_reporter``) softens it."""
+        self._direct_rest_put_raw(
+            f"/rest/api/3/issue/{jira_key}",
+            {"fields": {"reporter": {"accountId": account_id}}},
+        )
+
+    def search_user_by_email(self, email: str) -> str | None:
+        """Resolve an email to a Jira accountId via ``GET /rest/api/3/user/search`` (264f).
+
+        The v3 endpoint returns a JSON LIST of user objects each carrying ``accountId`` +
+        ``emailAddress``; return the accountId of the entry whose ``emailAddress`` matches
+        ``email`` EXACTLY (case-insensitive). Because Jira substring/relevance-matches the
+        query, ZERO or ≥2 exact matches → ``None`` (never guess). Used only as a transient
+        bootstrap by the outbound differ — the result is NOT persisted to ``mappings``."""
+        if not email:
+            return None
+        path = f"/rest/api/3/user/search?query={urllib.parse.quote(email)}"
+        users = self._direct_rest_get(path)
+        if not isinstance(users, list):
+            return None
+        target = email.strip().lower()
+        matched: list[str] = []
+        for u in users:
+            if not isinstance(u, dict):
+                continue
+            acct = u.get("accountId")
+            got = u.get("emailAddress")
+            if acct and isinstance(got, str) and got.strip().lower() == target:
+                matched.append(acct)
+        return matched[0] if len(matched) == 1 else None
 
     def _direct_rest_get(self, path: str) -> Any:
         """GET JSON data from a Jira REST path using stored credentials.
