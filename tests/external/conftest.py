@@ -23,6 +23,88 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
 
 
+def _jira_canary_should_fail(collected: int, executed: int, run_external: bool) -> bool:
+    """Decide whether the scheduled live-Jira canary should FAIL the session.
+
+    The canary exists so a scheduled external-integration run cannot go green while
+    every Jira live test silently skipped (missing creds/acli, a broken auth step) —
+    an all-skip run validates nothing. Only relevant when the external tier is opted
+    in via ``REBAR_RUN_EXTERNAL``; otherwise it is a no-op (returns False). Fails only
+    when at least one ``jira_live`` test was collected but NONE executed.
+    """
+    if not run_external:
+        return False
+    return collected >= 1 and executed == 0
+
+
+# nodeids that ran a non-skipped `call` phase this session — populated by
+# pytest_runtest_logreport, consumed by pytest_sessionfinish.
+_EXECUTED_NODEIDS_KEY = "_rebar_jira_executed_nodeids"
+
+
+def _executed_set(config: pytest.Config) -> set[str]:
+    store = getattr(config, _EXECUTED_NODEIDS_KEY, None)
+    if store is None:
+        store = set()
+        setattr(config, _EXECUTED_NODEIDS_KEY, store)
+    return store
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Auto-mark every Jira-gated module's tests with ``jira_live``.
+
+    Jira live test modules all define a module-level ``_live_jira_ready`` sentinel;
+    marking by that presence keeps the canary bookkeeping in one place instead of
+    requiring each test to carry the marker by hand.
+    """
+    for item in items:
+        if getattr(item.module, "_live_jira_ready", None) is not None:
+            item.add_marker(pytest.mark.jira_live)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Record which tests actually EXECUTED (ran a non-skipped call phase).
+
+    A ``call``-phase report means the test body ran (passed or failed); a ``skipped``
+    report in setup means it never ran. We record executed nodeids so
+    pytest_sessionfinish can tell "ran" from "skipped".
+    """
+    config = getattr(report, "config", None) or getattr(pytest_runtest_logreport, "_config", None)
+    if config is None:
+        return
+    if report.when == "call" and not report.skipped:
+        _executed_set(config).add(report.nodeid)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # TestReport carries no back-reference to config, so stash one for logreport.
+    pytest_runtest_logreport._config = config  # type: ignore[attr-defined]
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail a scheduled external run in which every Jira live test skipped.
+
+    No-op unless the external tier is opted in (``REBAR_RUN_EXTERNAL``). Reports the
+    collected/executed/skipped counts for ``jira_live``-marked tests, and — when at
+    least one was collected but none executed — flips the session to a failure exit.
+    """
+    if not _env_truthy("REBAR_RUN_EXTERNAL"):
+        return
+    executed_nodeids = _executed_set(session.config)
+    jira_items = [it for it in session.items if it.get_closest_marker("jira_live") is not None]
+    collected = len(jira_items)
+    executed = sum(1 for it in jira_items if it.nodeid in executed_nodeids)
+    skipped = collected - executed
+    print(f"\n[jira-live-canary] collected={collected} executed={executed} skipped={skipped}")
+    if _jira_canary_should_fail(collected, executed, run_external=True):
+        print(
+            "[jira-live-canary] FAIL: at least one jira_live test was collected but "
+            "none executed (every live-Jira test skipped) — the scheduled canary "
+            "validated nothing."
+        )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 @pytest.fixture(autouse=True)
 def _require_external_opt_in() -> None:
     """Make every test under tests/external/ INERT unless explicitly opted in.
