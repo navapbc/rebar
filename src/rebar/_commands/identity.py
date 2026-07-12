@@ -153,6 +153,102 @@ def _match_by_email(email: str, tracker: str) -> str | None:
     return None
 
 
+# ── provider-neutral resolution seam (epic gnu-whale-ichor / 264f) ──────────────
+def _iter_identities(repo_root=None):
+    """Yield ``(ticket_id, state)`` for every non-deleted ``identity`` ticket.
+
+    A thin generator over the tracker directory (mirrors :func:`_match_by_email`'s
+    scan) shared by the provider-neutral resolvers below. Silent on any listdir /
+    reduce failure — the resolvers are opt-in and never raise."""
+    import os
+
+    tracker = str(tracker_dir(repo_root))
+    try:
+        entries = sorted(os.listdir(tracker))
+    except OSError:
+        return
+    for entry in entries:
+        if entry.startswith("."):
+            continue
+        d = os.path.join(tracker, entry)
+        if not os.path.isdir(d):
+            continue
+        state = _reduce(d)
+        if not isinstance(state, dict) or state.get("ticket_type") != "identity":
+            continue
+        if state.get("status") == "deleted":
+            continue
+        yield (state.get("ticket_id") or entry, state)
+
+
+def _match_identity(local_assignee, repo_root=None) -> dict | None:
+    """The identity whose ticket id == ``local_assignee`` OR whose ``email`` matches it
+    (case-insensitive), else ``None``. An id match wins immediately; an email match must
+    be UNIQUE (zero or ≥2 email matches → ``None``, mirroring :func:`_match_by_email`).
+    Never raises."""
+    if not isinstance(local_assignee, str) or not local_assignee.strip():
+        return None
+    target = local_assignee.strip()
+    target_lower = target.lower()
+    email_matches: list[dict] = []
+    try:
+        for tid, state in _iter_identities(repo_root):
+            if state.get("ticket_id") == target or tid == target:
+                return state
+            email = state.get("email")
+            if isinstance(email, str) and email.strip().lower() == target_lower:
+                email_matches.append(state)
+    except Exception:  # noqa: BLE001 — opt-in resolver: any scan failure is a miss, not an error
+        return None
+    return email_matches[0] if len(email_matches) == 1 else None
+
+
+def resolve_mapping(provider: str, external_id: str, *, repo_root=None) -> str | None:
+    """Id of the identity whose ``mappings`` contains ``{provider, external_id}`` (an
+    EXACT match on the provider's opaque external id, NEVER email), else ``None``.
+
+    The provider-neutral seam (264f): 2f13's inbound ghost-minting and the Jira
+    outbound adapter both key on the opaque id through here. Never raises."""
+    try:
+        for tid, state in _iter_identities(repo_root):
+            for m in state.get("mappings") or []:
+                if not isinstance(m, dict):
+                    continue
+                if m.get("provider") == provider and m.get("external_id") == external_id:
+                    return tid
+    except Exception:  # noqa: BLE001 — opt-in resolver: any scan failure is a miss, not an error
+        return None
+    return None
+
+
+def jira_account_id(local_assignee: str, *, repo_root=None) -> str | None:
+    """Resolve a LOCAL assignee/reporter string to its Jira accountId, else ``None``.
+
+    Matches an identity by ticket id or case-insensitive ``email`` (see
+    :func:`_match_identity`) and returns that identity's ``{provider: "jira"}``
+    ``external_id`` (the opaque accountId). Never raises."""
+    state = _match_identity(local_assignee, repo_root=repo_root)
+    if state is None:
+        return None
+    for m in state.get("mappings") or []:
+        if isinstance(m, dict) and m.get("provider") == "jira":
+            ext = m.get("external_id")
+            if isinstance(ext, str) and ext:
+                return ext
+    return None
+
+
+def identity_email(local_assignee: str, *, repo_root=None) -> str | None:
+    """The matched identity's ``email`` (same id/email matching as
+    :func:`jira_account_id`), else ``None`` — the seam the ``/user/search`` outbound
+    bootstrap uses to obtain an email to query. Never raises."""
+    state = _match_identity(local_assignee, repo_root=repo_root)
+    if state is None:
+        return None
+    email = state.get("email")
+    return email if isinstance(email, str) and email else None
+
+
 # ── public core functions ──────────────────────────────────────────────────────
 # ── write-time private-key guard (401a, epic gnu-whale-ichor) ───────────────────
 def reject_private_key_material(values: list[str]) -> None:
