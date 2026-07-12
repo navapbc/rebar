@@ -181,8 +181,16 @@ def create_identity_core(
 
 
 def use_identity(identity_id: str, *, repo_root=None) -> None:
-    """Write the ``.rebar/current_identity`` pointer to ``identity_id``."""
+    """Write the ``.rebar/current_identity`` pointer to ``identity_id``.
+
+    Invalidates the per-repo attribution cache (epic gnu-whale-ichor): the current
+    identity determines the ``author_id`` stamped on subsequent event envelopes, so a
+    pointer change must be picked up by the next ``attribution_fields`` call rather
+    than served a stale cached dict computed under the previous identity."""
     _write_pointer(identity_id, repo_root=repo_root)
+    from rebar._commands._seam import _reset_attribution_cache
+
+    _reset_attribution_cache()
 
 
 def resolve_current_identity(*, repo_root=None) -> str | None:
