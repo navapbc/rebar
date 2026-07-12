@@ -118,3 +118,128 @@ def route_rebase(client: GerritClient, candidate: Candidate) -> str:
         return "rebase:chain"
     client.rebase(candidate.change_id, on_behalf_of_uploader=True)
     return "rebase"
+
+
+# =====================================================================================
+# S2b: the wipChain state machine + Fast-Forward-Only TOCTOU guard + stack hand-back.
+# =====================================================================================
+
+# wipChain phases. `paused` is S5's emergency-stop; the rest are the drive lifecycle.
+PHASE_SELECTING = "selecting"
+PHASE_REBASING = "rebasing"
+PHASE_AWAITING_VERIFIED = "awaiting_verified"
+PHASE_SUBMITTING = "submitting"
+PHASE_IDLE = "idle"
+PHASE_PAUSED = "paused"
+VALID_PHASES = frozenset(
+    {
+        PHASE_SELECTING,
+        PHASE_REBASING,
+        PHASE_AWAITING_VERIFIED,
+        PHASE_SUBMITTING,
+        PHASE_IDLE,
+        PHASE_PAUSED,
+    }
+)
+
+# Bounded re-drive: under FFO, main can advance faster than we rebase; retry a bounded number
+# of times before handing the stack back to its owning agent.
+MAX_RE_DRIVE = 5
+
+# The typed reason recorded/announced when a stack is handed back for a rebase.
+HANDBACK_NEEDS_REBASE = "needs_rebase"
+HANDBACK_COMMENT = (
+    "main advanced faster than the lander could rebase; rebase onto current main "
+    "and re-apply Autosubmit"
+)
+
+
+@dataclass
+class WipChain:
+    """The SINGLE in-flight work item (one instance -> never two rebases onto one HEAD)."""
+
+    change_id: str  # the chain tip (or the lone change)
+    chain_member_ids: list[str]  # all members bottom->top; [change_id] for a single
+    tested_shas: dict = field(default_factory=dict)  # change_id -> the CI-tested revision sha
+    verified_at: dict = field(default_factory=dict)  # change_id -> fresh-Verified timestamp
+    phase: str = PHASE_IDLE
+    re_drive_count: int = 0
+
+
+def is_landable(client: GerritClient, wip: WipChain) -> bool:
+    """FFO TOCTOU re-check performed immediately before submit: every member is STILL
+    `submittable` (under FFO that already implies descendant-of-current-tip, ADR-0040) AND
+    its current revision sha is UNCHANGED from the tested sha we recorded. Any drift
+    (main advanced, a new patchset, a dropped vote) -> not landable."""
+    for member_id in wip.chain_member_ids:
+        change = client.get_change(member_id, ["CURRENT_REVISION"])
+        if change.get("submittable") is not True:
+            return False
+        if change.get("current_revision") != wip.tested_shas.get(member_id):
+            return False
+    return True
+
+
+def hand_back(
+    client: GerritClient,
+    wip: WipChain,
+    reason: str = HANDBACK_NEEDS_REBASE,
+    *,
+    record_handback=None,
+) -> None:
+    """Hand the whole stack back to its owning agent (never partial-land, never evict a
+    member): remove `Autosubmit` (vote 0) from EVERY member and post a Gerrit comment naming
+    `reason`; the label-removal is the "handed back" signal `land` reads. `record_handback`,
+    when provided, is S3's marker writer `(reason, wip) -> None` (decoupled; S3 owns the
+    marker mechanism). Same hand-back mechanism S3 uses for conflict/CI-fail."""
+    comment = HANDBACK_COMMENT if reason == HANDBACK_NEEDS_REBASE else f"handed back: {reason}"
+    for member_id in wip.chain_member_ids:
+        client.set_review(member_id, message=comment, labels={"Autosubmit": 0})
+    if record_handback is not None:
+        record_handback(reason, wip)
+    wip.phase = PHASE_IDLE
+
+
+def drive_to_submit(
+    client: GerritClient,
+    wip: WipChain,
+    *,
+    rebase,
+    await_verified,
+    record_handback=None,
+) -> str:
+    """Drive `wip` to a terminal outcome under the FFO TOCTOU guard + bounded re-drive.
+
+    Loop up to MAX_RE_DRIVE times: if `is_landable`, `phase`->submitting and submit (ancestor-
+    atomic; S2c refines the submit call) -> return "submitted". Otherwise (or on a
+    `not fast-forward` submit refusal) re-drive: `phase`->rebasing, `rebase(client, wip)`,
+    `phase`->awaiting_verified, `await_verified(client, wip)`, increment `re_drive_count`, and
+    re-check. On exhausting MAX_RE_DRIVE without landing, `hand_back(...)` -> return
+    "handed_back". `rebase` and `await_verified` are injected (S2a routing + S2c await); they
+    are decoupled so this state machine is unit-testable in isolation."""
+    from autolander.gerrit import GerritError
+
+    for _attempt in range(MAX_RE_DRIVE + 1):
+        if is_landable(client, wip):
+            wip.phase = PHASE_SUBMITTING
+            try:
+                client.submit(wip.change_id)
+            except GerritError as exc:
+                if "not fast-forward" not in str(exc).lower():
+                    raise
+                # not-ff refusal: fall through to a re-drive, treated as not-landable.
+            else:
+                return "submitted"
+
+        if wip.re_drive_count >= MAX_RE_DRIVE:
+            hand_back(client, wip, HANDBACK_NEEDS_REBASE, record_handback=record_handback)
+            return "handed_back"
+
+        wip.phase = PHASE_REBASING
+        rebase(client, wip)
+        wip.phase = PHASE_AWAITING_VERIFIED
+        await_verified(client, wip)
+        wip.re_drive_count += 1
+
+    hand_back(client, wip, HANDBACK_NEEDS_REBASE, record_handback=record_handback)
+    return "handed_back"
