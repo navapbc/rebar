@@ -162,6 +162,7 @@ def transition_core(
     author: str,
     close_reason: str = "",
     force_close_reason: str = "",
+    attribution: dict | None = None,
 ) -> None:
     """Write the append-only STATUS(``target_status``) event under the write lock.
 
@@ -282,6 +283,10 @@ def transition_core(
             "parent_status_uuid": parent_status_uuid,
             "data": status_data,
         }
+        # Denormalized author attribution (epic gnu-whale-ichor): merge author_email /
+        # author_id alongside `author`. Absent -> unchanged envelope (back-compat).
+        if attribution:
+            event.update(attribution)
 
         final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
         final_path = os.path.join(ticket_dir_path, final_filename)
@@ -392,6 +397,7 @@ def claim_core(
     env_id: str,
     author: str,
     assignee: str = "",
+    attribution: dict | None = None,
 ) -> None:
     """Atomic claim: move an ``open`` ticket to ``in_progress`` AND set its assignee
     in ONE locked critical section (single commit). Rejects with
@@ -451,6 +457,9 @@ def claim_core(
             "parent_status_uuid": parent_status_uuid,
             "data": status_data,
         }
+        # Denormalized author attribution (epic gnu-whale-ichor) — see transition_core.
+        if attribution:
+            status_event.update(attribution)
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
         status_path = os.path.join(ticket_dir_path, status_filename)
         fsutil.atomic_write(status_path, canonical_str(status_event), encoding="utf-8")
@@ -469,6 +478,8 @@ def claim_core(
                 "author": author,
                 "data": {"fields": {"assignee": assignee}},
             }
+            if attribution:
+                edit_event.update(attribution)
             edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
             edit_path = os.path.join(ticket_dir_path, edit_filename)
             fsutil.atomic_write(edit_path, canonical_str(edit_event), encoding="utf-8")
