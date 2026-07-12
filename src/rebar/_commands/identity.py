@@ -277,18 +277,22 @@ def create_identity_core(
     mappings: list[dict] | None = None,
     keys: list[str] | None = None,
     *,
+    tags: list[str] | None = None,
     repo_root=None,
 ) -> dict:
     """Mint an ``identity`` ticket in ONE CREATE event; return ``{id, alias, title}``.
 
     ``name`` becomes the title; ``email`` / ``mappings`` / ``keys`` ride the CREATE
-    payload (see :func:`rebar._commands.composer.create_core`). Raises
-    :class:`CommandError` on validation failure."""
+    payload (see :func:`rebar._commands.composer.create_core`). ``tags`` (e.g. a
+    ``placeholder`` marker for a ghost identity) rides the SAME CREATE event so it is
+    atomic — no separate ``tag`` call, no tagless window. Raises :class:`CommandError`
+    on validation failure."""
     reject_private_key_material(keys or [])
     return create_core(
         "identity",
         name,
         description="",
+        tags=tags,
         identity={
             "email": email,
             "mappings": mappings or [],
@@ -296,6 +300,84 @@ def create_identity_core(
         },
         repo_root=repo_root,
     )
+
+
+_PLACEHOLDER_TAG = "placeholder"
+
+
+def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
+    """True iff ``identity_id`` is an identity whose compiled-state ``tags`` carries the
+    ``placeholder`` marker (a ghost minted for an unmapped inbound user). An unknown id,
+    a non-identity ticket, or any reduce failure is ``False`` — never raises."""
+    import os
+
+    if not isinstance(identity_id, str) or not identity_id.strip():
+        return False
+    try:
+        tracker = str(tracker_dir(repo_root))
+        d = os.path.join(tracker, identity_id)
+        state = _reduce(d)
+        if not isinstance(state, dict) or state.get("ticket_type") != "identity":
+            return False
+        return _PLACEHOLDER_TAG in (state.get("tags") or [])
+    except Exception:  # noqa: BLE001 — opt-in read: any failure is "not a placeholder"
+        return False
+
+
+def ensure_identity_for(
+    provider: str,
+    external_id: str,
+    display_name: str,
+    *,
+    repo_root=None,
+) -> str:
+    """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
+    its id (2f13, epic gnu-whale-ichor). Idempotent and provider-neutral:
+
+    * RESOLVE FIRST via :func:`resolve_mapping` (keyed on the opaque external id, NEVER
+      email). If an identity already carries this mapping, RETURN it — never mint a
+      second. When that existing identity is still a *placeholder* and ``display_name`` is
+      non-empty and differs from its current title, UPGRADE the title IN PLACE (a real,
+      already-named identity is left untouched — a ghost's mapping is reused, never
+      renamed over a human's).
+    * Else MINT a placeholder: an ``identity`` whose title is ``display_name`` (falling
+      back to ``external_id`` when blank), an empty email, the single ``{provider,
+      external_id}`` mapping, and the ``placeholder`` tag riding the SAME CREATE event.
+
+    Never raises on a lookup problem — a resolve failure falls through to a mint."""
+    import os
+
+    existing = None
+    try:
+        existing = resolve_mapping(provider, external_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — a resolve failure falls through to mint, never raises
+        existing = None
+
+    if existing:
+        name = (display_name or "").strip()
+        if name and is_placeholder(existing, repo_root=repo_root):
+            state = _reduce(os.path.join(str(tracker_dir(repo_root)), existing))
+            current_title = (state or {}).get("title") if isinstance(state, dict) else None
+            if name != current_title:
+                try:
+                    import rebar
+
+                    rebar.edit_ticket(existing, title=name, repo_root=repo_root)
+                except Exception:  # noqa: BLE001 — a best-effort upgrade never fails the resolve
+                    logger.warning(
+                        "ensure_identity_for: could not upgrade placeholder %s title",
+                        existing,
+                    )
+        return existing
+
+    res = create_identity_core(
+        (display_name or "").strip() or external_id,
+        "",
+        mappings=[{"provider": provider, "external_id": external_id}],
+        tags=[_PLACEHOLDER_TAG],
+        repo_root=repo_root,
+    )
+    return res["id"]
 
 
 def _identity_state(identity_id: str, *, repo_root=None) -> dict:
