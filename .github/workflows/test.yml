@@ -355,7 +355,7 @@ jobs:
           fi
           echo "Public-types drift gate: OK (types.py is up to date)."
 
-      - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
+      - name: Run the default suite (Python tiers; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider

@@ -346,7 +346,7 @@ jobs:
           echo "::error::pip-audit could not reach the advisory DB after 3 attempts — INFRASTRUCTURE issue, not a vulnerability. Comment 'recheck' to retry." >&2
           exit 1
 
-      - name: Run the default suite (Python tiers + bash collector; excludes integration + external)
+      - name: Run the default suite (Python tiers; excludes integration + external)
         run: >-
           pytest -m "not integration and not external" -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"
