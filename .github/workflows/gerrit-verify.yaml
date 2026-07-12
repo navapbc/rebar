@@ -231,6 +231,14 @@ jobs:
           python scripts/check_docs_index.py --check
           echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
 
+      # README golden-path gate in the Verified gate too (mirrors test.yml, ticket 0435):
+      # extract the README '## Quickstart' bash block and run it end-to-end in a throwaway
+      # repo, so a wrong command printed in the README fails the build.
+      - name: README quickstart golden-path gate
+        shell: bash
+        run: |
+          python scripts/check_readme_quickstart.py
+
       - name: Security-rules freshness gate (warn-only)
         shell: bash
         run: python -m rebar.grounding.detectors.security_pin

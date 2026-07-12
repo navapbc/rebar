@@ -270,6 +270,15 @@ jobs:
           python scripts/check_docs_index.py --check
           echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
 
+      # README golden-path gate (ticket 0435): extract the bash block under the README
+      # '## Quickstart' heading and RUN those exact lines end-to-end in a throwaway git
+      # repo. A wrong command *printed* in the README (e.g. a bad subcommand or a stale
+      # hard-coded id) then fails the build — command TEXT rot, not just executability.
+      - name: README quickstart golden-path gate
+        shell: bash
+        run: |
+          python scripts/check_readme_quickstart.py
+
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
       # `vendored_at` is older than the quarterly cadence, prompting a deliberate
