@@ -450,6 +450,17 @@ main checkout verifies the main checkout's `HEAD`, not your worktree edits):
   descendant is still uncertified; it no longer implies the ticket's **own** validation failed. The
   remedy for the descendant case is to re-close the uncertified child so it earns a signature.
 
+> **AC-authoring rule — never demand child SIGNATURES in a container's acceptance criteria.**
+> Because `certifiable: false` is a deliberate soft path (a parent closes *unsigned* when a
+> descendant is legitimately force-closed pending operator attestation), an epic/story AC must
+> assert the **outcome** ("all child stories closed"; "the work is landed") and **never** the
+> gate's own output ("children closed **(signed)**" / any signature demand). A "signed" AC turns
+> that soft PASS-but-unsigned path into a **hard FAIL**, blocking the parent's close and erasing
+> its certification signal. This is the bf50/5f39 contagion that motivated **bug 02a3**: bf50's
+> "all child stories closed (signed)" AC hard-FAILed a fully-landed 19-story epic when child 5f39
+> was force-closed for operator attestation. Assert what was *delivered*; let the gate decide
+> whether the close is signed. (See CLAUDE.md's "Ticket template the gates enforce" section.)
+
 **Trust model.** The signature is only *secure/meaningful* when rebar runs as the **MCP
 server**, whose environment signing key is canonical; a CLI/library install signs with a local
 key that **CI** reads as `foreign_key` (intentionally not secure). So CI verifies a closed
