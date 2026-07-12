@@ -53,6 +53,7 @@ def test_status_event_bytes_are_canonical(rebar_repo: Path) -> None:
     # byte order, so this is replay-safe.
     assert list(parsed.keys()) == [
         "author",
+        "author_email",  # epic gnu-whale-ichor (4e9d): denormalized author email on every event
         "data",
         "env_id",
         "event_type",
