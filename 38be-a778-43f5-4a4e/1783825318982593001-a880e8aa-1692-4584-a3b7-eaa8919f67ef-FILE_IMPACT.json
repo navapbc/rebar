@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"infra/autolander/loop.py","reason":"heartbeat + sentinel + drain + crash-recovery"},{"path":"infra/compose/Dockerfile.autolander","reason":"EDIT: HEALTHCHECK"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783825318982593001,"uuid":"a880e8aa-1692-4584-a3b7-eaa8919f67ef"}
