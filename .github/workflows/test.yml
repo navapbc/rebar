@@ -279,6 +279,20 @@ jobs:
         run: |
           python scripts/check_readme_quickstart.py
 
+      # CLI-reference drift gate (ticket e866): docs/cli-reference.md is DERIVED from the
+      # CLI's own help data (known_subcommands() + the curated intercept table). Regenerate
+      # and fail on any diff, so a new/renamed command cannot ship undocumented.
+      - name: CLI-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_cli_reference.py
+          if ! git diff --exit-code -- docs/cli-reference.md; then
+            echo "::error::docs/cli-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_cli_reference.py"
+            exit 1
+          fi
+          echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
+
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
       # `vendored_at` is older than the quarterly cadence, prompting a deliberate

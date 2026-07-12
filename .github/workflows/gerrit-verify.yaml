@@ -239,6 +239,18 @@ jobs:
         run: |
           python scripts/check_readme_quickstart.py
 
+      # CLI-reference drift gate in the Verified gate too (mirrors test.yml, ticket e866).
+      - name: CLI-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_cli_reference.py
+          if ! git diff --exit-code -- docs/cli-reference.md; then
+            echo "::error::docs/cli-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_cli_reference.py"
+            exit 1
+          fi
+          echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
+
       - name: Security-rules freshness gate (warn-only)
         shell: bash
         run: python -m rebar.grounding.detectors.security_pin

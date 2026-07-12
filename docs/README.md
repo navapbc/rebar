@@ -61,6 +61,8 @@ Day-to-day use of rebar through the CLI.
   rebar from the command line: create/claim/comment/link/transition tickets, search
   and list, the `idea` parking lot, session logs, and the quality gates as you
   experience them. Start here.
+- **[cli-reference.md](cli-reference.md)** — the complete CLI command reference
+  (generated from the CLI's own help data; do not edit by hand).
 - **[README.md](README.md)** — this index of the `docs/` tree.
 - **[import-export.md](import-export.md)** — moving tickets in and out of the store
   as NDJSON with `rebar export` / `rebar import` (a lossy interop projection, not a
