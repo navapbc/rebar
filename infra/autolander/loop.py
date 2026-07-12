@@ -167,6 +167,8 @@ class WipChain:
     verified_at: dict = field(default_factory=dict)  # change_id -> fresh-Verified timestamp
     phase: str = PHASE_IDLE
     re_drive_count: int = 0
+    rechecking: bool = False  # S3-owned in-flight sub-state: a bounded auto-`recheck` is pending
+    # (guards against re-posting `recheck`); NOT a new S2 phase.
 
 
 def is_landable(client: GerritClient, wip: WipChain) -> bool:
