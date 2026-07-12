@@ -193,7 +193,12 @@ def _semantic(state: dict) -> dict:
     recomputed from the newest event's timestamp and so legitimately differs across a
     compaction (the SNAPSHOT is timestamped after the folded events). Everything else
     must be identical, which is what these fault tests assert."""
-    return {k: v for k, v in state.items() if k != "updated_at"}
+    return {
+        k: v
+        for k, v in state.items()
+        # authorship_ledger is a compaction-only artifact (epic gnu-whale-ichor), not semantic state
+        if k not in ("updated_at", "authorship_ledger")
+    }
 
 
 def _seed_foldable(repo: Path, title: str, n_events: int) -> str:

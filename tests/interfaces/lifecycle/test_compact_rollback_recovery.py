@@ -56,7 +56,12 @@ def _retired(repo: Path, tid: str) -> list[Path]:
 def _semantic(state: dict) -> dict:
     """Reduced state minus the derived ``updated_at`` (recomputed from the newest
     event's timestamp, so it legitimately shifts when a SNAPSHOT is rebuilt)."""
-    return {k: v for k, v in state.items() if k != "updated_at"}
+    return {
+        k: v
+        for k, v in state.items()
+        # authorship_ledger is a compaction-only artifact (epic gnu-whale-ichor), not semantic state
+        if k not in ("updated_at", "authorship_ledger")
+    }
 
 
 class _RenameFault:
