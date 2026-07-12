@@ -320,36 +320,11 @@ pip install -e '.[dev]'
 
 ## CLI
 
-```bash
-rebar init                                   # create the tickets branch + worktree
-rebar create story "Add login page"          # prints the ticket id
-rebar idea "Maybe cache the graph"           # capture an undesigned idea (born in status `idea`; unclaimable until promoted)
-rebar show <id|alias>                         # compiled ticket state (JSON)
-rebar summary <id> [<id> ...]                 # one-line summary + blocking status for one or more ids
-rebar list [--status=open] [--has-tag=...]   # JSON array
-rebar edit <id> [--title ... --priority ... --parent ... --add-tag ...]   # edit ticket fields / tags
-rebar claim <id> --assignee <you>             # atomic open -> in_progress + assignee (the work-start primitive)
-rebar transition <id> <current> <target>      # optimistic-concurrency status change
-rebar reopen <id>                             # closed -> open (exit 10 if not currently closed)
-rebar comment <id> "<body>"
-rebar tag <id> <tag> / untag <id> <tag>       # add / remove a tag (convergent add/remove deltas)
-rebar link <id1> <id2> <relation>            # relation REQUIRED (see relations below)
-rebar unlink <source> <target>               # remove ONE link for the ordered pair (no relation arg)
-rebar deps <id>                               # dependency graph
-rebar search <query>                          # full-text over titles/descriptions/comments/tags (JSON)
-rebar ready                                   # tickets with all blockers closed
-rebar next-batch <epic-id>                    # unblocked tickets under an epic's hierarchy
-rebar scratch <set|get|clear> <id> ...        # per-ticket scratch channel for subagents
-rebar session-log append "<entry>"            # append to the current session_log (auto-rotates per session)
-rebar session-log start --summary "<title>"   # rotate to a fresh session_log
-rebar session-logs [--limit=<n>]              # list the newest session_log tickets, newest first
-rebar validate                                # repo-wide tracker health (NO ticket id; whole-store score 1-5)
-rebar review-plan <id>                        # plan-review gate: DET floor + 3-pass advisory; signs an attestation (exit 0=PASS,1=BLOCK,2=INDETERMINATE)
-rebar explain <criterion-id>                  # read the guide/rubric for a review criterion (pure registry read, no LLM call)
-rebar export [-o FILE]                        # store -> NDJSON (one ticket/line; for jq/DuckDB/pandas + rebar->rebar migration)
-rebar import [FILE]                           # import export NDJSON (fresh local ids; [--dry-run])
-rebar reconcile [--mode dry-run|reconcile-check|live]   # Jira sync (default: dry-run)
-```
+The **complete, always-current command reference** — every subcommand with its
+usage — is [docs/cli-reference.md](docs/cli-reference.md), generated from the CLI's
+own help data (so it can never drift from the code). The essentials to get moving:
+`rebar init` → `rebar create <type> "<title>"` → `rebar ready` → `rebar claim <id>
+--assignee <you>` → `rebar transition <id> <current> <target>`.
 
 Run `rebar help` (or `rebar --help` / `-h`) for the subcommand overview, and
 `rebar <subcommand> --help` (or `rebar help <subcommand>`) for a specific
@@ -539,10 +514,13 @@ wire format, and config keys) and what "may change before 1.0" means for each.
 rebar-mcp          # stdio transport
 ```
 
-Exposes ticket operations as MCP tools. `reconcile` defaults to `dry-run`
-(`live` requires `REBAR_MCP_ALLOW_JIRA_SYNC=1`). Set `REBAR_MCP_READONLY=1`
-to expose only the read tools (no write/mutation tools). To register it in an MCP
-client (registry name `io.github.navapbc/rebar`, or a direct `uvx` config), see
+Exposes ticket operations as MCP tools. The **complete tool reference**, grouped by
+gate tier (read-only / LLM-gated / write-gated), is
+[docs/mcp-reference.md](docs/mcp-reference.md) (generated from the server's own
+registrars). `reconcile` defaults to `dry-run` (`live` requires
+`REBAR_MCP_ALLOW_JIRA_SYNC=1`). Set `REBAR_MCP_READONLY=1` to expose only the read
+tools (no write/mutation tools). To register it in an MCP client (registry name
+`io.github.navapbc/rebar`, or a direct `uvx` config), see
 [Install → MCP server](#mcp-server--from-the-mcp-registry) above.
 
 **Maintainers:** the registry manifest lives in [`server.json`](server.json);
