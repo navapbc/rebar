@@ -29,6 +29,8 @@ Jump straight to what you're trying to do:
   [../CONTRIBUTING.md](../CONTRIBUTING.md).
 - **Understand the internals** → [architecture.md](architecture.md),
   [event-schema.md](event-schema.md), and [concurrency.md](concurrency.md).
+- **Authenticated identity** (entity, attribution, authorship signing, key rotation,
+  Jira mapping, opt-in enforcement) → [identity.md](identity.md).
 
 ## Troubleshooting
 
