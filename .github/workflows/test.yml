@@ -260,6 +260,16 @@ jobs:
           fi
           echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
 
+      # Docs-index completeness / dead-link gate (ticket f088): every living top-level
+      # docs/*.md must be linked from docs/README.md (allowlist: *.local.md), and every
+      # relative markdown link that resolves inside docs/ must point at an existing file.
+      # Fails the build on an unindexed living doc or a broken docs-internal link.
+      - name: Docs-index completeness gate
+        shell: bash
+        run: |
+          python scripts/check_docs_index.py --check
+          echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
+
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
       # `vendored_at` is older than the quarterly cadence, prompting a deliberate

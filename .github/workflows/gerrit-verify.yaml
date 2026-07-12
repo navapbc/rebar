@@ -221,6 +221,16 @@ jobs:
           fi
           echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
 
+      # Docs-index completeness / dead-link gate in the Verified gate too (mirrors
+      # test.yml, ticket f088): every living top-level docs/*.md must be linked from
+      # docs/README.md (allowlist: *.local.md), and every relative markdown link that
+      # resolves inside docs/ must point at an existing file.
+      - name: Docs-index completeness gate
+        shell: bash
+        run: |
+          python scripts/check_docs_index.py --check
+          echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
+
       - name: Security-rules freshness gate (warn-only)
         shell: bash
         run: python -m rebar.grounding.detectors.security_pin
