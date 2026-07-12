@@ -1,0 +1,165 @@
+{
+  "can_add": true,
+  "can_add_tags": true,
+  "can_upload": true,
+  "config_visible": true,
+  "config_web_links": [
+    {
+      "name": "browse",
+      "url": "/plugins/gitiles/rebar/+log/d9bb36596f0c6f74cf3be5b394d7b5891734b142/project.config"
+    }
+  ],
+  "groups": {
+    "2b3bd195a18a52d4bab410b21ce45a5e96953308": {
+      "name": "Service Users",
+      "url": "#/admin/groups/uuid-2b3bd195a18a52d4bab410b21ce45a5e96953308"
+    },
+    "3acfa86f990dd08e0c9d807e09540417ef617eb7": {
+      "name": "Administrators",
+      "url": "#/admin/groups/uuid-3acfa86f990dd08e0c9d807e09540417ef617eb7"
+    },
+    "3fe3138810fb101edd4e3b6b26fb4b9318d7f120": {
+      "name": "feature-branch-drivers",
+      "url": "#/admin/groups/uuid-3fe3138810fb101edd4e3b6b26fb4b9318d7f120"
+    },
+    "f53ff2cc43ea01587ce8efaf8c2ad9a5e82f1e4f": {
+      "name": "Contributors",
+      "url": "#/admin/groups/uuid-f53ff2cc43ea01587ce8efaf8c2ad9a5e82f1e4f"
+    },
+    "global:Registered-Users": {
+      "name": "Registered Users"
+    }
+  },
+  "inherits_from": {
+    "description": "Access inherited by all other projects.",
+    "id": "All-Projects",
+    "name": "All-Projects",
+    "state": "ACTIVE",
+    "web_links": [
+      {
+        "name": "browse",
+        "url": "/plugins/gitiles/All-Projects"
+      }
+    ]
+  },
+  "is_owner": true,
+  "local": {
+    "refs/for/refs/heads/*": {
+      "permissions": {
+        "push": {
+          "rules": {
+            "global:Registered-Users": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        }
+      }
+    },
+    "refs/for/refs/heads/feature/*": {
+      "permissions": {
+        "pushMerge": {
+          "exclusive": true,
+          "rules": {
+            "3fe3138810fb101edd4e3b6b26fb4b9318d7f120": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        }
+      }
+    },
+    "refs/for/refs/heads/main": {
+      "permissions": {
+        "pushMerge": {
+          "exclusive": true,
+          "rules": {
+            "3fe3138810fb101edd4e3b6b26fb4b9318d7f120": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        }
+      }
+    },
+    "refs/heads/*": {
+      "permissions": {
+        "label-LLM-Review": {
+          "label": "LLM-Review",
+          "rules": {
+            "2b3bd195a18a52d4bab410b21ce45a5e96953308": {
+              "action": "ALLOW",
+              "force": false,
+              "max": 1,
+              "min": -1
+            },
+            "3acfa86f990dd08e0c9d807e09540417ef617eb7": {
+              "action": "ALLOW",
+              "force": false,
+              "max": 1,
+              "min": -1
+            }
+          }
+        },
+        "label-Verified": {
+          "label": "Verified",
+          "rules": {
+            "2b3bd195a18a52d4bab410b21ce45a5e96953308": {
+              "action": "ALLOW",
+              "force": false,
+              "max": 1,
+              "min": -1
+            },
+            "3acfa86f990dd08e0c9d807e09540417ef617eb7": {
+              "action": "ALLOW",
+              "force": false,
+              "max": 1,
+              "min": -1
+            }
+          }
+        },
+        "submit": {
+          "exclusive": true,
+          "rules": {
+            "3acfa86f990dd08e0c9d807e09540417ef617eb7": {
+              "action": "ALLOW",
+              "force": false
+            },
+            "f53ff2cc43ea01587ce8efaf8c2ad9a5e82f1e4f": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        }
+      }
+    },
+    "refs/heads/feature/*": {
+      "permissions": {
+        "create": {
+          "rules": {
+            "3fe3138810fb101edd4e3b6b26fb4b9318d7f120": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        },
+        "delete": {
+          "rules": {
+            "3fe3138810fb101edd4e3b6b26fb4b9318d7f120": {
+              "action": "ALLOW",
+              "force": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "owner_of": [
+    "refs/heads/feature/*",
+    "refs/for/refs/heads/feature/*",
+    "refs/for/refs/heads/main",
+    "refs/heads/*",
+    "refs/for/refs/heads/*"
+  ],
+  "revision": "d9bb36596f0c6f74cf3be5b394d7b5891734b142"
+}

@@ -35,6 +35,28 @@ for f in infra/gerrit/project.config infra/gerrit/replication.config; do
   fi
 done
 
+echo "config-check: 1b. Autosubmit label security invariants (epic f1fa / S1)"
+# The auto-lander opt-in label MUST stay non-gating + non-sticky so it can never weaken the
+# two-vote (LLM-Review + Verified) gate (CVE-2025-1568 / GerriScary posture). Guard activates
+# once the label exists; asserts the invariants that keep it safe.
+PC=infra/gerrit/project.config
+if [ -f "$PC" ] && git config -f "$PC" --get label.Autosubmit.function >/dev/null 2>&1; then
+  if grep -Eq 'submittableIf.*Autosubmit|applicableIf.*Autosubmit' "$PC"; then
+    bad "Autosubmit is referenced by a submit-requirement — it MUST stay NON-GATING"
+  else note "ok: Autosubmit is non-gating (no submit-requirement references it)"; fi
+  if git config -f "$PC" --get label.Autosubmit.function 2>/dev/null | grep -qx NoBlock; then
+    note "ok: [label \"Autosubmit\"] function = NoBlock"
+  else bad "Autosubmit label function must be NoBlock"; fi
+  CC=$(git config -f "$PC" --get label.Autosubmit.copyCondition 2>/dev/null || true)
+  if [ -z "$CC" ]; then note "ok: Autosubmit copyCondition empty (non-sticky)"
+  else bad "Autosubmit copyCondition must be empty (non-sticky); got: '$CC'"; fi
+  if git config -f "$PC" --get-all 'access.refs/heads/*.label-Autosubmit' 2>/dev/null | grep -q 'group Contributors'; then
+    note "ok: Autosubmit vote ACL grants group Contributors (requester-votable)"
+  else bad "Autosubmit vote ACL must grant 'group Contributors' on refs/heads/*"; fi
+else
+  note "skip: Autosubmit label not present yet (pre-S1 cutover)"
+fi
+
 echo "config-check: 2. gerrit-to-platform ini template parses"
 INI=infra/gerrit/gerrit_to_platform.ini.template
 if [ -f "$INI" ]; then
