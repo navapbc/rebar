@@ -28,3 +28,22 @@ skill's directory into your Claude Code skills location and invoke it by its nam
 discovered and run. The rebar-specific steps inside a skill (for example, how changes are reviewed
 and landed) are written to defer to a project's own documentation, so they can be retargeted to
 another project's workflow.
+## The shared test-design standard (`shared/test-design.md`)
+
+`shared/test-design.md` is the canonical copy of the test-design standard the skills
+apply when authoring tests or testing acceptance criteria. Each consuming skill —
+`rebar-debug`, `rebar-implement`, `rebar-brainstorm` — ships its own `test-design.md`
+as a **byte-identical real-file copy**, so every skill directory is self-contained in
+any load context (a checkout, a symlinked skills dir, a plain copy). `rebar-janitor`
+takes no copy: it authors no tests.
+
+Edit the **canonical** file, then sync the copies:
+
+```sh
+for s in rebar-debug rebar-implement rebar-brainstorm; do
+  cp examples/claude-skills/shared/test-design.md examples/claude-skills/$s/test-design.md
+done
+```
+
+A gating unit test (`tests/unit/test_skill_shared_sync.py`, run by `make test`) fails
+when any copy diverges from the canonical file, so drift cannot land.

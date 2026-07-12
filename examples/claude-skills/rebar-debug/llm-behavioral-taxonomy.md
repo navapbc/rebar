@@ -110,5 +110,7 @@ held-out-fixer + RED→GREEN discipline:
 - **Stage 3 (Test)** — run the probe; confirm the mode only when the model's observed output
   matches the prediction. Static reading of the prompt is not confirmation of a `dynamic` mode.
 - **Phase 2 (Repair)** — RED = an eval/behavioural assertion that fails against the current
-  instruction; fix under KERNEL + affirmative-framing; GREEN = the assertion passes and the
+  instruction, quantified per `test-design.md` in this skill's directory (pinned settings,
+  multiple samples against a predeclared threshold, a negative control); fix under KERNEL +
+  affirmative-framing; GREEN = the assertion passes at the declared threshold and the
   original report no longer reproduces.

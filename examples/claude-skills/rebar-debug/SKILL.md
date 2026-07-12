@@ -431,19 +431,29 @@ With the mechanism proven, you've earned the fix. Phase 2 turns the Phase 1 proo
 correct change and confirms the user-visible problem is resolved — under a RED→GREEN
 discipline that keeps the fix honest.
 
-## Step 4 — Write a RED test that exercises the root cause
+## Step 4 — Design and prove a RED oracle
 
-Write a test that **exercises the proven mechanism** (not merely the surface symptom — the
-test fails *because of the mechanism* you confirmed in Phase 1). Run it and **verify it
-fails**, and verify it fails *for the expected reason* (right assertion, right error), not by
-accident (import error, typo, wrong fixture). Capture the RED output as evidence. A test that
+Design the oracle by **`test-design.md` in this skill's directory** (the shared test-design
+standard) before writing test code: inventory existing coverage first (the RED oracle may be
+an existing failing test, an existing test strengthened into its final RED form, or a new
+test, in that order of preference), freeze the test contract card, and select the smallest
+test tier that crosses every component of the proven mechanism.
+
+Then build the oracle so it **exercises the proven mechanism** (not merely the surface
+symptom — it fails *because of the mechanism* you confirmed in Phase 1), proving its fixture
+preconditions and asserting the contractual postcondition per the standard. Run it and
+**verify it fails**, and verify it fails *for the expected reason* (right assertion, right
+error), not by accident (import error, typo, wrong fixture). Capture the RED output as
+evidence, plus the standard's gating proof (collected, executed, gate command). A test that
 passes, or fails for the wrong reason, means the test is off or the root cause wasn't truly
 proven — resolve that here, because Step 5 relies on a test that was legitimately RED first.
 
 For an **LLM-surface** bug (a prompt/skill/agent instruction, where no executable unit test can
-exercise the mechanism), the RED artifact is an **eval or behavioural assertion** that fails
-against the current instruction and passes after the fix — otherwise the discipline is
-identical: it must be seen failing for the right reason first.
+exercise the mechanism), the RED artifact is a **behavioural eval built to the quantified
+standard in `test-design.md`** — pinned settings, multiple samples against a predeclared
+threshold, a negative control — that fails against the current instruction and passes after
+the fix. Otherwise the discipline is identical: it must be seen failing for the right reason
+first.
 
 ## Step 5 — Subagent implements the fix; verify against a held-out GREEN oracle
 
@@ -456,9 +466,11 @@ oracle it can read proves only that it can read.
 is not enough, since the subagent can read and edit files. Declare the test path off-limits.
 
 **Hand the fix subagent only:** the confirmed root cause (precise, mechanistic), the evidence,
-and the **original reproduction steps**. It fixes the mechanism and self-verifies against its
-**own** scratch reproduction + the Stage 3 runtime evidence — a private feedback loop that
-keeps the acceptance oracle independent.
+the **original reproduction steps**, and the **frozen test contract card** from Step 4 (the
+intended postcondition and invariants — the contract, never the test's fixture, assertions, or
+path). The card gives the fixer an unambiguous target while the oracle stays independent. It
+fixes the mechanism and self-verifies against its **own** scratch reproduction + the Stage 3
+runtime evidence — a private feedback loop that keeps the acceptance oracle independent.
 
 **Prior-art trust check (before modelling the fix on existing code).** If the fix will follow
 an existing pattern in the repo, do not model it on code that is itself under an open bug or a
@@ -470,10 +482,12 @@ derive the fix independently and say so.
 
 - Re-apply the held-out RED test and run it — it must now pass (**GREEN against an oracle the
   fixer never saw**).
-- **Mutation check (give the test teeth):** perturb the fix (negate the condition / revert the
-  key line), confirm the held-out test returns to **RED**, then restore the fix. A test that
-  stays green under mutation is a tautology, not a proof. Where the bug class warrants, also
-  assert a second input or differentially vs. pre-bug behavior to catch thin, single-input fixes.
+- **Mutation check (give the test teeth):** perturb the fix with a **defect-seeded mutation**
+  per `test-design.md` — re-introduce the exact confirmed root cause (restore the wrong ref,
+  re-omit the missing field, delete the recovery loop) — confirm the held-out test returns to
+  **RED**, then restore the fix. A test that stays green under mutation is a tautology, not a
+  proof. Where the bug class warrants, also assert a second input or differentially vs.
+  pre-bug behavior to catch thin, single-input fixes.
 - **Refactoring litmus (guard the opposite failure):** the mutation check proves the test goes
   RED when behaviour breaks; also confirm it does *not* go red for a behaviour-preserving
   change. Ask: would this test break if someone renamed an internal variable or extracted a

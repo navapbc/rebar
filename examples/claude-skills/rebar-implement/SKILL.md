@@ -171,13 +171,18 @@ writes the code and never sees the full oracle.
 
 ### 4a. Derive the specification
 
-From the ticket's **acceptance criteria and contracts** (and any interface/spec it cites),
-enumerate the intended behavior: the happy path, the edge/boundary/error cases, and the
-end-to-end behavior a user would observe. This enumeration is the test plan.
+Before deriving it, work from **`test-design.md` in this skill's directory** (the shared
+test-design standard) for oracle design: the existing-coverage inventory, tier selection,
+oracle completeness, and the gating proof. Then, from the ticket's **acceptance criteria and
+contracts** (and any interface/spec it cites), enumerate the intended behavior: the happy
+path, the edge/boundary/error cases, and the end-to-end behavior a user would observe. This
+enumeration is the test plan.
 
 ### 4b. Write the tests RED-first — all of them
 
-Author the full test set yourself, asserting **observable behavior and contracts** only (never
+Author the full test set yourself to the shared standard's oracle minimum (`test-design.md`:
+proven preconditions, exact postconditions, collateral invariants for stateful work, the
+tier each mechanism needs), asserting **observable behavior and contracts** only (never
 internal structure):
 
 - **Happy-path test(s)** — the minimal specification of correct behavior on well-formed input.

@@ -135,3 +135,11 @@ new-prohibition consumer scan, CI-trigger). Then run the plan-review gate on eac
 (`rebar review-plan <id>`) and remediate findings before claiming. Reading the gate first is
 standard process: it is far cheaper to author to the criteria than to remediate a BLOCK after
 the fact.
+
+Before recording any ticket whose acceptance criteria will include or reference testing,
+verification, or behavioral oracles, also read **`test-design.md` in this skill's
+directory** (the shared test-design standard) — when in doubt, read it (the cost is one
+file read; the benefit is acceptance criteria that name the test tier and the observable
+oracle, which the plan-review testing criterion rewards). The standard's tier rule is a
+planning readiness check: a plan whose mechanism is too unclear to name a tier has an
+unresolved design decision to settle in the Core loop first.
