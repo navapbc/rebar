@@ -10,7 +10,7 @@
     },
     "ticket_type": {
       "type": "string",
-      "enum": ["bug", "epic", "story", "task", "session_log", "code_review"]
+      "enum": ["bug", "epic", "story", "task", "session_log", "code_review", "identity"]
     },
     "relation": {
       "type": "string",
