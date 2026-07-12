@@ -330,6 +330,42 @@ def _parent_clear_is_managed(
     return should_propagate_removal("parent", parent_local_id, ticket)
 
 
+def _resolve_reporter_account_id(local_reporter: Any) -> str | None:
+    """Resolve a local reporter string (identity id / email) to a Jira accountId via
+    rebar core's identity seam (flow layer may import core), or ``None`` on any miss."""
+    if not local_reporter or not isinstance(local_reporter, str):
+        return None
+    try:
+        from rebar._commands import identity as _identity
+
+        return _identity.jira_account_id(local_reporter)
+    except Exception:  # noqa: BLE001 — best-effort; an unresolvable reporter is a miss
+        return None
+
+
+def _diff_reporter(
+    ticket: dict[str, Any], jira_fields: dict[str, Any], changed: dict[str, Any]
+) -> None:
+    """Emit the local ``reporter`` into ``changed`` for the dispatch-layer
+    ``set_reporter`` REST sub-call (264f) when it diverges from Jira's current
+    reporter accountId. Kept OUT of ``_map_local_to_jira_fields`` so the CREATE path
+    never carries a reporter field — reporter is an UPDATE-only REST sub-call. Emits
+    the RAW local string (dispatch re-resolves via ``identity.jira_account_id`` and
+    routes it through ``client.set_reporter``); it is NOT in ``_OUTBOUND_BATCH_ALLOWLIST``
+    (dispatch pops it before the scalar edit)."""
+    local_reporter = ticket.get("reporter") or None
+    if not local_reporter:
+        return
+    jira_reporter = jira_fields.get("reporter")
+    jira_acct = jira_reporter.get("accountId") if isinstance(jira_reporter, dict) else None
+    desired = _resolve_reporter_account_id(local_reporter)
+    if desired is not None and desired == (jira_acct or None):
+        return  # already the correct reporter — no churn
+    if desired is None and jira_acct is None:
+        return  # unresolvable reporter and Jira has none — nothing to do
+    changed["reporter"] = local_reporter
+
+
 def _diff_fields(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
@@ -432,7 +468,14 @@ def _diff_fields(
             # only when a resolver is supplied (the live pass); the no-resolver
             # fixture path keeps the legacy permissive string-match behavior.
             if local_val and assignee_resolver is not None:
-                acct, authoritative = assignee_resolver(local_val, jira_key)
+                # 264f: the resolver returns (accountId|None, authoritative,
+                # is_account_id). Tolerate a legacy 2-tuple resolver (is_account_id
+                # defaults False) so pre-264f fixtures that inject their own resolver
+                # keep working. is_account_id is True when acct is an already-resolved
+                # accountId (identity fast path / /user/search bootstrap).
+                _res = assignee_resolver(local_val, jira_key)
+                acct, authoritative = _res[0], _res[1]
+                is_account_id = _res[2] if len(_res) > 2 else False
                 if authoritative:
                     current_acct = (
                         jira_assignee.get("accountId") if isinstance(jira_assignee, dict) else None
@@ -447,6 +490,19 @@ def _diff_fields(
                             print(  # noqa: T201
                                 f"RECON: field_diff ticket={ticket_id} field=assignee "
                                 f"local={local_val!r:.80} -> unassign (unmappable)",
+                                file=sys.stderr,
+                            )
+                        continue
+                    if is_account_id:
+                        # 264f accountId fast-path: emit the resolved accountId directly
+                        # and flag it so dispatch/acli submit it without an assignable
+                        # search (the "no Jira search needed" measurable).
+                        changed[field_name] = acct
+                        changed["_assignee_is_account_id"] = True
+                        if verbose:
+                            print(  # noqa: T201
+                                f"RECON: field_diff ticket={ticket_id} field=assignee "
+                                f"local={local_val!r:.80} -> accountId={acct!r:.80} (identity)",
                                 file=sys.stderr,
                             )
                         continue
@@ -543,4 +599,8 @@ def _diff_fields(
                 and not _jira_matches_prev(fname, jira_fields, arbitration_prev)
             ):
                 conflict_sink.append((jira_key, fname))
+    # Reporter (264f): applied via a dedicated REST sub-call in dispatch, so it is
+    # emitted here as the raw local string OUTSIDE the mapped-field loop / conflict
+    # scan (conflict/directionality guards only cover the _INBOUND_MIRRORED_FIELDS).
+    _diff_reporter(ticket, jira_fields, changed)
     return changed

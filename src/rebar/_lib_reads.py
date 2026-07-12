@@ -234,6 +234,32 @@ def recent_session_logs(*, limit: int = 5, repo_root=None) -> list[TicketState]:
     return cast("list[TicketState]", _reads.recent_session_logs(limit=limit, repo_root=repo_root))
 
 
+# ── identity provider-neutral resolution seam (264f; read path, never raises) ──
+def resolve_mapping(provider: str, external_id: str, *, repo_root=None) -> str | None:
+    """Id of the identity whose ``mappings`` contains ``{provider, external_id}`` (exact
+    match on the provider's opaque external id, NEVER email), else ``None``. Never raises."""
+    from rebar._commands import identity as _identity
+
+    return _identity.resolve_mapping(provider, external_id, repo_root=repo_root)
+
+
+def jira_account_id(local_assignee: str, *, repo_root=None) -> str | None:
+    """Resolve a LOCAL assignee/reporter string (identity ticket id or case-insensitive
+    email) to its Jira accountId (``{provider:"jira"}`` external_id), else ``None``.
+    Never raises."""
+    from rebar._commands import identity as _identity
+
+    return _identity.jira_account_id(local_assignee, repo_root=repo_root)
+
+
+def identity_email(local_assignee: str, *, repo_root=None) -> str | None:
+    """The matched identity's ``email`` (same id/email matching as
+    :func:`jira_account_id`), else ``None``. Never raises."""
+    from rebar._commands import identity as _identity
+
+    return _identity.identity_email(local_assignee, repo_root=repo_root)
+
+
 def fsck(*, recover: bool = False, report_only: bool = False, repo_root=None) -> str:
     """Run store integrity checks. ``recover=True`` runs the destructive recovery
     path. ``report_only=True`` suppresses fsck's only mutation — removing a stale

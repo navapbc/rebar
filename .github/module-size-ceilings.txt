@@ -32,3 +32,5 @@ src/rebar/llm/plan_review/passes.py 871
 src/rebar/llm/workflow/lint_refs.py 870
 src/rebar/llm/workflow/gate_dispatch.py 910
 src/rebar/llm/runner.py 850
+src/rebar/_engine/rebar_reconciler/outbound_differ.py 862
+src/rebar/_engine/rebar_reconciler/dispatch_one.py 886
