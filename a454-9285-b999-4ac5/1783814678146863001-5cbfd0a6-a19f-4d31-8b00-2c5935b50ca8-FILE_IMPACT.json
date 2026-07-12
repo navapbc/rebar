@@ -1,0 +1,1 @@
+{"author":"RebarBotNava","data":{"file_impact":[{"path":"scripts/gen_config_reference.py","reason":"(if promoted) config-key generator"},{"path":"scripts/gen_api_reference.py","reason":"(if promoted) python-api generator"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783814678146863001,"uuid":"5cbfd0a6-a19f-4d31-8b00-2c5935b50ca8"}
