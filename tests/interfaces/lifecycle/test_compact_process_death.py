@@ -65,7 +65,12 @@ def _all_source_uuids(repo: Path, tid: str) -> set[str]:
 
 
 def _semantic(state: dict) -> dict:
-    return {k: v for k, v in state.items() if k != "updated_at"}
+    return {
+        k: v
+        for k, v in state.items()
+        # authorship_ledger is a compaction-only artifact (epic gnu-whale-ichor), not semantic state
+        if k not in ("updated_at", "authorship_ledger")
+    }
 
 
 def _seed_foldable(repo: Path, title: str, n_events: int) -> str:
