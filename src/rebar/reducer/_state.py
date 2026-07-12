@@ -44,6 +44,12 @@ def make_initial_state() -> dict:
         # key-absent, and an identity's genesis / KEY events fold onto this base.
         "keyring": [],
         "keyring_epoch": 0,
+        # Authorship PRESENCE summary (epic gnu-whale-ichor / 3183): a per-ticket count of
+        # folded events that DID vs DID NOT carry an `author_sig` on their envelope. This is
+        # PRESENCE ONLY — never a cryptographic check (that is the merge-gate `verify-authorship`
+        # + the epoch-scoped verify). Seeded here so a pre-feature snapshot / event replays to an
+        # explicit zeroed summary rather than key-absent; the replay loop increments it per event.
+        "authorship": {"signed": 0, "unsigned": 0},
         "preconditions_summary": {"status": "pre-manifest"},
         "parent_status_uuid": "",
     }
