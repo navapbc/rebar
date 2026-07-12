@@ -278,6 +278,61 @@ def verify_authorship(
     return registry.verify(AUTHORSHIP_KIND, envelope, trust_root)
 
 
+def verify_authorship_any_key(
+    envelope: dsse.Envelope, identity_id: str, *, repo_root=None
+) -> registry.Verdict:
+    """Verify ``envelope`` against ANY key the identity has EVER held (epic gnu-whale-ichor).
+
+    The trust root is built from EVERY keyring record's public key — regardless of
+    ``revoked_at`` — so this answers "was this signed by a real key of this identity at all?",
+    independent of era validity. Used by the merge-gate to distinguish a forged signature
+    (``bad-signature``) from a real-but-wrong-era one (``key_not_valid_at_era``). An empty
+    keyring / any lookup failure yields a non-verified ``Verdict``. Never raises.
+    """
+    keys: list[str] = []
+    for rec in _keyring_for(identity_id, repo_root=repo_root):
+        if not isinstance(rec, dict):
+            continue
+        pub = rec.get("public_key")
+        if isinstance(pub, str) and pub:
+            keys.append(pub)
+    if not keys:
+        return registry.Verdict(
+            verified=False,
+            verdict="unknown_principal",
+            reason=(
+                f"no keys recorded for identity {identity_id!r} "
+                "(unknown identity, not an identity ticket, or empty keyring)"
+            ),
+        )
+    trust_root = allowed_signers_from_keys(keys, principal=identity_id)
+    return registry.verify(AUTHORSHIP_KIND, envelope, trust_root)
+
+
+def identify_signer(envelope: dsse.Envelope, identity_id: str, *, repo_root=None) -> str | None:
+    """Return the FIRST keyring public key (incl. revoked) whose single-key trust root
+    verifies ``envelope``, or ``None`` (epic gnu-whale-ichor / 117b).
+
+    Iterates the identity's keyring in order, building a ONE-key trust root per record and
+    running :func:`registry.verify`; the first key whose lone verify passes is returned. No
+    match (forged / foreign signature) or any lookup failure yields ``None``. Never raises.
+    """
+    for rec in _keyring_for(identity_id, repo_root=repo_root):
+        if not isinstance(rec, dict):
+            continue
+        pub = rec.get("public_key")
+        if not isinstance(pub, str) or not pub:
+            continue
+        trust_root = allowed_signers_from_keys([pub], principal=identity_id)
+        try:
+            verdict = registry.verify(AUTHORSHIP_KIND, envelope, trust_root)
+        except Exception:  # noqa: BLE001 — a verify hiccup on one key → not this key, never raise
+            continue
+        if verdict.verified:
+            return pub
+    return None
+
+
 def authorship_content_hash(event: dict) -> str:
     """The SHA-256 (lowercase hex) digest over the event's canonical JSON bytes,
     with the ``author_sig`` key EXCLUDED (epic gnu-whale-ichor / c96d).
