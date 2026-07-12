@@ -1,13 +1,13 @@
-"""Shared infrastructure for Tier B leaf-write commands (docs/bash-migration.md §4).
+"""Shared infrastructure for Tier B leaf-write commands (history: docs/bash-migration.md §4).
 
 A Tier B command is a small function that (1) validates args, (2) resolves the
 ticket id, (3) composes the event JSON in Python, and (4) appends it through ONE
-narrow seam — the bash ``ticket-append-event.sh`` wrapping ``write_commit_event``
-(flock + atomic rename + git commit + best-effort push). This module owns the
-pieces every leaf command shares: tracker/id resolution, the ghost check, event
-metadata, and the seam subprocess call. The locked write path itself is NOT ported
-here (that is Tier D); until then Python writes route through the bash core so
-invariant I5 (single locked write path) holds unchanged.
+narrow seam — ``append_event`` → ``rebar._store.event_append.write_and_push``
+(flock + atomic rename + git commit + best-effort push), the single locked write
+path. This module owns the pieces every leaf command shares: tracker/id resolution,
+the ghost check, event metadata, and the append call. Tier D retired the bash core,
+so all writes route in-process through ``rebar._store`` and invariant I5 (single
+locked write path) holds unchanged.
 """
 
 from __future__ import annotations

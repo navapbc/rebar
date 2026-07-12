@@ -48,8 +48,8 @@ jobs:
             exit 1
           fi
 
-      # The rebar_repo fixture initializes a git-backed store via the bash engine,
-      # which shells out to jq + git (mirrors the main test workflow).
+      # The shell-based golden-path probe (scripts/probe-rebar.sh) parses rebar's
+      # JSON output with jq in its assertions (mirrors the main test workflow).
       - name: Ensure jq is installed
         run: sudo apt-get update && sudo apt-get install -y jq && jq --version
 

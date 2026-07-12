@@ -1,13 +1,11 @@
 """Tier B leaf-write command implementations + CLI dispatcher.
 
 The library/MCP call the command functions (``leaf.comment`` etc.) in-process; the
-bash dispatcher reaches the same functions via :func:`main` (run by the
-``ticket-commands.py`` engine entrypoint) when ``REBAR_LEAF_WRITES=python``. One
-implementation, two callers — the Tier A read-path shape applied to writes.
+CLI reaches the same functions via :func:`main`. One implementation, two callers —
+the Tier A read-path shape applied to writes.
 
-Each entry pins the command's argv arity and usage string to the bash function it
-replaces, so a too-few-args invocation prints the identical ``Usage:`` line and
-exits 1 under either implementation.
+Each entry pins the command's argv arity and usage string, so a too-few-args
+invocation prints the canonical ``Usage:`` line and exits 1.
 """
 
 from __future__ import annotations

@@ -1,12 +1,10 @@
-"""Tier B leaf-write commands ported to Python (docs/bash-migration.md §4).
+"""Tier B leaf-write commands, implemented in Python (history: docs/bash-migration.md §4).
 
-Each function here is the Python implementation of one ``ticket-lib-api.sh``
-leaf-write command, reached behind ``REBAR_LEAF_WRITES=python``. They validate and
-compose in Python, then append through the bash write seam (``_seam.append_event``
-→ ``ticket-append-event.sh`` → ``write_commit_event``) so the locked write path is
-unchanged until Tier D. Behaviour — validation order, error strings, exit codes,
-and the event envelope — mirrors the bash functions byte-for-byte so the per-command
-bash suite passes against either implementation.
+Each function here validates and composes one leaf-write event in Python, then appends
+it in-process through ``_seam.append_event`` → ``rebar._store.event_append.write_and_push``
+(the single locked write path; the bash seam was retired in Tier D). Behaviour —
+validation order, error strings, exit codes, and the event envelope — is pinned by the
+interface-contract tests.
 
 Ported so far: ``comment`` (COMMENT), ``set_file_impact`` (FILE_IMPACT),
 ``set_verify_commands`` (VERIFY_COMMANDS) — the pure single-event appends. The

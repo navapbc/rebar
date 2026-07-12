@@ -4,9 +4,8 @@ name: test
 # "the suite catches it", so this is the gate that makes that automatic (ticket
 # coily-conch-tag / Rec 3 of the 2026-06-09 architecture review).
 #
-# Coverage: the Python tiers (unit / scripts / interface) AND every standalone
-# bash suite under tests/scripts/test-*.sh, which the test_bash_suites.py collector
-# runs under pytest, plus the integration tier (concurrency + reconciler —
+# Coverage: the Python tiers (unit / scripts / interface) run under pytest, plus
+# the integration tier (concurrency + reconciler —
 # network-guarded / mocked, so CI-safe) as a separate step. Live Jira validation is
 # done via manual probes (bridge-probe, reconcile dry-run), not pytest. The external
 # tier (live LLM providers — tests/external/) is excluded from the default run via
