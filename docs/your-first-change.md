@@ -96,11 +96,17 @@ You only do this the first time.
    git push origin HEAD:refs/for/main
    ```
    Repeat until both votes are green.
-7. **A maintainer submits it.** Once both votes are `+1`, a maintainer presses
-   **Submit** and Gerrit merges the change and replicates the new `main` out to
-   GitHub. As a first-time contributor you won't see (and don't need) a Submit button
-   yourself — submit rights come once you've been added as a maintainer. Your job is
-   done when both votes are green. 🎉
+7. **A maintainer lands it.** Once both votes are `+1`, a maintainer (or the serial
+   **auto-lander**) lands your change: it is rebased onto the current `main` tip, its CI
+   re-runs on that exact tree, and it is then submitted — Gerrit merges and replicates the new
+   `main` out to GitHub. As a first-time contributor you won't see (and don't need) a Submit
+   button yourself — landing rights come once you've been added as a maintainer. **Two green
+   votes are necessary but not sufficient:** under Fast-Forward-Only `main` (ADR-0040) a change
+   only lands when it also sits on the current tip, so the maintainer/auto-lander handles that
+   rebase for you — don't be surprised if a green change needs a re-CI before it merges. So:
+   get both votes green, and the landing is taken care of. 🎉 (For how landing works, see
+   [CONTRIBUTING.md](../CONTRIBUTING.md) §2e and
+   [docs/adr/0042-auto-lander.md](adr/0042-auto-lander.md).)
 
 ## Gotchas
 

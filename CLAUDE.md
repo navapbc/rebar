@@ -554,8 +554,26 @@ the short version for agents:
    is a CI failure — open the linked run; if it's a flake, comment `recheck` to re-run CI
    on the same patchset.
 4. **Iterate:** fix findings, `git commit --amend --no-edit` (keep the `Change-Id`),
-   re-push (each new patchset re-runs both votes). **Submit** once both are green → Gerrit
-   merges and **replicates the new `main` to GitHub** (where branch CI runs on the push).
+   re-push (each new patchset re-runs `Verified`; `LLM-Review` carries across a conflict-free
+   `TRIVIAL_REBASE`, ADR-0041).
+5. **Land via the auto-lander — set `Autosubmit`, act on the ONE typed outcome; do NOT watch
+   individual votes.** Once your change is in review, hand it to the serial auto-lander instead
+   of babysitting the votes: run **`land <change> --wait`** (or set the requester-votable
+   **`Autosubmit`** label under your own identity). The lander rebases the front
+   `Autosubmit`+submittable change/stack to the current `main` tip, awaits a fresh `Verified` on
+   the rebased tree, and ancestor-atomic-submits the exact tested SHA — then Gerrit
+   **replicates the new `main` to GitHub** (where branch CI runs on the push). `land` returns
+   **one typed terminal outcome + a distinct exit code** — `merged` / `needs_rebase` /
+   `ci_failed` / `review_failed` / `lander_down` / … — which is the ONLY thing you act on. The
+   two votes still gate (step 3) and FFO still applies (below), but **"both votes green" no
+   longer means "it will land"**: under FFO a green change goes non-submittable the moment
+   `main` advances beneath it, and that FFO TOCTOU/conflict case is handled *inside* the tool
+   (it rebases-and-re-CIs, or hands the stack back as `needs_rebase`) — you never correlate
+   votes/labels/submittability yourself. See [docs/land-contract.md](docs/land-contract.md) for
+   the full outcome/exit-code contract and [docs/adr/0042-auto-lander.md](docs/adr/0042-auto-lander.md)
+   for the design. **Fallback:** on `lander_down` (the single-instance bot's heartbeat is stale
+   / unreachable), land manually with the FFO rebase + submit flow below — the sanctioned
+   degraded path.
 
 > **Your change must be on the CURRENT `main` tip to submit (Fast Forward Only, ADR-0040).**
 > `main` uses the **Fast Forward Only** submit type, so Gerrit never merges/rebases for you:
@@ -564,12 +582,14 @@ the short version for agents:
 > it (ordinary change / relation chain) — or **re-merge** it (feature-branch change) — onto
 > the new tip. That rebase mints a new patch set, which **drops `Verified` and re-runs CI on
 > the exact tree that will land** — the mechanism that makes it *impossible to land a stale or
-> untested tree on `main`*. Practically: when Submit says "not fast-forward / out of date," run
-> `git fetch origin && git rebase origin/main`, `git push gerrit HEAD:refs/for/main`, wait for
-> the fresh votes, then Submit. Under heavy concurrent landing this rebase-and-re-CI step is
+> untested tree on `main`*. The auto-lander (step 5) normally performs this rebase-and-re-CI
+> for you; **the manual form here is the `lander_down` fallback.** When Submit says "not
+> fast-forward / out of date," run `git fetch origin && git rebase origin/main`,
+> `git push gerrit HEAD:refs/for/main`, wait for the fresh `Verified`, then Submit. Under heavy
+> concurrent landing this rebase-and-re-CI step is
 > expected (the accepted tradeoff for the guarantee).
 
-> **Multi-story features → a feature branch (not one giant change).** Steps 1–4 above are
+> **Multi-story features → a feature branch (not one giant change).** Steps 1–5 above are
 > the path for **one** change. When you're driving a **multi-story feature** — especially
 > several agents in parallel — don't stack it into one change or a fragile chain: use a
 > **server-side feature branch** (epic 88ab, ADR-0025). Each story is reviewed *into*
@@ -581,7 +601,7 @@ the short version for agents:
 > **[CONTRIBUTING.md](CONTRIBUTING.md) §4**.
 >
 > - **When to use it:** genuinely multi-story / multi-agent work. **A single small change
->   → just push one change to `refs/for/main`** (steps 1–4) — a feature branch is overhead
+>   → just push one change to `refs/for/main`** (steps 1–5) — a feature branch is overhead
 >   you don't need for a one-shot fix.
 > - **Who can create it:** branch creation and the merge-commit push are restricted to the
 >   `feature-branch-drivers` Gerrit group; ordinary story pushes into the branch are not.
