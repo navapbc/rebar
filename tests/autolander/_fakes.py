@@ -17,19 +17,33 @@ def change_info(
     change_id: str,
     number: int,
     *,
-    autosubmit_date: str | None,
+    autosubmit_date: str | None = None,
     submittable: bool = True,
     parents: int = 1,
+    verified: bool = False,
+    status: str = "NEW",
+    revision: str | None = None,
 ) -> dict:
-    """Build a minimal ChangeInfo (o=DETAILED_LABELS + CURRENT_REVISION/COMMIT shape)."""
+    """Build a minimal ChangeInfo (o=DETAILED_LABELS + CURRENT_REVISION/COMMIT shape).
+
+    `verified=True` adds a fresh `Verified +1` on the current patchset; `status` is the
+    change status (e.g. "MERGED" after submit); `revision` overrides the current SHA.
+    """
     labels: dict = {}
     if autosubmit_date is not None:
         labels["Autosubmit"] = {"all": [{"value": 1, "date": autosubmit_date, "_account_id": 1000}]}
-    rev = "rev" + str(number)
+    if verified:
+        labels["Verified"] = {
+            "approved": {"_account_id": 2000},
+            "all": [{"value": 1, "_account_id": 2000}],
+        }
+    else:
+        labels["Verified"] = {"all": [{"value": 0, "_account_id": 2000}]}
+    rev = revision or ("rev" + str(number))
     return {
         "change_id": change_id,
         "_number": number,
-        "status": "NEW",
+        "status": status,
         "submittable": submittable,
         "labels": labels,
         "current_revision": rev,
