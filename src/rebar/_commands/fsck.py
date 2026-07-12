@@ -122,10 +122,18 @@ def _scan(
     import contextlib
     import io
 
+    # Store-wide authorship PRESENCE tally (3183): summed from each ticket's reduced
+    # ``authorship`` summary — presence only, never a crypto check (see verify-authorship).
+    signed_total = 0
+    unsigned_total = 0
     for ticket_id in _ticket_dirs(tracker):
         ticket_dir = os.path.join(tracker, ticket_id)
         with contextlib.redirect_stderr(io.StringIO()):
             state = reduce_ticket(ticket_dir)
+        _authorship = state.get("authorship") if isinstance(state, dict) else None
+        if isinstance(_authorship, dict):
+            signed_total += int(_authorship.get("signed") or 0)
+            unsigned_total += int(_authorship.get("unsigned") or 0)
         # reduce_ticket returns None (no CREATE) or a state dict; an error/ghost
         # ticket reduces to status 'fsck_needed' or 'error'.
         if state is None:
@@ -191,8 +199,7 @@ def _scan(
 
         findings = _snap_findings()
         # RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then
-        # re-check. A rebuild folds the orphan back in (SNAPSHOT_INCONSISTENT / a KNOWN
-        # ORPHAN_EVENT before the snapshot) — the remediation A3 runs against the live store.
+        # re-check (folds the orphan back in) — the remediation A3 runs against the live store.
         rebuildable = any("SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f for f in findings)
         if repair_snapshots and not no_mutate and rebuildable:
             from rebar._commands.compact import rebuild_snapshot_from_full_log
@@ -220,14 +227,11 @@ def _scan(
         lines.append(bm)
 
     # ── Check 5: forward-compat — event types newer than this binary (P2.3) ───
-    # Informational WARN (no issue_count, like push-pending): an unknown event_type
-    # is preserved-and-ignored by replay, so the store is NOT corrupt — but the
-    # event's effect is INVISIBLE until this binary is upgraded (e.g. a reconcile
-    # host on an old binary would reduce without it and push a stale tag set to
-    # Jira). Surface it so the otherwise-silent rollout window is detectable.
-    # Generic over KNOWN_EVENT_TYPES — not specific to any one new type. The
-    # event_type is read from the canonical filename suffix (``{ts}-{uuid}-{TYPE}``,
-    # uuid hyphens precede it), matching reducer/_sort.event_sort_key.
+    # Informational WARN (no issue_count, like push-pending): an unknown event_type is
+    # preserved-and-ignored by replay, so the store is NOT corrupt — but its effect is
+    # INVISIBLE until this binary is upgraded (e.g. a reconcile host on an old binary would
+    # reduce without it and push stale state). The event_type is read from the canonical
+    # filename suffix (``{ts}-{uuid}-{TYPE}``), matching reducer/_sort.event_sort_key.
     from rebar.reducer._version import is_unknown_newer_type
 
     unknown_types: set[str] = set()
@@ -247,12 +251,9 @@ def _scan(
             "reconcile host on an old binary may push stale state)."
         )
 
-    # Informational ensure-registry status (epic odd-vortex-elbow / WS3), derived
-    # WITHOUT running the sweep: M = registered units, N = applied units present in
-    # the git-ignored .ensure-applied marker (intersected with the registry so a
-    # stale marker id can't inflate N). Lowercase tag ⇒ text-only, like
-    # a3-remediation:/fsck complete — intentionally NOT lifted into --output json,
-    # so it never inflates issue_count or flips the exit code.
+    # Informational ensure-registry status (epic odd-vortex-elbow / WS3), derived WITHOUT
+    # running the sweep: N applied (in the git-ignored .ensure-applied marker, intersected with
+    # the registry) / M registered. Lowercase tag ⇒ text-only — never in --output json.
     from rebar._store import ensures as _ensures
 
     registry = _ensures.registry_ids()
@@ -261,6 +262,13 @@ def _scan(
     if applied_n < len(registry):
         ensures_line += " — run `rebar fsck --repair` to converge"
     lines.append(ensures_line)
+
+    # Advisory authorship line (3183): store-wide count of events WITHOUT an author_sig
+    # (presence only, like the ensures line — text-only, never in --output json / issue_count).
+    authorship_line = f"authorship: {signed_total} signed, {unsigned_total} unsigned event(s)"
+    if unsigned_total:
+        authorship_line += " — run `rebar verify-authorship`"
+    lines.append(authorship_line)
 
     return lines, issue_count
 
@@ -276,17 +284,15 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     if not source_uuids:
         return out
 
-    # Map uuid -> (filename, event_type). The type is parsed from the filename
-    # suffix (``{ts}-{uuid}-{TYPE}.json``, written by event_filename from the event's
-    # own event_type), so it agrees with the event body without a second file read.
+    # Map uuid -> (filename, event_type). The type is parsed from the filename suffix
+    # (``{ts}-{uuid}-{TYPE}.json``), so it agrees with the event body without a second read.
     event_files: dict[str, tuple[str, str]] = {}
     for name in sorted(os.listdir(ticket_dir)):
         if not name.endswith(".json") or name.startswith("."):
             continue
-        # I1: a folded source renamed to ``*.retired`` is NOT a live event — it must
-        # never read as "source UUID still exists" (SNAPSHOT_INCONSISTENT). The
-        # ``.json`` filter above already excludes ``*.json.retired``; this guard makes
-        # the intent explicit and keeps fsck correct if the suffix scheme ever changes.
+        # I1: a folded source renamed to ``*.retired`` is NOT a live event — it must never
+        # read as "source UUID still exists" (SNAPSHOT_INCONSISTENT). Explicit guard on top
+        # of the ``.json`` filter above (which already excludes ``*.json.retired``).
         if not is_active_event(name):
             continue
         if name == snapshot_filename:
@@ -308,13 +314,11 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
                 f"{u} still exists as {event_files[u][0]}"
             )
     for file_uuid, (name, etype) in event_files.items():
-        # Compaction folds ONLY KNOWN_EVENT_TYPES into source_event_uuids
-        # (_commands/compact.py excludes any other type from both deletion and the
-        # source list). A pre-snapshot event of a non-KNOWN type (e.g. the
-        # reducer-ignored REVIEW_RESULT, or a forward-compat type from a newer
-        # clone) is therefore *correctly* absent from source_event_uuids — flagging
-        # it ORPHAN_EVENT is a false positive. Stay symmetric with compaction: only
-        # a genuinely orphaned KNOWN-type event is real data loss.
+        # Compaction folds ONLY KNOWN_EVENT_TYPES into source_event_uuids (compact.py
+        # excludes any other type from deletion + the source list), so a pre-snapshot event
+        # of a non-KNOWN type (reducer-ignored REVIEW_RESULT, or a forward-compat type from a
+        # newer clone) is *correctly* absent — flagging it ORPHAN_EVENT is a false positive.
+        # Stay symmetric with compaction: only a genuinely orphaned KNOWN-type event is loss.
         if etype not in KNOWN_EVENT_TYPES:
             continue
         if name < snapshot_filename and "-SNAPSHOT.json" not in name:
@@ -538,11 +542,10 @@ def _has_remote(tracker: str) -> bool:
 
 
 def _reconciler_pause(repo_root=None) -> bool:
-    """Best-effort: disable the reconcile-bridge GHA schedule for the repair window and
-    confirm no pass is mid-flight (the leased CAS ``refs/reconciler/lock`` would expire,
-    so it is not the pause mechanism). Returns True iff we disabled it (→ re-enable in a
-    failsafe). A missing/unauthenticated ``gh`` just logs and returns False (the batched,
-    pre-tagged, committed design keeps a stray write recoverable)."""
+    """Best-effort: disable the reconcile-bridge GHA schedule for the repair window (the
+    leased CAS ``refs/reconciler/lock`` expires, so it is not the pause mechanism). Returns
+    True iff we disabled it (→ re-enable in a failsafe); a missing/unauthenticated ``gh``
+    returns False (the batched, pre-tagged, committed design keeps a stray write recoverable)."""
     cp = subprocess.run(
         ["gh", "workflow", "disable", "reconcile-bridge.yml"], capture_output=True, text=True
     )
@@ -556,16 +559,13 @@ def _reconciler_resume() -> None:
 
 
 def _reconciler_in_flight(repo_root=None) -> bool:
-    """Return True if a reconciler pass is (or may be) mid-flight — the in-flight guard
-    the destructive live repair runs AFTER disabling the schedule.
-
-    Disabling the GHA schedule stops the NEXT pass, not one already running; a pass that
-    started before we disabled would race our batched writes. The pass holds the leased
-    CAS ``refs/reconciler/lock`` for its duration, so ``check_pass_lock`` is the mid-flight
-    probe. Fail-CLOSED: if the lock state cannot be read (``ReconcileLockError``) — or the
-    advisory module can't be imported — we report in-flight=True so an indeterminate state
-    aborts the repair rather than writing under a possibly-live reconciler. A repo that
-    has never run the reconciler (ref absent) reads free → False → repair proceeds."""
+    """Return True if a reconciler pass is (or may be) mid-flight — the in-flight guard the
+    destructive live repair runs AFTER disabling the schedule (which stops the NEXT pass, not
+    one already running). The pass holds the leased CAS ``refs/reconciler/lock``, so
+    ``check_pass_lock`` is the probe. Fail-CLOSED: an unreadable lock (``ReconcileLockError``)
+    or an un-importable advisory module reports in-flight=True so an indeterminate state aborts
+    the repair rather than writing under a possibly-live reconciler; a never-reconciled repo
+    (ref absent) reads free → False → repair proceeds."""
     root = Path(repo_root) if repo_root is not None else Path(".")
     try:
         from rebar._engine import engine_dir
