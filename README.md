@@ -32,25 +32,33 @@ brew install navapbc/rebar/rebar # or via Homebrew
 
 ## Quickstart
 
-Run one ticket end-to-end across all three surfaces. `rebar --help` (and
+Run one ticket end-to-end with the CLI or the Python library; the JSON block is the
+MCP server config so agents can drive the same loop over MCP. `rebar --help` (and
 `rebar <command> --help`) is the authoritative command reference.
 
 ```bash
-rebar init && rebar create task "Add a login page"    # CLI: init + create
-rebar ready && rebar claim reel-lot-tea --assignee alice
-rebar transition reel-lot-tea in_progress closed       # -> UNBLOCKED: …
+# CLI: one ticket through init -> create -> ready -> claim -> close
+rebar init
+tid=$(rebar create task "Add a login page" | tail -1)   # capture the new ticket id
+rebar ready                                              # lists it as ready to work
+rebar claim "$tid" --assignee alice                     # open -> in_progress
+rebar transition "$tid" in_progress closed              # in_progress -> closed
 ```
 ```python
-import rebar                                            # Python library
+import rebar                                            # the same loop via the Python library
 tid = rebar.create_ticket("task", "Add a login page")
-rebar.claim(tid, assignee="alice"); rebar.transition(tid, "in_progress", "closed")
+rebar.claim(tid, assignee="alice")
+rebar.transition(tid, "in_progress", "closed")
 ```
 ```json
 { "mcpServers": { "rebar": { "command": "uvx", "args": ["--from", "nava-rebar[mcp]", "rebar-mcp"] } } }
 ```
 
-That's the whole loop — **init → create → ready → claim → close** — shared through the
-repo so many agents (and teammates via Jira) coordinate without stepping on each other.
+That's the whole loop — **init → create → ready → claim → close**. The CLI and Python
+blocks each drive **one** ticket end-to-end (the same id threaded through every step, no
+hard-coded id); the JSON is the MCP server config — add it to your client so an agent can
+run the same loop via the MCP tools. State is shared through the repo so many agents (and
+teammates via Jira) coordinate without stepping on each other.
 
 ## How it works
 
