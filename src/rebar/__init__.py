@@ -81,6 +81,7 @@ from rebar._lib_writes import (
     _python_leaf as _python_leaf,
 )
 from rebar._lib_writes import (
+    add_identity_key,
     append_session_log,
     archive,
     attach_commits,
@@ -95,6 +96,7 @@ from rebar._lib_writes import (
     link,
     reopen,
     resolve_current_identity,
+    revoke_identity_key,
     sign_manifest,
     start_session_log,
     tag,
@@ -141,6 +143,8 @@ __all__ = [
     "init_repo",
     "create_ticket",
     "create_identity",
+    "add_identity_key",
+    "revoke_identity_key",
     "use_identity",
     "resolve_current_identity",
     "idea",

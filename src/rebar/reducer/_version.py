@@ -35,7 +35,14 @@ from __future__ import annotations
 # survives, the mutation is invisible until it upgrades). The integer itself is
 # declarative only — forward-compat is governed by ``KNOWN_EVENT_TYPES`` below, not
 # by this value; nothing gates behavior on it.
-SCHEMA_VERSION = 3
+# v4 (epic gnu-whale-ichor / e165): the new ``KEY_ADD`` / ``KEY_REVOKE`` event bodies
+# fold an identity's signed key LIFECYCLE (TOFU genesis, signed add/revoke) into an
+# epoch-scoped keyring. Like TAG_DELTA (v3) this adds new event *body* types, so it
+# engages the unknown-type forward-compat path: an older (v3) clone preserves-and-ignores
+# a ``KEY_ADD``/``KEY_REVOKE`` (the file survives, the keyring mutation is invisible until
+# it upgrades). The integer is declarative only — forward-compat is governed by
+# ``KNOWN_EVENT_TYPES`` below.
+SCHEMA_VERSION = 4
 
 # Types that appear on disk but are intentionally NOT in KNOWN_EVENT_TYPES because
 # they are handled OUTSIDE the main replay dispatch: the bridge-only ``SYNC`` and
@@ -70,6 +77,13 @@ def is_unknown_newer_type(event_type: str) -> bool:
 # so the literal cannot drift between them.
 TAG_DELTA = "TAG_DELTA"
 
+# The KEY_ADD / KEY_REVOKE event type names (epic gnu-whale-ichor / e165) — a single
+# source of truth shared by the reducer dispatch (here, via KNOWN_EVENT_TYPES), the
+# write-path allow-list (``_store.event_append.EVENT_TYPES``), and the identity write
+# gate, so the literals cannot drift between them.
+KEY_ADD = "KEY_ADD"
+KEY_REVOKE = "KEY_REVOKE"
+
 # Every event_type the reducer's processor dispatch (_processors.replay) applies.
 # Anything outside this set is forward-compat payload: preserved-and-ignored.
 KNOWN_EVENT_TYPES = frozenset(
@@ -101,5 +115,11 @@ KNOWN_EVENT_TYPES = frozenset(
         # Tag add/remove deltas (epic P2.3): replace whole-field EDIT.tags (LWW
         # clobber) so concurrent tag edits converge. Folded by process_tag_delta.
         TAG_DELTA,
+        # Identity key lifecycle (epic gnu-whale-ichor / e165): signed add/revoke folded
+        # into an epoch-scoped keyring by process_key_event. Known (not forward-compat)
+        # so compaction squashes them into a SNAPSHOT (the keyring/keyring_epoch are
+        # preserved in compiled_state, restored by process_snapshot).
+        KEY_ADD,
+        KEY_REVOKE,
     }
 )
