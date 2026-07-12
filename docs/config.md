@@ -43,9 +43,11 @@
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 
-- **Core stays minimal** — the ONLY runtime dependency is `pyyaml`, the workflow
-  DSL loader (`pyproject.toml` `dependencies = ["pyyaml>=6"]`); the engine core and
-  reconciler are otherwise stdlib-only, and all LLM/MCP/eval/tracing functionality
+- **Core stays minimal** — only three runtime dependencies: `pyyaml` (the workflow
+  DSL loader), `jsonschema` (the schema-registry + contract validator), and
+  `referencing` (its `$ref` resolver) (`pyproject.toml`
+  `dependencies = ["pyyaml>=6", "jsonschema>=4.18", "referencing>=0.30"]`); the engine
+  core and reconciler are otherwise stdlib-only, and all LLM/MCP/eval/tracing functionality
   is behind optional extras. So for *config* specifically: **no `pydantic-settings`**
   (use a stdlib `dataclass` + hand-rolled validation) and **no `platformdirs`**
   (resolve XDG by hand via `$XDG_CONFIG_HOME` / `~/.config`).

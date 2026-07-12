@@ -153,16 +153,18 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
   **live** Jira reconciliation.
 
 **Python dependencies.** A base install (`pip install nava-rebar`) — the `rebar`
-CLI, the `import rebar` library, and the lean workflow engine — pulls only two
-runtime dependencies: [`pyyaml`](https://pyyaml.org) (the workflow DSL loader) and
+CLI, the `import rebar` library, and the lean workflow engine — pulls only three
+runtime dependencies: [`pyyaml`](https://pyyaml.org) (the workflow DSL loader),
 [`jsonschema`](https://python-jsonschema.readthedocs.io) (the schema-registry +
-workflow input/output-contract validator); the engine core and reconciler are
+workflow input/output-contract validator), and
+[`referencing`](https://referencing.readthedocs.io) (the JSON Schema `$ref`
+resolver `jsonschema` builds on); the engine core and reconciler are
 otherwise stdlib-only. Everything else is an optional extra, lazy-imported so the
 base stays light (CI enforces that):
 
 - **Optional runtime capabilities** — install what you serve:
   - **`[mcp]`** — the [`rebar-mcp` server](https://modelcontextprotocol.io)
-    (`mcp>=1.2`).
+    (`mcp>=1.9`).
   - **`[agents]`** — the LLM agent-operations framework + agentic workflow steps
     (`rebar review`, the `code_review` workflow): the provider-agnostic
     [pydantic-ai](https://ai.pydantic.dev) runtime (`pydantic-ai-slim[anthropic]`)

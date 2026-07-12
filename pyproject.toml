@@ -40,7 +40,7 @@ classifiers = [
     "Topic :: Software Development :: Version Control :: Git",
 ]
 
-# Core stays deliberately tiny. Two runtime dependencies, both serving the
+# Core stays deliberately tiny. Three runtime dependencies, all serving the
 # LEAN-RUNTIME workflow + schema capability (epic a88f) that must work WITHOUT the
 # heavy `[agents]`/`[eval]`/`[tracing]` extras:
 #   - pyyaml: the YAML loader for the workflow DSL — loading + running a
@@ -57,7 +57,7 @@ classifiers = [
 #     transitive of jsonschema, but we declare what we import).
 # This is consistent with the optionality CI (the import-linter ban-list targets
 # only the heavy ML/telemetry stack: anthropic/inspect_ai/langchain*/langgraph*/
-# opentelemetry*; pyyaml + jsonschema are intentionally permitted in core).
+# opentelemetry*; pyyaml + jsonschema + referencing are intentionally permitted in core).
 # Everything else — the engine core and the reconciler — remains stdlib-only.
 dependencies = [
     "pyyaml>=6",
