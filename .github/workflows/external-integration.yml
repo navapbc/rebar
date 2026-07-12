@@ -16,6 +16,12 @@ name: external-integration
 
 on:
   workflow_dispatch: {}
+  # Scheduled weekly live-Jira integration canary (Mondays 06:00 UTC). The external
+  # job's fail-on-all-skip guard (tests/external/conftest.py) turns a run in which
+  # every Jira live test silently skipped into a failure, so a broken auth step or
+  # missing creds surfaces instead of a green no-op.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -58,10 +64,66 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
+      - name: Cache acli binary
+        id: cache-acli
+        uses: actions/cache@v4
+        with:
+          path: ~/.acli
+          key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
+
+      - name: Download + verify + install acli
+        if: steps.cache-acli.outputs.cache-hit != 'true'
+        env:
+          ACLI_VERSION: ${{ vars.ACLI_VERSION }}
+          ACLI_SHA256: ${{ vars.ACLI_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACLI_VERSION:-}" ] || [ "$ACLI_VERSION" = "latest" ]; then
+            echo "::error::ACLI_VERSION repo variable is unset or 'latest'. Pin a specific version (e.g. 1.3.14-stable) and set ACLI_SHA256 to its digest."
+            exit 1
+          fi
+          mkdir -p ~/.acli
+          curl -sSL "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_amd64.tar.gz" -o ~/.acli/acli.tar.gz
+          if [ -n "${ACLI_SHA256:-}" ]; then
+            echo "${ACLI_SHA256}  $HOME/.acli/acli.tar.gz" | sha256sum -c --strict
+          else
+            echo "::warning::ACLI_SHA256 unset — proceeding without checksum verification. Set it to: $(sha256sum ~/.acli/acli.tar.gz | awk '{print $1}')"
+          fi
+          tar xzf ~/.acli/acli.tar.gz -C ~/.acli/ --strip-components=1
+          chmod +x ~/.acli/acli
+          rm -f ~/.acli/acli.tar.gz
+          if [ ! -s "$HOME/.acli/acli" ] || [ ! -x "$HOME/.acli/acli" ]; then
+            echo "::error::Extracted acli binary missing, empty, or not executable"
+            ls -la ~/.acli/ || true
+            exit 1
+          fi
+          if ! "$HOME/.acli/acli" --version >/dev/null 2>&1; then
+            echo "::error::Extracted acli binary failed --version smoke check"
+            exit 1
+          fi
+
+      - name: Add acli to PATH and authenticate
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo ln -sf "$HOME/.acli/acli" /usr/local/bin/acli
+          echo "$JIRA_API_TOKEN" | acli jira auth login \
+            --site "$JIRA_URL" \
+            --email "$JIRA_USER" \
+            --token
+
       - name: Run the external-integration suite
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Live-Jira canary creds (repo variables + secret), mirroring reconcile-bridge.
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           # The external tier is inert unless this opt-in is set (a safety guard
           # against accidental billable calls); the job above already required a key.
           REBAR_RUN_EXTERNAL: "1"
