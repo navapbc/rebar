@@ -44,7 +44,11 @@ from rebar._store.canonical import canonical_bytes  # the single canonical seria
 from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
 from rebar._store.gitutil import _with_index_lock_retry
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
-from rebar.reducer._version import TAG_DELTA  # single source of truth for the type name
+from rebar.reducer._version import (  # single source of truth for the type names
+    KEY_ADD,
+    KEY_REVOKE,
+    TAG_DELTA,
+)
 
 # I2 event-type enum (matches write_commit_event's `case` allow-list).
 EVENT_TYPES = frozenset(
@@ -69,6 +73,9 @@ EVENT_TYPES = frozenset(
         "COMMITS",
         # Tag add/remove deltas (epic P2.3).
         TAG_DELTA,
+        # Identity key lifecycle (epic gnu-whale-ichor / e165): signed add/revoke.
+        KEY_ADD,
+        KEY_REVOKE,
         # Plan-review observability sidecar (epic 5fd2 / child db7b). Reducer-IGNORED
         # (NOT in KNOWN_EVENT_TYPES) so it never enters compiled state / hot paths and
         # compaction preserves it; it is in this WRITE allow-list so it can be emitted.
@@ -127,6 +134,7 @@ def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
             f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}, "
+            f"{KEY_ADD}, {KEY_REVOKE}, "
             "REVIEW_RESULT, COMPLETION_VERDICT, TICKET_DIGEST, ENQUEUE_ENRICH, CLAIM_ENRICH, "
             "DONE_ENRICH",
             1,

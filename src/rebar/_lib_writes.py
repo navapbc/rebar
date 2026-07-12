@@ -199,6 +199,49 @@ def create_identity(
     return {"id": res["id"], "alias": res["alias"] or ""}
 
 
+def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None) -> None:
+    """Add ``public_key`` to an identity's epoch-scoped keyring (epic gnu-whale-ichor).
+
+    GENESIS/TOFU: the first key on a keyless identity is added trust-on-first-use (no
+    signature). NON-GENESIS: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
+    ``authorship.keyop_payload("KEY_ADD", identity_id, public_key)``) is REQUIRED and must
+    verify against a currently-valid key, or the rotation is refused (``RebarError``)."""
+    from rebar._commands import identity as _identity
+    from rebar._commands._seam import CommandError
+
+    try:
+        _identity.add_identity_key(
+            identity_id, public_key, signature=signature, repo_root=repo_root
+        )
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar identity key add failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+
+
+def revoke_identity_key(identity_id, public_key, *, signature, repo_root=None) -> None:
+    """Revoke ``public_key`` from an identity's keyring (epic gnu-whale-ichor).
+
+    Always signed: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
+    ``authorship.keyop_payload("KEY_REVOKE", identity_id, public_key)``) is REQUIRED and
+    must verify against a currently-valid key, or the revoke is refused (``RebarError``)."""
+    from rebar._commands import identity as _identity
+    from rebar._commands._seam import CommandError
+
+    try:
+        _identity.revoke_identity_key(
+            identity_id, public_key, signature=signature, repo_root=repo_root
+        )
+    except CommandError as exc:
+        raise RebarError(
+            f"rebar identity key revoke failed (exit {exc.returncode}): {exc.message}",
+            returncode=exc.returncode,
+            stderr=exc.message,
+        ) from None
+
+
 def use_identity(identity_id: str, *, repo_root=None) -> None:
     """Point ``.rebar/current_identity`` at ``identity_id`` (a local, git-ignored
     pointer — never propagated across machines)."""

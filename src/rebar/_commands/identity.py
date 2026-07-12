@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rebar._commands._seam import CommandError, tracker_dir
+from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._commands.composer import create_core
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,27 @@ def _match_by_email(email: str, tracker: str) -> str | None:
 
 
 # ── public core functions ──────────────────────────────────────────────────────
+# ── write-time private-key guard (401a, epic gnu-whale-ichor) ───────────────────
+def reject_private_key_material(values: list[str]) -> None:
+    """Refuse (raise :class:`CommandError`) if any string in ``values`` carries a
+    private-key PEM/OpenSSH header.
+
+    An ``identity`` records only PUBLIC key material (authorized-keys lines); a private
+    key must never be written into an identity event. Detection is case-INSENSITIVE and
+    covers the ``-----BEGIN … PRIVATE KEY-----`` header family (OpenSSH, RSA, EC, DSA,
+    plain, and encoded/encrypted). A normal ``ssh-ed25519 AAAA…`` public line does NOT
+    match. Non-``str`` entries are ignored (defensive)."""
+    for v in values:
+        if not isinstance(v, str):
+            continue
+        low = v.lower()
+        if "private key-----" in low and "-----begin" in low:
+            raise CommandError(
+                "Error: refusing to store private-key material in an identity "
+                "(identities record public keys only)"
+            )
+
+
 def create_identity_core(
     name: str,
     email: str,
@@ -167,6 +188,7 @@ def create_identity_core(
     ``name`` becomes the title; ``email`` / ``mappings`` / ``keys`` ride the CREATE
     payload (see :func:`rebar._commands.composer.create_core`). Raises
     :class:`CommandError` on validation failure."""
+    reject_private_key_material(keys or [])
     return create_core(
         "identity",
         name,
@@ -176,6 +198,127 @@ def create_identity_core(
             "mappings": mappings or [],
             "keys": keys or [],
         },
+        repo_root=repo_root,
+    )
+
+
+def _identity_state(identity_id: str, *, repo_root=None) -> dict:
+    """Reduced state of an existing ``identity`` ticket, or raise :class:`CommandError`.
+
+    Fails closed: an unknown id, a non-identity ticket, or a reduce failure is a
+    :class:`CommandError` (the key-lifecycle gate must never operate on a non-identity)."""
+    import rebar
+
+    try:
+        state = rebar.show_ticket(identity_id, repo_root=repo_root)
+    except Exception as exc:  # noqa: BLE001 — surface any lookup failure as a command error
+        raise CommandError(f"Error: identity {identity_id!r} not found: {exc}") from None
+    if not isinstance(state, dict) or state.get("ticket_type") != "identity":
+        raise CommandError(f"Error: {identity_id!r} is not an identity ticket")
+    return dict(state)
+
+
+def _encode_signature(signature) -> str:
+    """Serialize a DSSE :class:`~rebar.attest.dsse.Envelope` to its canonical JSON string
+    for durable, auditable storage on the KEY event (round-trips via ``dsse.decode``)."""
+    from rebar.attest import dsse
+
+    return dsse.encode(
+        signature.payload_type,
+        signature.payload,
+        [{"keyid": s.keyid, "sig": s.sig} for s in signature.signatures],
+    )
+
+
+def _verify_keyop_signature(op: str, identity_id: str, public_key: str, signature, *, repo_root):
+    """Refuse (raise :class:`CommandError`) unless ``signature`` is a valid authorship
+    attestation over ``keyop_payload(op, identity_id, public_key)`` by a CURRENTLY-valid
+    key of ``identity_id``. Two independent checks, both required:
+
+    1. ``signature.payload`` is EXACTLY the canonical key-op payload — so a signature over
+       some other op / identity / key can't be replayed here.
+    2. :func:`authorship.verify_authorship` verifies it against the identity's currently
+       valid keys — so an outsider (or a revoked key) cannot authorize the rotation.
+    """
+    from rebar.attest import authorship, dsse
+
+    if not isinstance(signature, dsse.Envelope):
+        raise CommandError(
+            f"Error: {op} requires a signature (dsse.Envelope) for a non-genesis key"
+        )
+    expected = authorship.keyop_payload(op, identity_id, public_key)
+    if signature.payload != expected:
+        raise CommandError(
+            f"Error: {op} signature does not cover this key operation "
+            f"(payload mismatch for identity {identity_id!r})"
+        )
+    verdict = authorship.verify_authorship(signature, identity_id, repo_root=repo_root)
+    if not verdict.verified:
+        raise CommandError(
+            f"Error: {op} signature is not signed by a currently-valid key of "
+            f"identity {identity_id!r} ({verdict.verdict}: {verdict.reason})"
+        )
+
+
+def add_identity_key(
+    identity_id: str,
+    public_key: str,
+    *,
+    signature=None,
+    repo_root=None,
+) -> None:
+    """Add ``public_key`` to an identity's keyring (epic gnu-whale-ichor / e165).
+
+    GENESIS / TOFU: when the identity currently has NO valid keys, the first key is added
+    trust-on-first-use — no signature is required (there is no prior key that could sign
+    it). NON-GENESIS: once the identity holds at least one valid key, ``signature`` (a
+    :class:`~rebar.attest.dsse.Envelope` over ``keyop_payload("KEY_ADD", identity_id,
+    public_key)``) is REQUIRED and must verify against a currently-valid key; otherwise the
+    rotation is REFUSED and NO event is appended. On success a ``KEY_ADD`` event is
+    appended (the signature envelope, if any, is stored encoded for auditability)."""
+    if not isinstance(public_key, str) or not public_key.strip():
+        raise CommandError("Error: add_identity_key requires a non-empty public key")
+    public_key = public_key.strip()
+    reject_private_key_material([public_key])
+    state = _identity_state(identity_id, repo_root=repo_root)
+    is_genesis = not (state.get("keys") or [])
+    encoded_sig = None
+    if not is_genesis:
+        _verify_keyop_signature("KEY_ADD", identity_id, public_key, signature, repo_root=repo_root)
+        encoded_sig = _encode_signature(signature)
+    append_event(
+        identity_id,
+        "KEY_ADD",
+        {"public_key": public_key, "signature": encoded_sig, "op": "KEY_ADD"},
+        tracker_dir(repo_root),
+        repo_root=repo_root,
+    )
+
+
+def revoke_identity_key(
+    identity_id: str,
+    public_key: str,
+    *,
+    signature,
+    repo_root=None,
+) -> None:
+    """Revoke ``public_key`` from an identity's keyring (epic gnu-whale-ichor / e165).
+
+    A revoke is ALWAYS signed: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
+    ``keyop_payload("KEY_REVOKE", identity_id, public_key)``) is REQUIRED and must verify
+    against a currently-valid key of the identity; otherwise the revoke is REFUSED and NO
+    event is appended. On success a ``KEY_REVOKE`` event is appended, closing the key's
+    validity window at the revoke event's position (its introducing commit)."""
+    if not isinstance(public_key, str) or not public_key.strip():
+        raise CommandError("Error: revoke_identity_key requires a non-empty public key")
+    public_key = public_key.strip()
+    _identity_state(identity_id, repo_root=repo_root)
+    _verify_keyop_signature("KEY_REVOKE", identity_id, public_key, signature, repo_root=repo_root)
+    append_event(
+        identity_id,
+        "KEY_REVOKE",
+        {"public_key": public_key, "signature": _encode_signature(signature), "op": "KEY_REVOKE"},
+        tracker_dir(repo_root),
         repo_root=repo_root,
     )
 
@@ -212,11 +355,56 @@ def resolve_current_identity(*, repo_root=None) -> str | None:
 
 # ───────────────────────────────── CLI ───────────────────────────────────────
 _USAGE = (
-    "Usage: rebar identity <create | use>\n"
+    "Usage: rebar identity <create | use | key>\n"
     "  create --name <n> --email <e> [--mapping <provider>:<external_id>]... "
     '[--key "<authorized-keys line>"]... [--self]\n'
-    "  use <id>"
+    "  use <id>\n"
+    '  key add <id> "<authorized-keys line>" [--signature-file <path>]\n'
+    '  key revoke <id> "<authorized-keys line>" --signature-file <path>'
 )
+
+
+def _load_signature(path: str | None):
+    """Decode a DSSE :class:`~rebar.attest.dsse.Envelope` from a ``dsse.encode`` JSON file,
+    or ``None`` when no ``--signature-file`` was given (genesis add). Raises
+    :class:`CommandError` on a missing/malformed file."""
+    if path is None:
+        return None
+    from rebar.attest import dsse
+
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+        return dsse.decode(text)
+    except (OSError, ValueError, KeyError) as exc:
+        raise CommandError(f"Error: could not read signature file {path!r}: {exc}") from None
+
+
+def _parse_key(argv: list[str]) -> dict:
+    """Parse ``key <add|revoke> <id> <pubkey> [--signature-file <path>]``."""
+    if len(argv) < 3:
+        raise CommandError(f"Error: 'key' requires <add|revoke> <id> <pubkey>\n{_USAGE}")
+    action, identity_id, public_key = argv[0], argv[1], argv[2]
+    if action not in ("add", "revoke"):
+        raise CommandError(f"Error: unknown key action '{action}' (add|revoke)\n{_USAGE}")
+    sig_file: str | None = None
+    i, n = 3, len(argv)
+    while i < n:
+        a = argv[i]
+        if a == "--signature-file" or a.startswith("--signature-file="):
+            if a.startswith("--signature-file="):
+                sig_file, i = a[len("--signature-file=") :], i + 1
+            elif i + 1 >= n:
+                raise CommandError(f"Error: --signature-file requires a value\n{_USAGE}")
+            else:
+                sig_file, i = argv[i + 1], i + 2
+        else:
+            raise CommandError(f"Error: unknown option '{a}'\n{_USAGE}")
+    return {
+        "action": action,
+        "identity_id": identity_id,
+        "public_key": public_key,
+        "sig_file": sig_file,
+    }
 
 
 def _parse_create(argv: list[str]) -> dict:
@@ -298,6 +486,28 @@ def identity_cli(argv: list[str], *, repo_root=None) -> int:
                 raise CommandError(f"Error: 'use' requires exactly one <id>\n{_USAGE}")
             use_identity(rest[0], repo_root=repo_root)
             print(f"Now using identity {rest[0]}")
+            return 0
+        if verb == "key":
+            opts = _parse_key(rest)
+            signature = _load_signature(opts["sig_file"])
+            if opts["action"] == "add":
+                add_identity_key(
+                    opts["identity_id"],
+                    opts["public_key"],
+                    signature=signature,
+                    repo_root=repo_root,
+                )
+                print(f"Added key to identity {opts['identity_id']}")
+            else:
+                if signature is None:
+                    raise CommandError(f"Error: key revoke requires --signature-file\n{_USAGE}")
+                revoke_identity_key(
+                    opts["identity_id"],
+                    opts["public_key"],
+                    signature=signature,
+                    repo_root=repo_root,
+                )
+                print(f"Revoked key from identity {opts['identity_id']}")
             return 0
         print(f"Error: unknown identity action '{verb}'\n{_USAGE}", file=sys.stderr)
         return 1

@@ -20,6 +20,8 @@ guarantees:
 
 from __future__ import annotations
 
+import os
+import subprocess
 from typing import cast
 
 from rebar.attest import dsse, registry, sshsig
@@ -93,6 +95,164 @@ def resolve_trust_root(identity_id: str, *, repo_root=None) -> str | None:
     if not keys:
         return None
     return allowed_signers_from_keys(keys, principal=identity_id)
+
+
+def keyop_payload(op: str, identity_id: str, public_key: str) -> bytes:
+    """The canonical bytes a KEY-op signature covers (epic gnu-whale-ichor / e165).
+
+    ``op`` is ``"KEY_ADD"`` / ``"KEY_REVOKE"``. The payload binds the operation to a
+    specific identity AND public key, so a signature over one key-op can never be
+    replayed as authorization for a different op / identity / key. Canonical (sorted-key,
+    compact) so signer and verifier derive byte-identical bytes independent of dict order.
+    """
+    from rebar._store.canonical import canonical_str
+
+    return canonical_str({"op": op, "identity_id": identity_id, "public_key": public_key}).encode(
+        "utf-8"
+    )
+
+
+def _keyring_for(identity_id: str, *, repo_root=None) -> list:
+    """The identity's position-based ``keyring`` records, or ``[]`` on ANY lookup problem
+    (unknown id, corrupt store, non-identity, I/O). Never raises — mirrors
+    :func:`resolve_trust_root`'s fail-closed contract."""
+    import rebar
+
+    try:
+        ticket = rebar.show_ticket(identity_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — any lookup failure → no keyring, never raise
+        return []
+    if not isinstance(ticket, dict):
+        return []
+    ring = ticket.get("keyring")
+    return ring if isinstance(ring, list) else []
+
+
+def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> str | None:
+    """The tickets-branch commit SHA that INTRODUCED the event file with ``position``
+    prefix, or ``None`` (epic gnu-whale-ichor — the git-commit-ancestry anchor).
+
+    ``position`` is an event's ``{timestamp}-{uuid}`` filename prefix; the event TYPE is
+    NOT an input, so we glob the prefix (``<position>-*.json``) under ``ticket_dir`` and ask
+    ``git log --diff-filter=A`` for the commit that added it. The LAST line of the log (the
+    oldest = the add commit) is returned. Any failure — git non-zero, no match, git missing,
+    a timeout, or any exception — yields ``None``; this function NEVER raises (fail-closed,
+    mirroring :func:`resolve_trust_root`)."""
+    if not position or not ticket_dir:
+        return None
+    try:
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
+        rel = os.path.relpath(ticket_dir, tracker)
+        pathspec = f"{rel}/{position}-*.json"
+        proc = subprocess.run(
+            ["git", "-C", tracker, "log", "--diff-filter=A", "--format=%H", "--", pathspec],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            return None
+        lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        return lines[-1] if lines else None
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → no commit, never raise (fail-closed)
+        return None
+
+
+def verify_authorship_at_commit(
+    envelope: dsse.Envelope,
+    identity_id: str,
+    event_commit: str,
+    event_position: str | None,
+    *,
+    repo_root=None,
+) -> registry.Verdict:
+    """Verify ``envelope`` against ONLY the keys valid for the event at ``event_commit``
+    (epic gnu-whale-ichor — the git-commit-ancestry validity model).
+
+    Unlike :func:`verify_authorship` (which trusts the identity's CURRENTLY-valid keys), the
+    trust root here is built from exactly the keyring records that were live as of
+    ``event_commit``. For each record the ``added_at`` / ``revoked_at`` POSITIONS are
+    resolved to commits via :func:`resolve_event_commit`; a key is VALID iff its add-commit
+    is an ANCESTOR of ``event_commit`` AND (its revoke-commit is ``None`` OR is NOT an
+    ancestor of ``event_commit``). Ancestry is decided by ``git merge-base --is-ancestor``.
+
+    Intra-commit refinement: ``merge-base --is-ancestor(C, C)`` is true, so when a key's
+    add/revoke commit EQUALS ``event_commit`` and ``event_position`` is given, the two are
+    ordered by POSITION instead (a total order within one commit): added-in-same-commit
+    counts as added iff ``added_at <= event_position``; revoked-in-same-commit counts as
+    revoked iff ``revoked_at <= event_position``.
+
+    An empty valid-key trust root yields a non-verified ``"unknown_principal"`` Verdict.
+    ANY git subprocess failure / timeout / exception also yields a non-verified Verdict —
+    this function NEVER raises for a git/lookup problem (fail-closed)."""
+    try:
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
+        ticket_dir = os.path.join(tracker, identity_id)
+
+        def _is_ancestor(ancestor: str, descendant: str) -> bool:
+            proc = subprocess.run(
+                ["git", "-C", tracker, "merge-base", "--is-ancestor", ancestor, descendant],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return proc.returncode == 0
+
+        valid_keys: list[str] = []
+        for rec in _keyring_for(identity_id, repo_root=repo_root):
+            if not isinstance(rec, dict):
+                continue
+            pub = rec.get("public_key")
+            added_at = rec.get("added_at")
+            revoked_at = rec.get("revoked_at")
+            if not isinstance(pub, str) or not pub or not isinstance(added_at, str) or not added_at:
+                continue
+            added_commit = resolve_event_commit(added_at, ticket_dir, repo_root=repo_root)
+            if added_commit is None:
+                continue
+            # Added as of event_commit? Refine to a position compare within one commit.
+            if added_commit == event_commit and event_position is not None:
+                added = added_at <= event_position
+            else:
+                added = _is_ancestor(added_commit, event_commit)
+            if not added:
+                continue
+            # Revoked as of event_commit? Same intra-commit refinement.
+            revoked = False
+            if isinstance(revoked_at, str) and revoked_at:
+                revoked_commit = resolve_event_commit(revoked_at, ticket_dir, repo_root=repo_root)
+                if revoked_commit is not None:
+                    if revoked_commit == event_commit and event_position is not None:
+                        revoked = revoked_at <= event_position
+                    else:
+                        revoked = _is_ancestor(revoked_commit, event_commit)
+            if revoked:
+                continue
+            valid_keys.append(pub)
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → non-verified, never raise (fail-closed)
+        return registry.Verdict(
+            verified=False,
+            verdict="unknown_principal",
+            reason=(
+                f"authorship verification for identity {identity_id!r} failed (git/lookup error)"
+            ),
+        )
+
+    if not valid_keys:
+        return registry.Verdict(
+            verified=False,
+            verdict="unknown_principal",
+            reason=(
+                f"no keys valid at commit {event_commit!r} for identity {identity_id!r} "
+                "(key not yet added, already revoked, or identity unknown/keyless)"
+            ),
+        )
+    trust_root = allowed_signers_from_keys(valid_keys, principal=identity_id)
+    return registry.verify(AUTHORSHIP_KIND, envelope, trust_root)
 
 
 def verify_authorship(

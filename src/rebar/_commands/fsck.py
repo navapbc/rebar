@@ -60,6 +60,11 @@ _HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
         "WORKFLOW_RUN",
         "WORKFLOW_STEP",
         "ARCHIVED",
+        # Identity key lifecycle (epic gnu-whale-ichor / e165): a KEY_ADD/KEY_REVOKE lands
+        # on an identity, not the ticket graph, so it is never a graph orphan — but it is
+        # epoch-order-sensitive (a blind rebuild could reorder add/revoke), so human-triage.
+        "KEY_ADD",
+        "KEY_REVOKE",
     }
 )
 

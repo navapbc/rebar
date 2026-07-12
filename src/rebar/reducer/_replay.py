@@ -24,6 +24,7 @@ from ._processors import (
     process_create,
     process_edit,
     process_file_impact,
+    process_key_event,
     process_link,
     process_revert,
     process_signature,
@@ -35,7 +36,7 @@ from ._processors import (
     process_workflow_run,
     process_workflow_step,
 )
-from ._version import KNOWN_EVENT_TYPES, TAG_DELTA
+from ._version import KEY_ADD, KEY_REVOKE, KNOWN_EVENT_TYPES, TAG_DELTA
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,8 @@ _EVENT_HANDLERS: dict[str, Callable[[_ReplayCtx], dict | None]] = {
     "WORKFLOW_STEP": lambda c: process_workflow_step(c.state, c.event, c.data),
     "COMMITS": lambda c: process_commits(c.state, c.event, c.data),
     TAG_DELTA: lambda c: process_tag_delta(c.state, c.data),
+    KEY_ADD: lambda c: process_key_event(c.state, c.event, c.data, KEY_ADD),
+    KEY_REVOKE: lambda c: process_key_event(c.state, c.event, c.data, KEY_REVOKE),
     "ARCHIVED": lambda c: process_archived(c.state),
     "SNAPSHOT": lambda c: process_snapshot(c.state, c.data),
 }

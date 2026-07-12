@@ -40,7 +40,12 @@ def is_active_event(name: str) -> bool:
 #   v4: replay now projects the kind-keyed `attestations` map (epic
 #       dark-acme-lumen); pre-v4 caches lack it, hiding a signed plan-review
 #       attestation and wrongly blocking `claim` (bug wait-warp-inlay)
-_REDUCER_CACHE_VERSION = 4
+#   v5: replay now projects an identity's epoch-scoped `keyring` + `keyring_epoch`
+#       (epic gnu-whale-ichor / e165); pre-v5 caches lack them
+#   v6: keyring is now POSITION-based — records are {public_key, added_at, revoked_at}
+#       and the `keyring_epoch` cursor is gone (epic gnu-whale-ichor, git-commit-ancestry
+#       validity); pre-v6 caches hold stale epoch-era records
+_REDUCER_CACHE_VERSION = 6
 
 
 def read_cache(cache_path: str, dir_hash: str) -> dict | None:
