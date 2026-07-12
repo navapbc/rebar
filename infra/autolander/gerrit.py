@@ -142,6 +142,25 @@ class GerritClient:
         _status, text = self._request("POST", f"/changes/{self._q(change_id)}/submit", body={})
         return json.loads(_strip_xssi(text))
 
+    def set_review(
+        self,
+        change_id: str,
+        *,
+        message: str | None = None,
+        labels: dict | None = None,
+    ) -> dict:
+        """`POST /changes/<id>/revisions/current/review` — post a comment and/or set label
+        votes (e.g. `{"Autosubmit": 0}` to remove a land request). -> the ReviewResult."""
+        body: dict = {}
+        if message is not None:
+            body["message"] = message
+        if labels is not None:
+            body["labels"] = labels
+        _status, text = self._request(
+            "POST", f"/changes/{self._q(change_id)}/revisions/current/review", body=body
+        )
+        return json.loads(_strip_xssi(text))
+
     @staticmethod
     def _q(change_id: str) -> str:
         """URL-encode a change id (`project~branch~Iabc` ids contain `~`)."""
