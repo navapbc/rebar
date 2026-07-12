@@ -303,6 +303,25 @@ class VerifyConfig:
 
 
 @dataclass
+class IdentityConfig:
+    # Opt-in authenticated-authorship enforcement (epic gnu-whale-ichor). When true,
+    # `rebar verify-authorship` (the CI merge-gate) FAILS if any in-scope mutating event
+    # is not a `verified` authored signature, and the UX write-gate refuses a write that
+    # cannot be signed (no resolvable identity / no signing key) for the gate-exempt types.
+    # Default off ⇒ authorship is advisory (signed best-effort, never enforced). Turning it
+    # off is the rollback. Env override: REBAR_IDENTITY_REQUIRE_AUTHENTICATED. Mirrors the
+    # verify.require_ticket_for_commit opt-in gate pattern. See docs/llm-framework.md /
+    # the identity epic.
+    require_authenticated: bool = False
+    # Path to the OpenSSH PRIVATE key used to sign event authorship at write time. When set
+    # (and a current identity resolves), each event's canonical bytes are signed and the DSSE
+    # envelope stored as `author_sig` on the event. Unset ⇒ events are written unsigned (the
+    # merge-gate then flags them when require_authenticated is on). Env override:
+    # REBAR_IDENTITY_SIGNING_KEY.
+    signing_key: str | None = None
+
+
+@dataclass
 class TicketConfig:
     display_mode: str = "auto"
     # The assignee `claim` falls back to when none is given (story c36c). A LOCAL
@@ -413,6 +432,7 @@ class Config:
     :meth:`from_mapping`. Secrets are NOT here (env/.env only)."""
 
     verify: VerifyConfig = field(default_factory=VerifyConfig)
+    identity: IdentityConfig = field(default_factory=IdentityConfig)
     ticket: TicketConfig = field(default_factory=TicketConfig)
     ticket_clarity: TicketClarityConfig = field(default_factory=TicketClarityConfig)
     compact: CompactConfig = field(default_factory=CompactConfig)
@@ -438,6 +458,7 @@ class Config:
 # ── schema: the single source of coercion truth (sparse parse + defaults) ─────
 _SECTION_CLASSES: dict[str, type] = {
     "verify": VerifyConfig,
+    "identity": IdentityConfig,
     "ticket": TicketConfig,
     "ticket_clarity": TicketClarityConfig,
     "compact": CompactConfig,
@@ -469,6 +490,10 @@ _SECTIONS: dict[str, dict] = {
         "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),
+    },
+    "identity": {
+        "require_authenticated": lambda v, k: _as_bool(v, k),
+        "signing_key": lambda v, k: _as_str(v, k),
     },
     "ticket": {
         "display_mode": lambda v, k: _as_str(v, k) or "auto",
