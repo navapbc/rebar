@@ -108,6 +108,11 @@ REVIEW_RESULT = "review_result"
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
 # outputSchema); the CLI/library JSON path is pinned via the "verify_completion" key.
 COMPLETION_VERDICT = "completion_verdict"
+# `rebar verify-identity --format json` report entry (epic gnu-whale-ichor / AC7, bff8).
+# verify-identity is an INTERCEPT command (not in the CLI help-arm system), so the --output
+# coverage guard never drives it live; registered in OUTPUT_SCHEMAS below under a synthetic
+# "verify_identity" key so the every-schema-file-is-wired guard sees verify_identity_report.
+VERIFY_IDENTITY_REPORT = "verify_identity_report"
 # rebar.llm — output of the Cupid ticket-digest enrichment op (epic only-crave-art,
 # ee3d). No CLI --output help arm (the coverage guard never drives it live); registered
 # in OUTPUT_SCHEMAS below under a synthetic "enrich" key so the every-schema-file-is-wired
@@ -290,6 +295,10 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
     # registered here so the every-schema-file-is-wired guard sees completion_verdict.
     "verify_completion": COMPLETION_VERDICT,
+    # verify-identity merge-gate JSON report (AC7): synthetic key, no CLI help arm (the
+    # --output coverage guard never drives it live); registered so the every-schema-file-is-
+    # wired guard sees verify_identity_report.
+    "verify_identity": VERIFY_IDENTITY_REPORT,
     # Cupid ticket-digest enrichment op (epic only-crave-art, ee3d): no CLI --output arm
     # (coverage guard never drives it live); registered so the every-schema-file-is-wired
     # guard sees ticket_digest and the runner validates enrich's structured output.
