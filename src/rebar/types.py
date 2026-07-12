@@ -19,7 +19,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 # --- shared enums (common.schema.json) ---
 TicketStatus = Literal["idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"]
-TicketType = Literal["bug", "epic", "story", "task", "session_log", "code_review"]
+TicketType = Literal["bug", "epic", "story", "task", "session_log", "code_review", "identity"]
 Relation = Literal[
     "blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"
 ]
