@@ -63,6 +63,8 @@ Day-to-day use of rebar through the CLI.
   experience them. Start here.
 - **[cli-reference.md](cli-reference.md)** — the complete CLI command reference
   (generated from the CLI's own help data; do not edit by hand).
+- **[mcp-reference.md](mcp-reference.md)** — the complete MCP tool reference, grouped by
+  gate tier (generated from the MCP server's own registrars; do not edit by hand).
 - **[README.md](README.md)** — this index of the `docs/` tree.
 - **[import-export.md](import-export.md)** — moving tickets in and out of the store
   as NDJSON with `rebar export` / `rebar import` (a lossy interop projection, not a

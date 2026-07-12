@@ -293,6 +293,20 @@ jobs:
           fi
           echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
 
+      # MCP-reference drift gate (ticket 235a): docs/mcp-reference.md is DERIVED from the
+      # MCP server's own registrars (read/llm/write), classified by gate tier. Regenerate
+      # and fail on any diff, so a newly-registered MCP tool cannot ship undocumented.
+      - name: MCP-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_mcp_reference.py
+          if ! git diff --exit-code -- docs/mcp-reference.md; then
+            echo "::error::docs/mcp-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_mcp_reference.py"
+            exit 1
+          fi
+          echo "MCP-reference drift gate: OK (docs/mcp-reference.md is up to date)."
+
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
       # `vendored_at` is older than the quarterly cadence, prompting a deliberate

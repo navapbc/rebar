@@ -251,6 +251,18 @@ jobs:
           fi
           echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
 
+      # MCP-reference drift gate in the Verified gate too (mirrors test.yml, ticket 235a).
+      - name: MCP-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_mcp_reference.py
+          if ! git diff --exit-code -- docs/mcp-reference.md; then
+            echo "::error::docs/mcp-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_mcp_reference.py"
+            exit 1
+          fi
+          echo "MCP-reference drift gate: OK (docs/mcp-reference.md is up to date)."
+
       - name: Security-rules freshness gate (warn-only)
         shell: bash
         run: python -m rebar.grounding.detectors.security_pin
