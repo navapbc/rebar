@@ -52,8 +52,10 @@ finding) are enforced at the normal threshold and must still be resolved; a nove
    machinery), the registry is unchanged, a prior sidecar with finding text exists, and the
    last review is within the freshness window (reset on each review). Any precondition
    failing → a **byte-identical full review**. A separate evidence-gate flag
-   (`novelty_drop_active`, default off) keeps the floor inert until the
-   `discriminates_novelty` eval has proven the novelty signal discriminates.
+   (`novelty_drop_active`) completes the triple gate. (Update 2026-07-11: both flags now
+   default ON — operator-authorized on field evidence in lieu of the `discriminates_novelty`
+   eval; an explicit `false` on either is the back-out. As written at acceptance time, both
+   shipped default-off pending that eval.)
 
 ### Within-session suppression (a deliberate, honest bound)
 
@@ -93,6 +95,8 @@ the full criteria set; only the *surfacing* of novel low-priority findings is su
 - **One of three Pass-3 floors.** This novelty floor is one of three deterministic Pass-3
   drop/refresh paths along independent axes: **novelty** (this ADR — plan-edit convergence),
   **material freshness** (ADR 0002 drift-refresh), and **delivered-completion** (ADR 0024 —
-  the container completion floor). They compose; each is separately gated and inert by default.
+  the container completion floor). They compose; each is separately gated. (Update
+  2026-07-11: the novelty floor's two flags now default ON, operator-authorized on field
+  evidence; the other two floors remain inert by default.)
 - Suppression is **observable**: narrowed verdicts record `narrowed` + `floored_criteria`
   + `floored_finding_ids` on coverage, and the dropped findings live in the sidecar.

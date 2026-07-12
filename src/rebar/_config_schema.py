@@ -259,9 +259,9 @@ class VerifyConfig:
     # Convergent plan-edit re-review (epic 7d43, child ec89): when true, a re-review of an
     # EDITED plan whose reviewed CODE is unchanged runs in remediation mode — the full criteria
     # set still runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor,
-    # child cc5b). Default OFF for v1 (expand-contract: ship off → validate on the dogfood
-    # corpus → flip in a follow-up); off/absent restores byte-identical full-review behavior.
-    remediation_mode: bool = False
+    # child cc5b). Default ON (operator-authorized on field evidence, 2026-07-11); an explicit
+    # false is the back-out and restores byte-identical full-review behavior.
+    remediation_mode: bool = True
     # The freshness window (minutes) for remediation mode: a re-review is eligible only when the
     # LAST review of any kind was within this many minutes, measured from that last review and
     # RESET on each review (so the loop persists across a series of edits and lapses to a normal
@@ -275,11 +275,12 @@ class VerifyConfig:
     # scripts/plan_review_impact_distribution.py). Both config-overridable.
     novelty_drop_threshold: float = 0.7
     novelty_priority_floor: float = 0.4
-    # The EVIDENCE GATE: the rising floor stays inert (gate runs un-floored) until this is flipped
-    # true — done MANUALLY by the operator only after 150b's `discriminates_novelty` eval has
-    # cleared its bar (`rebar prompt eval plan-review-novelty`). Default False (a third gate on top
-    # of remediation_mode + per-review eligibility), so the floor never drops a finding by default.
-    novelty_drop_active: bool = False
+    # The EVIDENCE GATE for the rising floor (shared with the code-review region-gated floor,
+    # ADR 0037). Default True (operator-authorized on field evidence, 2026-07-11, in lieu of
+    # 150b's `discriminates_novelty` eval); it remains a third gate on top of remediation_mode +
+    # per-review eligibility. An explicit false is the back-out: the floor goes inert and never
+    # drops a finding.
+    novelty_drop_active: bool = True
 
     # Pass-3 COMPLETION floor (epic 66ac / story 6533) — the container-completion analogue of the
     # novelty rising floor, for a re-fired epic/story-with-children review. A finding is DROPPED iff

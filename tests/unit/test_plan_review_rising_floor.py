@@ -83,7 +83,7 @@ def test_apply_floor_no_drop_leaves_verdict_untouched() -> None:
     assert v["coverage"]["counts"]["advisory_surfaced"] == 3
 
 
-# ── the triple gate (inert by default; evidence gate) ─────────────────────────────────────────
+# ── the triple gate (default-ON evidence gate; explicit false = back-out) ─────────────────────
 def _cfg(*, remediation_mode=True, novelty_drop_active=True):
     verify = types.SimpleNamespace(
         novelty_drop_active=novelty_drop_active,
@@ -163,7 +163,7 @@ def test_config_defaults() -> None:
     vc = core_config.VerifyConfig()
     assert vc.novelty_drop_threshold == 0.7
     assert vc.novelty_priority_floor == 0.4
-    assert vc.novelty_drop_active is False  # inert by default (the evidence gate)
+    assert vc.novelty_drop_active is True  # default-ON (operator-authorized 2026-07-11)
 
 
 # ── surfaced-only prior set (bug old-frilly-plankton) ─────────────────────────────────────────

@@ -4,7 +4,8 @@ The freshness-window + precondition check that decides whether a re-review is el
 remediation mode (the Pass-3 rising floor it gates is child cc5b). These tests pin: ALL
 preconditions are required (any one failing → not eligible → full review), the code-unchanged /
 plan-changed / registry-unchanged signals, the window math (reset on each review), the
-default-OFF config rollout, and the byte-identical full-review back-out.
+default-ON config (since 2026-07-11), and the byte-identical full-review back-out (explicit
+false).
 """
 
 from __future__ import annotations
@@ -186,11 +187,37 @@ def test_candidate_never_raises_on_any_precondition_error(monkeypatch, victim) -
     assert d["eligible"] is False
 
 
-# ── config keys (default-OFF rollout + the back-out) ──────────────────────────────────────────
-def test_config_defaults_off_and_60_minutes() -> None:
+# ── config keys (default-ON + the explicit-false back-out) ────────────────────────────────────
+def test_config_defaults_on_and_60_minutes() -> None:
     vc = core_config.VerifyConfig()
-    assert vc.remediation_mode is False
+    assert vc.remediation_mode is True
     assert vc.remediation_window_minutes == 60
+
+
+def test_default_config_enables_remediation_explicit_false_backs_out(monkeypatch) -> None:
+    """The 2026-07-11 default-ON flip: ``_remediation_decision`` proceeds to the eligibility
+    candidate under an unmodified ``VerifyConfig()``, and returns ``None`` (byte-identical full
+    review) under the explicit-false back-out."""
+    import types
+
+    from rebar.llm import plan_review
+
+    sentinel = {"eligible": True}
+    monkeypatch.setattr(attest, "remediation_mode_candidate", lambda *a, **k: sentinel)
+
+    monkeypatch.setattr(
+        "rebar.config.load_config",
+        lambda repo_root=None: types.SimpleNamespace(verify=core_config.VerifyConfig()),
+    )
+    assert plan_review._remediation_decision("T", None) is sentinel
+
+    monkeypatch.setattr(
+        "rebar.config.load_config",
+        lambda repo_root=None: types.SimpleNamespace(
+            verify=core_config.VerifyConfig(remediation_mode=False)
+        ),
+    )
+    assert plan_review._remediation_decision("T", None) is None
 
 
 def test_config_coerces_keys() -> None:

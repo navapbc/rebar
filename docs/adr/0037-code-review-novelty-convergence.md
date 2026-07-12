@@ -89,8 +89,10 @@ priority axis, not the novelty axis.
 
 The floor reuses plan-review's EXISTING config keys — `verify.novelty_drop_threshold`,
 `verify.novelty_priority_floor`, and `verify.novelty_drop_active` — introducing NO new
-config key. `novelty_drop_active` is the shared evidence gate: OFF by default, so an operator
-opts in with evidence exactly as plan-review requires. On top of the flag the floor SELF-GATES:
+config key. `novelty_drop_active` is the shared evidence gate: OFF by default as accepted, so
+an operator opts in with evidence exactly as plan-review requires. (Update 2026-07-11: the
+gate now defaults ON — operator-authorized on field evidence; an explicit `false` is the
+back-out.) On top of the flag the floor SELF-GATES:
 it is inert whenever there is no prior memory for the current key (first review, or a reader
 error). Both gates must be open before anything drops.
 
@@ -164,6 +166,8 @@ snapshot is deferred).
 - Code review converges across patchsets/sessions the way plan review converges across
   re-reviews, with the extra safety of the per-citation region gate (a changed region always
   re-raises). Both keyspaces are live: local `session:<id>` and Gerrit `change:<id>`.
-- The mechanism is OFF by default; enabling it is an operator decision gated on evidence.
+- The mechanism shipped OFF by default; enabling it was an operator decision gated on
+  evidence. (Update 2026-07-11: `novelty_drop_active` now defaults ON, operator-authorized on
+  field evidence; an explicit `false` is the back-out.)
 - Line-level region detection is the remaining follow-on; the machinery, both keyspaces, and the
   local + Gerrit paths ship here.

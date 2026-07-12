@@ -68,7 +68,15 @@ def test_region_unknown_on_absent_sentinel(tmp_path):
 
 # ── the floor ───────────────────────────────────────────────────────────────────────────────
 def _apply(
-    monkeypatch, *, advisory, nmap, region, prior_findings=None, coaching=None, cfg_active=True
+    monkeypatch,
+    *,
+    advisory,
+    nmap,
+    region,
+    prior_findings=None,
+    coaching=None,
+    cfg_active=True,
+    verify_cfg=None,
 ):
     """Drive apply_region_gated_floor with a mocked reader/scorer/region/config; return verdict."""
     prior = {
@@ -82,13 +90,44 @@ def _apply(
     monkeypatch.setattr(workflow_ops, "score_code_novelty", lambda *a, **k: nmap)
     monkeypatch.setattr(region_gate, "region_for_finding", lambda f, deps, repo_root=None: region)
     monkeypatch.setattr(
-        "rebar.config.load_config", lambda repo_root=None: _verify_cfg(active=cfg_active)
+        "rebar.config.load_config",
+        lambda repo_root=None: (
+            SimpleNamespace(verify=verify_cfg)
+            if verify_cfg is not None
+            else _verify_cfg(active=cfg_active)
+        ),
     )
     verdict = {"advisory": list(advisory), "coaching": coaching or [], "dropped": []}
     workflow_ops.apply_region_gated_floor(
         verdict, key="session:s", cfg=SimpleNamespace(repo_path=None), runner=object()
     )
     return verdict
+
+
+def test_default_verifyconfig_activates_floor_explicit_false_backs_out(monkeypatch):
+    """The 2026-07-11 default-ON flip: a genuinely unmodified ``VerifyConfig()`` proceeds past
+    the shared evidence gate (the floor drops an unchanged+novel+low-priority finding), while an
+    explicit ``novelty_drop_active=False`` restores the unfiltered verdict (the back-out)."""
+    from rebar._config_schema import VerifyConfig
+
+    advisory = [{"id": "f1", "finding": "nit", "priority": 0.2, "location": "a.py"}]
+    v = _apply(
+        monkeypatch,
+        advisory=advisory,
+        nmap={0: (0.9, "")},
+        region=region_gate.REGION_UNCHANGED,
+        verify_cfg=VerifyConfig(),
+    )
+    assert v["advisory"] == [] and len(v["dropped"]) == 1  # default config: floor active
+
+    v = _apply(
+        monkeypatch,
+        advisory=advisory,
+        nmap={0: (0.9, "")},
+        region=region_gate.REGION_UNCHANGED,
+        verify_cfg=VerifyConfig(novelty_drop_active=False),
+    )
+    assert len(v["advisory"]) == 1 and v["dropped"] == []  # explicit false: back-out
 
 
 def test_floor_drops_unchanged_novel_low_priority(monkeypatch):

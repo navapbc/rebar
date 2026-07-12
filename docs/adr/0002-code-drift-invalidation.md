@@ -68,7 +68,10 @@ error / registry-version skew / no reusable prior verdict.
 > drop/refresh paths along independent axes: **material freshness** (this ADR), **novelty**
 > (ADR 0008 — plan-edit convergence), and **delivered-completion** (ADR 0024 — the container
 > completion floor, which suppresses re-litigation of already-delivered, settled plan text).
-> They compose; each is separately gated and inert by default.
+> They compose; each is separately gated and shipped inert by default. (Update 2026-07-11:
+> the novelty floor's flags — `remediation_mode` + `novelty_drop_active` — were flipped ON by
+> default, operator-authorized on field evidence; drift-refresh and the completion floor
+> remain default-off.)
 
 ### Measurement (cost of probe-only refresh vs full re-review)
 

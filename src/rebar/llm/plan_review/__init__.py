@@ -78,7 +78,8 @@ def _progressive_enabled(repo_root) -> bool:
 
 def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
     """The remediation-mode eligibility DECISION for ``ticket_id`` (epic 7d43, child ec89),
-    or ``None`` when the ``verify.remediation_mode`` key is off/absent (default-OFF v1 rollout) or
+    or ``None`` when the ``verify.remediation_mode`` key is explicitly off (default ON since
+    2026-07-11; explicit false is the back-out) or
     config is unreadable — in which case the gate runs a byte-identical full review. When enabled,
     returns :func:`attest.remediation_mode_candidate`'s decision dict (the Pass-3 drop math that
     consumes ``eligible`` is child cc5b; this only decides eligibility)."""
@@ -191,8 +192,9 @@ def _maybe_apply_rising_floor(
     """The triple-gated Pass-3 rising-floor entry (child cc5b): apply the floor ONLY when config
     ``remediation_mode`` is on (``remediation`` is non-None), the per-review eligibility holds
     (ec89's decision ``eligible``), AND ``verify.novelty_drop_active`` is true (the evidence gate,
-    flipped only after 150b's ``discriminates_novelty`` eval clears its bar). By default the flag is
-    False, so the floor is inert and the verdict is byte-identical to a normal review."""
+    default ON since 2026-07-11 — operator-authorized on field evidence in lieu of 150b's
+    ``discriminates_novelty`` eval). Setting the flag to an explicit false is the back-out: the
+    floor goes inert and the verdict is byte-identical to a normal review."""
     from rebar import config as _config
 
     if not (remediation and remediation.get("eligible")):
@@ -520,8 +522,8 @@ def _run_plan_review(
 
     # Pass-3 RISING FLOOR (child cc5b) — applied BEFORE the sidecar emit so the dropped findings
     # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Triple-gated
-    # (config remediation_mode + per-review eligibility + verify.novelty_drop_active); inert (and
-    # the verdict byte-identical) by default.
+    # (config remediation_mode + per-review eligibility + verify.novelty_drop_active); both flags
+    # default ON (2026-07-11) — an explicit false on either goes inert (verdict byte-identical).
     _maybe_apply_rising_floor(
         ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
