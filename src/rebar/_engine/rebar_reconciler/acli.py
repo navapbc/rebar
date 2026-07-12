@@ -322,8 +322,18 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             **optional_fields,
         )
 
-    def update_issue(self, jira_key: str, **kwargs: Any) -> dict[str, Any]:
+    def update_issue(
+        self, jira_key: str, *, assignee_is_account_id: bool = False, **kwargs: Any
+    ) -> dict[str, Any]:
         """Update a Jira issue via ACLI.
+
+        264f: ``assignee_is_account_id`` (a bool — the ONLY new coupling into acli;
+        NO rebar-core import) marks that ``kwargs["assignee"]`` is an ALREADY-RESOLVED
+        Jira accountId (from the flow layer's identity mapping). When True a non-empty
+        assignee is submitted DIRECTLY, skipping ``validate_assignee_exists`` (no
+        assignable search). It is captured as an explicit keyword (never forwarded to
+        the module-level ``update_issue``), so it can't leak to the ACLI subprocess as a
+        bogus ``--assignee_is_account_id`` flag.
 
         Bug 85a1 (Fix D7): assignee=None/empty is routed through
         ``unassign_issue`` (REST PUT /assignee with ``{"accountId": null}``)
@@ -350,6 +360,9 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                         f"update_issue: unassign_issue({jira_key}) failed: {exc!r}",
                         file=sys.stderr,
                     )
+            elif assignee_is_account_id:
+                # 264f: already a resolved accountId — submit directly, no search.
+                pass
             else:
                 kwargs["assignee"] = self.validate_assignee_exists(
                     kwargs["assignee"], issue_key=jira_key
