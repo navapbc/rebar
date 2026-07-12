@@ -20,9 +20,9 @@ allowed set differs (a *profile*): `show`/`list`/`search`/`session-logs` default
 to `json` and add `llm`; `ready` is `text`(ids)/`llm`/`json`; everything else is
 `text`/`json`.
 
-All of this lives in **one** place — `src/rebar/_engine/ticket_output.py`
-(`parse_output(argv, profile)`); the bash commands shell into it, so the parsing,
-validation, and error text are never duplicated between bash and Python.
+All of this lives in **one** place — `src/rebar/_engine_support/output.py`
+(`parse_output(...)`); every command calls it **in-process**, so the parsing,
+validation, and error text are never duplicated across commands.
 
 ## Per-command output contract
 
@@ -77,9 +77,9 @@ human stderr prose. The human prose still goes to **stderr**; in text mode the
 envelope is suppressed (text-mode stdout is unchanged). The optional `exit_code`
 mirrors the process exit status (see [exit-codes.md](exit-codes.md)).
 
-The shared emitter is `ticket_output.error_envelope(...)` / the bash
-`_emit_error_envelope` helper (`ticket-output.sh`); every command's json-mode
-failure branch routes through it. Pinned by
+The shared emitter is `output.error_envelope(...)`
+(`src/rebar/_engine_support/output.py`); every command's json-mode
+failure branch routes through it in-process. Pinned by
 `tests/interfaces/contracts/test_error_envelope.py`.
 
 Not every non-zero exit is a "failure" in this sense: the per-ticket **gates**
