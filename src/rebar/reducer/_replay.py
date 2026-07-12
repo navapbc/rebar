@@ -195,6 +195,16 @@ def replay_events(
         if event_type not in KNOWN_EVENT_TYPES:
             pass
         else:
+            # Authorship PRESENCE count (epic gnu-whale-ichor / 3183): tally every folded
+            # (applied) event by whether its envelope carries an `author_sig`. This is
+            # PRESENCE-ONLY — a bad/forged author_sig still folds normally (the reducer NEVER
+            # rejects an event over authorship; cryptographic verification is the merge-gate's
+            # job) and still counts as "signed" (present). SNAPSHOT is excluded: it re-seeds
+            # the counts from its compiled_state (it summarizes already-counted events).
+            if event_type != "SNAPSHOT":
+                _bucket = "signed" if event.get("author_sig") else "unsigned"
+                _counts = state.setdefault("authorship", {"signed": 0, "unsigned": 0})
+                _counts[_bucket] = _counts.get(_bucket, 0) + 1
             handler = _EVENT_HANDLERS.get(event_type)
             if handler is not None:
                 result = handler(
