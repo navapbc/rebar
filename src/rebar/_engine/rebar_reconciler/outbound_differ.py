@@ -70,6 +70,103 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Identity-mapping assignee resolution (264f) — flow layer, may import rebar core
+# ---------------------------------------------------------------------------
+# The engine (acli.py) must NOT reach into rebar core, so ALL identity/mapping
+# resolution lives here in the flow layer and hands acli only a resolved
+# accountId string + a bool. These helpers default repo_root to rebar core's
+# config.repo_root() internally (per ddbe's identity module) and NEVER raise.
+
+# acli_rest exposes the /user/search email→accountId helper under this name; the
+# alias list tolerates a differently-named stub client in tests. First present
+# attribute wins.
+_USER_SEARCH_METHODS: tuple[str, ...] = (
+    "search_user_by_email",
+    "find_account_id_by_email",
+    "user_search_account_id",
+)
+
+
+def _identity_jira_account_id(assignee: str) -> str | None:
+    """rebar core's ``identity.jira_account_id`` (local assignee → Jira accountId),
+    or ``None`` on any miss/import failure. The trusted, stored-mapping fast path."""
+    try:
+        from rebar._commands import identity as _identity
+
+        return _identity.jira_account_id(assignee)
+    except Exception:  # noqa: BLE001 — resolution is best-effort; degrade to string-match
+        return None
+
+
+def _identity_email(assignee: str) -> str | None:
+    """rebar core's ``identity.identity_email`` for the ``/user/search`` bootstrap,
+    or ``None`` on any miss/import failure."""
+    try:
+        from rebar._commands import identity as _identity
+
+        return _identity.identity_email(assignee)
+    except Exception:  # noqa: BLE001 — best-effort; degrade without failing
+        return None
+
+
+def _bootstrap_account_id_via_user_search(assignee: str, client: Any) -> str | None:
+    """Best-effort TRANSIENT ``/user/search`` bootstrap: obtain the assignee's email
+    (identity email, else the assignee itself if it already looks like an email) and
+    ask the client for the exact-email accountId. ``None`` on no client / no email /
+    miss / ambiguity / any error — the caller then degrades to the string-match path.
+    The result is used for THIS run only (never persisted to ``mappings``)."""
+    if client is None:
+        return None
+    email = _identity_email(assignee)
+    if not email:
+        email = assignee if isinstance(assignee, str) and "@" in assignee else None
+    if not email:
+        return None
+    for name in _USER_SEARCH_METHODS:
+        fn = getattr(client, name, None)
+        if fn is None:
+            continue
+        try:
+            acct = fn(email)
+        except Exception:  # noqa: BLE001 — best-effort bootstrap; degrade on any transport error
+            return None
+        return acct or None
+    return None
+
+
+def _resolve_assignee_account_id(
+    assignee: str, jira_key: str, client: Any
+) -> tuple[str | None, bool, bool]:
+    """Resolve a local assignee to ``(accountId|None, authoritative, is_account_id)``.
+
+    Order: (1) the identity-mapping fast path (``jira_account_id``) — a trusted stored
+    accountId; (2) the transient ``/user/search`` bootstrap by email; (3) the legacy
+    ``validate_assignee_exists`` assignable-search string match. ``is_account_id`` is
+    ``True`` when the returned value is an ALREADY-RESOLVED accountId (paths 1 & 2) so
+    the applier/acli submits it directly and skips the assignable search. ``authoritative``
+    is ``True`` when the outcome is trustworthy (a resolved accountId, or a definitive
+    ``AssigneeNotFoundError`` → unassigned); ``False`` only when the mapping is unknown
+    (no client, or a transient lookup error) so the caller keeps the legacy string match."""
+    acct = _identity_jira_account_id(assignee)
+    if acct:
+        return (acct, True, True)
+    acct = _bootstrap_account_id_via_user_search(assignee, client)
+    if acct:
+        return (acct, True, True)
+    if client is None or not jira_key:
+        return (None, False, False)
+    try:
+        acct = client.validate_assignee_exists(assignee, issue_key=jira_key)
+        return (acct or None, True, False)
+    except Exception as exc:  # noqa: BLE001 — classify the resolution outcome
+        # AssigneeNotFoundError ⇒ definitively unassignable (→ unassigned).
+        # Any other (transient/transport) error ⇒ unknown → string-match fallback.
+        if type(exc).__name__ == "AssigneeNotFoundError":
+            return (None, True, False)
+        return (None, False, False)
+
+
+# ---------------------------------------------------------------------------
 # Bug 1e08-1a35-0267-4ca6 — bound-but-absent direct-GET sentinels / config
 # ---------------------------------------------------------------------------
 # A bound local ticket whose Jira key is ABSENT from this pass's search
@@ -468,36 +565,28 @@ def compute_outbound_mutations(
     # distinct assignees → a handful of lookups). With no client (unit/fixture
     # path) resolution is non-authoritative and the differ falls back to the
     # permissive string match.
-    _assignee_cache: dict[str, tuple[str | None, bool]] = {}
+    # 3-tuple (264f): (accountId|None, authoritative, is_account_id). The cache
+    # stores 3-tuples so both the identity fast-path and the legacy string-match
+    # path unpack identically at every call site.
+    _assignee_cache: dict[str, tuple[str | None, bool, bool]] = {}
 
-    def _assignee_resolver(assignee: str, jira_key: str) -> tuple[str | None, bool]:
-        """Resolve a local assignee to a Jira accountId.
+    def _assignee_resolver(assignee: str, jira_key: str) -> tuple[str | None, bool, bool]:
+        """Resolve a local assignee to a Jira accountId (264f).
 
-        Returns ``(account_id_or_None, authoritative)``. ``authoritative`` is
-        ``True`` when the result is trustworthy: an empty local assignee
-        (→ unassigned), a successful resolution (→ accountId), or a definitive
-        "no assignable user" (→ ``None`` = unassigned). It is ``False`` when we
-        could not determine the mapping (no client, or a transient lookup
-        error) — the caller then preserves the legacy string-match behavior.
+        Returns ``(account_id_or_None, authoritative, is_account_id)``.
+        ``authoritative`` is ``True`` when the result is trustworthy: an empty
+        local assignee (→ unassigned), a resolved accountId, or a definitive "no
+        assignable user" (→ ``None`` = unassigned); ``False`` when the mapping is
+        unknown (no client, or a transient lookup error) — the caller then
+        preserves the legacy string-match behavior. ``is_account_id`` is ``True``
+        only when the value is an already-resolved accountId (identity fast path or
+        the ``/user/search`` bootstrap) so acli skips the assignable search.
         """
         if not assignee:
-            return ("", True)
+            return ("", True, False)
         if assignee in _assignee_cache:
             return _assignee_cache[assignee]
-        if client is None or not jira_key:
-            result: tuple[str | None, bool] = (None, False)
-        else:
-            try:
-                acct = client.validate_assignee_exists(assignee, issue_key=jira_key)
-                result = (acct or None, True)
-            except Exception as exc:  # noqa: BLE001 — classify the resolution outcome
-                # AssigneeNotFoundError ⇒ definitively unassignable (→ unassigned).
-                # Any other (transient/transport) error ⇒ unknown → string-match
-                # fallback, so a Jira blip never spuriously unassigns a ticket.
-                if type(exc).__name__ == "AssigneeNotFoundError":
-                    result = (None, True)
-                else:
-                    result = (None, False)
+        result = _resolve_assignee_account_id(assignee, jira_key, client)
         _assignee_cache[assignee] = result
         return result
 
