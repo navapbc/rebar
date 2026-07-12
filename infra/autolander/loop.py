@@ -10,6 +10,7 @@ STDLIB-ONLY, no `import rebar`.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from autolander.gerrit import GerritClient
@@ -243,3 +244,100 @@ def drive_to_submit(
 
     hand_back(client, wip, HANDBACK_NEEDS_REBASE, record_handback=record_handback)
     return "handed_back"
+
+
+# =====================================================================================
+# S2c: fresh-Verified-per-member await + ancestor-atomic submit (the landing action).
+# =====================================================================================
+
+# Bounded await for a fresh Verified on the rebased tree (matches `land`'s default timeout).
+MEMBER_VERIFIED_TIMEOUT_S = 30 * 60
+VERIFIED_POLL_INTERVAL_S = 15
+
+
+class PartialLandError(RuntimeError):
+    """R3/R5 violation: after an ancestor-atomic submit, some stack member did NOT reach
+    MERGED. Raised LOUDLY (the caller emits AUTOLANDER_ERROR + a metric and hands back)."""
+
+
+def has_fresh_verified(change: dict) -> bool:
+    """True iff `change` carries a fresh `Verified +1` on its CURRENT patchset. Because the
+    rebase drops `Verified` (copyCondition NO_CODE_CHANGE only), a present `Verified +1` is by
+    construction on the post-rebase SHA — not a copied/carried vote."""
+    verified = (change.get("labels") or {}).get("Verified") or {}
+    if "approved" in verified:
+        return True
+    for entry in verified.get("all") or []:
+        if (entry.get("value") or 0) >= 1:
+            return True
+    return False
+
+
+def all_members_fresh_verified(client: GerritClient, wip: WipChain) -> bool:
+    """True iff EVERY chain member currently carries a fresh `Verified +1`. Submitting while
+    any member lacks one would land an untested tree (violates R5), so this gates submit."""
+    for member_id in wip.chain_member_ids:
+        change = client.get_change(member_id, ["DETAILED_LABELS", "CURRENT_REVISION"])
+        if not has_fresh_verified(change):
+            return False
+    return True
+
+
+def await_fresh_verified(
+    client: GerritClient,
+    wip: WipChain,
+    *,
+    timeout_s: int = MEMBER_VERIFIED_TIMEOUT_S,
+    poll_interval_s: int = VERIFIED_POLL_INTERVAL_S,
+    time_fn=None,
+    sleep_fn=None,
+) -> bool:
+    """Poll until EVERY member carries a fresh `Verified +1` (recording the tested SHA +
+    verified timestamp on `wip`). Returns True when all are fresh-verified; returns False on
+    exceeding `timeout_s` (CI hung) so the caller hands the stack back rather than blocking
+    forever. `time_fn`/`sleep_fn` are injectable for tests (default: monotonic clock +
+    time.sleep)."""
+    time_fn = time_fn or time.monotonic
+    sleep_fn = sleep_fn or time.sleep
+    start = time_fn()
+    while True:
+        if all_members_fresh_verified(client, wip):
+            for member_id in wip.chain_member_ids:
+                change = client.get_change(member_id, ["DETAILED_LABELS", "CURRENT_REVISION"])
+                wip.tested_shas[member_id] = change.get("current_revision")
+                verified = (change.get("labels") or {}).get("Verified") or {}
+                approved = verified.get("approved") or {}
+                wip.verified_at[member_id] = approved.get("date") or time_fn()
+            return True
+        if time_fn() - start >= timeout_s:
+            return False
+        sleep_fn(poll_interval_s)
+
+
+def ancestor_atomic_submit(
+    client: GerritClient,
+    wip: WipChain,
+    *,
+    close_ticket=None,
+) -> str:
+    """Land the stack with ONE `POST /changes/{tip}/submit` — Gerrit submits the members
+    "Submitted Together" by relation-chain ancestry (all-or-nothing), reinforced by S3's
+    shared topic + `change.submitWholeTopic`. **Partial-land safety (mandatory):** after the
+    submit call, verify EVERY member reached `MERGED`; if any is still open, raise
+    `PartialLandError` (never proceed on a partial land). On full merge, invoke
+    `close_ticket(member_id)` for each member (the `import rebar` ticket close/annotate seam,
+    injected for testability) and return "merged"."""
+    client.submit(wip.change_id)
+    not_merged = []
+    for member_id in wip.chain_member_ids:
+        change = client.get_change(member_id)
+        if change.get("status") != "MERGED":
+            not_merged.append(member_id)
+    if not_merged:
+        raise PartialLandError(
+            "partial land: member(s) did not reach MERGED: " + ", ".join(str(m) for m in not_merged)
+        )
+    if close_ticket is not None:
+        for member_id in wip.chain_member_ids:
+            close_ticket(member_id)
+    return "merged"
