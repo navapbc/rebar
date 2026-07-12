@@ -1,0 +1,101 @@
+"""Test harness for the serial auto-lander (epic f1fa). Puts `infra/` on sys.path so the
+standalone `autolander` package (which is NOT part of `src/rebar`) imports as `autolander.*`,
+and provides two fakes: a `RecordingClient` (duck-typed GerritClient for loop-logic tests)
+and a `FakeTransport` (HTTP-boundary seam for the real GerritClient)."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_INFRA = Path(__file__).resolve().parents[2] / "infra"
+if str(_INFRA) not in sys.path:
+    sys.path.insert(0, str(_INFRA))
+
+
+def change_info(
+    change_id: str,
+    number: int,
+    *,
+    autosubmit_date: str | None,
+    submittable: bool = True,
+    parents: int = 1,
+) -> dict:
+    """Build a minimal ChangeInfo (o=DETAILED_LABELS + CURRENT_REVISION/COMMIT shape)."""
+    labels: dict = {}
+    if autosubmit_date is not None:
+        labels["Autosubmit"] = {"all": [{"value": 1, "date": autosubmit_date, "_account_id": 1000}]}
+    rev = "rev" + str(number)
+    return {
+        "change_id": change_id,
+        "_number": number,
+        "status": "NEW",
+        "submittable": submittable,
+        "labels": labels,
+        "current_revision": rev,
+        "revisions": {rev: {"commit": {"parents": [{"commit": f"p{i}"} for i in range(parents)]}}},
+    }
+
+
+class RecordingClient:
+    """Duck-typed stand-in for GerritClient that records mutating calls and serves canned
+    reads. Lets loop-logic tests assert selection + routing WITHOUT any HTTP."""
+
+    def __init__(
+        self,
+        *,
+        query_result: list[dict] | None = None,
+        related: dict[str, list[dict]] | None = None,
+        changes: dict[str, dict] | None = None,
+    ) -> None:
+        self.query_result = query_result or []
+        self.related = related or {}
+        self.changes = changes or {c["change_id"]: c for c in self.query_result}
+        self.calls: list[tuple] = []  # ("rebase"|"rebase:chain"|"submit", change_id, kwargs)
+
+    def query_changes(self, query, opts=None):
+        self.calls.append(("query", query, {"opts": opts}))
+        return list(self.query_result)
+
+    def get_change(self, change_id, opts=None):
+        return self.changes[change_id]
+
+    def get_related(self, change_id):
+        return list(self.related.get(change_id, []))
+
+    def rebase(self, change_id, *, on_behalf_of_uploader=True):
+        self.calls.append(("rebase", change_id, {"on_behalf_of_uploader": on_behalf_of_uploader}))
+        return {"change_id": change_id}
+
+    def rebase_chain(self, change_id, *, on_behalf_of_uploader=True):
+        self.calls.append(
+            ("rebase:chain", change_id, {"on_behalf_of_uploader": on_behalf_of_uploader})
+        )
+        return {"change_id": change_id}
+
+    def submit(self, change_id):
+        self.calls.append(("submit", change_id, {}))
+        return {"change_id": change_id, "status": "MERGED"}
+
+    def mutating_calls(self):
+        return [c for c in self.calls if c[0] in ("rebase", "rebase:chain", "submit")]
+
+
+class FakeTransport:
+    """Records (method, path, body) and returns canned `(status, text)` per route. `text`
+    is returned verbatim (tests deliberately include Gerrit's XSSI prefix to exercise strip)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None]] = []
+        self._routes: dict[tuple[str, str], tuple[int, str]] = {}
+
+    def route(self, method: str, path_contains: str, status: int, text: str) -> FakeTransport:
+        self._routes[(method, path_contains)] = (status, text)
+        return self
+
+    def __call__(self, method: str, path: str, body: dict | None):
+        self.calls.append((method, path, body))
+        for (m, frag), resp in self._routes.items():
+            if m == method and frag in path:
+                return resp
+        return (404, ")]}'\n{}")
