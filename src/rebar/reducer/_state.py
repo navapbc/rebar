@@ -38,6 +38,13 @@ def make_initial_state() -> dict:
         "file_impact": [],
         "verify_commands": [],
         "signature": None,
+        # Identity key lifecycle (epic gnu-whale-ichor): a POSITION-based keyring of
+        # {public_key, added_at, revoked_at} records, where a position is an event's
+        # `{timestamp}-{uuid}` filename prefix (the git-commit-ancestry validity model,
+        # SCHEMA_VERSION 5 — no epoch cursor). Seeded empty here so a non-identity ticket
+        # replays to an explicit empty keyring rather than key-absent, and an identity's
+        # genesis / KEY events fold onto this base.
+        "keyring": [],
         "preconditions_summary": {"status": "pre-manifest"},
         "parent_status_uuid": "",
     }
