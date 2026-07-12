@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"docs/concurrency.md","reason":"parent-cascade race policy"},{"path":"tests/integration/test_concurrency_regression.py","reason":"cross-clone cascade race tests"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783886421395491001,"uuid":"81dcc086-d175-4318-8571-d1903601e349"}
