@@ -68,6 +68,46 @@ def _sync_before_compact(tracker: str) -> None:
     reads.ensure_fresh(tracker)
 
 
+def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
+    """Independently scan the folded event files and build the SNAPSHOT authorship ledger
+    (epic gnu-whale-ichor / 3183): one ``{event_uuid, author_id, author_sig, epoch}`` record
+    per folded event that carries an ``author_sig``. This preserves the signed events so the
+    merge-gate ``rebar verify-authorship`` can re-verify them AFTER the raw event files are
+    retired (folded into the SNAPSHOT). The keyring ``epoch`` is resolved at compaction time
+    (``epoch_for_position``) so verification never needs the retired raw file's position.
+    Unsigned events are omitted (the presence-only count lives in ``compiled_state`` already).
+    """
+    from rebar.attest import authorship
+
+    ledger: list[dict] = []
+    for path in event_paths:
+        try:
+            with open(path, encoding="utf-8") as f:
+                ev = json.load(f)
+        except (OSError, ValueError):
+            continue
+        sig = ev.get("author_sig")
+        if not sig:
+            continue
+        author_id = ev.get("author_id")
+        epoch = None
+        if author_id:
+            position = f"{ev.get('timestamp')}-{ev.get('uuid')}"
+            try:
+                epoch = authorship.epoch_for_position(str(author_id), position, repo_root=repo_root)
+            except Exception:  # noqa: BLE001 — best-effort; a lookup failure records a null epoch
+                epoch = None
+        ledger.append(
+            {
+                "event_uuid": ev.get("uuid"),
+                "author_id": author_id,
+                "author_sig": sig,
+                "epoch": epoch,
+            }
+        )
+    return ledger
+
+
 def _snapshot_strip_keys(emit_legacy_mirror: bool) -> set[str]:
     """Keys to drop from a SNAPSHOT's compiled_state before persisting. ``updated_at`` is
     always dropped (a derived presentation field re-computed every replay). In the 352b
@@ -180,6 +220,12 @@ def _compact_locked(
         # phase (unless rolled back) — new snapshots carry only ``attestations``.
         _strip = _snapshot_strip_keys(emit_legacy_mirror)
         compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
+        # Authorship ledger (epic gnu-whale-ichor / 3183): independently scan the folded
+        # events and preserve each SIGNED one so verify-authorship can re-verify it after
+        # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
+        compiled_state["authorship_ledger"] = _build_authorship_ledger(
+            fold_files, os.path.dirname(os.path.realpath(tracker))
+        )
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
             sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
@@ -344,6 +390,7 @@ def rebuild_snapshot_from_full_log(
         live_raw: list[str] = []
         source_uuids: list[str] = []
         old_snaps: list[str] = []
+        raw_paths: list[str] = []
         for name in sorted(os.listdir(ticket_dir)):
             if name.startswith(".") or name.endswith("-SYNC.json"):
                 continue
@@ -354,8 +401,14 @@ def rebuild_snapshot_from_full_log(
                     old_snaps.append(path)
                 continue
             source_uuids.append(_read_event_uuid(path))
+            raw_paths.append(path)
             if is_active_event(name):
                 live_raw.append(path)
+        # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
+        # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
+        compiled_state["authorship_ledger"] = _build_authorship_ledger(
+            raw_paths, os.path.dirname(os.path.realpath(tracker))
+        )
 
         env_id = _seam.env_id(Path(tracker))
         author = _git_author()
