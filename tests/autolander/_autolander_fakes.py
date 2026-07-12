@@ -23,6 +23,7 @@ def change_info(
     verified: bool = False,
     status: str = "NEW",
     revision: str | None = None,
+    owner_account: int = 1000,
 ) -> dict:
     """Build a minimal ChangeInfo (o=DETAILED_LABELS + CURRENT_REVISION/COMMIT shape).
 
@@ -46,6 +47,7 @@ def change_info(
         "status": status,
         "submittable": submittable,
         "labels": labels,
+        "owner": {"_account_id": owner_account},
         "current_revision": rev,
         "revisions": {rev: {"commit": {"parents": [{"commit": f"p{i}"} for i in range(parents)]}}},
     }
@@ -63,7 +65,9 @@ class RecordingClient:
         changes: dict[str, dict] | None = None,
         change_seq: dict[str, list[dict]] | None = None,
         submit_error: Exception | None = None,
+        set_review_errors: dict[str, Exception] | None = None,
     ) -> None:
+        self.set_review_errors = set_review_errors or {}
         self.query_result = query_result or []
         self.related = related or {}
         self.changes = changes or {c["change_id"]: c for c in self.query_result}
@@ -86,6 +90,8 @@ class RecordingClient:
 
     def set_review(self, change_id, *, message=None, labels=None):
         self.calls.append(("set_review", change_id, {"message": message, "labels": labels}))
+        if change_id in self.set_review_errors:
+            raise self.set_review_errors[change_id]
         return {"labels": labels or {}}
 
     def get_related(self, change_id):
