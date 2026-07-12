@@ -5,11 +5,13 @@ S2a implements the loop's FIRST step: pick the front `Autosubmit`+submittable ch
 call. The wipChain state machine (S2b), fresh-Verified-await + ancestor-atomic submit (S2c),
 and failure handling (S3) build on this.
 
-STDLIB-ONLY, no `import rebar`.
+The Gerrit helper (`gerrit.py`) is strictly stdlib-only; this loop MAY `import rebar` for
+ticket ops (e.g. annotate the ticket on merge), per the epic's scope note.
 """
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -255,9 +257,45 @@ MEMBER_VERIFIED_TIMEOUT_S = 30 * 60
 VERIFIED_POLL_INTERVAL_S = 15
 
 
+# Structured, greppable marker for high-visibility failures. S5c's observability keys its
+# `autolander_errors` alarm off this token on the container's stderr; keeping the emission
+# here (not only in a caller) makes the partial-land failure loud at its source.
+AUTOLANDER_ERROR = "AUTOLANDER_ERROR"
+HANDBACK_PARTIAL_LAND = "partial_land"
+
+
 class PartialLandError(RuntimeError):
     """R3/R5 violation: after an ancestor-atomic submit, some stack member did NOT reach
-    MERGED. Raised LOUDLY (the caller emits AUTOLANDER_ERROR + a metric and hands back)."""
+    MERGED. `ancestor_atomic_submit` emits AUTOLANDER_ERROR + a metric and hands back BEFORE
+    raising this, so the failure is loud at its source."""
+
+
+def emit_autolander_error(
+    detail: str, *, emit_metric=None, metric: str = "autolander_partial_land"
+) -> None:
+    """Emit a high-visibility failure: a structured `AUTOLANDER_ERROR` line on stderr (S5c
+    greps this) and, when wired, a metric via the injected `emit_metric(name, value)` hook
+    (S5c connects it to CloudWatch; None in tests / unwired runs)."""
+    sys.stderr.write(f"{AUTOLANDER_ERROR} {detail}\n")
+    sys.stderr.flush()
+    if emit_metric is not None:
+        emit_metric(metric, 1)
+
+
+def close_ticket_via_rebar(
+    change_id: str, *, ticket_id: str | None = None, message: str | None = None
+) -> None:
+    """Concrete `import rebar` ticket-annotate seam used on merge (the production default for
+    `ancestor_atomic_submit`'s `close_ticket`). Annotates the associated rebar ticket that the
+    change landed; best-effort (a ticket-op failure must not crash the lander)."""
+    import rebar  # loop.py MAY import rebar for ticket ops (epic scope); gerrit.py may not.
+
+    tid = ticket_id or change_id
+    msg = message or f"Landed on main via the serial auto-lander (Gerrit change {change_id})."
+    try:
+        rebar.comment(tid, msg)
+    except Exception as exc:  # noqa: BLE001 — annotation is best-effort; never crash the loop
+        sys.stderr.write(f"{AUTOLANDER_ERROR} ticket annotate failed for {tid}: {exc}\n")
 
 
 def has_fresh_verified(change: dict) -> bool:
@@ -314,30 +352,37 @@ def await_fresh_verified(
         sleep_fn(poll_interval_s)
 
 
+_USE_REBAR_CLOSE = object()  # sentinel: default to the concrete import-rebar annotate seam
+
+
 def ancestor_atomic_submit(
     client: GerritClient,
     wip: WipChain,
     *,
-    close_ticket=None,
+    close_ticket=_USE_REBAR_CLOSE,
+    emit_metric=None,
+    record_handback=None,
 ) -> str:
     """Land the stack with ONE `POST /changes/{tip}/submit` — Gerrit submits the members
     "Submitted Together" by relation-chain ancestry (all-or-nothing), reinforced by S3's
     shared topic + `change.submitWholeTopic`. **Partial-land safety (mandatory):** after the
-    submit call, verify EVERY member reached `MERGED`; if any is still open, raise
-    `PartialLandError` (never proceed on a partial land). On full merge, invoke
-    `close_ticket(member_id)` for each member (the `import rebar` ticket close/annotate seam,
-    injected for testability) and return "merged"."""
+    submit call, verify EVERY member reached `MERGED`; if any is still open, fail LOUDLY —
+    emit `AUTOLANDER_ERROR` + a metric, hand the stack back (`record_handback`), and raise
+    `PartialLandError` (never proceed on a partial land). On full merge, annotate each
+    member's ticket (`close_ticket`; defaults to the concrete `close_ticket_via_rebar`
+    `import rebar` seam — pass an explicit callable in tests) and return "merged"."""
     client.submit(wip.change_id)
-    not_merged = []
-    for member_id in wip.chain_member_ids:
-        change = client.get_change(member_id)
-        if change.get("status") != "MERGED":
-            not_merged.append(member_id)
+    not_merged = [m for m in wip.chain_member_ids if client.get_change(m).get("status") != "MERGED"]
     if not_merged:
-        raise PartialLandError(
-            "partial land: member(s) did not reach MERGED: " + ", ".join(str(m) for m in not_merged)
+        detail = "partial land: member(s) did not reach MERGED: " + ", ".join(
+            str(m) for m in not_merged
         )
-    if close_ticket is not None:
+        emit_autolander_error(detail, emit_metric=emit_metric)
+        if record_handback is not None:
+            record_handback(HANDBACK_PARTIAL_LAND, wip)
+        raise PartialLandError(detail)
+    closer = close_ticket_via_rebar if close_ticket is _USE_REBAR_CLOSE else close_ticket
+    if closer is not None:
         for member_id in wip.chain_member_ids:
-            close_ticket(member_id)
+            closer(member_id)
     return "merged"

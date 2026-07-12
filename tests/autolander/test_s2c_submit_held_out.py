@@ -62,8 +62,14 @@ def test_await_returns_true_when_all_fresh():
     assert got is True
 
 
-def test_partial_land_raises_loudly_and_does_not_close_tickets():
-    from autolander.loop import PartialLandError, WipChain, ancestor_atomic_submit
+def test_partial_land_fails_loudly_metric_handback_and_no_close(capsys):
+    from autolander.loop import (
+        AUTOLANDER_ERROR,
+        HANDBACK_PARTIAL_LAND,
+        PartialLandError,
+        WipChain,
+        ancestor_atomic_submit,
+    )
 
     # after submit: bottom MERGED but top left NEW -> a partial land
     bottom = change_info("Ibot", 401, verified=True, status="MERGED")
@@ -74,10 +80,21 @@ def test_partial_land_raises_loudly_and_does_not_close_tickets():
         chain_member_ids=["Ibot", "Itop"],
         tested_shas={"Ibot": bottom["current_revision"], "Itop": top["current_revision"]},
     )
-    closed = []
+    closed, metrics, handbacks = [], [], []
 
     with pytest.raises(PartialLandError):
-        ancestor_atomic_submit(client, wip, close_ticket=closed.append)
+        ancestor_atomic_submit(
+            client,
+            wip,
+            close_ticket=closed.append,
+            emit_metric=lambda name, val: metrics.append((name, val)),
+            record_handback=lambda reason, w: handbacks.append((reason, w.change_id)),
+        )
+    # LOUD: AUTOLANDER_ERROR on stderr + a metric emitted
+    assert AUTOLANDER_ERROR in capsys.readouterr().err
+    assert metrics and metrics[0][0] == "autolander_partial_land"
+    # handed back, and NO ticket closed on a partial land
+    assert handbacks == [(HANDBACK_PARTIAL_LAND, "Itop")]
     assert closed == [], "no tickets closed when the land is partial"
 
 
@@ -99,6 +116,24 @@ def test_merge_closes_every_member_ticket():
     assert outcome == "merged"
     assert closed == ["Ibot", "Itop"]
     assert [c for c in client.calls if c[0] == "submit"] == [("submit", "Itop", {})]
+
+
+def test_default_close_uses_concrete_rebar_seam(monkeypatch):
+    """When close_ticket is not supplied, merge annotates via the concrete import-rebar seam
+    `close_ticket_via_rebar` (monkeypatched here so no real rebar write happens)."""
+    import autolander.loop as loop
+    from autolander.loop import WipChain, ancestor_atomic_submit
+
+    merged = change_info("Ird", 410, verified=True, status="MERGED")
+    client = RecordingClient(changes={"Ird": merged})
+    wip = WipChain(
+        change_id="Ird", chain_member_ids=["Ird"], tested_shas={"Ird": merged["current_revision"]}
+    )
+    seen = []
+    monkeypatch.setattr(loop, "close_ticket_via_rebar", lambda cid: seen.append(cid))
+
+    assert ancestor_atomic_submit(client, wip) == "merged"  # no close_ticket kwarg -> default
+    assert seen == ["Ird"], "default close path must invoke the concrete import-rebar seam"
 
 
 def test_has_fresh_verified_reads_current_patchset_vote():
