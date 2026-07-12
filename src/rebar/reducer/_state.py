@@ -38,6 +38,12 @@ def make_initial_state() -> dict:
         "file_impact": [],
         "verify_commands": [],
         "signature": None,
+        # Identity key lifecycle (epic gnu-whale-ichor / e165): an epoch-scoped keyring
+        # of {public_key, added_epoch, revoked_epoch} records + the NEXT-EPOCH cursor. Seeded
+        # empty here so a non-identity ticket replays to an explicit empty keyring rather than
+        # key-absent, and an identity's genesis / KEY events fold onto this base.
+        "keyring": [],
+        "keyring_epoch": 0,
         "preconditions_summary": {"status": "pre-manifest"},
         "parent_status_uuid": "",
     }
