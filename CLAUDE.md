@@ -320,6 +320,21 @@ outcome, a timestamp); a blank or hand-wavy "done" still FAILs (and the finding'
 untagged or malformed falls back to codebase-verifiable, so existing tickets are unaffected.
 This lets genuinely operational work close **signed** instead of needing `--force-close`.
 
+**Never demand child SIGNATURES in an epic/story's acceptance criteria.** Author a
+container's ACs to state the **outcome** — "all child stories closed", "the work is
+landed on `main`" — and **never** phrase a criterion as "children closed **(signed)**"
+or otherwise require that descendants be *certified/signed*. Signature status is the
+close gate's **own output**, not a completion requirement: restating it as an AC
+defeats the deliberate `certifiable: false` soft path (ADR 0043 / the close-gate
+design), which lets a parent close — judged on its own criteria, left unsigned — when a
+child is legitimately force-closed pending operator attestation. A "signed" AC converts
+that soft PASS-but-unsigned path into a **hard FAIL**, blocking the parent's close and
+erasing its certification signal. This is the bf50/5f39 contagion that motivated
+**bug 02a3**: epic bf50's "all child stories closed (signed)" AC hard-FAILed a
+fully-landed 19-story epic when one child (5f39) was force-closed for operator
+attestation. Assert what was *delivered*, and let the gate decide whether the close is
+signed.
+
 Record `set_file_impact` (the `{path,reason}` array that `next_batch` uses to
 avoid scheduling file-conflicting tickets together) and `set_verify_commands`
 (DD-level verification) so downstream scheduling and verification work.
