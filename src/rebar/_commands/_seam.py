@@ -123,6 +123,32 @@ def env_id(tracker: Path) -> str:
         return ""
 
 
+def _git_config(key: str, fallback: str = "", *, cwd=None) -> str:
+    """A single ``git config <key>`` read, degrading to ``fallback`` on ANY failure.
+
+    Shells ``git config <key>`` (optionally under ``cwd`` so it reads a specific repo's
+    config, as ``identity._git_email`` does) and returns the stripped value; an unset
+    key, a missing/failed ``git`` invocation, a non-zero exit, or a timeout all fall back
+    to ``fallback``. NEVER raises (attribution reads must not break a write). ``timeout=5``
+    bounds a hung git.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "config", key],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return fallback
+    if out.returncode != 0:
+        return fallback
+    value = (out.stdout or "").strip()
+    return value or fallback
+
+
 def author(fallback: str = "Unknown") -> str:
     """Commit author name from git config, falling back to ``fallback`` (bash parity).
 
@@ -130,19 +156,47 @@ def author(fallback: str = "Unknown") -> str:
     use ``Unknown``; the tag helpers use lowercase ``unknown``. Callers pass the
     value their bash counterpart uses so a git-config-less environment matches.
     """
-    try:
-        out = subprocess.run(
-            ["git", "config", "user.name"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        name = out.stdout.strip()
-        if name:
-            return name
-    except OSError:
-        pass
-    return fallback
+    return _git_config("user.name", fallback)
+
+
+def author_email(repo_root=None) -> str:
+    """Commit email from the STORE repo's ``git config user.email`` (``""`` on any
+    failure). Reads with ``cwd`` = the resolved repo_root — mirroring
+    ``identity._git_email`` — so it reflects the store's committer, not the ambient
+    process cwd's git config."""
+    return _git_config("user.email", "", cwd=str(repo_root or config.repo_root()))
+
+
+# Denormalized author-attribution stamped onto every locally-written event envelope
+# (epic gnu-whale-ichor). Cached per canonical repo_root so a batch of writes performs
+# ONE git-config read + ONE identity resolution. The identity pointer changing
+# (``use_identity``) invalidates this via ``_reset_attribution_cache``.
+_ATTRIBUTION_CACHE: dict[str, dict] = {}
+
+
+def attribution_fields(repo_root=None) -> dict:
+    """Denormalized author attribution for an event envelope: ``{"author_email": ...}``
+    plus ``{"author_id": <id>}`` ONLY when a current identity resolves (omitted on a
+    miss). Cached per canonical repo_root — the first call per key does exactly ONE
+    ``author_email()`` and ONE ``resolve_current_identity()``; later calls return the
+    cached dict. ``identity`` is imported lazily (it imports from this module)."""
+    from rebar._commands import identity
+
+    key = os.path.realpath(str(repo_root or config.repo_root()))
+    cached = _ATTRIBUTION_CACHE.get(key)
+    if cached is not None:
+        return cached
+    fields: dict = {"author_email": author_email(repo_root)}
+    ident = identity.resolve_current_identity(repo_root=repo_root)
+    if ident is not None:
+        fields["author_id"] = ident
+    _ATTRIBUTION_CACHE[key] = fields
+    return fields
+
+
+def _reset_attribution_cache() -> None:
+    """Clear the per-repo attribution cache (tests; and on an identity-pointer change)."""
+    _ATTRIBUTION_CACHE.clear()
 
 
 _TAG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f]")
@@ -220,6 +274,12 @@ def append_event(
         "author": author(author_fallback),
         "data": data,
     }
+    # Denormalized author attribution (epic gnu-whale-ichor): stamp author_email
+    # (always) + author_id (when a current identity resolves) alongside `author`.
+    # Merged BEFORE the batch-sink branch so a buffered event is byte-identical to a
+    # directly-committed one. Canonical serialization sorts keys, so envelope order is
+    # irrelevant to the on-disk bytes.
+    event.update(attribution_fields(repo_root))
     # Deferred-commit sink (B2): when a batch buffer is active, hand the composed
     # event to it instead of committing. The caller flushes the buffer via
     # batch_stage_and_commit. Guards above (init gate, env_id/author/hlc) have run,
