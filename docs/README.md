@@ -16,6 +16,19 @@ A page can matter to more than one audience; it is filed under the audience most
 likely to reach for it first. If you're brand new, start with the
 [user guide](user-guide.md).
 
+**Doc taxonomy.** Within each audience, pages fall into four kinds, so you know how much
+to trust a page and how current it is:
+
+- **living reference** — the current, maintained description of a surface or subsystem
+  (most pages here); keep it in sync with the code.
+- **policy** — a normative rule that governs contributions (e.g. what the review gates
+  require).
+- **design rationale** — the reasoning behind a decision (ADRs and design notes; why,
+  not just what).
+- **historical evidence** — a durable record of a completed migration or validation,
+  kept for provenance. **Not** a living reference — do not treat it as current guidance.
+  These are grouped under [Historical evidence](#historical-evidence) below.
+
 ## User
 
 Day-to-day use of rebar through the CLI.
@@ -84,16 +97,16 @@ Developing rebar itself — architecture, internals, and the dev workflow.
   recipe for the periodic principal-engineer code-health audit.
 - **[jira-fixtures.md](jira-fixtures.md)** — the hermetic-but-honest Jira test fixtures
   and why hand-built snapshot dicts caused a bug class.
-- **[bash-migration.md](bash-migration.md)** — the historical record of the completed
-  bash→Python strangler-fig migration.
 - **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)** — rebar
   vs. OSS ticket systems: gaps, gotchas, and a prioritized remediation strategy.
 - **[remediation-implementation-plan.md](remediation-implementation-plan.md)** — the
   detailed how-to companion to the OSS comparison (seams, schema impact, test plans).
 - **[reuse-surface.md](reuse-surface.md)** — the developer API reference for the
   reusable subsystems (signing, LLM runtime, prompt/contract, output-schema seams).
-- **[88ab-feature-branch-evidence.md](88ab-feature-branch-evidence.md)** — durable
-  live-validation evidence for the epic-88ab Gerrit feature-branch flow.
+- **[attest-substrate.md](attest-substrate.md)** — the developer API reference for the
+  `rebar.attest` signing substrate (DSSE envelope, scheme registry, SSHSIG).
+- **[session-id-shims.md](session-id-shims.md)** — the session-provenance capture shims
+  that record which coding-agent session claimed a ticket.
 
 ## Agent
 
@@ -104,6 +117,8 @@ The LLM-agent operations and the gate / workflow machinery behind them.
   to add more).
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
+- **[review-policy.md](review-policy.md)** — *policy:* what the `LLM-Review` and
+  `Verified` Gerrit gates mean and the two `+1` votes every change to `main` must earn.
 - **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)** — the
   registry-generated reference of every plan-review criterion (one section per
   criterion; `rebar explain <id>` prints one).
@@ -130,6 +145,18 @@ The LLM-agent operations and the gate / workflow machinery behind them.
   execution_mode, the CI drift gate).
 - **[workflow-editor.md](workflow-editor.md)** — the visual workflow editor
   (`rebar workflow edit`) for authoring workflows.
+
+## Historical evidence
+
+Durable records of completed migrations and live-validation runs, kept for provenance.
+These are **not** living references — do not treat them as current guidance.
+
+- **[bash-migration.md](bash-migration.md)** — the record of the completed bash→Python
+  strangler-fig migration (kill-switches, the retired write seam, the dual-window rule).
+- **[88ab-feature-branch-evidence.md](88ab-feature-branch-evidence.md)** — live-validation
+  evidence for the epic-88ab Gerrit feature-branch flow.
+- **[dco-rollout-evidence.md](dco-rollout-evidence.md)** — the record that DCO sign-off
+  enforcement (`git commit -s` → `refs/for/*`) was validated end-to-end.
 
 ## Subdirectories
 
