@@ -47,6 +47,34 @@ logger = logging.getLogger(__name__)
 _RECONCILER_MARKER_APPLIER = "<!-- rebar:reconciler-echo -->"
 
 
+def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
+    """Best-effort: mint/reuse a placeholder identity for an inbound Jira assignee
+    (2f13). When the assignee field carries an ``accountId``, resolve it through
+    :func:`rebar.ensure_identity_for` (provider ``"jira"``, keyed on the opaque
+    accountId) so an unmapped inbound user gets a ghost identity that a later
+    outbound pass can key on.
+
+    ADDITIVE + best-effort: this NEVER changes the human-readable name extraction and
+    NEVER fails the inbound apply — no ``accountId`` or any mint failure is swallowed
+    and the apply continues with the name-only behavior."""
+    if not isinstance(assignee, dict):
+        return
+    account_id = assignee.get("accountId")
+    if not (isinstance(account_id, str) and account_id.strip()):
+        return
+    display_name = _extract_name(assignee)
+    try:
+        import rebar
+
+        rebar.ensure_identity_for(
+            "jira", account_id, display_name or account_id, repo_root=repo_root
+        )
+    except Exception:  # noqa: BLE001 — best-effort ghost mint; never fail the inbound apply
+        logger.debug(
+            "inbound: could not ensure identity for jira accountId %r", account_id, exc_info=True
+        )
+
+
 # ---------------------------------------------------------------------------
 # _apply_inbound_create phase helpers
 # ---------------------------------------------------------------------------
@@ -111,6 +139,9 @@ def _inbound_create_write_create_event(
         create_data["priority"] = _resolve_priority(fields["priority"])
     if fields.get("assignee"):
         create_data["assignee"] = _extract_name(fields["assignee"])
+        # 2f13 (additive): mint/reuse a ghost identity for the inbound assignee when it
+        # carries an opaque accountId — best-effort, never fails the create.
+        _ensure_inbound_assignee_identity(fields["assignee"], repo_root)
     create_path = _write_event_file(tracker_dir, local_id, "CREATE", create_data)
     return tracker_dir, raw_labels, create_path
 
@@ -232,7 +263,9 @@ def _inbound_create_writeback_jira(client, jira_key, local_id, tracker_dir) -> N
 # ---------------------------------------------------------------------------
 
 
-def _inbound_update_write_edit_event(fields, tracker_dir, local_id, written) -> None:
+def _inbound_update_write_edit_event(
+    fields, tracker_dir, local_id, written, repo_root=None
+) -> None:
     """Phase: map Jira→local scalar fields and write one EDIT event (if any)."""
     # Map field names to local reducer field names. The inbound differ
     # ALREADY maps Jira → local (see inbound_differ._map_jira_to_local_fields:
@@ -262,6 +295,11 @@ def _inbound_update_write_edit_event(fields, tracker_dir, local_id, written) -> 
     for _fname, _transform in _scalar_transforms.items():
         if _fname in fields:
             edit_fields[_fname] = _transform(fields[_fname])
+
+    # 2f13 (additive): mint/reuse a ghost identity for the inbound assignee when it
+    # carries an opaque accountId — best-effort, never fails the update.
+    if "assignee" in fields:
+        _ensure_inbound_assignee_identity(fields["assignee"], repo_root)
 
     if edit_fields:
         path = _write_event_file(tracker_dir, local_id, "EDIT", {"fields": edit_fields})

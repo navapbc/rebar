@@ -153,7 +153,7 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
     tracker_dir = _resolve_tracker_dir(repo_root)
 
     written: list[str] = []
-    _inbound_update_write_edit_event(fields, tracker_dir, local_id, written)
+    _inbound_update_write_edit_event(fields, tracker_dir, local_id, written, repo_root)
     _inbound_update_write_status_event(fields, tracker_dir, local_id, written)
     _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, written)
     _inbound_update_apply_comments(payload, tracker_dir, local_id, written)

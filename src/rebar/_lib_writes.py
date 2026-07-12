@@ -171,6 +171,7 @@ def create_identity(
     mappings: list[dict] | None = None,
     keys: list[str] | None = None,
     *,
+    tags: list[str] | None = None,
     repo_root=None,
     return_alias: bool = False,
 ) -> str | CreateResult:
@@ -178,7 +179,8 @@ def create_identity(
 
     ``name`` becomes the title; ``email`` / ``mappings`` (``{provider, external_id}``)
     / ``keys`` (OpenSSH authorized-keys lines) ride the CREATE payload and surface in
-    compiled state. Returns the canonical 16-hex id (default), or ``{"id", "alias"}``
+    compiled state. ``tags`` (e.g. ``["placeholder"]`` for a ghost) ride the SAME CREATE
+    event atomically. Returns the canonical 16-hex id (default), or ``{"id", "alias"}``
     with ``return_alias=True`` — same shape as :func:`create_ticket`.
     """
     from rebar._commands import identity as _identity
@@ -186,7 +188,7 @@ def create_identity(
 
     try:
         res = _identity.create_identity_core(
-            name, email, mappings=mappings, keys=keys, repo_root=repo_root
+            name, email, mappings=mappings, keys=keys, tags=tags, repo_root=repo_root
         )
     except CommandError as exc:
         raise RebarError(
@@ -197,6 +199,22 @@ def create_identity(
     if not return_alias:
         return res["id"]
     return {"id": res["id"], "alias": res["alias"] or ""}
+
+
+def ensure_identity_for(
+    provider: str,
+    external_id: str,
+    display_name: str,
+    *,
+    repo_root=None,
+) -> str:
+    """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
+    its id (2f13). Idempotent: reuses an existing mapping (upgrading a placeholder's title
+    in place when it is still a ghost), else mints a ``placeholder`` identity. Never raises
+    on a lookup problem — see :func:`rebar._commands.identity.ensure_identity_for`."""
+    from rebar._commands import identity as _identity
+
+    return _identity.ensure_identity_for(provider, external_id, display_name, repo_root=repo_root)
 
 
 def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None) -> None:

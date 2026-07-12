@@ -243,6 +243,15 @@ def resolve_mapping(provider: str, external_id: str, *, repo_root=None) -> str |
     return _identity.resolve_mapping(provider, external_id, repo_root=repo_root)
 
 
+def is_placeholder(identity_id: str, *, repo_root=None) -> bool:
+    """True iff ``identity_id`` is an identity whose compiled-state ``tags`` carries the
+    ``placeholder`` marker (a ghost minted for an unmapped inbound user). An unknown id or
+    non-identity ticket is ``False``. Never raises."""
+    from rebar._commands import identity as _identity
+
+    return _identity.is_placeholder(identity_id, repo_root=repo_root)
+
+
 def jira_account_id(local_assignee: str, *, repo_root=None) -> str | None:
     """Resolve a LOCAL assignee/reporter string (identity ticket id or case-insensitive
     email) to its Jira accountId (``{provider:"jira"}`` external_id), else ``None``.
