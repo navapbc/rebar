@@ -16,6 +16,30 @@ A page can matter to more than one audience; it is filed under the audience most
 likely to reach for it first. If you're brand new, start with the
 [user guide](user-guide.md).
 
+## Choose your path
+
+Jump straight to what you're trying to do:
+
+- **Start using rebar** (drive tickets from the CLI) → [user-guide.md](user-guide.md),
+  then [your-first-change.md](your-first-change.md).
+- **Drive rebar over MCP** (an LLM client / agent) → [llm-framework.md](llm-framework.md)
+  for the agent surfaces and gate operations.
+- **Contribute a code change** → [your-first-change.md](your-first-change.md) and
+  [local-dev-env.md](local-dev-env.md), with the review/landing flow in
+  [../CONTRIBUTING.md](../CONTRIBUTING.md).
+- **Understand the internals** → [architecture.md](architecture.md),
+  [event-schema.md](event-schema.md), and [concurrency.md](concurrency.md).
+
+## Troubleshooting
+
+Common symptoms and the fix:
+
+| Symptom | What it means → fix |
+|---------|---------------------|
+| `claim`/`transition` exits **10** (`ConcurrencyError`) | Optimistic concurrency: someone else moved the ticket. Re-read and pick another — don't force. See [concurrency.md](concurrency.md). |
+| `rebar-mcp: command not found` | The MCP server ships in an extra — install it: `pipx install nava-rebar[mcp]` (or `uvx --from nava-rebar[mcp] rebar-mcp`). See [config.md](config.md). |
+| `unknown key '…' ignored (typo?)` | A stale global build is shadowing the repo — activate the repo venv so `rebar` resolves to the local build. See [local-dev-env.md](local-dev-env.md). |
+
 **Doc taxonomy.** Within each audience, pages fall into four kinds, so you know how much
 to trust a page and how current it is:
 
