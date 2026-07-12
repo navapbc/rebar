@@ -561,7 +561,7 @@ def drift_refresh(
     finding reuse, so the (unenforced) code-blind criterion partition is not relied upon."""
     from . import attest
 
-    if ctx.ticket_type in ("bug", "session_log", "code_review"):
+    if ctx.ticket_type in ("bug", "session_log", "code_review", "identity"):
         return None
     cand = attest.drift_refresh_candidate(ctx.ticket_id, repo_root=repo_root)
     if cand is None:

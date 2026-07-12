@@ -403,7 +403,7 @@ Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match
 
 ## Intercept-arm commands
 
-The 16 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
+The 17 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
 
 | Command | Description |
 |---------|-------------|
@@ -411,6 +411,7 @@ The 16 advanced commands handled before the dispatcher. Each owns its own `--hel
 | `criteria` | Run per-criterion calibration evals against the shared review-criteria registry. |
 | `enrich` | Drain and report the cross-ticket overlap enrichment queue (`rebar enrich [--drain|--once|status]`). |
 | `explain` | Explain a review criterion by id — a pure registry/guide read, no LLM call. |
+| `identity` | Manage authenticated identities: create an identity entity, set the current self-identity, and add/revoke its signing keys (`identity key add|revoke`). |
 | `jira-onboard` | Interactive Jira onboarding wizard: detect, prompt for, persist, and validate the Jira connection settings. |
 | `llm` | LLM-framework setup wizard for configuring the optional agent surfaces (API key, model, extras). |
 | `prompt` | Run prompt-library evals over the packaged/overridden prompts. |

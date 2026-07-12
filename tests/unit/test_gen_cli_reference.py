@@ -34,6 +34,7 @@ _LADDER = {
     "criteria",
     "enrich",
     "explain",
+    "identity",  # epic gnu-whale-ichor: identity entity + self-identity + key add/revoke
     "jira-onboard",
     "llm",
     "prompt",

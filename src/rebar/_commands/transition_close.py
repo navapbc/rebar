@@ -96,7 +96,7 @@ def _completion_precheck(
     # session_log / code_review are lifecycle-exempt — they cannot be transitioned, so
     # transition_core will refuse this close authoritatively. Skip the gate BEFORE the (billable)
     # verifier runs, so a doomed close attempt never fires an LLM call.
-    if ticket_type in ("session_log", "code_review"):
+    if ticket_type in ("session_log", "code_review", "identity"):
         return None
     from rebar._commands import gates
 

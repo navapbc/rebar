@@ -23,7 +23,7 @@ from rebar._engine_support.reads import ReadError, deps_state, show_state
 
 # Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
 # so the per-ticket readiness gates (check_ac / clarity / quality) are a no-op PASS for them.
-_GATE_EXEMPT_TYPES = ("session_log", "code_review")
+_GATE_EXEMPT_TYPES = ("session_log", "code_review", "identity")
 
 
 # ── shared text extraction ────────────────────────────────────────────────────

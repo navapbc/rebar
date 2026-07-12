@@ -142,7 +142,7 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     }
 
     # Exempt types short-circuit to a PASS (no review runs) — mirrors run_review.
-    if pctx.ticket_type in ("bug", "session_log", "code_review"):
+    if pctx.ticket_type in ("bug", "session_log", "code_review", "identity"):
         reason = (
             "bug tickets are exempt from the plan-review gate"
             if pctx.ticket_type == "bug"

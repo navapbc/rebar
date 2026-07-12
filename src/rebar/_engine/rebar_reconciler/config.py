@@ -10,7 +10,7 @@ EXCLUDED_FIELDS: tuple[str, ...] = ("local_id", "rebar-id")
 # check). These types are also deliberately ABSENT from outbound_differ's
 # _LOCAL_TO_JIRA_TYPE map so any leak past this filter surfaces rather than
 # silently syncing.
-EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log", "code_review"})
+EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log", "code_review", "identity"})
 
 # Status mapping: local-side status name -> Jira-side status name.
 # Used by outbound_update v1's status-routing path (gated behind

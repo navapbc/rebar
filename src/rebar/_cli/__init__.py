@@ -439,6 +439,16 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "criteria":
         return _criteria(argv[1:])
 
+    # identity intercept (the identity entity: create + self-pointer; owns its own
+    # --help like reconcile/review). Full auto-init (it composes a CREATE write).
+    if argv and argv[0] == "identity":
+        rest = argv[1:]
+        if not rest or rest[0] not in ("--help", "-h", "help"):
+            ensure_initialized(init_only=False)
+        from rebar._commands import identity as _identity
+
+        return _identity.identity_cli(rest)
+
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.
     if argv and argv[0] == "config":
