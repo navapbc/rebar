@@ -70,6 +70,21 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
+    def create_identity(
+        name: str,
+        email: str,
+        mappings: list[dict] | None = None,
+        keys: list[str] | None = None,
+    ) -> CreateResultOut:
+        """Create an identity entity: a gate-/graph-exempt ticket recording a
+        person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of
+        {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the
+        CREATE and surface in show_ticket. Returns {id, alias}."""
+        return CreateResultOut.model_validate(
+            rebar.create_identity(name, email, mappings=mappings, keys=keys, return_alias=True)
+        )
+
+    @mcp.tool(annotations=_ANN["MUTATE"])
     def create_idea(title: str, description: str | None = None) -> CreateResultOut:
         """Capture an undesigned idea: create an epic in status 'idea' atomically.
 
