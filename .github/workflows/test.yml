@@ -373,7 +373,7 @@ jobs:
         run: >-
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider
+          -q -p no:cacheprovider --durations=25
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
 
@@ -386,7 +386,7 @@ jobs:
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
-          -q -p no:cacheprovider
+          -q -p no:cacheprovider --durations=25
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
 
   # External-integration tier (tests/external/): live, billable, real-mutation
