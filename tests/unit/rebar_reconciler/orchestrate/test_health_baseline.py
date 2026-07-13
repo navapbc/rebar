@@ -9,8 +9,11 @@ Tests cover:
     dir exists in repo_root, pre_pass_fsck_total is 0.
   - test_capture_baseline_counts_open_tickets: with a fake .tickets-tracker/,
     counts only tickets whose latest STATUS event has status 'open'.
-  - test_capture_baseline_not_implemented_error_not_raised: capture_baseline()
-    does NOT raise NotImplementedError.
+
+Note: the "capture_baseline() does not raise NotImplementedError" nuance needs no
+dedicated test — every test here calls capture_baseline() and then asserts on its
+observable result (return path / written JSON), so a re-stubbed NotImplementedError
+would fail all of them.
 """
 
 from __future__ import annotations
@@ -134,15 +137,6 @@ def test_capture_baseline_counts_open_tickets(health: ModuleType, tmp_path: Path
     )
     # Tickets A and B are open; C and D are not
     assert data["pre_pass_fsck_total"] == 2
-
-
-def test_capture_baseline_not_implemented_error_not_raised(
-    health: ModuleType, tmp_path: Path
-) -> None:
-    """capture_baseline() does NOT raise NotImplementedError."""
-    # This will raise if the stub is still in place
-    result = health.capture_baseline(pass_id="baseline-not-stub", repo_root=tmp_path)
-    assert result is not None
 
 
 def test_capture_baseline_counts_create_only_as_open(health: ModuleType, tmp_path: Path) -> None:
