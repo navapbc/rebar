@@ -238,12 +238,20 @@ def _display_group(verdict: str) -> str:
     return "unverified"
 
 
-def _resolve_commit(ev: _ScopedEvent, repo_root) -> str | None:
+def _resolve_commit(
+    ev: _ScopedEvent, repo_root, commit_map: dict[str, str] | None = None
+) -> str | None:
     """The event's introducing tracker-branch commit SHA, or ``None`` if unresolvable. LEDGER
-    entries carry a pre-resolved commit; LIVE events resolve it from their position + ticket
-    dir. Never raises (:func:`resolve_event_commit` is itself fail-closed)."""
+    entries carry a pre-resolved commit; a LIVE event is resolved via ``commit_map`` (the batched
+    single-pass lookup keyed by tracker-relative path, ``ev.ref`` for a file event) and only
+    falls back to the per-event :func:`resolve_event_commit` when the map lacks the path (empty
+    map / a merge-introduced file). Never raises (:func:`resolve_event_commit` is fail-closed)."""
     if ev.commit_sha is not None:
         return ev.commit_sha
+    if commit_map is not None:
+        mapped = commit_map.get(ev.ref)
+        if mapped is not None:
+            return mapped
     if ev.position and ev.ticket_dir:
         from rebar.attest import authorship
 
@@ -472,6 +480,13 @@ def cli(argv: list[str]) -> int:
     else:
         events = _collect_all(tracker)
 
+    # Resolve every event's introducing commit in ONE git-log pass instead of one subprocess
+    # per event (bug 1cc0). _resolve_commit looks each event up here and only falls back to the
+    # per-event resolver for a path the map lacks (fail-closed).
+    from rebar.attest import authorship
+
+    commit_map = authorship.build_introducing_commit_map(repo_root=args.root)
+
     counts = {
         VERIFIED: 0,
         UNSIGNED: 0,
@@ -487,7 +502,7 @@ def cli(argv: list[str]) -> int:
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
             continue
-        commit_sha = _resolve_commit(ev, args.root)
+        commit_sha = _resolve_commit(ev, args.root, commit_map)
         enforced = _is_enforced(commit_sha, since_ref, tracker)
         grandfathered = not enforced
         if enforced:
