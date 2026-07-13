@@ -59,3 +59,29 @@ violations** on this gold set — the evidence the operator needs before flippin
 `verify.completion_floor_active` on. The 80% per-axis agreement is recorded as the headroom to watch:
 a prompt revision that *lowered* containment/layer agreement enough to break the conjunction on a
 real corpus would first show up here (hence the retrigger-on-prompt-hash rule).
+
+## Monitoring (dogfooded in rebar's own project — story c366)
+
+`verify.completion_floor_active = true` is set in this project's `rebar.toml` so the floor runs
+live on re-fired epic/story-with-children plan-reviews. Because a suppression removes a finding
+from the surfaced advisory list, it must remain **auditable** — a wrongly-suppressed finding has
+to be recoverable. Every drop is persisted, not just logged:
+
+- **Where drops land.** On any review where the floor drops one or more findings, each dropped
+  finding is moved out of `advisory[]` into the plan-review **sidecar** `dropped[]` array, tagged
+  `drop_reason="completion"` and carrying its full completion sub-answers (`completion`), so the
+  reason for the drop is inspectable. The verdict `coverage` also records
+  `completion_floored_finding_ids` (the dropped finding ids) and `completion_floored_criteria`
+  (the affected criterion ids). A run that dropped nothing leaves the verdict byte-identical and
+  writes no `completion`-tagged entries.
+- **How to audit.** The sidecar for a review is written next to the plan-review attestation.
+  To review recent completion suppressions, inspect a review's sidecar and filter
+  `dropped[]` for `drop_reason == "completion"` (each entry carries the original finding text,
+  its `criteria`, and the completion answers that justified the drop). The runtime also emits an
+  `INFO` log line naming the floored finding ids whenever the floor drops on a run, so live
+  suppressions are visible without opening the sidecar. If a legitimate finding was suppressed,
+  the finding is fully reconstructable from the sidecar entry.
+- **Rollback.** The floor is advisory-only and cannot change a PASS/BLOCK verdict, so a wrong
+  suppression is never verdict-affecting and is always recoverable. To disable it entirely, set
+  `verify.completion_floor_active = false` in `rebar.toml` — an immediate, cheap revert that needs
+  no data cleanup (the flag simply goes inert and reviews return to byte-identical output).
