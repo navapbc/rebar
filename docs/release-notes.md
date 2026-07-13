@@ -8,6 +8,28 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## ONE-WAY DOOR — legacy signature-mirror rollback lever removed (task 7ed9)
+
+The CONTRACT-phase rollback toggle `compact.emit_legacy_signature_mirror` (env
+`REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR`) has been **removed**. Its default
+already meant "never persist the legacy `state['signature']` mirror into new
+snapshots", so this changes **no runtime behavior** — new snapshots carry only the
+kind-keyed `attestations` map, exactly as before. The key is now an unknown key
+(warned + ignored), and `CompactConfig` no longer carries the attribute.
+
+**Downstream warning — this is a ONE-WAY DOOR.** 352b let an operator re-emit the
+mirror by flipping this config key and recompacting. That escape hatch is gone. An
+**external project still running pre-attestations rebar** (which reads
+`state['signature']` directly and has no `attestations` map) that encounters a
+mirror-less snapshot whose latest signature was compacted below the horizon can **no
+longer recover via configuration** — the only remaining recovery is a **code
+downgrade** to a binary that still writes the mirror. This is **safe for fleets that
+auto-update to `origin/main`** (no pre-attestations binary remains live), which is
+this deployment. The in-memory re-derivation is untouched: a migrated reader still
+re-projects `state['signature']` from the attestations on every replay, so signature
+verification keeps working on a compacted, mirror-less ticket. (ticket `7ed9`; see
+`docs/migrations.md` "Legacy signature-mirror retirement".)
+
 ## BREAKING (pre-1.0) — remaining uncatalogued deprecations removed
 
 A sibling breaking pass to DE7 removed the five remaining **scheduled** (removable)

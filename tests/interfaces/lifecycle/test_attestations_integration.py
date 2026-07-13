@@ -85,11 +85,9 @@ def _snapshot_compiled_state(store: Path, tid: str):
     return snap
 
 
-def test_compaction_drops_legacy_mirror_by_default(
-    store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Contract phase (352b): a new SNAPSHOT carries only the kind-keyed attestations map;
-    # the legacy `signature` mirror is dropped by default.
+def test_compaction_drops_legacy_mirror(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Task 7ed9: a new SNAPSHOT UNCONDITIONALLY carries only the kind-keyed attestations map;
+    # the legacy `signature` mirror is never persisted (the rollback toggle was removed).
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")  # 3 events > 1 → force a SNAPSHOT
     tid = rebar.create_ticket("task", "compact", repo_root=str(store))
     _sign(store, tid, "plan-review", material="m")
@@ -105,20 +103,9 @@ def test_compaction_drops_legacy_mirror_by_default(
     assert set(snap["attestations"]) == {"plan-review", "completion-verifier"}
 
 
-def test_compaction_keeps_mirror_on_rollback(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Rollback (352b): set compact.emit_legacy_signature_mirror=true → the SNAPSHOT keeps
-    # the legacy `signature` mirror (most-recent attestation of any kind), so a not-yet-
-    # upgraded clone reading it still sees one attestation.
-    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
-    monkeypatch.setenv("REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR", "true")
-    tid = rebar.create_ticket("task", "compact", repo_root=str(store))
-    _sign(store, tid, "plan-review", material="m")
-    _sign(store, tid, "completion-verifier")
-    rebar.compact(tid, repo_root=str(store))
-
-    snap = _snapshot_compiled_state(store, tid)
-    assert "attestations" in snap and "signature" in snap
-    assert snap["signature"]["manifest"][0].startswith("completion-verifier")  # most-recent mirror
+# Task 7ed9 removed the `emit_legacy_signature_mirror` rollback toggle and the
+# "flag true → mirror persisted in the SNAPSHOT" path, so the former
+# `test_compaction_keeps_mirror_on_rollback` test was deleted (that path no longer exists).
 
 
 # ── concurrent / order-independent different-kind signs ─────────────────────────
