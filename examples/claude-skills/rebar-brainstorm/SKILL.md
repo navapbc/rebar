@@ -132,9 +132,9 @@ measurable in-session acceptance criteria, single-concern decomposition, a sound
 a stated positive rationale, compat/rollback for any migration, and maintainability/ADR — and
 its **overlays** (security trust-boundary, infra endpoint-auth, prior-art, migration-safety,
 new-prohibition consumer scan, CI-trigger). Then run the plan-review gate on each ticket
-(`rebar review-plan <id>`) and remediate findings before claiming. Reading the gate first is
-standard process: it is far cheaper to author to the criteria than to remediate a BLOCK after
-the fact.
+(`rebar review-plan <id>`); remediate any BLOCK and apply the advisory findings that genuinely
+improve the plan before claiming. Reading the gate first is standard process: it is far cheaper
+to author to the criteria than to remediate a BLOCK after the fact.
 
 Before recording any ticket whose acceptance criteria will include or reference testing,
 verification, or behavioral oracles, also read **`test-design.md` in this skill's
