@@ -538,32 +538,13 @@ def reconcile_recovery(client: GerritClient, state_dir) -> str | None:
     return f"phase={wip.phase}: interrupted before completion; re-select + re-drive"
 
 
-def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: no cover
-    """The single-instance bot entrypoint (operational glue over the tested pieces; exercised
-    by the live E2E, not unit tests). Acquire the flock (single instance), reconcile any
-    recovery.json, start the read-only status HTTP server on `status_port`, then poll every
-    POLL_S: write the heartbeat; if the emergency-stop sentinel is present stay `paused`; else
-    select the front candidate, drive it to submit, handling failure/hand-back. On SIGTERM,
-    FIRST write recovery.json, then drain the in-flight wipChain (bounded) before exit."""
-    import fcntl
+def make_status_server(state, gerrit, root, *, port=8080):
+    """Build the read-only status HTTP server (extracted from run_loop so the endpoint is
+    unit-testable via a real GET). The `_Status` handler closes over `state` (the
+    `{"wip", "phase_since"}` dict), `gerrit` (the waiting-count query), and `root` (the state
+    dir for `heartbeat_age_s`). Returns a bound `HTTPServer`; the caller starts/serves it on a
+    daemon thread and `shutdown()`s it. Behaviour is byte-for-byte the run_loop original."""
     import http.server
-    import signal
-    import threading
-
-    from autolander.gerrit import GerritError  # noqa: F401 — used in the drive/except paths
-
-    root = Path(state_dir)
-    root.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(root / LOCK_FILE, "w")  # noqa: SIM115 — held for process lifetime
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        emit_marker(MARKER_ERROR, {"detail": "another instance holds the lock"})
-        return 1
-
-    reconcile_recovery(gerrit, root)
-
-    state = {"wip": None, "phase_since": time.monotonic()}
 
     class _Status(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
@@ -584,7 +565,64 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
         def log_message(self, *_a):  # silence default stderr access log
             return
 
-    httpd = http.server.HTTPServer(("0.0.0.0", status_port), _Status)  # noqa: S104 — loopback via nginx
+    return http.server.HTTPServer(("0.0.0.0", port), _Status)  # noqa: S104 — loopback via nginx
+
+
+def healthcheck_ok(state_dir, now=None, *, stale_s=90) -> bool:
+    """The container HEALTHCHECK predicate, SHARED with the S5d test: the heartbeat is fresh
+    (healthy) iff its age is within `stale_s`; age > `stale_s` => unhealthy. `now` defaults to
+    wall-clock time. Container and test exercise this exact same age>90 => unhealthy logic."""
+    return heartbeat_age_s(state_dir, now if now is not None else time.time()) <= stale_s
+
+
+def healthcheck_main() -> None:  # pragma: no cover
+    """Docker HEALTHCHECK entrypoint (`python -c "from autolander.loop import healthcheck_main;
+    healthcheck_main()"`): exit 0 (healthy) iff the container's heartbeat is fresh, else 1
+    (unhealthy -> the autoheal sidecar restarts the wedged loop). The container state dir is
+    fixed at /var/gerrit/site/autolander (matches the Dockerfile + run defaults)."""
+    import sys
+
+    sys.exit(0 if healthcheck_ok("/var/gerrit/site/autolander") else 1)
+
+
+def handle_sigterm(state, stopping, root, *, now, grace_s=120) -> None:
+    """SIGTERM handler body (extracted so the drain contract is unit-testable). FIRST snapshot
+    the in-flight wipChain to recovery.json (crash-safe), THEN flip to draining: stop taking
+    new work (`stopping["v"]=True`) and set the bounded drain deadline (`now + grace_s`). Order
+    matters — the recovery snapshot must be durable before we begin draining."""
+    if state["wip"] is not None:
+        write_recovery(root, state["wip"])
+    stopping["v"] = True
+    stopping["drain_deadline"] = now + grace_s
+
+
+def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: no cover
+    """The single-instance bot entrypoint (operational glue over the tested pieces; exercised
+    by the live E2E, not unit tests). Acquire the flock (single instance), reconcile any
+    recovery.json, start the read-only status HTTP server on `status_port`, then poll every
+    POLL_S: write the heartbeat; if the emergency-stop sentinel is present stay `paused`; else
+    select the front candidate, drive it to submit, handling failure/hand-back. On SIGTERM,
+    FIRST write recovery.json, then drain the in-flight wipChain (bounded) before exit."""
+    import fcntl
+    import signal
+    import threading
+
+    from autolander.gerrit import GerritError  # noqa: F401 — used in the drive/except paths
+
+    root = Path(state_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(root / LOCK_FILE, "w")  # noqa: SIM115 — held for process lifetime
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        emit_marker(MARKER_ERROR, {"detail": "another instance holds the lock"})
+        return 1
+
+    reconcile_recovery(gerrit, root)
+
+    state = {"wip": None, "phase_since": time.monotonic()}
+
+    httpd = make_status_server(state, gerrit, root, port=status_port)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
     stopping = {"v": False, "drain_deadline": None}
@@ -603,11 +641,9 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
     def _on_sigterm(_signum, _frame):
         # FIRST action: crash-safe snapshot; then DRAIN — stop taking new work but let the
         # in-flight wipChain finish, bounded by the 120 s stop_grace_period (compose), while
-        # the heartbeat thread keeps the container healthy.
-        if state["wip"] is not None:
-            write_recovery(root, state["wip"])
-        stopping["v"] = True
-        stopping["drain_deadline"] = time.monotonic() + 120
+        # the heartbeat thread keeps the container healthy. (Body extracted to handle_sigterm
+        # so the drain contract is unit-testable.)
+        handle_sigterm(state, stopping, root, now=time.monotonic())
 
     signal.signal(signal.SIGTERM, _on_sigterm)
 

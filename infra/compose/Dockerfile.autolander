@@ -60,7 +60,7 @@ EXPOSE 8080
 # heartbeating and simply have nothing to land). start-period=60s gives the loop time to
 # write its first heartbeat before failures count.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=2 \
-    CMD python -c "import sys,time; sys.exit(1 if time.time() - float(open('/var/gerrit/site/autolander/heartbeat').read()) > 90 else 0)"
+    CMD python -c "from autolander.loop import healthcheck_main; healthcheck_main()"
 
 # Run the serial auto-lander loop.
 CMD ["python", "-m", "autolander.loop"]

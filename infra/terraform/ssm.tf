@@ -51,9 +51,9 @@ locals {
     # for the auto-lander's bot identity (RebarBotNava) — it authenticates the REST
     # rebase-on-behalf + ancestor-atomic submit calls the loop makes. Materialized into
     # the container .env by fetch-secrets.sh (autolander-gerrit-token -> AUTOLANDER_GERRIT_TOKEN),
-    # OPTIONAL there (blank until an operator populates this slot; the container still
-    # boots + heartbeats and only lands once the token is set). Operator populates this
-    # SecureString out-of-band, same as gerrit-bot-token.
+    # REQUIRED there (fetch-secrets fail-fasts on it — a blank token would make the lander a
+    # silent no-op, since landing is its sole job). The operator MUST populate this SecureString
+    # slot BEFORE deploy (it is already populated), out-of-band, same as gerrit-bot-token.
     "/rebar/prod/autolander-gerrit-token",
   ]
 }
