@@ -597,6 +597,12 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
     }
     # Denormalized author attribution (epic gnu-whale-ichor): present-only on the record.
     _fold_author_attribution(record, event)
+    # Asymmetric op-cert fields (keystone e4df): folded PRESENT-ONLY, so an HMAC event (no
+    # ``envelope`` in data) reduces to a byte-identical record and these keys never appear on it.
+    if data.get("envelope") is not None:
+        record["envelope"] = data["envelope"]
+        record["material_fingerprint"] = data.get("material_fingerprint")
+        record["merged_log_commit"] = data.get("merged_log_commit")
     # Mirror: unchanged single-slot semantics (back-compat for existing consumers).
     state["signature"] = record
     # Map: additive, kind-keyed; skip blank/retired/unkindable events (no key derivable).
