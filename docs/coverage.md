@@ -14,6 +14,39 @@ pytest -m "not integration and not external" \
 
 This is the same test selection CI's coverage step uses.
 
+## Parallel runs (pytest-xdist) require `parallel = true`
+
+CI runs the gating suite under **pytest-xdist** (`-n <cores> --dist worksteal`) to
+cut wall-clock time (~5× on the default tier). Coverage measurement under xdist has
+a hard prerequisite:
+
+```toml
+[tool.coverage.run]
+source = ["rebar"]
+branch = true
+parallel = true   # REQUIRED under pytest-xdist — see below
+```
+
+**Why `parallel = true` is mandatory with `-n>0`.** Each xdist worker is a separate
+process that records its own coverage. Without `parallel = true`, every worker
+writes to the *same* `.coverage` file and clobbers the others, so the combine step
+sees only the controller/last worker's data. The reported total then collapses far
+below the true value (measured ~37% vs the real ~77–80%), which trips
+`fail_under = 70` and reddens the build — and stray `.coverage.*` files leak into the
+checkout. With `parallel = true`, each worker writes a distinct
+`.coverage.<host>.<pid>.<rand>` data file and `pytest-cov` combines them at the end;
+the combined **TOTAL matches a serial (`-n0`) run exactly** and no `.coverage.*`
+files are left behind.
+
+`-n` is pinned to the runner's real vCPU count (ubuntu-latest = 4, macos arm = 3),
+**not** `-n auto`: on larger local hosts `auto` over-subscribes workers. To run the
+gating suite locally with coverage exactly as CI does:
+
+```
+pytest -m "not integration and not external" -n 4 --dist worksteal \
+  --cov=rebar --cov-report=term-missing:skip-covered -q
+```
+
 ## Measured baseline
 
 | Date       | Scope                                   | In-process total |

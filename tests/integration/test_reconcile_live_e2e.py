@@ -54,7 +54,16 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.live]
+# xdist_group pins every test in this module to a SINGLE pytest-xdist worker so the
+# live-Jira reconciler round-trips run serially even when the integration tier is
+# parallelized with `-n>0 --dist loadgroup` (story 8d36). These tests assert on Jira's
+# eventual consistency, which cross-worker interleaving would make flaky; they also
+# self-skip without live creds, so this only matters on a local live run.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.live,
+    pytest.mark.xdist_group("live_reconcile_e2e"),
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECON_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"

@@ -155,6 +155,22 @@ def _network_guard(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
 
 
+def _is_coverage_artifact(name: str) -> bool:
+    """coverage.py's own data files are NOT test leaks.
+
+    Under pytest-xdist (`-n>0`) with ``parallel = true`` (see docs/coverage.md), each
+    worker process writes a per-process data file — ``.coverage.<host>.<pid>.<rand>`` —
+    to the CWD (repo root) when it finishes, and pytest-cov combines them into a single
+    ``.coverage`` at session end. Because workers finish at different times, a file
+    written by a done worker would otherwise be observed as a "new entry" by the
+    per-test leak snapshot of a still-running worker and DELETED — corrupting the
+    combine (coverage collapses) and spuriously failing that test (story 8d36). These
+    names are all gitignored and produced by the coverage plugin, not the test body, so
+    the leak guard skips them (it never deletes and never fails on them).
+    """
+    return name == ".coverage" or name.startswith(".coverage.") or name == "coverage.xml"
+
+
 @pytest.fixture(autouse=True)
 def _no_repo_root_leaks() -> Iterator[None]:
     from _isolation import repo_leak_snapshot as _repo_leak_snapshot
@@ -164,7 +180,7 @@ def _no_repo_root_leaks() -> Iterator[None]:
         yield
     finally:
         after = _repo_leak_snapshot(_REPO_ROOT)
-        leaked = after - before
+        leaked = {name for name in (after - before) if not _is_coverage_artifact(name)}
         if leaked:
             # Deepest-first so a leaked file under a watched dir is removed before
             # we would touch the dir itself (top-level names sort shorter).

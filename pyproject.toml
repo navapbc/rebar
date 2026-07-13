@@ -157,6 +157,18 @@ dev = [
     "ruff==0.15.19",
     "mypy>=1.10",
     "pytest-cov>=5",
+    # Parallel test execution (story 8d36). Pinned EXACTLY (not a floor) so local and
+    # CI run the identical scheduler: xdist changes work-distribution/teardown behavior
+    # between releases, and the gating suite's per-test isolation is validated against
+    # THIS version. Coverage under xdist requires `parallel = true` in
+    # [tool.coverage.run]. Bump deliberately.
+    "pytest-xdist==3.8.0",
+    # Duration-based test sharding. Consumes the `.test_durations` file that
+    # `pytest --store-durations` (task 9ad9) can persist, to split the suite evenly
+    # across runners in a future cross-runner shard. Pinned exactly for the same
+    # local↔CI parity reason as xdist; kept here now so the shared dev/CI env has it
+    # available for 9ad9's optional store step and follow-on sharding work.
+    "pytest-split==0.11.0",
     # The commit gate driver: `make install`/`make hooks` run `pre-commit install`,
     # and CI runs `pre-commit run --all-files` for local↔CI parity. Declared here so a
     # clean editable install has it (no reliance on a global/pipx pre-commit).
@@ -367,6 +379,13 @@ disallow_untyped_defs = true
 [tool.coverage.run]
 source = ["rebar"]
 branch = true
+# REQUIRED for pytest-xdist: under `-n>0` each worker records coverage in its own
+# process, so coverage must write a per-process data file (`.coverage.<host>.<pid>.<rand>`)
+# and combine them at the end. Without `parallel = true` the workers clobber a single
+# `.coverage`, the combine yields only the controller's data (~ single-digit % << fail_under),
+# the build goes red, and stray `.coverage.*` files leak into the checkout. With it, the
+# combined TOTAL matches a serial run exactly. See docs/coverage.md. (story 8d36)
+parallel = true
 
 [tool.coverage.report]
 # Documented floor, set BELOW the measured in-process total (77% on 2026-06-27,
