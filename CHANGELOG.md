@@ -12,6 +12,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Breaking
 
+- Reject whitespace-only ticket titles on create/edit across the CLI, library, and
+  MCP surfaces: a title is now rejected when it is empty after trimming whitespace
+  (previously a spaces/tabs/newlines-only title was silently accepted). Titles with
+  real content but surrounding whitespace are still accepted and stored verbatim (no
+  trimming), and Unicode is preserved as-is (the pre-existing `→`→`->` normalization is
+  unchanged). Back-out/expand-contract note: this is a caller-visible tightening; a
+  pre-merge store scan confirmed zero existing whitespace-only titles, so no data
+  migration is required, and reverting the guard restores the prior accept-all behavior
+  with no stored-data change.
 - Remove the 8 scheduled back-compat shims (DE7)
 - Remove the remaining user-facing deprecations (DE7)
 

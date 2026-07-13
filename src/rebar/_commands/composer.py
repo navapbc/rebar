@@ -109,7 +109,7 @@ def create_core(
             error_code="invalid_ticket_type",
             input_str=ticket_type,
         )
-    if not title:
+    if not title.strip():
         raise CommandError("Error: title must be non-empty")
     if len(title) > 255:
         raise CommandError(f"Error: title exceeds 255 characters ({len(title)} chars)")
@@ -377,7 +377,7 @@ def edit_core(
     for key, value in fields.items():
         value = "" if value is None else str(value)
         if key == "title":
-            if value == "":
+            if value.strip() == "":
                 raise CommandError(
                     "Error: --title requires a non-empty value (empty values silently "
                     "clobber the title; bug 4f50)"
