@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 def test_defaults_when_empty() -> None:
     c = Config.from_mapping(None)
-    assert c.verify.require_signature_for_close is False
+    assert c.verify.require_plan_review_for_claim is False
     assert c.ticket.display_mode == "auto"
     assert c.compact.threshold == 10
     assert c.sync.push == "always" and c.sync.pull == "on"
@@ -30,7 +30,7 @@ def test_defaults_when_empty() -> None:
 def test_parses_known_keys_typed() -> None:
     c = Config.from_mapping(
         {
-            "verify": {"require_signature_for_close": True},
+            "verify": {"require_plan_review_for_claim": True},
             "compact": {"threshold": 25},
             "sync": {"push": "async", "pull": "off"},
             "mcp": {"allow_jira_sync": True},
@@ -39,7 +39,7 @@ def test_parses_known_keys_typed() -> None:
             "scratch": {"base_dir": "/tmp/s"},
         }
     )
-    assert c.verify.require_signature_for_close is True
+    assert c.verify.require_plan_review_for_claim is True
     assert c.compact.threshold == 25
     assert c.sync.push == "async" and c.sync.pull == "off"
     assert c.mcp.allow_jira_sync is True
@@ -52,13 +52,13 @@ def test_string_coercion_from_env_or_flat_file() -> None:
     # Values arriving as strings (env / legacy flat file) coerce to the typed shape.
     c = Config.from_mapping(
         {
-            "verify": {"require_signature_for_close": "yes"},
+            "verify": {"require_plan_review_for_claim": "yes"},
             "compact": {"threshold": "30"},
             "sync": {"push": "OFF"},  # case-insensitive choice
             "mcp": {"readonly": "1"},
         }
     )
-    assert c.verify.require_signature_for_close is True
+    assert c.verify.require_plan_review_for_claim is True
     assert c.compact.threshold == 30
     assert c.sync.push == "off"
     assert c.mcp.readonly is True
@@ -69,7 +69,7 @@ def test_string_coercion_from_env_or_flat_file() -> None:
     [
         ({"sync": {"push": "sometimes"}}, "sync.push"),
         ({"sync": {"pull": "maybe"}}, "sync.pull"),
-        ({"verify": {"require_signature_for_close": "kinda"}}, "boolean"),
+        ({"verify": {"require_plan_review_for_claim": "kinda"}}, "boolean"),
         ({"compact": {"threshold": "lots"}}, "integer"),
         ({"compact": {"threshold": 0}}, ">= 1"),  # below minimum
         ({"compact": {"threshold": True}}, "boolean"),  # bool rejected as int
@@ -147,11 +147,14 @@ def test_tracker_dir_rejects_unsafe(dir_: str) -> None:
 def test_unknown_key_and_section_warn_not_drop(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = Config.from_mapping(
-            {"verify": {"require_signature_for_close": True, "tpyo": 1}, "bogus_section": {"x": 1}},
+            {
+                "verify": {"require_plan_review_for_claim": True, "tpyo": 1},
+                "bogus_section": {"x": 1},
+            },
             source="rebar.toml",
         )
     # The valid key still parses; the unknown key/section are warned, NOT silently dropped.
-    assert c.verify.require_signature_for_close is True
+    assert c.verify.require_plan_review_for_claim is True
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "verify.tpyo" in text and "rebar.toml" in text
     assert "[bogus_section]" in text
@@ -162,5 +165,5 @@ def test_removed_verdict_alias_is_unknown_key(caplog: pytest.LogCaptureFixture) 
     # to the canonical key — it is just an unknown key (warned + ignored).
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = Config.from_mapping({"verify": {"require_verdict_for_close": True}})
-    assert c.verify.require_signature_for_close is False
+    assert c.verify.require_plan_review_for_claim is False
     assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)

@@ -47,8 +47,26 @@ def test_removed_verdict_alias_ignored_and_warns(
     (p / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
     with caplog.at_level(logging.WARNING, logger="rebar.config"):
         c = cfg.load_config(root=p)
-    assert c.verify.require_signature_for_close is False  # NOT aliased anymore
+    assert c.verify.overlap_enabled is False  # canonical key still parses; not aliased
     assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
+
+
+# ── removed key: verify.require_signature_for_close is now an unknown key ──────
+def test_removed_signature_close_key_ignored_and_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ``verify.require_signature_for_close`` signature close-gate was retired
+    (story 28f1) — this project's close gate is the completion verifier. Setting the
+    old key is now just an unknown key (warned + ignored), and ``VerifyConfig`` no
+    longer carries the attribute."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(
+        "[verify]\nrequire_signature_for_close = true\n", encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = cfg.load_config(root=p)
+    assert not hasattr(c.verify, "require_signature_for_close")
+    assert any("require_signature_for_close" in r.getMessage() for r in caplog.records)
 
 
 # ── unknown-key policy: WARN during window, ERROR past cutover ────────────────
@@ -86,10 +104,10 @@ def test_strict_loads_known_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text(
-        "[verify]\nrequire_signature_for_close = true\n[sync]\npush = 'off'\n", encoding="utf-8"
+        "[verify]\nrequire_plan_review_for_claim = true\n[sync]\npush = 'off'\n", encoding="utf-8"
     )
     c = cfg.load_config(root=p)
-    assert c.verify.require_signature_for_close is True and c.sync.push == "off"
+    assert c.verify.require_plan_review_for_claim is True and c.sync.push == "off"
 
 
 def test_strict_errors_on_removed_verdict_alias(

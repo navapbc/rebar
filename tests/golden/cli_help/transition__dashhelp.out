@@ -3,5 +3,3 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<
   status: idea | open | in_progress | closed | blocked
   idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
   bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:').
-  story/epic close requires a certified signature ('rebar sign'; or --force-close=<reason>) ONLY when the
-  opt-in gate verify.require_signature_for_close=true is set in rebar.toml (off by default).
