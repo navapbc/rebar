@@ -109,6 +109,23 @@ def test_removed_legacy_signature_mirror_key_ignored_and_warns(
     assert any("emit_legacy_signature_mirror" in r.getMessage() for r in caplog.records)
 
 
+# ── removed keys: the two reconciler baseline rollout flags are now unknown ────
+@pytest.mark.parametrize("removed_key", ["baseline_dual_write", "baseline_consumer_swap"])
+def test_removed_reconciler_baseline_flags_ignored_and_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, removed_key: str
+) -> None:
+    """The two convergence-rollout phase flags `reconciler.baseline_dual_write` and
+    `baseline_consumer_swap` were retired and hardcoded always-on (story d6bd). Each
+    is now just an unknown key (warned + ignored), and `ReconcilerConfig` no longer
+    carries the attribute."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(f"[reconciler]\n{removed_key} = false\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = cfg.load_config(root=p)
+    assert not hasattr(c.reconciler, removed_key)
+    assert any(removed_key in r.getMessage() for r in caplog.records)
+
+
 # ── unknown-key policy: WARN during window, ERROR past cutover ────────────────
 def test_unknown_key_warns_during_window(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     p = _proj(tmp_path)

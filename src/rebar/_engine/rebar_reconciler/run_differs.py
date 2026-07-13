@@ -450,14 +450,6 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # deduped bridge alerts from them below — behavior is otherwise unchanged.
     conflict_sink: list[tuple[str, str]] = []
     dropped_field_sink: list[tuple[str, str]] = []
-    # Story a118: read the Phase-3 consumer-swap flag ONCE per pass here (mirrors
-    # the max_acting_fraction read below); fail-safe OFF if config is unreadable.
-    try:
-        from rebar.config import ConfigError, load_config
-
-        _consumer_swap = bool(load_config().reconciler.baseline_consumer_swap)
-    except ConfigError:
-        _consumer_swap = False
     outbound_raw, absent_alive_fields = outbound_differ_mod.compute_outbound_mutations(
         local_tickets,
         curr_snapshot,
@@ -470,7 +462,6 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
             prev_snapshot=prev_snapshot,
             conflict_sink=conflict_sink,
             dropped_field_sink=dropped_field_sink,
-            baseline_consumer_swap=_consumer_swap,
         ),
     )
     _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
