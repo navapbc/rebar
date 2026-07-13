@@ -23,7 +23,7 @@ SCHEMA = "code_review_result_v1"
 # The impact-model formula version that produced this sidecar's scores (story
 # raptorial-galloping-dragon). Stamped top-level so the calibration replay SEGMENTS old-formula vs
 # new-formula findings and never pools across versions. Bump on any impact_code shape change.
-IMPACT_MODEL_VERSION = "code-v2"
+IMPACT_MODEL_VERSION = "code-v3"
 
 
 def change_fingerprint(
