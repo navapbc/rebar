@@ -69,6 +69,28 @@ def test_removed_signature_close_key_ignored_and_warns(
     assert any("require_signature_for_close" in r.getMessage() for r in caplog.records)
 
 
+# ── removed keys: the three settled verify off-switches are now unknown keys ───
+@pytest.mark.parametrize(
+    "removed_key",
+    ["progressive_drift_refresh", "remediation_mode", "novelty_drop_active"],
+)
+def test_removed_settled_verify_switches_ignored_and_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, removed_key: str
+) -> None:
+    """The three settled verify defaults (`progressive_drift_refresh`,
+    `remediation_mode`, `novelty_drop_active`) were made always-on and their off
+    switches removed (story 4cdf). Each is now just an unknown key (warned +
+    ignored), and `VerifyConfig` no longer carries the attribute. The retained
+    tuning params (`remediation_window_minutes`, `novelty_drop_threshold`,
+    `novelty_priority_floor`) are unaffected — see test_config_typed."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(f"[verify]\n{removed_key} = false\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = cfg.load_config(root=p)
+    assert not hasattr(c.verify, removed_key)
+    assert any(removed_key in r.getMessage() for r in caplog.records)
+
+
 # ── unknown-key policy: WARN during window, ERROR past cutover ────────────────
 def test_unknown_key_warns_during_window(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     p = _proj(tmp_path)
