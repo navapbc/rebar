@@ -36,7 +36,8 @@ def test_routing_index_covers_every_overlay_and_detector_keys():
 
 # ── threshold_for BEHAVIOR (not just key existence) ────────────────────────────────────────
 def test_threshold_for_default_overlay_is_advisory_at_095():
-    assert reg.threshold_for(["security"]) == (0.95, False)
+    # `performance` is a still-advisory overlay (b9c0 flipped only `security` to blocking).
+    assert reg.threshold_for(["performance"]) == (0.95, False)
 
 
 def test_threshold_for_unknown_criterion_is_the_default():
@@ -48,8 +49,9 @@ def test_threshold_for_takes_min_threshold_and_any_blocking():
     bt, blocking = reg.threshold_for(["security", "secret-detection"])
     assert bt == 0.5  # secret-detection's lower threshold wins (min)
     assert blocking is True  # secret-detection is blocking-enabled (WS5 flipped it)
-    # a purely-advisory criterion set stays non-blocking.
-    assert reg.threshold_for(["security", "performance"]) == (0.95, False)
+    # a purely-advisory criterion set stays non-blocking (performance + docs are both advisory;
+    # b9c0 flipped only `security`, so this pair no longer includes a blocking criterion).
+    assert reg.threshold_for(["performance", "docs"]) == (0.95, False)
 
 
 def test_secrets_security_keys_are_the_ws5_blocking_handoff():
@@ -60,9 +62,11 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
     for key in ("secret-detection", "high-critical-security"):
         assert idx[key]["blocking_enabled"] is True, f"{key} is the WS5-flipped blocking criterion"
     assert reg.threshold_for(["high-critical-security"])[1] is True
-    # and these remain the ONLY blocking-enabled criteria (every overlay stays advisory).
+    # b9c0 (2026-07-12) added `security` as the first serious-tier AGENT blocking criterion, at
+    # the 9f25-derived threshold; the approved blocking set is now exactly these three, and no
+    # other overlay blocks (adding a fourth must be a deliberate, re-approved change).
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
-    assert set(blocking) == {"secret-detection", "high-critical-security"}
+    assert set(blocking) == {"secret-detection", "high-critical-security", "security"}
 
 
 def test_applies_to_globs_single_source_and_escalation_only():
