@@ -136,8 +136,8 @@ the user's checkout.
 Move the epic itself into progress so the board reflects live work under it: `rebar claim <epic>
 --assignee <you>` (or `rebar transition <epic> open in_progress`). If the **plan-review claim
 gate** is enabled, a ticket must pass `rebar review-plan <id>` before it can be claimed —
-run it, **remediate every valid finding** (fix the real ones; justify any you judge invalid),
-and re-run until it passes. Note: claiming a child later will **cascade** a claim up to any
+run it, **remediate any blocking finding and re-run until it passes**; apply the advisory findings
+that genuinely improve the plan (and justify skipping the rest) — not a mandate to remediate every one. Note: claiming a child later will **cascade** a claim up to any
 still-`open` parent, running *that* parent's plan-review gate too — so earning the epic's
 attestation now avoids a surprise block when you claim its first leaf. Log the claim.
 
