@@ -265,3 +265,28 @@ def verify_opcert(
             f"commit {merged_log_commit!r} (not yet added, or already revoked)"
         ),
     )
+
+
+def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
+    """Reconstruct an op-cert from a stored ``attestations[kind]`` record (keystone e4df).
+
+    Returns ``(envelope, {"material_fingerprint": …, "merged_log_commit": …})`` when the record
+    carries an op-cert (an encoded DSSE ``envelope`` field), or ``None`` for a legacy HMAC record
+    (no envelope). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
+
+    Never raises on a malformed envelope — a decode failure yields ``None`` (fail-closed).
+    """
+    encoded = record.get("envelope")
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        envelope = dsse.decode(encoded)
+    except Exception:  # noqa: BLE001 — malformed envelope → None, never raise (fail-closed)
+        return None
+    return (
+        envelope,
+        {
+            "material_fingerprint": record.get("material_fingerprint"),
+            "merged_log_commit": record.get("merged_log_commit"),
+        },
+    )
