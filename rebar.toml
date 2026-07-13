@@ -36,6 +36,19 @@ overlap_enabled = true
 # then no-ops). Enforced by `.github/workflows/gerrit-verify.yaml`.
 require_ticket_for_commit = true
 
+# Pass-3 completion floor (epic 66ac / story 6533; dogfooded here per story c366). On a
+# re-fired epic/story-with-children plan-review, an advisory finding is DROPPED iff its
+# completion sub-answers say it is fully about DELIVERED, settled plan text (attribution =
+# delivered-now child AND containment = limited-to-closed AND layer = plan-semantics) AND
+# its priority is below `completion_priority_floor` AND none of `completion_preserve_criteria`
+# are flipped. Advisory-only, container-only, fail-safe-to-keep — it can NEVER change a
+# PASS/BLOCK verdict, and every drop is recoverable from the plan-review sidecar `dropped[]`
+# (tagged `drop_reason="completion"`; see docs/calibration/completion_floor.md "Monitoring").
+# Calibrated before flip: gold-set 30/30 floor decisions correct, κ=1.0, zero must-never-
+# suppress anchors dropped. The schema default stays False for other clients; this is a
+# per-project opt-in. Rollback is cheap and needs no data cleanup: set this back to false.
+completion_floor_active = true
+
 [ticket]
 # Default assignee `claim` uses when no --assignee is given (story c36c). Applied at
 # CLAIM time (not at ticket create). Use a Jira-RESOLVABLE identity (email/accountId),
