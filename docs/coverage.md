@@ -92,3 +92,19 @@ relationships via `client.set_relationship`), and the round-trips are exercised 
 `tests/integration/rebar_reconciler/test_link_sync.py`. (This entry previously said
 link sync was "not yet a reconciler capability"; that is stale — it is implemented
 and tested.)
+
+## Supplemental (structural) coverage — NOT behavioral
+
+A few tests are **structural tripwires**, not behavioral coverage: they assert
+properties of the *source or a registry* (via AST inspection, key-set completeness,
+or a source-string search) rather than exercising runtime behavior through an entry
+point. They are valuable guards, but they must **not** be counted as behavioral
+coverage of the code they inspect — a passing tripwire says "the shape is intact,"
+never "the behavior is correct." Classified explicitly so they are not mistaken for
+behavioral tests in the inventory above:
+
+| Test | Kind | What it guards (and does NOT prove) |
+|------|------|-------------------------------------|
+| `tests/unit/rebar_reconciler/orchestrate/test_leaves_registry_coverage.py::test_every_leaf_has_nonstub_body_structural_guard` | AST structural | Every registered leaf has a non-stub body (no bare `pass`/`...`). Proves the code exists, not that it behaves correctly. |
+| `tests/unit/rebar_reconciler/orchestrate/test_leaves_effect_matrix.py::test_matrix_covers_every_leaf` | Registry completeness | The effect matrix's key set covers every leaf. Proves the matrix is complete, not that any effect is correct. |
+| `tests/unit/test_llm_timeouts.py::test_no_total_runtime_timer_mechanism` | Source-string search | A specific total-runtime-timer mechanism is absent from the source. Proves absence of a construct, not any runtime timeout behavior. |

@@ -274,9 +274,11 @@ git): a local commit advances `HEAD` but not `refs/heads/tickets`. The previous
 guard tested `origin/tickets..tickets` (the lagging *branch ref*), which read
 empty in that state, so the sync `git reset --hard origin/tickets` **destroyed the
 un-pushed local commit**. Measuring local-ahead by `origin/tickets..HEAD` closes
-this. (This specific detached-HEAD-local-ahead edge has no dedicated automated
-regression test in the current suite — the historical shell test that covered it
-was retired in the bash→Python migration without a like-for-like successor.)
+this. (This specific detached-HEAD-local-ahead edge is pinned by a dedicated
+automated regression test,
+`tests/unit/test_sync_union_recovery.py::test_sync_preserves_detached_head_local_ahead_commit`,
+which drives the store into that state and asserts the un-pushed local commit
+survives the sync.)
 
 **Why union, not reset — and the safety invariant (epic 97e7 / P1.4).** The
 unrelated-history case used to `reset --hard origin/tickets`, which **orphaned**
