@@ -459,52 +459,83 @@ def build_status(wip, *, heartbeat_age_s: int, waiting_count: int, time_in_phase
     }
 
 
-def write_recovery(state_dir, wip) -> None:
+def write_recovery(state_dir, wip, *, acknowledged: bool = True) -> None:
     """SIGTERM's FIRST action: snapshot the in-flight wipChain to `recovery.json` on the state
-    volume (change_id, chain_member_ids, tested_shas, phase, re_drive_count) so a crash/restart
-    mid-flight can reconcile rather than double-submit or strand a stack."""
+    volume — `change_id`, `chain_member_ids`, `tested_shas`, `phase`, `re_drive_count`, and the
+    S3 hand-back `acknowledged` flag — so a crash/restart mid-flight can reconcile per-phase
+    rather than double-submit or strand a stack. `acknowledged` defaults True (a normal drive
+    snapshot has no pending hand-back); pass `acknowledged=False` ONLY when snapshotting while
+    a hand-back's Autosubmit-removal is still in progress, so restart re-drives it to
+    completion."""
     snapshot = {
         "change_id": wip.change_id,
         "chain_member_ids": list(wip.chain_member_ids),
         "tested_shas": dict(wip.tested_shas),
         "phase": wip.phase,
         "re_drive_count": wip.re_drive_count,
+        "acknowledged": acknowledged,
     }
     (Path(state_dir) / RECOVERY_FILE).write_text(json.dumps(snapshot, sort_keys=True))
 
 
 def load_recovery(state_dir):
-    """Load the `recovery.json` snapshot into a WipChain, or None when absent."""
+    """Load the `recovery.json` snapshot into a `(WipChain, acknowledged)` pair, or None when
+    absent. (Older records without `acknowledged` default to True — nothing to re-drive.)"""
     path = Path(state_dir) / RECOVERY_FILE
     if not path.exists():
         return None
     data = json.loads(path.read_text())
-    return WipChain(
+    wip = WipChain(
         change_id=data["change_id"],
         chain_member_ids=data["chain_member_ids"],
         tested_shas=data["tested_shas"],
-        phase=data["phase"],
-        re_drive_count=data["re_drive_count"],
+        phase=data.get("phase", PHASE_IDLE),
+        re_drive_count=data.get("re_drive_count", 0),
     )
+    return wip, data.get("acknowledged", True)
 
 
 def reconcile_recovery(client: GerritClient, state_dir) -> str | None:
-    """On restart, reconcile a `recovery.json` snapshot against LIVE Gerrit before resuming:
-    if the recorded tip already MERGED → clear recovery (done, no double-submit); if a tested
-    SHA no longer matches / not submittable → discard and re-select; else resume. Returns a
-    short disposition string (or None when there was no recovery record). Idempotent."""
-    wip = load_recovery(state_dir)
-    if wip is None:
+    """On restart, reconcile a `recovery.json` snapshot against LIVE Gerrit BEFORE resuming,
+    with a rule per wipChain phase (idempotent; NEVER double-submits; NEVER strands a stack).
+    Returns a short disposition (or None when there was no recovery record).
+
+    Precedence: (1) tip already MERGED → clear (the land completed). (2) An UNACKNOWLEDGED
+    hand-back (`acknowledged=False`) → re-drive `Autosubmit` removal to completion, then clear.
+    (3) tested SHA drifted (main moved / new patchset) → discard + re-select. (4) Per phase for
+    a still-open, SHA-matching change: `rebasing`/`awaiting_verified`/`selecting` → discard +
+    re-select (the step never completed); `submitting` (and not MERGED) → discard + re-select
+    (re-check submittability, never blind re-submit); `idle`/`paused` → nothing in flight,
+    clear."""
+    loaded = load_recovery(state_dir)
+    if loaded is None:
         return None
+    wip, acknowledged = loaded
     recovery_path = Path(state_dir) / RECOVERY_FILE
-    tip = client.get_change(wip.change_id, ["CURRENT_REVISION"])
+    tip = client.get_change(wip.change_id, ["CURRENT_REVISION", "SUBMITTABLE"])
+
     if tip.get("status") == "MERGED":
         recovery_path.unlink(missing_ok=True)
-        return "already merged; recovery cleared"
+        return f"phase={wip.phase}: already merged; recovery cleared"
+
+    if not acknowledged:
+        # a hand-back's Autosubmit removal was interrupted -> complete it idempotently.
+        from autolander import failure
+
+        failure.remove_autosubmit_from_stack(client, wip)
+        recovery_path.unlink(missing_ok=True)
+        return f"phase={wip.phase}: unacknowledged hand-back; Autosubmit removal re-driven; cleared"
+
     if tip.get("current_revision") != wip.tested_shas.get(wip.change_id):
         recovery_path.unlink(missing_ok=True)
-        return "stale snapshot discarded; will re-select"
-    return "resume in-flight stack"
+        return f"phase={wip.phase}: stale SHA (main advanced); discard + re-select"
+
+    # still-open, SHA-matching change: every phase discards + re-selects (the loop re-drives
+    # from a clean slate; submitting is NOT blind-resubmitted since it's not MERGED here).
+    recovery_path.unlink(missing_ok=True)
+    if wip.phase in (PHASE_IDLE, PHASE_PAUSED):
+        return f"phase={wip.phase}: nothing in flight; cleared"
+    return f"phase={wip.phase}: interrupted before completion; re-select + re-drive"
 
 
 def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: no cover
@@ -556,17 +587,31 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
     httpd = http.server.HTTPServer(("0.0.0.0", status_port), _Status)  # noqa: S104 — loopback via nginx
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
-    stopping = {"v": False}
+    stopping = {"v": False, "drain_deadline": None}
+
+    # A daemon heartbeat thread writes the heartbeat every POLL_S INDEPENDENTLY of the main
+    # loop — so it stays fresh (< 15 s) during a long in-flight drive AND during the SIGTERM
+    # drain, keeping the container `healthy` so autoheal never restarts a still-working bot.
+    def _heartbeat_loop():
+        while True:
+            write_heartbeat(root, time.time())
+            time.sleep(POLL_S)
+
+    write_heartbeat(root, time.time())  # one synchronous write so the file exists immediately
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
     def _on_sigterm(_signum, _frame):
+        # FIRST action: crash-safe snapshot; then DRAIN — stop taking new work but let the
+        # in-flight wipChain finish, bounded by the 120 s stop_grace_period (compose), while
+        # the heartbeat thread keeps the container healthy.
         if state["wip"] is not None:
-            write_recovery(root, state["wip"])  # FIRST action: crash-safe snapshot
+            write_recovery(root, state["wip"])
         stopping["v"] = True
+        stopping["drain_deadline"] = time.monotonic() + 120
 
     signal.signal(signal.SIGTERM, _on_sigterm)
 
     while not stopping["v"]:
-        write_heartbeat(root, time.time())
         if is_emergency_stopped(root):
             time.sleep(POLL_S)
             continue

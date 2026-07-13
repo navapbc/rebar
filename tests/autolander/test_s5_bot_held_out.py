@@ -47,9 +47,10 @@ def test_recovery_snapshot_round_trip(tmp_path):
         re_drive_count=2,
     )
     write_recovery(tmp_path, wip)
-    restored = load_recovery(tmp_path)
+    restored, acknowledged = load_recovery(tmp_path)
 
     assert restored is not None
+    assert acknowledged is True  # default (no hand-back in progress)
     assert restored.change_id == "Itip"
     assert restored.chain_member_ids == ["Ibot", "Itip"]
     assert restored.tested_shas == {"Ibot": "sB", "Itip": "sT"}

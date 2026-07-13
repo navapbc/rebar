@@ -121,6 +121,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.autolander
     restart: unless-stopped
+    stop_grace_period: 120s  # S5d: allow the bounded SIGTERM drain to finish (vs Docker's 10s default)
     env_file:
       - .env
     ports:
