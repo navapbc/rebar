@@ -123,13 +123,13 @@ def test_in_process_edit_is_picked_up(tmp_path: Path) -> None:
     cache re-stats the files it read and re-resolves on change (NOT a stale hit)."""
     p = _proj(tmp_path)
     pp = p / "pyproject.toml"
-    pp.write_text("[tool.rebar.verify]\nrequire_signature_for_close = false\n", encoding="utf-8")
-    assert cfg.load_config(root=p).verify.require_signature_for_close is False
+    pp.write_text("[tool.rebar.verify]\nrequire_plan_review_for_claim = false\n", encoding="utf-8")
+    assert cfg.load_config(root=p).verify.require_plan_review_for_claim is False
     # Operator tightens the gate (same process, same cache key); bump mtime to be
     # filesystem-resolution-independent.
-    pp.write_text("[tool.rebar.verify]\nrequire_signature_for_close = true\n", encoding="utf-8")
+    pp.write_text("[tool.rebar.verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8")
     os.utime(pp, (pp.stat().st_atime + 5, pp.stat().st_mtime + 5))
-    assert cfg.load_config(root=p).verify.require_signature_for_close is True  # honored
+    assert cfg.load_config(root=p).verify.require_plan_review_for_claim is True  # honored
 
 
 def test_implicit_root_keys_on_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
