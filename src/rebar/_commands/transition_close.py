@@ -224,6 +224,20 @@ def _completion_precheck(
         )
         if guidance:
             message += "\n\n  " + guidance
+        # Persist the FAIL verdict to a durable, queryable sidecar (ticket 24ec) BEFORE the
+        # raise, so a completion FAIL leaves an artifact (mirroring the plan-review
+        # REVIEW_RESULT sidecar) instead of vanishing. Best-effort: emit swallows its own
+        # errors and returns False; it never changes the close outcome or masks the FAIL —
+        # the raise below still fires unconditionally. Supply the canonical id so the record
+        # lands in the resolved ticket dir, and material=None (no fingerprint is computed on
+        # the FAIL path).
+        from rebar.llm import completion_sidecar
+
+        result.setdefault("ticket_id", resolved_id)
+        try:
+            completion_sidecar.emit(result, material=None, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 — defense-in-depth: persistence is best-effort observability and must NEVER mask the FAIL, even if emit itself raises
+            logger.warning("completion FAIL sidecar emit raised; still blocking", exc_info=True)
         raise CommandError(message, returncode=1)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
