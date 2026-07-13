@@ -86,7 +86,7 @@ def test_partial_land_fails_loudly_metric_handback_and_no_close(capsys):
         ancestor_atomic_submit(
             client,
             wip,
-            close_ticket=closed.append,
+            close_ticket=lambda cid, *, ticket_id=None: closed.append(cid),
             emit_metric=lambda name, val: metrics.append((name, val)),
             record_handback=lambda reason, w: handbacks.append((reason, w.change_id)),
         )
@@ -111,7 +111,9 @@ def test_merge_closes_every_member_ticket():
     )
     closed = []
 
-    outcome = ancestor_atomic_submit(client, wip, close_ticket=closed.append)
+    outcome = ancestor_atomic_submit(
+        client, wip, close_ticket=lambda cid, *, ticket_id=None: closed.append(cid)
+    )
 
     assert outcome == "merged"
     assert closed == ["Ibot", "Itop"]
@@ -130,7 +132,9 @@ def test_default_close_uses_concrete_rebar_seam(monkeypatch):
         change_id="Ird", chain_member_ids=["Ird"], tested_shas={"Ird": merged["current_revision"]}
     )
     seen = []
-    monkeypatch.setattr(loop, "close_ticket_via_rebar", lambda cid: seen.append(cid))
+    monkeypatch.setattr(
+        loop, "close_ticket_via_rebar", lambda cid, *, ticket_id=None: seen.append(cid)
+    )
 
     assert ancestor_atomic_submit(client, wip) == "merged"  # no close_ticket kwarg -> default
     assert seen == ["Ird"], "default close path must invoke the concrete import-rebar seam"

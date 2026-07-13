@@ -12,12 +12,36 @@ ticket ops (e.g. annotate the ticket on merge), per the epic's scope note.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from autolander.gerrit import GerritClient
+
+# The `rebar-ticket:` commit trailer (docs/commit-ticket-trailer.md) — the canonical link
+# from a landed commit to its rebar ticket. Key is case-insensitive; matched per-line so we
+# can take the LAST occurrence (git-trailer "last wins") when a message carries several.
+_REBAR_TICKET_TRAILER = re.compile(
+    r"^[ \t]*rebar-ticket[ \t]*:[ \t]*(.+?)[ \t]*$", re.IGNORECASE | re.MULTILINE
+)
+
+
+def ticket_id_from_commit_message(message: str) -> str | None:
+    """Extract the `rebar-ticket:` trailer value from a commit `message`.
+
+    Pure string function (easily unit-tested): case-insensitive key, LAST occurrence wins,
+    value stripped. Returns None when the trailer is absent (or the message is empty) — the
+    signal that the landed commit is NOT linked to a rebar ticket, so the lander must SKIP
+    annotation rather than fall back to the Gerrit Change-Id (bug dc33)."""
+    if not message:
+        return None
+    matches = _REBAR_TICKET_TRAILER.findall(message)
+    if not matches:
+        return None
+    return matches[-1].strip() or None
+
 
 # Selection query: open, has an Autosubmit +1, and Gerrit already considers it submittable
 # (both gate votes at MAX AND on-tip under Fast-Forward-Only main, ADR-0040).
@@ -300,16 +324,27 @@ def close_ticket_via_rebar(
     change_id: str, *, ticket_id: str | None = None, message: str | None = None
 ) -> None:
     """Concrete `import rebar` ticket-annotate seam used on merge (the production default for
-    `ancestor_atomic_submit`'s `close_ticket`). Annotates the associated rebar ticket that the
-    change landed; best-effort (a ticket-op failure must not crash the lander)."""
+    `ancestor_atomic_submit`'s `close_ticket`). Annotates the rebar ticket named by the landed
+    commit's `rebar-ticket:` trailer (`ticket_id`) that the change landed.
+
+    The Gerrit `change_id` is NEVER used as a ticket id (bug dc33): when `ticket_id` is falsy
+    (no `rebar-ticket:` trailer on the landed commit) this SKIPS annotation with a low-severity
+    note and returns WITHOUT calling `rebar.comment`. A genuine `rebar.comment` failure (a real
+    store/permission error) is still surfaced LOUDLY via `AUTOLANDER_ERROR` — best-effort in
+    that it never crashes the loop, but a real error is a real error."""
+    if not ticket_id:
+        sys.stderr.write(
+            f"autolander: no rebar-ticket trailer on {change_id}; skipping ticket annotation\n"
+        )
+        return
+
     import rebar  # loop.py MAY import rebar for ticket ops (epic scope); gerrit.py may not.
 
-    tid = ticket_id or change_id
     msg = message or f"Landed on main via the serial auto-lander (Gerrit change {change_id})."
     try:
-        rebar.comment(tid, msg)
+        rebar.comment(ticket_id, msg)
     except Exception as exc:  # noqa: BLE001 — annotation is best-effort; never crash the loop
-        sys.stderr.write(f"{AUTOLANDER_ERROR} ticket annotate failed for {tid}: {exc}\n")
+        sys.stderr.write(f"{AUTOLANDER_ERROR} ticket annotate failed for {ticket_id}: {exc}\n")
 
 
 def has_fresh_verified(change: dict) -> bool:
@@ -398,7 +433,14 @@ def ancestor_atomic_submit(
     closer = close_ticket_via_rebar if close_ticket is _USE_REBAR_CLOSE else close_ticket
     if closer is not None:
         for member_id in wip.chain_member_ids:
-            closer(member_id)
+            # Resolve the rebar ticket from the LANDED commit's `rebar-ticket:` trailer — never
+            # the Gerrit Change-Id (bug dc33). A missing trailer -> ticket_id=None -> the closer
+            # skips annotation (see close_ticket_via_rebar).
+            fetched = client.get_change(member_id, ["CURRENT_REVISION", "CURRENT_COMMIT"])
+            cur = fetched.get("current_revision")
+            rev = (fetched.get("revisions") or {}).get(cur) or {}
+            commit_message = (rev.get("commit") or {}).get("message") or ""
+            closer(member_id, ticket_id=ticket_id_from_commit_message(commit_message))
     return "merged"
 
 

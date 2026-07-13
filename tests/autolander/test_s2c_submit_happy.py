@@ -31,7 +31,9 @@ def test_ancestor_atomic_submit_merges_and_closes_ticket():
     )
     closed = []
 
-    outcome = ancestor_atomic_submit(client, wip, close_ticket=closed.append)
+    outcome = ancestor_atomic_submit(
+        client, wip, close_ticket=lambda cid, *, ticket_id=None: closed.append(cid)
+    )
 
     assert outcome == "merged"
     # exactly one submit, on the tip

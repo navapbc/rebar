@@ -24,11 +24,14 @@ def change_info(
     status: str = "NEW",
     revision: str | None = None,
     owner_account: int = 1000,
+    message: str | None = None,
 ) -> dict:
     """Build a minimal ChangeInfo (o=DETAILED_LABELS + CURRENT_REVISION/COMMIT shape).
 
     `verified=True` adds a fresh `Verified +1` on the current patchset; `status` is the
-    change status (e.g. "MERGED" after submit); `revision` overrides the current SHA.
+    change status (e.g. "MERGED" after submit); `revision` overrides the current SHA;
+    `message`, when given, is set as the current revision's `commit.message` (the CURRENT_COMMIT
+    shape the lander parses for the `rebar-ticket:` trailer).
     """
     labels: dict = {}
     if autosubmit_date is not None:
@@ -41,6 +44,9 @@ def change_info(
     else:
         labels["Verified"] = {"all": [{"value": 0, "_account_id": 2000}]}
     rev = revision or ("rev" + str(number))
+    commit: dict = {"parents": [{"commit": f"p{i}"} for i in range(parents)]}
+    if message is not None:
+        commit["message"] = message
     return {
         "change_id": change_id,
         "_number": number,
@@ -49,7 +55,7 @@ def change_info(
         "labels": labels,
         "owner": {"_account_id": owner_account},
         "current_revision": rev,
-        "revisions": {rev: {"commit": {"parents": [{"commit": f"p{i}"} for i in range(parents)]}}},
+        "revisions": {rev: {"commit": commit}},
     }
 
 

@@ -62,5 +62,54 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=2 \
     CMD python -c "from autolander.loop import healthcheck_main; healthcheck_main()"
 
-# Run the serial auto-lander loop.
+# ---------------------------------------------------------------------------
+# Tickets-store entrypoint (bug dc33 / puny-earthy-wolf).
+#
+# The auto-lander annotates the rebar ticket named by a landed commit's `rebar-ticket:`
+# trailer (loop.py: close_ticket_via_rebar). That write needs a writable, PUSHABLE rebar
+# tickets store in the container — without one every annotation fails "ticket system not
+# initialized" and the bot pages. Mirror the review-bot's data-capture entrypoint:
+#   1. Configure a PER-URL (not --global) git credential helper for the tickets remote that
+#      echoes username=x-access-token / password=$REVIEWBOT_TICKETS_PAT — REUSING the review-bot
+#      PAT (already in the shared .env), so the fine-grained contents:write PAT never lands on
+#      disk or inside a remote URL.
+#   2. Materialize a PERSISTENT tickets worktree ONCE (a clone of the `tickets` branch onto the
+#      mounted volume) so annotations auto-push (REBAR_SYNC_PUSH=always) instead of living in an
+#      ephemeral dir.
+#   3. Converge the (possibly freshly-cloned) worktree into a writable rebar store: repo-local
+#      git identity + rebar's idempotent ensure-registry (the `.env-id` store marker gate).
+# Everything is a no-op when REVIEWBOT_TICKETS_PAT is unset (the container still boots + lands;
+# only the ticket annotation is inert). The live clone/push is a DEPLOY-STEP CANARY (needs the
+# real SSM PAT + a running container), so it is NOT exercised by the in-repo unit tests. Never
+# blocks boot.
+ENV AUTOLANDER_TICKETS_DIR=/var/gerrit/site/autolander-tickets \
+    AUTOLANDER_TICKETS_URL=https://github.com/navapbc/rebar.git
+RUN set -eux; \
+    { \
+      echo '#!/bin/sh'; \
+      echo 'set -e'; \
+      echo 'if [ -n "${REVIEWBOT_TICKETS_PAT:-}" ]; then'; \
+      echo '  git config --global "credential.${AUTOLANDER_TICKETS_URL}.helper" \'; \
+      echo "    '!f() { echo username=x-access-token; echo \"password=\$REVIEWBOT_TICKETS_PAT\"; }; f'"; \
+      echo '  git config --global "credential.${AUTOLANDER_TICKETS_URL}.useHttpPath" false'; \
+      echo '  if [ ! -d "${AUTOLANDER_TICKETS_DIR}/.git" ]; then'; \
+      echo '    git clone --single-branch --branch tickets "${AUTOLANDER_TICKETS_URL}" "${AUTOLANDER_TICKETS_DIR}" || \'; \
+      echo '      echo "autolander: tickets worktree clone deferred (deploy canary)" >&2'; \
+      echo '  fi'; \
+      echo 'fi'; \
+      echo '# Converge the (possibly freshly-cloned) tickets worktree into a writable rebar'; \
+      echo '# store: repo-local git identity + the `.env-id` store marker via run_ensures.'; \
+      echo '# Idempotent — a no-op when the clone is deferred or already converged; never boots-blocks.'; \
+      echo 'if [ -d "${AUTOLANDER_TICKETS_DIR}/.git" ]; then'; \
+      echo '  git -C "${AUTOLANDER_TICKETS_DIR}" config user.email joeoakhart+bot@navapbc.com || :'; \
+      echo '  git -C "${AUTOLANDER_TICKETS_DIR}" config user.name RebarBotNava || :'; \
+      echo "  python -c \"import sys; from rebar._store.ensures import run_ensures; [print(f'autolander-ensure: {o.id}: {o.status}', file=sys.stderr) for o in run_ensures(sys.argv[1])]\" \"\${AUTOLANDER_TICKETS_DIR}\" || \\"; \
+      echo '    echo "autolander: tickets store ensure deferred (see logs)" >&2'; \
+      echo 'fi'; \
+      echo 'exec "$@"'; \
+    } > /usr/local/bin/autolander-entrypoint.sh; \
+    chmod +x /usr/local/bin/autolander-entrypoint.sh
+
+# Run the serial auto-lander loop (through the tickets-store entrypoint above).
+ENTRYPOINT ["/usr/local/bin/autolander-entrypoint.sh"]
 CMD ["python", "-m", "autolander.loop"]
