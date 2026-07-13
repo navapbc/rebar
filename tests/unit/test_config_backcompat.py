@@ -91,6 +91,24 @@ def test_removed_settled_verify_switches_ignored_and_warn(
     assert any(removed_key in r.getMessage() for r in caplog.records)
 
 
+# ── removed key: compact.emit_legacy_signature_mirror is now an unknown key ────
+def test_removed_legacy_signature_mirror_key_ignored_and_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`compact.emit_legacy_signature_mirror` (the CONTRACT-phase rollback lever of
+    the additive-attestations rollout) was retired (story 7ed9): new snapshots never
+    persist the legacy `signature` mirror. The key is now just an unknown key (warned
+    + ignored), and `CompactConfig` no longer carries the attribute."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(
+        "[compact]\nemit_legacy_signature_mirror = true\n", encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.config"):
+        c = cfg.load_config(root=p)
+    assert not hasattr(c.compact, "emit_legacy_signature_mirror")
+    assert any("emit_legacy_signature_mirror" in r.getMessage() for r in caplog.records)
+
+
 # ── unknown-key policy: WARN during window, ERROR past cutover ────────────────
 def test_unknown_key_warns_during_window(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     p = _proj(tmp_path)

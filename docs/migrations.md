@@ -145,6 +145,14 @@ new SNAPSHOTs stop carrying the mirror.
   freshly compacted or fsck-rebuilt ticket carries only `attestations`. Old snapshots that
   still hold only the mirror are upgraded on read by the existing fold-in
   (`_processors.py`), so migrated consumers always find a record.
+- **Toggle removed (task 7ed9): never-emit is now hardcoded.** 352b shipped this behind a
+  rollback lever (`compact.emit_legacy_signature_mirror`, default `false` = drop). Its
+  default already meant "never persist the mirror", so its removal changes no runtime
+  behavior — it only deletes the documented one-line config rollback. `compact.py` now
+  unconditionally strips `signature` from every new snapshot, and the config key no longer
+  exists (setting it warns + is ignored). **The in-memory re-derivation is untouched:** the
+  reducer's `process_signature` still re-projects `state['signature']` from the attestations
+  on every replay, so signature verification keeps working on a compacted, mirror-less ticket.
 
 **The readiness gate (AC1) — why this is a one-way door.** A pre-attestations clone (code
 older than the attestations release) reads `state['signature']` directly and has no
@@ -155,20 +163,18 @@ gate: the fleet auto-updates hourly to `origin/main`, so no pre-attestations bin
 live. Confirm before shipping to any *other* environment (upgrade reconcile hosts first, as
 `fsck` already warns for newer-than-binary event types).
 
-**Rollback (AC2).** The drop is fully reversible by configuration — **no code downgrade
-needed**. Set:
-
-```toml
-[tool.rebar.compact]
-emit_legacy_signature_mirror = true
-```
-
-(or env `REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR=true`). The **next compaction** of a
-ticket re-emits the mirror in its snapshot; run `rebar compact <id>` (or let the threshold
-trigger) to restore the mirror on a specific ticket immediately. **Named rollback target:**
-`compact.emit_legacy_signature_mirror = true` on the **0.7.x** line (the release that
-introduces the flag) — an operator who discovers a lingering pre-attestations reader flips
-this key and re-compacts, with no binary rollback.
+**Rollback (task 7ed9 — the config lever is GONE).** 352b shipped this drop behind a
+config rollback lever: `compact.emit_legacy_signature_mirror = true` (env
+`REBAR_COMPACT_EMIT_LEGACY_SIGNATURE_MIRROR=true`) made the next compaction re-emit the
+mirror in a ticket's snapshot, with no binary rollback. **That toggle has been removed.**
+The key's default already meant "never persist the mirror", so its removal changes no
+runtime behavior; it only retires the config escape hatch. Setting the key now warns and is
+ignored. After this change, **new snapshots never persist the `signature` mirror and there is
+no config flip that re-emits it** — the only way to recover the persisted mirror for a
+mirror-less snapshot read by an old (pre-attestations) reader is a **code downgrade** to a
+binary that still writes it. This is safe for this deployment precisely because the fleet
+auto-updates hourly to `origin/main`, so no pre-attestations binary remains live to need the
+mirror; the in-memory re-derivation (below) covers every migrated reader.
 
 **A note on removing the read-side fold-in.** 352b intentionally **keeps** the
 `_processors.py` old-snapshot fold-in. Removing it is a *further* contract step that is safe
