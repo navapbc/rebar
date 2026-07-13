@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# rebar auto-lander image (epic f1fa / story S5).
+#
+# Builds the serial auto-lander loop (infra/autolander/loop.py): a single-instance
+# daemon that polls Gerrit for the front submittable Autosubmit+1 change/chain and
+# lands it (rebase-on-behalf + ancestor-atomic submit), writing a heartbeat + a
+# read-only status endpoint. The build context is the REPO ROOT (see
+# docker-compose.yml: build.context: ../..), so the whole package is available to
+# `pip install .` AND the infra/autolander/ package is on the image.
+#
+# Unlike Dockerfile.reviewbot this image does NOT install the security scanners
+# (gitleaks/semgrep) — the auto-lander never runs the code-review gate; it only reads
+# Gerrit vote/label/submittability state and submits. Keeping the scanners out makes
+# the image lean and the build fast.
+#
+# .dockerignore NOTE: the build context is the repo root, so the repo-root
+# .dockerignore is what Docker honors (it already excludes .git, .venv, the ephemeral
+# infra/compose/.env, __pycache__, etc.).
+#
+# python:3.12-slim is multi-arch and resolves to arm64 on the t4g (Graviton) box.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+# Keep Python lean + predictable in a container.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# git is needed at runtime: rebar's engine shells out to git for the event store.
+# curl + ca-certificates: TLS trust for the HTTPS Gerrit REST calls the loop makes.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the whole repo (the build context is the repo root) and install the package
+# with the agents extra (the rebar.llm runtime + shared deps the loop links against).
+COPY . /app
+RUN pip install ".[agents]"
+
+# The auto-lander package lives under infra/autolander/ (NOT inside the installed
+# `rebar` package), so put infra/ on PYTHONPATH to make `import autolander` resolve.
+ENV PYTHONPATH=/app/infra
+
+# The read-only status endpoint the `land` command reads (S5). Published on host
+# loopback for the HOST nginx /autolander/status proxy; single-sourced from the .env
+# (AUTOLANDER_PORT, default 8080). Container port is fixed at 8080 (loop.py status_port).
+ENV AUTOLANDER_PORT=8080
+EXPOSE 8080
+
+# ---------------------------------------------------------------------------
+# HEALTHCHECK (S5d) — heartbeat-file liveness, NOT a Gerrit probe. The loop writes the
+# current epoch seconds to <state_dir>/heartbeat once per tick (POLL_S=15s). Report
+# UNHEALTHY when that file is missing or older than 90s (6 ticks), so the autoheal
+# sidecar (docker-compose.yml) restarts a wedged/deadlocked loop. Deliberately does NOT
+# reach Gerrit: a Gerrit outage must not make the lander look unhealthy (it should keep
+# heartbeating and simply have nothing to land). start-period=60s gives the loop time to
+# write its first heartbeat before failures count.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=2 \
+    CMD python -c "import sys,time; sys.exit(1 if time.time() - float(open('/var/gerrit/site/autolander/heartbeat').read()) > 90 else 0)"
+
+# Run the serial auto-lander loop.
+CMD ["python", "-m", "autolander.loop"]
