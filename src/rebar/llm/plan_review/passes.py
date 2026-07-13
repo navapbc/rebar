@@ -766,6 +766,16 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
             "unobservable success target as an observable proxy."
         ),
     },
+    # Operator-attested evidence (epic a8e5, ADR 0043): when an AC's "done" evidence lives OUTSIDE
+    # the codebase (a deploy, a live drill), tag it [operator-attested] and record the concrete
+    # attestation on the ticket — the completion verifier accepts that over an in-session proof.
+    "14": {
+        "name": "state attestation evidence",
+        "template": (
+            "State the concrete attestation evidence the [operator-attested] {subject} will "
+            "require (a change id / vote outcome / timestamp), recorded on the ticket."
+        ),
+    },
     # Foundation/enhancement split (epic cite-stone-sea / WS8): the removal of DEFERRED_MEASUREMENT
     # (counter-architectural — a blocking AC must be in-session-closable). Instead of deferring the
     # measurement inside the current AC, ship the functional goal with existing machinery now and

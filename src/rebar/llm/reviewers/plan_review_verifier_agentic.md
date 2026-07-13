@@ -126,6 +126,17 @@ each sub-question on its own merits. 'insufficient' is allowed and honest. Be DE
 targeted searches/reads per code-grounded finding, then judge it. Verdict-with-citation, never
 verdict-with-fix.
 
+claims_absence is yes|no|insufficient|na — does the FINDING's premise assert something is
+MISSING / never specified / not tasked / absent from the plan? Classify the finding TEXT.
+Answer `na` unless the finding is premised on an absence.
+
+absence_confirmed_in_context is yes|no|insufficient|na — SEARCH the provided plan text: is the
+item the finding claims absent GENUINELY absent (no provision covers it)? 'yes' = confirmed
+absent (the finding stands); 'no' = a provision WAS found (quote it — the absence premise is
+FALSE, and the finding is dropped). Answer `na` unless the finding claims an absence. Both
+claims_absence and absence_confirmed_in_context default `na` unless the finding is premised on
+an absence.
+
 ANTI-FP — adopted-library contract (FP6): if the asserted gap is a capability that is
 the DOCUMENTED CONTRACT of an adopted, maintained third-party dependency the plan commits
 to, the dependency's contract IS the existing mitigation — answer `no_existing_mitigation=yes`,

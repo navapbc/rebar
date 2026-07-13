@@ -31,6 +31,7 @@ registration decorators (import-light, no heavy LLM deps, no import cycle).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from rebar.llm.workflow.executor import StepContext, register_step
@@ -48,6 +49,71 @@ def _ticket_id(ctx: StepContext) -> str:
             f"the workflow against a target ticket"
         )
     return str(tid)
+
+
+# ── a8e5 Component 3: operator-attested AC awareness (pure DET, ADR-0043) ─────────────────────
+# An AC tagged `- [ ] [operator-attested] …` has "done" evidence that inherently lives OUTSIDE
+# the codebase (a deploy, a live drill), so a plan-review finding that flags it as
+# in-session-UNVERIFIABLE (the ac_unverifiable hard-override axis) is a FALSE POSITIVE: the
+# in-session unverifiability is by design. We DET-detect the tag and, for a finding that
+# references such an AC, clear ac_unverifiable BEFORE impact_plan reads it — leaving the kernel
+# impact_plan/pass3 math byte-unchanged (the fact is injected upstream, not taught to the kernel).
+_OPERATOR_ATTESTED_AC_RE = re.compile(
+    r"^\s*-\s*\[[ xX]?\]\s*\[operator-attested\]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def operator_attested_ac_texts(description: str) -> list[str]:
+    """Extract the criterion text of every AC checklist line tagged with the EXACT
+    case-insensitive token ``[operator-attested]`` (ADR-0043). The tag is stripped and the text
+    trimmed. Matching is exact on the hyphenated token — a near-miss like ``[operator_attested]``
+    is NOT operator-attested. Returns ``[]`` when none are tagged."""
+    return [m.strip() for m in _OPERATOR_ATTESTED_AC_RE.findall(description or "")]
+
+
+def _norm(s: str) -> str:
+    """Whitespace/case-normalize for substring matching."""
+    return " ".join((s or "").lower().split())
+
+
+def enrich_operator_attested(
+    findings: list[dict[str, Any]], verifs: dict[int, dict[str, Any]], description: str
+) -> None:
+    """DET-enrich verifications in place (mirrors code_review ``_det_enrich_verifications``): for a
+    finding that REFERENCES an operator-attested AC, inject ``operator_attested=True`` into its
+    ``severity_attributes`` and CLEAR the ``ac_unverifiable`` axis to ``"none"`` (an
+    operator-attested AC's in-session unverifiability is by design, not a defect). A finding
+    references an operator-attested AC iff a non-empty normalized operator-attested criterion text
+    is a substring of the finding's combined normalized text (location + finding + checklist_item +
+    evidence). Fail-safe: never raises on missing keys / bad shapes; a miss leaves the finding
+    untouched (the conservative direction — a surviving advisory, never a spurious clear)."""
+    oa_texts = [_norm(t) for t in operator_attested_ac_texts(description)]
+    oa_texts = [t for t in oa_texts if t]
+    if not oa_texts:
+        return
+    for i, f in enumerate(findings):
+        verif = verifs.get(i)
+        if not isinstance(verif, dict):
+            continue
+        attrs = verif.get("severity_attributes")
+        if not isinstance(attrs, dict):
+            attrs = {}
+            verif["severity_attributes"] = attrs
+        combined = _norm(
+            " ".join(
+                [
+                    str(f.get("location", "")),
+                    str(f.get("finding", "")),
+                    str(f.get("checklist_item", "")),
+                    " ".join(str(e) for e in (f.get("evidence") or [])),
+                ]
+            )
+        )
+        if any(oa in combined for oa in oa_texts):
+            attrs["operator_attested"] = True
+            if attrs.get("ac_unverifiable") not in (None, "", "none"):
+                attrs["ac_unverifiable"] = "none"
 
 
 @register_step(
@@ -351,6 +417,15 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
             reshape.summary(),
         )
         orchestrator.record_contract_violation(reshape.summary())
+
+    # a8e5 Component 3: operator-attested AC awareness. Clear ac_unverifiable on a finding that
+    # flags an operator-attested AC as in-session-unverifiable BEFORE Pass-3 reads it (fail-open:
+    # any read failure skips enrichment, never breaks the decide step).
+    try:
+        _desc = orchestrator.assemble_context(_ticket_id(ctx), repo_root=ctx.repo_root).description
+        enrich_operator_attested(findings, verifs, _desc)
+    except Exception:  # noqa: BLE001 — best-effort enrichment; never fail the gate on it
+        logger.debug("operator-attested enrichment skipped", exc_info=True)
 
     # The size-ladder's "too big at the largest model" findings are DET-style BLOCKS;
     # budget-shed findings are pre-decided INDETERMINATE. Both bypass Pass-2/3. The rest are
