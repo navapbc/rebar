@@ -22,6 +22,8 @@ CLAUDE.local.md
 .coverage.*
 coverage.xml
 htmlcov/
+# pytest --store-durations / pytest-split timings (perf logging, task 9ad9) — never committed
+.test_durations
 
 # Serena MCP (local code-navigation tooling; per-developer)
 .serena/
