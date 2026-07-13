@@ -357,6 +357,18 @@ def _maybe_apply_completion_floor(
         preserve=frozenset(verify_cfg.completion_preserve_criteria),
         delivered_ids=delivered_ids,
     )
+    # Observability (story c366): the successful-drop path is otherwise silent (only failures
+    # warn). Emit one INFO line naming the floored finding ids so live suppressions are visible
+    # without opening the sidecar; the full drop record still lands in the sidecar dropped[].
+    floored = (verdict.get("coverage") or {}).get("completion_floored_finding_ids") or []
+    if floored:
+        logger.info(
+            "completion floor dropped %d advisory finding(s) on %s: %s "
+            '(audit via sidecar dropped[] drop_reason="completion")',
+            len(floored),
+            ticket_id,
+            ", ".join(floored),
+        )
 
 
 def review_plan(
