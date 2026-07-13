@@ -1122,6 +1122,15 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # RED surface: the orphan is dropped by the far-future snapshot's positional skip.
     assert "orphan-from-B" not in _comment_bodies(repo_b), "expected the pre-repair positional drop"
 
+    # And `fsck` DETERMINISTICALLY FLAGS the orphan BEFORE any repair — B's merged-in
+    # comment sorts before the far-future snapshot yet is absent from its
+    # source_event_uuids, which is exactly the ORPHAN_EVENT / SNAPSHOT_INCONSISTENT the
+    # detector reports (so the drop is operator-detectable, not silent).
+    pre_repair_fsck = _engine_run(repo_b, "fsck", check=False).stdout
+    assert ("ORPHAN_EVENT" in pre_repair_fsck) or ("SNAPSHOT_INCONSISTENT" in pre_repair_fsck), (
+        f"fsck must flag the orphan before repair; got: {pre_repair_fsck}"
+    )
+
     # Remediation on B: rebuild the snapshot from the full log (folds the orphan back in).
     repair = _engine_run(repo_b, "fsck", "--repair-snapshots", check=False).stdout
     assert "rebuilt SNAPSHOT" in repair, repair
