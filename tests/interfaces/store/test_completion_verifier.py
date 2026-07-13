@@ -515,3 +515,36 @@ def test_free_text_conclusion_parses_into_structured_verdict() -> None:
     # An empty / non-JSON conclusion is a hard error, never an invented verdict.
     with pytest.raises(StructuredOutputError):
         structured.parse_structured("   ", model_cls)
+
+
+def test_op_fail_preserves_all_enumerated_criteria(rebar_repo: Path) -> None:
+    """74d9 anti-ratchet PLUMBING invariant: a FAIL verdict enumerating TWO independently
+    unmet criteria survives reconcile + the op layer with BOTH findings intact — the
+    verdict is not truncated to the first failure. (The prompt-behavioral proof that the
+    verifier EMITS both lives in the completion-verifier eval; this guards the pass-through.)"""
+    tid = _seed(rebar_repo)
+    r = _verify(
+        rebar_repo,
+        tid,
+        {
+            "verdict": "FAIL",
+            "findings": [
+                {
+                    "criterion": "multiply is unimplemented",
+                    "detail": "no impl",
+                    "severity": "high",
+                    "dimension": "completion",
+                },
+                {
+                    "criterion": "the untested path",
+                    "detail": "no unit test",
+                    "severity": "medium",
+                    "dimension": "completion",
+                },
+            ],
+        },
+    )
+    assert r["verdict"] == "FAIL"
+    crits = " ".join(str(f.get("criterion", "")) for f in r["findings"]).lower()
+    assert len(r["findings"]) == 2, r["findings"]
+    assert "multiply" in crits and "untested" in crits
