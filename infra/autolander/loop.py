@@ -578,30 +578,48 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
 
 
 def _drive_candidate(gerrit, wip, cand, marker_store, root):  # pragma: no cover
-    """Drive one selected candidate to a terminal outcome, composing the tested S2/S3 pieces:
-    rebase-to-tip -> await fresh Verified (per member) -> FFO TOCTOU re-check -> ancestor-atomic
-    submit; on CI-fail run the bounded auto-recheck then hand back; on a not-landable TOCTOU
-    (main moved) hand back as needs_rebase. All the called functions are unit-tested; this is
-    the operational sequencing."""
+    """Drive one selected candidate to a terminal outcome, composing the tested S2/S3 pieces.
+
+    SUBMIT-FIRST, rebase-on-conflict (do NOT rebase upfront): a selected change is already
+    `is:submittable`, which under FFO means it is ALREADY on the current tip with fresh votes
+    — so its tested tree IS the merged tree and it submits directly. A rebase is needed ONLY
+    when main advances between selection and submit (the submit then refuses `not
+    fast-forward`); `drive_to_submit` handles that by rebasing to the new tip, awaiting a fresh
+    Verified, and retrying (bounded), then handing back on exhaustion. On a post-rebase
+    `Verified -1`, run the bounded auto-recheck and hand back on repeat."""
     from autolander import failure  # local import: loop.py stays import-cycle-free
 
-    wip.phase = PHASE_REBASING
-    route_rebase(gerrit, cand)  # rebase to current main tip (rebase / rebase:chain)
-    wip.phase = PHASE_AWAITING_VERIFIED
-    if not await_fresh_verified(gerrit, wip):
-        # a member is Verified -1 (or CI hung): bounded auto-recheck, then hand back on repeat
-        outcome = failure.auto_recheck(
-            gerrit, wip, await_terminal_verified=lambda c, w: _terminal_verified_vote(c, w)
-        )
-        if outcome != failure.OUTCOME_VERIFIED:
-            failure.handle_ci_fail(gerrit, wip, marker_store)
+    # The selected change is submittable now (on-tip, fresh votes): record its tested SHAs so
+    # is_landable's TOCTOU guard passes for a direct submit.
+    for mid in wip.chain_member_ids:
+        wip.tested_shas[mid] = gerrit.get_change(mid, ["CURRENT_REVISION"]).get("current_revision")
+
+    from autolander.gerrit import GerritError
+
+    for attempt in range(MAX_RE_DRIVE + 1):
+        if is_landable(gerrit, wip):
+            wip.phase = PHASE_SUBMITTING
+            try:
+                ancestor_atomic_submit(gerrit, wip)  # submit + partial-land guard + ticket close
+                return
+            except GerritError as exc:
+                if "not fast-forward" not in str(exc).lower():
+                    raise  # a real submit error, not the TOCTOU race
+        # not landable (main advanced) or a not-ff submit refusal -> re-drive, bounded
+        if attempt >= MAX_RE_DRIVE:
+            failure.handle_rebase_conflict(gerrit, wip, marker_store, stack_id=cand.change_id)
             return
-    if not is_landable(gerrit, wip):
-        # main advanced under us (FFO TOCTOU): hand the whole stack back to rebase.
-        failure.handle_rebase_conflict(gerrit, wip, marker_store, stack_id=cand.change_id)
-        return
-    wip.phase = PHASE_SUBMITTING
-    ancestor_atomic_submit(gerrit, wip)  # single tip submit + partial-land guard + ticket close
+        wip.phase = PHASE_REBASING
+        route_rebase(gerrit, cand)  # rebase onto the new tip (on behalf of the uploader)
+        wip.phase = PHASE_AWAITING_VERIFIED
+        wip.re_drive_count = attempt + 1
+        if not await_fresh_verified(gerrit, wip):  # refreshes tested_shas on success
+            if (
+                failure.auto_recheck(gerrit, wip, await_terminal_verified=_terminal_verified_vote)
+                != failure.OUTCOME_VERIFIED
+            ):
+                failure.handle_ci_fail(gerrit, wip, marker_store)  # post-rebase -1 survived recheck
+                return
 
 
 def _terminal_verified_vote(gerrit, wip):  # pragma: no cover
