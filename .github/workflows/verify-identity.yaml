@@ -2,9 +2,15 @@ name: verify-identity
 
 # Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). Re-verifies every
 # in-scope mutating event's signature against its author identity's commit-ancestry-scoped
-# keyring, so a forged / unsigned / wrong-key event cannot land on `main`. `--require-authenticated`
-# forces enforcement on in CI regardless of config; `--since` (read from the ENFORCE_SINCE repo/
-# env var, default empty) grandfathers events introduced before that boundary.
+# keyring, so a forged / unsigned / wrong-key event cannot land on `main`.
+#
+# Enforcement follows PROJECT CONFIG, not a CI-forced flag: the gate enforces (non-zero
+# exit on any unverified in-scope event) only when `identity.require_authenticated` is on
+# in rebar.toml, and is advisory (exit 0, report-only) otherwise. The grandfather boundary
+# is `identity.enforce_since` in rebar.toml — events introduced up to that ref are
+# reported but never fail the gate. This lets the gate go live report-only today (nothing
+# is signed yet) and become blocking the moment write-signing is rolled out and the config
+# flag is flipped, with all pre-rollout events already grandfathered.
 
 on:
   push:
@@ -19,10 +25,6 @@ jobs:
   verify-identity:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
-    env:
-      # Grandfather boundary — a git ref on the tracker branch. Set the ENFORCE_SINCE repo
-      # variable to enable grandfathering; empty (default) enforces every in-scope event.
-      ENFORCE_SINCE: ${{ vars.ENFORCE_SINCE }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -34,5 +36,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
+      - name: Mount tickets branch as a worktree
+        # The store lives on the `tickets` orphan branch at the repo root, materialized
+        # as the gitignored `.tickets-tracker` worktree. A plain code checkout does not
+        # contain it, so verify-identity would exit 2 ("ticket store not found").
+        # Mount it on the ACTUAL `tickets` branch (not detached) so tracker.branch
+        # matches. Full fetch (no --depth) so merge-base / commit-ancestry scoping works
+        # against the whole tickets history. Mirrors reconcile-bridge.yml.
+        run: |
+          set -euo pipefail
+          git fetch origin '+tickets:refs/remotes/origin/tickets'
+          rm -rf .tickets-tracker
+          git worktree add -B tickets .tickets-tracker origin/tickets
       - name: verify-identity (gating)
-        run: rebar verify-identity --require-authenticated --since "${ENFORCE_SINCE}"
+        # No --require-authenticated / --since flags: enforcement posture and the
+        # grandfather boundary are read from rebar.toml (`identity.require_authenticated`,
+        # `identity.enforce_since`). See the header comment.
+        run: rebar verify-identity
