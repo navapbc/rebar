@@ -185,7 +185,11 @@ def is_landable(client: GerritClient, wip: WipChain) -> bool:
     its current revision sha is UNCHANGED from the tested sha we recorded. Any drift
     (main advanced, a new patchset, a dropped vote) -> not landable."""
     for member_id in wip.chain_member_ids:
-        change = client.get_change(member_id, ["CURRENT_REVISION"])
+        # SUBMITTABLE is REQUIRED — Gerrit only returns the `submittable` field when it is
+        # requested; without it the field is absent (reads as None) and this guard would
+        # wrongly report not-landable and rebase an already-submittable on-tip change (the
+        # live E2E surfaced exactly this).
+        change = client.get_change(member_id, ["CURRENT_REVISION", "SUBMITTABLE"])
         if change.get("submittable") is not True:
             return False
         if change.get("current_revision") != wip.tested_shas.get(member_id):
