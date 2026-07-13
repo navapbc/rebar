@@ -46,6 +46,7 @@ _NON_REPLAY_KNOWN_TYPES = frozenset(
         "SYNC",
         "PRECONDITIONS",
         "REVIEW_RESULT",
+        "COMPLETION_VERDICT",
         "TICKET_DIGEST",
         "ENQUEUE_ENRICH",
         "CLAIM_ENRICH",
