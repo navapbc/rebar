@@ -162,7 +162,10 @@ Report through the structured output:
 - `verdict`: `PASS` or `FAIL`.
 - `findings`: **one finding per FAILING requirement, and ONLY for failures** (a PASS has an
   empty `findings`). This is a completion check, not a code review — do not emit informational
-  or advisory findings; put any neutral observations in `summary`. Each finding:
+  or advisory findings; put any neutral observations in `summary`. **Assess EVERY
+  acceptance/success/close criterion independently and, on FAIL, emit one finding per unmet
+  criterion — never stop at the first failure; a verdict naming only a subset of the unmet
+  criteria is an INCOMPLETE verdict.** Each finding:
   - `criterion`: the specific requirement that failed (verbatim or clearly identifying).
   - `detail`: a concise explanation of *why* it is not met, grounded in your evidence.
   - `citations`: back every code claim. Your `read_file` tool prints `<lineno>: <content>` —

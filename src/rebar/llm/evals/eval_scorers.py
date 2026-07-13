@@ -279,6 +279,37 @@ def _attributes_criterion(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, False, f"no finding attributed to criterion {crit!r}")
 
 
+def _enumerates_all_unmet_criteria(case: dict, out: dict) -> ScoreResult:
+    """A FAIL verdict must enumerate EVERY unmet criterion — one distinct finding per
+    unmet criterion (anti-ratchet: never stop at the first failure). Applicable only to
+    cases that annotate `expected_unmet_criteria` (a list of short substrings naming the
+    criteria that should each be independently flagged). Each expected substring must be
+    matched (case-insensitive) by a finding's `criterion` field, and the match must be
+    BIJECTIVE — each expected substring is covered by a DISTINCT finding, so one finding
+    cannot stand in for two unmet criteria."""
+    expected = case.get("expected_unmet_criteria")
+    if not expected:
+        return _NA
+    findings = _findings(out)
+    crits = [str(f.get("criterion", "")).lower() for f in findings]
+    used: set[int] = set()
+    for exp in expected:
+        needle = str(exp).lower()
+        matched = False
+        for i, hay in enumerate(crits):
+            if i in used:
+                continue
+            if needle in hay:
+                used.add(i)
+                matched = True
+                break
+        if not matched:
+            return ScoreResult(
+                True, False, f"no distinct finding enumerates unmet criterion {exp!r}"
+            )
+    return ScoreResult(True, True)
+
+
 def _discriminates_impact_levels(case: dict, out: dict) -> ScoreResult:
     """A planted HIGH-impact finding must grade impact >= the "major" floor; a planted
     LOW-impact one below it. This is the IMPACT analogue of
@@ -393,6 +424,7 @@ REGISTRY: dict[str, Scorer] = {
     # grounding / attribution
     "cites_real_paths": _cites_real_paths,
     "attributes_g3_vs_g4": _attributes_criterion,
+    "enumerates_all_unmet_criteria": _enumerates_all_unmet_criteria,
     # verifier discrimination
     "discriminates_true_from_false": _discriminates_true_from_false,
     "discriminates_impact_levels": _discriminates_impact_levels,
