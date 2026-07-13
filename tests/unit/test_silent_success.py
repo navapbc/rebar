@@ -60,6 +60,52 @@ def test_repair_json_receives_schema(monkeypatch):
     assert captured["schema"] is _Model
 
 
+def test_schema_guided_parse_normalizes_the_result():
+    """Behavioral: a schema threaded into tolerant_parse changes the parsed RESULT — an
+    ambiguously-typed field (``"3"``) comes back as a normalized int (``3``) under an
+    integer schema, versus the raw string on the schema-less path. This exercises real
+    (unmonkeypatched) json-repair, so it proves the schema actually steers the VALUE, not
+    merely that a kwarg was forwarded.
+
+    Installed-library-independent: json-repair's ``schema=`` coercion is version-dependent
+    (some releases ignore it). We probe the installed lib first and ``skip`` with a clear
+    reason if it does not coerce, rather than asserting a behavior it cannot provide.
+    """
+    from pydantic import BaseModel
+
+    class _Counts(BaseModel):
+        count: int
+        name: str
+
+    # Malformed enough that strict ``json.loads`` AND the balanced-object scan both fail
+    # (a trailing comma does it), so tolerant_parse is forced down to the json-repair
+    # layer — the only layer that consults the schema.
+    malformed = '{"count": "3", "name": "x",}'
+
+    # Probe: does the installed json_repair honor schema= coercion at all?
+    import json_repair
+
+    probe = json_repair.repair_json(malformed, return_objects=True, schema=_Counts)
+    coerces = (
+        isinstance(probe, dict) and probe.get("count") == 3 and isinstance(probe["count"], int)
+    )
+    if not coerces:
+        pytest.skip(
+            "installed json_repair does not honor schema= coercion "
+            f"(probe returned {probe!r}); schema-guided parsing is a no-op here"
+        )
+
+    schemaless = structured.tolerant_parse(malformed)
+    guided = structured.tolerant_parse(malformed, schema=_Counts)
+
+    # The schema-guided VALUE is normalized to the schema-typed int...
+    assert guided["count"] == 3
+    assert isinstance(guided["count"], int)
+    # ...and genuinely DIFFERS from the schema-less parse (which leaves it the string "3").
+    assert schemaless["count"] != guided["count"]
+    assert schemaless["count"] == "3"
+
+
 def test_repair_json_falls_back_when_schema_call_raises(monkeypatch):
     """A schema-guided repair that raises falls back to the schema-less call — never a
     regression over today's behavior."""
