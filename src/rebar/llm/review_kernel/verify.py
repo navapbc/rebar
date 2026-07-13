@@ -139,8 +139,10 @@ def _build_binary(forbid: Any) -> type:
     from the module-level vocabulary, so the base and plan-review models never diverge."""
     from pydantic import Field, create_model
 
+    # Conditional VETO binaries (na-default, NOT graded): cited-reference + the a8e5 absence pair.
     binary_fields: dict[str, Any] = {
-        "cited_reference_accurate": (str, Field(default="na", description="yes|no|insufficient|na"))
+        q: (str, Field(default="na", description="yes|no|insufficient|na"))
+        for q in ("cited_reference_accurate", "claims_absence", "absence_confirmed_in_context")
     }
     for q in GRADED_BINARY:
         _default = "na" if q in _BINARY_NA_DEFAULT else "insufficient"
