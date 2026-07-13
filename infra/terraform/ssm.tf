@@ -47,6 +47,14 @@ locals {
     # fetch-secrets.sh's reviewbot-tickets-pat -> REVIEWBOT_TICKETS_PAT mapping) to push the
     # code_review artifact ticket events to origin/tickets. Operator populates this SecureString.
     "/rebar/prod/reviewbot-tickets-pat",
+    # Auto-lander landing credential (epic f1fa / story S5). The Gerrit HTTP password
+    # for the auto-lander's bot identity (RebarBotNava) — it authenticates the REST
+    # rebase-on-behalf + ancestor-atomic submit calls the loop makes. Materialized into
+    # the container .env by fetch-secrets.sh (autolander-gerrit-token -> AUTOLANDER_GERRIT_TOKEN),
+    # OPTIONAL there (blank until an operator populates this slot; the container still
+    # boots + heartbeats and only lands once the token is set). Operator populates this
+    # SecureString out-of-band, same as gerrit-bot-token.
+    "/rebar/prod/autolander-gerrit-token",
   ]
 }
 

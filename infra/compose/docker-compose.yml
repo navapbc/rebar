@@ -113,6 +113,50 @@ services:
     logging:
       driver: journald
 
+  # --- rebar auto-lander (serial landing daemon, epic f1fa / S5) -----------
+  autolander:
+    build:
+      # Build context is the REPO ROOT so `pip install .` + the infra/autolander/
+      # package are both available (see Dockerfile.autolander).
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.autolander
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Publish the read-only status endpoint on host loopback for the HOST nginx
+      # /autolander/status proxy. Host port is single-sourced from .env
+      # (AUTOLANDER_PORT, default 8080); container port is fixed at 8080 (loop.py).
+      - "127.0.0.1:${AUTOLANDER_PORT:-8080}:8080"
+    volumes:
+      # Persist the auto-lander state (heartbeat, emergency-stop sentinel, recovery.json,
+      # the single-instance lock) across container recreation, so a crash-restart resumes
+      # its in-flight snapshot instead of double-submitting. Bind onto the EBS host path
+      # like the gerrit_* site volumes; the external volume is created by compose-up.sh
+      # (SITE_SUBDIRS) and pre-provisioned on the host.
+      - gerrit_autolander:/var/gerrit/site/autolander
+    labels:
+      # Let the autoheal sidecar (below) restart this container when the heartbeat
+      # HEALTHCHECK (Dockerfile.autolander) reports unhealthy.
+      - autoheal=true
+    logging:
+      driver: journald
+
+  # --- autoheal sidecar (restart unhealthy labelled containers) ------------
+  # Watches Docker health state and restarts any container labelled autoheal=true that
+  # goes `unhealthy` — the actuator for the auto-lander's heartbeat HEALTHCHECK (S5d).
+  autoheal:
+    image: willfarrell/autoheal
+    restart: unless-stopped
+    environment:
+      # Only manage containers carrying this label (the autolander service above).
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+    volumes:
+      # Needs the Docker socket (read-write) to inspect health + issue container restarts.
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: journald
+
 # External named volumes for the stateful Gerrit site subdirs. Declared external:true
 # so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
 # (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS
@@ -140,4 +184,8 @@ volumes:
   # /var/gerrit/site/reviewbot-tickets — the persistent tickets worktree for code_review artifacts
   # (story limestone-unethical-zebrafinch); created by compose-up.sh alongside the others.
   gerrit_reviewbot_tickets:
+    external: true
+  # rebar auto-lander state (heartbeat + emergency-stop + recovery.json + instance lock)
+  # — bind onto /var/gerrit/site/autolander; created by compose-up.sh (SITE_SUBDIRS).
+  gerrit_autolander:
     external: true
