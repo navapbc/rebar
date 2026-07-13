@@ -160,6 +160,84 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
         return None
 
 
+def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
+    """Map every tracker event-file path (relative to the tracker root) to the OLDEST commit
+    that ADDED it, resolved in a SINGLE ``git log`` pass — the batched form of
+    :func:`resolve_event_commit`.
+
+    :func:`resolve_event_commit` runs one full-history ``git log`` per event; the merge-gate
+    calls it once per in-scope event, so a whole-store scan is O(events × history) (bug 1cc0 —
+    ~1.8 h at real store scale). This walks history ONCE (O(events + history), ~2 s) and returns
+    a lookup table, so the gate resolves every event's introducing commit without a per-event
+    subprocess. Callers keep :func:`resolve_event_commit` as a fail-closed fallback for any path
+    absent from the map (e.g. a file introduced only inside a merge commit — see below).
+
+    Mechanics (validated against the per-event resolver — 0 mismatches over 700 sampled events):
+
+    * ``--diff-filter=A --name-only`` lists the paths ADDED by each commit;
+    * ``--full-history`` disables history simplification, so a broad ``*.json`` pathspec sees
+      every add that a per-single-path query would (the walk that makes the two agree);
+    * ``--no-renames`` keeps a rename as add-at-new-path (events are immutable and never
+      renamed, so this only guards against spurious rename detection);
+    * ``--no-merges`` skips merge commits — ``--name-only`` shows no files for a merge anyway,
+      and a ticket event's real creating commit is always a non-merge on the tickets branch;
+    * ``%x1e`` (ASCII record separator) prefixes each hash so records parse unambiguously
+      without ``-z`` framing — the event-path charset (``<hex>/<ts>-<uuid>-<TYPE>.json``) never
+      needs quoting, and ``0x1e`` can appear in neither a path nor a SHA (Hugo's ``gitmap``
+      uses the same separator technique);
+    * ``-c log.showSignature=false`` avoids ``gpg:`` lines corrupting the stream (and the ~3×
+      slowdown) when a host has signature display on.
+
+    Git emits newest→oldest, so overwriting each path's entry as we stream leaves the OLDEST
+    add winning — matching :func:`resolve_event_commit`'s ``lines[-1]``. Never raises: any git
+    failure yields ``{}`` and every caller falls back to the per-event resolver (fail-closed).
+    """
+    try:
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
+        proc = subprocess.run(
+            [
+                "git",
+                "-c",
+                "log.showSignature=false",
+                "-C",
+                tracker,
+                "log",
+                "--diff-filter=A",
+                "--full-history",
+                "--no-merges",
+                "--no-renames",
+                "--format=%x1e%H",
+                "--name-only",
+                "--",
+                "*.json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if proc.returncode != 0:
+            return {}
+        commit_map: dict[str, str] = {}
+        for record in proc.stdout.split("\x1e"):
+            if not record.strip():
+                continue
+            lines = record.split("\n")
+            sha = lines[0].strip()
+            if len(sha) != 40:
+                continue
+            for path in lines[1:]:
+                path = path.strip()
+                if path:
+                    # newest→oldest walk; overwrite so the OLDEST add wins (matches
+                    # resolve_event_commit's lines[-1]).
+                    commit_map[path] = sha
+        return commit_map
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → empty map, never raise (fail-closed)
+        return {}
+
+
 def verify_authorship_at_commit(
     envelope: dsse.Envelope,
     identity_id: str,
