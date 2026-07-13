@@ -152,16 +152,30 @@ def claim_compute(
                 _cascade_seen=seen | {ticket_id},
             )
         except CommandError as exc:
-            msg = (
-                f"Error: cannot claim {ticket_id}: claiming its parent {parent_id} failed "
-                f"first, so the child was not claimed.\n  Parent error: {exc.message}"
-            )
-            # Preserve the concurrency identity: a parent that raced surfaces as
-            # exit-10 / ConcurrencyError at the leaf too (so the "pick another" retry
-            # path still fires). ConcurrencyMismatch hardcodes returncode=10.
-            if isinstance(exc, ConcurrencyMismatch):
-                raise ConcurrencyMismatch(msg) from None
-            raise CommandError(msg, returncode=exc.returncode) from None
+            # TOCTOU: the cascade DECISION above read the parent as ``open`` WITHOUT the
+            # write lock. A concurrent agent may have moved the parent
+            # ``open -> in_progress`` between that read and this locked parent claim, so
+            # the claim we just attempted was rejected. Re-check the parent's live
+            # status: if it is no longer ``open`` (a peer progressed it — or it is now
+            # closed/blocked), the cascade's whole purpose (never work a child under an
+            # OPEN parent) is already satisfied, so this is BENIGN — fall through and
+            # claim the child, matching the single-agent contract "parent already
+            # in_progress -> only the requested ticket moves". Only a parent still
+            # genuinely ``open`` (e.g. its own gate blocked the claim) is a real failure
+            # that must abort the child.
+            if _resolve_open_parent(tracker, ticket_id) is None:
+                pass  # parent progressed concurrently; proceed to claim the child
+            else:
+                msg = (
+                    f"Error: cannot claim {ticket_id}: claiming its parent {parent_id} failed "
+                    f"first, so the child was not claimed.\n  Parent error: {exc.message}"
+                )
+                # Preserve the concurrency identity: a parent that raced surfaces as
+                # exit-10 / ConcurrencyError at the leaf too (so the "pick another" retry
+                # path still fires). ConcurrencyMismatch hardcodes returncode=10.
+                if isinstance(exc, ConcurrencyMismatch):
+                    raise ConcurrencyMismatch(msg) from None
+                raise CommandError(msg, returncode=exc.returncode) from None
 
     from rebar._commands import _seam
 

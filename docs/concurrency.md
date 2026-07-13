@@ -118,6 +118,40 @@ rollback if the parent succeeds and the child then fails: an ancestor sitting in
 `src/rebar/_commands/transition.py` (`transition_compute`), via the shared
 `_resolve_open_parent` helper.
 
+#### Cross-agent race ownership policy (two agents, one open parent)
+
+The cascade above is the *single-agent* contract. When **two agents concurrently
+start work on children of the same still-`open` parent**, the outcome follows the
+ordinary optimistic-concurrency model — there is **no fail-fast across agents** and
+**no rollback of a losing agent's writes**. Two sub-cases:
+
+- **Different children of the same parent.** Each child simply carries its own
+  single claim (they never contend). The contention is only on the *parent*: both
+  cascades move the parent `open → in_progress`, which is a concurrent status change
+  on one ticket. On the same tracker the write lock **serializes** them (the second
+  agent, arriving after the parent is already `in_progress`, does **not** re-cascade —
+  it leaves the parent as-is). Across offline clones the two parent claims are a
+  **STATUS fork** resolved deterministically by the HLC/UUID tie-break on merge, and
+  the resolution is surfaced as **`STATUS_FORK_RESOLVED`** on the *parent* (via `fsck`
+  and in `show`'s `status_fork_resolutions`). The losing agent thereby learns its
+  parent ownership was superseded.
+- **The same child.** The child is *also* a concurrent claim, so it forks too and is
+  resolved by the **same tie-break independently of the parent** — the child's winner
+  **may differ** from the parent's winner (they are separate tickets with separate
+  forks). Both forks surface as `STATUS_FORK_RESOLVED` on their respective tickets.
+
+The losing side is never rolled back, but *how* it loses differs by locality. On the
+**same tracker** the write lock serializes the two parent cascades, so the losing
+cascade's parent claim is rejected **under the lock, before any event is committed** —
+there is no orphaned parent claim, and the loser simply proceeds to claim its own child
+(both agents succeed). **Offline**, both agents' claims commit independently, so the
+losing agent's already-written claim(s) — on the parent and/or the child — are **left
+in place (orphaned under the losing assignee); NOT retroactively rolled back or
+tombstoned.** Convergence is by the HLC/UUID tie-break + the `STATUS_FORK_RESOLVED`
+signal, never by deleting a committed event (I1 append-only).
+Regression coverage: `tests/integration/test_concurrency_regression.py`
+(`…parent_cascade_same_tracker_race…`, `…parent_cascade_two_clone_offline_race…`).
+
 ### I5 — Single locked write path
 All writes go through the lock-guarded append+commit path: atomic
 tmp-then-rename + `git add <event>` + `git commit`, all under the tickets-tracker
