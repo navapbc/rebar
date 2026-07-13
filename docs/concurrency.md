@@ -42,7 +42,21 @@ the reducer (both listing paths), and fsck. The SNAPSHOT is written atomically
 *before* the renames, so a crash mid-fold leaves a valid SNAPSHOT plus some
 already-`.retired` sources; a re-compact short-circuits on the SNAPSHOT and skips
 files already retired (idempotent), and a rename failure reverses the completed
-renames and removes the uncommitted SNAPSHOT (atomic — all sources retired or none).
+renames (atomic — all sources retired or none).
+
+**Rollback-failure recovery (compact → fsck).** When a forward rename fails,
+compaction reverses the renames it completed. The uncommitted SNAPSHOT is removed
+**only if that reverse is CLEAN** (every completed rename reversed) — that returns
+the store to its exact pre-fold state, so the SNAPSHOT is a stray artifact. If **any
+reverse-rename also fails**, the SNAPSHOT is **intentionally RETAINED** (it carries
+the folded effect of the source now stuck as `*.retired`; removing it would lose that
+effect from both an active event *and* the snapshot — silent data loss). The retained
+SNAPSHOT plus a reversed-to-active source is a `SNAPSHOT_INCONSISTENT` state that
+`rebar fsck --repair-snapshots` rebuilds from the full log; compaction emits a
+`rollback incomplete … run fsck` diagnostic pointing there. **Reads are already
+correct in this mixed window** — the reversed-to-active source keeps its original
+(pre-snapshot) filename, sorts before the SNAPSHOT, and is positionally skipped during
+replay, so it is never double-counted (the `fsck` repair is hygiene, not a read fix).
 
 **`.retired` lifecycle.** Retired files are kept **permanently** for now — an
 accepted storage tradeoff that guarantees a folded source is never lost and can

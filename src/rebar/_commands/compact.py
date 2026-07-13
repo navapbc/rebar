@@ -226,24 +226,52 @@ def _compact_locked(
                 logger.info("compact: retired folded event %s", os.path.basename(fp))
         except OSError:
             logger.warning(
-                "compact: failed to retire a folded event for %s — reversing %d rename(s) "
-                "and removing the uncommitted SNAPSHOT",
+                "compact: failed to retire a folded event for %s — reversing %d rename(s)",
                 ticket_id,
                 len(renamed),
                 exc_info=True,
             )
+            rollback_clean = True
             for orig, retired in reversed(renamed):
                 try:
                     os.rename(retired, orig)
                 except OSError:
+                    rollback_clean = False
                     logger.warning(
                         "compact: could not reverse rename %s -> %s", retired, orig, exc_info=True
                     )
-            try:
-                os.remove(final_path)
-            except OSError:
-                logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
-            sys.stderr.write("Error: failed to retire folded events while holding lock\n")
+            if rollback_clean:
+                # CLEAN rollback: every completed rename was reversed, so the store is
+                # back to its exact pre-fold state and the uncommitted SNAPSHOT is a
+                # stray artifact — remove it. (Preserves the original behavior.)
+                try:
+                    os.remove(final_path)
+                except OSError:
+                    logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
+                sys.stderr.write("Error: failed to retire folded events while holding lock\n")
+                return 1
+            # INCOMPLETE rollback: at least one reverse-rename failed, so a source is
+            # stuck as ``*.retired`` while its folded effect lives ONLY in the SNAPSHOT
+            # we wrote. We MUST intentionally RETAIN the SNAPSHOT here — removing it
+            # would drop that source's effect from BOTH an active event and the
+            # snapshot (silent data loss, the hazard this branch exists to avoid).
+            # Retaining it leaves a SNAPSHOT_INCONSISTENT state (a SNAPSHOT plus a
+            # reversed-to-active source) that ``fsck --repair-snapshots`` already
+            # rebuilds. Reads are already correct in this mixed window: the
+            # reversed-to-active source keeps its original (pre-snapshot) filename, so
+            # it is positionally skipped during replay and never double-counted. Do NOT
+            # "simplify" this back into an unconditional ``os.remove(final_path)``.
+            logger.warning(
+                "compact: rollback incomplete for %s — SNAPSHOT %s retained; run fsck",
+                ticket_id,
+                final_path,
+                exc_info=True,
+            )
+            sys.stderr.write(
+                "Error: failed to retire folded events while holding lock; rollback "
+                "incomplete (a folded source is stranded) — the SNAPSHOT is retained "
+                "to avoid data loss. Run `rebar fsck --repair-snapshots` to reconcile.\n"
+            )
             return 1
         try:
             os.remove(os.path.join(ticket_dir, ".cache.json"))
