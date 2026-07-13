@@ -707,8 +707,8 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
         # against this key's prior SURFACED findings + deps BEFORE the emit, so the persisted
         # payload
         # already reflects the convergence. Keyed by the TYPED keyspace — session (local) or change
-        # (Gerrit). Gated on verify.novelty_drop_active + self-gates inert with no prior memory;
-        # any error leaves the verdict unfiltered (no drops).
+        # (Gerrit). Always active (off switch retired in story 4cdf) + self-gates inert with no
+        # prior memory; any error leaves the verdict unfiltered (no drops).
         _novelty_key = None
         if request.session_id:
             _novelty_key = f"session:{request.session_id}"
