@@ -168,24 +168,8 @@ def transition_core(
 
     Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
     (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
-    and (opt-in) story/epic signature-close guards. Raises :class:`CommandError` for
-    validation / git failures. Returns ``None`` on success (the wrapper computes
-    newly_unblocked + output separately)."""
-    # Resolve the signature-close gate FLAG *outside* the write lock — matching the completion
-    # gate, whose flag is resolved before the locked core — so the config read never holds the
-    # lock. Only a close can trigger the gate, so resolve only then (the ticket_type-specific
-    # applicability + the fail-closed WARNING are deferred to `_signature_gate`, which fires the
-    # warning under the lock once the re-read confirms a story/epic — so the message names the
-    # right type and only when the gate applies). The actual signature CHECK needs the fresh
-    # under-lock state, so it stays inside the lock (see `_signature_gate`).
-    sig_require: bool | None = None
-    sig_config_error: str | None = None
-    if target_status == "closed":
-        from rebar._commands.gates import resolve_signature_gate
-
-        cfg_root = os.environ.get("REBAR_ROOT") or tracker_dir.rsplit("/", 1)[0]
-        sig_require, sig_config_error = resolve_signature_gate(cfg_root)
-
+    guard. Raises :class:`CommandError` for validation / git failures. Returns
+    ``None`` on success (the wrapper computes newly_unblocked + output separately)."""
     handle = _acquire_write_lock(tracker_dir)
     final_path = None
     try:
@@ -224,10 +208,9 @@ def transition_core(
         ticket_type = state.get("ticket_type", "")
 
         # `idea → closed` is a reject/drop, not a completion: an undesigned idea has
-        # nothing built to verify or attest, so it bypasses BOTH the bug-close-reason
-        # guard and the story/epic signature gate below (mirrors the completion-precheck
-        # bypass in transition_close.close_ticket). The open-children structural guard is
-        # enforced elsewhere and is NOT relaxed for idea.
+        # nothing built to verify or attest, so it bypasses the bug-close-reason guard
+        # below (mirrors the completion-precheck bypass in transition_close.close_ticket).
+        # The open-children structural guard is enforced elsewhere and is NOT relaxed for idea.
         from_idea = current_status == "idea"
 
         # Bug-close-reason guard (predicate shared with the completion gate's pre-check).
@@ -243,21 +226,6 @@ def transition_core(
                     'Error: --reason must start with "Fixed:" or "Escalated to user:"',
                     returncode=1,
                 )
-
-        # Signature gate (story/epic closure; opt-in via config). The flag was resolved OUTSIDE
-        # the lock (above); only the signature CHECK runs here, under the lock, on the fresh
-        # re-read `state`. (`sig_require` is set whenever target_status == "closed", so it is a
-        # real bool here, never None.)
-        if target_status == "closed" and ticket_type in ("story", "epic") and not from_idea:
-            _signature_gate(
-                tracker_dir,
-                ticket_id,
-                ticket_type,
-                state,
-                force_close_reason,
-                require_sig=bool(sig_require),
-                config_error=sig_config_error,
-            )
 
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
         parent_status_uuid = _parent_status_uuid(ticket_dir_path)
@@ -306,88 +274,6 @@ def transition_core(
         raise CommandError(f"Error: {exc}", returncode=1) from None
     finally:
         handle.release()
-
-
-def _signature_gate(
-    tracker_dir: str,
-    ticket_id: str,
-    ticket_type: str,
-    state: dict,
-    force_close_reason: str,
-    *,
-    require_sig: bool,
-    config_error: str | None,
-) -> None:
-    """Story/epic close gate: require a CERTIFIED signature made at the current HEAD
-    (OFF unless ``verify.require_signature_for_close=true`` in ``rebar.toml``).
-
-    The FLAG (is the gate on?) is resolved by ``gates.resolve_signature_gate`` OUTSIDE the write
-    lock and passed in as ``require_sig`` / ``config_error`` — so this function performs only the
-    actual signature CHECK, which needs the fresh under-lock ``state``. A present-but-unreadable
-    config fails CLOSED (``require_sig=True`` with ``config_error`` set); its warning is emitted
-    HERE (deferred from the flag resolution) now that ``ticket_type`` is known, so it names the
-    right ticket and only fires when the gate applies.
-
-    A manifest of verified steps is HMAC-signed with the environment key
-    (`rebar sign <id> <manifest>`) and recomputed/certified here; the signature
-    must also have been made at the current HEAD so a stale attestation cannot
-    close work whose code has since changed. Raises :class:`CommandError` when the
-    ticket is not certified; a force-close reason bypasses with a stderr warning
-    (the wrapper writes the audit comment). Replaces the legacy verdict-hash gate; the
-    deprecated ``--verdict-hash`` flag is now ignored at the CLI parse boundary
-    (``transition._warn_verdict_hash_deprecated``) and no longer reaches this gate."""
-    import sys
-
-    # Fail-closed warning, deferred from the (out-of-lock) flag resolution so it names the
-    # ticket_type and fires only when the gate applies (a present-but-unreadable config →
-    # require_sig=True, config_error set).
-    if config_error is not None:
-        print(
-            f"Warning: could not read rebar config ({config_error}); requiring a "
-            f"signature to close {ticket_type} {ticket_id} (fail-closed).",
-            file=sys.stderr,
-        )
-
-    if not require_sig:
-        return
-
-    if force_close_reason:
-        print(
-            f"Warning: closing {ticket_type} {ticket_id} via --force-close "
-            "(signature gate bypassed)",
-            file=sys.stderr,
-        )
-        print(f"  Reason: {force_close_reason}", file=sys.stderr)
-        return
-
-    from rebar import config as _config
-    from rebar import signing as _signing
-
-    key = _signing.signing_key(tracker_dir, create_if_missing=False)
-    result = _signing.verify_record(_signing.most_recent_attestation(state), ticket_id, key)
-    if not result["verified"]:
-        raise CommandError(
-            f"Error: closing a {ticket_type} requires a certified signature "
-            f"(verdict: {result['verdict']}).\n"
-            "  Recovery: sign a manifest of verified steps, then close:\n"
-            f'    rebar sign {ticket_id} \'["step one: PASS", "step two: PASS"]\'\n'
-            f"    rebar transition {ticket_id} closed\n"
-            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
-            returncode=1,
-        )
-    # Git-state binding: the attestation must be for the current HEAD. An
-    # unresolvable HEAD ('unknown') must NEVER satisfy the binding — otherwise
-    # 'unknown' == 'unknown' would silently void the freshness guard.
-    head_sha = _signing.head_sha(_config.repo_root())
-    if head_sha == "unknown" or result.get("head_sha") != head_sha:
-        raise CommandError(
-            f"Error: the signature for {ticket_type} {ticket_id} was made at a "
-            f"different commit (signed at {result.get('head_sha')}, HEAD is {head_sha}).\n"
-            f"  Recovery: re-sign at the current HEAD:\n"
-            f"    rebar sign {ticket_id} '[...verified steps...]'\n"
-            '  Override: use --force-close="<reason>" to bypass (requires user approval).',
-            returncode=1,
-        )
 
 
 def claim_core(
