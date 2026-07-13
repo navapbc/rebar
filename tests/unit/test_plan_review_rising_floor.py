@@ -3,8 +3,9 @@
 A finding is dropped IFF it is NOVEL (``novelty >= T_novel``) AND LOW-PRIORITY
 (``priority < floor``). These tests pin: the pure drop predicate (all four quadrants), the
 in-place verdict mutation (dropped→`dropped` bucket, narrowed coverage, corrected counts), and
-the TRIPLE GATE — the floor is inert unless config ``remediation_mode`` + per-review eligibility +
-``novelty_drop_active`` all hold (the evidence gate). No live LLM: the novelty map is injected.
+the gate — the floor is inert unless a remediation re-review is in progress AND per-review
+eligibility holds (the off switch was retired in story 4cdf; the floor is always active). No live
+LLM: the novelty map is injected.
 """
 
 from __future__ import annotations
@@ -83,22 +84,21 @@ def test_apply_floor_no_drop_leaves_verdict_untouched() -> None:
     assert v["coverage"]["counts"]["advisory_surfaced"] == 3
 
 
-# ── the triple gate (default-ON evidence gate; explicit false = back-out) ─────────────────────
-def _cfg(*, remediation_mode=True, novelty_drop_active=True):
+# ── the gate (always-active floor; still gated on remediation eligibility) ────────────────────
+def _cfg():
     verify = types.SimpleNamespace(
-        novelty_drop_active=novelty_drop_active,
         novelty_drop_threshold=_T,
         novelty_priority_floor=_FLOOR,
     )
     return types.SimpleNamespace(verify=verify)
 
 
-def _patch(monkeypatch, *, novelty_drop_active, injected_map):
+def _patch(monkeypatch, *, injected_map):
     # _maybe_apply_rising_floor does `from rebar import config as _config; _config.load_config(...)`
     monkeypatch.setattr(
         core_config,
         "load_config",
-        lambda repo_root=None: _cfg(novelty_drop_active=novelty_drop_active),
+        lambda repo_root=None: _cfg(),
     )
     monkeypatch.setattr(
         sidecar,
@@ -119,7 +119,7 @@ def _ctx():
 
 
 def test_floor_applied_when_all_gates_open(monkeypatch) -> None:
-    _patch(monkeypatch, novelty_drop_active=True, injected_map={0: 0.9})
+    _patch(monkeypatch, injected_map={0: 0.9})
     v = _verdict()
     plan_review._maybe_apply_rising_floor(
         "T", v, {"eligible": True}, ctx=_ctx(), cfg=_cfg(), runner=object(), repo_root=None
@@ -128,25 +128,12 @@ def test_floor_applied_when_all_gates_open(monkeypatch) -> None:
     assert v["coverage"]["narrowed"] is True
 
 
-def test_floor_inert_when_drop_flag_off(monkeypatch) -> None:
-    """The evidence gate: even with eligibility, novelty_drop_active=False → un-floored."""
-    _patch(monkeypatch, novelty_drop_active=False, injected_map={0: 0.9})
-    v = _verdict()
-    plan_review._maybe_apply_rising_floor(
-        "T",
-        v,
-        {"eligible": True},
-        ctx=_ctx(),
-        cfg=_cfg(novelty_drop_active=False),
-        runner=object(),
-        repo_root=None,
-    )
-    assert v["dropped"] == []
-    assert "narrowed" not in v["coverage"]
+# The off-switch (verify.novelty_drop_active=False → un-floored) was retired in story 4cdf; the
+# floor is now always active, so its disabled scenario no longer exists and its test was removed.
 
 
 def test_floor_inert_when_not_eligible(monkeypatch) -> None:
-    _patch(monkeypatch, novelty_drop_active=True, injected_map={0: 0.9})
+    _patch(monkeypatch, injected_map={0: 0.9})
     v = _verdict()
     # remediation None (config off) and not-eligible both → no floor
     plan_review._maybe_apply_rising_floor(
@@ -163,7 +150,6 @@ def test_config_defaults() -> None:
     vc = core_config.VerifyConfig()
     assert vc.novelty_drop_threshold == 0.7
     assert vc.novelty_priority_floor == 0.4
-    assert vc.novelty_drop_active is True  # default-ON (operator-authorized 2026-07-11)
 
 
 # ── surfaced-only prior set (bug old-frilly-plankton) ─────────────────────────────────────────
@@ -203,9 +189,7 @@ def test_dropped_prior_findings_never_reach_the_novelty_scorer(monkeypatch) -> N
             },
         ]
     }
-    monkeypatch.setattr(
-        core_config, "load_config", lambda repo_root=None: _cfg(novelty_drop_active=True)
-    )
+    monkeypatch.setattr(core_config, "load_config", lambda repo_root=None: _cfg())
     monkeypatch.setattr(sidecar, "latest_review_result", lambda tid, repo_root=None: prior_payload)
     captured: dict[str, object] = {}
 

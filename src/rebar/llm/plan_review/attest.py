@@ -440,7 +440,7 @@ def remediation_mode_candidate(
     # precondition (signing, the manifest parsers, current_code_sha / registry_version, or the
     # sidecar reads) leaves that precondition False and yields eligible=False → a full review.
     # The gate is fail-safe: a broken signal can only DENY remediation mode, never crash the
-    # plan review it gates (which runs only when verify.remediation_mode is on).
+    # plan review it gates.
     try:
         result = signing.verify_signature(ticket_id, repo_root=repo_root)
         manifest = result.get("manifest") if result.get("verified") else None
