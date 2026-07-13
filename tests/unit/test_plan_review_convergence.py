@@ -209,9 +209,7 @@ def test_each_precondition_falls_back_to_full_review(monkeypatch, label, overrid
         "load_config",
         lambda repo_root=None: types.SimpleNamespace(
             verify=types.SimpleNamespace(
-                remediation_mode=True,
                 remediation_window_minutes=60,
-                novelty_drop_active=True,
                 novelty_drop_threshold=_T,
                 novelty_priority_floor=_FLOOR,
             )
@@ -236,8 +234,9 @@ def test_each_precondition_falls_back_to_full_review(monkeypatch, label, overrid
     assert verdict == before, f"{label}: verdict must be byte-identical (un-floored)"
 
 
-def test_config_off_falls_back_to_full_review(monkeypatch) -> None:
-    """remediation_mode off ⇒ the wrapper gets remediation=None ⇒ byte-identical full review."""
+def test_no_remediation_falls_back_to_full_review(monkeypatch) -> None:
+    """remediation=None (e.g. config unreadable — the remediation_mode off switch was retired in
+    story 4cdf) ⇒ the wrapper gets remediation=None ⇒ byte-identical full review."""
     verdict = _verdict_with_droppable()
     before = copy.deepcopy(verdict)
     plan_review._maybe_apply_rising_floor(

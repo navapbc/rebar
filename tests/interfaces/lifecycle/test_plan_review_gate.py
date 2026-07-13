@@ -104,11 +104,10 @@ _DESC = (
 )
 
 
-def _enable(repo: Path, *, progressive: bool = True) -> None:
-    conf = "[verify]\nrequire_plan_review_for_claim = true\n"
-    if progressive:
-        conf += "progressive_drift_refresh = true\n"
-    (repo / "rebar.toml").write_text(conf)
+def _enable(repo: Path) -> None:
+    # progressive drift-refresh is always on (off switch retired in story 4cdf); the gate config
+    # no longer sets it.
+    (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
 
 
 def _commit(repo: Path) -> None:
@@ -904,31 +903,22 @@ def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:
     assert v["verdict"] == "PASS" and v["signature"]["signed"]
 
 
-def test_progressive_drift_refresh_default_on_takes_probe(rebar_repo: Path) -> None:
-    # a37b: DEFAULT config (no explicit progressive setting) now enables drift-refresh —
+def test_progressive_drift_refresh_always_takes_probe(rebar_repo: Path) -> None:
+    # progressive drift-refresh is always on (off switch retired in story 4cdf) —
     # a drift-only-stale re-review takes the scoped probe path instead of a full re-review.
     _commit(rebar_repo)
-    _enable(rebar_repo, progressive=False)  # omits the flag → exercises the code DEFAULT (now on)
+    _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
     v = _review(tid, rebar_repo)
-    assert "drift_refresh" in v["coverage"]  # default-on: the scoped probe path is taken
-    # AC2: the probe not only fires but REFRESHES the attestation (no full re-review) under default
+    assert "drift_refresh" in v["coverage"]  # always-on: the scoped probe path is taken
+    # the probe not only fires but REFRESHES the attestation (no full re-review)
     assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
 
 
-def test_progressive_drift_refresh_explicit_false_backs_out(rebar_repo: Path) -> None:
-    # a37b back-out: an EXPLICIT `progressive_drift_refresh = false` restores the full
-    # re-review path (drift-refresh not taken), proving the default flip is overridable.
-    _commit(rebar_repo)
-    _enable(rebar_repo, progressive=False)  # base gate config (omits the flag)
-    (rebar_repo / "rebar.toml").write_text(
-        (rebar_repo / "rebar.toml").read_text() + "progressive_drift_refresh = false\n"
-    )
-    tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
-    v = _review(tid, rebar_repo)
-    assert "drift_refresh" not in v["coverage"]  # explicit false → full re-review
+# The explicit-false back-out (progressive_drift_refresh = false → full re-review) was retired in
+# story 4cdf; drift-refresh is now unconditional, so that scenario no longer exists and its test
+# was removed.
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────
@@ -1330,20 +1320,6 @@ def test_genuinely_absent_symbol_still_blocks_control(rebar_repo: Path) -> None:
     )
 
 
-# ── a37b: progressive drift-refresh is now DEFAULT-ON (operator-authorized) ──────
-def test_progressive_drift_refresh_defaults_on(tmp_path: Path) -> None:
-    """a37b: VerifyConfig.progressive_drift_refresh defaults True — a genuinely unmodified
-    config takes the scoped drift-refresh probe path; an explicit false restores the full
-    re-review (the back-out)."""
-    from rebar import config
-
-    config.reset_config_cache()
-    d = tmp_path / "default"
-    d.mkdir()
-    assert config.load_config(str(d)).verify.progressive_drift_refresh is True
-
-    config.reset_config_cache()
-    off = tmp_path / "off"
-    off.mkdir()
-    (off / "rebar.toml").write_text("[verify]\nprogressive_drift_refresh = false\n")
-    assert config.load_config(str(off)).verify.progressive_drift_refresh is False
+# The verify.progressive_drift_refresh config key (default-True + its explicit-false back-out) was
+# retired in story 4cdf: drift-refresh is now unconditional, the field is gone from VerifyConfig,
+# and its config-default test was removed.
