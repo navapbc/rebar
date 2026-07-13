@@ -121,10 +121,30 @@ def classify_change(client: GerritClient, change: dict) -> tuple[str, list[str]]
     return KIND_SINGLE, [change_id]
 
 
-def select_front_candidate(client: GerritClient) -> Candidate | None:
+def _is_handed_back(marker_store, client: GerritClient, cand: Candidate) -> bool:
+    """True when `cand`'s tip or ANY member still carries a VALID `needs_rebase` hand-back
+    marker (bug 15a1). `MarkerStore.get_valid` is self-invalidating: it returns the marker
+    only while the change's current patchset SHA still matches the SHA recorded at hand-back,
+    i.e. while the OWNER has not yet rebased/re-uploaded. This is what lets a truly-conflicting
+    stack — whose `Autosubmit +1` was cast by ANOTHER account (which the bot cannot zero, so
+    it stays `is:submittable` and keeps matching SELECTION_QUERY) — be skipped instead of
+    re-selected every poll. Once the owner rebases (a new patchset SHA), the marker no longer
+    validates and the stack becomes eligible again — no permanent exclusion."""
+    for cid in (cand.change_id, *cand.member_ids):
+        if cid and marker_store.get_valid(client, cid) is not None:
+            return True
+    return False
+
+
+def select_front_candidate(client: GerritClient, marker_store=None) -> Candidate | None:
     """Select the front change/chain to land: the OLDEST-voted submittable `Autosubmit`
     change (FIFO on the Autosubmit vote's `ApprovalInfo.date`). Returns None when the pool
-    is empty."""
+    is empty.
+
+    When `marker_store` is provided, a candidate that still carries a VALID `needs_rebase`
+    hand-back marker (see `_is_handed_back`) is SKIPPED in FIFO order and the next eligible
+    candidate is considered; None is returned when none remain. With `marker_store=None` the
+    behaviour is identical to before (back-compat for existing callers/tests)."""
     changes = client.query_changes(SELECTION_QUERY, ["DETAILED_LABELS"])
     if not changes:
         return None
@@ -134,15 +154,19 @@ def select_front_candidate(client: GerritClient) -> Candidate | None:
     if not dated:
         return None
 
-    date, change = min(dated, key=lambda pair: pair[0])
-    kind, member_ids = classify_change(client, change)
-    return Candidate(
-        change_id=change.get("change_id"),
-        number=change.get("_number"),
-        autosubmit_date=date,
-        kind=kind,
-        member_ids=member_ids,
-    )
+    for date, change in sorted(dated, key=lambda pair: pair[0]):
+        kind, member_ids = classify_change(client, change)
+        cand = Candidate(
+            change_id=change.get("change_id"),
+            number=change.get("_number"),
+            autosubmit_date=date,
+            kind=kind,
+            member_ids=member_ids,
+        )
+        if marker_store is not None and _is_handed_back(marker_store, client, cand):
+            continue  # handed back and not yet rebased by its owner -> don't re-select
+        return cand
+    return None
 
 
 def route_rebase(client: GerritClient, candidate: Candidate) -> str:
@@ -189,6 +213,17 @@ HANDBACK_COMMENT = (
     "main advanced faster than the lander could rebase; rebase onto current main "
     "and re-apply Autosubmit"
 )
+
+
+def _is_fast_forward_reject(exc) -> bool:
+    """True for the Fast-Forward-Only submit refusal — the TOCTOU rebase case — in EITHER
+    wording. Gerrit's FFO *submit* refusal (submit type FAST_FORWARD_ONLY) reads "... Project
+    policy requires all submissions to be a fast-forward. Please rebase the change locally and
+    upload again for review." and does NOT contain the substring "not fast-forward" (that is
+    git's *push* wording). Both mean the same thing: the change is stale and must be rebased
+    onto the new tip. Match any "fast-forward" refusal so a real 409 submit-reject routes to a
+    rebase instead of being re-raised as a hard error (bug 15a1)."""
+    return "fast-forward" in str(exc).lower()
 
 
 @dataclass
@@ -268,9 +303,9 @@ def drive_to_submit(
             try:
                 client.submit(wip.change_id)
             except GerritError as exc:
-                if "not fast-forward" not in str(exc).lower():
+                if not _is_fast_forward_reject(exc):
                     raise
-                # not-ff refusal: fall through to a re-drive, treated as not-landable.
+                # FFO submit refusal: fall through to a re-drive, treated as not-landable.
             else:
                 return "submitted"
 
@@ -774,7 +809,7 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
             time.sleep(POLL_S)
             continue
         try:
-            cand = select_front_candidate(gerrit)
+            cand = select_front_candidate(gerrit, marker_store)
             if cand is not None:
                 wip = WipChain(change_id=cand.change_id, chain_member_ids=cand.member_ids)
                 state["wip"], state["phase_since"] = wip, time.monotonic()
@@ -816,9 +851,9 @@ def _drive_candidate(gerrit, wip, cand, marker_store, root):
                 ancestor_atomic_submit(gerrit, wip)  # submit + partial-land guard + ticket close
                 return
             except GerritError as exc:
-                if "not fast-forward" not in str(exc).lower():
+                if not _is_fast_forward_reject(exc):
                     raise  # a real submit error, not the TOCTOU race
-        # not landable (main advanced) or a not-ff submit refusal -> re-drive, bounded
+        # not landable (main advanced) or an FFO submit refusal -> re-drive, bounded
         if attempt >= MAX_RE_DRIVE:
             failure.handle_rebase_conflict(gerrit, wip, marker_store, stack_id=cand.change_id)
             return
