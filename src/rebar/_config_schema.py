@@ -245,9 +245,10 @@ class VerifyConfig:
 
     # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
     # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,
-    # REFRESH the attestation instead of a full re-review. OFF by default — opt-in until the
-    # token/latency saving is measured on a representative ticket.
-    progressive_drift_refresh: bool = False
+    # REFRESH the attestation instead of a full re-review. Default ON (operator-authorized
+    # 2026-07-12, epic a37b, on the measured token/latency saving); an explicit false is the
+    # back-out and restores the full-re-review path.
+    progressive_drift_refresh: bool = True
 
     # Token-budget headroom for the Pass-2 verify chunker (epic solid-timer-unison WS3): the
     # fraction of the verifier model's context window a single verify request may use before

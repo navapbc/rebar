@@ -61,7 +61,7 @@ code. A clean probe REFRESHES the attestation (re-sign the prior verdict with th
 dependency hashes); any blocking finding, or a finding citing a drifted file, escalates to a FULL
 re-review. Soundness is whole-verdict, gated by the probe — there is NO per-criterion finding reuse,
 so the (unenforced) code-blind criterion partition is not relied upon. Gated by
-`verify.progressive_drift_refresh` (**default off**); fail-safe to full re-review on probe
+`verify.progressive_drift_refresh` (**default ON** since 2026-07-12, epic a37b; explicit false backs out); fail-safe to full re-review on probe
 error / registry-version skew / no reusable prior verdict.
 
 > **One of three Pass-3 floors.** This drift-refresh is one of three deterministic Pass-3
@@ -87,10 +87,10 @@ A full story review is ~6 agent-tier (85×) criteria + ~15 single-turn criteria 
 The progressive **probe** runs only `E4` + `G1G2` (2 agent-tier finders) + one Pass-2 aggregate
 verify (Pass-3 is deterministic, no LLM) ≈ **3 LLM calls**, and the agent-tier finders dominate
 latency — so the probe is ≈ **1/3 of the full-review LLM calls** and a smaller fraction of wall-clock
-(2 of 6 agent-tier finders vs the full set), comfortably under the <50% sanity target. Because the
-saving is real but bounded (the 2 probe criteria are themselves agent-tier), the path ships **opt-in**
-until a project confirms the per-token saving on its own representative tickets, at which point the
-default can be flipped on in a follow-up.
+(2 of 6 agent-tier finders vs the full set), comfortably under the <50% sanity target. (Update
+2026-07-12, epic a37b: the saving is real but bounded — the 2 probe criteria are themselves
+agent-tier — and on that structural basis the path is now **default ON**; an explicit
+`verify.progressive_drift_refresh = false` backs out to the full-re-review path.)
 
 ## Shared ref-resolution boundary (epic `raze-vet-ditch`, S4b `piney-gold-day`)
 
