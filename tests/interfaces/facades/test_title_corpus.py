@@ -144,6 +144,68 @@ def test_nul_title_round_trips_library_and_mcp(rebar_repo: Path) -> None:
     assert cid and rebar.show_ticket(cid, repo_root=str(rebar_repo))["title"] == title
 
 
+def _mcp_edit(tid: str, title: str, repo: Path) -> tuple[bool, str]:
+    """Attempt an MCP edit_ticket title change. Returns (rejected, message)."""
+    import asyncio
+
+    from rebar.mcp_server import build_server
+
+    srv = build_server()
+    try:
+        asyncio.run(srv.call_tool("edit_ticket", {"ticket_id": tid, "title": title}))
+        return False, ""
+    except Exception as exc:  # noqa: BLE001 — any tool failure is a rejection here
+        return True, f"{exc} {exc.__cause__ or ''}"
+
+
+# ── whitespace-only rejection on the EDIT path across all three facades ────────
+def test_whitespace_only_rejected_on_edit_across_all_facades(rebar_repo: Path) -> None:
+    """The edit path rejects a whitespace-only --title identically on the CLI, library,
+    and MCP surfaces (complements the create-path coverage), and never clobbers the
+    stored title."""
+    pytest.importorskip("mcp")
+    bad = " \t\n "
+
+    # library edit
+    tid = rebar.create_ticket("task", "keep me", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError) as lib_ei:
+        rebar.edit_ticket(tid, title=bad, repo_root=str(rebar_repo))
+    assert "non-empty" in str(lib_ei.value).lower()
+
+    # cli edit
+    cp = _cli("edit", tid, f"--title={bad}", repo=rebar_repo)
+    assert cp.returncode != 0, cp.stdout
+    assert "non-empty" in cp.stderr.lower(), cp.stderr
+
+    # mcp edit
+    rejected, msg = _mcp_edit(tid, bad, rebar_repo)
+    assert rejected and "non-empty" in msg.lower(), msg
+
+    # None of the rejected edits mutated the stored title.
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["title"] == "keep me"
+
+
+# ── >255 (incl. ≥1000-char) rejection identity across all three facades ───────
+@pytest.mark.parametrize("n", [256, 1000])
+def test_over_255_char_title_rejected_across_all_facades(rebar_repo: Path, n: int) -> None:
+    """An oversized title (>255, including the ≥1000-char corpus case) is rejected
+    identically — nonzero/error carrying the shared '255' substring — on the CLI,
+    library, and MCP create surfaces (argv can carry these, unlike NUL)."""
+    pytest.importorskip("mcp")
+    big = "x" * n
+
+    with pytest.raises(rebar.RebarError) as lib_ei:
+        rebar.create_ticket("task", big, repo_root=str(rebar_repo))
+    assert "255" in str(lib_ei.value), str(lib_ei.value)
+
+    cp = _cli("create", "task", big, repo=rebar_repo)
+    assert cp.returncode != 0
+    assert "255" in cp.stderr, cp.stderr
+
+    rejected, msg, _cid = _mcp_create(big, rebar_repo)
+    assert rejected and "255" in msg, msg
+
+
 # ── cross-facade rejection identity for whitespace-only titles ────────────────
 def test_whitespace_only_rejected_identically_across_all_facades(rebar_repo: Path) -> None:
     pytest.importorskip("mcp")
