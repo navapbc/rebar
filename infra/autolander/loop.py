@@ -80,8 +80,14 @@ def classify_change(client: GerritClient, change: dict) -> tuple[str, list[str]]
     if len(parents) > 1:
         return KIND_MERGE, [change_id]
 
-    # Chain: RelatedChanges with >1 member, in the order given.
-    related = client.get_related(change_id)
+    # Chain: RelatedChanges with >1 OPEN member, in the order given. A MERGED/ABANDONED
+    # related change is NOT part of the live stack — a merged ancestor is now part of `main`
+    # (e.g. a just-landed parent), so it must be excluded or the loop mistakes a lone change
+    # atop a freshly-merged parent for a 2-member chain and rebases a stack that is already
+    # up to date.
+    related = [
+        m for m in client.get_related(change_id) if m.get("status") not in ("MERGED", "ABANDONED")
+    ]
     if len(related) > 1:
         member_ids = [m.get("change_id") or m.get("_change_number") for m in related]
         return KIND_CHAIN, member_ids

@@ -157,3 +157,19 @@ def test_non_2xx_raises_gerrit_error(fake_transport: FakeTransport):
     with pytest.raises(GerritError) as ei:
         client.rebase("123")
     assert ei.value.status == 409
+
+
+def test_merged_related_ancestor_excluded_from_chain():
+    """A change atop a JUST-MERGED parent (the merged parent still shows in RelatedChanges)
+    is a SINGLE change, not a 2-member chain — the merged ancestor is part of main now."""
+    from autolander.loop import KIND_SINGLE, classify_change
+
+    top = change_info("Itop", 11, autosubmit_date="2026-07-13 09:00:00.000000000", parents=1)
+    related = [
+        {"change_id": "Iparent", "_change_number": 10, "status": "MERGED"},  # just landed
+        {"change_id": "Itop", "_change_number": 11, "status": "NEW"},
+    ]
+    client = RecordingClient(query_result=[top], related={"Itop": related})
+    kind, members = classify_change(client, top)
+    assert kind == KIND_SINGLE, "a merged ancestor must NOT make this a chain"
+    assert members == ["Itop"]
