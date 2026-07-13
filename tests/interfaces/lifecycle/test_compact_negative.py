@@ -19,6 +19,8 @@ ticket keeps its original status.
 
 from __future__ import annotations
 
+import errno
+import os
 import subprocess
 from pathlib import Path
 
@@ -27,6 +29,7 @@ import pytest
 import rebar
 from rebar._commands import compact as _compact
 from rebar._store import lock as _lock
+from rebar.reducer._cache import RETIRED_SUFFIX
 
 
 def _seed(repo: Path, title: str) -> str:
@@ -165,3 +168,150 @@ def test_compact_git_failure_is_surfaced(
 
     # The ticket still reduces and keeps its status (no corruption from the abort).
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
+
+
+# ── I1: rename fault injection during the fold's retire/rollback loop ──────────
+#
+# The fold writes the SNAPSHOT atomically FIRST, then renames each folded source
+# ``*.json -> *.json.retired``. On a forward-rename OSError it reverses every
+# completed rename and aborts. Two failure shapes have DIFFERENT correct outcomes:
+#
+#   * every reverse-rename succeeds  -> a CLEAN rollback back to the pre-compaction
+#     state, so the uncommitted SNAPSHOT MUST be removed (no artifact left behind);
+#   * some reverse-rename ALSO fails -> the store is now mixed (a source is stuck
+#     ``*.retired`` while its folded effect lives only in the SNAPSHOT), so the
+#     SNAPSHOT MUST be RETAINED — removing it would silently lose that source's
+#     effect (the data-loss hazard this story fixes).
+#
+# These are induced at the single ``os.rename`` seam the retire loop uses, scoped
+# to the retirement renames (dst/src carrying ``RETIRED_SUFFIX``) so the SNAPSHOT's
+# own atomic-write rename passes through untouched.
+
+
+def _semantic(state: dict) -> dict:
+    """A ticket's reduced state minus ``updated_at`` — the one derived field that is
+    recomputed from the newest event's timestamp and so legitimately differs across a
+    compaction (the SNAPSHOT is timestamped after the folded events). Everything else
+    must be identical, which is what these fault tests assert."""
+    return {k: v for k, v in state.items() if k != "updated_at"}
+
+
+def _seed_foldable(repo: Path, title: str, n_events: int) -> str:
+    """Create a ticket and drive ``n_events`` extra events so the fold loop has
+    several sources to retire (enough to fail on the 2nd/3rd rename)."""
+    tid = _seed(repo, title)
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+    for i in range(n_events):
+        rebar.comment(tid, f"c{i}", repo_root=str(repo))
+    return tid
+
+
+class _RenameFault:
+    """A callable ``os.rename`` replacement that raises ``OSError`` on the Nth
+    *retirement* rename. A forward rename is ``*.json -> *.json.retired`` (dst ends
+    with ``RETIRED_SUFFIX``); a reverse (rollback) rename is
+    ``*.json.retired -> *.json`` (src ends with it). Every other rename (e.g. the
+    SNAPSHOT atomic write) passes straight through, so only the fold's
+    retire/rollback loop is perturbed.
+
+    Faulting is toggled with ``disarm()`` rather than ``monkeypatch.undo()``: the
+    ``monkeypatch`` fixture is shared across a test, so ``undo()`` would also revert
+    the autouse ``REBAR_COMPACTION_HORIZON_NS=0`` fixture and silently push the
+    horizon back to the 1800 s production default (making a later re-compaction a
+    no-op). Disarming leaves the (now transparent) wrapper installed."""
+
+    def __init__(self, *, fail_forward_on: int | None = None, fail_reverse_on: int | None = None):
+        self._real = os.rename
+        self._fwd = 0
+        self._rev = 0
+        self._ff = fail_forward_on
+        self._fr = fail_reverse_on
+
+    def disarm(self) -> None:
+        self._ff = None
+        self._fr = None
+
+    def __call__(self, src, dst, *a, **k):  # type: ignore[no-untyped-def]
+        s, d = os.fspath(src), os.fspath(dst)
+        if d.endswith(RETIRED_SUFFIX):
+            self._fwd += 1
+            if self._ff is not None and self._fwd == self._ff:
+                raise OSError(errno.EIO, "injected forward-rename fault")
+        elif s.endswith(RETIRED_SUFFIX):
+            self._rev += 1
+            if self._fr is not None and self._rev == self._fr:
+                raise OSError(errno.EIO, "injected reverse-rename fault")
+        return self._real(src, dst, *a, **k)
+
+
+def test_forward_rename_fault_clean_rollback_removes_snapshot(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Forward-rename OSError with all reverses succeeding: the fold aborts, every
+    retired source is reversed back to an active ``*.json``, and the uncommitted
+    SNAPSHOT is removed. Reduced state is deep-equal to pre-compaction, no
+    ``*.retired`` remains, and a subsequent clean compaction succeeds."""
+    from rebar.reducer import reduce_ticket
+
+    tid = _seed_foldable(rebar_repo, "fwd-fault", n_events=3)
+    tdir = rebar_repo / ".tickets-tracker" / tid
+    sources_before = {p.name for p in _events(rebar_repo, tid)}
+    state_before = reduce_ticket(str(tdir))
+
+    fault = _RenameFault(fail_forward_on=2)
+    monkeypatch.setattr(_compact.os, "rename", fault)
+    rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
+    err = capsys.readouterr().err
+    assert rc == 1, err
+    assert "failed to retire" in err
+
+    # Clean rollback: no SNAPSHOT artifact, no stranded ``*.retired`` sources, the
+    # original active event set is intact, and the reduced state is unchanged.
+    fault.disarm()
+    assert not _has_snapshot(rebar_repo, tid)
+    assert not _retired(rebar_repo, tid)
+    assert {p.name for p in _events(rebar_repo, tid)} == sources_before
+    assert reduce_ticket(str(tdir)) == state_before  # exact: identical event set
+
+    # And a normal compaction still works afterwards (no residual damage).
+    rc2 = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
+    assert rc2 == 0, capsys.readouterr().out
+    assert _has_snapshot(rebar_repo, tid)
+    assert _semantic(reduce_ticket(str(tdir))) == _semantic(state_before)
+
+
+def test_reverse_rename_fault_retains_snapshot_reads_safe(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Forward-rename OSError followed by a reverse-rename OSError: the rollback is
+    INCOMPLETE (a source is stuck ``*.retired``), so the SNAPSHOT is RETAINED, an
+    explicit ``rollback incomplete; run fsck`` diagnostic is emitted, and the call
+    returns failure. Crucially the mixed state is still read-correct — the retained
+    SNAPSHOT's positional skip means the reversed-to-active source is not
+    double-counted, so ``reduce_ticket`` matches the pre-compaction state (the
+    residual inconsistency is a hygiene issue for ``fsck``, not a read error)."""
+    from rebar.reducer import reduce_ticket
+
+    tid = _seed_foldable(rebar_repo, "rev-fault", n_events=3)
+    tdir = rebar_repo / ".tickets-tracker" / tid
+    state_before = reduce_ticket(str(tdir))
+
+    # Fail the 3rd forward rename (renames 1,2 succeeded), then fail the SECOND
+    # reverse rename so one source reverses to active while another stays retired.
+    fault = _RenameFault(fail_forward_on=3, fail_reverse_on=2)
+    monkeypatch.setattr(_compact.os, "rename", fault)
+    rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
+    err = capsys.readouterr().err
+    fault.disarm()
+
+    assert rc == 1, err
+    assert "rollback incomplete" in err.lower(), err
+    assert "fsck" in err.lower(), err
+
+    # The SNAPSHOT is RETAINED (it carries the folded effect of the source that
+    # could not be reversed) and at least one source is stranded ``*.retired``.
+    assert _has_snapshot(rebar_repo, tid), "snapshot must be retained on incomplete rollback"
+    assert _retired(rebar_repo, tid), "expected a source stuck as *.retired"
+
+    # Reads are safe in the mixed window: the reduced state is unchanged.
+    assert _semantic(reduce_ticket(str(tdir))) == _semantic(state_before)
