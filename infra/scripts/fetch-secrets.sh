@@ -16,7 +16,7 @@
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
 #   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
 #   /rebar/prod/reviewbot-tickets-pat      -> REVIEWBOT_TICKETS_PAT      (data capture, OPTIONAL)
-#   /rebar/prod/autolander-gerrit-token    -> AUTOLANDER_GERRIT_TOKEN    (auto-lander, OPTIONAL)
+#   /rebar/prod/autolander-gerrit-token    -> AUTOLANDER_GERRIT_TOKEN    (auto-lander, REQUIRED/fail-fast)
 # The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
@@ -91,9 +91,11 @@ github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
 # until the operator populates the SSM slot; the container boots either way, and the code_review
 # artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
 reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
-# OPTIONAL: the auto-lander's Gerrit HTTP password (epic f1fa / S5). Blank until the operator
-# populates the SSM slot; the autolander container boots + heartbeats either way, and landing
-# (rebase-on-behalf + ancestor-atomic submit) starts working once it is set.
+# REQUIRED (fail-fast): the auto-lander's Gerrit HTTP password (epic f1fa / S5). The lander's
+# SOLE job is landing changes, so a blank token = a silent no-op — fetch it with get_param
+# (aborts boot if the SSM slot is empty/None/CHANGEME), consistent with the other required
+# creds above. The operator MUST populate this SecureString slot before deploy (it is already
+# populated); rebase-on-behalf + ancestor-atomic submit need it to authenticate.
 autolander_gerrit_token="$(get_param autolander-gerrit-token)"
 
 # --- Write the .env atomically (0600), then move into place ----------------
