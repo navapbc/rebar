@@ -72,7 +72,9 @@ def test_closer_skips_without_trailer_and_never_uses_change_id(monkeypatch, caps
 
 
 def test_closer_annotates_the_trailer_ticket(monkeypatch):
-    """With a trailer, the closer annotates THAT ticket id (not the Change-Id)."""
+    """With a trailer + a configured tracker + a successful freshen, the closer annotates THAT
+    ticket id (not the Change-Id)."""
+    import autolander.loop as loop
     from autolander.loop import close_ticket_via_rebar
 
     called: list = []
@@ -83,11 +85,90 @@ def test_closer_annotates_the_trailer_ticket(monkeypatch):
             called.append((tid, msg))
 
     monkeypatch.setitem(__import__("sys").modules, "rebar", _FakeRebar())
+    monkeypatch.setenv("REBAR_TRACKER_DIR", "/tmp/fake-tracker")
+    monkeypatch.setattr(loop, "_freshen_ticket_store", lambda tracker: None)
 
     close_ticket_via_rebar("I0123abcChangeId", ticket_id="dc33")
 
     assert len(called) == 1
     assert called[0][0] == "dc33", "must annotate the rebar-ticket trailer id, not the Change-Id"
+
+
+def test_closer_pages_when_tracker_unset(monkeypatch, capsys):
+    """A MISSING tickets store (REBAR_TRACKER_DIR unset) is a real deploy misconfiguration: emit
+    AUTOLANDER_ERROR, never freshen, never call rebar.comment (bug dc33 follow-up)."""
+    import autolander.loop as loop
+    from autolander.loop import AUTOLANDER_ERROR, close_ticket_via_rebar
+
+    called: list = []
+    freshened: list = []
+
+    class _FakeRebar:
+        @staticmethod
+        def comment(tid, msg):
+            called.append((tid, msg))
+
+    monkeypatch.setitem(__import__("sys").modules, "rebar", _FakeRebar())
+    monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
+    monkeypatch.setattr(loop, "_freshen_ticket_store", lambda tracker: freshened.append(tracker))
+
+    close_ticket_via_rebar("I0123abcChangeId", ticket_id="dc33")
+
+    assert called == [], "must NOT annotate when the tracker is unset"
+    assert freshened == [], "must NOT freshen when the tracker is unset"
+    err = capsys.readouterr().err
+    assert AUTOLANDER_ERROR in err, "an unset tracker must page"
+    assert "not configured" in err
+
+
+def test_closer_skips_without_paging_when_freshen_raises(monkeypatch, capsys):
+    """A transient freshen failure must NOT page (the landing already succeeded and it self-heals
+    on the next landing): no rebar.comment, no AUTOLANDER_ERROR — just a warning."""
+    import autolander.loop as loop
+    from autolander.loop import AUTOLANDER_ERROR, close_ticket_via_rebar
+
+    called: list = []
+
+    class _FakeRebar:
+        @staticmethod
+        def comment(tid, msg):
+            called.append((tid, msg))
+
+    def _boom(tracker):
+        raise RuntimeError("network flake")
+
+    monkeypatch.setitem(__import__("sys").modules, "rebar", _FakeRebar())
+    monkeypatch.setenv("REBAR_TRACKER_DIR", "/tmp/fake-tracker")
+    monkeypatch.setattr(loop, "_freshen_ticket_store", _boom)
+
+    close_ticket_via_rebar("I0123abcChangeId", ticket_id="dc33")
+
+    assert called == [], "must NOT annotate when the freshen failed"
+    err = capsys.readouterr().err
+    assert AUTOLANDER_ERROR not in err, "a transient refresh failure must not page"
+    assert "refresh failed (transient)" in err
+
+
+def test_closer_pages_when_comment_raises_on_fresh_store(monkeypatch, capsys):
+    """A rebar.comment failure on a FRESHENED store is genuine (ticket absent / push perms) and
+    must page via AUTOLANDER_ERROR."""
+    import autolander.loop as loop
+    from autolander.loop import AUTOLANDER_ERROR, close_ticket_via_rebar
+
+    class _FakeRebar:
+        @staticmethod
+        def comment(tid, msg):
+            raise RuntimeError("ticket not found")
+
+    monkeypatch.setitem(__import__("sys").modules, "rebar", _FakeRebar())
+    monkeypatch.setenv("REBAR_TRACKER_DIR", "/tmp/fake-tracker")
+    monkeypatch.setattr(loop, "_freshen_ticket_store", lambda tracker: None)
+
+    close_ticket_via_rebar("I0123abcChangeId", ticket_id="dc33")
+
+    err = capsys.readouterr().err
+    assert AUTOLANDER_ERROR in err, "a comment failure on a fresh store must page"
+    assert "dc33" in err
 
 
 def test_ancestor_atomic_submit_selects_trailer_id_on_merge():
