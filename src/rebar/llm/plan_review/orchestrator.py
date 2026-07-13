@@ -359,6 +359,7 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
         if not registry.applies(
             c,
             has_children=ctx.has_children,
+            has_parent=bool(ctx.state.get("parent_id")),
             ticket_type=ctx.ticket_type,
             plan=plan,
         ):

@@ -83,6 +83,8 @@ steps:
           when: '${{ steps.assemble.outputs.include_G5 }}'
         - prompt: plan-review-G6
           when: '${{ steps.assemble.outputs.include_G6 }}'
+        - prompt: plan-review-G7
+          when: '${{ steps.assemble.outputs.include_G7 }}'
         - prompt: plan-review-T1
           when: '${{ steps.assemble.outputs.include_T1 }}'
         - prompt: plan-review-T10
