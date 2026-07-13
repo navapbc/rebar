@@ -200,6 +200,7 @@ _CODE_MAINT_BINARIES = {
     "safety_net_removal_without_replacement": _CODE_TIER_SERIOUS,
     "contract_drift": _CODE_TIER_MODERATE,
     "hidden_invariant": _CODE_TIER_MODERATE,
+    "reachable_path_without_automated_coverage": _CODE_TIER_MODERATE,
     "implicit_coupling": _CODE_TIER_MINOR,
     "dead_code": _CODE_TIER_MINOR,
 }

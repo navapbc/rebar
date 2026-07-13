@@ -63,6 +63,7 @@ MAINTAINABILITY lane (debt / contract / coupling):
 - safety_net_removal_without_replacement (serious) — a test/guard/assert is removed with no replacement.
 - contract_drift (moderate) — an interface drifts from its documented/implied contract.
 - hidden_invariant (moderate) — the change relies on or breaks an undocumented invariant.
+- reachable_path_without_automated_coverage (moderate) — the change introduces or unmasks a reachable code path with NO automated test coverage.
 - implicit_coupling (minor) — the change adds implicit cross-module coupling.
 - dead_code (minor) — the change introduces dead/unreachable code.
 TRIGGER LIKELIHOOD + DETECTION (drive the production-lane multiplier and the detection amplifier):
