@@ -301,6 +301,11 @@ class VerifyConfig:
     # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
     # default (the total back-out, exactly like novelty_drop_active).
     completion_floor_active: bool = False
+    # Opt-in per-gate required-signing-environment (story 42d1). When set to an env_id, a gate's
+    # operation certificate must come from that pinned trusted environment
+    # (`.rebar/trusted_environments.yaml`), verified against its out-of-band-pinned key. Default
+    # None ⇒ no required environment (the low-security default).
+    require_environment: str | None = None
 
 
 @dataclass
@@ -498,6 +503,7 @@ _SECTIONS: dict[str, dict] = {
         "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),
+        "require_environment": lambda v, k: _as_str(v, k),
     },
     "identity": {
         "require_authenticated": lambda v, k: _as_bool(v, k),
