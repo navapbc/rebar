@@ -24,7 +24,7 @@ jobs:
       # variable to enable grandfathering; empty (default) enforces every in-scope event.
       ENFORCE_SINCE: ${{ vars.ENFORCE_SINCE }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v6
