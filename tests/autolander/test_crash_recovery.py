@@ -4,6 +4,11 @@ double-submit an already-merged stack, never strand one on a stale snapshot."""
 
 from __future__ import annotations
 
+import json
+import threading
+import time
+import urllib.request
+
 import pytest
 from _autolander_fakes import RecordingClient, change_info
 
@@ -106,17 +111,133 @@ def test_reconcile_completes_unacknowledged_handback(tmp_path):
     assert not (tmp_path / RECOVERY_FILE).exists()
 
 
-def test_heartbeat_freshness_integrated_via_status(tmp_path):
-    """Integrated heartbeat-freshness proof: after write_heartbeat, the status document's
-    heartbeat_age_s (the field `land`'s lander_down reads) is fresh (< the 90s bound)."""
-    from autolander.loop import WipChain, build_status, heartbeat_age_s, write_heartbeat
+def test_heartbeat_freshness_through_status_endpoint_and_land(tmp_path, monkeypatch):
+    """END-TO-END heartbeat liveness: a fresh heartbeat is served as `heartbeat_age_s` through
+    the REAL status HTTP server (GET /autolander/status) — the same document `land` reads — so a
+    concurrent `land` sees the bot as live (proceeds to set Autosubmit). When the heartbeat
+    writer stalls past 90 s, the SAME endpoint reports the container UNHEALTHY (healthcheck_ok
+    False, matching the Dockerfile HEALTHCHECK) AND a concurrent `land` returns LANDER_DOWN.
 
-    write_heartbeat(tmp_path, now=1000.0)
-    age = heartbeat_age_s(tmp_path, now=1005.0)
-    status = build_status(
-        WipChain(change_id="", chain_member_ids=[], phase="idle"),
-        heartbeat_age_s=age,
-        waiting_count=0,
-        time_in_phase_s=5,
+    The clock is PINNED via `loop._now` so the age is deterministic — asserting on real elapsed
+    wall-clock is flaky on a loaded CI runner (a stall between the write and the GET inflates the
+    measured age)."""
+    from autolander import land
+    from autolander.loop import healthcheck_ok, make_status_server, write_heartbeat
+
+    fixed = 1_000_000.0
+    monkeypatch.setattr("autolander.loop._now", lambda: fixed)
+
+    write_heartbeat(tmp_path, fixed - 5.0)  # fresh: 5 s old under the pinned clock
+    state = {"wip": None, "phase_since": time.monotonic()}
+    httpd = make_status_server(state, RecordingClient(changes={}), tmp_path, port=0)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+
+    def status_reader():
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/autolander/status", timeout=5
+        ) as resp:
+            return json.loads(resp.read().decode())
+
+    try:
+        # --- fresh: endpoint reports a young heartbeat; healthcheck healthy; land is live ---
+        assert status_reader()["heartbeat_age_s"] == 5  # deterministic (< 15 s poll cadence)
+        assert healthcheck_ok(tmp_path, fixed) is True
+        assert land.heartbeat_fresh(status_reader) is True
+
+        # A concurrent land against a live bot PROCEEDS: it sets Autosubmit (records "Ix") and
+        # reaches a terminal outcome (the change is already MERGED) rather than LANDER_DOWN.
+        sa: list[str] = []
+        merged = RecordingClient(
+            changes={"Ix": change_info("Ix", 7, status="MERGED", revision="sx")}
+        )
+        outcome, _ = land.land(
+            "Ix",
+            gerrit=merged,
+            status_reader=status_reader,
+            marker_lookup=lambda _c: None,
+            set_autosubmit=lambda c: sa.append(c),
+            clock=lambda: 0.0,
+            sleep=lambda _s: None,
+        )
+        assert sa == ["Ix"], "a live bot => land proceeds to set Autosubmit"
+        assert outcome == land.MERGED and outcome != land.LANDER_DOWN
+
+        # --- stalled writer: backdate the heartbeat past the 90 s bound (pinned clock) ---
+        write_heartbeat(tmp_path, fixed - 100.0)
+        assert status_reader()["heartbeat_age_s"] == 100  # >= 90 s stale bound
+        assert healthcheck_ok(tmp_path, fixed) is False  # HEALTHCHECK -> unhealthy
+        assert land.heartbeat_fresh(status_reader) is False
+
+        # A concurrent land now reports LANDER_DOWN (returns before touching gerrit/clock).
+        down_sa: list[str] = []
+        outcome_down, _ = land.land(
+            "Ix",
+            gerrit=RecordingClient(changes={}),
+            status_reader=status_reader,
+            marker_lookup=lambda _c: None,
+            set_autosubmit=lambda c: down_sa.append(c),
+            clock=lambda: 0.0,
+            sleep=lambda _s: None,
+        )
+        assert outcome_down == land.LANDER_DOWN
+        assert down_sa == [], "a down bot => land never orphans an Autosubmit label"
+    finally:
+        httpd.shutdown()
+
+
+def test_drain_then_autoheal_restart_midway_recovers_cleanly(tmp_path):
+    """SIGTERM drain ⇄ autoheal race: handle_sigterm writes recovery.json FIRST (before draining),
+    so a `docker restart` (hard kill) mid-drain leaves a durable snapshot. On restart,
+    reconcile_recovery reconciles it against live Gerrit — an interrupted submit (still NEW)
+    re-selects with NO blind re-submit, and a submit that actually MERGED mid-interruption is
+    simply cleared. Neither path double-submits or strands the stack."""
+    from autolander.loop import (
+        RECOVERY_FILE,
+        WipChain,
+        handle_sigterm,
+        reconcile_recovery,
     )
-    assert status["heartbeat_age_s"] == 5 and status["heartbeat_age_s"] < 90
+
+    wip = WipChain(
+        change_id="It",
+        chain_member_ids=["Ib", "It"],
+        tested_shas={"It": "sT", "Ib": "sB"},
+        phase="submitting",
+    )
+    state = {"wip": wip, "phase_since": 0.0}
+    stopping = {"v": False, "drain_deadline": None}
+
+    # SIGTERM: recovery snapshot is durable IMMEDIATELY (written FIRST), THEN drain begins.
+    handle_sigterm(state, stopping, tmp_path, now=0.0)
+    assert (tmp_path / RECOVERY_FILE).exists(), "recovery.json written FIRST, before draining"
+    assert stopping["v"] is True
+    assert stopping["drain_deadline"] == 120
+
+    # --- autoheal `docker restart` mid-drain (hard kill): drain never finished. On restart the
+    # tip is STILL open (submit never completed) -> re-select, never blind re-submit. ---
+    client = RecordingClient(
+        changes={
+            "It": change_info("It", 912, status="NEW", revision="sT", submittable=True),
+            "Ib": change_info("Ib", 911, status="NEW", revision="sB"),
+        }
+    )
+    disp = reconcile_recovery(client, tmp_path)
+    assert "submitting" in disp
+    assert not any(c[0] == "submit" for c in client.calls), "never blind re-submit on restart"
+    assert not (tmp_path / RECOVERY_FILE).exists(), "recovery cleared after reconcile"
+
+    # --- benign race: the tip actually MERGED during the interrupted submit. Re-snapshot (the
+    # in-flight wip is unchanged) and reconcile -> cleared as merged, still NO submit call. ---
+    handle_sigterm(state, stopping, tmp_path, now=0.0)
+    assert (tmp_path / RECOVERY_FILE).exists()
+    merged_client = RecordingClient(
+        changes={
+            "It": change_info("It", 912, status="MERGED", revision="sT"),
+            "Ib": change_info("Ib", 911, status="NEW", revision="sB"),
+        }
+    )
+    disp_merged = reconcile_recovery(merged_client, tmp_path)
+    assert "merged" in disp_merged.lower()
+    assert not any(c[0] == "submit" for c in merged_client.calls)
+    assert not (tmp_path / RECOVERY_FILE).exists()
