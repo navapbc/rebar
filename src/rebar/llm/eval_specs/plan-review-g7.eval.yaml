@@ -81,3 +81,22 @@ dataset:
       judgment, NOT reversed)." LEAF (task): "Update the skill docs to REQUIRE remediating ALL
       valid advisories before claiming." The leaf's deliverable directly CONTRADICTS the parent's
       acceptance criterion (mandate vs judgment). G7 SHOULD fire: the parent wins on conflict.
+
+# Human-gold labels for judge kappa alignment (WS-G3): the frozen finding/pass verdicts a
+# grounded G7 judgment MUST agree with. Balanced (fire + pass), one per dataset scenario plus
+# extra false-fire anchors so the judge is measured on both recall and false-fire suppression.
+gold_set:
+  # ── FIRES (leaf diverges from the parent: out-of-scope add, or contradicts a parent AC) ──
+  - input: "Leaf adds an out-of-parent-scope deliverable the parent leaves to a sibling (G7-R-out-of-parent-scope)."
+    label: finding
+  - input: "Leaf contradicts a parent acceptance criterion; parent wins on conflict (G7-R-contradicts-parent-ac)."
+    label: finding
+  - input: "Leaf redefines a parent deliverable rather than delivering a subset of it (G7-R-redefines-parent-deliverable)."
+    label: finding
+  # ── PASS (leaf is a faithful subset of the parent; consistent narrowing must NOT fire) ──
+  - input: "Leaf delivers one named parent deliverable and narrows nothing out of scope (G7-P-consistent-narrowing)."
+    label: pass
+  - input: "Leaf implements part of the parent's plan with no new deliverable and no contradiction (G7-P-partial-of-parent)."
+    label: pass
+  - input: "Leaf scopes to a strict subset of the parent's files and criteria (G7-P-subset-scope)."
+    label: pass
