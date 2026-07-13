@@ -25,15 +25,25 @@ whole tree, so a full run finishes in a few minutes:
 | `src/rebar/_engine_support/next_batch.py` | conflict-aware next-batch selector |
 | `src/rebar/_engine_support/validate.py` | repo-wide tracker-health scoring |
 | `src/rebar/reducer/_processors.py` | per-event reducer processors |
+| `src/rebar/_commands/_compact_policy.py` | pure compaction fold predicate (`is_foldable`) |
+| `src/rebar/_store/_push_policy.py` | pure push-policy classifier (`normalize_push_mode`) |
 
-**Scope caveat — the recorded scores below cover ONLY these five behavioral cores.**
-They deliberately do **not** include the concurrency / durability decision logic
-(`src/rebar/_store/{sync,push,lock}.py` and `src/rebar/_commands/compact.py`'s
-fold/rollback path, and the reconciler orchestration), which are subprocess- and
-clone-heavy and were left out of the current `only_mutate` set to keep a full run to a
-few minutes. So a high mapped score here says nothing about mutation coverage of the
-fold/rollback, remote-append, or stale-owner/reclamation paths — a selective expansion
-onto those modules is tracked separately (story 25aa).
+**Scope caveat — selective concurrency-path expansion (story 25aa).** The last two
+rows are **narrow, noise-free shards** over the *pure decision logic* of two
+concurrency paths that now have behavioral tests: the compaction **fold selection**
+(`is_foldable`) and the outbound **push-policy classification** (`normalize_push_mode`).
+Each was extracted into a small pure helper module so mutmut mutates **only** the
+decision, not the subprocess-heavy orchestration around it (that orchestration is what
+generates the no-test / equivalent-mutant noise this scoping avoids — we deliberately do
+**not** add whole `compact.py` / `push.py` to `only_mutate`).
+
+The rest of the concurrency / durability decision logic remains **DESCOPED** pending a
+follow-up story: `src/rebar/_store/sync.py`'s **sync branch selection** and
+`src/rebar/_store/lock.py`'s **stale-owner / reclamation** logic (and the reconciler
+orchestration) are still subprocess- and clone-heavy and are not in `only_mutate`. So a
+high mapped score here now covers the fold-selection and push-policy decisions, but still
+says nothing about mutation coverage of the sync-branch-selection or
+lock-stale-owner/reclamation paths.
 
 The test selection (`pytest_add_cli_args_test_selection`) is scoped to the tests
 that exercise these cores, so each mutant is evaluated against a small, fast suite
@@ -46,6 +56,8 @@ rather than the full ~5k-test run. The per-module mapping is:
 | `next_batch.py` | `tests/interfaces/queries/test_next_batch_compute.py`, `tests/interfaces/queries/test_next_batch_behavior.py` |
 | `validate.py` | `tests/interfaces/queries/test_validate_compute.py` |
 | `gates.py` | `tests/interfaces/lifecycle/test_gate_rubric_consistency.py`, `queries/test_ws5d_quality_fileimpact.py`, `lifecycle/test_close_gate_story_epic.py` |
+| `_compact_policy.py` | `tests/unit/test_compact_policy.py` |
+| `_push_policy.py` | `tests/unit/test_push_policy.py` |
 
 ## Invocation
 
@@ -94,6 +106,19 @@ behavior is characterized through subprocess-driven interface tests
 (`test_validate_compute.py`, the gate-rubric/close-gate tests), which the
 coverage map cannot attribute; the mapped mutants those modules *do* expose
 in-process are fully killed.
+
+### Concurrency-path shards (2026-07-12, story 25aa)
+
+The two selective concurrency-path shards were run scoped to their own
+`only_mutate` entry + focused kill-suite (each is small enough that a run finishes
+in under a second). Both are fully killed — the direct in-process unit tests pin
+every operator, branch, and constant, so there are no no-tests / equivalent-mutant
+survivors to explain:
+
+| Module | Killed | Survived | No-tests | Timeout | Mapped score |
+|--------|-------:|---------:|---------:|--------:|-------------:|
+| `_commands/_compact_policy.py` | 7 | 0 | 0 | 0 | 100.0% |
+| `_store/_push_policy.py` | 8 | 0 | 0 | 0 | 100.0% |
 
 ### Remaining survivors are equivalent or cosmetic
 

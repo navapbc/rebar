@@ -42,10 +42,11 @@ def _push_mode(root: str | None = None) -> str:
     out to ``git`` for root detection, which would conflict with callers that mock
     subprocess. Best-effort: a malformed config falls back to the ``always`` default —
     a bad config must never break (or silently disable) the auto-push."""
+    from rebar._store._push_policy import normalize_push_mode
     from rebar.config import ConfigError, load_config
 
     try:
-        return load_config(root=root).sync.push
+        return normalize_push_mode(load_config(root=root).sync.push)
     except ConfigError:
         return "always"
 
