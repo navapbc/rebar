@@ -799,6 +799,15 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
         "name": "generalize the finding",
         "template": "Generalize {subject} across the rest of the work.",
     },
+    "13": {
+        "name": "realign to parent plan",
+        "template": (
+            "Realign {subject} to the parent's plan — the parent wins on conflict; if the "
+            "parent is genuinely wrong, update the PARENT first (which forces its re-review), "
+            "never silently diverge the leaf."
+        ),
+        "applies_when": ["G7"],
+    },
 }
 
 
