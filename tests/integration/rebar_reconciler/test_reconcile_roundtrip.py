@@ -91,6 +91,13 @@ class StubBindingStore:
     def get_local_id(self, jira_key: str) -> str | None:
         return self._j2l.get(jira_key)
 
+    # baseline arbitration surface (always-on since story d6bd)
+    def is_pending(self, local_id: str) -> bool:
+        return False
+
+    def get_baseline(self, local_id: str) -> dict | None:
+        return None
+
 
 def _make_ticket(
     ticket_id: str = "abc-1234",
