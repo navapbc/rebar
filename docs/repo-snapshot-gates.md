@@ -31,9 +31,13 @@ drift/ref coherence: [adr/0002-code-drift-invalidation.md](adr/0002-code-drift-i
   content allowed). It is **NEVER signed** (no `verified_at_sha`, no attestation) and is the
   documented **back-out** that restores the prior "read the local checkout" behavior — e.g. a
   single developer's *verify-before-push* flow. The `rebar transition … closed` CLI close gate
-  verifies an attested snapshot of `HEAD` (the committed state about to be pushed; `HEAD`
-  resolves from the local object DB, so the close does NOT fetch); the MCP `verify_completion`
-  tool defaults to attested `origin/main` (distributed verification of merged code).
+  verifies an attested snapshot of `HEAD` — the committed state about to be pushed — resolved
+  from the object DB of **whichever checkout the close command is run from** (so the close does
+  NOT fetch, and the verified code is *that* checkout's current branch tip, NOT `origin/main`).
+  **Run the close from the worktree/branch that holds the code you want verified:** if you edit
+  in a worktree but run `transition … closed` from the main checkout, the verifier reads the
+  main checkout's `HEAD` — not your edits. The MCP `verify_completion` tool defaults to attested
+  `origin/main` (distributed verification of merged code).
 
 **Defaults are configurable, not hardcoded.** `ref`/`source` resolve through the standard
 precedence: `REBAR_GATE_REF` / `REBAR_GATE_SOURCE` env > the `[snapshot]` config table
@@ -58,6 +62,11 @@ know you committed in the same stack; keep the `origin/main` default for standal
 
 `REBAR_ROOT` only locates the **object DB** to fetch from; in attested mode it does NOT
 determine which code is read — the snapshot at `ref` does. This is the cwd/branch decoupling.
+**The one exception is the symbolic ref `HEAD`** (what the CLI close gate uses): `HEAD` is
+resolved against the invoking checkout's current branch, so *which commit it names* depends on
+where you run the command. Run any `HEAD`-based gate — above all the `transition … closed`
+close gate — from the worktree/branch that holds the code to be verified. An explicit
+branch/tag/SHA `ref` stays fully cwd-independent.
 
 ## Private-repo fetch credentials + descriptive errors
 

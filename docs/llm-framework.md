@@ -432,7 +432,11 @@ the prompt carries an instruction-hierarchy clause (prompt-injection mitigation,
 
 **The close gate** (`verify.require_completion_verification_for_close`, default off; **on for
 this project**) wires this into `transition` **outside the write lock**, ordering
-**verify → close → sign**:
+**verify → close → sign**. It verifies the committed `HEAD` of **whichever checkout the
+`transition … closed` command runs from** — an immutable attested snapshot resolved offline,
+NOT `origin/main` and NOT necessarily the worktree where the edits were made — so **run the
+close from the worktree/branch that contains the code you want verified** (running it from the
+main checkout verifies the main checkout's `HEAD`, not your worktree edits):
 
 - on a non-force close it runs `verify_completion`; a **FAIL** verdict, or an **unavailable
   LLM** (missing `[agents]` extra / API key / any verifier error), **blocks** the close

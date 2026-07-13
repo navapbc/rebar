@@ -112,10 +112,13 @@ execute (ticket count, depth, code vs. non-code leaves) before continuing.
 Set up an isolated workspace so the stack builds cleanly on current `main` and never touches
 the user's checkout.
 
-1. **Fetch and branch from `origin/main` in a new worktree.** Per the project's convention;
-   the rebar default is `git fetch origin && git worktree add <path> -b <branch> origin/main`.
-   Verify you are on it and it contains current `origin/main` (`git rev-parse --show-toplevel`,
-   `git log --oneline origin/main -1`).
+1. **Fetch and branch from `origin/main` in a new worktree, then `cd` into it.** Per the
+   project's convention; the rebar default is
+   `git fetch origin && git worktree add <path> -b <branch> origin/main`. Verify you are on it
+   and it contains current `origin/main` (`git rev-parse --show-toplevel`,
+   `git log --oneline origin/main -1`). **`cd` into the worktree and run every subsequent
+   command — edits, gates, `rebar`, ticket closes, and `git` — from inside it**, never from
+   the primary checkout, so they all act on this worktree's branch.
 2. **Set up the local environment.** Activate the project's local build/venv per its docs (for
    rebar: `source .venv/bin/activate`, or `make install` first if absent) and **confirm the
    tools resolve to the worktree**, not a stale global install (`which rebar` → the worktree's
