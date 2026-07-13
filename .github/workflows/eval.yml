@@ -45,6 +45,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Install (dev)
         run: |
           python -m pip install --upgrade pip
@@ -88,12 +90,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Cache pip wheels  # cuts install cost/time on repeated scheduled runs
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-eval-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: pip-eval-${{ runner.os }}-
+          # pip caching is now the setup-python built-in (keyed on pyproject.toml),
+          # replacing the previous manual `actions/cache@v4` step here (task bad4).
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Install with the agents + eval extras
         run: |
           python -m pip install --upgrade pip
