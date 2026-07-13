@@ -901,6 +901,25 @@ def _apply_mutations(ctx: _PassContext) -> None:
     ctx.nowrite_plan = nowrite_plan
 
 
+def _advance_baselines(binding_store: Any, curr_snapshot: Mapping[str, Any]) -> int:
+    """Advance every CONFIRMED binding's per-binding baseline to the current snapshot
+    (story d6bd — the always-on successor to the retired dual-write shadow). Only
+    confirmed bindings whose Jira key is in the current fetch window are advanced (an
+    out-of-window key has no fresh value this pass); ``set_baseline`` filters to the
+    mirrored fields. In-memory until the caller's ``save()`` persists them (ADR 0026).
+    """
+    advanced = 0
+    for local_id, entry in binding_store.all_bindings().items():
+        if entry.get("state") != "confirmed":
+            continue
+        jira_key = entry.get("jira_key")
+        if not jira_key or jira_key not in curr_snapshot:
+            continue
+        binding_store.set_baseline(local_id, curr_snapshot[jira_key])
+        advanced += 1
+    return advanced
+
+
 def _persist_and_log(ctx: _PassContext) -> dict:
     """Persist phase: save+commit the binding store, advance the prev snapshot
     (idempotency), tally the truthful applied/failure counts from the manifest,
@@ -927,31 +946,18 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     # helper writes/commits it to the tickets branch. Both are store writes —
     # skip the entire block in no-write mode (ticket yaw-plait-doe).
     if persist:
-        # Convergence rollout Phase 1 (epic 3006-e198 / 7d23): dual-write per-
-        # binding baselines from the current snapshot in SHADOW (no consumer reads
-        # them) and log the equivalence check vs prev_snapshot. Off unless
-        # reconciler.baseline_dual_write is enabled. Runs BEFORE save() so the
-        # advanced baselines persist this pass; fail-open (never break a sync pass).
+        # Convergence rollout retired (story d6bd): ALWAYS advance the per-binding
+        # baselines from the current snapshot (formerly gated on the removed
+        # reconciler.baseline_dual_write). This records the last-synced Jira-side
+        # ancestor the outbound field differ arbitrates against (ADR 0026). Runs
+        # BEFORE save() so they persist this pass; fail-open (never break a sync pass).
         try:
-            from rebar.config import load_config as _load_config
-
-            _dual_write = bool(_load_config().reconciler.baseline_dual_write)
-        except Exception:  # noqa: BLE001 — config unreadable → shadow off, sync unaffected
-            _dual_write = False
-        if _dual_write:
-            try:
-                _shadow_mod = _load("reconcile_baseline_shadow", "baseline_shadow.py")
-                _shadow_mod.run_dual_write_shadow(
-                    binding_store,
-                    ctx.curr_snapshot,
-                    ctx.prev_snapshot,
-                    sync_logger=sync_logger,
-                )
-            except Exception as exc:  # noqa: BLE001 — shadow is derisk-only; never break sync
-                print(  # noqa: T201
-                    f"reconcile: baseline dual-write shadow failed ({exc})",
-                    file=sys.stderr,
-                )
+            _advance_baselines(binding_store, ctx.curr_snapshot)
+        except Exception as exc:  # noqa: BLE001 — baseline advance is best-effort; never break sync
+            print(  # noqa: T201
+                f"reconcile: baseline advance failed ({exc})",
+                file=sys.stderr,
+            )
         try:
             binding_store.save()
             # Commit the updated bindings.json to the tickets orphan branch so
