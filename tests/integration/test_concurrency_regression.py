@@ -937,3 +937,225 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     fsck = json.loads(_engine_run(repo_b, "fsck", "--output", "json", check=False).stdout)
     kinds = [f.get("kind") for f in fsck.get("issues", [])]
     assert "status_fork_resolved" in kinds, f"fsck must flag the resolved fork; kinds={kinds}"
+
+
+# ─────────── Real push/fetch/merge during compaction (story 1fdc) ─────────────
+# The two compaction-resurrection/orphan tests above (…recovered_by_fsck_rebuild,
+# …resurrection_no_data_loss_and_repairable) SIMULATE a remote append by hand-copying
+# clone B's event file into clone A's tracker dir plus a ``--no-verify`` commit — they
+# never drive a real ``git push``/``fetch``/merge, so real publish/reconverge timing is
+# unexercised. The two tests below drive the actual engine sync (real push/fetch/merge)
+# across two clones so the snapshot-horizon safety property is exercised end-to-end.
+#
+# HLC note (why the timestamps are injected rather than "natural"): ``hlc.next_tick`` is
+# MONOTONIC — ``max(cache, witness, physical_now())+1`` — so on a ticket that already has
+# a current-time event (the fixture ``seed``'s CREATE), a ``REBAR_HLC_NOW=<far-past>``
+# append is floored back up to current time and can NOT produce a genuinely far-past
+# event. To place events at deterministic timestamps we either (a) disable the monotonic
+# clock with ``REBAR_HLC=0`` (then ``next_tick`` returns exactly ``physical_now()`` =
+# the injected ``REBAR_HLC_NOW``), or (b) inject a FUTURE ``REBAR_HLC_NOW`` (which the
+# monotonic floor accepts). All cross-clone ordering below is fixed by explicit
+# timestamps, never by a wall-clock race (SDET: no timing races).
+
+
+def _engine_run_env(repo: Path, *args: str, env_extra=None, check: bool = True):
+    """``_engine_run`` with EXTRA env merged over ``engine_env`` — the injection point for
+    ``REBAR_HLC_NOW`` (physical clock) / ``REBAR_HLC`` (disable the monotonic tick) /
+    ``REBAR_COMPACTION_HORIZON_NS`` so the test controls event + compaction timestamps."""
+    env = _engine.engine_env(repo_root=str(repo))
+    if env_extra:
+        env.update({k: str(v) for k, v in env_extra.items()})
+    return subprocess.run(
+        [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=check
+    )
+
+
+# Scenario-A constants (see the module note above for why they are injected).
+_A_FAR_PAST = 10**9  # ~1970: the CREATE + folded comments' timestamp band (via REBAR_HLC=0).
+_A_HORIZON = 1800 * 10**9  # 1800s — a normal conservative fold horizon.
+# Compaction "now": between (_A_FAR_PAST + _A_HORIZON) and current time, so the far-past
+# events fold (now - ts >= horizon) while the current-time "young" event does NOT.
+_A_COMPACT_NOW = 10**15
+# Scenario-B constants.
+_B_FAR_FUTURE = 4 * 10**18  # ~year 2096: the adversarial far-future SNAPSHOT timestamp.
+_B_NORMAL_TS = 3 * 10**18  # B's "normal-clock" orphan comment — below the far-future snapshot.
+
+
+def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clones):
+    """Scenario A (story 1fdc): the conservative horizon keeps a concurrent REAL remote
+    append safe with NO repair. A folds only FAR-PAST events while a YOUNG (current-time)
+    event stays live, so the SNAPSHOT timestamp is bounded far below any current-time
+    event; B's real current-time push therefore sorts AFTER the snapshot and replays on
+    top — visible immediately, with no ``fsck --repair`` and no SNAPSHOT_INCONSISTENT/
+    ORPHAN_EVENT. Unlike the two manual-copy regressions above, the remote append travels
+    through real ``git push``/``fetch``/merge via the engine's own sync.
+
+    A purpose-built far-past ticket is used rather than the fixture ``seed`` because the
+    monotonic HLC floor (see module note) forbids a genuinely far-past event on ``seed``
+    (its CREATE is at real current time); the far-past band is what makes the snapshot ts
+    provably below the concurrent append."""
+    remote, repo_a, repo_b, _seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # A builds a far-past ticket: CREATE + two comments at ~1970 (REBAR_HLC=0 makes the
+    # injected clock authoritative), then ONE young comment at real current time (no
+    # override) that stays live and bounds the snapshot ts below current time.
+    hlc0 = {"REBAR_HLC": "0"}
+    tid = (
+        _engine_run_env(
+            repo_a,
+            "create",
+            "task",
+            "far-past compaction subject",
+            env_extra={**hlc0, "REBAR_HLC_NOW": _A_FAR_PAST},
+        )
+        .stdout.strip()
+        .splitlines()[-1]
+    )
+    _engine_run_env(
+        repo_a, "comment", tid, "fold-1", env_extra={**hlc0, "REBAR_HLC_NOW": _A_FAR_PAST + 1}
+    )
+    _engine_run_env(
+        repo_a, "comment", tid, "fold-2", env_extra={**hlc0, "REBAR_HLC_NOW": _A_FAR_PAST + 2}
+    )
+    _engine_run(repo_a, "comment", tid, "young-live")  # current time → stays live
+    # Publish the uncompacted ticket so origin holds it.
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+
+    # A compacts: folds only the far-past events (now - ts >= horizon), leaving the young
+    # one live. --skip-sync keeps the timing under the test's control. Then A publishes
+    # the compacted result (a fast-forward — no other clone has pushed) so origin reflects
+    # the retirement (no folded source survives as live .json to later resurrect).
+    out = _engine_run_env(
+        repo_a,
+        "compact",
+        tid,
+        "--threshold=0",
+        f"--horizon={_A_HORIZON}",
+        "--skip-sync",
+        env_extra={"REBAR_HLC_NOW": _A_COMPACT_NOW},
+    ).stdout
+    assert "compacted" in out, out
+    assert any(n.endswith("-SNAPSHOT.json") for n in _event_files(tracker_a)), (
+        "compaction must have produced a real SNAPSHOT event"
+    )
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+
+    # B fetches the compacted ticket via the engine's read-side sync, then appends a
+    # comment at REAL current time. current time >> the far-past snapshot ts, so the
+    # append sorts AFTER the snapshot. The write auto-pushes to origin (real push).
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    _engine_run(repo_b, "comment", tid, "remote-append-from-B")
+    assert "remote-append-from-B" in _engine_run(repo_b, "show", tid).stdout
+
+    # A reconverges through the read-side sync (fetch origin + union) — NO repair.
+    _expire_sync_marker(tracker_a)
+    show_a = _engine_run(repo_a, "show", tid).stdout
+    assert "remote-append-from-B" in show_a, (
+        "B's real remote append must be visible on A immediately (sorts after the "
+        f"far-below snapshot ts), with no repair. show={show_a}"
+    )
+    # The folded far-past events survive in the snapshot's compiled_state (no data loss).
+    assert "fold-1" in show_a and "fold-2" in show_a and "young-live" in show_a
+
+    # fsck is clean: no positional-skip drop (ORPHAN_EVENT) and no resurrected folded
+    # source (SNAPSHOT_INCONSISTENT). This is the whole point of the conservative horizon.
+    fsck_out = _engine_run(repo_a, "fsck", check=False).stdout
+    assert "SNAPSHOT_INCONSISTENT" not in fsck_out, fsck_out
+    assert "ORPHAN_EVENT" not in fsck_out, fsck_out
+
+
+def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_clones):
+    """Scenario B (story 1fdc): an ADVERSARIAL far-FUTURE snapshot timestamp forces the
+    positional-skip data-loss class, and a REAL push/fetch/merge + ``fsck
+    --repair-snapshots`` converges BOTH clones. Mirrors
+    ``…resurrection_no_data_loss_and_repairable`` intent but via real sync (not a manual
+    file copy) and a far-future snapshot ts.
+
+    A compacts ``seed`` under a far-future clock so its SNAPSHOT carries a far-future
+    timestamp and pushes it. B, on a normal clock, appends a comment whose timestamp
+    sorts BEFORE the far-future snapshot — the merged-in orphan the snapshot's positional
+    skip silently drops (RED). ``fsck --repair-snapshots`` rebuilds the snapshot from the
+    full log and folds the orphan back in (GREEN); both clones then hold byte-identical
+    replayed state including B's specific comment."""
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # A compacts seed with a far-future SNAPSHOT ts (horizon 0 → fold everything; the
+    # SNAPSHOT ts is next_tick, floored up to REBAR_HLC_NOW). Then A publishes it.
+    out = _engine_run_env(
+        repo_a,
+        "compact",
+        seed,
+        "--threshold=0",
+        "--horizon=0",
+        "--skip-sync",
+        env_extra={"REBAR_HLC_NOW": _B_FAR_FUTURE},
+    ).stdout
+    assert "compacted" in out, out
+    snap = _seed_dir_files(tracker_a, seed, "-SNAPSHOT.json")
+    assert snap and int(snap[-1].name.split("-")[0]) >= _B_FAR_FUTURE, (
+        f"SNAPSHOT must carry a far-future timestamp; files={[p.name for p in snap]}"
+    )
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+
+    # B, on a NORMAL clock, appends a comment. REBAR_HLC=0 pins its timestamp to
+    # _B_NORMAL_TS (below the far-future snapshot) regardless of the far-future snapshot
+    # its write-side sync merges in — so its filename prefix sorts BEFORE A's SNAPSHOT.
+    # The write auto-pushes; its merge-as-union brings A's SNAPSHOT into B's clone.
+    _engine_run_env(
+        repo_b,
+        "comment",
+        seed,
+        "orphan-from-B",
+        env_extra={"REBAR_HLC": "0", "REBAR_HLC_NOW": _B_NORMAL_TS},
+    )
+    b_comment = _seed_dir_files(tracker_b, seed, "-COMMENT.json")[-1]
+    b_uuid = json.loads(b_comment.read_text())["uuid"]
+
+    def _comment_bodies(repo: Path) -> list[str]:
+        shown = json.loads(_engine_run(repo, "show", seed, "--output", "json").stdout)
+        return [c.get("body", "") for c in shown.get("comments", [])]
+
+    # RED surface: the orphan is dropped by the far-future snapshot's positional skip.
+    assert "orphan-from-B" not in _comment_bodies(repo_b), "expected the pre-repair positional drop"
+
+    # Remediation on B: rebuild the snapshot from the full log (folds the orphan back in).
+    repair = _engine_run(repo_b, "fsck", "--repair-snapshots", check=False).stdout
+    assert "rebuilt SNAPSHOT" in repair, repair
+    assert "orphan-from-B" in _comment_bodies(repo_b), "repair must recover the orphan on B"
+    # Publish B's rebuilt snapshot so A can reconverge onto it.
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b)
+
+    # A reconverges via real fetch/merge; a rebuild is applied if the merge left it stray.
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    if "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout:
+        _engine_run(repo_a, "fsck", "--repair-snapshots", check=False)
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+
+    # GREEN convergence oracle — concrete, not merely exit 0. Parse each clone's replayed
+    # state and assert byte-equality. ``updated_at`` is a DERIVED presentation field
+    # (recomputed on every replay from the latest event) — popped from both before the
+    # comparison so an equality mismatch reflects real state divergence, not the derived
+    # clock. Everything else must match exactly.
+    state_a = json.loads(_engine_run(repo_a, "show", seed, "--output", "json").stdout)
+    state_b = json.loads(_engine_run(repo_b, "show", seed, "--output", "json").stdout)
+    state_a.pop("updated_at", None)
+    state_b.pop("updated_at", None)
+    assert state_a == state_b, f"clones did not converge byte-equal: A={state_a} B={state_b}"
+
+    # B's SPECIFIC pre-push comment is present in BOTH clones — by its replayed body and by
+    # its captured event UUID's event file surviving on both trackers. The rebuild folds
+    # the comment into the new snapshot and RENAMES its source to ``*.retired`` (never
+    # deletes — no data loss), so the presence check spans the full committed listing
+    # (``.json`` + ``.retired``), not just live ``.json`` events.
+    def _committed_files(tracker: Path) -> str:
+        return _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker).stdout
+
+    assert "orphan-from-B" in _comment_bodies(repo_a)
+    assert "orphan-from-B" in _comment_bodies(repo_b)
+    assert b_uuid in _committed_files(tracker_a), f"B's comment {b_uuid} lost on A"
+    assert b_uuid in _committed_files(tracker_b), f"B's comment {b_uuid} lost on B"
