@@ -377,7 +377,6 @@ def _diff_fields(
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
     local_id: str = "",
-    baseline_consumer_swap: bool = False,
 ) -> dict[str, Any]:
     """Compare local ticket to Jira fields. Return only changed fields.
 
@@ -406,17 +405,30 @@ def _diff_fields(
     verbose = _rebar_env("RECONCILER_VERBOSE", "0") == "1"
     ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
 
-    # Convergence rollout Phase-3 (story a118): the arbitration ANCESTOR used by
-    # direction-suppression (Site A) and both-sides-conflict detection (Site B).
-    # Flag OFF (default): the prev_snapshot-derived ``prev_jira_fields`` — the swap
-    # is byte-for-byte a no-op. Flag ON: the per-binding baseline (get_baseline),
-    # which is JIRA-keyed with the same shape (_BASELINE_FIELDS). A ``None`` baseline
-    # (no ancestor recorded) is the documented local-wins signal (ADR 0026 §2); a
-    # corrupt bindings.json has already failed the pass CLOSED at load, so no new
-    # corrupt-detection branch is needed here.
+    # Convergence rollout retired (story d6bd): the arbitration ANCESTOR used by
+    # direction-suppression (Site A) and both-sides-conflict detection (Site B) is
+    # now ALWAYS the per-binding baseline (get_baseline), which is JIRA-keyed with
+    # the same shape (_BASELINE_FIELDS). A ``None`` baseline (no ancestor recorded)
+    # is the documented local-wins signal (ADR 0026 §2); a corrupt bindings.json has
+    # already failed the pass CLOSED at load, so no new corrupt-detection branch is
+    # needed here. Falls back to the prev_snapshot-derived ``prev_jira_fields`` only
+    # when there is no binding_store/local_id (fixture paths that pass neither).
     arbitration_prev = prev_jira_fields
-    if baseline_consumer_swap and binding_store is not None and local_id:
+    if binding_store is not None and local_id:
         arbitration_prev = binding_store.get_baseline(local_id)
+        # Cold-start observability (story d6bd): a CONFIRMED binding whose baseline
+        # is still None is inside the one-pass warm-up window — arbitration degrades
+        # to local-wins, so a concurrent Jira edit could be lost until the baseline
+        # populates. Emit one RECON: line per affected binding per pass (the differ
+        # calls _diff_fields once per binding) so the window is visible in GHA logs.
+        # This runs only on the differ's bound-update path (jira_key present), so the
+        # binding is bound; "confirmed" is therefore just "not still pending".
+        if arbitration_prev is None and not binding_store.is_pending(local_id):
+            print(  # noqa: T201 — operator-facing RECON: cold-start diagnostic on stderr
+                f"RECON: baseline_cold_start local_id={local_id}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     local_mapped = _map_local_to_jira_fields(
         ticket,

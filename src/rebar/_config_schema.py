@@ -386,13 +386,11 @@ class ReconcilerConfig:
     # decisions (terminal-transition / retire / adopt) exceed this fraction of the
     # binding population. 2026-07-03 census measured 1.14% acting — 8.8× headroom.
     max_acting_fraction: float = 0.10
-    # Convergence rollout (task 7d23): dual-write the per-binding baseline
-    # alongside prev_snapshot WITHOUT consuming it, for the shadow phase.
-    baseline_dual_write: bool = False
-    # Convergence rollout Phase-3 (story a118): CONSUME the per-binding baseline
-    # (get_baseline) as the arbitration ancestor in the outbound field differ,
-    # in place of prev_snapshot. Flipped ON only after >=10 clean shadow passes.
-    baseline_consumer_swap: bool = False
+    # Convergence rollout retired (story d6bd): the per-binding baseline is now
+    # ALWAYS dual-written AND ALWAYS consumed as the outbound field differ's
+    # arbitration ancestor (ADR 0026). The former rollout flags
+    # (baseline_dual_write / baseline_consumer_swap) ran clean in prod and were
+    # removed — the always-on behavior is hardcoded, no config surface remains.
 
 
 @dataclass
@@ -517,8 +515,6 @@ _SECTIONS: dict[str, dict] = {
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
         "max_acting_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
-        "baseline_dual_write": lambda v, k: _as_bool(v, k),
-        "baseline_consumer_swap": lambda v, k: _as_bool(v, k),
     },
     "jira": {
         "url": lambda v, k: _as_str(v, k),

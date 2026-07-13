@@ -68,19 +68,10 @@ url     = "https://navasage.atlassian.net"   # env JIRA_URL
 user    = "joeoakhart@navapbc.com"           # env JIRA_USER
 project = "REB"                              # env JIRA_PROJECT; the "Rebar" project
 
-[reconciler]
-# Convergence rollout Phase 1 (story a118): dual-write the per-binding baseline
-# alongside prev_snapshot in SHADOW — the differ does NOT consume it yet, so this
-# does not change any sync behavior. Each pass logs `RECON: baseline_shadow_check
-# divergent=N` (captured in the reconcile-bridge run logs); >=10 consecutive
-# divergent=0 passes gate the Phase-3 `baseline_consumer_swap` flip. See
-# docs/jira-sync-setup.md "Convergence rollout: the baseline consumer swap".
-baseline_dual_write = true
-# Convergence rollout Phase 3 (story a118): CONSUME the per-binding baseline as the
-# outbound field-differ's arbitration ancestor, replacing prev_snapshot. Flipped ON
-# after 30 consecutive clean (divergent=0) shadow passes proved the baseline
-# arbitrates identically (GHA reconcile-bridge runs 19:33Z-23:33Z 2026-07-09).
-baseline_consumer_swap = true
+# [reconciler]: the convergence-rollout flags baseline_dual_write /
+# baseline_consumer_swap were retired (story d6bd) — the per-binding baseline is
+# now ALWAYS dual-written and ALWAYS consumed as the outbound field differ's
+# arbitration ancestor (ADR 0026). No reconciler keys remain to configure here.
 
 [identity]
 

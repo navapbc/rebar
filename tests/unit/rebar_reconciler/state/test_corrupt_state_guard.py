@@ -272,6 +272,13 @@ class TestPrevSnapshotCorrupt:
         }
 
         class StubBindingStore:
+            def get_baseline(self, local_id):
+                # story d6bd: baseline arbitration is always-on; unset -> None (local-wins).
+                return None
+
+            def is_pending(self, local_id):
+                return False
+
             def get_jira_key(self, local_id: str):
                 return "DIG-TEST-1"
 
@@ -368,6 +375,13 @@ class TestHealthyStateRegression:
         new_body = "Brand new comment"
 
         class StubBindingStore:
+            def get_baseline(self, local_id):
+                # story d6bd: baseline arbitration is always-on; unset -> None (local-wins).
+                return None
+
+            def is_pending(self, local_id):
+                return False
+
             def get_jira_key(self, local_id: str):
                 if local_id == "healthy-local-1":
                     return jira_key
