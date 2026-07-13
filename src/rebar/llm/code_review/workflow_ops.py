@@ -593,10 +593,9 @@ def apply_region_gated_floor(
     MATCHES a prior surfaced finding (low novelty) but is not dropped is stamped
     ``carried_from = matched_prior_id`` and has its coaching stripped, while remaining surfaced.
 
-    REUSES ``decide.rising_floor_drop`` UNCHANGED and the c639 reader. Gated on
-    ``verify.novelty_drop_active`` (the shared evidence gate, ON by default since 2026-07-11;
-    explicit false is the back-out — same three keys
-    plan-review uses, no NEW config) and self-gates inert when there is no prior memory for ``key``.
+    REUSES ``decide.rising_floor_drop`` UNCHANGED and the c639 reader. The floor is always active
+    (operator-authorized 2026-07-11; the off switch was retired in story 4cdf) and self-gates inert
+    when there is no prior memory for ``key``.
     FAIL-SAFE: wrapped in try/except → any error leaves the verdict fully unfiltered (no drops)."""
     try:
         from rebar import config as _config
@@ -606,8 +605,6 @@ def apply_region_gated_floor(
         if not key:
             return
         vcfg = _config.load_config(repo_root).verify
-        if not vcfg.novelty_drop_active:  # shared evidence gate (default ON; false = back-out)
-            return
         advisory = verdict.get("advisory") or []
         if not advisory:
             return

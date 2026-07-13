@@ -187,17 +187,16 @@ def test_candidate_never_raises_on_any_precondition_error(monkeypatch, victim) -
     assert d["eligible"] is False
 
 
-# ── config keys (default-ON + the explicit-false back-out) ────────────────────────────────────
-def test_config_defaults_on_and_60_minutes() -> None:
+# ── config keys (the retained remediation_window_minutes tuning param) ────────────────────────
+def test_config_default_window_60_minutes() -> None:
     vc = core_config.VerifyConfig()
-    assert vc.remediation_mode is True
     assert vc.remediation_window_minutes == 60
 
 
-def test_default_config_enables_remediation_explicit_false_backs_out(monkeypatch) -> None:
-    """The 2026-07-11 default-ON flip: ``_remediation_decision`` proceeds to the eligibility
-    candidate under an unmodified ``VerifyConfig()``, and returns ``None`` (byte-identical full
-    review) under the explicit-false back-out."""
+def test_remediation_decision_always_proceeds(monkeypatch) -> None:
+    """Remediation mode is always on (the off switch was retired in story 4cdf):
+    ``_remediation_decision`` always proceeds to the eligibility candidate under an unmodified
+    ``VerifyConfig()``. The former explicit-false back-out scenario no longer exists."""
     import types
 
     from rebar.llm import plan_review
@@ -211,20 +210,9 @@ def test_default_config_enables_remediation_explicit_false_backs_out(monkeypatch
     )
     assert plan_review._remediation_decision("T", None) is sentinel
 
-    monkeypatch.setattr(
-        "rebar.config.load_config",
-        lambda repo_root=None: types.SimpleNamespace(
-            verify=core_config.VerifyConfig(remediation_mode=False)
-        ),
-    )
-    assert plan_review._remediation_decision("T", None) is None
-
 
 def test_config_coerces_keys() -> None:
-    sparse = core_config.coerce_sparse(
-        {"verify": {"remediation_mode": True, "remediation_window_minutes": 30}}
-    )
-    assert sparse["verify"]["remediation_mode"] is True
+    sparse = core_config.coerce_sparse({"verify": {"remediation_window_minutes": 30}})
     assert sparse["verify"]["remediation_window_minutes"] == 30
 
 

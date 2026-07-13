@@ -13,10 +13,9 @@ from rebar.llm.code_review import region_gate, workflow_ops
 cr_contracts.register_contracts()
 
 
-def _verify_cfg(active=True, t_novel=0.7, floor=0.4):
+def _verify_cfg(t_novel=0.7, floor=0.4):
     return SimpleNamespace(
         verify=SimpleNamespace(
-            novelty_drop_active=active,
             novelty_drop_threshold=t_novel,
             novelty_priority_floor=floor,
         )
@@ -75,7 +74,6 @@ def _apply(
     region,
     prior_findings=None,
     coaching=None,
-    cfg_active=True,
     verify_cfg=None,
 ):
     """Drive apply_region_gated_floor with a mocked reader/scorer/region/config; return verdict."""
@@ -92,9 +90,7 @@ def _apply(
     monkeypatch.setattr(
         "rebar.config.load_config",
         lambda repo_root=None: (
-            SimpleNamespace(verify=verify_cfg)
-            if verify_cfg is not None
-            else _verify_cfg(active=cfg_active)
+            SimpleNamespace(verify=verify_cfg) if verify_cfg is not None else _verify_cfg()
         ),
     )
     verdict = {"advisory": list(advisory), "coaching": coaching or [], "dropped": []}
@@ -104,10 +100,10 @@ def _apply(
     return verdict
 
 
-def test_default_verifyconfig_activates_floor_explicit_false_backs_out(monkeypatch):
-    """The 2026-07-11 default-ON flip: a genuinely unmodified ``VerifyConfig()`` proceeds past
-    the shared evidence gate (the floor drops an unchanged+novel+low-priority finding), while an
-    explicit ``novelty_drop_active=False`` restores the unfiltered verdict (the back-out)."""
+def test_default_verifyconfig_activates_floor(monkeypatch):
+    """A genuinely unmodified ``VerifyConfig()`` applies the floor (drops an
+    unchanged+novel+low-priority finding). The off switch (``novelty_drop_active=False``) was
+    retired in story 4cdf, so the floor is always active."""
     from rebar._config_schema import VerifyConfig
 
     advisory = [{"id": "f1", "finding": "nit", "priority": 0.2, "location": "a.py"}]
@@ -119,15 +115,6 @@ def test_default_verifyconfig_activates_floor_explicit_false_backs_out(monkeypat
         verify_cfg=VerifyConfig(),
     )
     assert v["advisory"] == [] and len(v["dropped"]) == 1  # default config: floor active
-
-    v = _apply(
-        monkeypatch,
-        advisory=advisory,
-        nmap={0: (0.9, "")},
-        region=region_gate.REGION_UNCHANGED,
-        verify_cfg=VerifyConfig(novelty_drop_active=False),
-    )
-    assert len(v["advisory"]) == 1 and v["dropped"] == []  # explicit false: back-out
 
 
 def test_floor_drops_unchanged_novel_low_priority(monkeypatch):
@@ -195,7 +182,7 @@ def test_reader_error_or_no_prior_yields_no_drops(monkeypatch):
     monkeypatch.setattr(
         "rebar.llm.code_review.sidecar.latest_code_review_result", lambda key, repo_root=None: None
     )
-    monkeypatch.setattr("rebar.config.load_config", lambda repo_root=None: _verify_cfg(active=True))
+    monkeypatch.setattr("rebar.config.load_config", lambda repo_root=None: _verify_cfg())
     verdict = {"advisory": [{"id": "f1", "priority": 0.2, "location": "a.py"}], "coaching": []}
     workflow_ops.apply_region_gated_floor(
         verdict, key="session:s", cfg=SimpleNamespace(repo_path=None), runner=object()
@@ -212,7 +199,7 @@ def test_forced_reader_exception_yields_no_drops(monkeypatch):
         raise RuntimeError("reader blew up")
 
     monkeypatch.setattr("rebar.llm.code_review.sidecar.latest_code_review_result", _boom)
-    monkeypatch.setattr("rebar.config.load_config", lambda repo_root=None: _verify_cfg(active=True))
+    monkeypatch.setattr("rebar.config.load_config", lambda repo_root=None: _verify_cfg())
     verdict = {"advisory": [{"id": "f1", "priority": 0.2, "location": "a.py"}], "coaching": []}
     workflow_ops.apply_region_gated_floor(
         verdict, key="session:s", cfg=SimpleNamespace(repo_path=None), runner=object()
@@ -220,15 +207,9 @@ def test_forced_reader_exception_yields_no_drops(monkeypatch):
     assert len(verdict["advisory"]) == 1 and not verdict.get("dropped")
 
 
-def test_floor_inert_when_evidence_gate_off(monkeypatch):
-    v = _apply(
-        monkeypatch,
-        advisory=[{"id": "f1", "priority": 0.2, "location": "a.py"}],
-        nmap={0: (0.9, "")},
-        region=region_gate.REGION_UNCHANGED,
-        cfg_active=False,  # verify.novelty_drop_active off → no drops
-    )
-    assert len(v["advisory"]) == 1 and not v.get("dropped")
+# The evidence-gate off-switch (verify.novelty_drop_active=False → no drops) was retired in story
+# 4cdf; the floor is now always active, so its disabled scenario no longer exists and its test was
+# removed.
 
 
 # ── the novelty scorer captures matched_prior_id (for carried_from) ───────────────────────────
