@@ -363,8 +363,9 @@ sub-call (`plan_review_completion`); the drop is deterministic in Pass-3 (no LLM
 is recorded on `coverage` (`completion_floored_criteria` / `completion_floored_finding_ids`) and in
 the `REVIEW_RESULT` sidecar with `drop_reason: "completion"` (vs `"novelty"` / `null`) — the offline
 join key. This is the third of three deterministic Pass-3 floors — **novelty** (plan-edit
-convergence, above), **material freshness** (drift-refresh, ADR 0002), and **delivered-completion**
-(this) — each along an independent axis and inert by default.
+convergence, above), **material freshness** (drift-refresh, ADR 0002 — default ON since 2026-07-12),
+and **delivered-completion** (this) — each along an independent axis, firing only when its own
+staleness/completion condition is met.
 
 ## Configuration
 

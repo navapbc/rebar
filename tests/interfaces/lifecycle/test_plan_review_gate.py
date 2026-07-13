@@ -904,15 +904,31 @@ def test_drift_refresh_skips_when_no_prior_verdict(rebar_repo: Path) -> None:
     assert v["verdict"] == "PASS" and v["signature"]["signed"]
 
 
-def test_progressive_drift_refresh_is_opt_in(rebar_repo: Path) -> None:
-    # With the flag OFF (default), code drift falls back to a FULL re-review — the
-    # progressive path is never taken ("measure before enabling by default").
+def test_progressive_drift_refresh_default_on_takes_probe(rebar_repo: Path) -> None:
+    # a37b: DEFAULT config (no explicit progressive setting) now enables drift-refresh —
+    # a drift-only-stale re-review takes the scoped probe path instead of a full re-review.
     _commit(rebar_repo)
-    _enable(rebar_repo, progressive=False)
+    _enable(rebar_repo, progressive=False)  # omits the flag → exercises the code DEFAULT (now on)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
     v = _review(tid, rebar_repo)
-    assert "drift_refresh" not in v["coverage"]  # opt-in: not enabled by default
+    assert "drift_refresh" in v["coverage"]  # default-on: the scoped probe path is taken
+    # AC2: the probe not only fires but REFRESHES the attestation (no full re-review) under default
+    assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
+
+
+def test_progressive_drift_refresh_explicit_false_backs_out(rebar_repo: Path) -> None:
+    # a37b back-out: an EXPLICIT `progressive_drift_refresh = false` restores the full
+    # re-review path (drift-refresh not taken), proving the default flip is overridable.
+    _commit(rebar_repo)
+    _enable(rebar_repo, progressive=False)  # base gate config (omits the flag)
+    (rebar_repo / "rebar.toml").write_text(
+        (rebar_repo / "rebar.toml").read_text() + "progressive_drift_refresh = false\n"
+    )
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    v = _review(tid, rebar_repo)
+    assert "drift_refresh" not in v["coverage"]  # explicit false → full re-review
 
 
 # ── config: dotted enables, default off ─────────────────────────────────────────
@@ -1312,3 +1328,22 @@ def test_genuinely_absent_symbol_still_blocks_control(rebar_repo: Path) -> None:
         "expected the absence finding to BLOCK for a truly-absent symbol; "
         f"blocking={verdict['blocking']}"
     )
+
+
+# ── a37b: progressive drift-refresh is now DEFAULT-ON (operator-authorized) ──────
+def test_progressive_drift_refresh_defaults_on(tmp_path: Path) -> None:
+    """a37b: VerifyConfig.progressive_drift_refresh defaults True — a genuinely unmodified
+    config takes the scoped drift-refresh probe path; an explicit false restores the full
+    re-review (the back-out)."""
+    from rebar import config
+
+    config.reset_config_cache()
+    d = tmp_path / "default"
+    d.mkdir()
+    assert config.load_config(str(d)).verify.progressive_drift_refresh is True
+
+    config.reset_config_cache()
+    off = tmp_path / "off"
+    off.mkdir()
+    (off / "rebar.toml").write_text("[verify]\nprogressive_drift_refresh = false\n")
+    assert config.load_config(str(off)).verify.progressive_drift_refresh is False
