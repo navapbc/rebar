@@ -31,7 +31,7 @@ jobs:
     name: external integration (live services)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -68,7 +68,7 @@ jobs:
 
       - name: Cache acli binary
         id: cache-acli
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.acli
           key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
@@ -139,7 +139,7 @@ jobs:
     name: langfuse tracing round-trip (ephemeral self-hosted)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
