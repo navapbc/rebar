@@ -84,9 +84,15 @@ class RecordingClient:
     def get_change(self, change_id, opts=None):
         self.calls.append(("get_change", change_id, {"opts": opts}))
         seq = self.change_seq.get(change_id)
-        if seq:
-            return seq.pop(0) if len(seq) > 1 else seq[0]
-        return self.changes[change_id]
+        base = (
+            seq.pop(0) if (seq and len(seq) > 1) else (seq[0] if seq else self.changes[change_id])
+        )
+        # Mirror Gerrit: `submittable` is only returned when the SUBMITTABLE option is asked
+        # for. A caller that forgets o=SUBMITTABLE gets no `submittable` key (-> reads as
+        # None), which is exactly the bug the live E2E surfaced.
+        if "SUBMITTABLE" not in (opts or []):
+            base = {k: v for k, v in base.items() if k != "submittable"}
+        return base
 
     def set_review(self, change_id, *, message=None, labels=None):
         self.calls.append(("set_review", change_id, {"message": message, "labels": labels}))
