@@ -929,22 +929,40 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
     return results
 
 
+def det_finding_has_subject(finding: dict) -> bool:
+    """a8e5 Component 2 — a DET finding is ADJUDICABLE only if it names a concrete subject: a
+    non-blank ``location`` OR at least one ``evidence`` span. A subject-less DET finding (no
+    location, no evidence) is unadjudicable ("Sibling tickets touch the same file(s)" naming no
+    tickets/files) and is dropped by the hygiene backstop at the DET emission point. All existing
+    DET checks emit evidence, so this drops nothing in practice — it is a safety net."""
+    return bool((finding.get("location") or "").strip()) or bool(finding.get("evidence"))
+
+
 def det_blocking_findings(results: list[DetResult]) -> list[dict]:
     """The blocking findings from a DET run (P1/P5-cycle/P8), each tagged with its
-    criterion id — the orchestrator surfaces these as the gate's hard blocks."""
+    criterion id — the orchestrator surfaces these as the gate's hard blocks. Subject-less
+    DET findings are dropped by the hygiene backstop (:func:`det_finding_has_subject`)."""
     out = []
     for r in results:
         if r.blocked and r.finding:
+            if not det_finding_has_subject(r.finding):
+                logger.warning("dropping subject-less blocking DET finding from %s", r.name)
+                continue
             out.append({**r.finding, "criteria": [r.id], "criterion_name": r.name, "tier": "DET"})
     return out
 
 
 def det_advisory_findings(results: list[DetResult]) -> list[dict]:
-    """The non-blocking DET findings (P4/P6/P7 + P5 interference), surfaced as
-    advisory coaching alongside the LLM-tier advisory set."""
+    """The non-blocking DET findings (P4/P6/P7 + P5 interference), surfaced as advisory
+    coaching alongside the LLM-tier advisory set. Subject-less DET findings are dropped by the
+    hygiene backstop (:func:`det_finding_has_subject`) — this is DET-scoped by construction
+    (LLM-tier findings never flow through this function)."""
     out = []
     for r in results:
         if r.status == "fail" and not r.blocking and r.finding:
+            if not det_finding_has_subject(r.finding):
+                logger.warning("dropping subject-less advisory DET finding from %s", r.name)
+                continue
             out.append({**r.finding, "criteria": [r.id], "criterion_name": r.name, "tier": "DET"})
     return out
 

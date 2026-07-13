@@ -86,6 +86,17 @@ def test_decision_labels_by_construction() -> None:
     assert review_kernel.pass3_decide(vetoed)["decision"] == "dropped"
 
 
+def test_absence_claim_veto_drops_refuted_absence() -> None:
+    """a8e5 Component 1: the absence-claim veto mirrors the cited-reference veto. A finding
+    whose premise asserts something is ABSENT (``claims_absence == "yes"``) that the verifier
+    then REFUTED by finding a provision in the plan (``absence_confirmed_in_context == "no"``)
+    is DROPPED with reason ``veto:absence-refuted`` — even at full validity + impact."""
+    refuted = _verif(binary={"claims_absence": "yes", "absence_confirmed_in_context": "no"})
+    d = review_kernel.pass3_decide(refuted, blocking_enabled=True)
+    assert d["decision"] == "dropped"
+    assert d["reason"] == "veto:absence-refuted"
+
+
 # ── the threshold is a PARAMETER: two consumers, one kernel, independent partitions ──
 def test_parameterized_threshold_two_consumers_one_kernel() -> None:
     """A mid-priority finding (validity 1.0 × impact 0.5 = 0.5): a STRICT gate
@@ -184,12 +195,22 @@ def test_verification_contract_shares_the_binary_vocabulary() -> None:
     # plan-review dispatches the EXTENDED model, not the kernel alias
     assert passes._pass2_model is kverify.plan_review_verification_model
 
-    expected_binary = {*review_kernel.GRADED_BINARY, "cited_reference_accurate"}
+    # The Binary vocabulary is the GRADED set + the THREE conditional veto binaries
+    # (cited_reference_accurate + the a8e5 absence-claim pair). None of the vetoes are in
+    # GRADED_BINARY (they gate/drop, they do not grade validity).
+    expected_binary = {
+        *review_kernel.GRADED_BINARY,
+        "cited_reference_accurate",
+        "claims_absence",
+        "absence_confirmed_in_context",
+    }
     base = kverify.verification_model()
     plan = kverify.plan_review_verification_model()
-    # identical Binary vocabulary on both models
+    code = kverify.code_review_verification_model()
+    # identical Binary vocabulary on ALL THREE models (shared builder — no drift across gates)
     assert _binary_fields(base) == expected_binary
     assert _binary_fields(plan) == expected_binary
+    assert _binary_fields(code) == expected_binary
     # the plan model is a strict SUPERSET on severity_attributes: the base five + 7 axes + detection
     base_sev = _severity_fields(base)
     plan_sev = _severity_fields(plan)
