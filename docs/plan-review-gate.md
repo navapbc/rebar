@@ -156,6 +156,7 @@ and fills a bounded noun-phrase `{subject}`). The built-in registry
 | 7 | thin vertical slice | "Prove {subject} end-to-end with a thin vertical slice first." |
 | 8 | ADR / one-way-door | "Record an ADR for {subject} — it reads like a one-way door." |
 | 9 | plan the verification | "Plan how {subject} will be verified in-session — restate any deferred or unobservable success target as an observable proxy." |
+| 14 | state attestation evidence | "State the concrete attestation evidence the [operator-attested] {subject} will require (a change id / vote outcome / timestamp), recorded on the ticket." |
 | 10 | foundation/enhancement split | "Deliver {subject} with existing machinery first; make the ideal version a dependent follow-on ticket." |
 | 11 | propagate to children | "Propagate the revision for {subject} to the child tickets." |
 | 12 | generalize the finding | "Generalize {subject} across the rest of the work." |

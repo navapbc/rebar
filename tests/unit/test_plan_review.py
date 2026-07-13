@@ -297,6 +297,84 @@ def test_pass3_indeterminate_without_verification() -> None:
     assert passes.pass3_decide(None)["decision"] == "indeterminate"
 
 
+def test_pass3_absence_claim_veto() -> None:
+    """a8e5 Component 1 (plan-review re-export): the absence-claim veto drops a finding whose
+    absence premise the verifier refuted (a provision WAS found in the plan)."""
+    v = _verif(binary={"claims_absence": "yes", "absence_confirmed_in_context": "no"})
+    d = passes.pass3_decide(v)
+    assert d["decision"] == "dropped" and d["reason"] == "veto:absence-refuted"
+
+
+# ── a8e5 Component 2: DET-tier hygiene backstop (subject-less DET findings drop) ──────────────
+def test_det_hygiene_drops_subjectless_det_finding() -> None:
+    """A DET finding that names NO subject — no ``location`` and no ``evidence`` spans — is
+    unadjudicable and is dropped at the DET emission/aggregation point (both lanes). This
+    NEVER touches LLM-tier findings (they don't flow through det_*_findings)."""
+    from rebar.llm.plan_review.det_floor import (
+        DetResult,
+        det_advisory_findings,
+        det_blocking_findings,
+        det_finding_has_subject,
+    )
+
+    assert det_finding_has_subject({"finding": "x", "evidence": ["a concrete span"]}) is True
+    assert det_finding_has_subject({"finding": "x", "location": "src/foo.py:10"}) is True
+    assert det_finding_has_subject({"finding": "x", "evidence": []}) is False
+
+    subjectless_adv = DetResult(
+        "P4", "p4_oversize", "fail", blocking=False, finding={"finding": "off", "evidence": []}
+    )
+    assert det_advisory_findings([subjectless_adv]) == []
+    subjectless_block = DetResult(
+        "P1", "p1_readiness_shape", "fail", blocking=True, finding={"finding": "no", "evidence": []}
+    )
+    assert det_blocking_findings([subjectless_block]) == []
+
+
+# ── a8e5 Component 3: operator-attested AC awareness ──────────────────────────────────────────
+def test_operator_attested_ac_texts_parses_tagged_criteria() -> None:
+    """The pure DET parser extracts ONLY criteria tagged with the exact `[operator-attested]`
+    token (case-insensitive), returning their criterion text (tag stripped)."""
+    from rebar.llm.plan_review.workflow_ops import operator_attested_ac_texts
+
+    desc = (
+        "## Acceptance Criteria\n"
+        "- [ ] a normal codebase-verifiable criterion\n"
+        "- [ ] [operator-attested] the fix is deployed to prod and the two-vote gate passes\n"
+    )
+    texts = operator_attested_ac_texts(desc)
+    assert len(texts) == 1
+    assert "deployed to prod" in texts[0].lower()
+
+
+def test_enrich_operator_attested_clears_ac_unverifiable_upstream() -> None:
+    """A finding flagging an operator-attested AC as in-session-unverifiable gets
+    ``operator_attested=True`` injected and its ``ac_unverifiable`` axis CLEARED to "none"
+    BEFORE impact_plan reads it — so the hard-override 0.85 floor no longer fires. The kernel
+    impact_plan math is unchanged; the fact is injected upstream."""
+    from rebar.llm import review_kernel
+    from rebar.llm.plan_review.workflow_ops import enrich_operator_attested
+
+    desc = (
+        "## Acceptance Criteria\n"
+        "- [ ] [operator-attested] the fix is deployed to prod and the two-vote gate passes\n"
+    )
+    findings = [
+        {
+            "finding": "the AC cannot be objectively verified as written",
+            "location": "## Acceptance Criteria",
+            "evidence": ["the fix is deployed to prod and the two-vote gate passes"],
+        }
+    ]
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    assert review_kernel.impact_plan(verifs[0]["severity_attributes"]) >= 0.85
+    enrich_operator_attested(findings, verifs, desc)
+    attrs = verifs[0]["severity_attributes"]
+    assert attrs.get("operator_attested") is True
+    assert attrs.get("ac_unverifiable") == "none"
+    assert review_kernel.impact_plan(attrs) < 0.85
+
+
 # ── registry + routing ────────────────────────────────────────────────────────
 def test_registry_coverage_guard_passes() -> None:
     ok, missing = registry.check_registry_coverage()
