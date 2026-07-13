@@ -228,3 +228,60 @@ def test_three_plan_review_specs_pass_strict() -> None:
     for name in ("plan-review-finder", "plan-review-verifier", "plan-review-isf-finder"):
         spec = yaml.safe_load(open(f"src/rebar/llm/eval_specs/{name}.eval.yaml").read())
         assert ev.validate_eval_spec(spec, strict=True) == [], name
+
+
+# ── 74d9: completion-verifier enumerates ALL unmet criteria (happy path) ────────
+# The scorer `enumerates_all_unmet_criteria` proves a FAIL verdict emits a distinct
+# finding for EVERY criterion the case annotates as unmet (anti-ratchet). Happy path:
+# it reads `expected_unmet_criteria` (list of substrings) off the case and requires a
+# bijective match against the findings' `criterion` fields.
+
+_TWO_UNMET_CASE = {"expect": "fail", "expected_unmet_criteria": ["AC1", "AC2"]}
+_TWO = _TWO_UNMET_CASE
+
+
+def test_enumerates_all_unmet_criteria_both_present() -> None:
+    out = {"findings": [{"criterion": "AC1 unmet"}, {"criterion": "AC2 unmet"}]}
+    r = sc.score("enumerates_all_unmet_criteria", _TWO_UNMET_CASE, out)
+    assert r.applicable is True and r.passed is True
+
+
+def test_enumerates_all_unmet_criteria_one_missing_fails() -> None:
+    out = {"findings": [{"criterion": "AC1 unmet"}]}
+    r = sc.score("enumerates_all_unmet_criteria", _TWO_UNMET_CASE, out)
+    assert r.applicable is True and r.passed is False
+
+
+def test_abstains_when_no_expected_criteria() -> None:
+    # No annotation → not applicable (the scorer only judges annotated cases).
+    r = sc.score("enumerates_all_unmet_criteria", {"expect": "fail"}, {"findings": []})
+    assert r.applicable is False
+
+
+def test_abstains_on_empty_expected_list() -> None:
+    r = sc.score(
+        "enumerates_all_unmet_criteria",
+        {"expect": "fail", "expected_unmet_criteria": []},
+        {"findings": [{"criterion": "AC1"}]},
+    )
+    assert r.applicable is False
+
+
+def test_bijective_one_finding_cannot_cover_two_criteria() -> None:
+    # A single finding mentioning BOTH substrings must NOT satisfy two distinct criteria
+    # (anti-ratchet requires one finding PER unmet criterion).
+    out = {"findings": [{"criterion": "AC1 and AC2 both unmet"}]}
+    r = sc.score("enumerates_all_unmet_criteria", _TWO, out)
+    assert r.applicable is True and r.passed is False
+
+
+def test_case_insensitive_substring_match() -> None:
+    out = {"findings": [{"criterion": "ac1 gap"}, {"criterion": "the AC2 item"}]}
+    r = sc.score("enumerates_all_unmet_criteria", _TWO, out)
+    assert r.applicable is True and r.passed is True
+
+
+def test_extra_findings_do_not_break_a_full_cover() -> None:
+    out = {"findings": [{"criterion": "AC1"}, {"criterion": "AC2"}, {"criterion": "AC9 noise"}]}
+    r = sc.score("enumerates_all_unmet_criteria", _TWO, out)
+    assert r.applicable is True and r.passed is True
