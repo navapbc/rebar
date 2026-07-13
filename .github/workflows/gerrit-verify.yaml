@@ -347,14 +347,29 @@ jobs:
           exit 1
 
       - name: Run the default suite (Python tiers; excludes integration + external)
+        # Parallelized with pytest-xdist (story 8d36). `-n` is PINNED to the runner's
+        # real vCPU count (ubuntu-latest = 4, macos arm = 3) rather than `-n auto`:
+        # `auto` over-subscribes on larger local hosts and coverage combines correctly
+        # only because `parallel = true` is set in [tool.coverage.run] (pyproject.toml).
+        # `--dist worksteal` load-balances by stealing from idle workers (fastest for
+        # this isolation-safe suite). Coverage combine requires `parallel = true`.
         run: >-
-          pytest -m "not integration and not external" -q -p no:cacheprovider
+          pytest -m "not integration and not external"
+          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
+          -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
+        # Also parallelized (story 8d36). `--dist loadgroup` (not worksteal) so tests
+        # sharing an `@pytest.mark.xdist_group` land on ONE worker: the live-Jira
+        # reconciler E2E (tests/integration/test_reconcile_live_e2e.py) is xdist_group-
+        # confined so its eventual-consistency assertions stay serial. Those tests
+        # self-skip in CI (no live creds); the grouping guards a local live run.
         run: >-
-          pytest -m integration -q -p no:cacheprovider
+          pytest -m integration
+          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
+          -q -p no:cacheprovider
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
 
   optionality:
