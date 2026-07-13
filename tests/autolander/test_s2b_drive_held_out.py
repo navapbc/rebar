@@ -145,3 +145,62 @@ def test_hand_back_removes_label_and_comments_every_member():
         "Autosubmit removed from EVERY member (never partial)"
     )
     assert calls == [HANDBACK_NEEDS_REBASE]
+
+
+# --- FIX 15a1: the FFO submit-reject predicate + routing ---------------------
+def test_is_fast_forward_reject_matches_both_wordings():
+    from autolander.gerrit import GerritError
+    from autolander.loop import _is_fast_forward_reject
+
+    gerrit_submit = GerritError(
+        409,
+        "Failed to submit 2 changes ... Project policy requires all submissions to be a "
+        "fast-forward. Please rebase the change locally and upload again for review.",
+    )
+    git_push = GerritError(409, "change is not fast-forward; rebase and try again")
+    unrelated = GerritError(409, "conflict: merge failed")
+
+    assert _is_fast_forward_reject(gerrit_submit) is True, "Gerrit FFO submit refusal"
+    assert _is_fast_forward_reject(git_push) is True, "git push wording"
+    assert _is_fast_forward_reject(unrelated) is False, "unrelated 409 must not match"
+
+
+# The REAL Gerrit FFO SUBMIT refusal — deliberately WITHOUT the substring "not fast-forward"
+# (that is git's PUSH wording). Bug 15a1: the old guard only matched "not fast-forward", so
+# this real message was re-raised, looped as AUTOLANDER_ERROR, and re-selected forever.
+_GERRIT_FFO_SUBMIT_MSG = (
+    "Failed to submit 2 changes ... Project policy requires all submissions to be a "
+    "fast-forward. Please rebase the change locally and upload again for review."
+)
+_GIT_PUSH_MSG = "change is not fast-forward; rebase and try again"
+
+
+@pytest.mark.parametrize("message", [_GERRIT_FFO_SUBMIT_MSG, _GIT_PUSH_MSG])
+def test_drive_candidate_routes_ffo_submit_reject_to_rebase(tmp_path, capsys, message):
+    from autolander.failure import MarkerStore
+    from autolander.gerrit import GerritError
+    from autolander.loop import Candidate, WipChain, _drive_candidate
+
+    # A single on-tip, fresh-Verified change; the FIRST submit refuses with the FFO message,
+    # forcing the TOCTOU rebase path; the re-driven submit then lands it (RecordingClient raises
+    # submit_error ONCE, then succeeds).
+    new = change_info("Iff", 705, autosubmit_date="t", submittable=True, verified=True)
+    merged = change_info(
+        "Iff", 705, autosubmit_date="t", submittable=True, verified=True, status="MERGED"
+    )
+    client = RecordingClient(
+        change_seq={"Iff": [new, merged]}, submit_error=GerritError(409, message)
+    )
+    wip = WipChain(change_id="Iff", chain_member_ids=["Iff"])
+    cand = Candidate(
+        change_id="Iff", number=705, autosubmit_date="t", kind="single", member_ids=["Iff"]
+    )
+
+    _drive_candidate(client, wip, cand, MarkerStore(tmp_path), tmp_path)
+
+    # routed to a rebase (the FFO refusal is NOT re-raised as a hard error)...
+    assert ("rebase", "Iff", {"on_behalf_of_uploader": True}) in client.mutating_calls()
+    # ...the submit was retried after the rebase (2 attempts: the refusal + the landing)...
+    assert len([c for c in client.calls if c[0] == "submit"]) == 2
+    # ...and nothing was emitted as a high-visibility error.
+    assert "AUTOLANDER_ERROR" not in capsys.readouterr().err
