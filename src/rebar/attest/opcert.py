@@ -18,8 +18,13 @@ Distinct from authorship in two ways the design turns on:
 * **Subject binds {ticket id, material fingerprint, merged-log commit}** in an in-toto v1 Statement,
   so a cert cannot be replayed onto a different ticket or a mutated material fingerprint.
 
-API STUB — signatures + docstrings are pinned here for the RED oracle; the bodies are filled by
-the implementer (story 368c). The stub is deliberately non-functional (verify never certifies).
+**Rollout (keystone e4df).** Op-cert ``SIGNATURE`` events (produced by
+``signing.sign_opcert_manifest``, stored per the e4df keystone and read here by
+``opcert_from_record``) carry a DSSE ``envelope`` and NO HMAC ``signature``. A pre-upgrade clone
+preserves such an event append-only but reads it as **UNSIGNED** — it has no asymmetric verifier —
+so op-cert verification requires the upgraded binary: **upgrade verify/reconcile hosts first** (as
+with the SSHSIG-authorship rollout and ``TAG_DELTA``). The record-schema extension itself is
+additive (legacy HMAC records are byte-unchanged and still HMAC-verify).
 """
 
 from __future__ import annotations
@@ -264,4 +269,29 @@ def verify_opcert(
             f"signing key of {principal!r} is real but not valid at "
             f"commit {merged_log_commit!r} (not yet added, or already revoked)"
         ),
+    )
+
+
+def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
+    """Reconstruct an op-cert from a stored ``attestations[kind]`` record (keystone e4df).
+
+    Returns ``(envelope, {"material_fingerprint": …, "merged_log_commit": …})`` when the record
+    carries an op-cert (an encoded DSSE ``envelope`` field), or ``None`` for a legacy HMAC record
+    (no envelope). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
+
+    Never raises on a malformed envelope — a decode failure yields ``None`` (fail-closed).
+    """
+    encoded = record.get("envelope")
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        envelope = dsse.decode(encoded)
+    except Exception:  # noqa: BLE001 — malformed envelope → None, never raise (fail-closed)
+        return None
+    return (
+        envelope,
+        {
+            "material_fingerprint": record.get("material_fingerprint"),
+            "merged_log_commit": record.get("merged_log_commit"),
+        },
     )
