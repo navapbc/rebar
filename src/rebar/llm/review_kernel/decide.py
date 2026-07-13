@@ -325,6 +325,20 @@ def pass3_decide(
             "priority": priority,
             "severity": sev,
         }
+    # a8e5 Component 1: absence-claim veto — the finding is premised on an absence
+    # ("claims_absence" == "yes") that the verifier REFUTED by finding a covering provision in
+    # the plan ("absence_confirmed_in_context" == "no"). Mirrors the cited-reference veto: a
+    # conditional drop that fires only on a DEFINITE refutation ("insufficient"/"yes" never veto),
+    # so an older/absent verifier (both default "na") is byte-unchanged.
+    if binary.get("claims_absence") == "yes" and binary.get("absence_confirmed_in_context") == "no":
+        return {
+            "decision": "dropped",
+            "reason": "veto:absence-refuted",
+            "validity": val,
+            "impact": imp,
+            "priority": priority,
+            "severity": sev,
+        }
     if val < 0.5:
         decision, reason = "dropped", "low-validity"
     elif blocking_enabled and priority >= block_threshold:
