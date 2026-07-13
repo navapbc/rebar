@@ -17,16 +17,18 @@ stdlib-only.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from autolander.gerrit import GerritClient, GerritError
-from autolander.loop import WipChain, hand_back  # noqa: F401 (hand_back reused conceptually)
+from autolander.loop import MARKER_HANDBACK, WipChain, emit_marker, hand_back  # noqa: F401
 
 RECHECK_COMMENT = "recheck"  # ChatOps trigger (gerrit_to_platform: recheck = verify)
 OUTCOME_CI_FAILED = "ci_failed"
 OUTCOME_NEEDS_REBASE = "needs_rebase"
 OUTCOME_VERIFIED = "verified"
+TRANSITION_LOG = "transitions.log"  # rolling per-transition debug log (append-only JSONL)
 
 
 @dataclass
@@ -104,6 +106,15 @@ class MarkerStore:
                 markers.append(marker)
         return markers
 
+    def log_transition(self, event: str, **fields) -> None:
+        """Append ONE rolling per-transition debug line (JSONL) to `transitions.log`. The
+        authoritative outcome record is single-slot (self-invalidating, above); this rolling
+        log is a debugging trail of every transition even though the record is overwritten."""
+        at = fields.pop("at", None) or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        line = json.dumps({"event": event, "at": at, **fields}, sort_keys=True)
+        with (self._root / TRANSITION_LOG).open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
 
 def stack_owner_account(client: GerritClient, wip: WipChain) -> int | None:
     """The stack's owning agent = `owner._account_id` on the tip change."""
@@ -144,10 +155,16 @@ def auto_recheck(
     return OUTCOME_CI_FAILED
 
 
-def handle_ci_fail(client: GerritClient, wip: WipChain) -> str:
+def handle_ci_fail(client: GerritClient, wip: WipChain, store: MarkerStore | None = None) -> str:
     """After the auto-recheck still shows `Verified -1`: remove `Autosubmit` from ALL stack
     members and stop driving. Posts NO bot comment (the native `-1` + run logs are the
-    signal). `ci_failed` is derived live (not persisted). Returns `OUTCOME_CI_FAILED`."""
+    signal). `ci_failed` is derived live (not persisted). Emits an `AUTOLANDER_HANDBACK`
+    marker + a rolling per-transition log line. Returns `OUTCOME_CI_FAILED`."""
+    emit_marker(MARKER_HANDBACK, {"change": wip.change_id, "reason": OUTCOME_CI_FAILED})
+    if store is not None:
+        store.log_transition(
+            OUTCOME_CI_FAILED, change=wip.change_id, members=list(wip.chain_member_ids)
+        )
     remove_autosubmit_from_stack(client, wip)
     return OUTCOME_CI_FAILED
 
@@ -178,6 +195,11 @@ def handle_rebase_conflict(
         acknowledged=False,
     )
     store.upsert(marker)  # record BEFORE removal (idempotent ordering)
+    store.log_transition(OUTCOME_NEEDS_REBASE, change=wip.change_id, stack_id=stack_id, at=now)
+    emit_marker(
+        MARKER_HANDBACK,
+        {"change": wip.change_id, "stack_id": stack_id, "reason": OUTCOME_NEEDS_REBASE},
+    )
     remove_autosubmit_from_stack(client, wip)
     store.acknowledge(wip.change_id)
     return OUTCOME_NEEDS_REBASE

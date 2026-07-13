@@ -126,3 +126,20 @@ def test_stack_owner_account_reads_tip_owner():
     wip = WipChain(change_id="Itip", chain_member_ids=["Ibot", "Itip"])
 
     assert stack_owner_account(client, wip) == 4242
+
+
+def test_rolling_transition_log_and_handback_marker(tmp_path, capsys):
+    """A rolling per-transition log line is appended (debug trail) AND an AUTOLANDER_HANDBACK
+    marker is emitted, even though the authoritative needs_rebase record is single-slot."""
+    from autolander.failure import TRANSITION_LOG, MarkerStore, handle_rebase_conflict
+    from autolander.loop import MARKER_HANDBACK, WipChain
+
+    client = RecordingClient(changes={"Itip": change_info("Itip", 550, revision="sT")})
+    wip = WipChain(change_id="Itip", chain_member_ids=["Itip"])
+    store = MarkerStore(tmp_path)
+
+    handle_rebase_conflict(client, wip, store, stack_id="topic-y", now="2026-07-13")
+
+    log = (tmp_path / TRANSITION_LOG).read_text()
+    assert "needs_rebase" in log and "Itip" in log, "a rolling per-transition line is appended"
+    assert MARKER_HANDBACK in capsys.readouterr().out, "hand-back emits the observability marker"
