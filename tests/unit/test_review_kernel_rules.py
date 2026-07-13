@@ -71,11 +71,15 @@ def test_independence_instructions_never_leak_the_findings_conclusion() -> None:
 
 def test_atomicity_each_binary_subquestion_is_an_independent_field() -> None:
     fields = _binary_fields()
-    # each graded sub-question is its own field, plus the conditional veto
-    # (cited_reference_accurate) — count stays len(GRADED_BINARY) + 1 as the tuple grows.
+    # each graded sub-question is its own field, plus the THREE conditional veto binaries
+    # (cited_reference_accurate + the a8e5 absence-claim pair) — count stays
+    # len(GRADED_BINARY) + 3 as the graded tuple grows; the vetoes are NOT graded.
     assert review_kernel.GRADED_BINARY and set(review_kernel.GRADED_BINARY) <= fields
     assert "cited_reference_accurate" in fields
-    assert len(fields) == len(review_kernel.GRADED_BINARY) + 1
+    _absence = {"claims_absence", "absence_confirmed_in_context"}
+    assert _absence <= fields
+    assert _absence.isdisjoint(review_kernel.GRADED_BINARY)
+    assert len(fields) == len(review_kernel.GRADED_BINARY) + 3
 
 
 def test_verifier_new_subanswers_are_in_the_verification_contract() -> None:
