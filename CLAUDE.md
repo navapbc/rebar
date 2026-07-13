@@ -128,7 +128,11 @@ the next passing review re-signs the current plan.
 **Completion-verifier protocol (to close).** Closing a work ticket runs the
 completion verifier. If it **fails**, you must **remediate the failure and try to
 close the ticket again** — repeat until it passes (the signed verdict is the proof
-the criteria are met).
+the criteria are met). The verifier reads the committed `HEAD` of **whichever
+checkout you run the close from** (resolved offline — not `origin/main`), so run
+`transition … closed` from the **worktree/branch that contains the code you want
+verified**; closing from the main checkout while your edits live in a worktree makes
+the verifier read the wrong (unchanged) tree.
 
 ## MCP tool set
 
@@ -501,7 +505,10 @@ the short version for agents:
 > edit, branch from current `origin/main` in a dedicated worktree
 > (`git fetch origin && git worktree add ../<name> -b <branch> origin/main`) and set up its
 > local venv (see [`docs/local-dev-env.md`](docs/local-dev-env.md)). Editing in the main
-> checkout risks building on stale code and a painful rebase at submit time.
+> checkout risks building on stale code and a painful rebase at submit time. **`cd` into the
+> worktree and run every subsequent command — edits, gates, `rebar`, the ticket close, and
+> `git` — from inside it**, so they all act on the worktree's branch and never on the main
+> checkout.
 
 > **Remotes in this checkout (split residency).** This working checkout has **two** remotes
 > with distinct roles — don't conflate them:
