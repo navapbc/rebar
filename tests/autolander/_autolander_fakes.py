@@ -65,9 +65,11 @@ class RecordingClient:
         changes: dict[str, dict] | None = None,
         change_seq: dict[str, list[dict]] | None = None,
         submit_error: Exception | None = None,
+        rebase_error: Exception | None = None,
         set_review_errors: dict[str, Exception] | None = None,
     ) -> None:
         self.set_review_errors = set_review_errors or {}
+        self.rebase_error = rebase_error
         self.query_result = query_result or []
         self.related = related or {}
         self.changes = changes or {c["change_id"]: c for c in self.query_result}
@@ -105,6 +107,8 @@ class RecordingClient:
 
     def rebase(self, change_id, *, on_behalf_of_uploader=True):
         self.calls.append(("rebase", change_id, {"on_behalf_of_uploader": on_behalf_of_uploader}))
+        if self.rebase_error is not None:
+            raise self.rebase_error
         return {"change_id": change_id}
 
     def rebase_chain(self, change_id, *, on_behalf_of_uploader=True):
