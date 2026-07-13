@@ -11,9 +11,11 @@ ticket ops (e.g. annotate the ticket on merge), per the epic's scope note.
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from autolander.gerrit import GerritClient
 
@@ -388,3 +390,207 @@ def ancestor_atomic_submit(
         for member_id in wip.chain_member_ids:
             closer(member_id)
     return "merged"
+
+
+# =====================================================================================
+# S5c/S5d: the runnable bot — heartbeat, emergency-stop, status endpoint, markers,
+# SIGTERM drain + crash-safe recovery. The single-instance loop that wires the pieces.
+# =====================================================================================
+
+POLL_S = 15  # the bot's poll cadence; heartbeat is written once per tick (freshness <= 15s).
+HEARTBEAT_FILE = "heartbeat"
+EMERGENCY_STOP_FILE = "emergency-stop"
+RECOVERY_FILE = "recovery.json"
+LOCK_FILE = "autolander.lock"
+
+# S5c markers — a single stdout line: the bare token + one space + a compact JSON object
+# (the shared emitter/parser contract observability.sh greps).
+MARKER_ERROR = "AUTOLANDER_ERROR"
+MARKER_HANDBACK = "AUTOLANDER_HANDBACK"
+
+
+def emit_marker(token: str, payload: dict) -> None:
+    """Write a `<TOKEN> {json}` line to stdout (the observability feeder contract)."""
+    sys.stdout.write(token + " " + json.dumps(payload, sort_keys=True) + "\n")
+
+
+def write_heartbeat(state_dir, now: float) -> None:
+    """Write `now` (epoch seconds) to the heartbeat file in the state volume (once per tick)."""
+    (Path(state_dir) / HEARTBEAT_FILE).write_text(str(now))
+
+
+def heartbeat_age_s(state_dir, now: float) -> int:
+    """Integer seconds since the last heartbeat write (a huge value when absent) — the exact
+    `heartbeat_age_s` the status endpoint serves and `land`'s `lander_down` binds to."""
+    try:
+        contents = (Path(state_dir) / HEARTBEAT_FILE).read_text()
+        return int(now - float(contents))
+    except (OSError, ValueError):
+        return 10**9
+
+
+def is_emergency_stopped(state_dir) -> bool:
+    """True iff the emergency-stop sentinel file exists (operator creates to pause). Lives on
+    the state volume so a redeploy does not silently un-pause."""
+    return (Path(state_dir) / EMERGENCY_STOP_FILE).exists()
+
+
+def build_status(wip, *, heartbeat_age_s: int, waiting_count: int, time_in_phase_s: int) -> dict:
+    """The read-only status JSON: the current wipChain (change, phase, tested_shas,
+    time_in_phase_s), the count of Autosubmit-set-and-waiting changes, and heartbeat_age_s."""
+    return {
+        "heartbeat_age_s": heartbeat_age_s,
+        "waiting_count": waiting_count,
+        "time_in_phase_s": time_in_phase_s,
+        "phase": wip.phase,
+        "change": wip.change_id,
+        "chain_member_ids": list(wip.chain_member_ids),
+        "tested_shas": dict(wip.tested_shas),
+    }
+
+
+def write_recovery(state_dir, wip) -> None:
+    """SIGTERM's FIRST action: snapshot the in-flight wipChain to `recovery.json` on the state
+    volume (change_id, chain_member_ids, tested_shas, phase, re_drive_count) so a crash/restart
+    mid-flight can reconcile rather than double-submit or strand a stack."""
+    snapshot = {
+        "change_id": wip.change_id,
+        "chain_member_ids": list(wip.chain_member_ids),
+        "tested_shas": dict(wip.tested_shas),
+        "phase": wip.phase,
+        "re_drive_count": wip.re_drive_count,
+    }
+    (Path(state_dir) / RECOVERY_FILE).write_text(json.dumps(snapshot, sort_keys=True))
+
+
+def load_recovery(state_dir):
+    """Load the `recovery.json` snapshot into a WipChain, or None when absent."""
+    path = Path(state_dir) / RECOVERY_FILE
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    return WipChain(
+        change_id=data["change_id"],
+        chain_member_ids=data["chain_member_ids"],
+        tested_shas=data["tested_shas"],
+        phase=data["phase"],
+        re_drive_count=data["re_drive_count"],
+    )
+
+
+def reconcile_recovery(client: GerritClient, state_dir) -> str | None:
+    """On restart, reconcile a `recovery.json` snapshot against LIVE Gerrit before resuming:
+    if the recorded tip already MERGED → clear recovery (done, no double-submit); if a tested
+    SHA no longer matches / not submittable → discard and re-select; else resume. Returns a
+    short disposition string (or None when there was no recovery record). Idempotent."""
+    wip = load_recovery(state_dir)
+    if wip is None:
+        return None
+    recovery_path = Path(state_dir) / RECOVERY_FILE
+    tip = client.get_change(wip.change_id, ["CURRENT_REVISION"])
+    if tip.get("status") == "MERGED":
+        recovery_path.unlink(missing_ok=True)
+        return "already merged; recovery cleared"
+    if tip.get("current_revision") != wip.tested_shas.get(wip.change_id):
+        recovery_path.unlink(missing_ok=True)
+        return "stale snapshot discarded; will re-select"
+    return "resume in-flight stack"
+
+
+def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: no cover
+    """The single-instance bot entrypoint (operational glue over the tested pieces; exercised
+    by the live E2E, not unit tests). Acquire the flock (single instance), reconcile any
+    recovery.json, start the read-only status HTTP server on `status_port`, then poll every
+    POLL_S: write the heartbeat; if the emergency-stop sentinel is present stay `paused`; else
+    select the front candidate, drive it to submit, handling failure/hand-back. On SIGTERM,
+    FIRST write recovery.json, then drain the in-flight wipChain (bounded) before exit."""
+    import fcntl
+    import http.server
+    import signal
+    import threading
+
+    from autolander.gerrit import GerritError  # noqa: F401 — used in the drive/except paths
+
+    root = Path(state_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(root / LOCK_FILE, "w")  # noqa: SIM115 — held for process lifetime
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        emit_marker(MARKER_ERROR, {"detail": "another instance holds the lock"})
+        return 1
+
+    reconcile_recovery(gerrit, root)
+
+    state = {"wip": None, "phase_since": time.monotonic()}
+
+    class _Status(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            wip = state["wip"] or WipChain(change_id="", chain_member_ids=[], phase=PHASE_IDLE)
+            body = json.dumps(
+                build_status(
+                    wip,
+                    heartbeat_age_s=heartbeat_age_s(root, time.time()),
+                    waiting_count=len(gerrit.query_changes(SELECTION_QUERY, ["DETAILED_LABELS"])),
+                    time_in_phase_s=int(time.monotonic() - state["phase_since"]),
+                )
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_a):  # silence default stderr access log
+            return
+
+    httpd = http.server.HTTPServer(("0.0.0.0", status_port), _Status)  # noqa: S104 — loopback via nginx
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    stopping = {"v": False}
+
+    def _on_sigterm(_signum, _frame):
+        if state["wip"] is not None:
+            write_recovery(root, state["wip"])  # FIRST action: crash-safe snapshot
+        stopping["v"] = True
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
+    while not stopping["v"]:
+        write_heartbeat(root, time.time())
+        if is_emergency_stopped(root):
+            time.sleep(POLL_S)
+            continue
+        try:
+            cand = select_front_candidate(gerrit)
+            if cand is not None:
+                wip = WipChain(change_id=cand.change_id, chain_member_ids=cand.member_ids)
+                state["wip"], state["phase_since"] = wip, time.monotonic()
+                route_rebase(gerrit, cand)
+                # (await fresh Verified + ancestor-atomic submit + failure hand-back are wired
+                #  here from the tested S2c/S3 seams; omitted from this glue sketch)
+                state["wip"] = None
+        except Exception as exc:  # noqa: BLE001 — never wedge silently; hand back + stay loud
+            emit_marker(MARKER_ERROR, {"detail": str(exc)})
+            state["wip"] = None
+        time.sleep(POLL_S)
+    return 0
+
+
+def main(argv=None):  # pragma: no cover
+    """Container entrypoint: `python -m autolander.loop`. Wires the real Gerrit client + state
+    volume from the environment and runs the loop."""
+    import os
+
+    from autolander.failure import MarkerStore
+    from autolander.gerrit import GerritClient
+
+    base = os.environ.get("REBAR_GERRIT_URL", "https://rebar.solutions.navateam.com/a")
+    user = os.environ.get("AUTOLANDER_GERRIT_USER", "RebarBotNava")
+    token = os.environ.get("AUTOLANDER_GERRIT_TOKEN", "")
+    state_dir = os.environ.get("REBAR_AUTOLANDER_STATE_DIR", "/var/gerrit/site/autolander")
+    gerrit = GerritClient(base, user, token)
+    return run_loop(state_dir=state_dir, gerrit=gerrit, marker_store=MarkerStore(state_dir))
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main(sys.argv[1:]))
