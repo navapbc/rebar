@@ -210,6 +210,14 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
                 f"{where}: criterion {cid!r} applies_at.scope must be a non-empty list of "
                 f"'container'/'leaf', got {scope!r}"
             )
+        # `require_parent_id` (G7): a boolean axis restricting a criterion to tickets WITH a
+        # parent. bool ONLY (Python bool is a subclass of int, so check isinstance explicitly
+        # to reject int/str).
+        if "require_parent_id" in ap and not isinstance(ap["require_parent_id"], bool):
+            raise CriteriaError(
+                f"{where}: criterion {cid!r} applies_at.require_parent_id must be a boolean, "
+                f"got {ap['require_parent_id']!r}"
+            )
 
 
 # ── effective (overlay-merged) views, gate-parameterized + repo-keyed ───────────────

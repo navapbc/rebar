@@ -38,6 +38,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "G4": (0.95, "advisory"),
     "G5": (0.6, "blocking"),
     "G6": (0.6, "blocking"),
+    "G7": (0.95, "advisory"),
     "ISF": (0.95, "advisory"),
     "T1": (0.7, "blocking"),
     "T10": (0.95, "advisory"),

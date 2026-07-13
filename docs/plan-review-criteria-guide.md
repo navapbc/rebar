@@ -62,13 +62,13 @@ Checklist:
 - Where behavior changes, callers depending on old behavior are acknowledged.
 
 ## E4
-**Assumption/premise verification [agent]** — exec:AGENT, advisory, facet:codebase-grounding
+**Assumption/premise verification [agent]** — exec:AGENT, blocking, facet:codebase-grounding
 
 Scan the plan for assertions about the codebase ('X already exists', 'Y does Z', hedges/confident-assertions) and FORCE a Grep/Read probe per assertion; cached/training knowledge is not a substitute. Fail-closed on absent evidence (unverifiable assertion = gap). ANTI-FP: read the named implementation file before flagging a contract-doc-only claim.
 
 CONFIDENT-ASSERTION SCAN PROTOCOL (G-7a): enumerate the assertion-shaped sentences and probe each — do not eyeball. Trigger frames: "X already {does/handles/returns/supports} Y", "X is {safe/idempotent/atomic/thread-safe}", "there is no X", "X guarantees Y", "X can't/never Z". Each such frame is an empirically-checkable claim: Grep/Read for it and treat an unverifiable one as a gap. A committed element resting on such an unbacked claim is graded in Pass-2 via committed_work_relies_on_unbacked_claim.
 
-SCOPE-EXCLUSION SUB-CHECK (G-4): a descoping claim used to EXCLUDE work ("OUT: X — already exists", "handled by Y", "covered by Z") is where a false premise deletes work invisibly (nothing downstream references it), so probe it like any other assertion. DISCRIMINATION (co-located rule): FIRE on an empirically-checkable / codebase exclusion ("X already exists / is handled in code") that a Grep/Read can and does refute; ABSTAIN-with-coverage on an external-fact exclusion the tools cannot settle ("another team owns X", "the vendor already does Y") — record it as covered-but-unverifiable rather than asserting a gap you cannot ground.
+SCOPE-EXCLUSION SUB-CHECK (G-4): a descoping claim used to EXCLUDE work ("OUT: X — already exists", "handled by Y", "covered by Z") is where a false premise deletes work invisibly (nothing downstream references it), so probe it like any other assertion. DISCRIMINATION (co-located rule): FIRE on an empirically-checkable / codebase exclusion ("X already exists / is handled in code") that a Grep/Read can and does refute; ABSTAIN-with-coverage on an external-fact exclusion the tools cannot settle ("another team owns X", "the vendor already does Y") — record it as covered-but-unverifiable rather than asserting a gap you cannot ground. THIRD-PARTY SYMBOLS: an existence/capability claim about an INSTALLED dependency's symbol ("library.Thing exists / is importable") is settleable by `resolve_symbol` (the installed environment), not by a Grep of the repo — resolve it there and treat an environment-resolved symbol as verified rather than an unbacked assertion.
 
 Checklist:
 - Each codebase assertion ('X exists','Y does Z', hedges/confident-assertions) is verified by a Grep/Read — training knowledge is not a substitute.
@@ -127,9 +127,9 @@ Checklist:
 - At least one criterion carries a concrete validation mechanism (before/after, operational metric, dogfooding).
 
 ## G1G2
-**Edit-set / scope accuracy [agent]** — exec:AGENT, advisory, facet:codebase-grounding
+**Edit-set / scope accuracy [agent]** — exec:AGENT, blocking, facet:codebase-grounding
 
-Verify (via Glob/Grep) that every file/symbol the plan names actually exists; enumerate consumers/callers OUTSIDE the artifact's dir that a change would require updating; flag hallucinated/missing edit targets and unenumerated consumers; classify behavioral hunks in/ambiguous/out-of-scope (CREATION=new behavior->out-of-scope). High blast-radius alone is not a fail if acknowledged. ANTI-FP: report only high-confidence; STOP if scope too vague.
+Verify (via Glob/Grep) that every file/symbol the plan names actually exists; enumerate consumers/callers OUTSIDE the artifact's dir that a change would require updating; flag hallucinated/missing edit targets and unenumerated consumers; classify behavioral hunks in/ambiguous/out-of-scope (CREATION=new behavior->out-of-scope). High blast-radius alone is not a fail if acknowledged. ANTI-FP: report only high-confidence; STOP if scope too vague. Any symbol created by a ticket this ticket depends_on (evaluated recursively) is treated as if it EXISTS and is NOT MISSING. A symbol/import you cannot find via Glob/Grep may be a THIRD-PARTY/library symbol living in an installed dependency (site-packages) your repo-scoped tools cannot see — call `resolve_symbol` to check the installed environment and treat an environment-resolved symbol as EXISTING; when it is plausibly a library symbol you cannot ground, abstain rather than flag it hallucinated.
 
 Checklist:
 - Every file/symbol the plan names exists (Glob/Grep) — flag hallucinated/missing edit targets.
@@ -223,6 +223,24 @@ Checklist:
 - Reviewer generates 1-2 structurally-different alternatives and judges the chosen approach defensible on codebase-alignment/blast-radius/testability/simplicity/robustness; a clearly-superior missed alternative is a coaching finding.
 - The plan states a POSITIVE rationale for the chosen approach (its absence is a finding); do NOT require a rejected-alternatives section (anti-priming).
 
+## G7
+**Leaf-parent containment [agent, leaf]** — exec:AGENT, advisory, facet:leaf
+
+LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal.
+
+FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Success Criteria/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
+
+FIRE A FINDING when the leaf is NOT a subset of the parent — specifically when the leaf:
+- (a) delivers something the parent's plan does not contain, or that the parent implies is out of scope;
+- (b) contradicts a parent acceptance/success criterion; or
+- (c) redefines a deliverable the parent specifies differently.
+Consistent NARROWING — a leaf that does PART of what the parent describes, faithfully and without contradiction — is NOT a finding.
+
+CONFLICT RULE — the PARENT WINS. On any conflict between the leaf and the parent, the parent's plan is authoritative. The productive move is to realign the leaf to the parent. If you believe the parent is genuinely wrong, do NOT silently diverge the leaf — instead update the parent first (which stales the parent's own plan-review attestation and forces its re-review), and only then re-review the leaf against the corrected parent. Realigning the leaf to a subset of the parent, or updating the parent, are the only acceptable resolutions.
+
+Checklist:
+- The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent AC/success criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding.
+
 ## ISF
 **Intent-source fidelity (plan vs linked design intent)** — exec:2-STEP, advisory, facet:intent-provenance
 
@@ -234,7 +252,7 @@ Checklist:
 - No expressed requirement is silently dropped, narrowed, or contradicted (the visual-editing-deferred failure mode).
 
 ## T1
-**Prior-art / novel-architecture justification [overlay]** — exec:AGENT, advisory, facet:overlay-priorart
+**Prior-art / novel-architecture justification [overlay]** — exec:AGENT, blocking, facet:overlay-priorart
 
 OVERLAY — apply when the plan crosses a bright-line (external integration, unfamiliar dependency, security/auth, a novel architectural pattern, a performance/scalability target, or a migration). Tool-grounded where possible (web/codebase). Checks: (a) is there relevant PRIOR ART the plan should consider before committing, or is it reinventing/repackaging something that exists? (b) for a novel pattern: is the novelty justified vs an established approach (anti-repackaging, Rule-of-Three)? (c) are unverified capability assertions ('library supports X') resolved? SEVERITY: a novel architecture chosen with no consideration of prior art = MAJOR. ANTI-FP: a well-trodden pattern needs no prior-art search; not-applicable when no bright-line fires.
 
@@ -469,7 +487,7 @@ Checklist:
 - Large docs have structure; no hot-path instruction-bloat.
 
 ## T8
-**LLM / prompt structural-completeness probe [overlay]** — exec:AGENT, advisory, facet:overlay-llm
+**LLM / prompt structural-completeness probe [overlay]** — exec:AGENT, blocking, facet:overlay-llm
 
 OVERLAY — apply when the plan defines an LLM/agent system (prompts, sub-agents, reviewers, output schemas, enums). Probe (tool-grounded) for STRUCTURAL GAPS a generic checklist misses: (a) a schema/enum referenced but whose value vocabulary is never defined; (b) a processing protocol/decision rule referenced but not co-located with the schema that needs it; (c) a counter/state increment with ambiguous placement; (d) an unspecified fallback for an incomplete/failed sub-step; (e) instruction-locality / pink-elephant antipatterns. Use Grep/Read to confirm referenced agents/skills/enums exist and are fully specified. Report each PROVEN gap with evidence. SEVERITY: an undefined-but-referenced enum/protocol an executor needs = MAJOR. ANTI-FP: cite concrete evidence; this is the overlay that recovers the structural-gap signal a generic checklist misses.
 
