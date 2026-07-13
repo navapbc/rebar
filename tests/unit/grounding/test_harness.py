@@ -222,3 +222,51 @@ def test_as_abstain_on_non_abstained_raises() -> None:
     r = harness.run_tool([sys.executable, "-c", "pass"], backend="py")
     with pytest.raises(ValueError):
         r.as_abstain(job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1)
+
+
+def test_signal_death_not_misclassified_as_timeout_under_reap_lag(monkeypatch) -> None:
+    """Bug 85c3: a signal-killed worker whose exit hasn't been reaped yet must map to
+    parse_error, NOT timeout — even if ``proc.is_alive()`` transiently returns True.
+
+    Deterministically reproduces the crash-vs-timeout race by forcing the proc's
+    ``is_alive()`` to report True exactly once (simulating reap lag right after the
+    signal death). The classifier must key on whether the poll() timeout actually
+    elapsed — a crash closes the pipe immediately (poll → True), so it can never be a
+    timeout — not on the racy is_alive() probe.
+
+    RED (pre-fix, is_alive()-gated classifier): returns abstain_reason=="timeout".
+    GREEN (poll-gated classifier): returns abstain_reason=="parse_error".
+    """
+    real_ctx = harness._worker_context()
+
+    class _ReapLagCtx:
+        """Wrap the real context so the spawned proc reports is_alive()==True once."""
+
+        def Pipe(self, *args, **kwargs):
+            return real_ctx.Pipe(*args, **kwargs)
+
+        def Process(self, *args, **kwargs):
+            proc = real_ctx.Process(*args, **kwargs)
+            real_is_alive = proc.is_alive
+            forced = {"done": False}
+
+            def fake_is_alive():
+                # First probe after the crash: pretend the killed child isn't reaped
+                # yet (the exact transient the bug misread as a live→timeout worker).
+                if not forced["done"]:
+                    forced["done"] = True
+                    return True
+                return real_is_alive()
+
+            proc.is_alive = fake_is_alive  # type: ignore[method-assign]
+            return proc
+
+    monkeypatch.setattr(harness, "_worker_context", lambda: _ReapLagCtx())
+
+    r = harness.run_in_worker(wp.hard_crash, backend="tree-sitter")
+    assert r.abstained, "a signal-killed worker must fail open, not complete"
+    assert r.abstain_reason == "parse_error", (
+        f"signal death misclassified as {r.abstain_reason!r} under reap lag "
+        "(crash-vs-timeout race, bug 85c3)"
+    )
+    ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))

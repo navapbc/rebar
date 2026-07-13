@@ -329,17 +329,32 @@ def run_in_worker(
 
     try:
         payload = None
+        polled = False
         try:
-            # poll() returns as soon as the child sends (or closes the pipe on
-            # exit/crash), so a large result drains here instead of deadlocking a
-            # join-before-read; recv() then reads the whole framed message.
-            if parent_conn.poll(call_timeout):
+            # poll() returns True as soon as the child sends OR closes the pipe on
+            # exit/crash, and returns False ONLY when the whole timeout elapses with
+            # the child still holding the pipe open (a genuine hang). So a large
+            # result drains here instead of deadlocking a join-before-read; recv()
+            # then reads the whole framed message. Capture the poll outcome — it,
+            # NOT proc.is_alive(), is the timeout discriminator (see below).
+            polled = parent_conn.poll(call_timeout)
+            if polled:
                 payload = parent_conn.recv()
         except EOFError:
-            payload = None  # child closed the pipe without sending (exit/crash)
+            payload = None  # child closed the pipe without sending (exit/crash); polled is True
 
-        if payload is None and proc.is_alive():
-            # Nothing arrived within the timeout and the worker is still running → hang.
+        if not polled and proc.is_alive():
+            # The poll() timed out (nothing readable, no EOF) AND the worker is
+            # still running → a genuine hang. Reap it and report timeout.
+            #
+            # We must NOT gate this on ``proc.is_alive()`` alone: a worker that was
+            # just signal-killed (SIGABRT/SIGSEGV) closes the pipe (poll() → True,
+            # recv() → EOFError, payload=None) but may not be reaped yet, so
+            # is_alive() transiently returns True. Classifying that as "timeout"
+            # instead of falling through to the exitcode inspection below (→
+            # parse_error) is the crash-vs-timeout race (bug 85c3). Discriminating on
+            # ``not polled`` — did the timeout actually elapse — is race-free: a crash
+            # makes poll() return True immediately, so it never lands here.
             _reap_worker(proc)
             return RunResult(
                 backend=backend,

@@ -370,9 +370,15 @@ def test_run_acli_429_retries_with_rate_limit_backoff(tmp_path, monkeypatch, cap
     succeeds on retry, and NO uniform 2s sleep is used (add-on, not double-sleep)."""
     monkeypatch.setenv("FAKE_429_COUNTER", str(tmp_path / "n"))
     delays: list[float] = []
-    monkeypatch.setattr(acli_subprocess.time, "sleep", lambda s: delays.append(s))
+    # Patch the narrow retry-backoff SEAM, not the module-global time.sleep. The
+    # latter would also capture CPython's subprocess.Popen._wait busy-wait poll
+    # sleeps (an exponential 0.0005→0.05s series emitted from communicate() whose
+    # iteration count depends on OS reap latency), making the assertion flaky under
+    # load. _backoff_sleep isolates the retry-backoff schedule deterministically.
+    monkeypatch.setattr(acli_subprocess, "_backoff_sleep", lambda s: delays.append(s))
     with caplog.at_level(logging.WARNING):
         result = acli_subprocess._run_acli(["search", "x"], acli_cmd=_fake_cmd(_FAKE_429_THEN_OK))
     assert result.returncode == 0 and result.stdout == "[]"
+    # Exactly one retry backoff, honoring Retry-After=1 (no uniform 2s/4s backoff).
     assert delays == [1.0], f"expected one Retry-After=1 backoff, got {delays}"
     assert any("429" in r.message for r in caplog.records)

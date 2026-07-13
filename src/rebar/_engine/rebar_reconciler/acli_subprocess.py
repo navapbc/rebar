@@ -211,6 +211,22 @@ class AcliMutationError(RuntimeError):
     """
 
 
+def _backoff_sleep(seconds: float) -> None:
+    """Sleep *seconds* between ACLI retry attempts (the single retry-backoff seam).
+
+    Deliberately a distinct, patchable indirection over ``time.sleep`` rather than
+    a bare ``time.sleep`` call. Tests that assert the retry-backoff schedule can
+    patch THIS function to observe only the retry delays. Patching the module-global
+    ``time.sleep`` instead would also capture the sub-second poll sleeps
+    CPython's ``subprocess.Popen._wait`` busy-wait emits from inside
+    ``communicate()`` (an exponential 0.0005→0.05s series whose iteration count
+    depends on how quickly the OS reaps the child) — an unrelated, load-dependent
+    signal that made the 429-backoff assertion flaky under load. Same behavior as
+    ``time.sleep``; the split exists purely to isolate the observable seam.
+    """
+    time.sleep(seconds)
+
+
 def _build_env() -> dict[str, str]:
     """Build subprocess environment for ACLI."""
     return os.environ.copy()
@@ -373,7 +389,7 @@ def _run_acli(
             partial_err = _decode_partial(exc.stderr)
             _reap_process_group(p)
             if retry_on_timeout and attempt < _MAX_ATTEMPTS - 1:
-                time.sleep(2 ** (attempt + 1))  # 2s, 4s — retry within the loop
+                _backoff_sleep(2 ** (attempt + 1))  # 2s, 4s — retry within the loop
                 continue
             # Terminal: raised BEFORE _check_mutation_failure (never fabricate a
             # success on a killed child).
@@ -404,7 +420,7 @@ def _run_acli(
             # and the terminal contract (CalledProcessError) is unchanged.
             if attempt < _MAX_ATTEMPTS - 1:
                 rl_delay = _rate_limit_backoff(attempt, cpe.stderr)
-                time.sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))
+                _backoff_sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))
             continue
 
         # Bug 44de: ACLI exits 0 even when a mutation fails. Inspect the
