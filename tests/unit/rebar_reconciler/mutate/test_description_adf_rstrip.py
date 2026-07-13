@@ -60,6 +60,13 @@ class StubBindingStore:
     def __init__(self, b: dict[str, str] | None = None) -> None:
         self._b = b or {}
 
+    def get_baseline(self, local_id):
+        # story d6bd: baseline arbitration is always-on; unset -> None (local-wins).
+        return None
+
+    def is_pending(self, local_id):
+        return False
+
     def get_jira_key(self, lid):
         return self._b.get(lid)
 

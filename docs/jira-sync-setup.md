@@ -314,44 +314,43 @@ a one-way projection — not by writing a false parent.)
 
 ---
 
-## Convergence rollout: the baseline consumer swap (`reconciler.baseline_consumer_swap`)
+## Baseline arbitration (always-on) and the cold-start warm-up window
 
-The outbound field differ arbitrates local⇄Jira edits against an **ancestor**. The
-rollout migrates that ancestor from `prev_snapshot` to the durable per-binding
-**baseline** in two config-gated phases:
+The outbound field differ arbitrates local⇄Jira edits against an **ancestor**. That
+ancestor is the durable per-binding **baseline** (ADR 0026): every live pass advances
+each confirmed binding's baseline from the current Jira snapshot, and the differ
+consumes `get_baseline(local_id)` at both the direction-suppression and
+both-sides-conflict sites. A `None` baseline is the documented local-wins signal
+(ADR 0026 §2); a corrupt `bindings.json` has already failed the pass **closed at load**,
+so arbitration adds no new failure mode.
 
-- **Phase 1 — shadow (`reconciler.baseline_dual_write = true`).** The baseline is
-  written alongside `prev_snapshot` but **not consumed**. Each pass emits a
-  `RECON: baseline_shadow_check divergent=<N> equal=<M> seeded=<S>` line to **stderr**
-  (captured in the GitHub Actions *Reconcile Bridge* run logs) and, on divergence, a
-  `baseline_shadow_divergence` bridge alert. `divergent == 0` means the baseline would
-  arbitrate identically to `prev_snapshot`.
-- **Phase 3 — consumer swap (`reconciler.baseline_consumer_swap = true`).** The differ
-  **consumes** `get_baseline(local_id)` in place of `prev_snapshot` at both the
-  direction-suppression and both-sides-conflict sites. A `None` baseline is the
-  documented local-wins signal (ADR 0026 §2); a corrupt `bindings.json` has already
-  failed the pass **closed at load**, so the swap adds no new failure mode.
+This behavior is **always on** (story d6bd). It was previously gated behind two
+convergence-rollout flags — `reconciler.baseline_dual_write` (shadow dual-write) and
+`reconciler.baseline_consumer_swap` (consume the baseline). Both ran clean in production
+for this project and have been **retired**; the flags no longer exist (setting either in
+`rebar.toml` is ignored with a typo warning — see `test_config_backcompat.py`).
 
-**Flip procedure.** Enable `baseline_dual_write` first and confirm **≥10 consecutive
-clean shadow passes** — derive the streak from the durable GHA run logs:
+### The one-pass cold-start warm-up window
+
+Baselines populate **lazily**: a binding first gets a baseline on the first always-on
+pass in which its Jira key is present in the fetch window. A repo upgrading from a
+version that never dual-wrote therefore starts with `get_baseline() == None` for its
+bindings, so arbitration degrades to **local-wins** for one pass per binding until the
+baseline is advanced. During that window a **concurrent Jira-side edit could be lost**
+(local-wins overwrites it) before the inbound differ can mirror it.
+
+The window is **observable, not silent**: for each confirmed binding whose baseline is
+still `None`, the differ emits one `RECON: baseline_cold_start local_id=<id>` line to
+**stderr** per pass (captured in the GitHub Actions *Reconcile Bridge* run logs). Once
+the binding's baseline is populated the line stops. To confirm the window has closed:
 
 ```sh
-gh run list --workflow=reconcile-bridge.yml --limit 12 --json databaseId,conclusion
-gh run view <databaseId> --log | grep 'baseline_shadow_check'   # divergent must be 0
+gh run view <databaseId> --log | grep 'baseline_cold_start'   # empty once warmed up
 ```
 
-Any `divergent > 0`, a failed/absent run, or a gap > 2× the schedule interval **resets**
-the streak. Then set `baseline_consumer_swap = true` and run at least one live pass with
-the flag ON, confirming it stays clean.
-
-**Rollback (one line, no deploy):** set `baseline_consumer_swap = false` in `rebar.toml`
-— the differ reverts byte-for-byte to the `prev_snapshot` path on the next pass.
-
-> **Why there is no separate "classifier-vs-legacy" divergence alert.** `classify()`
-> runs only on off-snapshot pairs (binding walk); the field differ owns active bindings,
-> so no production path has both a `classify()` decision and the legacy action for the
-> *same* binding to compare without a forbidden parallel engine. The **`baseline_shadow_check`**
-> shadow gate above IS the rollout's divergence signal — no additional alert is built.
+The window is at most one pass per binding and self-heals; no operator action is
+required beyond noting that concurrent Jira edits to a just-upgraded binding may need to
+be re-applied if they land inside the window.
 
 ---
 
@@ -465,24 +464,20 @@ that empties the window therefore trips the breaker instead of mass-retiring.
 The 2026-07-03 census measured 1.14% acting — 8.8× headroom. Lower the fraction
 to tighten the guard during rollout.
 
-### Baseline dual-write shadow (Phase 1 derisk)
+### Baseline arbitration (always-on)
 
-The one high-risk step is swapping direction arbitration from `prev_snapshot` to
-the per-binding `baseline` (ADR 0026). It is derisked in shadow first: set
-`reconciler.baseline_dual_write = true` to advance a per-binding baseline every
-live pass **without any consumer reading it**, logging a `baseline_shadow_check`
-(equal/divergent counts vs `prev_snapshot`) each pass. The consumer swap (Phase 3)
-is gated on **≥ N consecutive clean passes** (`divergent == 0`); any
-`baseline_shadow_divergence` event resets the count. Disable the flag to stop
-shadowing at any time — it never affects arbitration.
+Direction arbitration uses the per-binding `baseline` (ADR 0026), advanced every
+live pass before `save()`. This was rolled out behind the retired
+`reconciler.baseline_dual_write` / `reconciler.baseline_consumer_swap` flags (story
+d6bd) and is now hardcoded always-on. See "Baseline arbitration (always-on) and the
+cold-start warm-up window" above for the lazy warm-up window and the
+`RECON: baseline_cold_start` diagnostic.
 
 ### Rollback procedure (summary)
 
 1. Dispatch `reconcile-bridge.yml` with **`mode: dry-run`** (or `reconcile-check`)
    — stops all acting mutations on the next pass.
-2. If a baseline swap misbehaves, set `reconciler.baseline_dual_write = false` and
-   keep the live consumer on `prev_snapshot`.
-3. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
+2. Retirements are a reversible soft-delete (`bindings-retired.json`, full history
    on the `tickets` branch); re-linking a wrongly-retired binding is a recovery,
    not a re-create.
 
