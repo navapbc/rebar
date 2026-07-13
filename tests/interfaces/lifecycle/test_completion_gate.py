@@ -517,3 +517,59 @@ def test_resolve_session_falls_back_to_unknown(monkeypatch) -> None:
     monkeypatch.delenv("SESSION_ID", raising=False)
     monkeypatch.setattr(_tc, "_short_head", lambda _tracker: "")
     assert _tc._resolve_session("ignored") == "unknown"
+
+
+# ── 24ec: a FAIL close leaves a durable, queryable verdict record ───────────────
+def test_fail_close_persists_durable_verdict(rebar_repo: Path, monkeypatch) -> None:
+    """A blocked FAIL close must leave a durable, queryable sidecar record (mirroring the
+    plan-review REVIEW_RESULT sidecar) carrying the schema tag, the failing criteria, and
+    the remediation guidance — so completion FAILs are recoverable offline, not vanished."""
+    import json
+
+    from rebar.llm import completion_sidecar as cs
+
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", FAIL)
+    tid = _make(rebar_repo)
+    with pytest.raises(rebar.RebarError):
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    rec = cs.latest_fail_verdict(tid, repo_root=str(rebar_repo))
+    assert rec is not None, "no durable FAIL record was persisted"
+    assert rec["schema"] == "completion_verifier_fail_v1"
+    blob = json.dumps(rec)
+    assert "AC1" in blob  # the failing criterion is captured
+    assert rec.get("remediation")  # remediation guidance captured (reconcile sets it on FAIL)
+
+
+# ── 24ec held-out edge coverage (persistence-failure fail-closed; PASS leaves no record) ──
+
+
+def test_persistence_failure_does_not_mask_the_fail(rebar_repo: Path, monkeypatch) -> None:
+    # If the durable-persist step raises, the close MUST still block with the FAIL unchanged
+    # (fail-closed preserved; persistence is best-effort observability, never load-bearing).
+    from rebar.llm import completion_sidecar as cs
+
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", FAIL)
+
+    def _boom_emit(*a, **k):
+        raise RuntimeError("sidecar write blew up")
+
+    monkeypatch.setattr(cs, "emit", _boom_emit)
+    tid = _make(rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    assert "AC1" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+
+
+def test_pass_close_leaves_no_fail_record(rebar_repo: Path, monkeypatch) -> None:
+    from rebar.llm import completion_sidecar as cs
+
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+    assert cs.latest_fail_verdict(tid, repo_root=str(rebar_repo)) is None
