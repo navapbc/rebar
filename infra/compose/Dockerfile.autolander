@@ -96,6 +96,14 @@ RUN set -eux; \
       echo '    git clone --single-branch --branch tickets "${AUTOLANDER_TICKETS_URL}" "${AUTOLANDER_TICKETS_DIR}" || \'; \
       echo '      echo "autolander: tickets worktree clone deferred (deploy canary)" >&2'; \
       echo '  fi'; \
+      echo '  # Self-heal a BROKEN empty clone (bug dc33): a boot clone can fail silently and'; \
+      echo '  # leave a repo with 0 commits that never recovers. Re-fetch it (best-effort).'; \
+      echo '  if [ -d "${AUTOLANDER_TICKETS_DIR}/.git" ] && \'; \
+      echo '     [ "$(git -C "${AUTOLANDER_TICKETS_DIR}" rev-list --count HEAD 2>/dev/null || echo 0)" = "0" ]; then'; \
+      echo '    git -C "${AUTOLANDER_TICKETS_DIR}" fetch origin tickets && \'; \
+      echo '      git -C "${AUTOLANDER_TICKETS_DIR}" reset --hard FETCH_HEAD || \'; \
+      echo '      echo "autolander: tickets fetch deferred" >&2'; \
+      echo '  fi'; \
       echo 'fi'; \
       echo '# Converge the (possibly freshly-cloned) tickets worktree into a writable rebar'; \
       echo '# store: repo-local git identity + the `.env-id` store marker via run_ensures.'; \

@@ -12,7 +12,9 @@ ticket ops (e.g. annotate the ticket on merge), per the epic's scope note.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -320,6 +322,54 @@ def emit_autolander_error(
         emit_metric(metric, 1)
 
 
+_FRESHEN_TIMEOUT_S = 120
+
+
+def _freshen_ticket_store(tracker: str) -> None:
+    """Bring the tickets store at `tracker` current with the `tickets` branch before annotating
+    (bug dc33 follow-up). The dc33 boot clone can fail silently and leave a broken EMPTY repo
+    (0 commits) that never self-heals, and a clone-once store goes stale as other agents create
+    tickets after boot — so `rebar.comment` cannot resolve the ticket a change landed for.
+
+    If `tracker` is not a valid git repo, (re-)clone the `tickets` branch from
+    `AUTOLANDER_TICKETS_URL` (the container's global git credential helper supplies the PAT).
+    Otherwise clear any staged/uncommitted junk (a prior run_ensures may have staged
+    `.gitattributes`/`.gitignore`), fetch `origin tickets`, and hard-reset to it. Then converge
+    with `run_ensures` so `.env-id`/gc/merge-ours exist. Raises on any git/ensure failure — the
+    caller treats that as a transient, non-paging skip."""
+
+    def _git(*args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            check=True,
+            capture_output=True,
+            timeout=_FRESHEN_TIMEOUT_S,
+        )
+
+    is_repo = (
+        subprocess.run(
+            ["git", "-C", tracker, "rev-parse", "--git-dir"],
+            capture_output=True,
+            timeout=_FRESHEN_TIMEOUT_S,
+        ).returncode
+        == 0
+    )
+    if not is_repo:
+        url = os.environ.get("AUTOLANDER_TICKETS_URL") or "https://github.com/navapbc/rebar.git"
+        _git("clone", "--single-branch", "--branch", "tickets", url, tracker)
+    else:
+        # Clear any staged/uncommitted junk first so it can't block the fetch/reset, then bring
+        # the working tree current with the remote `tickets` tip.
+        _git("-C", tracker, "reset", "--hard")
+        _git("-C", tracker, "fetch", "origin", "tickets")
+        _git("-C", tracker, "reset", "--hard", "FETCH_HEAD")
+
+    # Converge the (possibly freshly-cloned) store: repo-local identity, `.env-id`, gc, merge-ours.
+    from rebar._store.ensures import run_ensures  # lazy — matches the lazy `import rebar` below
+
+    list(run_ensures(tracker))
+
+
 def close_ticket_via_rebar(
     change_id: str, *, ticket_id: str | None = None, message: str | None = None
 ) -> None:
@@ -329,12 +379,36 @@ def close_ticket_via_rebar(
 
     The Gerrit `change_id` is NEVER used as a ticket id (bug dc33): when `ticket_id` is falsy
     (no `rebar-ticket:` trailer on the landed commit) this SKIPS annotation with a low-severity
-    note and returns WITHOUT calling `rebar.comment`. A genuine `rebar.comment` failure (a real
-    store/permission error) is still surfaced LOUDLY via `AUTOLANDER_ERROR` — best-effort in
-    that it never crashes the loop, but a real error is a real error."""
+    note and returns WITHOUT calling `rebar.comment`.
+
+    Before annotating, the tickets store is FRESHENED (bug dc33 follow-up) so a broken/empty or
+    stale clone self-heals — see `_freshen_ticket_store`. The severity ladder:
+      * no `ticket_id` -> quiet skip (unchanged).
+      * `REBAR_TRACKER_DIR` unset/empty -> `AUTOLANDER_ERROR` (a MISSING store is a real deploy
+        misconfiguration that must page) and return.
+      * freshen raises -> a NON-paging warning + return (the landing already succeeded; a
+        transient fetch failure self-heals on the next landing and must not page).
+      * `rebar.comment` fails on a FRESH store -> `AUTOLANDER_ERROR` (ticket truly absent / push
+        perms — a genuine problem that should page). Never crashes the loop."""
     if not ticket_id:
         sys.stderr.write(
             f"autolander: no rebar-ticket trailer on {change_id}; skipping ticket annotation\n"
+        )
+        return
+
+    tracker = os.environ.get("REBAR_TRACKER_DIR")
+    if not tracker:
+        sys.stderr.write(
+            f"{AUTOLANDER_ERROR} REBAR_TRACKER_DIR not configured; cannot annotate {ticket_id}\n"
+        )
+        return
+
+    try:
+        _freshen_ticket_store(tracker)
+    except Exception as exc:  # noqa: BLE001 — a transient refresh failure self-heals; never page.
+        sys.stderr.write(
+            "autolander: ticket store refresh failed (transient); skipping annotation of "
+            f"{ticket_id}: {exc}\n"
         )
         return
 
