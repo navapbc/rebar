@@ -25,6 +25,7 @@ from pathlib import Path
 
 from rebar import config
 from rebar._commands import _seam
+from rebar._commands._compact_policy import is_foldable
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
@@ -157,11 +158,8 @@ def _compact_locked(
         # behavior; the offline test suite defaults to 0).
         now = hlc.physical_now()
 
-        def _foldable(ts: int | None) -> bool:
-            return horizon <= 0 or (ts is not None and now - ts >= horizon)
-
-        old = [(fp, u, ts) for (fp, u, ts) in parsed if _foldable(ts)]
-        young = [(fp, u, ts) for (fp, u, ts) in parsed if not _foldable(ts)]
+        old = [(fp, u, ts) for (fp, u, ts) in parsed if is_foldable(ts, now, horizon)]
+        young = [(fp, u, ts) for (fp, u, ts) in parsed if not is_foldable(ts, now, horizon)]
 
         if not old:
             sys.stdout.write("all events within the compaction horizon — nothing to fold\n")

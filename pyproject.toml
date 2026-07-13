@@ -393,6 +393,11 @@ only_mutate = [
     "src/rebar/_engine_support/next_batch.py",
     "src/rebar/_engine_support/validate.py",
     "src/rebar/reducer/_processors.py",
+    # Selective concurrency-path shards (story 25aa): the PURE decision logic of two
+    # concurrency paths, extracted into small helpers so only the decision is mutated
+    # (not the subprocess-heavy orchestration around it).
+    "src/rebar/_commands/_compact_policy.py",
+    "src/rebar/_store/_push_policy.py",
 ]
 # Fast, fail-fast runner over the dev venv; -p no:randomly for determinism and a
 # fixed basetemp to dodge the macOS tmp race. The test selection is scoped to the
@@ -415,6 +420,10 @@ pytest_add_cli_args_test_selection = [
     "tests/interfaces/lifecycle/test_gate_rubric_consistency.py",
     "tests/interfaces/queries/test_ws5d_quality_fileimpact.py",
     "tests/interfaces/lifecycle/test_close_gate_story_epic.py",
+    # _commands/_compact_policy.py (fold predicate shard, story 25aa)
+    "tests/unit/test_compact_policy.py",
+    # _store/_push_policy.py (push-policy classifier shard, story 25aa)
+    "tests/unit/test_push_policy.py",
 ]
 
 [tool.pytest.ini_options]
