@@ -61,7 +61,7 @@ code. A clean probe REFRESHES the attestation (re-sign the prior verdict with th
 dependency hashes); any blocking finding, or a finding citing a drifted file, escalates to a FULL
 re-review. Soundness is whole-verdict, gated by the probe — there is NO per-criterion finding reuse,
 so the (unenforced) code-blind criterion partition is not relied upon. Gated by
-`verify.progressive_drift_refresh` (**default off**); fail-safe to full re-review on probe
+`verify.progressive_drift_refresh` (**default ON** since 2026-07-12, epic a37b; explicit false backs out); fail-safe to full re-review on probe
 error / registry-version skew / no reusable prior verdict.
 
 > **One of three Pass-3 floors.** This drift-refresh is one of three deterministic Pass-3
