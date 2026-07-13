@@ -173,3 +173,78 @@ def test_merged_related_ancestor_excluded_from_chain():
     kind, members = classify_change(client, top)
     assert kind == KIND_SINGLE, "a merged ancestor must NOT make this a chain"
     assert members == ["Itop"]
+
+
+# --- FIX 15a1: selection backs off a handed-back stack -----------------------
+def test_selection_skips_change_with_valid_handback_marker(tmp_path):
+    """A submittable Autosubmit change whose `Autosubmit +1` was cast by ANOTHER account keeps
+    matching SELECTION_QUERY after a hand-back (the bot can only zero its OWN vote). A VALID
+    `needs_rebase` marker (patchset SHA still matches) means the owner has not rebased yet, so
+    selection must SKIP it instead of re-selecting it every poll (the 15a1 infinite loop)."""
+    from autolander.failure import MarkerStore, NeedsRebaseMarker
+    from autolander.loop import select_front_candidate
+
+    c = change_info("Ihb", 801, autosubmit_date="2026-07-13 10:00:00.000000000")
+    client = RecordingClient(query_result=[c], related={"Ihb": []})
+    store = MarkerStore(tmp_path)
+
+    # baseline: no marker -> selected normally
+    assert select_front_candidate(client, store).change_id == "Ihb"
+
+    # valid marker (patchset_sha == current revision) -> skipped
+    store.upsert(
+        NeedsRebaseMarker(
+            change_id="Ihb",
+            patchset_sha=c["current_revision"],
+            stack_id="Ihb",
+            change_ids=["Ihb"],
+        )
+    )
+    assert select_front_candidate(client, store) is None, "handed-back stack must not re-select"
+
+    # marker_store omitted -> unchanged legacy behaviour (still selects)
+    assert select_front_candidate(client).change_id == "Ihb"
+
+
+def test_selection_skips_handed_back_front_and_picks_next(tmp_path):
+    """When the FIFO-front candidate is handed back, selection moves to the NEXT eligible
+    candidate in FIFO order rather than returning None."""
+    from autolander.failure import MarkerStore, NeedsRebaseMarker
+    from autolander.loop import select_front_candidate
+
+    front = change_info("Ifront", 802, autosubmit_date="2026-07-13 09:00:00.000000000")
+    nxt = change_info("Inext", 803, autosubmit_date="2026-07-13 09:30:00.000000000")
+    client = RecordingClient(query_result=[front, nxt], related={"Ifront": [], "Inext": []})
+    store = MarkerStore(tmp_path)
+    store.upsert(
+        NeedsRebaseMarker(
+            change_id="Ifront",
+            patchset_sha=front["current_revision"],
+            stack_id="Ifront",
+            change_ids=["Ifront"],
+        )
+    )
+
+    cand = select_front_candidate(client, store)
+    assert cand is not None and cand.change_id == "Inext", "skip handed-back front, take next"
+
+
+def test_selection_ignores_stale_handback_marker(tmp_path):
+    """A marker whose SHA no longer matches the change's current patchset means the owner has
+    rebased/re-uploaded: `get_valid` self-invalidates, so the change is eligible again."""
+    from autolander.failure import MarkerStore, NeedsRebaseMarker
+    from autolander.loop import select_front_candidate
+
+    c = change_info("Istale", 804, autosubmit_date="2026-07-13 08:00:00.000000000")
+    client = RecordingClient(query_result=[c], related={"Istale": []})
+    store = MarkerStore(tmp_path)
+    store.upsert(
+        NeedsRebaseMarker(
+            change_id="Istale",
+            patchset_sha="OLD_SHA",  # owner has since rebased -> a new patchset
+            stack_id="Istale",
+            change_ids=["Istale"],
+        )
+    )
+
+    assert select_front_candidate(client, store).change_id == "Istale"
