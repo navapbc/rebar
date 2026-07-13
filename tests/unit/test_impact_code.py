@@ -279,3 +279,47 @@ def test_impact_code_gap_beats_old_mean_gap() -> None:
     # cannot see down toward 0 and CANNOT separate landmines from nits (the 0.33 attribute floor
     # is dropped; separation now comes from the two-lane tier model).
     assert _median_gap(impact_code) > _median_gap(impact)
+
+
+# ── f32e: new maint-lane binary reachable_path_without_automated_coverage ────────
+def test_reachable_path_without_automated_coverage_scores_moderate_maint() -> None:
+    # A change that introduces/unmasks a reachable path with NO automated coverage is a
+    # MODERATE (0.6) maintainability consequence. Cold (no churn) × detection amp 0.8:
+    # 0.6 × 0.5 × 0.8 = 0.24 — mirrors the other moderate maint binaries (contract_drift).
+    assert impact_code({"reachable_path_without_automated_coverage": True}) == 0.24
+
+
+def test_529_shaped_untested_degradation_now_scores_nonzero() -> None:
+    # #529's advisory ("new degrade behavior has no test") scored impact 0.0 under code-v2
+    # and went red on main. Under code-v3 the new binary makes it reachable-to-block (> 0).
+    assert impact_code({"reachable_path_without_automated_coverage": True}) > 0.0
+
+
+# f32e held-out edge coverage (abstain / byte-compat / tier-ordering / churn):
+
+
+def test_binary_false_contributes_nothing() -> None:
+    # Abstain-safe: an explicit False (or absence) must NOT inflate impact.
+    assert impact_code({"reachable_path_without_automated_coverage": False}) == 0.0
+
+
+def test_old_sidecars_byte_unchanged() -> None:
+    # code-v2 findings that never carried the new binary score EXACTLY as before.
+    assert impact_code({}) == 0.0
+    assert impact_code({"data_loss_without_recovery": True}) == 0.72
+    assert impact_code({"dead_code": True}) == 0.12
+
+
+def test_new_binary_is_moderate_below_serious() -> None:
+    # MODERATE (0.24 cold) must rank strictly below a SERIOUS maint binary.
+    new = impact_code({"reachable_path_without_automated_coverage": True})
+    serious = impact_code({"safety_net_removal_without_replacement": True})
+    assert new < serious
+
+
+def test_new_binary_scales_with_churn() -> None:
+    # Maint-lane freq multiplier: a hot (churn90=30) reachable-uncovered path scores higher
+    # than a cold one (0.6 x 1.0 x 0.8 = 0.48 vs 0.6 x 0.5 x 0.8 = 0.24).
+    cold = impact_code({"reachable_path_without_automated_coverage": True})
+    hot = impact_code({"reachable_path_without_automated_coverage": True, "churn90": 30})
+    assert hot > cold
