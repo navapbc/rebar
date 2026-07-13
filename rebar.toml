@@ -68,3 +68,26 @@ baseline_dual_write = true
 # after 30 consecutive clean (divergent=0) shadow passes proved the baseline
 # arbitrates identically (GHA reconcile-bridge runs 19:33Z-23:33Z 2026-07-09).
 baseline_consumer_swap = true
+
+[identity]
+
+# Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). The CI workflow
+# `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
+# flags, so its enforcement posture and grandfather boundary come from HERE.
+#
+# require_authenticated: keep OFF until write-signing is actually rolled out (self-identity
+# + identity.signing_key configured on the write paths). While off the merge-gate is
+# advisory — it re-verifies and reports every in-scope event's authorship but exits 0, so
+# it cannot block a landing. The store currently holds 0 signed events, so turning this on
+# before signing is live would fail every push (bug 27ae / sanguine-shockproof-queenant).
+# Flip to true in the SAME change that enables signing. Env override:
+# REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
+require_authenticated = false
+
+# Grandfather boundary — a git ref on the `tickets` tracker branch. Only events whose
+# introducing commit is this ref or a descendant are ENFORCED; everything at/before it is
+# reported but never fails the gate. Pinned to the tracker HEAD at the rollout-prep point
+# so that when require_authenticated is later flipped on, all pre-signing historical events
+# are grandfathered and only newly-signed writes are enforced. Env override:
+# REBAR_IDENTITY_ENFORCE_SINCE.
+enforce_since = "ce3f8bcbe13d37e93a0758f7f73cb3ebeac3b043"
