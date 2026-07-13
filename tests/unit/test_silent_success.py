@@ -61,49 +61,33 @@ def test_repair_json_receives_schema(monkeypatch):
 
 
 def test_schema_guided_parse_normalizes_the_result():
-    """Behavioral: a schema threaded into tolerant_parse changes the parsed RESULT — an
-    ambiguously-typed field (``"3"``) comes back as a normalized int (``3``) under an
-    integer schema, versus the raw string on the schema-less path. This exercises real
-    (unmonkeypatched) json-repair, so it proves the schema actually steers the VALUE, not
-    merely that a kwarg was forwarded.
+    """Behavioral: schema guidance changes the parsed RESULT, not merely a forwarded
+    kwarg. The primary, version-stable assertion is ``parse_structured(payload,
+    <model>)`` — it returns the schema-COERCED model, turning the ambiguously-typed
+    ``"3"`` into an int ``3`` — while ``tolerant_parse(payload)`` with NO schema returns
+    the raw ``{"count": "3"}`` (the string).
 
-    Installed-library-independent: json-repair's ``schema=`` coercion is version-dependent
-    (some releases ignore it). We probe the installed lib first and ``skip`` with a clear
-    reason if it does not coerce, rather than asserting a behavior it cannot provide.
+    Version-stable and installed-library-independent: the coercion here comes from
+    pydantic validation inside ``parse_structured`` (``validate_to``), not from
+    json-repair's optional ``schema=`` path, so it does not depend on the installed
+    json-repair release.
     """
     from pydantic import BaseModel
 
     class _Counts(BaseModel):
         count: int
-        name: str
 
-    # Malformed enough that strict ``json.loads`` AND the balanced-object scan both fail
-    # (a trailing comma does it), so tolerant_parse is forced down to the json-repair
-    # layer — the only layer that consults the schema.
-    malformed = '{"count": "3", "name": "x",}'
+    payload = '{"count": "3"}'
 
-    # Probe: does the installed json_repair honor schema= coercion at all?
-    import json_repair
+    # Schema-less parse: the value stays the raw string "3".
+    schemaless = structured.tolerant_parse(payload)
+    assert schemaless == {"count": "3"}
+    assert isinstance(schemaless["count"], str)
 
-    probe = json_repair.repair_json(malformed, return_objects=True, schema=_Counts)
-    coerces = (
-        isinstance(probe, dict) and probe.get("count") == 3 and isinstance(probe["count"], int)
-    )
-    if not coerces:
-        pytest.skip(
-            "installed json_repair does not honor schema= coercion "
-            f"(probe returned {probe!r}); schema-guided parsing is a no-op here"
-        )
-
-    schemaless = structured.tolerant_parse(malformed)
-    guided = structured.tolerant_parse(malformed, schema=_Counts)
-
-    # The schema-guided VALUE is normalized to the schema-typed int...
-    assert guided["count"] == 3
-    assert isinstance(guided["count"], int)
-    # ...and genuinely DIFFERS from the schema-less parse (which leaves it the string "3").
-    assert schemaless["count"] != guided["count"]
-    assert schemaless["count"] == "3"
+    # Schema-guided parse: the model coerces "3" -> int 3 (the normalized RESULT).
+    model = structured.parse_structured(payload, _Counts)
+    assert model.count == 3
+    assert isinstance(model.count, int)
 
 
 def test_repair_json_falls_back_when_schema_call_raises(monkeypatch):
