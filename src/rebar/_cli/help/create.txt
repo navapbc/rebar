@@ -1,1 +1,2 @@
 Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]
+Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).

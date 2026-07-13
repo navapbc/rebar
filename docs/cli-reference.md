@@ -72,6 +72,7 @@ Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]
 
 ```
 Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]
+Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).
 ```
 
 ### `delete`
@@ -90,6 +91,7 @@ Usage: rebar deps <ticket_id> [--include-archived] [--no-pull]
 
 ```
 Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]
+Title: --title must be non-empty after trimming whitespace (a whitespace-only value is rejected); surrounding whitespace around real content is kept verbatim (not trimmed).
 Tags: --add-tag/--remove-tag add/remove; --set-tags replaces (compiled to a convergent delta, add-wins). --set-tags="" clears only the tags THIS clone has observed (not an authoritative reset).
 ```
 
