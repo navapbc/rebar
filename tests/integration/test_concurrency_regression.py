@@ -1131,18 +1131,23 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
         f"fsck must flag the orphan before repair; got: {pre_repair_fsck}"
     )
 
-    # Remediation on B: rebuild the snapshot from the full log (folds the orphan back in).
-    repair = _engine_run(repo_b, "fsck", "--repair-snapshots", check=False).stdout
-    assert "rebuilt SNAPSHOT" in repair, repair
-    assert "orphan-from-B" in _comment_bodies(repo_b), "repair must recover the orphan on B"
-    # Publish B's rebuilt snapshot so A can reconverge onto it.
-    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b)
-
-    # A reconverges via real fetch/merge; a rebuild is applied if the merge left it stray.
+    # ── Remediation in the AC's prescribed (critical) sequence: A repairs FIRST. ──
+    # A first fetches B's merged-in orphan (real fetch/merge), THEN rebuilds its snapshot
+    # from the full log — folding the orphan back in — and PUBLISHES the repaired commit.
     _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    if "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "fsck", check=False).stdout:
-        _engine_run(repo_a, "fsck", "--repair-snapshots", check=False)
+    _engine_run(repo_a, "list")  # real fetch/merge: A now holds B's orphan
+    a_repair = _engine_run(repo_a, "fsck", "--repair-snapshots", check=False).stdout
+    assert "rebuilt SNAPSHOT" in a_repair, a_repair
+    assert "orphan-from-B" in _comment_bodies(repo_a), "A repair must fold in the orphan"
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+
+    # THEN B fetches+syncs A's repaired snapshot and runs `fsck --repair` to converge.
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")  # real fetch/merge of A's repaired commit
+    _engine_run(repo_b, "fsck", "--repair", check=False)
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b, check=False)
+    assert "orphan-from-B" in _comment_bodies(repo_b), "B must hold the orphan after sync + repair"
+    # A reconverges onto any commit B published during its repair.
     _expire_sync_marker(tracker_a)
     _engine_run(repo_a, "list")
 
