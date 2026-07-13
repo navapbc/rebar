@@ -26,6 +26,15 @@ whole tree, so a full run finishes in a few minutes:
 | `src/rebar/_engine_support/validate.py` | repo-wide tracker-health scoring |
 | `src/rebar/reducer/_processors.py` | per-event reducer processors |
 
+**Scope caveat — the recorded scores below cover ONLY these five behavioral cores.**
+They deliberately do **not** include the concurrency / durability decision logic
+(`src/rebar/_store/{sync,push,lock}.py` and `src/rebar/_commands/compact.py`'s
+fold/rollback path, and the reconciler orchestration), which are subprocess- and
+clone-heavy and were left out of the current `only_mutate` set to keep a full run to a
+few minutes. So a high mapped score here says nothing about mutation coverage of the
+fold/rollback, remote-append, or stale-owner/reclamation paths — a selective expansion
+onto those modules is tracked separately (story 25aa).
+
 The test selection (`pytest_add_cli_args_test_selection`) is scoped to the tests
 that exercise these cores, so each mutant is evaluated against a small, fast suite
 rather than the full ~5k-test run. The per-module mapping is:

@@ -511,10 +511,13 @@ def test_leaf_behavioral_effect(key, applier, mut_mod, fixture_repo, monkeypatch
 
 
 def test_matrix_covers_every_leaf(applier, mut_mod):
-    """Every (direction, action) in _LEAVES must have a behavioural matrix entry.
+    """SUPPLEMENTAL registry-completeness tripwire — NOT behavioral coverage.
 
-    Derives the expected set FROM _LEAVES so a newly-added leaf with no
-    behavioural coverage fails here (rather than silently shipping untested).
+    Asserts that every (direction, action) in _LEAVES has a matrix *entry*, deriving
+    the expected key set FROM _LEAVES so a newly-added leaf with no entry fails here
+    rather than silently shipping unmapped. This proves the matrix is COMPLETE (no leaf
+    is missing a row); it does NOT exercise or prove any leaf's runtime behavior — the
+    behavioral assertions live in the per-effect tests elsewhere in this module.
     """
     leaf_keys = {(d.value, a.value) for (d, a) in applier._LEAVES}
     matrix_keys = set(_MATRIX)

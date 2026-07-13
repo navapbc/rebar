@@ -143,12 +143,12 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 - [`git`](https://git-scm.com) — required (the store is a git orphan branch +
   worktree). The engine is pure in-process Python; `bash` and `jq` are **not**
   required at runtime.
-- [`flock`](https://github.com/util-linux/util-linux) from **util-linux** —
-  recommended for robust write serialization, but **not strictly required**: it is
-  not on `PATH` by default on macOS (`brew install util-linux`), and when no
-  util-linux `flock` is found rebar falls back to a `mkdir`-based lock
-  automatically. (A non-util-linux `flock` such as BusyBox's is ignored in favor of
-  the fallback.)
+- **No external lock binary is required.** Write serialization uses a two-window
+  lock built entirely from the Python standard library — a `fcntl.flock(LOCK_EX)`
+  advisory lock plus an atomic `mkdir` lock (`src/rebar/_store/lock.py`) — so there
+  is **no dependency on util-linux's `flock` binary** (or any other external tool).
+  The `mkdir` window keeps mutual exclusion holding even where `fcntl.flock` is
+  unreliable (e.g. some network filesystems).
 - [`acli`](https://developer.atlassian.com/cloud/acli/) (Atlassian CLI) — only for
   **live** Jira reconciliation.
 
@@ -194,9 +194,9 @@ See [Install](#install) and [Tests](#tests).
 
 rebar ships from one Python package — PyPI distribution **`nava-rebar`** (the
 import package and commands stay `rebar` / `rebar-mcp`). Pick the channel that
-fits. (System prerequisites in all cases: `git` and `python3` (≥ 3.11); a
-util-linux `flock` is used for write serialization when present, with a `mkdir`
-fallback otherwise; `acli` only for live Jira reconciliation.)
+fits. (System prerequisites in all cases: `git` and `python3` (≥ 3.11); write
+serialization uses a built-in `fcntl.flock` + `mkdir` lock with no external
+binary; `acli` only for live Jira reconciliation.)
 
 ### Homebrew (CLI)
 
