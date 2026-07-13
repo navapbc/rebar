@@ -887,6 +887,30 @@
     "trigger": "a real design choice exists: novel/complex approach, multiple viable mechanisms, or an irreversible/high-blast decision (LLM-routed; skip mechanical tickets)",
     "overlay_routing": "llm"
   },
+  "G7": {
+    "exec": "AGENT",
+    "facet": "parent-containment",
+    "applies_at": {
+      "scope": [
+        "leaf"
+      ],
+      "suppress_types": [
+        "bug",
+        "session_log"
+      ],
+      "require_parent_id": true
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "scope_subset",
+        "check": "The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent AC/success criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding."
+      }
+    ],
+    "routing": "leaf",
+    "context_needs": "the PARENT ticket's plan, read live via the show_ticket tool at runtime (parent_id is in the ticket-graph context) — NOT fed as a snapshot"
+  },
   "T10": {
     "exec": "AGENT",
     "facet": "overlay-infra",

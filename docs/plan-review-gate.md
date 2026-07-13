@@ -160,6 +160,7 @@ and fills a bounded noun-phrase `{subject}`). The built-in registry
 | 10 | foundation/enhancement split | "Deliver {subject} with existing machinery first; make the ideal version a dependent follow-on ticket." |
 | 11 | propagate to children | "Propagate the revision for {subject} to the child tickets." |
 | 12 | generalize the finding | "Generalize {subject} across the rest of the work." |
+| 13 | realign to parent plan | "Realign {subject} to the parent's plan — the parent wins on conflict; if the parent is genuinely wrong, update the PARENT first (which forces its re-review), never silently diverge the leaf." |
 
 **Project-extensible:** a project adds or overrides moves by id via
 `.rebar/plan_review_moves.json` (`{move_id: {name, template}}`; the template must

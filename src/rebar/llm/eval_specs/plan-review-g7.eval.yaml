@@ -1,0 +1,83 @@
+# Standing eval spec for the plan-review LEAF criterion G7 (leaf-parent containment; epic
+# unrational-expansive-catfish / child d4cf). G7 fires on the CLAIM-gating review of a leaf ticket
+# WITH a parent and checks the leaf's declared scope is a SUBSET of its parent's plan (parent wins
+# on conflict), mapping a divergence onto the `divergent_implementation` plan axis.
+#
+# This is the SEMANTIC fixture set for G7 (the AGENT-criterion convention used by G3/G4 in
+# plan-review-container.eval.yaml — LLM-criterion semantics are validated by a gated, path-scoped
+# eval, not by tests/ unit tests, because the judgment is the model's). It exercises the three
+# scenarios d4cf's AC names: a leaf that consistently NARROWS its parent PASSES (no finding); a leaf
+# that ADDS an out-of-parent-scope deliverable FIRES; a leaf that CONTRADICTS a parent AC FIRES.
+# Run offline shape-check: `rebar prompt eval plan-review-g7`. A live model run needs the [eval]
+# extra + credentials (the gated, non-blocking semantic eval — see eval_specs/README.plan-review.md).
+prompt: plan-review-G7
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+scorers:
+  # Deterministic GATE: the criterion emits a schema-valid finding set (empty on a PASS case, a
+  # divergent_implementation finding on a fire case) — scored independently of judge polarity.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates against plan_review_findings: a fire case surfaces at least one G7 finding
+      mapped to the divergent_implementation axis; a pass (narrowing) case surfaces none.
+
+  # LLM-judge REPORT only (cross-family grader; no self-grading).
+  - type: llm-judge
+    name: containment_grounded_against_parent
+    gates: false
+    threshold: 0.7
+    pointwise: true
+    rubric: >
+      Score 0..1 whether the G7 verdict is grounded against the PARENT's plan: a fire is justified
+      ONLY when the leaf delivers something outside the parent's declared scope, contradicts a
+      parent acceptance/success criterion, or redefines a parent deliverable; a leaf that merely
+      does PART of the parent (consistent narrowing) must NOT fire. Length-neutral; a fire
+      manufactured from a benign narrowing scores low.
+    grader:
+      model: openai:gpt-4o-2024-08-06
+      temperature: 0
+      seed: 21
+      snapshot: "2024-08-06"
+
+# The labeled case set: `expect: finding` = G7 SHOULD fire (recall); `expect: pass` = a GOOD
+# (narrowing) case G7 must NOT fire on (false-fire). Each input is a parent/leaf pair; G7 fetches
+# the parent via show_ticket at runtime and applies the parent-wins subset check.
+dataset:
+  # ── narrowing → PASS (the leaf is a faithful subset of the parent; no finding) ──────────────
+  - id: G7-P-consistent-narrowing
+    corpus: rebar
+    criterion: G7
+    expect: pass
+    note: consistent-narrowing
+    input: >
+      PARENT (epic): "Add a code-drift-refresh probe path AND make it the default AND sweep all
+      default-off framing from docs." LEAF (task): "Flip verify.progressive_drift_refresh to
+      default True in _config_schema.py and add the default-on behavioral test." The leaf delivers
+      a coherent SUBSET of the parent (one of its named deliverables), narrows nothing out of
+      scope, and contradicts no parent criterion. G7 must NOT fire — consistent narrowing is fine.
+  # ── exceeding → FIRES (the leaf delivers something outside the parent's scope) ───────────────
+  - id: G7-R-out-of-parent-scope
+    corpus: rebar
+    criterion: G7
+    expect: finding
+    note: out-of-parent-scope-deliverable
+    input: >
+      PARENT (story): "Derive the code-review block threshold from the adjudicated code-v2 corpus
+      and commit the derivation script + artifact." LEAF (task): "Derive the threshold AND ALSO
+      flip the `security` criterion to blocking in criteria_routing.json." The leaf ADDS a
+      deliverable (enabling blocking) the parent's plan does not contain and explicitly leaves to a
+      sibling. G7 SHOULD fire (divergent_implementation): a leaf delivering out of the parent's scope.
+  # ── contradicting → FIRES (the leaf contradicts a parent acceptance criterion) ───────────────
+  - id: G7-R-contradicts-parent-ac
+    corpus: rebar
+    criterion: G7
+    expect: finding
+    note: contradicts-parent-ac
+    input: >
+      PARENT (epic) AC: "Agent guidance no longer MANDATES advisory remediation (loosened to
+      judgment, NOT reversed)." LEAF (task): "Update the skill docs to REQUIRE remediating ALL
+      valid advisories before claiming." The leaf's deliverable directly CONTRADICTS the parent's
+      acceptance criterion (mandate vs judgment). G7 SHOULD fire: the parent wins on conflict.
