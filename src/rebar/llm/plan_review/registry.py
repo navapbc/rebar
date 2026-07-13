@@ -70,7 +70,7 @@ CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6"})
 # graph (one child at a time). T-overlays that depend on what the code actually
 # does are agent-tier too.
 AGENT_TIER = frozenset(
-    {"G1G2", "E4", "A1", "G6", "G3", "G4", "T1", "T3", "T5c", "T8", "T10", "T11"}
+    {"G1G2", "E4", "A1", "G6", "G3", "G4", "G7", "T1", "T3", "T5c", "T8", "T10", "T11"}
 )
 
 # The canonical v4 §5 registry — the completeness guard's authority. The DET floor
@@ -93,6 +93,7 @@ CANONICAL_LLM = frozenset(
         "A1",
         "G5",
         "G6",
+        "G7",
         "ISF",
         # Cheap 1-TURN provenance finder (epic cite-stone-sea / WS2) — hedged-requirement
         # signal feeding Pass-2's committed_work_relies_on_unbacked_claim. See ADR 0033.
@@ -312,6 +313,7 @@ def applies(
     crit: dict[str, Any],
     *,
     has_children: bool = False,
+    has_parent: bool = False,
     ticket_type: str | None = None,
     plan: str = "",
 ) -> bool:
@@ -330,6 +332,10 @@ def applies(
     scope = ap.get("scope") or ["container", "leaf"]
     node = "container" if has_children else "leaf"
     if node not in scope:
+        return False
+    # `require_parent_id` (G7): a criterion that only runs on a ticket WITH a parent
+    # (e.g. leaf-parent-containment). Absent/false ⇒ no parent requirement.
+    if ap.get("require_parent_id") and not has_parent:
         return False
     for cond in ap.get("suppress_when") or []:
         if cond == "test_task" and is_test_task(plan):
