@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -78,6 +79,25 @@ def _snapshot_strip_keys(emit_legacy_mirror: bool) -> set[str]:
     if not emit_legacy_mirror:
         keys.add("signature")
     return keys
+
+
+def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
+    """Test-only failpoint (inert in production). When the environment variable
+    ``REBAR_TEST_COMPACT_RENAME_BARRIER`` names a directory, pause after the FIRST
+    source rename (``n_renamed == 1``) so a test can reliably SIGKILL a real
+    compactor process in the mid-retirement window — SNAPSHOT already written, one
+    source ``*.retired``, the rest still active, nothing committed and the write lock
+    still held. The hook writes a ``reached`` marker (its PID) and then blocks until a
+    ``release`` file appears, so the test controls the kill point deterministically
+    with no timing race. Guarded entirely by the env var: unset ⇒ immediate return."""
+    barrier = os.environ.get("REBAR_TEST_COMPACT_RENAME_BARRIER")
+    if not barrier or n_renamed != 1:
+        return
+    bdir = Path(barrier)
+    (bdir / "reached").write_text(str(os.getpid()), encoding="utf-8")
+    release = bdir / "release"
+    while not release.exists():
+        time.sleep(0.02)
 
 
 def _compact_locked(
@@ -224,6 +244,7 @@ def _compact_locked(
                 os.rename(fp, retired)
                 renamed.append((fp, retired))
                 logger.info("compact: retired folded event %s", os.path.basename(fp))
+                _maybe_pause_at_rename_barrier(len(renamed))
         except OSError:
             logger.warning(
                 "compact: failed to retire a folded event for %s — reversing %d rename(s)",

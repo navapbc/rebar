@@ -82,6 +82,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_commands/txn.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py`, `src/rebar/config.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
+| `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/config.py` |  |
 | `RECONCILER_ABSENT_GET_BUDGET` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_engine/rebar_reconciler/binding_store.py`, `src/rebar/_engine/rebar_reconciler/binding_walk.py` |  |
@@ -94,7 +95,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_84 variables._
+_85 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
