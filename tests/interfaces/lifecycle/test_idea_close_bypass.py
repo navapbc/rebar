@@ -5,7 +5,6 @@ undesigned idea"), not a completion — so there is nothing to verify or attest,
 the close must succeed with NONE of the completion gates that guard a real close:
 
 - the bug-close-reason guard (``txn.transition_core``),
-- the opt-in story/epic signature gate (``txn.transition_core``),
 - the completion-verifier / file-impact precheck (``transition_close.close_ticket``).
 
 The one guard that STAYS is the structural open-children guard (integrity, not
@@ -21,10 +20,6 @@ from pathlib import Path
 import pytest
 
 import rebar
-
-
-def _enable_signature_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_signature_for_close = true\n")
 
 
 def _enable_completion_gate(repo: Path) -> None:
@@ -64,27 +59,13 @@ def test_non_idea_bug_still_requires_reason(rebar_repo: Path) -> None:
 
 
 @pytest.mark.parametrize("ttype", ("story", "epic"))
-def test_idea_story_epic_closes_without_signature(rebar_repo: Path, ttype: str) -> None:
-    """With the signature gate ON, an `idea` story/epic still closes unsigned."""
-    _enable_signature_gate(rebar_repo)
-    _commit(rebar_repo)
+def test_idea_story_epic_closes(rebar_repo: Path, ttype: str) -> None:
+    """An `idea` story/epic is a reject/drop and closes cleanly (nothing to verify)."""
     tid = rebar.create_ticket(ttype, f"Rough {ttype} idea", repo_root=str(rebar_repo))
     rebar.transition(tid, "open", "idea", repo_root=str(rebar_repo))
 
     out = rebar.transition(tid, "idea", "closed", repo_root=str(rebar_repo))
     assert out["to"] == "closed"
-
-
-def test_non_idea_story_still_gated_by_signature(rebar_repo: Path) -> None:
-    """Regression: with the gate ON, a normal story close without a signature fails."""
-    _enable_signature_gate(rebar_repo)
-    _commit(rebar_repo)
-    tid = rebar.create_ticket("story", "Real story", repo_root=str(rebar_repo))
-    rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
-
-    with pytest.raises(rebar.RebarError):
-        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
-    assert _status(tid, rebar_repo) != "closed"
 
 
 def test_idea_parent_open_children_guard_still_holds(rebar_repo: Path) -> None:
