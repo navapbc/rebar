@@ -132,7 +132,9 @@ Every decision emulates a proven, actively-maintained OSS workflow rather than i
    endpoint** exposes bot liveness (`heartbeat_age_s`) and queue state, the Zuul `zuul-web` /
    Prow-Tide `deck` pattern. This resolves the "file vs metric" ambiguity: a local heartbeat file
    backs the in-container HEALTHCHECK, while the status endpoint surfaces liveness to a remote
-   `land` invocation.
+   `land` invocation. The status server listens on the container's fixed port 8080, published on
+   the host loopback as **8081** (`AUTOLANDER_PORT`) — 8080 on the host is Gerrit's — and nginx
+   routes `GET /autolander/status` to it.
 
 3. **CQ-reset hand-back.** On a rebase conflict, a post-rebase `Verified -1`, or exhaustion of the
    bounded re-drive, the lander **removes `Autosubmit` from every stack member + posts a comment

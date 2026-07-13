@@ -126,8 +126,8 @@ services:
     ports:
       # Publish the read-only status endpoint on host loopback for the HOST nginx
       # /autolander/status proxy. Host port is single-sourced from .env
-      # (AUTOLANDER_PORT, default 8080); container port is fixed at 8080 (loop.py).
-      - "127.0.0.1:${AUTOLANDER_PORT:-8080}:8080"
+      # (AUTOLANDER_PORT, default 8081 — Gerrit owns host 8080); container port is fixed at 8080 (loop.py).
+      - "127.0.0.1:${AUTOLANDER_PORT:-8081}:8080"
     volumes:
       # Persist the auto-lander state (heartbeat, emergency-stop sentinel, recovery.json,
       # the single-instance lock) across container recreation, so a crash-restart resumes

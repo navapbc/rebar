@@ -21,7 +21,7 @@
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
 # to their presence.
-# Plus non-secrets: REVIEW_BOT_PORT=8000 and AUTOLANDER_PORT=8080 (single-source the
+# Plus non-secrets: REVIEW_BOT_PORT=8000 and AUTOLANDER_PORT=8081 (8080 is Gerrit's; single-source the
 # ports for compose + nginx).
 # (The other /rebar/prod/* params — ssh host key, replication deploy key, alert
 # endpoint — are consumed elsewhere, not by these containers, so they are not fetched.)
@@ -111,7 +111,7 @@ chmod 600 "${tmp}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
   echo "AUTOLANDER_GERRIT_TOKEN=${autolander_gerrit_token}"
   echo "REVIEW_BOT_PORT=8000"
-  echo "AUTOLANDER_PORT=8080"
+  echo "AUTOLANDER_PORT=8081"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"
 chmod 600 "${ENV_FILE}"
