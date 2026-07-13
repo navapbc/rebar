@@ -94,7 +94,7 @@ reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
 # OPTIONAL: the auto-lander's Gerrit HTTP password (epic f1fa / S5). Blank until the operator
 # populates the SSM slot; the autolander container boots + heartbeats either way, and landing
 # (rebase-on-behalf + ancestor-atomic submit) starts working once it is set.
-autolander_gerrit_token="$(get_param_optional autolander-gerrit-token)"
+autolander_gerrit_token="$(get_param autolander-gerrit-token)"
 
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
