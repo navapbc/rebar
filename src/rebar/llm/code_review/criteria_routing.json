@@ -2,10 +2,16 @@
   "_comment": "Committed routing index for the code-review gate (analog of plan_review/criteria_routing.json). Top-level _-prefixed keys are stripped by registry.routing_index(). The secret-detection / high-critical-security keys ship blocking_enabled=false (advisory in v1); WS5 flips exactly those two to true (the deterministic gitleaks/semgrep detectors, fail-closed). An overlay's optional nit_suppressed:true (story grusome-uncheerful-nematode) demotes an advisory finding whose criteria are ALL nit-suppressed from the surfaced set to dropped (code_review_decide), reducing docs/llm-prompts nit noise; it does not affect blocking.",
   "security": {
     "exec": "AGENT",
-    "applies_to": ["**/auth*", "**/*secret*", "**/security/**", "**/signing*", "**/*cred*"],
-    "default_posture": "advisory",
-    "block_threshold": 0.95,
-    "blocking_enabled": false
+    "applies_to": [
+      "**/auth*",
+      "**/*secret*",
+      "**/security/**",
+      "**/signing*",
+      "**/*cred*"
+    ],
+    "default_posture": "blocking",
+    "block_threshold": 0.54,
+    "blocking_enabled": true
   },
   "performance": {
     "exec": "AGENT",
@@ -16,28 +22,45 @@
   },
   "i18n": {
     "exec": "1-TURN",
-    "applies_to": ["**/locale/**", "**/*i18n*", "**/translations/**"],
+    "applies_to": [
+      "**/locale/**",
+      "**/*i18n*",
+      "**/translations/**"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "a11y": {
     "exec": "1-TURN",
-    "applies_to": ["**/*.html", "**/*.jsx", "**/*.tsx", "**/templates/**"],
+    "applies_to": [
+      "**/*.html",
+      "**/*.jsx",
+      "**/*.tsx",
+      "**/templates/**"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "db-migrations": {
     "exec": "AGENT",
-    "applies_to": ["**/migrations/**", "**/alembic/**", "**/*schema*.sql"],
+    "applies_to": [
+      "**/migrations/**",
+      "**/alembic/**",
+      "**/*schema*.sql"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "docs": {
     "exec": "1-TURN",
-    "applies_to": ["**/*.md", "docs/**", "**/README*"],
+    "applies_to": [
+      "**/*.md",
+      "docs/**",
+      "**/README*"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false,
@@ -45,42 +68,70 @@
   },
   "supply-chain": {
     "exec": "1-TURN",
-    "applies_to": ["**/requirements*.txt", "**/pyproject.toml", "**/package*.json", "**/*.lock", "**/Pipfile*"],
+    "applies_to": [
+      "**/requirements*.txt",
+      "**/pyproject.toml",
+      "**/package*.json",
+      "**/*.lock",
+      "**/Pipfile*"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "api-compat": {
     "exec": "AGENT",
-    "applies_to": ["**/*api*", "**/schemas/**", "**/*.proto", "**/cli*", "**/mcp_server*"],
+    "applies_to": [
+      "**/*api*",
+      "**/schemas/**",
+      "**/*.proto",
+      "**/cli*",
+      "**/mcp_server*"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "iac": {
     "exec": "AGENT",
-    "applies_to": ["**/*.tf", "**/*.tfvars", "**/k8s/**", "**/helm/**", "**/ansible/**", "**/Dockerfile*"],
+    "applies_to": [
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/k8s/**",
+      "**/helm/**",
+      "**/ansible/**",
+      "**/Dockerfile*"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "tests": {
     "exec": "AGENT",
-    "applies_to": ["**/test_*.py", "**/*_test.py", "**/tests/**"],
+    "applies_to": [
+      "**/test_*.py",
+      "**/*_test.py",
+      "**/tests/**"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
   "llm-prompts": {
     "exec": "AGENT",
-    "applies_to": ["**/reviewers/**", "**/prompts*", "**/*.prompt", "**/schemas/*.schema.json"],
+    "applies_to": [
+      "**/reviewers/**",
+      "**/prompts*",
+      "**/*.prompt",
+      "**/schemas/*.schema.json"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false,
     "nit_suppressed": true
   },
   "deletion-impact": {
-    "_comment": "story f983: CONTENT-triggered (not glob) overlay — registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ADVISORY (blocking_enabled=false): a now-dangling reference is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
+    "_comment": "story f983: CONTENT-triggered (not glob) overlay \u2014 registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ADVISORY (blocking_enabled=false): a now-dangling reference is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "advisory",
@@ -88,7 +139,7 @@
     "blocking_enabled": false
   },
   "scope-intent": {
-    "_comment": "story 3c5d: CONTENT-triggered (not glob) overlay — fires ONLY when >=1 ticket resolves from the commit's rebar-ticket: trailer, so applies_to is empty. It reviews the diff against the UNION scope/AC of those tickets (injected as its per-overlay ticket_context; base + every other overlay stay ticket-blind). ADVISORY (blocking_enabled=false): scope drift is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
+    "_comment": "story 3c5d: CONTENT-triggered (not glob) overlay \u2014 fires ONLY when >=1 ticket resolves from the commit's rebar-ticket: trailer, so applies_to is empty. It reviews the diff against the UNION scope/AC of those tickets (injected as its per-overlay ticket_context; base + every other overlay stay ticket-blind). ADVISORY (blocking_enabled=false): scope drift is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "advisory",
@@ -101,7 +152,9 @@
     "default_posture": "blocking",
     "block_threshold": 0.5,
     "blocking_enabled": true,
-    "detector": { "id": "rebar.builtin.security.secrets-gitleaks" },
+    "detector": {
+      "id": "rebar.builtin.security.secrets-gitleaks"
+    },
     "fail_mode": "closed"
   },
   "high-critical-security": {
@@ -110,27 +163,40 @@
     "default_posture": "blocking",
     "block_threshold": 0.5,
     "blocking_enabled": true,
-    "detector": { "id_prefix": "rebar.builtin.security." },
+    "detector": {
+      "id_prefix": "rebar.builtin.security."
+    },
     "fail_mode": "closed"
   },
   "public-exposure-without-auth": {
-    "_comment": "task 830a: deterministic public-exposure signals (0.0.0.0/0 ingress, public IP, internet-facing LB, non-loopback compose bind) on the *.tf / docker-compose diff — the code-level counterpart to plan-review T10. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding, since boundary controls (gateway/mTLS/network policy) may live outside the diff. NOT under the fail-closed rebar.builtin.security. prefix.",
+    "_comment": "task 830a: deterministic public-exposure signals (0.0.0.0/0 ingress, public IP, internet-facing LB, non-loopback compose bind) on the *.tf / docker-compose diff \u2014 the code-level counterpart to plan-review T10. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding, since boundary controls (gateway/mTLS/network policy) may live outside the diff. NOT under the fail-closed rebar.builtin.security. prefix.",
     "exec": "DET",
-    "applies_to": ["**/*.tf", "**/*.tfvars", "**/docker-compose*.yml", "**/docker-compose*.yaml", "**/compose*.yml", "**/compose*.yaml"],
+    "applies_to": [
+      "**/*.tf",
+      "**/*.tfvars",
+      "**/docker-compose*.yml",
+      "**/docker-compose*.yaml",
+      "**/compose*.yml",
+      "**/compose*.yaml"
+    ],
     "default_posture": "advisory",
     "block_threshold": 0.5,
     "blocking_enabled": false,
-    "detector": { "id_prefix": "rebar.builtin.iac.public-exposure." },
+    "detector": {
+      "id_prefix": "rebar.builtin.iac.public-exposure."
+    },
     "fail_mode": "open"
   },
   "conflict-markers": {
-    "_comment": "story da25: deterministic, polyglot detector for leftover VCS merge-conflict markers (<<<<<<< / >>>>>>> / diff3 |||||||) committed into source. Runs in opengrep `generic` mode over every file type. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding; an abstain (no engine on PATH) never blocks — no new BLOCK source. applies_to empty so it considers every changed file (matches are diff-scoped by location in run_detectors). NOT under the fail-closed rebar.builtin.security. prefix. The FP-prone bare `=======` separator is deliberately NOT matched.",
+    "_comment": "story da25: deterministic, polyglot detector for leftover VCS merge-conflict markers (<<<<<<< / >>>>>>> / diff3 |||||||) committed into source. Runs in opengrep `generic` mode over every file type. ADVISORY (blocking_enabled=false, fail_mode=open): a match is a coach-not-block coverage finding; an abstain (no engine on PATH) never blocks \u2014 no new BLOCK source. applies_to empty so it considers every changed file (matches are diff-scoped by location in run_detectors). NOT under the fail-closed rebar.builtin.security. prefix. The FP-prone bare `=======` separator is deliberately NOT matched.",
     "exec": "DET",
     "applies_to": [],
     "default_posture": "advisory",
     "block_threshold": 0.5,
     "blocking_enabled": false,
-    "detector": { "id_prefix": "rebar.builtin.smell.conflict-markers." },
+    "detector": {
+      "id_prefix": "rebar.builtin.smell.conflict-markers."
+    },
     "fail_mode": "open"
   }
 }
