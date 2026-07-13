@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1159,3 +1160,183 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     assert "orphan-from-B" in _comment_bodies(repo_b)
     assert b_uuid in _committed_files(tracker_a), f"B's comment {b_uuid} lost on A"
     assert b_uuid in _committed_files(tracker_b), f"B's comment {b_uuid} lost on B"
+
+
+# ──────────── Parent-first claim cascade cross-agent races (story f476) ───────────
+# The single-agent parent-first cascade (claiming an open child pulls its still-open
+# parent into progress under the same assignee) is covered elsewhere. The two tests
+# below add the CROSS-agent race coverage that Concurrency Doctrine sub-cases (a)
+# [same-tracker, two processes] and (b) [two offline clones] describe.
+def _last_id(cp: subprocess.CompletedProcess) -> str:
+    """The ticket id a `create` prints on the last stdout line (warnings go to stderr)."""
+    return cp.stdout.strip().splitlines()[-1]
+
+
+def _status_assignee(repo: Path, ticket_id: str) -> tuple[str, str | None]:
+    d = json.loads(_engine_run(repo, "show", ticket_id).stdout)
+    return d.get("status", ""), d.get("assignee")
+
+
+def _dirs_with_blob(tracker: Path, needle: str) -> set[str]:
+    """Ticket-dir ids whose committed union holds an event file containing *needle*."""
+    listing = _git("ls-tree", "-r", "--name-only", "tickets", cwd=tracker).stdout
+    hit: set[str] = set()
+    for path in listing.splitlines():
+        if not path.endswith(".json"):
+            continue
+        if needle in _git("show", f"tickets:{path}", cwd=tracker).stdout:
+            hit.add(path.split("/")[0])
+    return hit
+
+
+def test_parent_cascade_same_tracker_race_winner_takes_parent_loser_aborts(two_clones):
+    """Same-tracker parent-cascade race (Concurrency Doctrine sub-case a). A parent
+    story P (open) with two open children C1/C2; two REAL processes concurrently claim
+    *different* children on the ONE tracker. Each child needs only its own single
+    claim — the sole point of contention is P's ``open -> in_progress`` driven by the
+    parent-first cascade.
+
+    Contract asserted here: the two claims of DIFFERENT children never truly conflict,
+    so BOTH succeed (exit 0) and BOTH children end ``in_progress`` under their own
+    assignee. The only real contention is P's ``open -> in_progress``: whichever
+    cascade commits P first wins its ownership; the other process, arriving after the
+    lock shows P already ``in_progress``, does NOT re-cascade — it just claims its own
+    child (matching the single-agent contract "parent already in_progress -> only the
+    requested ticket moves"). Which agent's name lands on P is nondeterministic (either
+    is valid); everything else is deterministic.
+
+    Regression note: this pins the fix for the cascade TOCTOU where a concurrent
+    different-child claim used to abort with exit 10 because the parent-claim decision
+    was taken on an unlocked, stale ``open`` read and the locked parent claim then
+    rejected the second cascade. The cascade now treats a parent that a peer has
+    already progressed as a benign no-op and proceeds to claim the child.
+    """
+    _remote, repo_a, _repo_b, _seed = two_clones
+    parent = _last_id(_engine_run(repo_a, "create", "story", "cascade race parent"))
+    c1 = _last_id(_engine_run(repo_a, "create", "task", "cascade child one", "--parent", parent))
+    c2 = _last_id(_engine_run(repo_a, "create", "task", "cascade child two", "--parent", parent))
+
+    env = _engine.engine_env(repo_root=str(repo_a))
+
+    def _spawn(child: str, who: str) -> subprocess.Popen:
+        return subprocess.Popen(
+            [sys.executable, "-m", "rebar.cli", "claim", child, f"--assignee={who}"],
+            cwd=str(repo_a),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    p1 = _spawn(c1, "alice")
+    p2 = _spawn(c2, "bob")
+    _o1, e1 = p1.communicate()
+    _o2, e2 = p2.communicate()
+
+    # Different children never conflict: BOTH processes succeed.
+    assert p1.returncode == 0, (p1.returncode, e1)
+    assert p2.returncode == 0, (p2.returncode, e2)
+
+    # Each child is claimed under its own assignee (the lock serialized the shared parent
+    # cascade; neither child claim was aborted).
+    assert _status_assignee(repo_a, c1) == ("in_progress", "alice"), _status_assignee(repo_a, c1)
+    assert _status_assignee(repo_a, c2) == ("in_progress", "bob"), _status_assignee(repo_a, c2)
+
+    # P lands in_progress, owned by whichever cascade committed it first (either is valid).
+    p_status, p_assignee = _status_assignee(repo_a, parent)
+    assert p_status == "in_progress", p_status
+    assert p_assignee in {"alice", "bob"}, p_assignee
+
+
+def test_parent_cascade_two_clone_offline_race_forks_resolved_independently(two_clones):
+    """Two-clone offline parent-cascade race (Concurrency Doctrine sub-case b), modeled
+    on ``test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced`` but driven
+    THROUGH the parent-first cascade and onto the SAME child.
+
+    A (FAST clock) claims child C → cascades to claim parent P (both under alice).
+    B (SLOW clock) claims the SAME C → cascades to claim P (both under bob). Both
+    succeed locally because each clone is fully offline and never witnesses the other.
+    After reconvergence BOTH P and C are STATUS forks, each resolved INDEPENDENTLY by
+    the HLC/UUID tie-break to the FAST-clock winner (alice). The loser's (bob)
+    already-written claim events are LEFT IN PLACE (orphaned under bob), never rolled
+    back or tombstoned — convergence is by tie-break + the ``STATUS_FORK_RESOLVED``
+    signal, not by deletion.
+    """
+    remote, repo_a, repo_b, _seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # Parent + child created on A (online → auto-push); B syncs and sees both as open.
+    parent = _last_id(_engine_run(repo_a, "create", "story", "offline cascade parent"))
+    child = _last_id(
+        _engine_run(repo_a, "create", "task", "offline cascade child", "--parent", parent)
+    )
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+    assert _status_assignee(repo_b, parent)[0] == "open", "B must see parent open pre-race"
+    assert _status_assignee(repo_b, child)[0] == "open", "B must see child open pre-race"
+
+    # Diverge offline; prime each read marker so neither re-syncs during the claims.
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+    _engine_run(repo_a, "list")
+    _engine_run(repo_b, "list")
+
+    # Both claim the SAME child; the cascade pulls the open parent into progress too.
+    a = _engine_run_at(repo_a, "claim", child, "--assignee=alice", now=_FAST_NOW)
+    b = _engine_run_at(repo_b, "claim", child, "--assignee=bob", now=_SLOW_NOW)
+    assert a.returncode == 0, a.stderr
+    assert b.returncode == 0, b.stderr
+    # Offline, each clone locally believes it owns BOTH P and C (no contention seen yet).
+    assert _status_assignee(repo_a, parent) == ("in_progress", "alice")
+    assert _status_assignee(repo_a, child) == ("in_progress", "alice")
+    assert _status_assignee(repo_b, parent) == ("in_progress", "bob")
+    assert _status_assignee(repo_b, child) == ("in_progress", "bob")
+
+    # Reconverge: A fast-forwards over the (base) remote; B's next write triggers the
+    # real merge-as-union push that folds in A's already-pushed claims; A read-syncs.
+    _remote_add(tracker_a, remote)
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _remote_add(tracker_b, remote)
+    _engine_run(repo_b, "comment", child, "trigger reconverge push from B")
+    _remote_add(tracker_a, remote)
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+    _expire_sync_marker(tracker_a)
+    _engine_run(repo_a, "list")
+
+    # (1) Deterministic convergence: both clones agree, on the FAST-clock winner (alice),
+    # for BOTH the parent and the child fork.
+    for tid in (parent, child):
+        sa, sb = _status_assignee(repo_a, tid), _status_assignee(repo_b, tid)
+        assert sa == sb, f"{tid} diverged across clones: A={sa} B={sb}"
+        assert sa == ("in_progress", "alice"), f"{tid} did not converge to the FAST winner: {sa}"
+
+    # (2) BOTH P and C surface the resolved fork via show, and the two resolutions are
+    # INDEPENDENT records (the child fork is resolved in its own right — disjoint event
+    # UUIDs from the parent's resolution).
+    p_res = json.loads(_engine_run(repo_b, "show", parent).stdout).get("status_fork_resolutions")
+    c_res = json.loads(_engine_run(repo_b, "show", child).stdout).get("status_fork_resolutions")
+    assert p_res, "parent must surface its resolved fork"
+    assert c_res, "child must surface its OWN resolved fork (resolved independently)"
+    p_uuids = {u for r in p_res for u in (r.get("winner_uuid"), r.get("dropped_uuid")) if u}
+    c_uuids = {u for r in c_res for u in (r.get("winner_uuid"), r.get("dropped_uuid")) if u}
+    assert p_uuids and c_uuids, (p_uuids, c_uuids)
+    assert p_uuids.isdisjoint(c_uuids), f"parent/child forks not independent: {p_uuids} & {c_uuids}"
+
+    # ...and fsck flags BOTH tickets' resolved forks.
+    fsck_out = json.loads(_engine_run(repo_b, "fsck", "--output", "json", check=False).stdout)
+    forked = {
+        f.get("ticket_id")
+        for f in fsck_out.get("issues", [])
+        if f.get("kind") == "status_fork_resolved"
+    }
+    assert {parent, child} <= forked, f"fsck must flag both forks; got {forked}"
+
+    # (3) The loser's (bob) claim is NOT rolled back: bob's assignee claim EVENT still
+    # exists in the committed union under BOTH the parent and child ticket dirs. (The
+    # STATUS fork resolved against bob, but the event file that recorded bob's ownership
+    # is left in place — orphaned, never deleted/tombstoned.)
+    bob_dirs = _dirs_with_blob(tracker_a, '"assignee":"bob"')
+    assert parent in bob_dirs, f"loser's parent claim event was rolled back (dirs={bob_dirs})"
+    assert child in bob_dirs, f"loser's child claim event was rolled back (dirs={bob_dirs})"
