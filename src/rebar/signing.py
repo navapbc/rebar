@@ -520,6 +520,84 @@ def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_roo
     return {**record, "ticket_id": resolved}
 
 
+def sign_opcert_manifest(
+    ticket_id: str,
+    manifest,
+    *,
+    material_fingerprint: str,
+    merged_log_commit: str,
+    key_path: str,
+    principal: str,
+    repo_root=None,
+) -> dict:
+    """Sign a manifest as an ASYMMETRIC op-cert (keystone e4df); append an envelope-bearing
+    SIGNATURE event.
+
+    Builds a DSSE envelope via :func:`rebar.attest.opcert.sign_opcert` binding
+    ``{ticket_id, material_fingerprint, merged_log_commit}``, then appends a SIGNATURE event whose
+    record carries the encoded ``envelope`` + those bound fields + ``algorithm="sshsig"`` and the
+    signed ``manifest`` (first line ``"<kind>: …"`` so the reducer derives the attestation kind) —
+    but NO HMAC ``signature``. The kind-keyed ``attestations`` map then holds an op-cert record the
+    merge-gate (4214) verifies.
+
+    """
+    from rebar._commands._seam import (
+        CommandError,
+        append_event,
+        require_id,
+        require_not_ghost,
+    )
+    from rebar.attest import opcert
+    from rebar.attest.dsse import encode
+    from rebar.reducer._processors import attestation_kind
+
+    if not ticket_id:
+        raise SigningError("Error: ticket_id must be non-empty")
+    steps = parse_manifest(manifest)
+
+    tracker = config.tracker_dir(repo_root)
+    try:
+        resolved = require_id(ticket_id, tracker)
+        require_not_ghost(resolved, tracker)
+    except CommandError as exc:
+        raise SigningError(exc.message, exc.returncode) from None
+
+    # The attestation kind (from the manifest) is bound INTO the signed op-cert subject, so a cert
+    # cannot be filed under / accepted for a different kind than it was signed for (kind-confusion).
+    kind = attestation_kind(steps, {})
+    if kind is None:
+        raise SigningError("Error: op-cert manifest[0] must encode a kind (e.g. 'plan-review: …')")
+    env = opcert.sign_opcert(
+        resolved,
+        material_fingerprint,
+        merged_log_commit,
+        kind=kind,
+        key_path=key_path,
+        principal=principal,
+    )
+    envelope = encode(
+        env.payload_type,
+        env.payload,
+        [{"keyid": s.keyid, "sig": s.sig} for s in env.signatures],
+    )
+    record = {
+        "manifest": steps,
+        "algorithm": "sshsig",
+        "envelope": envelope,
+        "material_fingerprint": material_fingerprint,
+        "merged_log_commit": merged_log_commit,
+        "signed_at": time.time_ns(),
+        # Unsigned routing hint mirroring the manifest-authoritative kind the reducer derives
+        # (the kind is ALSO bound into the signed envelope subject above).
+        "kind": kind,
+    }
+    try:
+        append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
+    except CommandError as exc:
+        raise SigningError(exc.message, exc.returncode) from None
+    return {**record, "ticket_id": resolved}
+
+
 # NOTE: ``retire_attested_pin`` (a write-time clear of the signature on reopen) was REMOVED
 # in epic dark-acme-lumen. Attestation records are now immutable and reopen invalidation is
 # computed on READ via ``state['last_reopened_at']`` + ``plan_review.attest.compute_validity``
