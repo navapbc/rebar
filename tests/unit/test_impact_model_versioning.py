@@ -31,7 +31,7 @@ def test_code_review_payload_stamps_version() -> None:
     from rebar.llm.code_review import sidecar
 
     payload = sidecar.build_payload({"verdict": "PASS"}, target_ticket="A1")
-    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v2"
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v3"
 
 
 def test_plan_and_code_versions_are_distinct() -> None:
@@ -144,3 +144,10 @@ def test_ab_gate_is_regression_detecting() -> None:
     # The real model passes on the same rows.
     _, _, _, passes_real = ab.gate(rows)
     assert passes_real is True
+
+
+def test_code_review_impact_model_version_is_v3() -> None:
+    # f32e: adding a maint-lane binary is a vocabulary change → IMPACT_MODEL_VERSION bump.
+    from rebar.llm.code_review import sidecar as code_sc
+
+    assert code_sc.IMPACT_MODEL_VERSION == "code-v3"
