@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 
-__all__ = ["gate_enabled", "plan_review_precheck", "resolve_signature_gate"]
+__all__ = ["gate_enabled", "plan_review_precheck"]
 
 logger = logging.getLogger(__name__)
 
@@ -54,31 +54,6 @@ def gate_enabled(
             file=sys.stderr,
         )
         return False
-
-
-def resolve_signature_gate(cfg_root: str) -> tuple[bool, str | None]:
-    """Resolve the ``verify.require_signature_for_close`` close-gate flag, failing CLOSED.
-
-    The signature close gate (``_commands.txn._signature_gate``) is the STRONGER of the opt-in
-    gates: unlike :func:`gate_enabled` (which fails OPEN — an unreadable config *skips* the gate),
-    a present-but-unreadable config here must NEVER silently disable the gate — it *requires* a
-    signature (fail-CLOSED). An ABSENT config returns the default (gate off), the intended opt-out.
-
-    Returns ``(require_sig, config_error)``. On a :class:`ConfigError` it returns
-    ``(True, "<error text>")`` WITHOUT printing — the caller emits the fail-closed warning once it
-    knows the ticket_type, so the message names the right ticket and fires only when the gate
-    actually applies (a story/epic close). Returning the flag here (rather than reading the config
-    inside ``_signature_gate``) lets ``transition_core`` resolve it OUTSIDE the write lock — like
-    the completion gate, whose flag is resolved before the locked core — while the actual signature
-    CHECK (which needs the fresh under-lock state) stays inside the lock. This keeps the
-    fail-closed posture in the gates seam, once, so it can't drift from the other gates.
-    """
-    from rebar.config import ConfigError, load_config
-
-    try:
-        return bool(load_config(cfg_root).verify.require_signature_for_close), None
-    except ConfigError as exc:
-        return True, str(exc)
 
 
 def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:
