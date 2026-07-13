@@ -587,7 +587,7 @@ def run_loop(*, state_dir, gerrit, marker_store, status_port=8080):  # pragma: n
     return 0
 
 
-def _drive_candidate(gerrit, wip, cand, marker_store, root):  # pragma: no cover
+def _drive_candidate(gerrit, wip, cand, marker_store, root):
     """Drive one selected candidate to a terminal outcome, composing the tested S2/S3 pieces.
 
     SUBMIT-FIRST, rebase-on-conflict (do NOT rebase upfront): a selected change is already
@@ -620,7 +620,13 @@ def _drive_candidate(gerrit, wip, cand, marker_store, root):  # pragma: no cover
             failure.handle_rebase_conflict(gerrit, wip, marker_store, stack_id=cand.change_id)
             return
         wip.phase = PHASE_REBASING
-        route_rebase(gerrit, cand)  # rebase onto the new tip (on behalf of the uploader)
+        try:
+            route_rebase(gerrit, cand)  # rebase onto the new tip (on behalf of the uploader)
+        except GerritError:
+            # POST /rebase 409 = a textual rebase CONFLICT (never allow_conflicts): record
+            # needs_rebase + remove Autosubmit from the whole stack, hand back to the owner.
+            failure.handle_rebase_conflict(gerrit, wip, marker_store, stack_id=cand.change_id)
+            return
         wip.phase = PHASE_AWAITING_VERIFIED
         wip.re_drive_count = attempt + 1
         if not await_fresh_verified(gerrit, wip):  # refreshes tested_shas on success
@@ -632,10 +638,31 @@ def _drive_candidate(gerrit, wip, cand, marker_store, root):  # pragma: no cover
                 return
 
 
-def _terminal_verified_vote(gerrit, wip):  # pragma: no cover
-    """Read the tip's current Verified vote as an int (+1/-1/0) for the auto-recheck await."""
-    labels = gerrit.get_change(wip.change_id, ["DETAILED_LABELS"]).get("labels", {})
-    return 1 if has_fresh_verified({"labels": labels}) else -1
+def _terminal_verified_vote(
+    gerrit, wip, *, time_fn=None, sleep_fn=None, timeout_s=None, poll_s=None
+):
+    """Await the tip's TERMINAL Verified vote for the auto-recheck. The `gerrit-verify`
+    clear-vote job resets `Verified -> 0` at run start; this MUST be treated as
+    *recheck-running*, NOT as a result — so a transient `0`/absent vote keeps polling. Returns
+    `+1` on a terminal approved, `-1` on a terminal rejected, and `-1` on timeout (give up ->
+    hand back). `time_fn`/`sleep_fn` are injectable for tests."""
+    time_fn = time_fn or time.monotonic
+    sleep_fn = sleep_fn or time.sleep
+    timeout_s = MEMBER_VERIFIED_TIMEOUT_S if timeout_s is None else timeout_s
+    poll_s = VERIFIED_POLL_INTERVAL_S if poll_s is None else poll_s
+    start = time_fn()
+    while True:
+        verified = (gerrit.get_change(wip.change_id, ["DETAILED_LABELS"]).get("labels") or {}).get(
+            "Verified"
+        ) or {}
+        if verified.get("approved"):
+            return 1
+        if verified.get("rejected"):
+            return -1
+        # transient 0 / no terminal result yet -> the recheck is still running; keep waiting.
+        if time_fn() - start >= timeout_s:
+            return -1
+        sleep_fn(poll_s)
 
 
 def main(argv=None):  # pragma: no cover
