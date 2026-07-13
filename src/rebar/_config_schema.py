@@ -242,10 +242,9 @@ class VerifyConfig:
 
     # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
     # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,
-    # REFRESH the attestation instead of a full re-review. Default ON (operator-authorized
-    # 2026-07-12, epic a37b, on the measured token/latency saving); an explicit false is the
-    # back-out and restores the full-re-review path.
-    progressive_drift_refresh: bool = True
+    # REFRESH the attestation instead of a full re-review. Always on (operator-authorized
+    # 2026-07-12, epic a37b, on the measured token/latency saving); the off switch was
+    # retired in story 4cdf.
 
     # Token-budget headroom for the Pass-2 verify chunker (epic solid-timer-unison WS3): the
     # fraction of the verifier model's context window a single verify request may use before
@@ -254,12 +253,11 @@ class VerifyConfig:
     # aggregate call; this only triggers on a pathological huge-findings ticket.
     verify_window_headroom: float = 0.8
 
-    # Convergent plan-edit re-review (epic 7d43, child ec89): when true, a re-review of an
-    # EDITED plan whose reviewed CODE is unchanged runs in remediation mode — the full criteria
-    # set still runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor,
-    # child cc5b). Default ON (operator-authorized on field evidence, 2026-07-11); an explicit
-    # false is the back-out and restores byte-identical full-review behavior.
-    remediation_mode: bool = True
+    # Convergent plan-edit re-review (epic 7d43, child ec89): a re-review of an EDITED plan whose
+    # reviewed CODE is unchanged always runs in remediation mode — the full criteria set still
+    # runs, but Pass-3 may drop only NOVEL, low-priority findings (the rising floor, child cc5b).
+    # Always on (operator-authorized on field evidence, 2026-07-11); the off switch was retired
+    # in story 4cdf.
     # The freshness window (minutes) for remediation mode: a re-review is eligible only when the
     # LAST review of any kind was within this many minutes, measured from that last review and
     # RESET on each review (so the loop persists across a series of edits and lapses to a normal
@@ -273,12 +271,10 @@ class VerifyConfig:
     # scripts/plan_review_impact_distribution.py). Both config-overridable.
     novelty_drop_threshold: float = 0.7
     novelty_priority_floor: float = 0.4
-    # The EVIDENCE GATE for the rising floor (shared with the code-review region-gated floor,
-    # ADR 0037). Default True (operator-authorized on field evidence, 2026-07-11, in lieu of
-    # 150b's `discriminates_novelty` eval); it remains a third gate on top of remediation_mode +
-    # per-review eligibility. An explicit false is the back-out: the floor goes inert and never
-    # drops a finding.
-    novelty_drop_active: bool = True
+    # The rising floor is always active (shared with the code-review region-gated floor, ADR 0037;
+    # operator-authorized on field evidence, 2026-07-11, in lieu of 150b's `discriminates_novelty`
+    # eval). It still runs subject to remediation eligibility + per-review self-gates; the off
+    # switch (`novelty_drop_active`) was retired in story 4cdf.
 
     # Pass-3 COMPLETION floor (epic 66ac / story 6533) — the container-completion analogue of the
     # novelty rising floor, for a re-fired epic/story-with-children review. A finding is DROPPED iff
@@ -296,7 +292,7 @@ class VerifyConfig:
     # The EVIDENCE GATE: the completion floor stays inert (gate runs un-floored) until this is
     # flipped true — manually by the operator only after the calibration gold-set (story 77cf) has
     # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
-    # default (the total back-out, exactly like novelty_drop_active).
+    # default (the total back-out).
     completion_floor_active: bool = False
 
 
@@ -484,13 +480,10 @@ _SECTIONS: dict[str, dict] = {
         "overlap_enabled": lambda v, k: _as_bool(v, k),
         "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
         "enable_code_review": lambda v, k: _as_bool(v, k),
-        "progressive_drift_refresh": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
-        "remediation_mode": lambda v, k: _as_bool(v, k),
         "remediation_window_minutes": lambda v, k: _as_int(v, k, minimum=1),
         "novelty_drop_threshold": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "novelty_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
-        "novelty_drop_active": lambda v, k: _as_bool(v, k),
         "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),

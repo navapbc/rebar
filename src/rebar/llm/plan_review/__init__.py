@@ -65,31 +65,17 @@ def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
     )
 
 
-def _progressive_enabled(repo_root) -> bool:
-    """Whether the progressive drift-refresh path is enabled
-    (``verify.progressive_drift_refresh``, default ON; explicit false is the back-out)."""
-    from rebar import config as _config
-
-    try:
-        return bool(_config.load_config(repo_root).verify.progressive_drift_refresh)
-    except Exception:  # noqa: BLE001 — config unreadable → conservative full review
-        return False
-
-
 def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
     """The remediation-mode eligibility DECISION for ``ticket_id`` (epic 7d43, child ec89),
-    or ``None`` when the ``verify.remediation_mode`` key is explicitly off (default ON since
-    2026-07-11; explicit false is the back-out) or
-    config is unreadable — in which case the gate runs a byte-identical full review. When enabled,
-    returns :func:`attest.remediation_mode_candidate`'s decision dict (the Pass-3 drop math that
-    consumes ``eligible`` is child cc5b; this only decides eligibility)."""
+    or ``None`` when config is unreadable — in which case the gate runs a byte-identical full
+    review. Remediation mode is always on (off switch retired in story 4cdf); this returns
+    :func:`attest.remediation_mode_candidate`'s decision dict (the Pass-3 drop math that consumes
+    ``eligible`` is child cc5b; this only decides eligibility)."""
     from rebar import config as _config
 
     try:
         verify_cfg = _config.load_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → conservative full review (no remediation)
-        return None
-    if not verify_cfg.remediation_mode:
         return None
     return attest.remediation_mode_candidate(
         ticket_id, window_minutes=verify_cfg.remediation_window_minutes, repo_root=repo_root
@@ -189,12 +175,12 @@ def _maybe_apply_rising_floor(
     runner: Runner | None,
     repo_root,
 ) -> None:
-    """The triple-gated Pass-3 rising-floor entry (child cc5b): apply the floor ONLY when config
-    ``remediation_mode`` is on (``remediation`` is non-None), the per-review eligibility holds
-    (ec89's decision ``eligible``), AND ``verify.novelty_drop_active`` is true (the evidence gate,
-    default ON since 2026-07-11 — operator-authorized on field evidence in lieu of 150b's
-    ``discriminates_novelty`` eval). Setting the flag to an explicit false is the back-out: the
-    floor goes inert and the verdict is byte-identical to a normal review."""
+    """The gated Pass-3 rising-floor entry (child cc5b): apply the floor when a remediation
+    re-review is in progress (``remediation`` is non-None) and the per-review eligibility holds
+    (ec89's decision ``eligible``). The rising floor is always active (operator-authorized on field
+    evidence, 2026-07-11 — in lieu of 150b's ``discriminates_novelty`` eval; the off switch was
+    retired in story 4cdf); the remediation-eligibility + no-prior-memory self-gates below still
+    keep a normal review byte-identical."""
     from rebar import config as _config
 
     if not (remediation and remediation.get("eligible")):
@@ -203,8 +189,6 @@ def _maybe_apply_rising_floor(
         verify_cfg = _config.load_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-floored
         return
-    if not verify_cfg.novelty_drop_active:
-        return  # evidence gate: inert until the novelty discriminator has cleared its bar
     advisory = verdict.get("advisory") or []
     prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
     # SURFACED-ONLY (bug old-frilly-plankton): score novelty ONLY against findings that were
@@ -499,9 +483,9 @@ def _run_plan_review(
     # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
     # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
     # plan still matches the code, refresh the attestation instead of a full re-review.
-    # Default ON (verify.progressive_drift_refresh; operator-authorized 2026-07-12);
-    # explicit false backs out.
-    if sign and _progressive_enabled(repo_root):
+    # Always on (operator-authorized 2026-07-12; off switch retired in story 4cdf); still
+    # self-gated by ``if sign`` (a --no-sign / readonly review has no attestation to refresh).
+    if sign:
         refreshed = orchestrator.drift_refresh(ctx, cfg, runner=runner, repo_root=repo_root)
         if refreshed is not None:
             from rebar.llm import findings
@@ -534,9 +518,9 @@ def _run_plan_review(
         verdict.setdefault("coverage", {})["remediation"] = remediation
 
     # Pass-3 RISING FLOOR (child cc5b) — applied BEFORE the sidecar emit so the dropped findings
-    # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Triple-gated
-    # (config remediation_mode + per-review eligibility + verify.novelty_drop_active); both flags
-    # default ON (2026-07-11) — an explicit false on either goes inert (verdict byte-identical).
+    # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Always active
+    # (off switch retired in story 4cdf); still gated on a remediation re-review + per-review
+    # eligibility, so a normal review's verdict stays byte-identical.
     _maybe_apply_rising_floor(
         ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
