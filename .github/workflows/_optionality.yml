@@ -55,6 +55,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Install (dev)
         run: |
           python -m pip install --upgrade pip
@@ -80,6 +82,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Build the wheel
         run: |
           python -m pip install --upgrade pip build
@@ -149,6 +153,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Install nava-rebar[${{ matrix.extra }}]
         run: |
           python -m pip install --upgrade pip
@@ -190,6 +196,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
       - name: Install the union of all extras (catch ResolutionImpossible)
         run: |
           python -m pip install --upgrade pip
