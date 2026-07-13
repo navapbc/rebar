@@ -355,6 +355,10 @@ def code_review_verification_model(*, strict: bool = False) -> type:
             default=False,
             description="TRUE if the change relies on/breaks an undocumented invariant (moderate).",
         )
+        reachable_path_without_automated_coverage: bool = Field(
+            default=False,
+            description="TRUE if a reachable path lacks automated coverage (moderate).",
+        )
         implicit_coupling: bool = Field(
             default=False,
             description="TRUE if the change adds implicit cross-module coupling (minor).",

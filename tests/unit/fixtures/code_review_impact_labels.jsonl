@@ -29,3 +29,4 @@
 {"label": "NIT", "note": "dead code with base attrs noise but no consequence binary weight", "severity_attributes": {"dead_code": true, "prod_impact": "low", "reversibility": "easy"}}
 {"label": "NIT", "note": "implicit coupling on a cold module", "severity_attributes": {"implicit_coupling": true, "churn90": 0}}
 {"label": "NIT", "note": "no consequence; documentation-only nit", "severity_attributes": {"trigger_likelihood": "common"}}
+{"label": "HIGH", "note": "f32e: change introduces a reachable path with no automated coverage on a hot file (moderate, churn)", "severity_attributes": {"reachable_path_without_automated_coverage": true, "silent_failure": true, "churn90": 34}}
