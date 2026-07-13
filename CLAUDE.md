@@ -115,10 +115,11 @@ These two gates are not advisory — adhere to them strictly.
 review before it can be claimed**. Run `rebar review-plan <id>` (MCP `review_plan`)
 first. If the review **fails** (a BLOCK verdict), you must **remediate the failure
 and re-run the review** until it passes — do not claim a ticket with a failing or
-absent review. Even on a review that **passes**, you must **remediate all valid
-advisory findings** before continuing (triage each: fix the valid ones; a finding
-you judge invalid must be justified, not silently ignored). The coaching notes tell
-you the productive next move per finding. Run `rebar review-plan <id>` exactly as
+absent review. Even on a review that **passes**, review the advisory findings and
+their coaching notes and **apply the ones that genuinely improve the plan** — this is
+a judgment call, **not a mandate to remediate every advisory**. (A **BLOCK** verdict
+is different: it must always be remediated and re-reviewed, per above.) The coaching
+notes tell you the productive next move per finding. Run `rebar review-plan <id>` exactly as
 documented so it **signs a plan-review attestation on every non-blocking PASS** — that
 signed attestation is what the claim gate consumes. **Sign on every round:** signing is
 free, you cannot know in advance which round is the last, and remediating a finding
