@@ -29,6 +29,19 @@ with a test (`test_impact_model_versioning.py`) so a future edit cannot silently
 impact-driven hard block — the rollout stays permissive by construction until a calibration
 justifies otherwise.
 
+> **Enablement note — 2026-07-12 (epic 9d50 / story b9c0): the first LLM criterion now blocks.**
+> The calibration justification arrived. Story 9f25 derived the code-review block threshold from
+> the deduped code-v2 finding corpus (161 findings): the priority distribution has a hard **0.60
+> ceiling**, with the #518-class importlib code-execution security findings at the ~0.54 band.
+> On that evidence, **`security` (an `exec: AGENT` criterion) is flipped to `blocking_enabled:
+> true` at `block_threshold` 0.54** — the first LLM criterion permitted to block, a deliberate
+> exception to the "only exec:DET blocks" invariant above. `test_impact_model_versioning.py`,
+> `test_code_review_ws2.py`, and `test_code_review_deletion_impact.py` are updated to pin the new
+> approved blocking set `{secret-detection, high-critical-security, security}`; every other LLM
+> criterion stays advisory at 0.95, and any further addition must be a re-approved change. 9f25's
+> 0.54 is provisional pending a held-out (non-circular) adjudication confirmation — see
+> `docs/experiments/derive_code_review_threshold.md`.
+
 ### Version-tag every review artifact
 Each `REVIEW_RESULT` sidecar stamps a top-level `impact_model_version` (`plan-v2` / `code-v2`) from a
 module constant in the respective `sidecar.py`. The calibration replay segments on it and treats a

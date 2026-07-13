@@ -79,16 +79,20 @@ def test_replay_segments_by_version(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 # ── permissive-rollout invariant (no impact-graded hard block) ────────────────────────────
-def test_code_review_only_det_security_criteria_are_hard_blocks() -> None:
+def test_code_review_approved_blocking_criteria_set() -> None:
     from rebar.llm.code_review import registry
 
     idx = registry.routing_index()
     blocking = {c for c, v in idx.items() if isinstance(v, dict) and v.get("blocking_enabled")}
-    # The ONLY hard blocks are the two pre-existing exec:DET security detectors — the impact
-    # redesign introduced none.
-    assert blocking == {"secret-detection", "high-critical-security"}
-    for c in blocking:
+    # The APPROVED hard-block set: the two pre-existing exec:DET security detectors PLUS the
+    # `security` AGENT criterion that b9c0 (2026-07-12) flipped on at the 9f25-derived threshold
+    # — the first LLM criterion permitted to block. Any addition beyond these three must be a
+    # deliberate, re-approved change (this pin forces it).
+    assert blocking == {"secret-detection", "high-critical-security", "security"}
+    for c in ("secret-detection", "high-critical-security"):
         assert idx[c].get("exec") == "DET"
+    # `security` is the deliberate exception to the old "only DET blocks" invariant.
+    assert idx["security"].get("exec") == "AGENT" and idx["security"].get("block_threshold") == 0.54
 
 
 # The plan-review criteria whose hard-block posture is APPROVED (set by the threshold-recalibration
