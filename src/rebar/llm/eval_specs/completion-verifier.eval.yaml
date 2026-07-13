@@ -21,6 +21,9 @@ scorers:
   - type: deterministic
     name: no_false_fail_on_complete
     description: On a ticket whose requirements are all demonstrably met, the verdict is PASS.
+  - type: deterministic
+    name: enumerates_all_unmet_criteria
+    description: On a ticket with multiple unmet criteria, the FAIL verdict emits one distinct finding per unmet criterion (anti-ratchet — never stops at the first failure).
   - type: llm-judge
     name: finding_cites_criterion_and_is_grounded
     gates: false
@@ -216,6 +219,25 @@ dataset:
             # no --json flag — the comment's claim is not backed by code
             a = p.parse_args()
             a.fn(a)
+  # --- anti-ratchet (ticket 74d9): TWO independently-unmet AC items → the FAIL verdict
+  # --- must enumerate BOTH (a distinct finding for each), never stop at the first.
+  - id: CV-two-unmet-criteria
+    corpus: rebar
+    expect: fail
+    note: "`multiply` is unimplemented AND there is no unit test → BOTH AC items are unmet; the verdict must name each."
+    expected_unmet_criteria:
+      - multiply
+      - unit test
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] implement a `multiply(a, b)` helper that returns a * b
+      - [ ] cover `multiply` with a unit test in tests/test_math.py
+    files:
+      src/math_util.py: |
+        def multiply(a, b):
+            # NOT IMPLEMENTED: returns the wrong value and ignores b
+            raise NotImplementedError
+        # and no tests/test_math.py exists → the test AC item is also unmet
 
 gold_set:
   - input: "A FAIL finding: 'AC item `--json` unmet — no --json flag in src/cli.py.'"
