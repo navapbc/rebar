@@ -23,5 +23,15 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    # Used by the re-homed auth_host SSO stack: random_password mints the CloudFront↔Lambda
+    # origin secret (auth_host.tf); archive_file zips the auth-host Lambda bundle.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }

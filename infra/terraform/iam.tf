@@ -133,7 +133,9 @@ resource "aws_iam_role_policy_attachment" "dlm_managed" {
 # `terraform plan` on infra/terraform/**, so committed HCL that sits un-applied surfaces
 # as a failing check (the root cause behind dc3f: manual applies drift silently).
 #
-# The OIDC provider (token.actions.githubusercontent.com) already exists in the account.
+# The OIDC provider (token.actions.githubusercontent.com) is owned by rebar (oidc.tf) —
+# adopted from the decommissioned snap project (epic gaugeable-combatable-skylark) so rebar
+# controls its own dependency rather than trusting a dead stack's ARN.
 # Trust is scoped to THIS repo. Permissions = AWS-managed ReadOnlyAccess (covers S3 state
 # read + ssm:GetParameter + every data-source read a plan performs) PLUS one inline
 # statement for kms:Decrypt-via-SSM, which ReadOnlyAccess deliberately omits and the
@@ -144,7 +146,7 @@ data "aws_iam_policy_document" "gha_terraform_plan_assume" {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"]
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
     }
     condition {
       test     = "StringEquals"

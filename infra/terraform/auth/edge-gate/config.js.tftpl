@@ -1,0 +1,12 @@
+"use strict";
+
+// GENERATED AT DEPLOY by Terraform (templatefile) — DO NOT EDIT, DO NOT COMMIT.
+// Lambda@Edge has no env vars and can't read SSM at viewer-request, so the
+// cookie-signing secret is baked into the bundle here. Rotating the secret
+// (see auth/RUNBOOK.md) re-bakes and republishes this function.
+
+module.exports = {
+  signingSecret: ${jsonencode(signing_secret)},
+  authHostUrl: ${jsonencode(auth_host_url)},
+  cookieName: ${jsonencode(cookie_name)},
+};
