@@ -26,7 +26,6 @@
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 806
 src/rebar/_engine/rebar_reconciler/reconcile.py 1083
 src/rebar/config.py 839
-src/rebar/llm/plan_review/attest.py 880
 src/rebar/llm/plan_review/det_floor.py 975
 src/rebar/llm/plan_review/passes.py 871
 src/rebar/llm/workflow/lint_refs.py 870

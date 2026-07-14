@@ -18,274 +18,57 @@ exists. ``--force`` (with a justification) bypasses it and is audit-logged.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import os
 import time
 from collections.abc import Mapping
 from typing import Any
 
+# Manifest construction + dependency-hashing live in the sibling ``manifest`` module
+# (a pure, dependency-light seam). Re-exported here so the historical import paths
+# ``rebar.llm.plan_review.attest.<name>`` keep working unchanged for callers/tests.
+from .manifest import (
+    _ABSENT_HASH,
+    _DEP_PREFIX,
+    _DISABLED_PREFIX,
+    _MANIFEST_PREFIX,
+    _REFRESHED_PREFIX,
+    _REGVER_PREFIX,
+    _cited_paths,
+    _hash_basis,
+    _hash_file,
+    build_manifest,
+    dependency_hashes,
+    is_plan_review_manifest,
+    manifest_deps,
+    manifest_disabled_builtins,
+    manifest_material,
+    manifest_rebar_version,
+    manifest_regver,
+    registry_version,
+)
+
 logger = logging.getLogger(__name__)
 
-_MANIFEST_PREFIX = "plan-review"
-_DEP_PREFIX = "dep"
-_REGVER_PREFIX = "regver:"  # criteria-registry version stamp (progressive drift-refresh, ADR 0002)
-_REFRESHED_PREFIX = "refreshed-from:"  # provenance on a drift-refreshed attestation
-_DISABLED_PREFIX = "disabled_builtins:"  # built-in ids the project overlay disabled (story 08af)
-_ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
-
-
-def registry_version(repo_root=None) -> str:
-    """A short, deterministic stamp of the criteria registry the review ran against
-    (the canonical DET + LLM id sets + the routing index). Bound into the manifest so
-    a progressive drift-refresh can detect that the registry changed since signing
-    (version skew) and fall back to a FULL re-review instead of reusing the verdict.
-
-    OVERLAY-AWARE (story 08af): with ``repo_root`` given, the stamp hashes the repo's
-    EFFECTIVE routing (packaged ⊕ the ``.rebar/criteria_routing.json`` overlay) plus the
-    overlay's activated-project ids and disabled-built-in set — so activating / re-tuning /
-    disabling a project criterion changes the stamp, which the claim gate reads as
-    ``stale-regver`` (invalidating a prior plan-review attestation). With ``repo_root=None``,
-    OR a repo with NO overlay, the basis is BYTE-IDENTICAL to the historical packaged stamp
-    (``activated`` / ``disabled`` are only added when non-empty), so existing attestations —
-    signed before this change — stay valid (zero churn)."""
-    from . import registry
-
-    activated: list[str] = []
-    disabled: list[str] = []
-    try:
-        if repo_root is None:
-            routing_obj: dict = registry._routing_index()
-        else:
-            routing_obj = registry.effective_routing(repo_root)
-            disabled = registry.disabled_builtins(repo_root)
-            activated = sorted(
-                c for c in registry.effective_criteria(repo_root) if c.startswith("project.")
-            )
-        routing = json.dumps(routing_obj, sort_keys=True)
-    except Exception:  # noqa: BLE001 — routing unreadable → stamp the id sets alone; still detects drift
-        routing = ""
-        activated = []
-        disabled = []
-    # The overlay dimensions are added ONLY when non-empty so an overlay-absent repo hashes
-    # to the SAME basis as the packaged (repo_root=None) stamp — preserving back-compat.
-    basis_obj: dict[str, Any] = {
-        "det": sorted(registry.CANONICAL_DET),
-        "llm": sorted(registry.CANONICAL_LLM),
-        "grounded": sorted(registry.CODEBASE_GROUNDED),
-        "routing": routing,
-    }
-    if activated:
-        basis_obj["activated"] = activated
-    if disabled:
-        basis_obj["disabled"] = disabled
-    basis = json.dumps(basis_obj, sort_keys=True)
-    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
-
-
-# ── code-drift dependency set (epic boil-golem-veto / ADR 0002) ───────────────────
-def _hash_file(path: str, *, base: str) -> str:
-    """SHA-256 of the WORKING-TREE file's raw bytes (no normalization) — the bytes the
-    review actually grounds against. A missing/unreadable path hashes to ``_ABSENT_HASH``
-    so a later create/delete is itself a detectable change. ``base`` is the repo root a
-    relative ``path`` is resolved against."""
-    full = path if os.path.isabs(path) else os.path.join(base, path)
-    try:
-        with open(full, "rb") as fh:
-            return hashlib.sha256(fh.read()).hexdigest()
-    except OSError:
-        return _ABSENT_HASH
-
-
-def _cited_paths(verdict: dict[str, Any]) -> set[str]:
-    """The ``kind == "file"`` citation paths across every finding bucket of the
-    IN-MEMORY verdict (the persisted REVIEW_RESULT sidecar slims paths out, so the
-    verdict is the only complete source). Free-text citations with no ``path`` are
-    ignored, never guessed."""
-    out: set[str] = set()
-    for bucket in ("blocking", "advisory", "coaching", "indeterminate", "dropped", "overflow"):
-        for finding in verdict.get(bucket) or []:
-            if not isinstance(finding, dict):
-                continue
-            for cit in finding.get("citations") or []:
-                if isinstance(cit, dict) and cit.get("kind") == "file" and cit.get("path"):
-                    out.add(str(cit["path"]))
-    return out
-
-
-def _hash_basis(repo_root=None, *, pinned_sha: str | None = None) -> str:
-    """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b) that BOTH the
-    plan-review signing-time hashing AND the claim-gate freshness re-check resolve through,
-    so they cannot diverge (whole-HEAD vs pinned-SHA) and re-introduce the staleness
-    false-positive ADR 0002 prevents.
-
-    Resolution (single source):
-      * ``pinned_sha`` given (the claim gate, reading the signature's ``verified_at_sha``) →
-        the materialized snapshot at that SHA (a cache hit when the review's snapshot is
-        still warm; a local ``read-tree`` otherwise — no network when the objects are
-        present). If it cannot be materialized, degrade to the working tree (the gate then
-        fails CLOSED on any drift — the conservative direction).
-      * else the active attested gate snapshot (``current_code_root``, set during an attested
-        ``review_plan``) → the same snapshot the signature was produced against.
-      * else the in-place checkout (``_config.repo_root``) — the local / back-out basis.
-
-    BACK-OUT: a plan-review signed in local mode (or pre-S4b) carries no ``verified_at_sha``;
-    both sides then resolve to the working tree exactly as before this consolidation."""
-    from rebar import config as _config
-
-    if pinned_sha:
-        try:
-            from rebar._snapshot import cache as _cache
-
-            handle = _cache.acquire(
-                pinned_sha, source_mode="attested", repo_root=repo_root, fetch=False
-            )
-            return str(handle.path)
-        except Exception:  # noqa: BLE001 — snapshot unavailable → degrade to the working tree (never crash the gate)
-            logger.warning(
-                "snapshot for pinned sha %s unavailable; hashing the working tree", pinned_sha
-            )
-    from rebar.llm.config import current_code_root
-
-    active = current_code_root()
-    return active if active else str(_config.repo_root(repo_root))
-
-
-def dependency_hashes(verdict: dict[str, Any], *, repo_root=None) -> dict[str, str]:
-    """The signed dependency set: ``{path: sha256}`` for the union of the ticket's
-    declared ``file_impact`` and the files the review CITED (``kind=file``), hashed
-    from the working tree. Sorted for reproducible signing. Empty when nothing is
-    declared/cited — the claim gate then falls back to whole-HEAD freshness."""
-    import rebar
-
-    ticket_id = verdict.get("ticket_id", "")
-    paths: set[str] = set(_cited_paths(verdict))
-    try:
-        for entry in rebar.get_file_impact(ticket_id, repo_root=repo_root) or []:
-            p = entry.get("path") if isinstance(entry, dict) else None
-            if p:
-                paths.add(str(p))
-    except Exception:  # noqa: BLE001 — file_impact read is best-effort; broad-but-logged below
-        logger.warning("file_impact read failed for %s; scoping to citations only", ticket_id)
-    # Hash through the shared boundary: during an attested review this is the pinned-SHA
-    # snapshot (the claim gate re-hashes the SAME basis); in local mode it is the checkout.
-    base = _hash_basis(repo_root)
-    return {p: _hash_file(p, base=base) for p in sorted(paths)}
-
-
-# ── manifest ─────────────────────────────────────────────────────────────────────
-def build_manifest(
-    verdict: dict[str, Any],
-    *,
-    material: str,
-    deps: dict[str, str] | None = None,
-    regver: str | None = None,
-    refreshed_from: str | None = None,
-    verified_at_sha: str | None = None,
-) -> list[str]:
-    """The deterministic manifest signed for a passing plan-review verdict. The
-    signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
-    material fingerprint (for material-edit invalidation), the per-path code-drift
-    dependency map (for code-drift invalidation, ADR 0002), the criteria-registry
-    version stamp (for progressive-refresh skew detection), and provenance (including a
-    ``rebar-version:`` stamp of the gate code that signed — audit-only, stable for a given
-    rebar build). No timestamps, so re-signing the same verified state is reproducible."""
-    from rebar import signing as _signing
-
-    counts = (verdict.get("coverage", {}) or {}).get("counts", {}) or {}
-    lines = [
-        f"{_MANIFEST_PREFIX}: {verdict.get('verdict', 'PASS')}",
-        f"ticket: {verdict.get('ticket_id', '')}",
-        f"material: {material}",
-        f"model: {verdict.get('model') or 'n/a'}",
-        f"runner: {verdict.get('runner') or 'n/a'}",
-        f"blocking: {counts.get('blocking', 0)}",
-        f"advisory: {counts.get('advisory_surfaced', 0)}",
-        # Which rebar gate code produced this attestation (audit/provenance, epic
-        # jira-reb-596). NEVER read by compute_validity.
-        _signing.rebar_version_step(_signing.gate_code_version()),
-    ]
-    if regver:
-        lines.append(f"{_REGVER_PREFIX} {regver}")
-    # Record the built-in criteria the project overlay DISABLED for this review (sorted,
-    # deterministic). Additive — absent on a clean run, so the manifest is byte-identical to
-    # a pre-08af manifest when the overlay disables nothing (story 08af).
-    disabled = sorted((verdict.get("coverage", {}) or {}).get("disabled_builtins") or [])
-    if disabled:
-        lines.append(f"{_DISABLED_PREFIX} {','.join(disabled)}")
-    if refreshed_from:
-        lines.append(f"{_REFRESHED_PREFIX} {refreshed_from}")
-    # Pin the snapshot SHA the dep hashes were computed against (epic raze-vet-ditch S4b),
-    # so the claim gate re-hashes at the SAME basis via the shared boundary. Only present
-    # for an attested review; a local review omits it (both sides then use the checkout).
-    if verified_at_sha:
-        from rebar import signing as _signing
-
-        lines.append(_signing.verified_at_sha_step(verified_at_sha))
-    # Per-path dependency hashes (sorted), one line each: ``dep <sha256> <path>``.
-    # The hash is fixed-width so the path (which may contain spaces) is an unambiguous
-    # remainder. A per-path map (not a rolled-up root) is the contract Story 2 builds on.
-    for path, digest in sorted((deps or {}).items()):
-        lines.append(f"{_DEP_PREFIX} {digest} {path}")
-    return lines
-
-
-def manifest_deps(manifest: list[str] | None) -> dict[str, str]:
-    """Parse the signed ``{path: sha256}`` dependency map back out of a manifest
-    ({} when none — e.g. an attestation signed before ADR 0002)."""
-    out: dict[str, str] = {}
-    for line in manifest or []:
-        s = str(line)
-        if s.startswith(_DEP_PREFIX + " "):
-            _, _, rest = s.partition(" ")
-            digest, _, path = rest.partition(" ")
-            if path:
-                out[path] = digest
-    return out
-
-
-def manifest_regver(manifest: list[str] | None) -> str | None:
-    """The criteria-registry version stamp from a manifest (None if pre-stamp)."""
-    for line in manifest or []:
-        if str(line).startswith(_REGVER_PREFIX):
-            return str(line).split(":", 1)[1].strip()
-    return None
-
-
-def manifest_rebar_version(manifest: list[str] | None) -> str | None:
-    """The gate-code version+SHA provenance stamp from a manifest, or ``None`` when the
-    manifest predates the stamp (epic jira-reb-596). Audit-only — thin re-export of
-    :func:`rebar.signing.rebar_version_from_manifest` co-located with the other manifest
-    parsers."""
-    from rebar import signing as _signing
-
-    return _signing.rebar_version_from_manifest(manifest)
-
-
-def manifest_disabled_builtins(manifest: list[str] | None) -> list[str]:
-    """The sorted built-in ids the overlay disabled at signing time, parsed from a manifest
-    (``[]`` when the line is absent — a clean run or a pre-08af attestation)."""
-    for line in manifest or []:
-        s = str(line)
-        if s.startswith(_DISABLED_PREFIX):
-            rest = s.split(":", 1)[1].strip()
-            return sorted(x for x in (p.strip() for p in rest.split(",")) if x)
-    return []
-
-
-def is_plan_review_manifest(manifest: list[str] | None) -> bool:
-    if not manifest:
-        return False
-    return str(manifest[0]).startswith(_MANIFEST_PREFIX + ":")
-
-
-def manifest_material(manifest: list[str] | None) -> str | None:
-    """Extract the bound material fingerprint from a signed manifest, if present."""
-    for line in manifest or []:
-        if str(line).startswith("material:"):
-            return str(line).split(":", 1)[1].strip()
-    return None
+__all__ = [
+    "_ABSENT_HASH",
+    "_DEP_PREFIX",
+    "_DISABLED_PREFIX",
+    "_MANIFEST_PREFIX",
+    "_REFRESHED_PREFIX",
+    "_REGVER_PREFIX",
+    "_cited_paths",
+    "_hash_basis",
+    "_hash_file",
+    "build_manifest",
+    "dependency_hashes",
+    "is_plan_review_manifest",
+    "manifest_deps",
+    "manifest_disabled_builtins",
+    "manifest_material",
+    "manifest_rebar_version",
+    "manifest_regver",
+    "registry_version",
+]
 
 
 def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) -> dict[str, Any]:
@@ -552,6 +335,74 @@ def _manifest_int(manifest: list[str] | None, prefix: str) -> int:
         return 0
 
 
+# ── authoritative (signed) field sourcing for validity checks ─────────────────────
+def _is_opcert(attestation: Mapping[str, Any]) -> bool:
+    """True when the verify-result came from the op-cert (envelope) verifier. Keyed on the
+    unspoofable ``opcert`` marker :func:`_opcert_signing.verify_opcert_record` sets (chosen on
+    ``record.envelope`` presence), NOT the attacker-writable ``algorithm`` field."""
+    return attestation.get("opcert") is True
+
+
+def _authoritative_material(attestation: Mapping[str, Any]) -> str | None:
+    """The AUTHENTICATED material fingerprint to gate material-edit invalidation against.
+
+    SECURITY (finding B): for an op-cert (envelope) record the material fingerprint is sourced from
+    the SIGNED payload (surfaced by ``verify_opcert_record`` as ``material_fingerprint``) — NEVER
+    the plaintext ``manifest``'s ``material:`` line, which is not covered by the DSSE signature and
+    lives on the attacker-writable tickets branch. A legacy HMAC record's manifest IS covered by the
+    HMAC signature, so ``manifest_material`` remains authentic there (behavior unchanged).
+
+    An op-cert minted from a manifest with no ``material:`` line binds an EMPTY material fingerprint
+    (``mint_opcert_record`` uses ``_manifest_material_fingerprint(steps) or ""``), which the signed
+    payload surfaces here as ``""``. That is "no bound material", so we normalise it to ``None`` —
+    the "no fingerprint → drift check skipped" contract (matching ``manifest_material``'s ``None``
+    for a material-less manifest). A genuine bound fingerprint is a non-empty hash, so this only
+    maps the empty sentinel through; a real post-signing material edit still fails the check as
+    ``stale-material``."""
+    if _is_opcert(attestation):
+        return attestation.get("material_fingerprint") or None
+    return manifest_material(attestation.get("manifest") or [])
+
+
+def _authoritative_manifest(attestation: Mapping[str, Any]) -> list:
+    """The AUTHENTICATED manifest to read plan-review freshness inputs from — the per-path
+    dependency-hash map (``manifest_deps`` → the ``stale-code`` check), the criteria-registry
+    version stamp (``manifest_regver`` → the ``stale-regver`` check), and the pinned-SHA re-hash
+    basis (``verified_at_sha_from_manifest``).
+
+    SECURITY (stale-code / stale-regver findings): for an op-cert (envelope) record the manifest is
+    sourced from the SIGNED DSSE payload (surfaced by ``verify_opcert_record`` as
+    ``signed_manifest`` from the in-toto predicate) — NEVER the record's plaintext ``manifest``
+    mirror, which is not
+    covered by the DSSE signature and lives on the auto-pushed, attacker-writable tickets branch.
+    Mirrors ``_authoritative_material`` (which reads the signed ``material_fingerprint`` rather than
+    the plaintext ``material:`` line). A legacy HMAC record's manifest IS covered by the HMAC
+    signature, so its plaintext ``manifest`` remains authentic (behavior unchanged).
+
+    A legacy op-cert minted BEFORE the manifest was bound into the payload has no
+    ``signed_manifest``; there is nothing authenticated to read, so we fall back to the record's
+    plaintext ``manifest`` — no worse than today's behavior for those already-deployed records, and
+    new op-certs carry the signed manifest."""
+    if _is_opcert(attestation):
+        signed = attestation.get("signed_manifest")
+        if isinstance(signed, list):
+            return signed
+    return attestation.get("manifest") or []
+
+
+def _authoritative_head(attestation: Mapping[str, Any]) -> str | None:
+    """The AUTHENTICATED code-anchor commit for unscoped whole-HEAD freshness.
+
+    SECURITY (finding B): for an op-cert record use the SIGNED ``merged_log_commit`` (the code state
+    bound into the cert's subject) rather than the plaintext ``head_sha`` mirror. For a local review
+    ``merged_log_commit`` equals the head at signing time, so legit records are unaffected; a
+    tampered plaintext ``head_sha`` can no longer make a stale attestation read as fresh. A legacy
+    HMAC record keeps its ``head_sha`` mirror (behavior unchanged)."""
+    if _is_opcert(attestation):
+        return attestation.get("merged_log_commit")
+    return attestation.get("head_sha")
+
+
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────
 def compute_validity(
     attestation: Mapping[str, Any] | None,
@@ -582,7 +433,6 @@ def compute_validity(
 
     if not isinstance(attestation, dict):
         return {"valid": False, "reason": f"no certified {kind} attestation", "verdict": "unsigned"}
-    manifest = attestation.get("manifest") or []
     signed_at = attestation.get("signed_at")
 
     # Reopen invalidation (BOTH kinds): an attestation signed at/before the latest reopen is
@@ -609,7 +459,7 @@ def compute_validity(
                 "reason": "the ticket is not closed (completion verdict no longer applies)",
                 "verdict": "not-closed",
             }
-        signed_material = manifest_material(manifest)
+        signed_material = _authoritative_material(attestation)
         if signed_material is not None:
             current = current_material_fingerprint(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root
@@ -627,13 +477,20 @@ def compute_validity(
         }
 
     if kind == _MANIFEST_PREFIX:  # plan-review
+        # SECURITY (stale-code / stale-regver findings): read every manifest-derived freshness
+        # input (regver stamp, per-path dep hashes, pinned re-hash basis) from the AUTHENTICATED
+        # manifest — the SIGNED DSSE payload for an op-cert, the HMAC-covered record manifest for a
+        # legacy record — NEVER the attacker-writable plaintext record mirror. An attacker with
+        # tickets-branch write access can no longer edit the plaintext dep-hash / regver lines to
+        # make a stale attestation read as fresh (the signature does not cover the plaintext).
+        auth_manifest = _authoritative_manifest(attestation)
         # Criteria-registry drift (story 08af): the overlay-aware stamp changes when a project
         # criterion is activated / re-tuned / disabled, so a signed regver that no longer matches
         # the current one means the criteria the plan was reviewed against changed. A MISSING
         # regver line is treated as stale too (expand-contract: every production plan-review
         # manifest carries one; an overlay-absent repo re-hashes to the SAME packaged stamp the
         # manifest was signed with, so a real unchanged attestation stays valid).
-        signed_regver = manifest_regver(manifest)
+        signed_regver = manifest_regver(auth_manifest)
         if signed_regver is None or signed_regver != registry_version(repo_root):
             return {
                 "valid": False,
@@ -646,9 +503,9 @@ def compute_validity(
         # Code-drift freshness (ADR 0002): re-hash the SIGNED per-path map at the SAME
         # pinned-SHA basis the attestation signed against (so the gate and plan-review can't
         # diverge); when unscoped, fall back to conservative whole-HEAD freshness.
-        deps = manifest_deps(manifest)
+        deps = manifest_deps(auth_manifest)
         if deps:
-            pinned = signing.verified_at_sha_from_manifest(manifest)
+            pinned = signing.verified_at_sha_from_manifest(auth_manifest)
             base = _hash_basis(repo_root, pinned_sha=pinned)
             drifted = [
                 p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
@@ -665,17 +522,19 @@ def compute_validity(
                 }
         else:
             head = signing.head_sha(_config.repo_root(repo_root))
-            if head == "unknown" or attestation.get("head_sha") != head:
+            # SECURITY (finding B): compare against the AUTHENTICATED anchor (op-cert: the SIGNED
+            # merged_log_commit; HMAC: the head_sha mirror), never a mutable plaintext mirror.
+            signed_head = _authoritative_head(attestation)
+            if head == "unknown" or signed_head != head:
                 return {
                     "valid": False,
                     "reason": (
-                        f"attestation is stale (unscoped; signed at {attestation.get('head_sha')}, "
-                        f"HEAD is {head})"
+                        f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
                     ),
                     "verdict": "stale-head",
                 }
         # Material-edit invalidation (fail closed if the fingerprint can't be recomputed).
-        signed = manifest_material(manifest)
+        signed = _authoritative_material(attestation)
         if signed is not None:
             current = current_material_fingerprint(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root
