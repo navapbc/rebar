@@ -69,6 +69,31 @@ def _head(repo: Path) -> str:
     ).stdout.strip()
 
 
+def _positions(repo: Path) -> list[tuple[str, str]]:
+    """Sorted (log_position, tickets_branch_commit) over the store's event files, oldest-first —
+    so callers can pick an early add-position and a later storage anchor S (Option B)."""
+    import os
+
+    from rebar._commands._seam import tracker_dir
+    from rebar.attest import authorship
+
+    tracker = str(tracker_dir(str(repo)))
+    commit_map = authorship.build_introducing_commit_map(repo_root=str(repo))
+    out: list[tuple[str, str]] = []
+    for d in sorted(os.listdir(tracker)):
+        dp = os.path.join(tracker, d)
+        if d.startswith(".") or not os.path.isdir(dp):
+            continue
+        for fn in sorted(os.listdir(dp)):
+            if not fn.endswith(".json") or fn.startswith("."):
+                continue
+            commit = commit_map.get(f"{d}/{fn}")
+            if commit:
+                out.append((fn[:-5].rsplit("-", 1)[0], commit))
+    out.sort()
+    return out
+
+
 def test_sign_opcert_stores_envelope_on_ticket(store: Path, tmp_path: Path) -> None:
     """The producer writes an envelope-bearing SIGNATURE event; the ticket's reduced
     attestations[kind] record carries the encoded envelope + bound fields, and no HMAC."""
@@ -116,9 +141,24 @@ def test_opcert_from_record_roundtrips_and_verifies(store: Path, tmp_path: Path)
     assert bound["material_fingerprint"] == MATERIAL
     assert bound["merged_log_commit"] == commit
 
-    keyring = [{"public_key": pub, "added_at_commit": commit, "revoked_at_commit": None}]
+    # Option B: the key era boundary is a TICKETS-BRANCH log position and validity is judged at the
+    # cert's STORAGE ANCHOR S (a tickets-branch commit). Pin the key from an early position and use
+    # the latest tickets-branch commit (the SIGNATURE event just written) as S.
+    pos = _positions(store)
+    keyring = [
+        {"public_key": pub, "added_at_log_position": pos[0][0], "revoked_at_log_position": None}
+    ]
     verdict = opcert.verify_opcert(
-        envelope, tid, MATERIAL, commit, keyring, kind=KIND, principal=ENV_ID, repo_root=str(store)
+        envelope,
+        tid,
+        MATERIAL,
+        commit,
+        keyring,
+        kind=KIND,
+        principal=ENV_ID,
+        storage_anchor_commit=pos[-1][1],
+        storage_anchor_position=pos[-1][0],
+        repo_root=str(store),
     )
     assert verdict.verified is True
     assert verdict.verdict == "certified"
