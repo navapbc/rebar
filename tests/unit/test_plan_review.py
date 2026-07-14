@@ -746,7 +746,7 @@ def test_sidecar_payload_is_offline_reconstructable() -> None:
         "coaching": [],
     }
     p = sidecar.build_payload(verdict, material="abc")
-    assert p["schema"] == "plan_review_result_v1"
+    assert p["schema"] == "plan_review_result_v2"
     assert p["findings"][0]["id"] == "f1" and p["findings"][0]["criteria"] == ["E2"]
     assert p["material_fingerprint"] == "abc"
 
