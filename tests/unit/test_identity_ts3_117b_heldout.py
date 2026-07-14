@@ -252,6 +252,11 @@ def test_verify_signature_schema_includes_key_not_valid_at_era() -> None:
         "certified",
         "mismatch",
         "key_not_valid_at_era",
+        # Added by the op-cert producer-signing seam (story 8d8e) — the op-cert dispatch verdicts.
+        "invalid",
+        "unavailable",
+        "unknown_kind",
+        "unknown_scheme",
     }
 
 

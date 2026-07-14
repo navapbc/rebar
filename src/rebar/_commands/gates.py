@@ -115,10 +115,24 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     check = llm.claim_gate_check(ticket_id, repo_root=repo_root)
     if check.get("ok"):
         return None
+    # DEGRADE remediation (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH >= 8.9). When it
+    # is unavailable the review could not MINT the attestation, so name the concrete fix in-band.
+    ssh_hint = ""
+    try:
+        from rebar.attest import sshsig
+
+        if sshsig.ssh_keygen_version() is None:
+            ssh_hint = (
+                "  Signing requires OpenSSH >= 8.9 (ssh-keygen) to mint the op-cert attestation —\n"
+                "  install OpenSSH, then run `rebar review-plan` to earn it.\n"
+            )
+    except Exception:  # noqa: BLE001 — the ssh-keygen probe is advisory; never let it break the gate
+        pass
     raise CommandError(
         f"Error: cannot start work on {ticket_id}: {check.get('reason')}.\n"
         "  The plan-review gate is enabled (verify.require_plan_review_for_claim) — it\n"
         "  guards starting work via both `claim` and `transition open in_progress`.\n"
+        f"{ssh_hint}"
         "  Recovery: run the plan review to earn an attestation, then start work:\n"
         f"    rebar review-plan {ticket_id}\n"
         f"    rebar claim {ticket_id}   (or: rebar transition {ticket_id} open in_progress)\n"
