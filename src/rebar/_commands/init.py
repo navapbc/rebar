@@ -40,6 +40,8 @@ from rebar.graph._cache import _GRAPH_CACHE_FILE
 _GITIGNORE = f""".env-id
 .closure-key
 .signing-key
+.opcert-key
+.opcert-key.pub
 .state-cache
 .scratch/
 .cache.json

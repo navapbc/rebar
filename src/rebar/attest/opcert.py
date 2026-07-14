@@ -83,7 +83,12 @@ def opcert_subject_digest(
 
 
 def build_opcert_statement(
-    ticket_id: str, material_fingerprint: str, merged_log_commit: str, kind: str
+    ticket_id: str,
+    material_fingerprint: str,
+    merged_log_commit: str,
+    kind: str,
+    *,
+    manifest: list | None = None,
 ) -> dict:
     """The in-toto Statement an op-cert signature wraps.
 
@@ -91,7 +96,25 @@ def build_opcert_statement(
     ``{ticket_id, material_fingerprint, merged_log_commit, kind}``; the fields are also
     recorded in ``predicate`` for transparency (the security-relevant binding is the
     hashed digest in ``subject``).
+
+    SECURITY (stale-code / stale-regver findings): when ``manifest`` (the full signed ``steps``
+    list) is supplied it is recorded in the ``predicate`` as ``manifest`` so it is COVERED by the
+    DSSE-PAE signature over the whole payload — even though it is NOT part of the subject digest.
+    This lets the freshness checks that read manifest-derived inputs (``manifest_deps`` for
+    stale-code, ``manifest_regver`` for stale-regver) source them from the AUTHENTICATED payload
+    rather than the record's attacker-writable plaintext manifest mirror. The subject DIGEST
+    contract is UNCHANGED (still the 4-field digest), so the merge-gate ``verify_opcert`` — which
+    recomputes the digest from those 4 fields, never the predicate — is unaffected. The field is
+    added only when supplied, so legacy call sites produce byte-identical payloads.
     """
+    predicate: dict[str, object] = {
+        "ticket_id": ticket_id,
+        "material_fingerprint": material_fingerprint,
+        "merged_log_commit": merged_log_commit,
+        "kind": kind,
+    }
+    if manifest is not None:
+        predicate["manifest"] = manifest
     return {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [
@@ -105,12 +128,7 @@ def build_opcert_statement(
             }
         ],
         "predicateType": PAYLOAD_TYPE,
-        "predicate": {
-            "ticket_id": ticket_id,
-            "material_fingerprint": material_fingerprint,
-            "merged_log_commit": merged_log_commit,
-            "kind": kind,
-        },
+        "predicate": predicate,
     }
 
 
@@ -122,6 +140,7 @@ def sign_opcert(
     kind: str,
     key_path: str,
     principal: str,
+    manifest: list | None = None,
 ) -> dsse.Envelope:
     """Sign an op-cert whose in-toto subject binds ``{ticket_id, material_fingerprint,
     merged_log_commit, kind}``, with the environment's Ed25519 key at ``key_path`` under
@@ -139,7 +158,9 @@ def sign_opcert(
     from rebar._store.canonical import canonical_str
 
     sshsig.ensure_available()
-    statement = build_opcert_statement(ticket_id, material_fingerprint, merged_log_commit, kind)
+    statement = build_opcert_statement(
+        ticket_id, material_fingerprint, merged_log_commit, kind, manifest=manifest
+    )
     payload = canonical_str(statement).encode("utf-8")
     pae = dsse.pae(PAYLOAD_TYPE, payload)
     sig = sshsig.sign(pae, key_path, OPCERT_NAMESPACE)
@@ -317,17 +338,23 @@ def verify_opcert(
 def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
     """Reconstruct an op-cert from a stored ``attestations[kind]`` record (keystone e4df).
 
-    Returns ``(envelope, {"material_fingerprint": …, "merged_log_commit": …})`` when the record
-    carries an op-cert (an encoded DSSE ``envelope`` field), or ``None`` for a legacy HMAC record
-    (no envelope). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
+    Returns ``(envelope, {"ticket_id": …, "kind": …, "material_fingerprint": …,
+    "merged_log_commit": …, "manifest": …})`` when the record carries an op-cert (an encoded DSSE
+    ``envelope`` field), or ``None`` for a legacy HMAC record (no envelope). ``manifest`` is the
+    SIGNED steps list when the producer bound it into the payload (``None`` for a pre-binding
+    op-cert). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
 
-    SECURITY (finding #4, commit half — story 4214): the bound ``{material_fingerprint,
-    merged_log_commit}`` are sourced from the SIGNED envelope PAYLOAD (the in-toto predicate),
-    **never** from the record's plaintext mirror. Those mirror fields live on the auto-pushed,
-    non-Gerrit-gated tickets branch and are attacker-writable; the payload is authenticated by the
-    DSSE-PAE signature that :func:`verify_opcert` checks, so a tampered payload fails verification
-    while a tampered plaintext mirror is simply ignored. This makes the gate's verdict invariant
-    under plaintext-mirror mutation (verify-then-extract).
+    SECURITY (finding #4, commit half — story 4214): every bound field
+    (``{ticket_id, kind, material_fingerprint, merged_log_commit}``) is sourced from the SIGNED
+    envelope PAYLOAD (the in-toto predicate), **never** from the record's plaintext mirror. Those
+    mirror fields live on the auto-pushed, non-Gerrit-gated tickets branch and are
+    attacker-writable; the payload is authenticated by the DSSE-PAE signature that
+    :func:`verify_opcert` checks, so a
+    tampered payload fails verification while a tampered plaintext mirror is simply ignored. This
+    makes the gate's verdict invariant under plaintext-mirror mutation (verify-then-extract). The
+    subject-binding ``{ticket_id, kind}`` are surfaced here so the same-environment local verify
+    path can enforce the subject binding (cross-ticket / cross-kind replay defense) without
+    re-decoding.
 
     Never raises on a malformed envelope/payload — a decode failure yields ``None`` (fail-closed).
     """
@@ -341,8 +368,15 @@ def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
         if not isinstance(predicate, dict):
             return None
         bound = {
+            "ticket_id": predicate.get("ticket_id"),
+            "kind": predicate.get("kind"),
             "material_fingerprint": predicate.get("material_fingerprint"),
             "merged_log_commit": predicate.get("merged_log_commit"),
+            # SECURITY (stale-code / stale-regver findings): the SIGNED manifest (when the producer
+            # bound it into the payload; None for a legacy op-cert minted before that). Surfaced so
+            # the freshness checks read dep-hashes / regver from the authenticated payload, never
+            # the attacker-writable plaintext record manifest.
+            "manifest": predicate.get("manifest"),
         }
     except Exception:  # noqa: BLE001 — malformed envelope/payload → None, never raise (fail-closed)
         return None
