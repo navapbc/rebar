@@ -403,7 +403,7 @@ Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match
 
 ## Intercept-arm commands
 
-The 19 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
+The 20 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
 
 | Command | Description |
 |---------|-------------|
@@ -425,4 +425,5 @@ The 19 advanced commands handled before the dispatcher. Each owns its own `--hel
 | `verify-commit-ticket` | Verify a commit message references a rebar ticket that resolves in the store (the commit-ticket gate). |
 | `verify-completion` | Run the completion-verifier agent to check a ticket's completion criteria are demonstrably met by the implementation. |
 | `verify-identity` | The authenticated-authorship merge-gate: verify each mutating event's in-toto authorship signature against the author identity's commit-anchored keyring (`--require-authenticated`, `--since` grandfathering, `--format json` report). |
+| `verify-opcert` | The required-environment operation-certificate merge-gate: verify each in-scope closed ticket carries a valid completion-verifier op-cert from the trusted environment pinned in `.rebar/trusted_environments.yaml` (`--require-environment`, `--since` grandfathering). |
 | `workflow` | Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine DSL toolchain). |
