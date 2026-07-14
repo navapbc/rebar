@@ -93,35 +93,28 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 ```toml
 [tool.rebar]
 # verification gate
-verify.require_signature_for_close = false
 verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
                                              # model window a single verify request may use before
                                              # the findings are split into multiple calls (0.1–1.0)
-verify.progressive_drift_refresh   = true    # progressively refresh drifted findings during plan review
-                                             # (default ON since 2026-07-12, epic a37b; explicit false backs out)
+# Progressive drift-refresh of drifted findings during plan review is now
+# always-on (unconditional; no config toggle).
 verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
                                              # verdict (signed onto the ticket); fail-closed. ON for
-                                             # this project's rebar.toml. Alternative to the signature gate.
+                                             # this project's rebar.toml.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
 verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env
                                              # REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT. See docs/commit-ticket-trailer.md
-verify.remediation_mode            = true    # convergent plan-edit re-review (epic 7d43): when on, a
-                                             # re-review of an edited plan whose CODE is unchanged may
-                                             # drop only NOVEL low-priority findings (the rising floor).
-                                             # Default ON (operator-authorized 2026-07-11); explicit
-                                             # false restores a byte-identical full review (the back-out).
-verify.remediation_window_minutes  = 60      # remediation-mode freshness window: a re-review is eligible
+# Convergent plan-edit re-review (the rising floor: a re-review of an edited plan
+# whose CODE is unchanged drops only NOVEL low-priority findings) is now always-on
+# and unconditional; the evidence gate is always-on too. These tuning params remain:
+verify.remediation_window_minutes  = 60      # remediation freshness window: a re-review is eligible
                                              # only if the last review of any kind was within this many
                                              # minutes (measured from it, reset on each review). Min 1.
 verify.novelty_drop_threshold      = 0.7     # T_novel: a finding is droppable only if its novelty >= this
 verify.novelty_priority_floor      = 0.4     # rising floor: drop a novel finding only if priority < this
                                              # (scalar ≈ corpus p40 impact; see the distribution script)
-verify.novelty_drop_active         = true    # EVIDENCE GATE (shared with the code-review region floor).
-                                             # Default ON (operator-authorized on field evidence
-                                             # 2026-07-11, in lieu of the discriminates_novelty eval);
-                                             # explicit false makes both floors inert (the back-out)
 
 # tickets / display / maintenance
 ticket.display_mode      = "auto"
@@ -382,8 +375,7 @@ names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
 `REBAR_ID_GUARD_MODE`→
 `REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). **Removed pre-1.0 (DE7 — no
 longer honored):** the flat `.rebar/config.conf` reader (use `rebar.toml` / a
-`[tool.rebar]` pyproject table), the `verify.require_verdict_for_close` config alias
-(use `verify.require_signature_for_close`), and the env aliases `REBAR_PUSH` (use
+`[tool.rebar]` pyproject table), and the env aliases `REBAR_PUSH` (use
 `REBAR_SYNC_PUSH`), `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), and
 `REBAR_MCP_ALLOW_RECONCILE_LIVE` (use `REBAR_MCP_ALLOW_JIRA_SYNC`). **Also removed pre-1.0
 (ticket unclear-verymad-sablefish):** the env alias `REBAR_LLM_MAX_ITERS` (use
