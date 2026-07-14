@@ -97,11 +97,36 @@ jobs:
       - name: Configure git identity
         env:
           BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
-          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}
+          # Default to the Rebar Bot authorship identity's email (story 1787) so the
+          # signing seam's git-email fallback resolves canary writes to identity
+          # 594c-9dcf-5ad6-4e6d. Overridable via the BRIDGE_BOT_EMAIL repo variable.
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
         run: |
           set -euo pipefail
           git config --global user.name "${BRIDGE_BOT_NAME}"
           git config --global user.email "${BRIDGE_BOT_EMAIL}"
+
+      - name: Materialize the Rebar Bot signing key
+        # Story 1787: the canary writes NON-EXEMPT tickets via the rebar CLI, which signs
+        # automatically through the seam once identity.signing_key + a resolvable identity
+        # are present. A multi-line OpenSSH PEM key cannot live in an env var used as a
+        # key_path, so materialize it to a 0600 file under $RUNNER_TEMP (discarded at job
+        # end) and export its path. If the secret is unset the canary still runs, writing
+        # unsigned (verify-identity is advisory).
+        env:
+          REBAR_BOT_SIGNING_KEY: ${{ secrets.REBAR_BOT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REBAR_BOT_SIGNING_KEY:-}" ]; then
+            echo "REBAR_BOT_SIGNING_KEY unset — canary writes will be unsigned (advisory)"
+            exit 0
+          fi
+          echo "::add-mask::${REBAR_BOT_SIGNING_KEY}"
+          KEYFILE="${RUNNER_TEMP}/rebar-bot-signing-key"
+          install -m 600 /dev/null "${KEYFILE}"
+          printf '%s\n' "${REBAR_BOT_SIGNING_KEY}" > "${KEYFILE}"
+          echo "REBAR_IDENTITY_SIGNING_KEY=${KEYFILE}" >> "${GITHUB_ENV}"
+          echo "Materialized bot signing key to ${KEYFILE} (0600)"
 
       - name: Initialize the ticket store (seed .env-id for CLI writes)
         # A bare `git worktree add` of the tickets branch does NOT create
