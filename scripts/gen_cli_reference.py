@@ -109,6 +109,11 @@ INTERCEPT_COMMANDS: dict[str, str] = {
         "`revoke <env_id> <public_key-or-index>` stamp the current tickets-branch tip log position "
         "as the key's `added_at_log_position` / `revoked_at_log_position`."
     ),
+    "remote-cert": (
+        "Request an op-cert from the trusted gate service at `verify.opcert_remote_url` "
+        "(SigV4-signed): submit `<ticket-id> <kind>`, poll to a verdict, and on PASS persist the "
+        "returned signed envelope as a `SIGNATURE` event the merge gate certifies."
+    ),
     "workflow": (
         "Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine "
         "DSL toolchain)."
