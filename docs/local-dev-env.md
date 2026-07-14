@@ -22,6 +22,14 @@ make install                                    # editable '.[dev]' install + th
 export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (review-plan, verify-completion)
 ```
 
+> **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
+> tickets should own its **own** identity + SSH signing key (never the shared bot). One-time
+> setup — create/own an identity ticket, set the current-identity pointer, and point
+> `identity.signing_key` (or `REBAR_IDENTITY_SIGNING_KEY`) at your **per-machine, uncommitted**
+> SSH private key — is documented in [`identity.md`](identity.md) under "Setting up signing in
+> a local dev / agent clone". The key never leaves your machine; only your public key lives in
+> the store.
+
 **Use `make install` — it is the one canonical setup path.** It runs `pip install -e
 '.[dev]'` (which pulls `nava-rebar[agents]` plus the lint/type/test tooling, so the
 editable install is a complete env for everything below) **and** wires the pre-commit hook

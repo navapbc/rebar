@@ -163,3 +163,51 @@ Enforcement is **project-opt-in** via `identity.require_authenticated` (default 
 To sign your own writes, configure `identity.signing_key` (the path to your
 identity's SSH private key) and set your self-identity; `append_event` then stamps an
 in-toto Statement `author_sig` on every event you write.
+
+## Setting up signing in a local dev / agent clone (story 472f)
+
+Every human or agent clone writes non-exempt tickets, so each needs its **own** identity
+(never the shared bot). One-time setup per machine:
+
+1. **Own an identity ticket.** Create one (or reuse yours):
+   `rebar identity create --name "<your name>" --email <your-git-email> --key "<your ssh public key line>" --self`.
+   `--self` records it as this clone's current identity via the **git-ignored**
+   `.rebar/current_identity` pointer. (Equivalently, `rebar identity use <id>` later.)
+2. **Point `identity.signing_key` at your SSH PRIVATE key.** Either set
+   `[verify]`-adjacent `identity.signing_key = "~/.ssh/id_ed25519"` in your **local**
+   config (`.rebar/config.conf` or user config — NOT the shared `rebar.toml`), or export
+   `REBAR_IDENTITY_SIGNING_KEY=~/.ssh/id_ed25519`. This key is **per-machine and is never
+   committed** — only your PUBLIC key lives in the store (on the identity ticket).
+3. **Git-email fallback.** If no `.rebar/current_identity` pointer is set, the resolver
+   falls back to a **case-insensitive match of the store repo's `git config user.email`**
+   against identity tickets (`resolve_current_identity`). So if your git email already
+   matches your identity ticket's email, signing "just works" without an explicit pointer.
+
+**Verify a signed write:** after setup, make any write (e.g. `rebar comment <id> "hi"`) and
+run `rebar show <id>` — the new event shows `authorship: {signed: ≥1}`; `rebar
+verify-authorship` emits a `verified` verdict for it. (Note: this is the SSH-authorship flow —
+distinct from `rebar verify-signature`, which certifies HMAC *manifest* attestations from the
+`rebar sign` command, not event authorship.)
+
+## The CI merge-gate: `verify-identity.yaml` (story cc0b)
+
+The authenticated-authorship control runs in CI as `.github/workflows/verify-identity.yaml`:
+
+- **It mounts the tickets store.** The store lives on the `tickets` orphan branch, which a
+  plain code checkout does not contain (a bare `rebar verify-identity` would exit 2, "store
+  not found"). The workflow's "Mount tickets branch as a worktree" step fetches
+  `+tickets:refs/remotes/origin/tickets` and `git worktree add -B tickets .tickets-tracker
+  origin/tickets` (full history, so commit-ancestry scoping works), so the gate scans real
+  events.
+- **Posture is config-driven, not hard-forced.** The gating step passes **no**
+  `--require-authenticated` / `--since` flags; enforcement follows
+  `identity.require_authenticated` in `rebar.toml` (**currently `false` → advisory, exit 0**:
+  it re-verifies and reports every in-scope event's authorship but does not block landing).
+  It becomes blocking only when that flag is flipped on (a separate, deliberate step).
+- **Grandfathering boundary — CI vs local.** The boundary that exempts pre-enforcement events
+  is `identity.enforce_since` in `rebar.toml`, overridable in CI by the **environment
+  variable `REBAR_IDENTITY_ENFORCE_SINCE`** (set in the workflow's `env:` block) — there is no
+  `vars.ENFORCE_SINCE` GitHub Actions repo variable. Before enforcement is flipped on, this
+  boundary must be set to an appropriate ref (e.g. the earliest tickets-store event, or the
+  enforcement-cutover commit) so historical unsigned events are grandfathered and the gate is
+  not spuriously red.
