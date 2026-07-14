@@ -299,6 +299,41 @@ def test_build_payload_carries_session_id_and_deps() -> None:
     assert without["deps"] == {}
 
 
+def test_latest_code_review_result_reads_both_v1_and_v2(store: Path) -> None:
+    """Story 7c84: the reader accepts BOTH code_review_result_v1 and _v2. A hand-written v1
+    artifact reads back (surfaced = blocking+advisory union); a v2 artifact reads back the same
+    way, so the region-gated novelty floor is unaffected by the schema bump."""
+    from rebar import config as _config
+    from rebar._commands._seam import append_event
+
+    root = str(store)
+    tracker = _config.tracker_dir(root)
+
+    def _emit_raw(session: str, schema: str) -> None:
+        art = rebar.create_ticket("code_review", f"code-review: session:{session}", repo_root=root)
+        payload = {
+            "schema": schema,
+            "verdict": "PASS",
+            "ticket_id": art,
+            "session_id": session,
+            "deps": {"x.py": "hh"},
+            "blocking": [{"id": "b", "finding": "bug", "criteria": ["tests"], "norm_id": "nbug"}],
+            "advisory": [{"id": "a", "finding": "nit", "criteria": ["docs"], "norm_id": "nnit"}],
+            "coaching": [],
+        }
+        append_event(art, "REVIEW_RESULT", payload, tracker, repo_root=root)
+
+    _emit_raw("v1sess", "code_review_result_v1")
+    got_v1 = sidecar.latest_code_review_result("session:v1sess", repo_root=root)
+    assert got_v1 is not None
+    assert {f["id"] for f in got_v1["findings"]} == {"b", "a"}  # surfaced = blocking+advisory
+
+    _emit_raw("v2sess", "code_review_result_v2")
+    got_v2 = sidecar.latest_code_review_result("session:v2sess", repo_root=root)
+    assert got_v2 is not None
+    assert {f["id"] for f in got_v2["findings"]} == {"b", "a"}
+
+
 def test_cited_paths_code_review_parses_location() -> None:
     """Paths are parsed from each finding's `location` string (stripping `:line`), over the
     blocking + advisory buckets only — code-review findings have no `citations[kind==file]` list."""
