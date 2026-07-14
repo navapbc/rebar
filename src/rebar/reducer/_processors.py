@@ -603,6 +603,9 @@ def process_signature(state: dict, event: dict, data: dict) -> None:
         record["envelope"] = data["envelope"]
         record["material_fingerprint"] = data.get("material_fingerprint")
         record["merged_log_commit"] = data.get("merged_log_commit")
+        # The DSSE principal (env_id) the op-cert was signed under (story 8d8e), so the shape-aware
+        # verify wrapper can classify a foreign-environment cert without decoding the envelope.
+        record["principal"] = data.get("principal")
     # Mirror: unchanged single-slot semantics (back-compat for existing consumers).
     state["signature"] = record
     # Map: additive, kind-keyed; skip blank/retired/unkindable events (no key derivable).

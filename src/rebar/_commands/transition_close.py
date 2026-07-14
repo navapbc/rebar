@@ -424,9 +424,19 @@ def close_ticket(
                 "not attesting stale state. Re-close to certify against the current tree.\n"
             )
         else:
-            _signing.sign_manifest(
-                ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
-            )
+            try:
+                _signing.sign_manifest(
+                    ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
+                )
+            except _signing.SigningError as exc:
+                # DEGRADE, never wedge (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH
+                # >= 8.9) and a writable tracker. When neither can produce a key the close ALREADY
+                # committed, so this is the same closed-without-signature outcome as --force-close:
+                # warn and skip signing (exit 0). Re-close once OpenSSH >= 8.9 is installed.
+                sys.stderr.write(
+                    f"Warning: closed {ticket_id} WITHOUT a completion signature — {exc.message} "
+                    "Re-close once signing is available to certify against the current tree.\n"
+                )
 
     # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
     # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +
