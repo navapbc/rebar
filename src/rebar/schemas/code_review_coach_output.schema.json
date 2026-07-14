@@ -20,6 +20,12 @@
     },
     "coverage": {
       "type": "object"
+    },
+    "dropped": {
+      "type": "array"
+    },
+    "indeterminate": {
+      "type": "array"
     }
   }
 }

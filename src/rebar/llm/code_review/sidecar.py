@@ -19,7 +19,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
-SCHEMA = "code_review_result_v1"
+SCHEMA = "code_review_result_v2"
+# Readers accept every schema version ever written (v2 is a lossless superset of v1: it ADDS
+# the `dropped`/`indeterminate` pools + per-finding threshold stamps, without changing the
+# SURFACED buckets). Old v1 records must still read, so guard on membership not equality.
+ACCEPTED_SCHEMAS = ("code_review_result_v1", "code_review_result_v2")
 # The impact-model formula version that produced this sidecar's scores (story
 # raptorial-galloping-dragon). Stamped top-level so the calibration replay SEGMENTS old-formula vs
 # new-formula findings and never pools across versions. Bump on any impact_code shape change.
@@ -97,6 +101,8 @@ def build_payload(
         "coverage": verdict.get("coverage", {}),
         "blocking": _with_norm_ids(verdict.get("blocking", [])),
         "advisory": _with_norm_ids(verdict.get("advisory", [])),
+        "dropped": _with_norm_ids(verdict.get("dropped", [])),
+        "indeterminate": _with_norm_ids(verdict.get("indeterminate", [])),
         "coaching": verdict.get("coaching", []),
     }
 
@@ -215,7 +221,7 @@ def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str
                 logger.warning("code_review sidecar %s unreadable; trying older", fname)
                 continue
             payload = event.get("data") if isinstance(event, dict) else None
-            if isinstance(payload, dict) and payload.get("schema") == SCHEMA:
+            if isinstance(payload, dict) and payload.get("schema") in ACCEPTED_SCHEMAS:
                 return payload, _ts_prefix(fname)
         return None, -1
     except (FileNotFoundError, NotADirectoryError):

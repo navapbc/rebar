@@ -506,6 +506,8 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
         "advisory": surfaced,
         "coaching": coaching,
         "coverage": coverage,
+        "dropped": list(ctx.inputs.get("dropped") or []),
+        "indeterminate": list(ctx.inputs.get("indeterminate") or []),
     }
 
 
