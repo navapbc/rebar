@@ -207,7 +207,8 @@ def test_sidecar_payload_anchors_on_the_explicit_target_ticket():
         {"verdict": "PASS", "blocking": [], "advisory": []}, target_ticket="abc-123"
     )
     assert payload["ticket_id"] == "abc-123"
-    assert payload["schema"] == "code_review_result_v1"
+    # story 7c84: a fresh emit is now the lossless v2 record
+    assert payload["schema"] == "code_review_result_v2"
     assert payload["verdict"] == "PASS"
     # emit with a falsy ticket is a no-op (the diff-only path emits nothing).
     assert sidecar.emit({"verdict": "PASS"}, target_ticket="") is False

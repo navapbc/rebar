@@ -181,4 +181,6 @@ steps:
     with:
       blocking: ${{ steps.decide.outputs.blocking }}
       surfaced: ${{ steps.decide.outputs.surfaced }}
+      dropped: ${{ steps.decide.outputs.dropped }}
+      indeterminate: ${{ steps.decide.outputs.indeterminate }}
       notes: ${{ steps.coach.outputs.notes }}
