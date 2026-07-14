@@ -193,11 +193,34 @@ jobs:
         # on CI runners.
         env:
           BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
-          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}
+          # Default to the Rebar Bot authorship identity's email (story 9e76) so the inline
+          # signing seam's git-email fallback resolves reconciler-authored events to identity
+          # 594c-9dcf-5ad6-4e6d. Overridable via the BRIDGE_BOT_EMAIL repo variable.
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
         run: |
           set -euo pipefail
           git config --global user.name "${BRIDGE_BOT_NAME}"
           git config --global user.email "${BRIDGE_BOT_EMAIL}"
+
+      - name: Materialize the Rebar Bot signing key
+        # Story 9e76: the reconciler's inbound writer now stamps + signs events inline; it
+        # signs only when identity.signing_key resolves. Materialize the key to a 0600 file
+        # under $RUNNER_TEMP (discarded at job end) and export its path. Unset ⇒ events are
+        # written unsigned (verify-identity is advisory until require_authenticated flips on).
+        env:
+          REBAR_BOT_SIGNING_KEY: ${{ secrets.REBAR_BOT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REBAR_BOT_SIGNING_KEY:-}" ]; then
+            echo "REBAR_BOT_SIGNING_KEY unset — reconciler writes will be unsigned (advisory)"
+            exit 0
+          fi
+          echo "::add-mask::${REBAR_BOT_SIGNING_KEY}"
+          KEYFILE="${RUNNER_TEMP}/rebar-bot-signing-key"
+          install -m 600 /dev/null "${KEYFILE}"
+          printf '%s\n' "${REBAR_BOT_SIGNING_KEY}" > "${KEYFILE}"
+          echo "REBAR_IDENTITY_SIGNING_KEY=${KEYFILE}" >> "${GITHUB_ENV}"
+          echo "Materialized bot signing key to ${KEYFILE} (0600)"
 
       - name: Run reconciler
         # Exit-code contract (src/rebar/_engine/rebar_reconciler/__main__.py):
@@ -232,7 +255,10 @@ jobs:
         # — a clean worktree does NOT imply nothing to push.
         env:
           BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
-          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}
+          # Same Rebar Bot authorship email default as the "Configure git identity" step
+          # above (story 9e76) — both BRIDGE_BOT_EMAIL fallbacks must agree so the identity
+          # resolver sees the bot email on this commit path too.
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
         run: |
           set -euo pipefail
           cd .tickets-tracker
