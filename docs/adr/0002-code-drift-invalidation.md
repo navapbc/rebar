@@ -61,7 +61,7 @@ code. A clean probe REFRESHES the attestation (re-sign the prior verdict with th
 dependency hashes); any blocking finding, or a finding citing a drifted file, escalates to a FULL
 re-review. Soundness is whole-verdict, gated by the probe — there is NO per-criterion finding reuse,
 so the (unenforced) code-blind criterion partition is not relied upon. Gated by
-`verify.progressive_drift_refresh` (**default ON** since 2026-07-12, epic a37b; explicit false backs out); fail-safe to full re-review on probe
+`verify.progressive_drift_refresh` (**default ON** since 2026-07-12, epic a37b; explicit false backs out) (retired in the config-prune epic; the behavior is now always-on and unconditional); fail-safe to full re-review on probe
 error / registry-version skew / no reusable prior verdict.
 
 > **One of three Pass-3 floors.** This drift-refresh is one of three deterministic Pass-3
@@ -71,7 +71,9 @@ error / registry-version skew / no reusable prior verdict.
 > They compose; each is separately gated and shipped inert by default. (Update 2026-07-11:
 > the novelty floor's flags — `remediation_mode` + `novelty_drop_active` — were flipped ON by
 > default, operator-authorized on field evidence; drift-refresh and the completion floor
-> remain default-off.)
+> remain default-off.) (Later update: `remediation_mode`, `novelty_drop_active`, and
+> `progressive_drift_refresh` were all retired in the config-prune epic; those behaviors are
+> now always-on and unconditional.)
 
 ### Measurement (cost of probe-only refresh vs full re-review)
 
@@ -90,7 +92,8 @@ latency — so the probe is ≈ **1/3 of the full-review LLM calls** and a small
 (2 of 6 agent-tier finders vs the full set), comfortably under the <50% sanity target. (Update
 2026-07-12, epic a37b: the saving is real but bounded — the 2 probe criteria are themselves
 agent-tier — and on that structural basis the path is now **default ON**; an explicit
-`verify.progressive_drift_refresh = false` backs out to the full-re-review path.)
+`verify.progressive_drift_refresh = false` backs out to the full-re-review path.) (Retired in
+the config-prune epic: the config key no longer exists and the path is now always-on.)
 
 ## Shared ref-resolution boundary (epic `raze-vet-ditch`, S4b `piney-gold-day`)
 

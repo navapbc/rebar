@@ -121,8 +121,7 @@ behavior a reviewer/author sees:
   `blocking` + `advisory` buckets), so a dropped finding never re-enters the prior set (the
   code-review counterpart of the plan-review fix, bug `old-frilly-plankton`). The whole floor is
   fail-safe: any reader/hash/novelty error leaves the verdict fully unfiltered (no drops). It is
-  ON by default since 2026-07-11 (gated on the shared `verify.novelty_drop_active`; an explicit
-  `false` is the back-out) and self-gates inert with no
+  always-on (armed by the shared, always-on evidence gate) and self-gates inert with no
   prior memory. The novelty sub-call (`reviewers/code_review_novelty.md`, `code-novelty` reviewer,
   `code_review_novelty` contract = the SAME kernel `novelty_model`) sees prior findings ONLY in its
   instructions — never the Pass-1 finder (ADR 0008 Invariant 1).

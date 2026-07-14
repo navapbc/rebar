@@ -268,8 +268,9 @@ and need the `nava-rebar[agents]` extra + `ANTHROPIC_API_KEY`. Part of the optio
 > criteria, but is **left unsigned**. `--force-close` closes without verifying or
 > signing. So a **closed-without-signature** ticket means "not certified" — the gate was
 > bypassed *or* a descendant is still uncertified; it no longer implies the ticket's own
-> validation failed (re-close the uncertified child to earn its signature). It is an
-> *alternative* to the signature gate (`require_signature_for_close`), not composed with it.
+> validation failed (re-close the uncertified child to earn its signature). It is now the
+> sole close-gate attestation (the older signature close gate was retired in the config-prune
+> epic).
 
 ## Quality gates
 

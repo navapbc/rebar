@@ -65,7 +65,7 @@ kwarg/function are gone) — switch to the canonical replacement:
 | env `REBAR_PUSH` | env var | env `REBAR_SYNC_PUSH` |
 | env `TICKETS_TRACKER_DIR` | env var | env `REBAR_TRACKER_DIR` |
 | env `REBAR_MCP_ALLOW_RECONCILE_LIVE` | env var | env `REBAR_MCP_ALLOW_JIRA_SYNC` |
-| cfg `verify.require_verdict_for_close` | config key | cfg `verify.require_signature_for_close` |
+| cfg `verify.require_verdict_for_close` | config key | cfg `verify.require_completion_verification_for_close` |
 | flat `.rebar/config.conf` reader | config file | `rebar.toml` or a `[tool.rebar]` table in `pyproject.toml` |
 | lib `edit_ticket(tags=…)` | library kwarg | `edit_ticket(set_tags=…)` (or `add_tags=` / `remove_tags=`) |
 | lib `rebar.list_epics()` | library function | `rebar.list_tickets(ticket_type="epic", status="open,in_progress", blocking_state="unblocked", …)` (+ `ticket_type="bug", priority=0` for the P0 bugs) |
