@@ -467,10 +467,8 @@ key that **CI** reads as `foreign_key` (intentionally not secure). So CI verifie
 ticket's attestation under the MCP server's key; local installs cannot mint a CI-trusted
 attestation. The agent is read-only and never signs its own homework — a deterministic gate
 acts on its verdict, and a successful prompt-injection can at worst flip the *advisory* verdict,
-never forge the signature. The gate is an **alternative** to the signature gate
-(`require_signature_for_close`), not composed with it (the completion gate signs *after* the
-close; the signature gate requires a signature *before* it — enabling both deadlocks a non-force
-close). An unreadable config fails this gate **off** (with a warning), so it never auto-enables
+never forge the signature. The completion-verification close gate is the sole close-gate
+attestation (it signs a PASS verdict *after* the close). An unreadable config fails this gate **off** (with a warning), so it never auto-enables
 across repos that didn't opt in.
 
 ## See also — reuse reference + the plan-review gate

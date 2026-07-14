@@ -324,11 +324,9 @@ both-sides-conflict sites. A `None` baseline is the documented local-wins signal
 (ADR 0026 §2); a corrupt `bindings.json` has already failed the pass **closed at load**,
 so arbitration adds no new failure mode.
 
-This behavior is **always on** (story d6bd). It was previously gated behind two
-convergence-rollout flags — `reconciler.baseline_dual_write` (shadow dual-write) and
-`reconciler.baseline_consumer_swap` (consume the baseline). Both ran clean in production
-for this project and have been **retired**; the flags no longer exist (setting either in
-`rebar.toml` is ignored with a typo warning — see `test_config_backcompat.py`).
+This behavior is **always on** (story d6bd): the per-binding baseline is unconditionally
+dual-written and consumed as the arbitration ancestor. There is no configuration knob to
+change it.
 
 ### The one-pass cold-start warm-up window
 
@@ -467,10 +465,9 @@ to tighten the guard during rollout.
 ### Baseline arbitration (always-on)
 
 Direction arbitration uses the per-binding `baseline` (ADR 0026), advanced every
-live pass before `save()`. This was rolled out behind the retired
-`reconciler.baseline_dual_write` / `reconciler.baseline_consumer_swap` flags (story
-d6bd) and is now hardcoded always-on. See "Baseline arbitration (always-on) and the
-cold-start warm-up window" above for the lazy warm-up window and the
+live pass before `save()`. It is hardcoded always-on (story d6bd). See "Baseline
+arbitration (always-on) and the cold-start warm-up window" above for the lazy
+warm-up window and the
 `RECON: baseline_cold_start` diagnostic.
 
 ### Rollback procedure (summary)

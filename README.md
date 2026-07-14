@@ -546,9 +546,9 @@ values and which layer each came from.
 
 ```toml
 [tool.rebar]
-verify.require_signature_for_close = true  # gate story/epic close on a certified
-                                           # signature at HEAD (rebar sign); default
-                                           # false.
+verify.require_completion_verification_for_close = true  # gate work-ticket close on a PASS
+                                           # completion verdict (signed onto the ticket);
+                                           # fail-closed. Default false.
 ticket.display_mode = "auto"               # auto | canonical | alias | short
 compact.threshold   = 10
 sync.push = "always"                       # always | async | off
