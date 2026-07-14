@@ -320,29 +320,25 @@ prior findings, so the independence invariant holds **by construction**. A faile
 novelty sub-call defaults novelty to `0.0` (carryover → never dropped — a broken signal can
 only make the gate stricter).
 
-**Remediation mode is gated — and ON by default since 2026-07-11.** The floor applies only
-when ALL hold:
-config `remediation_mode` on (the default); the plan changed; the **code is unchanged** since the baseline
+**Remediation mode is always-on and unconditional.** The floor applies only
+when ALL hold: the plan changed; the **code is unchanged** since the baseline
 (detected by `verified_at_sha` equality against the prior signed manifest — reusing the
 signed snapshot ref, no new diff machinery); the registry is unchanged; a prior sidecar with
 finding text exists; and the last review of any kind is within the freshness window
 (default 60 min, measured from the last review and **reset on each review**, so the loop
 persists across a series of edits and lapses to a normal full review only after the agent
-goes idle). Any precondition failing → a **byte-identical full review**. A separate
-**evidence-gate** flag `novelty_drop_active` (also ON by default) completes the triple gate.
-Both defaults were flipped ON 2026-07-11, operator-authorized on field evidence (782
+goes idle). Any precondition failing → a **byte-identical full review**. The
+**evidence gate** completes the triple gate and is likewise always-on. Field evidence (782
 post-recalibration runs: 32% verdict instability on byte-identical plans, 95% of remediation
-edits minting new findings) in lieu of the `discriminates_novelty` eval
-(`rebar prompt eval plan-review-novelty`), which remains available to re-run before the
-flags are removed entirely.
+edits minting new findings) motivated making both unconditional; the `discriminates_novelty`
+eval (`rebar prompt eval plan-review-novelty`) remains available to re-run.
 
 A narrowed verdict records `narrowed: true` + `floored_criteria` + `floored_finding_ids` on
 its `coverage`, and the dropped novel findings are written to the `REVIEW_RESULT` sidecar
 (joinable by `norm_id`) — so within-session suppression is always **observable**. This is
 the *complement* of the code-drift `drift_refresh` path (ADR 0002): drift-refresh is plan
-**unchanged** + code drifted; remediation is plan **changed** + code unchanged. Setting
-`remediation_mode` (or `novelty_drop_active`) off restores byte-identical full-review
-behavior — the total back-out.
+**unchanged** + code drifted; remediation is plan **changed** + code unchanged. Both the
+remediation floor and its evidence gate are always-on and unconditional.
 
 ## Completion-aware container review (the completion floor)
 
@@ -374,11 +370,9 @@ staleness/completion condition is met.
 | Key | Default | Effect |
 |-----|---------|--------|
 | `verify.require_plan_review_for_claim` | `false` | When true, starting work on a work ticket (`claim`, or `transition open→in_progress`) requires a fresh certified plan-review attestation. **Turning it off is the rollback** — an ordinary preference, no kill-switch needed. |
-| `verify.remediation_mode` | `true` | Enable the rising-floor remediation re-review (above). Default ON since 2026-07-11 (operator-authorized); an explicit `false` → byte-identical full review (the back-out). |
-| `verify.remediation_window_minutes` | `60` | Freshness window: a re-review is eligible only if the last review of any kind was within this many minutes (measured from it, reset on each review). |
+| `verify.remediation_window_minutes` | `60` | Freshness window for the (always-on) rising-floor remediation re-review: a re-review is eligible only if the last review of any kind was within this many minutes (measured from it, reset on each review). |
 | `verify.novelty_drop_threshold` | `0.7` | `T_novel`: a finding is droppable only if its novelty ≥ this. |
-| `verify.novelty_priority_floor` | `0.4` | The rising floor: drop a novel finding only if its priority < this (a scalar ≈ the corpus p40 impact percentile; `scripts/plan_review_impact_distribution.py` prints the inputs). |
-| `verify.novelty_drop_active` | `true` | **Evidence gate** (shared with the code-review region-gated floor). Default ON since 2026-07-11, operator-authorized on field evidence in lieu of the `discriminates_novelty` eval; an explicit `false` makes both floors inert (the back-out). |
+| `verify.novelty_priority_floor` | `0.4` | The rising floor: drop a novel finding only if its priority < this (a scalar ≈ the corpus p40 impact percentile; `scripts/plan_review_impact_distribution.py` prints the inputs). The evidence gate that arms both this floor and the code-review region-gated floor is always-on and unconditional. |
 | `verify.completion_floor_active` | `false` | **Evidence gate** for the completion floor (container completion-awareness, above). Off/absent → byte-identical full review (the back-out); flip true only after the calibration gold-set clears its must-never-suppress bar. |
 | `verify.completion_priority_floor` | `0.4` | The completion floor: drop a delivered, plan-semantics finding only if its priority < this (same "below major" band as the novelty floor). |
 | `verify.completion_preserve_criteria` | `["T5c","T10"]` | Always-preserve criterion ids the completion floor never drops (security overlay + endpoint/interface contract). Accepts a TOML array or a comma-separated string; add privacy/compliance ids here — a config change, not code. |

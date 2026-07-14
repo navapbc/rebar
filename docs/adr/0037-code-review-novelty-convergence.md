@@ -92,7 +92,9 @@ The floor reuses plan-review's EXISTING config keys — `verify.novelty_drop_thr
 config key. `novelty_drop_active` is the shared evidence gate: OFF by default as accepted, so
 an operator opts in with evidence exactly as plan-review requires. (Update 2026-07-11: the
 gate now defaults ON — operator-authorized on field evidence; an explicit `false` is the
-back-out.) On top of the flag the floor SELF-GATES:
+back-out.) (Retired in the config-prune epic: `novelty_drop_active` no longer exists and the
+evidence gate is now always-on; `novelty_drop_threshold` / `novelty_priority_floor` remain as
+tuning params.) On top of the (now-unconditional) gate the floor SELF-GATES:
 it is inert whenever there is no prior memory for the current key (first review, or a reader
 error). Both gates must be open before anything drops.
 
@@ -168,6 +170,7 @@ snapshot is deferred).
   re-raises). Both keyspaces are live: local `session:<id>` and Gerrit `change:<id>`.
 - The mechanism shipped OFF by default; enabling it was an operator decision gated on
   evidence. (Update 2026-07-11: `novelty_drop_active` now defaults ON, operator-authorized on
-  field evidence; an explicit `false` is the back-out.)
+  field evidence; an explicit `false` is the back-out.) (Retired in the config-prune epic:
+  the key no longer exists and the mechanism is now always-on.)
 - Line-level region detection is the remaining follow-on; the machinery, both keyspaces, and the
   local + Gerrit paths ship here.
