@@ -127,10 +127,10 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
     - **Walk-back over unusable files:** the newest sidecar is preferred, but a single
       malformed (mid-emit crash) or foreign-schema newest file does NOT blind the caller
       to older valid reviews — the reader walks from newest to oldest and returns the
-      first usable ``plan_review_result_v1`` payload (a malformed file is logged, once).
-    - **Schema guard:** a payload whose ``schema`` != ``"plan_review_result_v1"`` is
-      skipped, so a future schema bump can never feed a stale shape to the novelty
-      sub-call. All files unusable → ``None``.
+      first usable ``plan_review_result_v1``/``_v2`` payload (a malformed file is logged, once).
+    - **Schema guard:** a payload whose ``schema`` is neither ``"plan_review_result_v1"``
+      nor ``"plan_review_result_v2"`` is skipped, so a future schema bump can never feed a
+      stale shape to the novelty sub-call. All files unusable → ``None``.
     """
     try:
         from rebar import config as _config
@@ -154,7 +154,10 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
                 logger.warning("REVIEW_RESULT sidecar %s unreadable; trying older", fname)
                 continue
             payload = event.get("data") if isinstance(event, dict) else None
-            if isinstance(payload, dict) and payload.get("schema") == "plan_review_result_v1":
+            if isinstance(payload, dict) and payload.get("schema") in (
+                "plan_review_result_v1",
+                "plan_review_result_v2",
+            ):
                 return payload
         return None
     except FileNotFoundError:
@@ -309,10 +312,12 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         # Field-selection principle (child e344): persist the PROSE a remediation
         # re-review's Pass-2 novelty sub-call needs to re-ground itself against the
         # prior findings (``finding`` / ``suggested_fix`` / ``checklist_item``) plus the
-        # fingerprints/decision/verification needed for offline calibration — but
-        # deliberately exclude runtime-only carriers (e.g. ``scenarios``, ``evidence``,
-        # ``_agentic``) to keep the sidecar lean. As the finding schema grows, add a key
-        # here only when an offline consumer (calibration or re-grounding) needs it.
+        # fingerprints/decision/verification needed for offline calibration. Story 4e19
+        # makes the record LOSSLESS (v2): the Pass-1 ``evidence``/``scenarios`` grounding
+        # prose is now persisted too, along with the resolved ``block_threshold`` /
+        # ``blocking_enabled`` the Pass-3 decision applied — so an auditor can see a
+        # finding's grounding quotes AND the exact decision boundary that judged it.
+        # (Runtime-only carriers like ``_agentic`` are still excluded.)
         return {
             "id": f.get("id"),
             # OBSERVABILITY-ONLY enrichment (db7b follow-on): a reword-tolerant fingerprint
@@ -348,6 +353,15 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "finding": f.get("finding", ""),
             "suggested_fix": f.get("suggested_fix", ""),
             "checklist_item": f.get("checklist_item", ""),
+            # Lossless v2 (story 4e19): the Pass-1 grounding prose (quotes the finder
+            # cited, failure scenarios it imagined) + the resolved decision boundary the
+            # Pass-3 decision applied. block_threshold/blocking_enabled ride on the finding
+            # because pass3_over_findings merged the decision output (see decide.py). All
+            # sidecar-event ONLY; the surfaced verdict shape is unchanged.
+            "evidence": f.get("evidence", []),
+            "scenarios": f.get("scenarios", []),
+            "block_threshold": f.get("block_threshold"),
+            "blocking_enabled": f.get("blocking_enabled"),
         }
 
     all_findings = (
@@ -358,7 +372,7 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         + verdict.get("dropped", [])
     )
     return {
-        "schema": "plan_review_result_v1",
+        "schema": "plan_review_result_v2",
         "impact_model_version": IMPACT_MODEL_VERSION,
         "verdict": verdict.get("verdict"),
         "ticket_id": verdict.get("ticket_id"),
