@@ -296,8 +296,18 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
             provenance={"test": "link_sync_roundtrip_live", "local_id": "loc-a"},
         )
         result = apply_outbound._apply_outbound_update(apply_mut, client=client)
-        assert (result.payload or {}).get("links_applied", 0) >= 1, (
-            f"apply leaf reported no link applied: {getattr(result, 'payload', None)!r}"
+        # The typed leaf delegates outbound updates to the SINGLE production applier
+        # (batch update_one) and returns its raw result; per-sub-op telemetry like
+        # `links_applied` is intentionally NOT surfaced here (see apply_outbound
+        # ._apply_outbound_update docstring — story 2359 will surface it on the batch
+        # outcome). So assert the leaf delegated cleanly (an update_result, no comment
+        # errors); the AUTHORITATIVE proof the link was applied is the LIVE issuelink
+        # check immediately below.
+        assert result.payload and "update_result" in result.payload, (
+            f"apply leaf did not delegate to update_one: {getattr(result, 'payload', None)!r}"
+        )
+        assert not result.payload.get("comment_errors"), (
+            f"apply leaf reported comment errors: {result.payload.get('comment_errors')!r}"
         )
 
         # Assert the live link now exists on A, pointing at B (either direction).
