@@ -48,6 +48,8 @@ _LADDER = {
     "verify-commit-ticket",
     "verify-completion",
     "verify-identity",  # epic gnu-whale-ichor / AC7: authenticated-authorship merge-gate
+    "verify-opcert",  # epic sonic-columned-sturgeon / 4214: required-environment op-cert merge-gate
+    "trusted-env",  # story 4214: maintain .rebar/trusted_environments.yaml (add/revoke keys)
     "workflow",
 }
 

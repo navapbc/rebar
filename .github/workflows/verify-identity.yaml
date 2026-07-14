@@ -12,6 +12,11 @@ name: verify-identity
 # is signed yet) and become blocking the moment write-signing is rolled out and the config
 # flag is flipped, with all pre-rollout events already grandfathered.
 
+# CI-trigger audit (op-cert lane, story 4214): every on: trigger is classified so no
+# merge path silently skips the gate.
+#   push              — INCLUDED (branches-ignore feature/**; NO_FILTER on main — no paths filter)
+#   pull_request      — INCLUDED (NO_FILTER: no paths filter, so every PR runs the gate)
+#   workflow_dispatch — INCLUDED (manual)
 on:
   push:
     branches-ignore: ["feature/**"]
@@ -55,3 +60,7 @@ jobs:
         # grandfather boundary are read from rebar.toml (`identity.require_authenticated`,
         # `identity.enforce_since`). See the header comment.
         run: rebar verify-identity
+      - name: verify-opcert (required-environment op-cert gate)
+        # Same merged-log walk; posture + grandfather boundary from rebar.toml
+        # (verify.require_environment, verify.opcert_enforce_since) — no CI variable.
+        run: rebar verify-opcert
