@@ -429,6 +429,14 @@ def main(argv: list[str] | None = None) -> int:
         from rebar._commands import verify_authorship
 
         return verify_authorship.cli(argv[1:])
+    if argv and argv[0] == "verify-opcert":  # required-environment op-cert merge-gate (story 4214)
+        from rebar._commands import verify_opcert
+
+        return verify_opcert.cli(argv[1:])
+    if argv and argv[0] == "trusted-env":  # maintain .rebar/trusted_environments.yaml (story 4214)
+        from rebar._commands import trusted_env_cmd
+
+        return trusted_env_cmd.cli(argv[1:])
 
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":

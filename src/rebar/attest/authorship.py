@@ -160,6 +160,93 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
         return None
 
 
+def resolve_position_commit(position: str, tracker: str, *, repo_root=None) -> str | None:
+    """The tickets-branch commit SHA that INTRODUCED the event file with ``position`` prefix,
+    searched GLOBALLY across ``tracker`` (a sibling of :func:`resolve_event_commit` for callers
+    that do not know the owning ticket dir — e.g. the op-cert era anchor, whose boundary positions
+    are recorded out-of-band and are not scoped to one ticket).
+
+    ``position`` is an event's ``{timestamp}-{uuid}`` prefix; positions are GLOBALLY unique, so a
+    ``*{position}-*.json`` pathspec matches exactly the one introducing file wherever it lives. As
+    with :func:`resolve_event_commit`, the LAST line of ``git log --diff-filter=A`` (the oldest =
+    the add commit) is returned; ANY failure — git non-zero, no match, git missing, a timeout, or
+    any exception — yields ``None`` (this function NEVER raises, fail-closed)."""
+    if not position or not tracker:
+        return None
+    try:
+        pathspec = f"*{position}-*.json"
+        proc = subprocess.run(
+            ["git", "-C", tracker, "log", "--diff-filter=A", "--format=%H", "--", pathspec],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            return None
+        lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        return lines[-1] if lines else None
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → no commit, never raise (fail-closed)
+        return None
+
+
+def keys_valid_at_anchor(
+    records: list[dict],
+    anchor_commit: str,
+    anchor_position: str | None,
+    *,
+    resolve,
+    is_ancestor,
+) -> list[str]:
+    """The shared ancestry + intra-commit-position era predicate (epic gnu-whale-ichor).
+
+    Given keyring ``records`` (dicts carrying ``public_key`` plus ``added_at`` / ``revoked_at``
+    POSITION strings), return the public keys VALID at the anchor ``(anchor_commit,
+    anchor_position)``. ``resolve(position) -> commit | None`` maps a log position to its
+    introducing tickets-branch commit; ``is_ancestor(ancestor, descendant) -> bool`` decides
+    ancestry on the tickets branch. A key is VALID iff its add-commit is an ANCESTOR of
+    ``anchor_commit`` AND (it is not revoked OR its revoke-commit is NOT an ancestor). When an
+    add/revoke commit EQUALS ``anchor_commit`` and ``anchor_position`` is given, the two are
+    ordered by POSITION instead (a total order within one commit): added counts iff
+    ``added_at <= anchor_position``; revoked counts iff ``revoked_at <= anchor_position``.
+
+    This is the SINGLE era rule; both :func:`verify_authorship_at_commit` and
+    :func:`rebar.attest.opcert.verify_opcert` call it with their own resolvers, so the rule is
+    never duplicated. Pure: the caller owns fail-closed error handling around ``resolve`` /
+    ``is_ancestor``."""
+    valid_keys: list[str] = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        pub = rec.get("public_key")
+        added_at = rec.get("added_at")
+        revoked_at = rec.get("revoked_at")
+        if not isinstance(pub, str) or not pub:
+            continue
+        if not isinstance(added_at, str) or not added_at:
+            continue
+        added_commit = resolve(added_at)
+        if added_commit is None:
+            continue
+        if added_commit == anchor_commit and anchor_position is not None:
+            added = added_at <= anchor_position
+        else:
+            added = is_ancestor(added_commit, anchor_commit)
+        if not added:
+            continue
+        revoked = False
+        if isinstance(revoked_at, str) and revoked_at:
+            revoked_commit = resolve(revoked_at)
+            if revoked_commit is not None:
+                if revoked_commit == anchor_commit and anchor_position is not None:
+                    revoked = revoked_at <= anchor_position
+                else:
+                    revoked = is_ancestor(revoked_commit, anchor_commit)
+        if revoked:
+            continue
+        valid_keys.append(pub)
+    return valid_keys
+
+
 def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
     """Map every tracker event-file path (relative to the tracker root) to the OLDEST commit
     that ADDED it, resolved in a SINGLE ``git log`` pass — the batched form of
@@ -280,37 +367,19 @@ def verify_authorship_at_commit(
             )
             return proc.returncode == 0
 
-        valid_keys: list[str] = []
-        for rec in _keyring_for(identity_id, repo_root=repo_root):
-            if not isinstance(rec, dict):
-                continue
-            pub = rec.get("public_key")
-            added_at = rec.get("added_at")
-            revoked_at = rec.get("revoked_at")
-            if not isinstance(pub, str) or not pub or not isinstance(added_at, str) or not added_at:
-                continue
-            added_commit = resolve_event_commit(added_at, ticket_dir, repo_root=repo_root)
-            if added_commit is None:
-                continue
-            # Added as of event_commit? Refine to a position compare within one commit.
-            if added_commit == event_commit and event_position is not None:
-                added = added_at <= event_position
-            else:
-                added = _is_ancestor(added_commit, event_commit)
-            if not added:
-                continue
-            # Revoked as of event_commit? Same intra-commit refinement.
-            revoked = False
-            if isinstance(revoked_at, str) and revoked_at:
-                revoked_commit = resolve_event_commit(revoked_at, ticket_dir, repo_root=repo_root)
-                if revoked_commit is not None:
-                    if revoked_commit == event_commit and event_position is not None:
-                        revoked = revoked_at <= event_position
-                    else:
-                        revoked = _is_ancestor(revoked_commit, event_commit)
-            if revoked:
-                continue
-            valid_keys.append(pub)
+        def _resolve(position: str) -> str | None:
+            return resolve_event_commit(position, ticket_dir, repo_root=repo_root)
+
+        # The keyring records already carry ``added_at`` / ``revoked_at`` position strings, which
+        # is exactly the shape ``keys_valid_at_anchor`` consumes — so we pass them straight through
+        # to the SHARED era predicate (identical to the op-cert gate's, never duplicated).
+        valid_keys = keys_valid_at_anchor(
+            _keyring_for(identity_id, repo_root=repo_root),
+            event_commit,
+            event_position,
+            resolve=_resolve,
+            is_ancestor=_is_ancestor,
+        )
     except Exception:  # noqa: BLE001 — ANY git/lookup failure → non-verified, never raise (fail-closed)
         return registry.Verdict(
             verified=False,

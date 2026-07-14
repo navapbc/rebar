@@ -10,11 +10,19 @@ certificate's own self-claimed keyid (an unauthenticated hint).
 Config schema (``.rebar/trusted_environments.yaml``)::
 
     environments:
-      - env_id: "<string>"                  # MUST equal the DSSE principal (keyid)
+      - env_id: "<string>"                        # MUST equal the DSSE principal (keyid)
         keys:
-          - public_key: "ssh-ed25519 AAAA…" # one OpenSSH ed25519 authorized-keys line
-            added_at_commit: "<git-sha>"     # era start (a commit on main)
-            revoked_at_commit: "<git-sha>|null"
+          - public_key: "ssh-ed25519 AAAA…"       # one OpenSSH ed25519 authorized-keys line
+            added_at_log_position: "<ts>-<uuid>"  # era start: a TICKETS-BRANCH log position
+            revoked_at_log_position: "<ts>-<uuid>|null"
+
+Era boundaries are TICKETS-BRANCH log positions (``{timestamp}-{uuid}`` event-position strings),
+NOT git-main SHAs (story 4214 / Option B): a key's validity is evaluated at the certificate's
+STORAGE ANCHOR — the tickets-branch commit that introduced its terminal ``SIGNATURE`` event — so a
+revoked-key holder cannot backdate the cert's self-chosen ``merged_log_commit`` to a pre-revocation
+ancestor and have the stale key still verify. A legacy config still using ``added_at_commit`` /
+``revoked_at_commit`` surfaces the SAME located :class:`TrustedEnvError` as any other malformed
+config (the new field names are required).
 
 Loader posture mirrors ``rebar.llm.criteria.overlay``: **fail-open** when the file is absent (no
 required environment — the low-security default), a **located** :class:`TrustedEnvError` (naming
@@ -80,12 +88,44 @@ def load_trusted_environments(repo_root: str | None = None) -> dict | None:
             f"trusted-environments config {path} must be a mapping with an 'environments' list; "
             f"got {type(data).__name__}"
         )
+    _validate_key_schema(data, path)
     return data
 
 
+def _validate_key_schema(data: dict, path: Path) -> None:
+    """Reject a present-but-legacy/malformed key record with a LOCATED error (story 4214).
+
+    Each key must carry ``added_at_log_position`` (a non-empty string tickets-branch log position);
+    a legacy record still using the retired git-SHA fields ``added_at_commit`` /
+    ``revoked_at_commit``, or one missing ``added_at_log_position``, is NOT silently accepted — it
+    surfaces the same located :class:`TrustedEnvError` (naming the path) as any other malformed
+    config. ``revoked_at_log_position`` is optional and may be ``null``.
+    """
+    for env in data.get("environments") or []:
+        if not isinstance(env, dict):
+            continue
+        for key in env.get("keys") or []:
+            if not isinstance(key, dict):
+                continue
+            if "added_at_commit" in key or "revoked_at_commit" in key:
+                raise TrustedEnvError(
+                    f"trusted-environments config {path} uses the retired git-SHA era fields "
+                    "'added_at_commit'/'revoked_at_commit'; Option B (story 4214) requires "
+                    "tickets-branch log positions 'added_at_log_position'/'revoked_at_log_position'"
+                )
+            pos = key.get("added_at_log_position")
+            if not isinstance(pos, str) or not pos:
+                raise TrustedEnvError(
+                    f"trusted-environments config {path} key record is missing a non-empty "
+                    "'added_at_log_position' (a tickets-branch {timestamp}-{uuid} log position)"
+                )
+
+
 def trusted_env_keyring(env_id: str, repo_root: str | None = None) -> list[dict] | None:
-    """The pinned key records for ``env_id`` (``{public_key, added_at_commit, revoked_at_commit}``),
-    or ``None`` when the config is absent or ``env_id`` is not pinned.
+    """The pinned key records for ``env_id``
+    (``{public_key, added_at_log_position, revoked_at_log_position}``), or ``None`` when the config
+    is absent or ``env_id`` is not pinned. Era boundaries are TICKETS-BRANCH log positions
+    (Option B).
     """
     data = load_trusted_environments(repo_root)
     if data is None:
@@ -97,8 +137,8 @@ def trusted_env_keyring(env_id: str, repo_root: str | None = None) -> list[dict]
                 keyring.append(
                     {
                         "public_key": key.get("public_key"),
-                        "added_at_commit": key.get("added_at_commit"),
-                        "revoked_at_commit": key.get("revoked_at_commit"),
+                        "added_at_log_position": key.get("added_at_log_position"),
+                        "revoked_at_log_position": key.get("revoked_at_log_position"),
                     }
                 )
             return keyring
@@ -113,10 +153,14 @@ def verify_required_environment(
     required_env_id: str,
     *,
     kind: str,
+    storage_anchor_commit: str,
+    storage_anchor_position: str | None = None,
     repo_root: str | None = None,
 ) -> registry.Verdict:
     """Verify ``envelope`` is an op-cert from the pinned ``required_env_id`` for
-    ``{ticket_id, material_fingerprint, merged_log_commit}``.
+    ``{ticket_id, material_fingerprint, merged_log_commit}``, with key era-validity anchored on the
+    certificate's STORAGE ANCHOR ``(storage_anchor_commit, storage_anchor_position)`` — NOT on the
+    cert's self-chosen ``merged_log_commit`` (story 4214 / Option B).
 
     Loads ``required_env_id``'s pinned keyring and delegates to
     :func:`rebar.attest.opcert.verify_opcert` with ``principal=required_env_id`` — so the signature
@@ -142,5 +186,7 @@ def verify_required_environment(
         keyring,
         kind=kind,
         principal=required_env_id,
+        storage_anchor_commit=storage_anchor_commit,
+        storage_anchor_position=storage_anchor_position,
         repo_root=repo_root,
     )
