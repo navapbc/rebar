@@ -96,17 +96,16 @@ You only do this the first time.
    git push origin HEAD:refs/for/main
    ```
    Repeat until both votes are green.
-7. **A maintainer lands it.** Once both votes are `+1`, a maintainer (or the serial
-   **auto-lander**) lands your change: it is rebased onto the current `main` tip, its CI
-   re-runs on that exact tree, and it is then submitted — Gerrit merges and replicates the new
-   `main` out to GitHub. As a first-time contributor you won't see (and don't need) a Submit
-   button yourself — landing rights come once you've been added as a maintainer. **Two green
-   votes are necessary but not sufficient:** under Fast-Forward-Only `main` (ADR-0040) a change
-   only lands when it also sits on the current tip, so the maintainer/auto-lander handles that
-   rebase for you — don't be surprised if a green change needs a re-CI before it merges. So:
-   get both votes green, and the landing is taken care of. 🎉 (For how landing works, see
-   [CONTRIBUTING.md](../CONTRIBUTING.md) §2e and
-   [docs/adr/0042-auto-lander.md](adr/0042-auto-lander.md).)
+7. **A maintainer lands it with Submit.** Once both votes are `+1` and nothing is unresolved,
+   a maintainer lands your change with a plain Gerrit **Submit**. `main` is
+   **Rebase-If-Necessary** (ADR-0047): Gerrit rebases the change onto the current `main` tip and
+   submits it server-side, atomically — then merges and replicates the new `main` out to GitHub.
+   As a first-time contributor you won't see (and don't need) a Submit button yourself — landing
+   rights come once you've been added as a maintainer. **Two green votes + mergeable = it
+   lands;** you don't pre-rebase (Gerrit does it), and the only time anyone rebases by hand is a
+   textual merge conflict Gerrit can't resolve. So: get both votes to `+1`, and the landing is
+   taken care of. 🎉 (For how landing works, see [CONTRIBUTING.md](../CONTRIBUTING.md) §2e and
+   [docs/adr/0047-retire-autolander-rebase-if-necessary.md](adr/0047-retire-autolander-rebase-if-necessary.md).)
 
 ## Gotchas
 

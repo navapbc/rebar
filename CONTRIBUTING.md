@@ -13,9 +13,9 @@ Gerrit-submitted change replicates out. Direct pushes and pull-request merges to
 > **TL;DR of the loop:** clone from Gerrit → install the `commit-msg` hook → commit →
 > `git push origin HEAD:refs/for/main` → the bots vote `LLM-Review` (LLM) and `Verified`
 > (CI) → fix findings and re-push the amended commit until **both** are `+1` (comment
-> `recheck` to re-run CI) → **`land <change> --wait`** (or set `Autosubmit`) and act on the one
-> typed outcome → it replicates to GitHub `main`. Do **not** watch the votes or assume "both
-> `+1` = it lands" — the auto-lander (§2e) handles the FFO rebase/conflict case.
+> `recheck` to re-run CI) → **Submit** the change → it replicates to GitHub `main`. `main` is
+> **Rebase-If-Necessary**, so Gerrit rebases onto the current tip and submits server-side; a
+> textual conflict is the only case you rebase by hand (§2e).
 
 > **Status.** Both votes are **live and blocking today**: a change needs `LLM-Review = +1`
 > **and** `Verified = +1` to submit. (The `Verified`/CI requirement was activated
@@ -144,37 +144,31 @@ re-runs and re-votes `Verified`. Resolve any inline comments (mark them **Done**
 so `-has:unresolved` is satisfied.
 
 ### 2e. Submit
-**Land via the auto-lander — set `Autosubmit`, act on the ONE typed outcome; do not watch the
-votes.** Once your change is in review, hand it to the serial **auto-lander** rather than
-watching the two votes and pressing Submit yourself: run **`land <change> --wait`** (or set the
-requester-votable **`Autosubmit`** label under your own identity). The lander rebases the front
-`Autosubmit`+submittable change/stack onto the current `main` tip, awaits a fresh `Verified` on
-the rebased tree, and ancestor-atomic-submits the exact tested SHA; Gerrit then merges and
-**replicates the new `main` to GitHub** (that replication is the only way GitHub `main`
-advances). `land` returns **one typed terminal outcome + a distinct exit code** — `merged` /
-`needs_rebase` / `ci_failed` / `review_failed` / `lander_down` / … — and that outcome is the
-only thing you act on. The two votes still gate (§2c) and FFO still applies (below), but
-**"both votes are `+1`" no longer means "it will land":** under FFO a green change goes
-non-submittable the moment `main` advances beneath it, and that FFO TOCTOU/conflict case is
-handled *inside* the tool (it rebases-and-re-CIs, or hands the stack back as `needs_rebase`) —
-you never correlate votes/labels/submittability yourself. The full outcome/exit-code contract
-is [docs/land-contract.md](docs/land-contract.md); the design and rationale are
-[docs/adr/0042-auto-lander.md](docs/adr/0042-auto-lander.md).
+**Land with a plain Gerrit Submit once both votes are green.** Once your change has
+**`LLM-Review +1` AND `Verified +1`** and no unresolved comments, land it yourself with a plain
+Gerrit **Submit** — the Submit button on the change page, or `ssh -p 29418
+<you>@rebar.solutions.navateam.com gerrit review --submit <change>,<patchset>`, or
+`POST /a/changes/<n>/submit`. `main` is **Rebase-If-Necessary** (ADR-0047): Gerrit fast-forwards
+when it can and otherwise **rebases your change onto the current `main` tip and submits it
+server-side, atomically, under its own lock** — so you do **not** pre-rebase for the ordinary
+(non-conflicting) case. Gerrit then merges and **replicates the new `main` to GitHub** (that
+replication is the only way GitHub `main` advances). The two votes still gate (§2c); with them
+green and the change mergeable, Submit lands it. There is no landing bot, queue, or hand-off
+label — you run Submit yourself.
 
-> **`main` is Fast Forward Only (ADR-0040): a change must sit on the current tip to land.**
-> Gerrit will not merge or rebase for you. If `main` moved while you were in review, the change
-> is non-submittable ("not fast-forward / out of date") until it is put back on the tip:
-> `git fetch origin && git rebase origin/main` (a **feature-branch** change re-merges: `git
-> merge --no-ff gerrit/feature/<name>` onto the new `main`), then re-push `HEAD:refs/for/main`.
-> The rebase drops the stale `Verified` vote and **CI re-runs against the exact tree that
-> lands**, which is what guarantees a change that breaks CI can never reach `main`. **The
-> auto-lander performs exactly this rebase-and-re-CI for you** — the manual form here is the
-> `lander_down` fallback (do it by hand, then **Submit** on the change page or `ssh -p 29418
-> <you>@rebar.solutions.navateam.com gerrit review --submit <change>,<patchset>`, when the
-> lander is unavailable). Expect the rebase-and-re-CI under concurrent landing — it is the
-> deliberate tradeoff (no auto-merge of an untested tree). Do **not** add
-> `changekind:TRIVIAL_REBASE` to the `Verified` `copyCondition`: that would let a stale vote
-> survive a rebase and defeat the guarantee.
+> **A textual conflict is the only time you rebase by hand.** Under Rebase-If-Necessary, Gerrit
+> does the rebase for you at submit time — the old requirement that your change sit directly on
+> the current `main` tip is gone. The one exception is a **textual merge conflict** Gerrit
+> cannot resolve: it refuses the submit and hands the change back. Then, and only then, do the
+> ordinary `git fetch origin && git rebase origin/main` (a **feature-branch** merge change
+> re-merges: `git merge --no-ff gerrit/feature/<name>` onto the new `main`), resolve the
+> conflict, re-push `HEAD:refs/for/main`, wait for a fresh `Verified`, and **Submit** again.
+>
+> **Safety net — post-merge `main` CI (ADR-0047).** A clean (non-conflicted) rebase is submitted
+> without re-running integration CI, so the detector for a rare *semantic* conflict between two
+> individually-green changes is the existing **CI that runs on every push to `main`** (via the
+> GitHub mirror). On the rare red `main`, a human does a **manual revert** through Gerrit —
+> there is no auto-revert.
 
 > **Submitting requires contributor authorization.** The **Submit** action is restricted to
 > the `Contributors` group (plus Administrators) — anyone may push to `refs/for/*` to
@@ -182,9 +176,7 @@ is [docs/land-contract.md](docs/land-contract.md); the design and rationale are
 > when both votes are `+1`. If Submit is unavailable to you, ask an admin to add your Gerrit
 > account to the `Contributors` group (or to submit on your behalf). This is enforced
 > natively by the Submit ACL in `infra/gerrit/project.config` (managed by
-> `infra/gerrit/setup-project.sh` via `CONTRIBUTOR_MEMBERS`). The `Autosubmit` land-intent
-> label is scoped the same way — requester-votable by `Contributors` — so setting it (or
-> running `land`) is available to exactly the accounts that may land.
+> `infra/gerrit/setup-project.sh` via `CONTRIBUTOR_MEMBERS`).
 
 ---
 
@@ -340,8 +332,8 @@ git push gerrit HEAD:refs/for/refs/heads/feature/<name>
 
 Each story is a normal Gerrit change and gets the **full two-vote gate** (`LLM-Review` +
 `Verified`) against the feature branch. Land each story once both are `+1` and nothing is
-unresolved — via `land`/`Autosubmit` and its typed outcome, exactly as in §2e (don't watch the
-votes); it merges into `feature/<name>`, not `main`.
+unresolved — with a plain Gerrit **Submit**, exactly as in §2e; it merges into
+`feature/<name>`, not `main`.
 
 ### 4d. Catch-up merge — keep the feature branch current with `main`
 
@@ -391,11 +383,10 @@ git push gerrit HEAD:refs/for/main
 
 This merge change is gated **identically** to any other: `LLM-Review` + `Verified` must
 both be `+1`. The `LLM-Review` bot reviews the auto-merge delta; CI runs `Verified`
-against the merge tree. Land it via `land`/`Autosubmit` and its typed outcome (§2e), not by
-watching the votes — Gerrit lands the whole feature on `main` atomically and replicates it to
-the GitHub mirror. (A merge change is a `--no-ff` commit whose first parent is the `main` tip,
-so it fast-forwards under FFO; when `main` advances first, the lander's `needs_rebase`
-hand-back maps to the ADR-0025 re-merge below.)
+against the merge tree. Land it with a plain Gerrit **Submit** once both votes are green (§2e)
+— Gerrit lands the whole feature on `main` atomically and replicates it to the GitHub mirror.
+(When `main` advances under the open merge change before you Submit, refresh it with the
+ADR-0025 re-merge below.)
 
 **Re-merge behaviour when `main` advances under your open merge change (ADR-0025).** If
 `main` moves while the merge change is in review, re-merge to refresh it:
@@ -531,10 +522,11 @@ a `rebar-ticket:` trailer, and push to `refs/for/main`.
   `+1`** (both votes are required — see §2c) and that there are **no unresolved comments**
   (the submit rule is `LLM-Review=MAX AND Verified=MAX AND -has:unresolved`); mark comments
   resolved.
-- **Both votes are `+1` but the change still won't land.** Expected under FFO (ADR-0040): a
-  green change is non-submittable once `main` advances beneath it. Don't watch the votes — run
-  **`land <change> --wait`** (or set `Autosubmit`) and act on the typed outcome; a
-  `needs_rebase` outcome means rebase to tip and re-request (§2e, `docs/land-contract.md`).
+- **Both votes are `+1` but the change still won't land.** Under Rebase-If-Necessary
+  (ADR-0047), both-votes-green + mergeable = submittable, so first confirm there are **no
+  unresolved comments** and that you have submit authorization (§2e). If Submit reports a
+  **textual merge conflict**, Gerrit couldn't rebase it for you — `git fetch origin && git
+  rebase origin/main`, resolve, re-push, wait for a fresh `Verified`, then Submit again (§2e).
 - **CI (`Verified`) didn't run / no run appeared.** The CI dispatch (Gerrit →
   gerrit-to-platform → GitHub Actions) may be down. Comment **`recheck`** to re-trigger; if
   still nothing, it's an infra issue for maintainers (see

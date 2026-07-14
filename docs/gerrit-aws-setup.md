@@ -105,7 +105,6 @@ values out-of-band, e.g. `aws ssm put-parameter --overwrite --type SecureString`
 | `/rebar/prod/mcp-hmac-signing-key` | `CHANGEME` → an HMAC signing key | verdict signing |
 | `/rebar/prod/gerrit-admin-password` | `CHANGEME` → admin password | admin bootstrap |
 | `/rebar/prod/gerrit-bot-token` | `CHANGEME` → bot HTTP token | bot votes + webhook URL token |
-| `/rebar/prod/autolander-gerrit-token` | `CHANGEME` → the auto-lander bot's HTTP token | auto-lander rebase+submit (epic f1fa) |
 | `/rebar/prod/gerrit-ssh-host-ed25519-key` | `CHANGEME` → SSH host key | Gerrit SSH identity |
 | `/rebar/prod/github-replication-deploy-key` | `CHANGEME` → ed25519 **private** key | Gerrit → GitHub push (Step 6) |
 | `/rebar/prod/alert-endpoint` | `CHANGEME` → alert destination | monitoring |

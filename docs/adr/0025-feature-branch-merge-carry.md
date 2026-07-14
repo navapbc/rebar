@@ -1,5 +1,7 @@
 # ADR 0025 — Feature-branch merge-carry: `MERGE_FIRST_PARENT_UPDATE` copyCondition + submit-type pin + `feature-branch-drivers` ACLs
 
+> **Note (2026-07-13):** `main`'s submit type is now **Rebase-If-Necessary** per [ADR 0047](0047-retire-autolander-rebase-if-necessary.md); this ADR's references to a fast-forward-only submit type describe the prior model. The feature-branch machinery it decides (the `MERGE_FIRST_PARENT_UPDATE` copyCondition and `feature-branch-drivers` ACLs) remains in effect — but how Rebase-If-Necessary interacts with the merge-back re-merge/re-CI cost is not re-derived here and needs human review.
+
 **Status:** Accepted (epic 88ab / story S1 — bored-tag-sale)
 **Date:** 2026-07-02
 **Amends:** ADR 0013 (LLM-Review label) and ADR 0020 (two-vote CI gate)

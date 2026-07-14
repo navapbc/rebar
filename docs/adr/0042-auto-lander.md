@@ -1,5 +1,7 @@
 # ADR 0042 — Parallel-agent auto-lander for `main` (serial Phase 1)
 
+> **Superseded by [ADR 0047](0047-retire-autolander-rebase-if-necessary.md) (2026-07-13).** Kept for historical context; the decision below no longer reflects how changes land.
+
 **Status:** Accepted
 **Date:** 2026-07-12
 **Builds on:** ADR 0040 (Fast Forward Only submit type — the R5 backstop this lander sits on),

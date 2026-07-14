@@ -1,5 +1,7 @@
 # ADR 0041 — Carry the LLM-Review vote across `TRIVIAL_REBASE` (preserve review on a non-conflicting update from `main`)
 
+> **Note (2026-07-13):** `main`'s submit type is now **Rebase-If-Necessary** per [ADR 0047](0047-retire-autolander-rebase-if-necessary.md); this ADR's Fast-Forward-Only framing describes the prior model. The LLM-Review `TRIVIAL_REBASE` carry it decides still applies (Gerrit's server-side rebase can produce a `TRIVIAL_REBASE` patch set), but that interaction is not re-derived here and needs human review.
+
 **Status:** Accepted
 **Date:** 2026-07-10
 **Amends:** ADR 0025 (reverses its deliberate `TRIVIAL_REBASE` exclusion for the LLM-Review label). Complements ADR 0040 (Fast Forward Only submit type).

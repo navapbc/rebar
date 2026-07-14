@@ -295,8 +295,8 @@ pip install -e '.[dev]'
 > Gerrit's two-vote gate (`LLM-Review` + `Verified`/CI). New contributors: start with the
 > friendly walkthrough [docs/your-first-change.md](docs/your-first-change.md); the full
 > reference is [CONTRIBUTING.md](CONTRIBUTING.md) (clone from Gerrit, push to
-> `refs/for/main`, then let the serial auto-lander land it once both votes pass — set the
-> `Autosubmit` label or run `land`; see [docs/land-contract.md](docs/land-contract.md)).
+> `refs/for/main`, then land it with a plain Gerrit **Submit** once both votes pass — `main`
+> is Rebase-If-Necessary, so Gerrit rebases onto the tip and submits server-side).
 
 > **Packaging note — why rebar installs *unpacked* to disk.** The library, CLI,
 > MCP server, and the whole read/write core run **in-process** in Python. The one

@@ -1,5 +1,7 @@
 # ADR 0040 — `main` submit type → Fast Forward Only (make it impossible to land a stale/untested tree)
 
+> **Superseded by [ADR 0047](0047-retire-autolander-rebase-if-necessary.md) (2026-07-13).** Kept for historical context; the decision below no longer reflects how changes land.
+
 **Status:** Accepted
 **Date:** 2026-07-10
 **Amends:** ADR 0020 (two-vote CI gate), ADR 0025 (feature-branch merge-carry — corrects its submit-type claim)
