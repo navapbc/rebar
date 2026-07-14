@@ -69,6 +69,11 @@ jobs:
 
     env:
       MODE: ${{ github.event.inputs.mode || 'live' }}
+      # Bug ad48: set the signing-key path at JOB level so EVERY rebar write step (the inline
+      # inbound signer + the commit-back) sees identity.signing_key — cross-step $GITHUB_ENV
+      # propagation did not reach the write steps. The "Materialize the Rebar Bot signing key"
+      # step writes the file at this exact path; absent secret ⇒ no file ⇒ unsigned fallback.
+      REBAR_IDENTITY_SIGNING_KEY: ${{ runner.temp }}/rebar-bot-signing-key
 
     steps:
       - name: Checkout repository
