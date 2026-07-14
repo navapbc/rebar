@@ -552,6 +552,40 @@ def _manifest_int(manifest: list[str] | None, prefix: str) -> int:
         return 0
 
 
+# ── authoritative (signed) field sourcing for validity checks ─────────────────────
+def _is_opcert(attestation: Mapping[str, Any]) -> bool:
+    """True when the verify-result came from the op-cert (envelope) verifier. Keyed on the
+    unspoofable ``opcert`` marker :func:`_opcert_signing.verify_opcert_record` sets (chosen on
+    ``record.envelope`` presence), NOT the attacker-writable ``algorithm`` field."""
+    return attestation.get("opcert") is True
+
+
+def _authoritative_material(attestation: Mapping[str, Any]) -> str | None:
+    """The AUTHENTICATED material fingerprint to gate material-edit invalidation against.
+
+    SECURITY (finding B): for an op-cert (envelope) record the material fingerprint is sourced from
+    the SIGNED payload (surfaced by ``verify_opcert_record`` as ``material_fingerprint``) — NEVER
+    the plaintext ``manifest``'s ``material:`` line, which is not covered by the DSSE signature and
+    lives on the attacker-writable tickets branch. A legacy HMAC record's manifest IS covered by the
+    HMAC signature, so ``manifest_material`` remains authentic there (behavior unchanged)."""
+    if _is_opcert(attestation):
+        return attestation.get("material_fingerprint")
+    return manifest_material(attestation.get("manifest") or [])
+
+
+def _authoritative_head(attestation: Mapping[str, Any]) -> str | None:
+    """The AUTHENTICATED code-anchor commit for unscoped whole-HEAD freshness.
+
+    SECURITY (finding B): for an op-cert record use the SIGNED ``merged_log_commit`` (the code state
+    bound into the cert's subject) rather than the plaintext ``head_sha`` mirror. For a local review
+    ``merged_log_commit`` equals the head at signing time, so legit records are unaffected; a
+    tampered plaintext ``head_sha`` can no longer make a stale attestation read as fresh. A legacy
+    HMAC record keeps its ``head_sha`` mirror (behavior unchanged)."""
+    if _is_opcert(attestation):
+        return attestation.get("merged_log_commit")
+    return attestation.get("head_sha")
+
+
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────
 def compute_validity(
     attestation: Mapping[str, Any] | None,
@@ -609,7 +643,7 @@ def compute_validity(
                 "reason": "the ticket is not closed (completion verdict no longer applies)",
                 "verdict": "not-closed",
             }
-        signed_material = manifest_material(manifest)
+        signed_material = _authoritative_material(attestation)
         if signed_material is not None:
             current = current_material_fingerprint(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root
@@ -665,17 +699,19 @@ def compute_validity(
                 }
         else:
             head = signing.head_sha(_config.repo_root(repo_root))
-            if head == "unknown" or attestation.get("head_sha") != head:
+            # SECURITY (finding B): compare against the AUTHENTICATED anchor (op-cert: the SIGNED
+            # merged_log_commit; HMAC: the head_sha mirror), never a mutable plaintext mirror.
+            signed_head = _authoritative_head(attestation)
+            if head == "unknown" or signed_head != head:
                 return {
                     "valid": False,
                     "reason": (
-                        f"attestation is stale (unscoped; signed at {attestation.get('head_sha')}, "
-                        f"HEAD is {head})"
+                        f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
                     ),
                     "verdict": "stale-head",
                 }
         # Material-edit invalidation (fail closed if the fingerprint can't be recomputed).
-        signed = manifest_material(manifest)
+        signed = _authoritative_material(attestation)
         if signed is not None:
             current = current_material_fingerprint(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root

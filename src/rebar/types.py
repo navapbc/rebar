@@ -217,11 +217,15 @@ class SignResult(TypedDict):
 
     manifest: list[str]
     algorithm: str
-    signature: str
-    key_id: str
-    head_sha: str
     signed_at: int
     ticket_id: str
+    signature: NotRequired[str | None]
+    key_id: NotRequired[str | None]
+    head_sha: NotRequired[str | None]
+    envelope: NotRequired[str | None]
+    principal: NotRequired[str | None]
+    material_fingerprint: NotRequired[str | None]
+    merged_log_commit: NotRequired[str | None]
 
 
 class VerifySignatureResult(TypedDict):
@@ -234,7 +238,17 @@ class VerifySignatureResult(TypedDict):
     signed_at: int | None
     head_sha: str | None
     verified: bool
-    verdict: Literal["unsigned", "foreign_key", "certified", "mismatch", "key_not_valid_at_era"]
+    verdict: Literal[
+        "unsigned",
+        "foreign_key",
+        "certified",
+        "mismatch",
+        "key_not_valid_at_era",
+        "invalid",
+        "unavailable",
+        "unknown_kind",
+        "unknown_scheme",
+    ]
     reason: str
     ticket_id: str
     rebar_version: NotRequired[str | None]

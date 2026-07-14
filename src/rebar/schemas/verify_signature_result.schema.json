@@ -14,7 +14,7 @@
     "signed_at": { "type": ["integer", "null"] },
     "head_sha": { "type": ["string", "null"] },
     "verified": { "type": "boolean" },
-    "verdict": { "type": "string", "enum": ["unsigned", "foreign_key", "certified", "mismatch", "key_not_valid_at_era"], "description": "The verify-result verdict. `verified` is true iff `certified`. `key_not_valid_at_era` (epic gnu-whale-ichor) is the authorship-gate verdict for a cryptographically-valid signature by a key NOT valid at the event's commit. Display grouping: verified (certified) / unverified (mismatch | foreign_key | key_not_valid_at_era) / unsigned." },
+    "verdict": { "type": "string", "enum": ["unsigned", "foreign_key", "certified", "mismatch", "key_not_valid_at_era", "invalid", "unavailable", "unknown_kind", "unknown_scheme"], "description": "The verify-result verdict. `verified` is true iff `certified`. `key_not_valid_at_era` (epic gnu-whale-ichor) is the authorship-gate verdict for a cryptographically-valid signature by a key NOT valid at the event's commit. `invalid` / `unavailable` / `unknown_kind` / `unknown_scheme` (story 8d8e) are the op-cert dispatch verdicts: a malformed principal/namespace/envelope, a missing ssh-keygen, or a defensive registry miss. Display grouping: verified (certified) / unverified (mismatch | foreign_key | key_not_valid_at_era | invalid | unavailable | unknown_kind | unknown_scheme) / unsigned." },
     "reason": { "type": "string" },
     "ticket_id": { "type": "string" },
     "rebar_version": { "type": ["string", "null"], "description": "The rebar gate code (version + short commit SHA, e.g. '0.6.0 (deadbee-dirty)') that produced the attestation — audit/provenance only, epic jira-reb-596. Null for pre-stamp or unsigned records." }

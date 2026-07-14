@@ -95,18 +95,43 @@ def test_opcert_survives_compaction(store: Path, tmp_path: Path) -> None:
     assert rec["merged_log_commit"] == commit
 
 
+def _write_legacy_hmac_attestation(store: Path, tid: str) -> None:
+    """Append a genuine LEGACY HMAC SIGNATURE event (as clones did before story 8d8e repointed the
+    seam to op-certs). Constructed directly rather than via ``sign_manifest`` — which now mints an
+    op-cert — so these tests exercise the read-both path on a real HMAC record."""
+    from rebar._commands._seam import append_event
+
+    resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
+    tracker = Path(store) / ".tickets-tracker"
+    manifest = [f"{KIND}: PASS"]
+    key = signing.signing_key(str(tracker))
+    append_event(
+        resolved,
+        "SIGNATURE",
+        {
+            "manifest": manifest,
+            "algorithm": signing.ALGORITHM,
+            "signature": signing.compute_signature(resolved, manifest, key),
+            "key_id": signing.key_fingerprint(key),
+            "kind": KIND,
+        },
+        tracker,
+        repo_root=str(store),
+    )
+
+
 def test_opcert_from_record_none_for_hmac(store: Path) -> None:
     tid = rebar.create_ticket("task", "hmac me", repo_root=str(store))
-    signing.sign_manifest(tid, [f"{KIND}: PASS"], kind=KIND, repo_root=str(store))
+    _write_legacy_hmac_attestation(store, tid)
     rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
     assert opcert.opcert_from_record(rec) is None  # a plain HMAC record is not an op-cert
 
 
 def test_hmac_record_is_additively_unchanged(store: Path) -> None:
-    """A legacy HMAC sign_manifest record carries none of the op-cert fields — the extension is
+    """A legacy HMAC record carries none of the op-cert fields — the extension is
     present-only, so older clones preserve-and-ignore."""
     tid = rebar.create_ticket("task", "hmac me", repo_root=str(store))
-    signing.sign_manifest(tid, [f"{KIND}: PASS"], kind=KIND, repo_root=str(store))
+    _write_legacy_hmac_attestation(store, tid)
     rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
     # The op-cert fields are folded present-only, so an HMAC record gains none of them.
     # (The raw HMAC `signature` hex is stripped from show reads by public_state, so we assert the
