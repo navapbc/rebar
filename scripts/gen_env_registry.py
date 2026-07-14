@@ -43,6 +43,7 @@ KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
     "_llm_int": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     "_int_env": (0, ""),  # review_bot/config.py
     "_severities_env": (0, ""),  # review_bot/config.py
+    "_str_env": (0, ""),  # opcert_service/config.py: os.environ.get(name)
 }
 
 

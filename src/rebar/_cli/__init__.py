@@ -437,6 +437,10 @@ def main(argv: list[str] | None = None) -> int:
         from rebar._commands import trusted_env_cmd
 
         return trusted_env_cmd.cli(argv[1:])
+    if argv and argv[0] == "remote-cert":  # trusted op-cert gate service client (story ee0b)
+        from rebar._commands import remote_cert
+
+        return remote_cert.cli(argv[1:])
 
     # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
     if argv and argv[0] == "workflow":
