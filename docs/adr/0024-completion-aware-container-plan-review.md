@@ -103,7 +103,8 @@ plan-semantics) is a non-drop value, an unsure/degraded classification **always 
 - `completion_floor_active: bool = False` — the **evidence gate**. Inert until an operator flips it
   on after the calibration gold-set (story 77cf) clears its must-never-suppress bar. Default off ⇒
   the floor never drops a finding ⇒ the verdict is **byte-identical** to today's (the total back-out,
-  exactly like `novelty_drop_active`).
+  exactly like `novelty_drop_active` was — though `novelty_drop_active` has since been retired
+  in the config-prune epic and its floor is now always-on).
 - `completion_priority_floor: float = 0.4` — the low-stakes bar (the corpus "below major" band; same
   default as `novelty_priority_floor`).
 - `completion_preserve_criteria: tuple[str,…] = ("T5c", "T10")` — the always-preserve set, referencing

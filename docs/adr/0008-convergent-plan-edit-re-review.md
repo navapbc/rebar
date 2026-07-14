@@ -46,7 +46,10 @@ finding) are enforced at the normal threshold and must still be resolved; a nove
 3. **The drop decision is deterministic in Pass-3.** `novelty = 1 − mean(matches-prior
    sub-answers)` and the drop predicate `rising_floor_drop(priority, novelty, …)` are pure
    arithmetic — no LLM holistic severity anywhere in the decision path.
-4. **Remediation mode is gated, not the default.** The floor applies only when ALL hold:
+4. **Remediation mode is gated, not the default.** (`remediation_mode` and
+   `novelty_drop_active` were retired in the config-prune epic; both behaviors are now
+   always-on and unconditional — the configurable-toggle framing below is historical.) The
+   floor applies only when ALL hold:
    config `remediation_mode` on, the plan changed, the **code is unchanged** since the
    baseline (`verified_at_sha` equality — reusing the signed snapshot ref, no new diff
    machinery), the registry is unchanged, a prior sidecar with finding text exists, and the
@@ -88,7 +91,8 @@ the full criteria set; only the *surfacing* of novel low-priority findings is su
   unchanged code: each round drops the novel low-priority noise that would restart it,
   while carryover and novel high-priority findings still gate.
 - **Back-out is trivial and total:** setting `remediation_mode` (or `novelty_drop_active`)
-  off restores byte-identical full-review behavior. The `drift_refresh` code-drift path
+  off restores byte-identical full-review behavior. (Retired in the config-prune epic; these
+  keys no longer exist and the behavior is now always-on.) The `drift_refresh` code-drift path
   (ADR 0002) is untouched and orthogonal (it is the *complement* on the material axis:
   drift-refresh = plan unchanged + code drifted; remediation = plan changed + code
   unchanged).
