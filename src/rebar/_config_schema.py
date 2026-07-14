@@ -306,6 +306,12 @@ class VerifyConfig:
     # grandfathering). Overridable per-run by `rebar verify-opcert --since <ref>`. Mirrors
     # identity.enforce_since for the authorship gate.
     opcert_enforce_since: str | None = None
+    # Opt-in trusted op-cert gate service base URL (story ee0b). When set, `rebar remote-cert`
+    # routes a gate run to the trusted environment at this URL (which fetches authoritative
+    # state itself, runs the gate, and returns a signed op-cert). Unset ⇒ the remote path is
+    # simply unavailable and `rebar remote-cert` errors with a clear message; it is NEVER
+    # required for any LOCAL op-cert sign/verify path (those stay fully offline). Default None.
+    opcert_remote_url: str | None = None
 
 
 @dataclass
@@ -498,6 +504,7 @@ _SECTIONS: dict[str, dict] = {
         "completion_floor_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
         "opcert_enforce_since": lambda v, k: _as_str(v, k),
+        "opcert_remote_url": lambda v, k: _as_str(v, k),
     },
     "identity": {
         "require_authenticated": lambda v, k: _as_bool(v, k),

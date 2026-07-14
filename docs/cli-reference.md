@@ -401,7 +401,7 @@ Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match
 
 ## Intercept-arm commands
 
-The 21 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
+The 22 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
 
 | Command | Description |
 |---------|-------------|
@@ -414,6 +414,7 @@ The 21 advanced commands handled before the dispatcher. Each owns its own `--hel
 | `llm` | LLM-framework setup wizard for configuring the optional agent surfaces (API key, model, extras). |
 | `prompt` | Run prompt-library evals over the packaged/overridden prompts. |
 | `reconcile` | Reconcile the rebar store with Jira (dry-run by default; `live` performs the sync). |
+| `remote-cert` | Request an op-cert from the trusted gate service at `verify.opcert_remote_url` (SigV4-signed): submit `<ticket-id> <kind>`, poll to a verdict, and on PASS persist the returned signed envelope as a `SIGNATURE` event the merge gate certifies. |
 | `review` | Run the tool-using LLM agent to review a ticket (or its graph) and emit structured findings. |
 | `review-code` | Run the LLM code-review agent over a diff or commit range and emit structured findings. |
 | `review-plan` | Run the plan-review gate on a ticket; on a non-blocking PASS it signs the plan-review attestation the claim gate consumes. |

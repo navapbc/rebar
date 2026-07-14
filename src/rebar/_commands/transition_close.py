@@ -86,7 +86,9 @@ def _completion_precheck(
 ):
     """The completion-verification close gate's PRE-close half (runs outside the write lock).
 
-    Returns the manifest to **sign** on a PASS verdict, or ``None`` when the gate is off or the
+    Returns the PASS verdict ``result`` (the sign signal, fed to
+    :func:`sign_completion_verdict` after a confirmed close), or ``None`` when the gate is off or
+    the
     close is a ``--force-close`` (which closes WITHOUT verifying or signing — withholding the
     signed confirmation, so a closed-without-signature ticket is the durable signal that
     validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
@@ -253,7 +255,7 @@ def _completion_precheck(
     # signal; re-close the uncertified descendant through the gate to certify, then re-close here.
     if result.get("certifiable") is False:
         return None
-    return _verdict_manifest(result, ticket_id, repo_root)
+    return result
 
 
 def _is_full_sha(s: object) -> bool:
@@ -314,6 +316,27 @@ def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]
     return manifest
 
 
+def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None) -> dict:
+    """The completion-verifier PRODUCER STEP: build the deterministic PASS manifest for
+    ``result`` (via :func:`_verdict_manifest`) and mint the ``completion-verifier`` op-cert
+    through the signing seam (:func:`rebar.signing.sign_manifest`), appending the SIGNATURE
+    event to the store under ``repo_root``. Returns the signed record.
+
+    Extracted from the close gate so BOTH producers mint the completion op-cert the SAME way
+    (story ee0b): the close path here and the trusted op-cert gate service's worker on a PASS
+    verdict. The service points ``REBAR_OPCERT_KEY_PATH`` / ``REBAR_OPCERT_ENV_ID`` at the
+    provisioned environment key before calling this, so the SEAM signs once with that key — the
+    caller never signs bespokely. Raises :class:`rebar.signing.SigningError` on the degrade path
+    (OpenSSH < 8.9 / unwritable tracker), which the caller records as a closed-/completed-without
+    -signature outcome."""
+    from rebar import signing as _signing
+
+    manifest = _verdict_manifest(result, ticket_id, repo_root)
+    return _signing.sign_manifest(
+        ticket_id, manifest, kind="completion-verifier", repo_root=repo_root
+    )
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -371,12 +394,12 @@ def close_ticket(
     # when the from-status is `idea`. The open-children structural guard above still
     # ran unconditionally (integrity, not completion), so an idea parent over
     # non-closed children is still refused.
-    verified_manifest = None
+    verified_result = None
     if target_status == "closed" and current_status != "idea":
         from rebar.reducer import reduce_ticket as _reduce
 
         ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
-        verified_manifest = _completion_precheck(
+        verified_result = _completion_precheck(
             ticket_id, ticket_type, repo_root_str, repo_root, reason=reason, force_close=force_close
         )
 
@@ -403,7 +426,7 @@ def close_ticket(
     # (two-local-commit) window leaves closed-without-signature — the conservative direction
     # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
     # the trustworthy record can't be written.
-    if target_status == "closed" and verified_manifest is not None:
+    if target_status == "closed" and verified_result is not None:
         import sys
 
         from rebar import signing as _signing
@@ -415,7 +438,8 @@ def close_ticket(
         # attest stale state. The ticket already closed (the transition committed above), so this is
         # the same closed-without-signature outcome as --force-close: warn on stderr and skip
         # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
-        _verified_sha = _signing.verified_at_sha_from_manifest(verified_manifest)
+        _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
+        _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
         _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
         if _material_drifted(_verified_sha, _fresh_sha):
             sys.stderr.write(
@@ -425,9 +449,9 @@ def close_ticket(
             )
         else:
             try:
-                _signing.sign_manifest(
-                    ticket_id, verified_manifest, kind="completion-verifier", repo_root=repo_root
-                )
+                # The shared producer step (story ee0b) — same seam call the trusted op-cert gate
+                # service uses on a PASS verdict, so both producers mint the cert identically.
+                sign_completion_verdict(verified_result, ticket_id, repo_root)
             except _signing.SigningError as exc:
                 # DEGRADE, never wedge (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH
                 # >= 8.9) and a writable tracker. When neither can produce a key the close ALREADY

@@ -50,6 +50,7 @@ _LADDER = {
     "verify-identity",  # epic gnu-whale-ichor / AC7: authenticated-authorship merge-gate
     "verify-opcert",  # epic sonic-columned-sturgeon / 4214: required-environment op-cert merge-gate
     "trusted-env",  # story 4214: maintain .rebar/trusted_environments.yaml (add/revoke keys)
+    "remote-cert",  # story ee0b: trusted op-cert gate service client
     "workflow",
 }
 
