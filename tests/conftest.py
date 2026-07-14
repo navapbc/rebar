@@ -233,6 +233,22 @@ def _gate_source_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _identity_enforcement_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the authenticated-authorship write-gate OFF for the suite (story ad42).
+
+    A stray global ``REBAR_IDENTITY_REQUIRE_AUTHENTICATED=1`` in the environment would
+    otherwise break the suite broadly: every create/mutate of a non-exempt ticket type
+    fails with the "cannot be signed" CommandError when no identity + signing key is
+    configured. This guard pins the enforcement flag to ``0`` for the in-process suite so
+    results never depend on an ambient global. Unlike the gate-source default above this is
+    UNCONDITIONAL (it must override a stray ``=1``, not defer to it). The dedicated identity
+    enforcement tests (``tests/unit/test_identity_*``) are unaffected: they build their own
+    subprocess ``env`` dict with the flag set explicitly and pass ``env=`` to
+    ``subprocess.run``, so their value wins in the child process regardless of this default."""
+    monkeypatch.setenv("REBAR_IDENTITY_REQUIRE_AUTHENTICATED", "0")
+
+
+@pytest.fixture(autouse=True)
 def _compaction_horizon_zero_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default the compaction horizon to 0 for the offline suite (RC2b, 36d1).
 
