@@ -47,6 +47,13 @@ locals {
     # fetch-secrets.sh's reviewbot-tickets-pat -> REVIEWBOT_TICKETS_PAT mapping) to push the
     # code_review artifact ticket events to origin/tickets. Operator populates this SecureString.
     "/rebar/prod/reviewbot-tickets-pat",
+    # Authenticated-authorship signing key (epic cummy-monkeyish-dassie / story 297d, task bffe).
+    # The Rebar Bot's ed25519 PRIVATE key. Materialized at boot to a 0600 file for the AWS
+    # review-bot + auto-lander containers (identity.signing_key), following the ci-gerrit-ssh-key /
+    # g2p-github-pat materialize-to-file precedent (NOT the container .env, which holds only
+    # single-line tokens). The same private key is also stored as the GitHub Actions secret
+    # REBAR_BOT_SIGNING_KEY for the reconcile-bridge + canary workflows. Operator populates the value.
+    "/rebar/prod/rebar-bot-signing-key",
   ]
 }
 
