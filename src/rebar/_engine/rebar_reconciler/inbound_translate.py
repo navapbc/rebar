@@ -246,6 +246,20 @@ def _write_event_file(
         "author": author,
         "data": data,
     }
+    # Authenticated authorship (story 9e76): stamp attribution (author_email / author_id) and
+    # sign (author_sig) INLINE, reusing the same seam helpers as _seam.append_event, so
+    # Jira-sourced reconciler events are attributable + verifiable under `rebar verify-identity`
+    # instead of classifying as unknown-author/unsigned. Done INLINE rather than by routing
+    # through _seam.append_event because append_event commits+pushes eagerly (write_and_push),
+    # which would break the reconciler's batch-commit orchestration — this function deliberately
+    # writes an UNCOMMITTED file. Best-effort + additive: with no resolvable identity or no
+    # signing key the event is written unsigned (older readers ignore the extra keys); a signing
+    # failure is logged, never raised. repo_root is the tracker worktree's parent.
+    from rebar._commands import _seam
+
+    _repo_root = tracker_dir.parent
+    event.update(_seam.attribution_fields(_repo_root))
+    _seam._apply_authorship(event, ticket_id, event_type, data, str(tracker_dir), _repo_root)
     final = ticket_dir / _store_event_append.event_filename(ts, uuid_str, event_type)
     tmp = ticket_dir / f".tmp-{uuid_str}-{event_type}"
     # attempts=1 preserves the bare module's historical single-shot acquire. The
