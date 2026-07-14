@@ -9,12 +9,18 @@ against that environment's **out-of-band-pinned** public key. Orthogonal to auth
 
 Distinct from authorship in two ways the design turns on:
 
-* **Out-of-band keys, explicit SHAs.** Environment keys live in a review-gated config
-  (``.rebar/trusted_environments.yaml``), NOT on the auto-pushed tickets branch, so the identity
-  epic's tickets-branch resolver (``authorship.resolve_event_commit`` / ``_keyring_for``) cannot be
-  reused. Each key record carries explicit ``added_at_commit``/``revoked_at_commit`` git SHAs on
-  ``main``; validity is the same ``git merge-base --is-ancestor`` *rule* against the cert's bound
-  merged-log commit.
+* **Out-of-band keys, era at the STORAGE ANCHOR (story 4214 — Option B).** Environment keys live
+  in a review-gated config (``.rebar/trusted_environments.yaml``), NOT on the auto-pushed tickets
+  branch. Each key record carries explicit ``added_at_log_position``/``revoked_at_log_position``
+  TICKETS-BRANCH log positions (``{timestamp}-{uuid}`` event-position strings; the revoke may be
+  ``null``). A key's era-validity is evaluated at the certificate's STORAGE ANCHOR ``S`` — the
+  tickets-branch commit that introduced the terminal envelope-bearing ``SIGNATURE`` event — NOT at
+  the cert's SELF-CHOSEN ``merged_log_commit`` (which a revoked-key holder could backdate to a
+  pre-revocation ancestor to make a stale key "verify"). Validity reuses the identity epic's shared
+  ancestry + intra-commit-position rule (``authorship.keys_valid_at_anchor`` +
+  ``authorship.resolve_position_commit``): the era boundary positions resolve to their introducing
+  tickets-branch commits and are compared against ``S``. ``merged_log_commit`` remains a signed
+  subject field (so signatures still verify) but carries NO key-validity semantics.
 * **Subject binds {ticket id, material fingerprint, merged-log commit}** in an in-toto v1 Statement,
   so a cert cannot be replayed onto a different ticket or a mutated material fingerprint.
 
@@ -30,6 +36,7 @@ additive (legacy HMAC records are byte-unchanged and still HMAC-verify).
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 
 from rebar.attest import authorship, dsse, registry, sshsig
@@ -152,21 +159,36 @@ def verify_opcert(
     *,
     kind: str,
     principal: str,
+    storage_anchor_commit: str,
+    storage_anchor_position: str | None = None,
     repo_root: str | None = None,
 ) -> registry.Verdict:
     """Verify ``envelope`` as an op-cert for ``principal`` bound to
     ``{ticket_id, material_fingerprint, merged_log_commit, kind}`` against ``keyring``
-    (records of ``{public_key, added_at_commit, revoked_at_commit}``). ``kind`` is bound so a
-    cert signed for one attestation kind cannot be accepted for another (kind-confusion).
+    (records of ``{public_key, added_at_log_position, revoked_at_log_position}``). ``kind`` is bound
+    so a cert signed for one attestation kind cannot be accepted for another (kind-confusion).
+
+    Era-validity is evaluated at the certificate's STORAGE ANCHOR
+    ``(storage_anchor_commit, storage_anchor_position)`` — the tickets-branch commit that introduced
+    the terminal envelope-bearing ``SIGNATURE`` event and its intra-commit position — NOT at
+    ``merged_log_commit`` (story 4214 / Option B). ``merged_log_commit`` stays in the signed subject
+    digest (so the signature still verifies) but no longer anchors key validity; this closes the
+    rollback where a revoked-key holder backdates ``merged_log_commit`` to a pre-revocation
+    ancestor.
 
     Two-phase (mirrors ``verify_authorship``'s gate-layer reclassification), all verdict strings
     drawn from the canonical ``verify_signature_result.schema.json`` enum:
 
     * subject binding mismatch (replay / mutated material) → ``mismatch``;
     * signature not by ANY historical keyring key → ``mismatch``;
-    * signature by a real key but that key is not valid at ``merged_log_commit`` →
+    * signature by a real key but that key is not valid at the storage anchor →
       ``key_not_valid_at_era``;
-    * signature by a key valid at that era → ``certified``.
+    * signature by a key valid at that anchor → ``certified``.
+
+    The era boundary positions (``added_at_log_position`` / ``revoked_at_log_position``) resolve to
+    their introducing tickets-branch commits and are compared against ``storage_anchor_commit`` with
+    the SAME ancestry + intra-commit-position rule authorship uses (the SHARED
+    ``authorship.keys_valid_at_anchor`` + ``authorship.resolve_position_commit`` — not a duplicate).
 
     Any parse/shape problem, or any git/subprocess/lookup failure, yields a non-verified
     ``Verdict`` — this function never raises (fail-closed).
@@ -218,41 +240,47 @@ def verify_opcert(
             reason=(f"signature is not by any key in the keyring for principal {principal!r}"),
         )
 
-    # ── Phase 2: is the signing key valid AT ``merged_log_commit``? ──
-    # A key is valid iff its add-commit is an ancestor of merged_log_commit AND
-    # (it is not revoked, or its revoke-commit is NOT an ancestor of merged_log_commit).
+    # ── Phase 2: is the signing key valid AT the STORAGE ANCHOR ``S``? ──
+    # A key is valid iff its add-position resolves to an ANCESTOR of S AND (it is not revoked, or
+    # its revoke-position does NOT resolve to an ancestor of S). Era boundaries are TICKETS-BRANCH
+    # log positions; ancestry is decided on the tracker (tickets branch), NOT the code repo, and
+    # anchored on S rather than the cert's self-chosen merged_log_commit (story 4214 / Option B).
     try:
-        git_dir = repo_root or "."
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
 
         def _is_ancestor(ancestor: str, descendant: str) -> bool:
             proc = subprocess.run(
-                ["git", "-C", git_dir, "merge-base", "--is-ancestor", ancestor, descendant],
+                ["git", "-C", tracker, "merge-base", "--is-ancestor", ancestor, descendant],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             return proc.returncode == 0
 
-        valid_keys: list[str] = []
-        for rec in keyring:
-            if not isinstance(rec, dict):
-                continue
-            pub = rec.get("public_key")
-            added_at = rec.get("added_at_commit")
-            revoked_at = rec.get("revoked_at_commit")
-            if not isinstance(pub, str) or not pub:
-                continue
-            if not isinstance(added_at, str) or not added_at:
-                continue
-            if not _is_ancestor(added_at, merged_log_commit):
-                continue
-            if (
-                isinstance(revoked_at, str)
-                and revoked_at
-                and _is_ancestor(revoked_at, merged_log_commit)
-            ):
-                continue
-            valid_keys.append(pub)
+        def _resolve(position: str) -> str | None:
+            return authorship.resolve_position_commit(position, tracker, repo_root=repo_root)
+
+        # Normalize the out-of-band keyring records to the shared predicate's {added_at, revoked_at}
+        # shape (the config field names are the log-position variants), then apply the SINGLE era
+        # rule shared with authorship — never a re-implementation.
+        records = [
+            {
+                "public_key": rec.get("public_key"),
+                "added_at": rec.get("added_at_log_position"),
+                "revoked_at": rec.get("revoked_at_log_position"),
+            }
+            for rec in keyring
+            if isinstance(rec, dict)
+        ]
+        valid_keys = authorship.keys_valid_at_anchor(
+            records,
+            storage_anchor_commit,
+            storage_anchor_position,
+            resolve=_resolve,
+            is_ancestor=_is_ancestor,
+        )
     except Exception:  # noqa: BLE001 — ANY git/lookup failure → non-verified, never raise (fail-closed)
         return registry.Verdict(
             verified=False,
@@ -271,17 +299,17 @@ def verify_opcert(
                 verdict="certified",
                 reason=(
                     f"op-cert signed by a key of {principal!r} valid at "
-                    f"commit {merged_log_commit!r}"
+                    f"storage anchor {storage_anchor_commit!r}"
                 ),
             )
 
-    # A real key of this environment signed it, but that key was not valid at the era.
+    # A real key of this environment signed it, but that key was not valid at the storage anchor.
     return registry.Verdict(
         verified=False,
         verdict="key_not_valid_at_era",
         reason=(
             f"signing key of {principal!r} is real but not valid at "
-            f"commit {merged_log_commit!r} (not yet added, or already revoked)"
+            f"storage anchor {storage_anchor_commit!r} (not yet added, or already revoked)"
         ),
     )
 
@@ -293,19 +321,29 @@ def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
     carries an op-cert (an encoded DSSE ``envelope`` field), or ``None`` for a legacy HMAC record
     (no envelope). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
 
-    Never raises on a malformed envelope — a decode failure yields ``None`` (fail-closed).
+    SECURITY (finding #4, commit half — story 4214): the bound ``{material_fingerprint,
+    merged_log_commit}`` are sourced from the SIGNED envelope PAYLOAD (the in-toto predicate),
+    **never** from the record's plaintext mirror. Those mirror fields live on the auto-pushed,
+    non-Gerrit-gated tickets branch and are attacker-writable; the payload is authenticated by the
+    DSSE-PAE signature that :func:`verify_opcert` checks, so a tampered payload fails verification
+    while a tampered plaintext mirror is simply ignored. This makes the gate's verdict invariant
+    under plaintext-mirror mutation (verify-then-extract).
+
+    Never raises on a malformed envelope/payload — a decode failure yields ``None`` (fail-closed).
     """
     encoded = record.get("envelope")
     if not isinstance(encoded, str) or not encoded:
         return None
     try:
         envelope = dsse.decode(encoded)
-    except Exception:  # noqa: BLE001 — malformed envelope → None, never raise (fail-closed)
+        statement = json.loads(envelope.payload)
+        predicate = statement.get("predicate") if isinstance(statement, dict) else None
+        if not isinstance(predicate, dict):
+            return None
+        bound = {
+            "material_fingerprint": predicate.get("material_fingerprint"),
+            "merged_log_commit": predicate.get("merged_log_commit"),
+        }
+    except Exception:  # noqa: BLE001 — malformed envelope/payload → None, never raise (fail-closed)
         return None
-    return (
-        envelope,
-        {
-            "material_fingerprint": record.get("material_fingerprint"),
-            "merged_log_commit": record.get("merged_log_commit"),
-        },
-    )
+    return (envelope, bound)

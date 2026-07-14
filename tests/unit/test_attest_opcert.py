@@ -14,10 +14,10 @@ OpenSSH >= 8.9 is unavailable.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
+from _opcert_helpers import keypair, store_with_chain
 
 from rebar.attest import opcert, sshsig
 
@@ -33,35 +33,8 @@ ENV_ID = "trusted-ci@rebar.test"
 TICKET = "abcd-1234-ef01-5678"
 MATERIAL = "0123456789abcdef"
 KIND = "completion-verifier"
-
-
-def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
-    """Return (private_key_path, 'ssh-ed25519 AAAA…' public line) for a fresh Ed25519 key."""
-    key = tmp_path / name
-    subprocess.run(
-        ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", name],
-        check=True,
-        capture_output=True,
-    )
-    parts = (tmp_path / f"{name}.pub").read_text().strip().split()
-    return str(key), f"{parts[0]} {parts[1]}"
-
-
-def _git_repo_with_commit(tmp_path: Path) -> tuple[Path, str]:
-    """A real git repo with one commit; return (repo_dir, commit_sha) — the 'main' era anchor."""
-    repo = tmp_path / "code"
-    repo.mkdir()
-    for args in (
-        ("git", "init", "-q"),
-        ("git", "config", "user.email", "d@e.test"),
-        ("git", "config", "user.name", "D"),
-        ("git", "commit", "-q", "--allow-empty", "-m", "c1"),
-    ):
-        subprocess.run(args, cwd=repo, check=True, capture_output=True)
-    sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
-    return repo, sha
+# merged_log_commit is a signed SUBJECT field only under Option B (no key-validity semantics).
+MERGED = "0" * 40
 
 
 def test_opcert_kind_registered() -> None:
@@ -74,24 +47,29 @@ def test_opcert_kind_registered() -> None:
     assert policy.namespace == opcert.OPCERT_NAMESPACE == "rebar.opcert.v1"
 
 
-def test_opcert_sign_and_verify_roundtrip(tmp_path: Path) -> None:
-    """A cert signed by environment E, bound to {ticket, material, commit}, verifies against E's
-    pinned key when the subject matches and the key is valid at the bound commit."""
-    repo, commit = _git_repo_with_commit(tmp_path)
-    priv, pub = _keypair(tmp_path, "env")
-    keyring = [{"public_key": pub, "added_at_commit": commit, "revoked_at_commit": None}]
+def test_opcert_sign_and_verify_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cert signed by environment E, bound to {ticket, material, merged-log commit}, verifies
+    against E's pinned key when the subject matches and the key is valid at the STORAGE ANCHOR (a
+    tickets-branch commit; the key's add-position resolves to an ancestor of it)."""
+    repo, _tracker, pos = store_with_chain(tmp_path, monkeypatch, 3)
+    priv, pub = keypair(tmp_path, "env")
+    keyring = [
+        {"public_key": pub, "added_at_log_position": pos[0][0], "revoked_at_log_position": None}
+    ]
 
     envelope = opcert.sign_opcert(
-        TICKET, MATERIAL, commit, key_path=priv, kind=KIND, principal=ENV_ID
+        TICKET, MATERIAL, MERGED, key_path=priv, kind=KIND, principal=ENV_ID
     )
     verdict = opcert.verify_opcert(
         envelope,
         TICKET,
         MATERIAL,
-        commit,
+        MERGED,
         keyring,
         kind=KIND,
         principal=ENV_ID,
+        storage_anchor_commit=pos[-1][1],
+        storage_anchor_position=pos[-1][0],
         repo_root=str(repo),
     )
     assert verdict.verified is True
