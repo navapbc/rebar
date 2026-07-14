@@ -188,4 +188,9 @@ def test_warm_resolution_is_cheap(tmp_path: Path) -> None:
     for _ in range(1000):
         cfg.load_config(root=p)
     elapsed = time.perf_counter() - start
-    assert elapsed < 0.5  # 1000 cached resolves in <0.5s (typically <10ms)
+    # Generous smoke ceiling: warm resolves are dict lookups (~10ms for 1000; ~0.5s
+    # even on a loaded CI runner). A GROSS regression — a broken cache doing a per-resolve
+    # filesystem walk up a 40-deep tree — would take many seconds, so 5s catches the real
+    # failure while tolerating CI wall-clock variance (bug 19d7: a 0.5s ceiling flaked at
+    # ~0.50–0.51s under load across py3.11/3.12/3.13).
+    assert elapsed < 5.0
