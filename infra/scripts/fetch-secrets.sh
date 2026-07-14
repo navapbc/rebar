@@ -16,13 +16,11 @@
 #   /rebar/prod/github-oauth-client-id     -> GITHUB_OAUTH_CLIENT_ID     (WS8, OPTIONAL)
 #   /rebar/prod/github-oauth-client-secret -> GITHUB_OAUTH_CLIENT_SECRET (WS8, OPTIONAL)
 #   /rebar/prod/reviewbot-tickets-pat      -> REVIEWBOT_TICKETS_PAT      (data capture, OPTIONAL)
-#   /rebar/prod/autolander-gerrit-token    -> AUTOLANDER_GERRIT_TOKEN    (auto-lander, REQUIRED/fail-fast)
 # The two OAuth creds are OPTIONAL here (blank if unpopulated) — they are only needed
 # under auth.type = OAUTH, and compose-up.sh FAILS LOUD if OAUTH is selected but they
 # are empty. Making them REQUIRED here would couple every boot (incl. non-OAUTH rollback)
 # to their presence.
-# Plus non-secrets: REVIEW_BOT_PORT=8000 and AUTOLANDER_PORT=8081 (8080 is Gerrit's; single-source the
-# ports for compose + nginx).
+# Plus a non-secret: REVIEW_BOT_PORT=8000 (single-source the port for compose + nginx).
 # (The other /rebar/prod/* params — ssh host key, replication deploy key, alert
 # endpoint — are consumed elsewhere, not by these containers, so they are not fetched.)
 # ---------------------------------------------------------------------------
@@ -91,12 +89,6 @@ github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
 # until the operator populates the SSM slot; the container boots either way, and the code_review
 # artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
 reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
-# REQUIRED (fail-fast): the auto-lander's Gerrit HTTP password (epic f1fa / S5). The lander's
-# SOLE job is landing changes, so a blank token = a silent no-op — fetch it with get_param
-# (aborts boot if the SSM slot is empty/None/CHANGEME), consistent with the other required
-# creds above. The operator MUST populate this SecureString slot before deploy (it is already
-# populated); rebase-on-behalf + ancestor-atomic submit need it to authenticate.
-autolander_gerrit_token="$(get_param autolander-gerrit-token)"
 
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
@@ -111,9 +103,7 @@ chmod 600 "${tmp}"
   echo "GITHUB_OAUTH_CLIENT_ID=${github_oauth_client_id}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
-  echo "AUTOLANDER_GERRIT_TOKEN=${autolander_gerrit_token}"
   echo "REVIEW_BOT_PORT=8000"
-  echo "AUTOLANDER_PORT=8081"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"
 chmod 600 "${ENV_FILE}"

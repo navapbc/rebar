@@ -44,11 +44,8 @@ SHA_FILE="$STATE_DIR/deployed-sha"
 BACKOFF_FILE="$STATE_DIR/deploy-backoff"              # "<target-sha> <fail-count> <next-epoch>"
 BOT_SERVICE="${BOT_SERVICE:-review-bot}"              # compose service name (NEVER 'gerrit')
 BOT_IMAGE="${BOT_IMAGE:-compose-review-bot}"
-AUTOLANDER_SERVICE="${AUTOLANDER_SERVICE:-autolander}"     # compose service name (NEVER 'gerrit')
-AUTOLANDER_IMAGE="${AUTOLANDER_IMAGE:-compose-autolander}"
 GERRIT_CONTAINER="${GERRIT_CONTAINER:-compose-gerrit-1}"
 HEALTH_URL="${HEALTH_URL:-http://localhost:8000/health}"   # review-bot receiver (NOT Gerrit 8080)
-AUTOLANDER_HEALTH_URL="${AUTOLANDER_HEALTH_URL:-http://localhost:8080/}"  # auto-lander status endpoint (NOT Gerrit)
 FETCH_TIMEOUT="${FETCH_TIMEOUT:-60}"                  # a hung fetch must not hold the lock
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
@@ -56,10 +53,6 @@ BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap 
 
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml'
-# auto-lander redeploys iff a matching path changed (its own package + Dockerfile, plus
-# the shared pyproject/compose). Same bounded-blast-radius contract as the review-bot:
-# only the autolander service is rebuilt/restarted; the gerrit container is never touched.
-AUTOLANDER_PATHS='infra/autolander/ infra/compose/Dockerfile.autolander pyproject.toml infra/compose/docker-compose.yml'
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
 CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh'
 # host observability probe: re-materialized (idempotent installer) on a source change.
@@ -196,49 +189,6 @@ if changed "$BOT_PATHS"; then
   fi
   prune_docker_caches
   log "review-bot redeployed + healthy"
-fi
-
-# ── auto-lander: rebuild + restart ONLY on a source change (epic f1fa / S5) ───
-# Parallel to the review-bot block above; same self-heal contract (rollback to :prev on
-# an unhealthy deploy) and the same bounded blast radius (never touches `gerrit`). The
-# source sync is repeated (idempotent) so an autolander-only change still refreshes the
-# copy-based build context even when no review-bot path changed.
-if changed "$AUTOLANDER_PATHS"; then
-  log "auto-lander sources changed; sync + rebuild + restart (blast radius = $AUTOLANDER_SERVICE only)"
-  if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
-    err mirror-checkout-failed "git checkout $TARGET in $MIRROR_DIR failed"; record_backoff_failure; exit 1
-  fi
-  if ! rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$MIRROR_DIR/" "$DEPLOY_REPO/" 2>/dev/null; then
-    err rsync-failed "rsync $MIRROR_DIR -> $DEPLOY_REPO failed"; record_backoff_failure; exit 1
-  fi
-  env_owner="$(stat -c '%U:%G' "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true)"
-  chown -R 502:502 "$DEPLOY_REPO" 2>/dev/null || true
-  [ -n "$env_owner" ] && chown "$env_owner" "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true
-
-  gerrit_before="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
-  # preserve the current image as :prev for rollback (only if one exists).
-  if docker image inspect "$AUTOLANDER_IMAGE:latest" >/dev/null 2>&1; then docker tag "$AUTOLANDER_IMAGE:latest" "$AUTOLANDER_IMAGE:prev"; have_prev=1; else have_prev=0; fi
-  if ! ( cd "$COMPOSE_DIR" && docker compose build "$AUTOLANDER_SERVICE" && docker compose up -d "$AUTOLANDER_SERVICE" ); then
-    err autolander-build-failed "compose build/up $AUTOLANDER_SERVICE failed"
-    [ "$have_prev" = 1 ] && { docker tag "$AUTOLANDER_IMAGE:prev" "$AUTOLANDER_IMAGE:latest"; ( cd "$COMPOSE_DIR" && docker compose up -d "$AUTOLANDER_SERVICE" ); }
-    record_backoff_failure; exit 1
-  fi
-  # END-TO-END health check: the read-only status endpoint returns 200 once the loop is
-  # up. Deliberately NOT a Gerrit probe — a Gerrit outage must not fail an autolander deploy.
-  ok=0; deadline=$(( $(now) + HEALTH_TIMEOUT ))
-  while [ "$(now)" -lt "$deadline" ]; do curl -fsS -m 3 "$AUTOLANDER_HEALTH_URL" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
-  if [ "$ok" != 1 ]; then
-    err autolander-unhealthy "auto-lander failed status-endpoint check after deploy; ROLLING BACK to :prev"
-    if [ "$have_prev" = 1 ]; then docker tag "$AUTOLANDER_IMAGE:prev" "$AUTOLANDER_IMAGE:latest"; ( cd "$COMPOSE_DIR" && docker compose up -d "$AUTOLANDER_SERVICE" ); fi
-    record_backoff_failure; exit 1
-  fi
-  # blast-radius assertion: the gerrit container must be UNTOUCHED.
-  gerrit_after="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
-  if [ -n "$gerrit_before" ] && [ "$gerrit_before" != "$gerrit_after" ]; then
-    err blast-radius "gerrit container id changed during an auto-lander deploy — investigate"
-  fi
-  prune_docker_caches
-  log "auto-lander redeployed + healthy"
 fi
 
 # ── host observability probe: re-materialize on a probe-source change ─────────

@@ -177,40 +177,6 @@ aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null || true
 [ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
 
-# --- 4e. auto-lander landing failures + unhealthy health-state (epic f1fa / S5) ---
-# The serial auto-lander (compose-autolander-1) writes AUTOLANDER_ERROR (a landing step
-# failed) and AUTOLANDER_HANDBACK (it handed a stack back instead of landing it) markers to
-# stdout -> journald. Same offset-delta shape as the voter_errors feeder (§4): a persisted
-# cumulative grep count turned into a per-interval delta via an offset file. PLUS the
-# container's Docker HEALTH STATE: the heartbeat HEALTHCHECK (Dockerfile.autolander) flips the
-# container `unhealthy` when the loop stops heartbeating (wedged/deadlocked) — a condition that
-# emits NO journald marker, so we add 1 to the count when `docker inspect` reports `unhealthy`
-# (NOT a journald grep). Published as the DIMENSIONLESS Count metric rebar/host:autolander_errors
-# that the monitoring_autolander.tf alarm watches.
-AUTOLANDER_CONTAINER="${AUTOLANDER_CONTAINER:-compose-autolander-1}"
-AUTOLANDER_OFFSET_FILE="${AUTOLANDER_OFFSET_FILE:-/var/lib/rebar/autolander-fail-offset}"
-mkdir -p "$(dirname "$AUTOLANDER_OFFSET_FILE")"
-# NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0` (that would
-# append a SECOND "0" line and corrupt the arithmetic). Capture the single-line count and
-# default-empty-to-0 instead.
-altotal=$(journalctl CONTAINER_NAME="$AUTOLANDER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'AUTOLANDER_ERROR|AUTOLANDER_HANDBACK') || true
-altotal=${altotal:-0}
-alprev=$(cat "$AUTOLANDER_OFFSET_FILE" 2>/dev/null || echo 0)
-case "$alprev" in '' | *[!0-9]*) alprev=0 ;; esac
-alnew=$((altotal - alprev))
-[ "$alnew" -lt 0 ] && alnew=$altotal
-echo "$altotal" >"$AUTOLANDER_OFFSET_FILE"
-# Docker health-state: add 1 when the container reports `unhealthy` (a wedged loop emits no
-# marker). `docker inspect` prints empty / errors when the container is absent or has no
-# healthcheck yet — treat anything other than the literal `unhealthy` as not-contributing.
-alhealth=$(docker inspect --format '{{.State.Health.Status}}' "$AUTOLANDER_CONTAINER" 2>/dev/null || true)
-alunhealthy=0; [ "$alhealth" = "unhealthy" ] && alunhealthy=1
-alsum=$((alnew + alunhealthy))
-# Published WITHOUT dimensions to match the dimensionless alarm in monitoring_autolander.tf
-# (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name autolander_errors --unit Count --value "$alsum" 2>/dev/null || true
-[ "$alsum" -gt 0 ] && logger -t rebar-health "auto-lander failures/unhealthy (new this interval)=${alsum} (markers=${alnew} unhealthy=${alunhealthy})"
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
 # Watch the GERRIT container's journald for gerrit-to-platform (g2p) error markers

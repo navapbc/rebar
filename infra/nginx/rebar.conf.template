@@ -1,14 +1,14 @@
 # ---------------------------------------------------------------------------
 # nginx site for rebar.solutions.navateam.com (epic d251 / story S2).
 #
-# This is a TEMPLATE: ${REVIEW_BOT_PORT} and ${AUTOLANDER_PORT} are substituted at boot
+# This is a TEMPLATE: ${REVIEW_BOT_PORT} is substituted at boot
 # via envsubst, e.g. (in the deploy/boot script):
-#     export REVIEW_BOT_PORT AUTOLANDER_PORT
-#     envsubst '${REVIEW_BOT_PORT} ${AUTOLANDER_PORT}' \
+#     export REVIEW_BOT_PORT
+#     envsubst '${REVIEW_BOT_PORT}' \
 #       < infra/nginx/rebar.conf.template \
 #       > /etc/nginx/conf.d/rebar.conf
 #     nginx -t && systemctl reload nginx
-# Only ${REVIEW_BOT_PORT} + ${AUTOLANDER_PORT} are templated; the single-quoted envsubst
+# Only ${REVIEW_BOT_PORT} is templated; the single-quoted envsubst
 # arg above ensures nginx's own $variables (e.g. $host, $remote_addr) are left untouched.
 #
 # nginx runs as a HOST package (dnf nginx) — NOT a container — so host certbot can
@@ -53,20 +53,6 @@ server {
     # so an external GET /review/health reaches the app as GET /health.
     location /review/ {
         proxy_pass http://127.0.0.1:${REVIEW_BOT_PORT}/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-
-    # --- auto-lander: /autolander/status -> the read-only status endpoint ---
-    # The auto-lander (epic f1fa / S5) serves a read-only JSON status document (heartbeat
-    # age, current phase, waiting count) on 127.0.0.1:${AUTOLANDER_PORT}. Same prefix-strip
-    # + header pattern as /review/: the trailing slash on proxy_pass replaces the matched
-    # /autolander/status prefix, so GET /autolander/status reaches the app as GET /. This
-    # endpoint is read-only (GET only; the loop exposes no mutating routes).
-    location /autolander/status {
-        proxy_pass http://127.0.0.1:${AUTOLANDER_PORT}/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

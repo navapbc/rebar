@@ -113,66 +113,6 @@ services:
     logging:
       driver: journald
 
-  # --- rebar auto-lander (serial landing daemon, epic f1fa / S5) -----------
-  autolander:
-    build:
-      # Build context is the REPO ROOT so `pip install .` + the infra/autolander/
-      # package are both available (see Dockerfile.autolander).
-      context: ../..
-      dockerfile: infra/compose/Dockerfile.autolander
-    restart: unless-stopped
-    stop_grace_period: 120s  # S5d: allow the bounded SIGTERM drain to finish (vs Docker's 10s default)
-    env_file:
-      - .env
-    environment:
-      # Ticket annotation on landing (bug dc33): auto-push each `landed` ticket comment to
-      # origin/tickets as it is written. The push credential is a URL-scoped git credential
-      # helper materialized by the entrypoint from REVIEWBOT_TICKETS_PAT (reused from .env /
-      # fetch-secrets.sh); the persistent tickets worktree below is its store.
-      REBAR_SYNC_PUSH: "always"
-      # Point rebar's ambient tickets store (config.tracker_dir, read by close_ticket_via_rebar's
-      # rebar.comment call) at the PERSISTENT tickets worktree, NOT the container's /app cwd — so
-      # the annotation lands in the pushable clone.
-      REBAR_TRACKER_DIR: /var/gerrit/site/autolander-tickets
-    ports:
-      # Publish the read-only status endpoint on host loopback for the HOST nginx
-      # /autolander/status proxy. Host port is single-sourced from .env
-      # (AUTOLANDER_PORT, default 8081 — Gerrit owns host 8080); container port is fixed at 8080 (loop.py).
-      - "127.0.0.1:${AUTOLANDER_PORT:-8081}:8080"
-    volumes:
-      # Persist the auto-lander state (heartbeat, emergency-stop sentinel, recovery.json,
-      # the single-instance lock) across container recreation, so a crash-restart resumes
-      # its in-flight snapshot instead of double-submitting. Bind onto the EBS host path
-      # like the gerrit_* site volumes; the external volume is created by compose-up.sh
-      # (SITE_SUBDIRS) and pre-provisioned on the host.
-      - gerrit_autolander:/var/gerrit/site/autolander
-      # Persistent tickets worktree (bug dc33): a durable clone of the `tickets` branch that
-      # survives container recreation, so the auto-lander's landed-ticket annotations accumulate
-      # + auto-push (REBAR_SYNC_PUSH=always) instead of living in an ephemeral dir. Materialized
-      # once by the entrypoint (see Dockerfile.autolander).
-      - gerrit_autolander_tickets:/var/gerrit/site/autolander-tickets
-    labels:
-      # Let the autoheal sidecar (below) restart this container when the heartbeat
-      # HEALTHCHECK (Dockerfile.autolander) reports unhealthy.
-      - autoheal=true
-    logging:
-      driver: journald
-
-  # --- autoheal sidecar (restart unhealthy labelled containers) ------------
-  # Watches Docker health state and restarts any container labelled autoheal=true that
-  # goes `unhealthy` — the actuator for the auto-lander's heartbeat HEALTHCHECK (S5d).
-  autoheal:
-    image: willfarrell/autoheal
-    restart: unless-stopped
-    environment:
-      # Only manage containers carrying this label (the autolander service above).
-      AUTOHEAL_CONTAINER_LABEL: autoheal
-    volumes:
-      # Needs the Docker socket (read-write) to inspect health + issue container restarts.
-      - /var/run/docker.sock:/var/run/docker.sock
-    logging:
-      driver: journald
-
 # External named volumes for the stateful Gerrit site subdirs. Declared external:true
 # so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
 # (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS
@@ -200,12 +140,4 @@ volumes:
   # /var/gerrit/site/reviewbot-tickets — the persistent tickets worktree for code_review artifacts
   # (story limestone-unethical-zebrafinch); created by compose-up.sh alongside the others.
   gerrit_reviewbot_tickets:
-    external: true
-  # rebar auto-lander state (heartbeat + emergency-stop + recovery.json + instance lock)
-  # — bind onto /var/gerrit/site/autolander; created by compose-up.sh (SITE_SUBDIRS).
-  gerrit_autolander:
-    external: true
-  # /var/gerrit/site/autolander-tickets — the persistent tickets worktree for landed-ticket
-  # annotations (bug dc33); created by compose-up.sh (SITE_SUBDIRS) alongside the others.
-  gerrit_autolander_tickets:
     external: true
