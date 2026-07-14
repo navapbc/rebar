@@ -1,35 +1,22 @@
 """Environment-bound manifest signing for tickets.
 
-This is the cryptographic-attestation surface: a ticket can carry a **manifest of
-verified steps** plus an **HMAC-SHA256 signature** computed with a key that is
-**specific to the environment** rebar runs in (e.g. an MCP server deployed in a
-shared environment). The ``verify-signature`` command then *certifies* that the
-recorded steps still match the signature — and, because the key never leaves the
-environment, that the signature was produced *here* and not transplanted from
-another clone.
+This is the cryptographic-attestation surface: a ticket carries a **manifest of verified steps**
+plus a signature that ``verify-signature`` later *certifies* was produced *here*, not transplanted
+from another clone. The signature is persisted as an append-only ``SIGNATURE`` event, so it flows
+through the same locked write path, auto-push, and compaction as every other event.
 
-Design (mirrors the existing ``.closure-key`` verdict-hash gate in
-``compute-verdict-hash.sh``):
+**Expand phase (story 8d8e): write-new, read-both.** The producer seam (:func:`sign_manifest`)
+now MINTS a ``rebar.opcert.v1`` DSSE op-cert with the environment's auto-generated Ed25519 key —
+see :mod:`rebar._opcert_signing` for the env-key custody + mint/verify machinery. The read seam
+(:func:`verify_attestation_record`) dispatches on record SHAPE: envelope-bearing records → the
+op-cert verifier; legacy ``signature``-bearing (HMAC) records → the UNCHANGED :func:`verify_record`
++ HMAC secret below, so pre-existing HMAC attestations still verify alongside new envelopes.
 
-* **Key resolution** — ``REBAR_SIGNING_KEY`` (injected out-of-band into a shared
-  deployment) wins; otherwise the per-environment ``<tracker>/.signing-key`` file
-  (a UUID4 generated on first use, gitignored, never committed, never shared).
-  The key is the environment's secret: only a process holding it can produce — or
-  certify — a signature.
-* **Signed payload** — a canonical JSON serialisation of
-  ``{v, algorithm, ticket_id, manifest}``. Binding the ``ticket_id`` stops a
-  signature being replayed onto another ticket; binding the whole manifest means
-  any edit to the verified-step list invalidates the signature. The signed payload
-  deliberately does NOT include volatile git state, so a signature stays
-  certifiable as the repo evolves (``head_sha`` is recorded as audit metadata
-  only).
-* **Key fingerprint** (``key_id``) — a domain-separated SHA-256 prefix of the key,
-  stored on the record so verification can distinguish "manifest tampered" from
-  "signed by a *different* environment's key" without ever exposing the key.
-
-The signature is persisted as a ``SIGNATURE`` event (append-only, replayed into
-``state['signature']`` as last-writer-wins), so it flows through the same locked
-write path, auto-push, and compaction as every other event.
+Legacy HMAC design (still the read path for pre-8d8e records): the key is ``REBAR_SIGNING_KEY``
+(injected out-of-band) else the per-environment ``<tracker>/.signing-key`` (a UUID4, gitignored);
+the signed payload is a canonical ``{v, algorithm, ticket_id, manifest}`` (binding ticket_id +
+whole manifest); ``key_id`` is a domain-separated fingerprint distinguishing "tampered" from
+"foreign key".
 """
 
 from __future__ import annotations
@@ -45,7 +32,27 @@ import uuid as _uuid
 from pathlib import Path
 
 from rebar import config
+from rebar._opcert_signing import (
+    OpcertKeyUnavailable,
+    ensure_opcert_key,
+    mint_opcert_record,
+    opcert_principal,
+    sign_opcert_manifest,
+    verify_opcert_record,
+)
 from rebar._store.canonical import canonical_bytes
+
+# Re-exported for back-compat + tests: the op-cert env-key custody + mint/verify machinery lives
+# in ``rebar._opcert_signing`` (split out to keep both units under the module-size cap, story 8d8e).
+__all__ = [
+    "OpcertKeyUnavailable",
+    "ensure_opcert_key",
+    "opcert_principal",
+    "sign_manifest",
+    "sign_opcert_manifest",
+    "verify_attestation_record",
+    "verify_signature",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -439,6 +446,28 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     }
 
 
+def verify_attestation_record(
+    record: dict | None, ticket_id: str, *, key: bytes | None = None, repo_root=None
+) -> dict:
+    """Shape-aware verify dispatch (story 8d8e, expand phase = write-new / read-both).
+
+    An ``envelope``-bearing record (a ``rebar.opcert.v1`` DSSE op-cert) routes to the op-cert
+    verifier; a legacy ``signature``-bearing (HMAC) record routes to the UNCHANGED
+    :func:`verify_record`. This lets old HMAC attestations verify alongside new envelope ones on the
+    same store (kind-keyed coexistence). The result shape is the uniform
+    :func:`verify_record` contract either way, so downstream readers (``verify_signature``,
+    ``compute_validity``, ``signature_findings``) are unchanged.
+
+    ``key`` is the HMAC secret for the legacy path; when omitted it is resolved read-only (a missing
+    key never mints one). ``repo_root`` locates the tracker for the op-cert principal + pubkey."""
+    record = record if isinstance(record, dict) else {}
+    if record.get("envelope"):
+        return verify_opcert_record(record, ticket_id, repo_root=repo_root)
+    if key is None:
+        key = signing_key(str(config.tracker_dir(repo_root)), create_if_missing=False)
+    return verify_record(record, ticket_id, key)
+
+
 # ── git audit metadata ────────────────────────────────────────────────────────
 def head_sha(repo_root) -> str:
     """Current HEAD sha of ``repo_root``, or ``'unknown'`` when unresolvable.
@@ -464,17 +493,18 @@ def head_sha(repo_root) -> str:
 def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_root=None) -> dict:
     """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
 
-    Validates the manifest, resolves the ticket id, computes the HMAC with the
-    environment key, and persists the signature record through the single locked
-    write path. Returns the record (with the resolved ``ticket_id``). Raises
-    :class:`SigningError` on a validation/resolve failure.
+    **Producer-signing seam (story 8d8e, fork A).** This is a thin delegator over
+    :func:`rebar._opcert_signing.mint_opcert_record`: it mints a ``rebar.opcert.v1`` DSSE op-cert
+    with the ambient environment's auto-generated Ed25519 key (``<tracker>/.opcert-key``) — one
+    signature per verdict, no HMAC — and persists it through the single locked write path.
+    Returns the record (with the resolved ``ticket_id``). Raises :class:`SigningError` on a
+    validation/resolve failure, and — on the DEGRADE path (``ssh-keygen`` < 8.9 or an unwritable
+    tracker) — a :class:`SigningError` naming OpenSSH >= 8.9, which callers record as an in-band
+    ``{signed: false}`` outcome (no local op wedges; the gate that needs it blocks).
 
-    ``kind`` (e.g. ``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED on
-    the event as a routing hint for the reducer's kind-keyed attestations map (epic
-    dark-acme-lumen). It is never authoritative — the reducer derives the kind from the
-    signed ``manifest[0]`` and ignores a mismatched hint — so it does not enter the canonical
-    signed payload and never invalidates a prior signature. Omitted callers (e.g. `rebar sign`)
-    sign exactly as before.
+    ``kind`` (``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED as a routing hint
+    for the reducer's kind-keyed attestations map; the reducer derives the authoritative kind from
+    the signed ``manifest[0]``. Omitted callers (e.g. `rebar sign`) sign a generic op-cert.
     """
     from rebar._commands._seam import (
         CommandError,
@@ -494,103 +524,16 @@ def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_roo
     except CommandError as exc:
         raise SigningError(exc.message, exc.returncode) from None
 
-    key = signing_key(str(tracker))
-    signature = compute_signature(resolved, steps, key)
-    record = {
-        "manifest": steps,
-        "algorithm": ALGORITHM,
-        "signature": signature,
-        "key_id": key_fingerprint(key),
-        "head_sha": head_sha(config.repo_root(repo_root)),
-        # Returned for convenience on this in-memory record. The PERSISTED + queryable value
-        # is the signed `verified-at-sha:` manifest step itself: the reducer keeps only the
-        # signed fields, and `verify_signature` derives `verified_at_sha` from the manifest —
-        # so the trust anchor is always the signed step, never this unsigned echo.
-        "verified_at_sha": verified_at_sha_from_manifest(steps),
-        "signed_at": time.time_ns(),
-    }
-    # Unsigned routing hint for the reducer's kind-keyed map; omitted when not provided so
-    # existing callers' events are byte-identical to before.
-    if kind is not None:
-        record["kind"] = kind
+    # DEGRADE path: a missing/too-old ssh-keygen, or a key that cannot be (re)generated, raises a
+    # SigningError naming OpenSSH >= 8.9. Callers record it as an in-band {signed: false} outcome —
+    # no local op is wedged by signing itself (the gate that needs it blocks with the remediation).
     try:
-        append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
-    except CommandError as exc:
-        raise SigningError(exc.message, exc.returncode) from None
-    return {**record, "ticket_id": resolved}
-
-
-def sign_opcert_manifest(
-    ticket_id: str,
-    manifest,
-    *,
-    material_fingerprint: str,
-    merged_log_commit: str,
-    key_path: str,
-    principal: str,
-    repo_root=None,
-) -> dict:
-    """Sign a manifest as an ASYMMETRIC op-cert (keystone e4df); append an envelope-bearing
-    SIGNATURE event.
-
-    Builds a DSSE envelope via :func:`rebar.attest.opcert.sign_opcert` binding
-    ``{ticket_id, material_fingerprint, merged_log_commit}``, then appends a SIGNATURE event whose
-    record carries the encoded ``envelope`` + those bound fields + ``algorithm="sshsig"`` and the
-    signed ``manifest`` (first line ``"<kind>: …"`` so the reducer derives the attestation kind) —
-    but NO HMAC ``signature``. The kind-keyed ``attestations`` map then holds an op-cert record the
-    merge-gate (4214) verifies.
-
-    """
-    from rebar._commands._seam import (
-        CommandError,
-        append_event,
-        require_id,
-        require_not_ghost,
-    )
-    from rebar.attest import opcert
-    from rebar.attest.dsse import encode
-    from rebar.reducer._processors import attestation_kind
-
-    if not ticket_id:
-        raise SigningError("Error: ticket_id must be non-empty")
-    steps = parse_manifest(manifest)
-
-    tracker = config.tracker_dir(repo_root)
-    try:
-        resolved = require_id(ticket_id, tracker)
-        require_not_ghost(resolved, tracker)
-    except CommandError as exc:
-        raise SigningError(exc.message, exc.returncode) from None
-
-    # The attestation kind (from the manifest) is bound INTO the signed op-cert subject, so a cert
-    # cannot be filed under / accepted for a different kind than it was signed for (kind-confusion).
-    kind = attestation_kind(steps, {})
-    if kind is None:
-        raise SigningError("Error: op-cert manifest[0] must encode a kind (e.g. 'plan-review: …')")
-    env = opcert.sign_opcert(
-        resolved,
-        material_fingerprint,
-        merged_log_commit,
-        kind=kind,
-        key_path=key_path,
-        principal=principal,
-    )
-    envelope = encode(
-        env.payload_type,
-        env.payload,
-        [{"keyid": s.keyid, "sig": s.sig} for s in env.signatures],
-    )
-    record = {
-        "manifest": steps,
-        "algorithm": "sshsig",
-        "envelope": envelope,
-        "material_fingerprint": material_fingerprint,
-        "merged_log_commit": merged_log_commit,
-        "signed_at": time.time_ns(),
-        # Unsigned routing hint mirroring the manifest-authoritative kind the reducer derives
-        # (the kind is ALSO bound into the signed envelope subject above).
-        "kind": kind,
-    }
+        record = mint_opcert_record(resolved, steps, kind=kind, repo_root=repo_root)
+    except OpcertKeyUnavailable as exc:
+        raise SigningError(
+            f"{exc.message}. Install OpenSSH >= 8.9 and ensure the tracker directory is writable."
+        ) from None
+    record["signed_at"] = time.time_ns()
     try:
         append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
     except CommandError as exc:
@@ -672,7 +615,9 @@ def verify_signature(ticket_id: str, *, kind: str | None = None, repo_root=None)
     / ``"completion-verifier"``) verifies THAT kind strictly from the kind-keyed map. Use
     :func:`verify_attestations` for all kinds at once."""
     resolved, state, key = _resolve_and_reduce(ticket_id, repo_root)
-    result = verify_record(_record_for_kind(state, kind), resolved, key)
+    result = verify_attestation_record(
+        _record_for_kind(state, kind), resolved, key=key, repo_root=repo_root
+    )
     result["ticket_id"] = resolved
     if kind is not None:
         result["kind"] = kind
@@ -689,7 +634,7 @@ def verify_attestations(ticket_id: str, *, repo_root=None) -> dict:
     out: dict = {}
     if isinstance(att, dict):
         for k in sorted(att):
-            r = verify_record(att[k], resolved, key)
+            r = verify_attestation_record(att[k], resolved, key=key, repo_root=repo_root)
             r["ticket_id"] = resolved
             r["kind"] = k
             out[k] = r
@@ -718,6 +663,16 @@ def sign_cli(argv: list[str]) -> int:
         return exc.returncode
     if fmt == "json":
         sys.stdout.write(json.dumps(record, ensure_ascii=False) + "\n")
+    elif record.get("envelope"):
+        # Op-cert record (story 8d8e): render the DSSE envelope digest + principal (there is no
+        # HMAC ``signature`` field to slice — the legacy render would KeyError).
+        digest = hashlib.sha256(record["envelope"].encode("utf-8")).hexdigest()[:16]
+        sys.stdout.write(
+            f"SIGNED {record['ticket_id']} "
+            f"steps={len(record['manifest'])} "
+            f"principal={record.get('principal')} "
+            f"envelope={digest}…\n"
+        )
     else:
         sys.stdout.write(
             f"SIGNED {record['ticket_id']} "

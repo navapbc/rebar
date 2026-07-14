@@ -73,6 +73,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
 | `REBAR_NO_SYNC` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SYNC_PULL` |
+| `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/llm/plan_review/sizing.py` |  |
 | `REBAR_PREVIEW_TIMEOUT` | `src/rebar/llm/workflow/criterion_preview.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
@@ -95,7 +96,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_85 variables._
+_86 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
