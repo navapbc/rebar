@@ -63,7 +63,8 @@ def test_latest_review_result_returns_newest_payload_with_prose(rebar_repo: Path
 
     got = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
     assert got is not None
-    assert got["schema"] == "plan_review_result_v1"
+    # A fresh emit is now the lossless v2 record (story 4e19); the reader accepts both.
+    assert got["schema"] == "plan_review_result_v2"
     assert got["material_fingerprint"] == "m2"  # newest
     assert got["findings"][0]["finding"] == "second review finding"
     assert got["findings"][0]["suggested_fix"] == "Do the thing."
@@ -117,8 +118,8 @@ def test_latest_review_result_walks_back_past_corrupt_newest(rebar_repo: Path) -
 
 
 def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: Path) -> None:
-    """A newest sidecar whose schema != plan_review_result_v1 is rejected → None, so a
-    future schema bump can never feed a stale shape to the novelty sub-call."""
+    """A newest sidecar whose schema is neither plan_review_result_v1 nor _v2 is rejected →
+    None, so a FUTURE schema bump can never feed a stale shape to the novelty sub-call."""
     tid = _make_ticket(rebar_repo)
     assert sidecar.emit(_verdict(tid, "ok finding"), material="m1", repo_root=str(rebar_repo))
     tracker = str(_config.tracker_dir(str(rebar_repo)))
@@ -157,3 +158,49 @@ def test_prune_bound_still_respected_after_prose_fields(rebar_repo: Path) -> Non
     got = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
     assert got is not None
     assert got["material_fingerprint"] == f"m{n - 1}"  # newest survives the prune
+
+
+def test_reader_accepts_both_v1_and_v2_schemas(rebar_repo: Path) -> None:
+    """Story 4e19: the reader accepts BOTH plan_review_result_v1 and _v2. A hand-written v1
+    record (predating the new fields) reads back cleanly and WITHOUT evidence/scenarios/
+    threshold; a fresh v2 emit reads back WITH them, newest-first."""
+    from rebar._commands._seam import append_event
+
+    tid = _make_ticket(rebar_repo)
+    tracker = _config.tracker_dir(str(rebar_repo))
+    # A genuine v1 record: no evidence/scenarios/block_threshold/blocking_enabled on the finding.
+    v1_payload = {
+        "schema": "plan_review_result_v1",
+        "verdict": "PASS",
+        "ticket_id": tid,
+        "material_fingerprint": "m-v1",
+        "findings": [
+            {"id": "old", "finding": "legacy finding", "criteria": ["C1"], "location": "L"}
+        ],
+        "coaching": [],
+    }
+    append_event(tid, "REVIEW_RESULT", v1_payload, tracker, repo_root=str(rebar_repo))
+
+    got_v1 = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
+    assert got_v1 is not None
+    assert got_v1["schema"] == "plan_review_result_v1"
+    assert got_v1["findings"][0]["finding"] == "legacy finding"
+    # the reader does not choke on the absence of the new fields on a v1 record
+    assert "evidence" not in got_v1["findings"][0]
+    assert "block_threshold" not in got_v1["findings"][0]
+
+    # A fresh v2 emit on the same ticket: carries the new fields, and is returned as newest.
+    v = _verdict(tid, "modern finding")
+    v["advisory"][0]["evidence"] = ["grounding quote"]
+    v["advisory"][0]["scenarios"] = ["the boundary case"]
+    v["advisory"][0]["block_threshold"] = 0.7
+    v["advisory"][0]["blocking_enabled"] = True
+    assert sidecar.emit(v, material="m-v2", repo_root=str(rebar_repo))
+
+    got_v2 = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
+    assert got_v2 is not None
+    assert got_v2["schema"] == "plan_review_result_v2"  # newest
+    assert got_v2["findings"][0]["evidence"] == ["grounding quote"]
+    assert got_v2["findings"][0]["scenarios"] == ["the boundary case"]
+    assert got_v2["findings"][0]["block_threshold"] == 0.7
+    assert got_v2["findings"][0]["blocking_enabled"] is True

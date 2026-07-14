@@ -286,7 +286,9 @@ def pass3_decide(
     impact_fn: Callable[[dict[str, Any]], float] | None = None,
 ) -> dict[str, Any]:
     """The deterministic decision. Returns
-    ``{decision, reason, validity, impact, priority, severity}``.
+    ``{decision, reason, validity, impact, priority, severity, block_threshold,
+    blocking_enabled}`` — the last two echo back the exact decision boundary the
+    finding was judged against (persisted losslessly by the sidecar).
 
     Rules (the v1 authoritative shape):
       * no verification → INDETERMINATE (verifier produced nothing for this finding);
@@ -309,6 +311,8 @@ def pass3_decide(
             "impact": 0.0,
             "priority": 0.0,
             "severity": "none",
+            "block_threshold": block_threshold,
+            "blocking_enabled": blocking_enabled,
         }
     binary = verification.get("binary", {}) or {}
     attrs = verification.get("severity_attributes", {}) or {}
@@ -324,6 +328,8 @@ def pass3_decide(
             "impact": imp,
             "priority": priority,
             "severity": sev,
+            "block_threshold": block_threshold,
+            "blocking_enabled": blocking_enabled,
         }
     # a8e5 Component 1: absence-claim veto — the finding is premised on an absence
     # ("claims_absence" == "yes") that the verifier REFUTED by finding a covering provision in
@@ -338,6 +344,8 @@ def pass3_decide(
             "impact": imp,
             "priority": priority,
             "severity": sev,
+            "block_threshold": block_threshold,
+            "blocking_enabled": blocking_enabled,
         }
     if val < 0.5:
         decision, reason = "dropped", "low-validity"
@@ -352,6 +360,8 @@ def pass3_decide(
         "impact": imp,
         "priority": priority,
         "severity": sev,
+        "block_threshold": block_threshold,
+        "blocking_enabled": blocking_enabled,
     }
 
 

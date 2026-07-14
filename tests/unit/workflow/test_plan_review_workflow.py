@@ -364,6 +364,84 @@ def test_clean_pass_makes_no_coach_llm_call(monkeypatch):
     assert canned.prompts_seen.count("plan-review-coach") == 0
 
 
+# ── producer/consumer: a real review run → the real sidecar emit → lossless v2 event (4e19) ─
+def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tmp_path):
+    """test-design §3 producer/consumer: a full OFFLINE plan review (stub LLM finder + canned
+    agent) produces a verdict, which the REAL git-backed sidecar emit path persists as a
+    ``REVIEW_RESULT`` event whose ``schema`` is ``plan_review_result_v2`` and whose every
+    persisted finding carries ``evidence``, ``scenarios``, ``block_threshold``, and
+    ``blocking_enabled`` (story 4e19). Unlike the direct ``build_payload`` unit tests, the
+    findings here are the OUTPUT of the real four-pass pipeline, threaded through the real emit."""
+    import subprocess
+
+    import rebar
+    from rebar.llm.plan_review import sidecar
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for a in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@e.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "i"),
+    ):
+        subprocess.run(a, cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "k")
+    rebar.init_repo(repo_root=str(repo))
+    tid = rebar.create_ticket("story", "Build X", description=_GOOD_AC, repo_root=str(repo))
+
+    state = _state()
+    state["ticket_id"] = tid
+    _patch_reads(monkeypatch, state)
+    from rebar.llm.plan_review.orchestrator import assemble_context, route_criteria
+
+    ctx = assemble_context(tid, repo_root=None)
+    single, agent = route_criteria(ctx)
+    routed_ids = [c["id"] for c in single + agent]
+    # The Pass-1 finder emits evidence + scenarios per finding (the prose v2 must persist).
+    finder = _CountingFinder(
+        structured={
+            "analysis": "",
+            "findings": [
+                {
+                    "finding": f"f-{cid}",
+                    "criteria": [cid],
+                    "evidence": [f"grounding quote for {cid}"],
+                    "scenarios": [f"failure scenario for {cid}"],
+                }
+                for cid in routed_ids
+            ],
+        }
+    )
+    rec, res = _run(monkeypatch, state, finder=finder, agent=_CannedAgent())
+    assert res.status == "succeeded", res.error
+    verdict = _terminal_verdict(rec)
+    assert verdict is not None and verdict["advisory"], "expected surviving advisory findings"
+    verdict["ticket_id"] = tid
+
+    # REAL emit path → read the persisted event's payload back.
+    assert sidecar.emit(verdict, material="fp-xyz", repo_root=str(repo))
+    got = sidecar.latest_review_result(tid, repo_root=str(repo))
+    assert got is not None
+    assert got["schema"] == "plan_review_result_v2"
+    assert got["findings"], "the emitted sidecar must persist the review's findings"
+    # Every persisted finding carries the v2 keys (present even when empty/None — e.g. a DET-tier
+    # finding has no scenarios and is not threshold-decided).
+    for sf in got["findings"]:
+        for key in ("evidence", "scenarios", "block_threshold", "blocking_enabled"):
+            assert key in sf, f"finding {sf.get('id')} is missing the v2 key {key!r}"
+    # The LLM-tier findings (the four-pass output) carry the populated prose AND the resolved
+    # decision boundary the Pass-3 decision applied — the enrichment that was previously dropped.
+    llm = [sf for sf in got["findings"] if sf.get("tier") == "LLM"]
+    assert llm, "expected at least one LLM-tier finding in the emitted sidecar"
+    for sf in llm:
+        assert sf.get("evidence"), f"LLM finding {sf.get('id')} lost its evidence prose"
+        assert sf.get("scenarios"), f"LLM finding {sf.get('id')} lost its scenarios prose"
+        assert sf.get("block_threshold") is not None, "LLM finding lost its block_threshold"
+        assert sf.get("blocking_enabled") is not None, "LLM finding lost its blocking_enabled"
+
+
 # ── P1/P5 DET block does NOT short-circuit: LLM runs, DET block merged → BLOCK ─
 def test_p1_det_block_still_runs_llm_and_blocks(monkeypatch):
     # Reconciled with bespoke run_review (story B5): a P1 DET block (here, NO

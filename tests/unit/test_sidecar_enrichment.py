@@ -94,9 +94,10 @@ def test_slim_persists_finding_prose_for_re_grounding() -> None:
                 "tier": "LLM",
                 "decision": "advisory",
                 "priority": 0.4,
-                # runtime-only carriers that _slim deliberately drops from the sidecar
+                # story 4e19: evidence/scenarios are now PERSISTED (lossless v2 audit record)
                 "scenarios": ["retry storm"],
                 "evidence": ["no cap stated"],
+                # _agentic stays a runtime-only carrier that _slim deliberately drops
                 "_agentic": True,
             }
         ],
@@ -114,9 +115,10 @@ def test_slim_persists_finding_prose_for_re_grounding() -> None:
     assert sf["finding"] == "The retry budget is unbounded."
     assert sf["suggested_fix"] == "Cap retries at 3 with backoff."
     assert sf["checklist_item"] == "- [ ] Bound the retry budget."
-    # runtime-only carriers are NOT persisted (lean-sidecar field-selection principle)
-    assert "scenarios" not in sf
-    assert "evidence" not in sf
+    # story 4e19: evidence + scenarios are now persisted in the lossless v2 record
+    assert sf["scenarios"] == ["retry storm"]
+    assert sf["evidence"] == ["no cap stated"]
+    # a runtime-only carrier is still NOT persisted (lean-sidecar field-selection principle)
     assert "_agentic" not in sf
 
 
