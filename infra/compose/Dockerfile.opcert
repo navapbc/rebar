@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# rebar trusted op-cert gate service image (story ee0b).
+#
+# Builds the FastAPI service (src/rebar/opcert_service/app.py). The build context is the
+# REPO ROOT (like Dockerfile.reviewbot; see docker-compose.yml build.context), so the whole
+# package is available to `pip install .`.
+#
+# python:3.12-slim is Debian bookworm, whose `openssh-client` is OpenSSH 9.x — comfortably
+# >= 8.9, the floor the op-cert SSHSIG signer requires (`ssh-keygen -Y sign` with validity
+# intervals). The RUN below FAILS THE BUILD if the installed ssh-keygen is older than 8.9,
+# so the requirement can never silently regress.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Runtime deps:
+#  - git: rebar's engine shells out to git for the event store + the authoritative fetch.
+#  - openssh-client (OpenSSH >= 8.9): the op-cert producer signs via `ssh-keygen -Y sign`.
+#  - ca-certificates: TLS to the review/tickets remotes and SSM.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ver="$(ssh-keygen -V 2>&1 | sed -nE 's/.*OpenSSH_([0-9]+\.[0-9]+).*/\1/p')" \
+    && echo "detected OpenSSH ${ver}" \
+    && awk -v v="$ver" 'BEGIN { split(v, p, "."); if (p[1] < 8 || (p[1] == 8 && p[2] < 9)) exit 1 }' \
+    || { echo "ERROR: OpenSSH >= 8.9 is required (op-cert SSHSIG signing)" >&2; exit 1; }
+
+WORKDIR /app
+
+# Install the package with the agents (rebar.llm gate runtime) + reviewbot (fastapi +
+# uvicorn[standard] ASGI server + boto3 for the SSM key fetch) extras.
+COPY . /app
+RUN pip install ".[agents,reviewbot]"
+
+ENV REBAR_OPCERT_PORT=8080
+EXPOSE 8080
+
+# Run the ASGI app. Host 0.0.0.0 so the published container port is reachable; the port is
+# fixed 8080 inside the container.
+CMD ["uvicorn", "rebar.opcert_service.app:app", "--host", "0.0.0.0", "--port", "8080"]

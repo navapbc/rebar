@@ -156,7 +156,24 @@ def ensure_opcert_key(tracker: str | os.PathLike[str], *, create_if_missing: boo
     (a fresh keypair under the same principal — the same stale-attestation lifecycle as any other).
     With ``create_if_missing=False`` (VERIFY side) a missing key is NEVER created — verification is
     read-only and must not write a secret to disk. Raises :class:`OpcertKeyUnavailable` when the key
-    is absent and cannot be created (verify side, or an unwritable tracker)."""
+    is absent and cannot be created (verify side, or an unwritable tracker).
+
+    ONE seam override (story ee0b, the trusted op-cert gate service hand-off): when
+    ``REBAR_OPCERT_KEY_PATH`` is set to an explicit private-key file path, it takes precedence
+    over the ``<tracker>/.opcert-key`` genesis and is returned verbatim. The trusted gate
+    materializes the environment's SSM-held key to a 0600 temp file, points this at it for the
+    single sign, and deletes it afterward — so the key is never persisted under the tracker.
+    A configured-but-missing override is a hard :class:`OpcertKeyUnavailable` (never silently
+    fall back to minting a fresh local key when an explicit key was requested)."""
+    override = os.environ.get("REBAR_OPCERT_KEY_PATH")
+    if override and override.strip():
+        override = override.strip()
+        if not os.path.exists(override):
+            raise OpcertKeyUnavailable(
+                f"Error: REBAR_OPCERT_KEY_PATH={override!r} does not exist "
+                "(the provisioned op-cert key file is absent)"
+            )
+        return override
     key_path = opcert_key_path(tracker)
     if os.path.exists(key_path):
         _ensure_opcert_pub(key_path)
