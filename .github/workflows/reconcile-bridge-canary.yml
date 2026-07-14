@@ -62,6 +62,11 @@ jobs:
       ALERT_WINDOW_HOURS: ${{ inputs.alert_window_hours || '2' }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       ALERT_TAG: heartbeat-alert
+      # Bug ad48: set the signing-key path at JOB level so EVERY rebar write step sees
+      # identity.signing_key — cross-step $GITHUB_ENV propagation did not reach the write
+      # steps. The "Materialize the Rebar Bot signing key" step writes the file at this exact
+      # path; if the secret is unset the file is absent and writes fall back to unsigned.
+      REBAR_IDENTITY_SIGNING_KEY: ${{ runner.temp }}/rebar-bot-signing-key
 
     steps:
       - name: Checkout repository
