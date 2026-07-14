@@ -168,7 +168,7 @@ label — you run Submit yourself.
 > without re-running integration CI, so the detector for a rare *semantic* conflict between two
 > individually-green changes is the existing **CI that runs on every push to `main`** (via the
 > GitHub mirror). On the rare red `main`, a human does a **manual revert** through Gerrit —
-> there is no auto-revert.
+> there is no auto-revert. Runbook: [`infra/runbooks/main-red-post-merge.md`](infra/runbooks/main-red-post-merge.md).
 
 > **Submitting requires contributor authorization.** The **Submit** action is restricted to
 > the `Contributors` group (plus Administrators) — anyone may push to `refs/for/*` to

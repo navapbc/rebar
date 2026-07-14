@@ -84,7 +84,8 @@ exceeds the value of never being *briefly* red on `main`.
    judged too expensive to maintain for too little value at this scale.
 4. **Post-merge `main` CI is the safety net.** Gerrit already replicates each submit to the
    GitHub mirror, where branch CI runs on `main` — this is the (free) detector for the rare
-   semantic conflict. On a red `main`, **revert manually** via Gerrit (runbook to follow).
+   semantic conflict. On a red `main`, **revert manually** via Gerrit — runbook:
+   [`infra/runbooks/main-red-post-merge.md`](../../infra/runbooks/main-red-post-merge.md).
    **Auto-revert is deliberately NOT built** (added infra vs. POC scope); revisit only if
    red-`main` actually recurs.
 
