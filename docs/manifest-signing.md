@@ -57,8 +57,9 @@ the environment that holds the key can certify its own attestations.
 
 ## Where it plugs in
 
-- **Close gate.** When `verify.require_signature_for_close = true`, closing a story/epic
-  requires a certified signature made at the current HEAD (re-sign if HEAD moved, or
+- **Close gate.** The completion-verification close gate
+  (`verify.require_completion_verification_for_close = true`) signs a PASS
+  `completion-verifier` verdict onto the ticket at close (re-verify if HEAD moved, or
   bypass with `--force-close=<reason>`). See the [Configuration](../README.md#configuration)
   section of the README.
 - **Attestation kinds.** A ticket holds a kind-keyed `attestations` map — independent
