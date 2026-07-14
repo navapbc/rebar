@@ -175,6 +175,30 @@ What it creates and the guards (ADR-0012):
 - A single-owner instance role + DLM lifecycle policy; downstream stories *attach*
   scoped inline policies to the existing role rather than redeclaring it.
 
+### Shared infrastructure re-homed from snap (ADR 0048)
+
+rebar shares its AWS account with the (now-decommissioned) `snap` demo project. On
+snap's turndown, `infra/terraform/` **adopted** the shared, rebar-facing resources
+snap's dead terraform had owned — imported into rebar's state, retagged `Project=rebar`,
+and released from snap's state (physical `snap-demo-*` names preserved to avoid a
+destroy/recreate):
+
+- **The GitHub Actions OIDC provider** (`aws_iam_openid_connect_provider.github`,
+  `oidc.tf`). rebar's `rebar-terraform-plan` drift role (`iam.tf`) federates it, so rebar
+  now **owns the dependency it relies on** rather than trusting a decommissioned stack's
+  ARN — previously this provider was merely assumed to "already exist in the account."
+- **The `*.solutions.navateam.com` wildcard ACM cert** (`acm.tf`, `prevent_destroy`).
+- **The `auth_host` domain-wide SSO stack** (`auth_sso.tf`, `auth_host.tf`): a regional
+  Lambda behind API Gateway v2 + CloudFront at `auth.solutions.navateam.com` that runs the
+  Google OAuth flow and mints a domain-wide `__Secure-sso` session cookie, plus the
+  cookie-signing SSM secret and the reusable `modules/sso-gate` per-subdomain gate. Owned
+  by rebar but **not wired into Gerrit** (Gerrit has its own auth + direct-EC2 TLS) — it is
+  the SSO gate for future `*.solutions.navateam.com` surfaces. Operate it via
+  [`infra/runbooks/sso-auth-host.md`](../infra/runbooks/sso-auth-host.md).
+
+See [ADR 0048](adr/0048-rehome-snap-shared-infra.md) for the adopt-vs-teardown decision,
+the import-not-recreate mechanics, and the name-preservation tradeoff.
+
 ---
 
 ## 5. Step 2 — Deploy Gerrit + the review-bot
