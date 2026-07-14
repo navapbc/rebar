@@ -99,6 +99,11 @@ INTERCEPT_COMMANDS: dict[str, str] = {
         "authorship signature against the author identity's commit-anchored keyring "
         "(`--require-authenticated`, `--since` grandfathering, `--format json` report)."
     ),
+    "verify-opcert": (
+        "The required-environment operation-certificate merge-gate: verify each in-scope closed "
+        "ticket carries a valid completion-verifier op-cert from the trusted environment pinned in "
+        "`.rebar/trusted_environments.yaml` (`--require-environment`, `--since` grandfathering)."
+    ),
     "workflow": (
         "Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine "
         "DSL toolchain)."

@@ -306,6 +306,13 @@ class VerifyConfig:
     # (`.rebar/trusted_environments.yaml`), verified against its out-of-band-pinned key. Default
     # None ⇒ no required environment (the low-security default).
     require_environment: str | None = None
+    # Grandfathering boundary for the op-cert merge-gate (`rebar verify-opcert`, story 4214). A git
+    # ref (commit/tag/branch) on the tracker branch: only tickets whose close-STATUS introducing
+    # commit is `<ref>` or a descendant of it are ENFORCED; pre-existing (ancestor) closures are
+    # reported but never fail the gate. Unset ⇒ every in-scope closed ticket is enforced (no
+    # grandfathering). Overridable per-run by `rebar verify-opcert --since <ref>`. Mirrors
+    # identity.enforce_since for the authorship gate.
+    opcert_enforce_since: str | None = None
 
 
 @dataclass
@@ -504,6 +511,7 @@ _SECTIONS: dict[str, dict] = {
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
+        "opcert_enforce_since": lambda v, k: _as_str(v, k),
     },
     "identity": {
         "require_authenticated": lambda v, k: _as_bool(v, k),
