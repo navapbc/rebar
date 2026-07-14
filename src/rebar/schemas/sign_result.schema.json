@@ -2,17 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/sign_result.schema.json",
   "title": "SignResult",
-  "description": "Result of `rebar sign <ticket_id> <manifest_json> --output json` (and the library sign_manifest() / MCP sign_manifest): the persisted SIGNATURE record plus the resolved ticket_id. manifest is the array of verified-step strings; signature is the HMAC-SHA256 hex; key_id is the environment key fingerprint; head_sha is audit metadata; signed_at is a ns-epoch integer. A validation/resolve failure emits no JSON (stderr + nonzero exit).",
+  "description": "Result of `rebar sign <ticket_id> <manifest_json> --output json` (and the library sign_manifest() / MCP sign_manifest): the persisted SIGNATURE record plus the resolved ticket_id. manifest is the array of verified-step strings; signed_at is a ns-epoch integer. Expand phase (story 8d8e) admits BOTH shapes: the legacy HMAC record (algorithm HMAC-SHA256, `signature` hex, `key_id` fingerprint, `head_sha`) and the new op-cert record (algorithm `sshsig`, an `envelope` DSSE string, `principal`, `material_fingerprint`, `merged_log_commit`). A validation/resolve failure emits no JSON (stderr + nonzero exit).",
   "type": "object",
   "additionalProperties": true,
-  "required": ["manifest", "algorithm", "signature", "key_id", "head_sha", "signed_at", "ticket_id"],
+  "required": ["manifest", "algorithm", "signed_at", "ticket_id"],
   "properties": {
     "manifest": { "type": "array", "items": { "type": "string" } },
     "algorithm": { "type": "string" },
-    "signature": { "type": "string" },
-    "key_id": { "type": "string" },
-    "head_sha": { "type": "string" },
     "signed_at": { "type": "integer" },
-    "ticket_id": { "type": "string" }
+    "ticket_id": { "type": "string" },
+    "signature": { "type": ["string", "null"], "description": "HMAC-SHA256 hex (legacy HMAC record only; null/absent on an op-cert record)." },
+    "key_id": { "type": ["string", "null"], "description": "Environment key fingerprint (legacy HMAC record only)." },
+    "head_sha": { "type": ["string", "null"], "description": "Audit metadata: HEAD at signing time." },
+    "envelope": { "type": ["string", "null"], "description": "Encoded rebar.opcert.v1 DSSE envelope (op-cert record only; null/absent on a legacy HMAC record)." },
+    "principal": { "type": ["string", "null"], "description": "The DSSE principal (environment id) the op-cert was signed under (op-cert record only)." },
+    "material_fingerprint": { "type": ["string", "null"], "description": "The material fingerprint bound into the op-cert subject (op-cert record only)." },
+    "merged_log_commit": { "type": ["string", "null"], "description": "The bound commit (verified-at sha, else HEAD) the op-cert subject binds (op-cert record only)." }
   }
 }

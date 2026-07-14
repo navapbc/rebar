@@ -317,17 +317,22 @@ def verify_opcert(
 def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
     """Reconstruct an op-cert from a stored ``attestations[kind]`` record (keystone e4df).
 
-    Returns ``(envelope, {"material_fingerprint": …, "merged_log_commit": …})`` when the record
-    carries an op-cert (an encoded DSSE ``envelope`` field), or ``None`` for a legacy HMAC record
-    (no envelope). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
+    Returns ``(envelope, {"ticket_id": …, "kind": …, "material_fingerprint": …,
+    "merged_log_commit": …})`` when the record carries an op-cert (an encoded DSSE ``envelope``
+    field), or ``None`` for a legacy HMAC record (no envelope). The returned envelope is fed to
+    :func:`verify_opcert` with a pinned keyring.
 
-    SECURITY (finding #4, commit half — story 4214): the bound ``{material_fingerprint,
-    merged_log_commit}`` are sourced from the SIGNED envelope PAYLOAD (the in-toto predicate),
-    **never** from the record's plaintext mirror. Those mirror fields live on the auto-pushed,
-    non-Gerrit-gated tickets branch and are attacker-writable; the payload is authenticated by the
-    DSSE-PAE signature that :func:`verify_opcert` checks, so a tampered payload fails verification
-    while a tampered plaintext mirror is simply ignored. This makes the gate's verdict invariant
-    under plaintext-mirror mutation (verify-then-extract).
+    SECURITY (finding #4, commit half — story 4214): every bound field
+    (``{ticket_id, kind, material_fingerprint, merged_log_commit}``) is sourced from the SIGNED
+    envelope PAYLOAD (the in-toto predicate), **never** from the record's plaintext mirror. Those
+    mirror fields live on the auto-pushed, non-Gerrit-gated tickets branch and are
+    attacker-writable; the payload is authenticated by the DSSE-PAE signature that
+    :func:`verify_opcert` checks, so a
+    tampered payload fails verification while a tampered plaintext mirror is simply ignored. This
+    makes the gate's verdict invariant under plaintext-mirror mutation (verify-then-extract). The
+    subject-binding ``{ticket_id, kind}`` are surfaced here so the same-environment local verify
+    path can enforce the subject binding (cross-ticket / cross-kind replay defense) without
+    re-decoding.
 
     Never raises on a malformed envelope/payload — a decode failure yields ``None`` (fail-closed).
     """
@@ -341,6 +346,8 @@ def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
         if not isinstance(predicate, dict):
             return None
         bound = {
+            "ticket_id": predicate.get("ticket_id"),
+            "kind": predicate.get("kind"),
             "material_fingerprint": predicate.get("material_fingerprint"),
             "merged_log_commit": predicate.get("merged_log_commit"),
         }

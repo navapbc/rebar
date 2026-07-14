@@ -104,14 +104,23 @@ try:
         stale: list = []
 
     class SignResultOut(_Out):
-        # Mirrors src/rebar/schemas/sign_result.schema.json.
+        # Mirrors src/rebar/schemas/sign_result.schema.json. Expand phase (story 8d8e): admits BOTH
+        # the legacy HMAC record (signature/key_id/head_sha) and the op-cert record (envelope/
+        # principal/material_fingerprint/merged_log_commit); only manifest/algorithm/signed_at/
+        # ticket_id are always present.
         ticket_id: str
         manifest: list[str] = []
         algorithm: str
-        signature: str
-        key_id: str
-        head_sha: str
         signed_at: int
+        # Legacy HMAC shape (optional — absent on an op-cert record).
+        signature: str | None = None
+        key_id: str | None = None
+        head_sha: str | None = None
+        # Op-cert shape (optional — absent on a legacy HMAC record).
+        envelope: str | None = None
+        principal: str | None = None
+        material_fingerprint: str | None = None
+        merged_log_commit: str | None = None
 
     class VerifySignatureResultOut(_Out):
         # Mirrors src/rebar/schemas/verify_signature_result.schema.json.

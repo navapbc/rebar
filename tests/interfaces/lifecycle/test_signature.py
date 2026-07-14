@@ -49,9 +49,11 @@ def test_library_sign_then_certify(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rec = rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     assert rec["ticket_id"] == tid
-    assert rec["algorithm"] == "HMAC-SHA256"
+    # Story 8d8e: the producer seam mints a rebar.opcert.v1 DSSE op-cert, not an HMAC record.
+    assert rec["algorithm"] == "sshsig"
     assert rec["manifest"] == MANIFEST
-    assert rec["signature"] and rec["key_id"]
+    assert rec["envelope"] and rec["principal"]
+    assert "signature" not in rec  # no HMAC hex
 
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out["verified"] is True
@@ -84,18 +86,25 @@ def test_verify_unresolvable_ticket_raises(rebar_repo: Path) -> None:
 
 
 # ── tamper / foreign-key detection ────────────────────────────────────────────
-def _forge_signature_event(repo: Path, tid: str, new_manifest: list[str]) -> None:
-    """Append a fresh SIGNATURE event whose manifest was altered but whose
-    signature is copied from the genuine one — i.e. a tampered record."""
+def _tamper_opcert_envelope(repo: Path, tid: str) -> None:
+    """Append a fresh SIGNATURE event whose op-cert envelope has a CORRUPTED signature — the
+    op-cert analogue of a tampered record (story 8d8e; the DSSE signature no longer verifies)."""
     import glob
     import uuid as _uuid
+
+    from rebar.attest import dsse
 
     tdir = repo / ".tickets-tracker" / tid
     latest = sorted(glob.glob(str(tdir / "*-SIGNATURE.json")))[-1]
     ev = json.loads(Path(latest).read_text())
+    env = dsse.decode(ev["data"]["envelope"])
+    bad = bytearray(env.signatures[0].sig)
+    bad[len(bad) // 2] ^= 0xFF  # flip a byte in the SSHSIG signature
+    ev["data"]["envelope"] = dsse.encode(
+        env.payload_type, env.payload, [{"keyid": env.signatures[0].keyid, "sig": bytes(bad)}]
+    )
     ev["uuid"] = str(_uuid.uuid4())
     ev["timestamp"] = int(ev["timestamp"]) + 1000
-    ev["data"] = {**ev["data"], "manifest": new_manifest}
     (tdir / f"{ev['timestamp']}-{ev['uuid']}-SIGNATURE.json").write_text(
         json.dumps(ev, ensure_ascii=False)
     )
@@ -106,7 +115,9 @@ def _forge_signature_event(repo: Path, tid: str, new_manifest: list[str]) -> Non
 def test_tampered_manifest_is_rejected(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    _forge_signature_event(rebar_repo, tid, MANIFEST + ["SECRETLY ADDED STEP"])
+    # Story 8d8e: the op-cert signature covers the DSSE subject; a corrupted signature reads as
+    # not-certified (a manifest-step edit is instead caught by compute_validity's material recheck).
+    _tamper_opcert_envelope(rebar_repo, tid)
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out["verified"] is False
     assert out["verdict"] == "mismatch"
@@ -117,8 +128,8 @@ def test_foreign_environment_key_cannot_certify(
 ) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
-    # A different environment (different signing key) must not be able to certify.
-    monkeypatch.setenv("REBAR_SIGNING_KEY", "a-totally-different-environment-key")
+    # A different environment (a different op-cert principal) must not be able to certify.
+    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "a-totally-different-environment")
     out = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out["verified"] is False
     assert out["verdict"] == "foreign_key"
@@ -206,25 +217,25 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
     assert out["verdict"] == "certified"
 
 
-# ── cross-environment via a REAL key-file swap (not just env override) ─────────
+# ── cross-environment via a REAL .env-id swap (op-cert principal, story 8d8e) ──
 def test_foreign_key_round_trip_via_file_swap(rebar_repo: Path) -> None:
-    import uuid as _uuid
-
+    # The op-cert principal is the environment's .env-id; a store carrying a cert whose principal
+    # differs from THIS environment's reads foreign_key (no scheme invoked).
     tid = _seed(rebar_repo)
-    keyfile = rebar_repo / ".tickets-tracker" / ".signing-key"
-    env_a = keyfile.read_text()
+    envid_file = rebar_repo / ".tickets-tracker" / ".env-id"
+    env_a = envid_file.read_text()
 
-    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))  # signed by A
+    rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))  # signed under principal A
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
-    # Become environment B (different key on disk).
-    keyfile.write_text(str(_uuid.uuid4()) + "\n")
+    # Become environment B (different .env-id → different principal).
+    envid_file.write_text("environment-b\n")
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
 
-    # B re-signs → certified in B; A's restored key then sees B's signature foreign.
+    # B re-signs → certified in B; A's restored id then sees B's signature foreign.
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
-    keyfile.write_text(env_a)
+    envid_file.write_text(env_a)
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "foreign_key"
 
 
@@ -253,6 +264,9 @@ def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
     # Forge a latest SNAPSHOT whose compiled_state.signature is a NON-dict string
     # (a corrupt / forward-compat snapshot). It must verify cleanly, not crash.
     state["signature"] = "totally-not-a-dict"
+    # Exercise the non-dict `signature` fallback: with no kind-keyed attestations, verify falls back
+    # to the (corrupt) `signature` mirror, which must fail-close rather than crash.
+    state["attestations"] = {}
     ts = _time.time_ns()
     uid = str(_uuid.uuid4())
     tdir = rebar_repo / ".tickets-tracker" / tid
@@ -290,11 +304,11 @@ def test_show_strips_raw_hex_but_keeps_facts(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     sig = rebar.show_ticket(tid, repo_root=str(rebar_repo))["signature"]
-    # The raw HMAC hex (the "signature itself") is not in client output ...
+    # The raw HMAC hex is never in client output (and an op-cert record has none) ...
     assert "signature" not in sig
-    # ... but the facts a client needs ARE: the verified-steps manifest + key fp.
+    # ... but the facts a client needs ARE: the verified-steps manifest + the op-cert principal.
     assert sig["manifest"] == MANIFEST
-    assert sig["key_id"]
+    assert sig["principal"]
 
 
 def test_llm_view_compacts_signature(rebar_repo: Path) -> None:
@@ -319,8 +333,8 @@ def test_validate_flags_tampered_signature(rebar_repo: Path) -> None:
     # A clean signature is not flagged.
     clean = rebar.validate(repo_root=str(rebar_repo))
     assert not any("[SIGNATURE]" in m for m in clean["major_issues"])
-    # Tamper, then validate flags it MAJOR and names the ticket.
-    _forge_signature_event(rebar_repo, tid, MANIFEST + ["SECRETLY ADDED"])
+    # Tamper the op-cert signature, then validate flags it MAJOR and names the ticket.
+    _tamper_opcert_envelope(rebar_repo, tid)
     rep = rebar.validate(repo_root=str(rebar_repo))
     sig_majors = [m for m in rep["major_issues"] if "[SIGNATURE]" in m]
     assert sig_majors, f"tampered signature not flagged: {rep['major_issues']}"

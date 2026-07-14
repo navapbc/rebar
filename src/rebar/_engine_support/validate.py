@@ -114,7 +114,12 @@ def signature_findings(tracker: str) -> list:
         record = signing.most_recent_attestation(state or {})
         if not record:
             continue
-        verdict = signing.verify_record(record, name, key).get("verdict")
+        # Shape-aware dispatch (story 8d8e): envelope-bearing op-cert records route to the op-cert
+        # verifier, legacy HMAC records to the unchanged verify_record — so a certified op-cert is
+        # never mis-reported as unsigned. repo_root is the code root (parent of the tracker).
+        verdict = signing.verify_attestation_record(
+            record, name, key=key, repo_root=os.path.dirname(tracker)
+        ).get("verdict")
         if verdict == "mismatch":
             out.append(
                 Finding(
