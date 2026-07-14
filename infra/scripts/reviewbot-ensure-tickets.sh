@@ -28,8 +28,11 @@
 set -eu
 
 DIR="${1:-${REVIEWBOT_TICKETS_DIR:-}}"
-EMAIL="${REVIEWBOT_GIT_USER_EMAIL:-rebar-review-bot@navateam.com}"
-NAME="${REVIEWBOT_GIT_USER_NAME:-rebar-review-bot}"
+# Default to the Rebar Bot authorship identity's email (story 245e) so the review-bot's
+# store writes attribute to identity 594c-9dcf-5ad6-4e6d via the git-email resolver.
+# Overridable via REVIEWBOT_GIT_USER_EMAIL.
+EMAIL="${REVIEWBOT_GIT_USER_EMAIL:-joeoakhart+bot@navapbc.com}"
+NAME="${REVIEWBOT_GIT_USER_NAME:-Rebar Bot}"
 PY="${REVIEWBOT_PYTHON:-python3}"
 
 if [ -z "$DIR" ]; then

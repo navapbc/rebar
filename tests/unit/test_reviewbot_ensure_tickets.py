@@ -143,11 +143,13 @@ def test_ensure_makes_clone_writable_and_durable(origin_with_tickets: Path, tmp_
     assert result.returncode == 0, result.stderr
     assert (clone / ".env-id").exists()  # store marker now present
 
-    # AC#1(a): a repo-local git identity was set (default review-bot values).
+    # AC#1(a): a repo-local git identity was set. The default email is the shared Rebar Bot
+    # authorship identity (story 245e) so the review-bot's writes attribute to identity
+    # 594c-9dcf-5ad6-4e6d via the git-email resolver; overridable via REVIEWBOT_GIT_USER_EMAIL.
     email = subprocess.run(
         ["git", "-C", str(clone), "config", "user.email"], capture_output=True, text=True
     ).stdout.strip()
-    assert email == "rebar-review-bot@navateam.com"
+    assert email == "joeoakhart+bot@navapbc.com"
 
     head_before = _git("rev-parse", "HEAD", cwd=clone).stdout.strip()
     tid = _write_into(clone)
