@@ -90,6 +90,23 @@ github_oauth_client_secret="$(get_param_optional github-oauth-client-secret)"
 # artifact push (story limestone-unethical-zebrafinch) starts working once it is set.
 reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
 
+# OPTIONAL: the Rebar Bot ed25519 authorship signing key (story 245e). A multi-line
+# OpenSSH PEM key cannot live in a single-line .env value, so materialize it to a 0600
+# FILE next to the .env (the ci-gerrit-ssh-key / g2p-github-pat materialize-to-file
+# precedent) and export only its PATH via REBAR_IDENTITY_SIGNING_KEY in the .env. Blank ⇒
+# the reviewbot writes unsigned (its types are gate-exempt, so this is attribution only).
+rebar_bot_signing_key="$(get_param_optional rebar-bot-signing-key)"
+signing_key_path=""
+if [ -n "${rebar_bot_signing_key}" ]; then
+  signing_key_path="$(dirname "${ENV_FILE}")/rebar-bot-signing-key"
+  key_tmp="$(mktemp "${signing_key_path}.XXXXXX")"
+  chmod 600 "${key_tmp}"
+  printf '%s\n' "${rebar_bot_signing_key}" > "${key_tmp}"
+  mv -f "${key_tmp}" "${signing_key_path}"
+  chmod 600 "${signing_key_path}"
+  echo "fetch-secrets.sh: materialized rebar-bot signing key to ${signing_key_path} (0600)" >&2
+fi
+
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
 chmod 600 "${tmp}"
@@ -103,6 +120,8 @@ chmod 600 "${tmp}"
   echo "GITHUB_OAUTH_CLIENT_ID=${github_oauth_client_id}"
   echo "GITHUB_OAUTH_CLIENT_SECRET=${github_oauth_client_secret}"
   echo "REVIEWBOT_TICKETS_PAT=${reviewbot_tickets_pat}"
+  # Path (not the key material) to the materialized bot signing key; empty ⇒ unsigned.
+  echo "REBAR_IDENTITY_SIGNING_KEY=${signing_key_path}"
   echo "REVIEW_BOT_PORT=8000"
 } >"${tmp}"
 mv -f "${tmp}" "${ENV_FILE}"
