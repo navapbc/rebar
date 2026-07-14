@@ -145,6 +145,6 @@ fi
 
 git config user.email admin@example.com
 git config user.name Administrator
-git commit -q -m "rebar project.config: LLM-Review + Verified labels + Autosubmit label (auto-lander opt-in, epic f1fa) + rebase/rebaseOnBehalfOfUploader grant (auto-lander FFO rebase, S5b) + submit requirements + submit-type pin + feature-branch ACLs + Contributors submit gate"
+git commit -q -m "rebar project.config: LLM-Review + Verified labels + submit requirements + submit-type = rebase-if-necessary (ADR 0047; Verified carries TRIVIAL_REBASE) + feature-branch ACLs + Contributors submit gate"
 git push -q origin HEAD:refs/meta/config
 echo "setup-project: pushed refs/meta/config for '$PROJECT'" >&2
