@@ -27,7 +27,7 @@ GERRIT_UID=1000 # the `gerrit` user inside the image
 # diffs the compose file's external volumes against `--print-volumes` output, so a
 # compose edit that adds a volume without extending this list cannot reach main —
 # the incident-2731 drift class).
-SITE_SUBDIRS="git index cache db etc logs plugins reviewbot reviewbot-tickets autolander autolander-tickets"
+SITE_SUBDIRS="git index cache db etc logs plugins reviewbot reviewbot-tickets"
 
 # Volume name for a site subdir: docker volume names cannot carry the hyphenated
 # host-dir spelling one-for-one (gerrit_reviewbot_tickets binds reviewbot-tickets),
