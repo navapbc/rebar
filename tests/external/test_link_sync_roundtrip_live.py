@@ -139,6 +139,13 @@ class StubBindingStore:
     def get_local_id(self, jira_key: str) -> str | None:
         return self._j2l.get(jira_key)
 
+    def get_baseline(self, local_id: str) -> dict[str, object] | None:
+        # No last-synced Jira-side baseline is recorded in this stub, so the outbound
+        # differ degrades to local-wins (ADR 0026 §2) — matching this test's intended
+        # pre-baseline-rollout semantics. Mirrors BindingStore.get_baseline's contract
+        # (an absent baseline is a valid None); outbound_fields now ALWAYS calls it.
+        return None
+
 
 def _make_ticket(
     ticket_id: str,
