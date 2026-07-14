@@ -30,7 +30,9 @@ Jump straight to what you're trying to do:
 - **Understand the internals** → [architecture.md](architecture.md),
   [event-schema.md](event-schema.md), and [concurrency.md](concurrency.md).
 - **Authenticated identity** (entity, attribution, authorship signing, key rotation,
-  Jira mapping, opt-in enforcement) → [identity.md](identity.md).
+  Jira mapping, opt-in enforcement) → [identity.md](identity.md). To **set it up in your own
+  project's environments** (local dev, CI, containers), see the project-agnostic
+  [identity-setup.md](identity-setup.md) client guide.
 
 ## Troubleshooting
 
