@@ -105,9 +105,6 @@ Developing rebar itself — architecture, internals, and the dev workflow.
 - **[your-first-change.md](your-first-change.md)** — **start here if you're new:** a
   warm, start-to-finish walkthrough of getting your first change reviewed and landed
   through Gerrit. ([CONTRIBUTING.md](../CONTRIBUTING.md) is the full reference.)
-- **[land-contract.md](land-contract.md)** — the auto-lander's agent contract: the
-  `land` / `land-status` outcome enum, exit-code table, and JSON output schema that an
-  agent acts on to land a change (the design is recorded in ADR-0042).
 - **[architecture.md](architecture.md)** — the top-level design: event-sourced store,
   the three facades (library / CLI / MCP), and how they fit together.
 - **[event-schema.md](event-schema.md)** — the append-only JSON event files and the

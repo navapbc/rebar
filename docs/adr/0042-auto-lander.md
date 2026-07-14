@@ -8,8 +8,9 @@ the LLM review), ADR 0020 (two-vote CI gate), ADR 0025 (feature-branch merge-car
 
 This ADR is the durable *rationale* record for the serial auto-lander (epic `f1fa-57d8-07cb-44af`,
 alias `peridotite-thickset-pintail`). The stable, versioned *interface* it anchors — the `land` /
-`land-status` outcome enum and exit codes — is [`docs/land-contract.md`](../land-contract.md)
-(`contract-version: 1`); this ADR cites it rather than restating it.
+`land-status` outcome enum and exit codes — was `docs/land-contract.md`
+(`contract-version: 1`); this ADR cited it rather than restating it. (That contract doc,
+and the auto-lander itself, were removed by ADR 0047.)
 
 ## Context
 
@@ -73,8 +74,8 @@ project `land` / `land-status` command, which returns exactly one outcome from a
 `merged | needs_rebase | ci_failed | review_failed | not_requested | abandoned | lander_down |
 error | pending | timed_out` — each with a pinned exit code. Agents depend **only** on this
 contract; they never correlate Gerrit votes/labels/submittability themselves. The "both votes green
-but conflicts" trap is resolved *inside* the tool. The full enum, exit codes, and JSON schema are
-[`docs/land-contract.md`](../land-contract.md) (`contract-version: 1`).
+but conflicts" trap is resolved *inside* the tool. The full enum, exit codes, and JSON schema were
+in `docs/land-contract.md` (`contract-version: 1`), removed with the auto-lander by ADR 0047.
 
 **Outcome provenance (the deliberate split model).** The one outcome that is *not* a native Gerrit
 fact — `needs_rebase` (a rebase conflict / not-fast-forward-landable state, which has no live
