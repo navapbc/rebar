@@ -6,6 +6,12 @@ authorship at the merge gate. This guide is the operator/agent reference for tha
 system. The load-bearing design decisions are recorded in
 [adr/0045-authenticated-identity.md](adr/0045-authenticated-identity.md).
 
+> **Just want to turn it on for your project?** See the practical, project-agnostic
+> [**Setting up authenticated identity & signing (client guide)**](identity-setup.md) — a
+> placeholder-driven, step-by-step guide for configuring signing in local dev, CI, and
+> containerized environments (no deployment-specific details). This document below is the
+> reference *model*; that one is the *how-to*.
+
 ## The `identity` entity
 
 An **identity** is a first-class, event-sourced ticket-type (like `session_log`):
