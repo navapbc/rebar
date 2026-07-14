@@ -146,6 +146,15 @@ class StubBindingStore:
         # (an absent baseline is a valid None); outbound_fields now ALWAYS calls it.
         return None
 
+    def is_pending(self, local_id: str) -> bool:
+        # All bindings in this stub are already resolved (constructed from a plain
+        # local->jira map), so none are in the write-ahead "pending" state.
+        return False
+
+    def recover_pending_bindings(self, client: object, *, failure_sink: list | None = None) -> int:
+        # No pending bindings to recover in this stub → zero recovered (story 9622).
+        return 0
+
 
 def _make_ticket(
     ticket_id: str,
