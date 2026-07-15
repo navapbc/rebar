@@ -37,6 +37,46 @@
           "name": "REBAR_MCP_ALLOW_JIRA_SYNC",
           "description": "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only.",
           "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_TRANSPORT",
+          "description": "Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_HOST",
+          "description": "Bind host for the Streamable-HTTP transport (default 127.0.0.1).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_PORT",
+          "description": "Bind port for the Streamable-HTTP transport (1-65535; default 8000).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_PATH",
+          "description": "URL path the Streamable-HTTP transport serves on (default /mcp).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_ALLOWED_HOSTS",
+          "description": "Comma-separated allowlist of exact host:port values accepted by the Streamable-HTTP DNS-rebinding protection; empty defaults to loopback.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_ALLOWED_ORIGINS",
+          "description": "Comma-separated allowlist of exact Origin values accepted by the Streamable-HTTP DNS-rebinding protection; empty defaults to loopback.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_HTTP_TLS_AT_EDGE",
+          "description": "Set to 1 to acknowledge TLS is terminated at the edge; required to bind the Streamable-HTTP transport to a non-loopback host.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP",
+          "description": "Set to 1 to acknowledge running the Streamable-HTTP transport without a token verifier; required to boot the HTTP transport while auth is off.",
+          "isRequired": false
         }
       ]
     }

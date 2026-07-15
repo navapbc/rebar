@@ -62,7 +62,7 @@ def _as_bool(v: Any, key: str) -> bool:
     raise ConfigError(f"{key}: expected a boolean, got {v!r}")
 
 
-def _as_int(v: Any, key: str, *, minimum: int | None = None) -> int:
+def _as_int(v: Any, key: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
     if isinstance(v, bool):  # bool is an int subclass — reject to catch e.g. true→1
         raise ConfigError(f"{key}: expected an integer, got boolean {v!r}")
     try:
@@ -71,6 +71,8 @@ def _as_int(v: Any, key: str, *, minimum: int | None = None) -> int:
         raise ConfigError(f"{key}: expected an integer, got {v!r}") from None
     if minimum is not None and i < minimum:
         raise ConfigError(f"{key}: must be >= {minimum}, got {i}")
+    if maximum is not None and i > maximum:
+        raise ConfigError(f"{key}: must be <= {maximum}, got {i}")
     return i
 
 
@@ -389,6 +391,18 @@ class McpConfig:
     readonly: bool = False
     allow_llm: bool = False
     allow_jira_sync: bool = False
+    # Streamable-HTTP transport (S1): stdio remains the default; "http" selects the
+    # optional SDK Streamable-HTTP transport with DNS-rebinding protection + fail-closed
+    # startup gates. The http_* keys tune the bind + allowlists; each auto-derives a
+    # REBAR_MCP_<KEY_UPPER> env var.
+    transport: str = "stdio"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8000
+    http_path: str = "/mcp"
+    http_allowed_hosts: tuple[str, ...] = ()
+    http_allowed_origins: tuple[str, ...] = ()
+    http_tls_at_edge: bool = False
+    allow_unauthenticated_http: bool = False
 
 
 @dataclass
@@ -539,6 +553,14 @@ _SECTIONS: dict[str, dict] = {
         "readonly": lambda v, k: _as_bool(v, k),
         "allow_llm": lambda v, k: _as_bool(v, k),
         "allow_jira_sync": lambda v, k: _as_bool(v, k),
+        "transport": lambda v, k: _as_choice(v, k, {"stdio", "http"}),
+        "http_host": lambda v, k: _as_str(v, k),
+        "http_port": lambda v, k: _as_int(v, k, minimum=1, maximum=65535),
+        "http_path": lambda v, k: _as_str(v, k),
+        "http_allowed_hosts": lambda v, k: _as_str_tuple(v, k),
+        "http_allowed_origins": lambda v, k: _as_str_tuple(v, k),
+        "http_tls_at_edge": lambda v, k: _as_bool(v, k),
+        "allow_unauthenticated_http": lambda v, k: _as_bool(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),

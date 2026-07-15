@@ -205,8 +205,12 @@ def render() -> str:
     lines.append("")
     lines.append("| Variable | Meaning |")
     lines.append("|----------|---------|")
-    for var in ("REBAR_MCP_READONLY", "REBAR_MCP_ALLOW_LLM", "REBAR_MCP_ALLOW_JIRA_SYNC"):
-        lines.append(f"| `{var}` | {env.get(var, '')} |")
+    # Iterate MCP_ENV_VARS so every honored REBAR_MCP_* gate gets a row (can't drift
+    # from the manifest). REBAR_ROOT is a path input, not a gate — skip it here.
+    for var, desc in env.items():
+        if not var.startswith("REBAR_MCP_"):
+            continue
+        lines.append(f"| `{var}` | {desc} |")
     lines.append("")
     lines.append(f"_{total} tools._")
     lines.append("")
