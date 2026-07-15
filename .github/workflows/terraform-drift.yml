@@ -44,8 +44,16 @@ jobs:
           terraform_version: 1.10.5
           terraform_wrapper: false
 
+      - name: terraform fmt -check
+        # Fail the check if any .tf file is not canonically formatted (story 76d2).
+        run: terraform fmt -check -recursive
+
       - name: terraform init
         run: terraform init -input=false
+
+      - name: terraform validate
+        # Offline configuration validation (types, references, required args) — story 76d2.
+        run: terraform validate
 
       - name: terraform plan (fail on drift)
         # -detailed-exitcode: 0 = no changes, 2 = a diff (un-applied drift) -> the step

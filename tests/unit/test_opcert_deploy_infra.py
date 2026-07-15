@@ -366,3 +366,11 @@ def test_opcert_compose_service_sets_aws_region() -> None:
     # environment may be a dict or a list of "K=V"; normalize to a key set
     keys = set(env) if isinstance(env, dict) else {e.split("=", 1)[0] for e in env}
     assert "AWS_REGION" in keys, "opcert service must set AWS_REGION for the boto3 SSM client"
+
+
+def test_terraform_ci_runs_fmt_check_and_validate() -> None:
+    """Story 76d2: the terraform CI workflow must run `terraform fmt -check` AND
+    `terraform validate` (not only `plan`), so a mis-formatted or invalid .tf module fails CI."""
+    wf = (_REPO / ".github" / "workflows" / "terraform-drift.yml").read_text(encoding="utf-8")
+    assert "terraform fmt -check" in wf, "CI must run `terraform fmt -check`"
+    assert "terraform validate" in wf, "CI must run `terraform validate`"
