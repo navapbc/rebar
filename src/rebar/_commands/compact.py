@@ -27,7 +27,7 @@ from rebar import config
 from rebar._commands import _seam
 from rebar._commands._compact_policy import is_foldable
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._store import event_append, fsutil, hlc, lock
+from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
@@ -168,6 +168,10 @@ def _compact_locked(
     except lock.LockTimeout as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
+    except compat.StoreIncompatibleError as exc:
+        # Story 21dd: fail closed (non-zero) on an incompatible store before compaction.
+        sys.stderr.write(str(exc) + "\n")
+        return exc.returncode
     try:
         # Re-list event files inside the lock (authoritative). Exclude -SYNC.json
         # (bridge metadata that must survive compaction).
@@ -414,6 +418,11 @@ def rebuild_snapshot_from_full_log(
     try:
         handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
     except lock.LockTimeout as exc:
+        logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
+        return False
+    except compat.StoreIncompatibleError as exc:
+        # Story 21dd: fail closed on an incompatible store — the snapshot rebuild is a
+        # mutation, so skip it (the read-only diagnostic still surfaces the record).
         logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
         return False
     try:

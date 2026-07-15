@@ -431,6 +431,34 @@ def _gitignore_unit(tracker: str) -> EnsureOutcome:
     return EnsureOutcome("gitignore", "changed", f"added {len(missing)} .gitignore line(s)")
 
 
+def _store_compat_unit(tracker: str) -> EnsureOutcome:
+    """Stamp the COMMITTED store-compatibility record ``.store-compat.json`` (story
+    21dd). A v1.0 rebar reads this record before any mutating/publishing operation and
+    fails CLOSED on a record it cannot interpret (see :mod:`rebar._store.compat`); an
+    ABSENT record is implicit-legacy and passes through, so writing it is purely
+    additive and rollback-safe.
+
+    Tree-checks the committed blob first (like :func:`_gitignore_unit`) so a converged
+    store makes zero commits and reports ``ok``. The record is a COMMITTED tickets-branch
+    file — NOT gitignored — so it must be ``git add``ed + committed by the unit (the
+    ensure sweep itself does not commit)."""
+    from rebar._store import compat
+
+    if _git(tracker, "show", f"tickets:{compat.COMPAT_FILENAME}").returncode == 0:
+        return EnsureOutcome("store-compat", "ok", "compat record present")
+    compat.write_compat_record(tracker)
+    _git(tracker, "add", compat.COMPAT_FILENAME)
+    _git(
+        tracker,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        "chore: add .store-compat.json store-compatibility record (story 21dd)",
+    )
+    return EnsureOutcome("store-compat", "changed", "wrote .store-compat.json")
+
+
 def _exclude_scratch_in_tracker(tracker: str) -> None:
     git_file = os.path.join(tracker, ".git")
     git_dir = ""

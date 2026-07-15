@@ -789,6 +789,16 @@ def _apply_mutations(ctx: _PassContext) -> None:
     health_mod = ctx.health_mod
     sync_logger = ctx.sync_logger
 
+    # Story 21dd: the reconciler's outbound apply publishes ticket writes externally
+    # (and to Jira), so fail CLOSED on a store this rebar cannot interpret BEFORE any
+    # mutation. Guarded by `persist` so dry-run / cap-0 preview passes (which write
+    # nothing) are excluded. The reconciler resolves the store directly, so use the
+    # `.tickets-tracker` boundary here — not config.tracker_dir().
+    if persist:
+        from rebar._store.compat import check_store_compat
+
+        check_store_compat(repo_root / ".tickets-tracker")  # tickets-boundary-ok — Finding 2
+
     # -------------------------------------------------------------------
     # Post-filter: when filter_local_ids is set, discard mutations that
     # target tickets outside the filter scope.  All three differs ran on

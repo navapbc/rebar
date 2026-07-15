@@ -37,7 +37,7 @@ import subprocess
 import uuid
 
 from rebar._commands._seam import CommandError
-from rebar._store import event_append, fsutil, hlc, lock
+from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
 from rebar.reducer import reduce_ticket
@@ -85,6 +85,10 @@ def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
         return lock.acquire(tracker_dir, timeout=30, attempts=1, dual_window=True)
     except lock.LockTimeout:
         raise CommandError("Error: could not acquire lock", returncode=1) from None
+    except compat.StoreIncompatibleError as exc:
+        # Story 21dd: the acquire() gate fails closed on an incompatible store — surface
+        # it as a non-zero CommandError so the txn critical section never runs.
+        raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None
 
 
 def _parent_status_uuid(ticket_dir_path: str) -> str | None:

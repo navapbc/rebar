@@ -51,7 +51,8 @@ and treated as a whole-sweep no-op, so init / boot never abort on ensure trouble
    applied-set marker.
 3. That's it — the unit now runs at every entry point below and is surfaced by `fsck`.
 
-The five built-in units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`.
+The six built-in units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`,
+`store-compat`.
 
 ## Where `run_ensures` runs
 
@@ -123,6 +124,62 @@ version** that fails **closed** when a store is newer than the running binary (s
 refuses rather than corrupts). That A-tier ledger is future work; the `gc-config` unit is the
 canonical example of a change that fits School B today but would move under an A-tier version
 gate if it ever became unsafe to re-run. (See the `doctor` idea `dabb`.)
+
+## The committed store-compat record + fail-closed gate (story 21dd)
+
+The A-tier ledger above is still future work, but its **committed store-format version that
+fails closed** is now realized as a small, standalone record — `.store-compat.json` — on the
+tickets branch:
+
+```json
+{"format_version": 1, "required_capabilities": []}
+```
+
+**How a v1.0 binary reads it (`rebar._store.compat`).** Before any *mutating or
+externally-publishing* operation, `check_store_compat(tracker)` classifies the record into four
+states:
+
+1. **ABSENT** → implicit legacy (format version `0`), compatible, **passes through**. A store
+   predating this feature is never blocked — this is what makes shipping the record purely
+   additive and rollback-safe.
+2. **PRESENT + compatible** → a known `format_version` and every `required_capabilities` entry in
+   `KNOWN_CAPABILITIES` → pass.
+3. **PRESENT + incompatible** → an unrecognized `format_version`, or a required capability this
+   binary does not provide (the store was written by a *newer* rebar) → raise
+   `StoreIncompatibleError` (fail **closed**).
+4. **PRESENT + corrupt/unreadable** → JSON parse error, malformed shape, truncation, or a read
+   error → raise `StoreIncompatibleError` naming the parse error + record path. A corrupt record
+   is **never** silently treated as absent (that would let it bypass the gate).
+
+**Where the gate fires.** The single chokepoint is inside `rebar._store.lock.acquire()` (after
+tracker canonicalization, before the fcntl leg), so it covers `write_lock()` and every direct
+`acquire()` caller — leaf writes (`_seam.append_event`), `txn`, `compact`, and the `fsck` repair
+path. The two publishing paths that mutate the store **without** the write lock are gated
+explicitly: `fsck_recover` (raw `git rebase/merge --continue`) and the reconciler's outbound
+apply (`reconcile._apply_mutations`, guarded by `persist` so dry-run/cap-0 previews are exempt).
+
+**Reads stay available.** The gate is on the *write* lock only, so `list`/`show`/`search` and
+`fsck`'s read-only diagnostic keep working on an incompatible store. `fsck` surfaces the problem
+as a structured top-level `compat_error` object (`{"kind", "detail"}`, where `kind` ∈
+`unknown_format_version | unknown_capability | corrupt_record`) plus a stderr WARNING, **without**
+changing its exit code — so an operator can still inspect a store the write gate refuses.
+
+**The ensure unit stamps it.** The `store-compat` ensure unit (`init._store_compat_unit`) writes
+the current-version record via `fsutil.atomic_write` and commits it to the tickets branch when the
+committed blob is absent (tree-checked, so a converged store makes zero commits). Because an ABSENT
+record passes the gate, the sweep's own `write_lock` acquisition on a fresh/legacy store is not
+self-blocked. The record is a **committed** file — deliberately NOT in `.gitignore`.
+
+**Fail-closed integrity in the sweep.** `run_ensures` wraps its body in a broad `except Exception`
+that logs-and-returns (an ensure sweep must never abort its caller). `StoreIncompatibleError`
+subclasses `Exception`, so it would be swallowed into a silent no-op — turning the gate into a
+bypass at MCP boot / `fsck --repair`. `run_ensures` therefore **re-raises** it explicitly, ahead
+of the broad handler, so the incompatible-store signal reaches the caller and fails closed.
+
+**Rollback safety.** Rolling back to a pre-v1.0 binary is safe: an older binary does not read
+`.store-compat.json` at all (it has no gate), and the committed record is inert to it. A v1.0
+binary reading a *newer* store's record is exactly the fail-closed case above (refuse rather than
+corrupt) — the intended one-way protection.
 
 ## Legacy signature-mirror retirement (352b)
 

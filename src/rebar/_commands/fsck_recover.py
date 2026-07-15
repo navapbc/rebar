@@ -124,6 +124,20 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
         )
         return 2
 
+    # Story 21dd: fsck-recover drives raw git (rebase/merge --continue) on the store
+    # WITHOUT the write lock, so the lock.acquire() gate never fires here — gate it
+    # explicitly, failing closed on an incompatible store before any git mutation.
+    # `--detect-only` is a read-only diagnostic (no git mutation), so it stays available
+    # under an incompatible record, mirroring the fsck diagnostic read-allowance.
+    if not detect_only:
+        from rebar._store.compat import StoreIncompatibleError, check_store_compat
+
+        try:
+            check_store_compat(tracker_dir)
+        except StoreIncompatibleError as exc:
+            sys.stderr.write(str(exc) + "\n")
+            return exc.returncode
+
     git_dir = _resolve_tracker_git_dir(tracker_dir)
     if not git_dir:
         sys.stderr.write(f"Error: could not resolve git directory for tracker '{tracker_dir}'\n")
