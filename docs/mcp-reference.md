@@ -103,5 +103,10 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT` | HTTP timeout in seconds for the `jwt` verifier's JWKS fetch (default 10). |
 | `REBAR_MCP_AUTH_JWT_EXPECTED_TYP` | When set, the `jwt` verifier requires the JWT header `typ` to equal this (e.g. at+JWT per RFC 9068); unset skips the check. |
 | `REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST` | Set to 1 to permit a private/link-local/loopback JWKS host (SSRF guard is on by default); off by default. |
+| `REBAR_MCP_AUTH_INTROSPECTION_ENDPOINT` | The `introspection` verifier's RFC 7662 endpoint URL (must be https://); the opaque token is POSTed here on every request (no caching). |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_ID` | The client id the `introspection` verifier presents to the Authorization Server via HTTP Basic (client_secret_basic). |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV` | The NAME of the env var holding the introspection client secret (never the secret itself); must be present + non-empty at startup or the server refuses to start (fail-closed). |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | Set to 1 to permit a private/link-local/loopback introspection endpoint host (SSRF guard is on by default); off by default. |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | Set to 1 to accept an active introspection response that OMITS `aud` (many AS do); off by default (fail-closed reject). |
 
 _49 tools._

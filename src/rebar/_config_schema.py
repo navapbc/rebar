@@ -425,6 +425,14 @@ class McpConfig:
     auth_jwt_jwks_timeout: int = 10
     auth_jwt_expected_typ: str = ""
     auth_jwt_allow_private_jwks_host: bool = False
+    # Introspection verifier (S4): the `introspection` strategy's flat keys (RFC 7662).
+    # Each auto-derives a REBAR_MCP_<KEY_UPPER> env var. The client secret is NEVER stored
+    # in config — auth_introspection_client_secret_env NAMES the env var holding it.
+    auth_introspection_endpoint: str = ""
+    auth_introspection_client_id: str = ""
+    auth_introspection_client_secret_env: str = ""
+    auth_introspection_allow_private_host: bool = False
+    auth_introspection_allow_missing_aud: bool = False
 
 
 @dataclass
@@ -597,6 +605,11 @@ _SECTIONS: dict[str, dict] = {
         "auth_jwt_jwks_timeout": lambda v, k: _as_int(v, k, minimum=1),
         "auth_jwt_expected_typ": lambda v, k: _as_str(v, k),
         "auth_jwt_allow_private_jwks_host": lambda v, k: _as_bool(v, k),
+        "auth_introspection_endpoint": lambda v, k: _as_str(v, k),
+        "auth_introspection_client_id": lambda v, k: _as_str(v, k),
+        "auth_introspection_client_secret_env": lambda v, k: _as_str(v, k),
+        "auth_introspection_allow_private_host": lambda v, k: _as_bool(v, k),
+        "auth_introspection_allow_missing_aud": lambda v, k: _as_bool(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),
