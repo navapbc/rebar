@@ -16,6 +16,11 @@ import logging
 import os
 from typing import Any
 
+# The retention cap is a SINGLE definition owned by plan_review.sidecar (story fde0); code-review
+# imports it rather than defining a second literal, so both prune paths are governed by one
+# constant. plan_review.sidecar is stdlib-only at import (no cycle back to this module).
+from rebar.llm.plan_review.sidecar import RETAIN_PER_TICKET
+
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
@@ -136,10 +141,57 @@ def emit(
             change_fp=change_fp,
         )
         append_event(target_ticket, EVENT_TYPE, payload, tracker, repo_root=repo_root)
-        return True
     except Exception:  # noqa: BLE001 — sidecar is best-effort; a failure must not fail the gate
         logger.warning("code-review REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
+    prune(target_ticket, repo_root=repo_root)  # best-effort retention (bounds code-review growth)
+    return True
+
+
+def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> int:
+    """Bound REVIEW_RESULT growth on a code-review target ticket: keep the most-recent ``keep``
+    sidecar events (filename timestamp order) and remove older ones. Returns the count removed.
+    The code-review analogue of :func:`rebar.llm.plan_review.sidecar.prune`, governed by the SAME
+    :data:`RETAIN_PER_TICKET` constant (story fde0 — code-review previously had NO prune, so its
+    sidecars grew unbounded). Best-effort and exception-swallowing — a failed prune never fails the
+    gate; the sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
+    try:
+        import subprocess
+
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        old = files[: max(0, len(files) - keep)]
+        if not old:
+            return 0
+        rels = [f"{rid}/{f}" for f in old]
+        subprocess.run(["git", "-C", tracker, "rm", "-q", *rels], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                tracker,
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return len(old)
+    except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the gate
+        logger.warning("code-review REVIEW_RESULT sidecar prune failed; continuing", exc_info=True)
+        return 0
 
 
 # ── reviewed-file content-hash map (deps) — the region-gate state ────────────────────────────────
