@@ -8,7 +8,11 @@ dist/
 .ruff_cache/
 .tickets-tracker/
 bridge_state/
-.rebar/
+# Ignore local .rebar state (session-log pointer, HLC cache, …) but TRACK the out-of-band
+# trusted-environment pin (story 76d2): trusted_environments.yaml lives on the code branch
+# (Gerrit-gated + CODEOWNERS-protected), NEVER the auto-pushed tickets branch.
+.rebar/*
+!.rebar/trusted_environments.yaml
 .claude/
 session-logs/
 CLAUDE.local.md
@@ -51,3 +55,8 @@ src/rebar/_build_info.py
 # d01e live-validation run artifacts (CI artifacts, not source)
 /reports/
 /leaked-artifacts.log
+
+# terraform plan artifacts (generated)
+infra/terraform/tf.plan
+infra/terraform/tf.plan.json
+infra/terraform/.terraform/

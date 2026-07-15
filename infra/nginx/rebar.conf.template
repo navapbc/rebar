@@ -14,8 +14,28 @@
 # nginx runs as a HOST package (dnf nginx) — NOT a container — so host certbot can
 # manage the Let's Encrypt cert and reload it in place (see ADR-0007 and
 # infra/scripts/install-certbot-timer.sh). It proxies to the loopback-published
-# container ports: Gerrit on 127.0.0.1:8080, review-bot on 127.0.0.1:${REVIEW_BOT_PORT}.
+# container ports: Gerrit on 127.0.0.1:8080, review-bot on 127.0.0.1:${REVIEW_BOT_PORT},
+# op-cert gate on 127.0.0.1:8090 (story 76d2).
 # ---------------------------------------------------------------------------
+
+# --- op-cert origin guard (story 76d2) — FAIL-CLOSED, STRUCTURAL deny-all ---
+# The trusted op-cert gate service is reached ONLY through the SigV4-authenticated API
+# Gateway, which injects a static `X-Opcert-Guard: <secret>` header on every proxied
+# request. This map turns that header into $opcert_guard_ok (1 iff the header matches the
+# materialized secret); the /opcert/ location below returns 403 when it is 0.
+#
+# DENY-ALL IS STRUCTURAL, IN THE TEMPLATE ITSELF: `default 0` means an UNKNOWN/missing
+# header => 0 => 403. The secret's matching entry (`"<value>" 1;`) lives in the SEPARATE
+# file /etc/nginx/opcert-guard.map.conf, written from SSM by
+# infra/scripts/materialize-opcert-guard.sh. The include is a GLOB
+# (`opcert-guard*.conf`) precisely because nginx tolerates a ZERO-MATCH glob include
+# (unlike a missing literal include, which is a config error): so on a FRESH boot with no
+# materialized file, nginx STILL STARTS CLEANLY and /opcert/ serves 403 to everyone until
+# the guard is materialized. A guard rotation just rewrites that one file + reloads nginx.
+map $http_x_opcert_guard $opcert_guard_ok {
+    default 0;
+    include /etc/nginx/opcert-guard*.conf;
+}
 
 # --- Port 80: ACME challenge + redirect everything else to HTTPS -----------
 server {
@@ -53,6 +73,24 @@ server {
     # so an external GET /review/health reaches the app as GET /health.
     location /review/ {
         proxy_pass http://127.0.0.1:${REVIEW_BOT_PORT}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # --- op-cert gate: /opcert/ -> the FastAPI gate service (story 76d2) --
+    # FAIL-CLOSED: any request whose X-Opcert-Guard header does not match the materialized
+    # secret gets 403 BEFORE proxying (a direct-to-origin request that bypasses API Gateway
+    # has no valid guard header, so it is rejected here). The proxy_pass has NO trailing
+    # slash / path, so the /opcert/ prefix is PRESERVED — the service's own routes are
+    # /opcert/jobs and /opcert/jobs/{id} (see rebar.opcert_service.app), so the prefix must
+    # reach the app intact.
+    location /opcert/ {
+        if ($opcert_guard_ok = 0) {
+            return 403;
+        }
+        proxy_pass http://127.0.0.1:8090;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
