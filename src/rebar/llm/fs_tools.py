@@ -134,3 +134,20 @@ def _within_root(abs_path: str, root: str) -> bool:
     to reject symlinks pointing outside the root (read_file blocks these too, via
     _safe_path)."""
     return abs_path == root or abs_path.startswith(root + os.sep)
+
+
+# Path components that mark an INSTALLED-DEPENDENCY location rather than first-party
+# source. A repo-local virtualenv (e.g. `<repo>/.venv/lib/pythonX/site-packages/…`)
+# lives *under* the repo root, so `_within_root` alone would wrongly call a
+# third-party symbol "repo-local"; excluding these roots keeps the first-party vs
+# third-party classification honest. `site-packages`/`dist-packages` are the
+# universal install dirs; the venv names mirror `_NOISE_DIRS` for defence in depth.
+_DEPENDENCY_PATH_PARTS = frozenset({"site-packages", "dist-packages", ".venv", "venv"})
+
+
+def _is_dependency_path(abs_path: str) -> bool:
+    """True if ``abs_path`` lives inside an installed-dependency / virtualenv root
+    (site-packages, dist-packages, or a `.venv`/`venv` dir), even when that root is
+    nested inside the repo. Lets callers keep a repo-local `.venv` from masquerading
+    as first-party source."""
+    return not _DEPENDENCY_PATH_PARTS.isdisjoint(abs_path.split(os.sep))

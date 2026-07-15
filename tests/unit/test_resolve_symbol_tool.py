@@ -10,7 +10,9 @@ PyYAML (``yaml``), a CORE runtime dependency present on every job.
 
 from __future__ import annotations
 
-from rebar.llm import pai_tools
+import os
+
+from rebar.llm import fs_tools, pai_tools
 
 _TP_PKG = "yaml"  # PyYAML: a core dependency, installed in every CI job.
 
@@ -48,3 +50,53 @@ def test_resolve_symbol_never_raises_on_garbage() -> None:
     # A non-identifier is rejected safely (never handed to importlib as a path).
     out = _resolve_symbol()("os; rm -rf /")
     assert out.startswith("UNRESOLVED")
+
+
+def test_is_dependency_path_flags_install_and_venv_roots() -> None:
+    sep = os.sep
+    for part in ("site-packages", "dist-packages", ".venv", "venv"):
+        p = sep.join(("", "repo", part, "pkg", "__init__.py"))
+        assert fs_tools._is_dependency_path(p), p
+    # First-party source has none of those components.
+    assert not fs_tools._is_dependency_path(sep.join(("", "repo", "src", "rebar", "x.py")))
+
+
+def test_resolve_symbol_repo_nested_venv_is_third_party(monkeypatch) -> None:
+    """Regression: a dependency installed in a repo-LOCAL `.venv` lives under the
+    repo root, but must still classify as third-party — not repo-local (in-tree
+    .venv was misclassified as first-party because locality was root-containment
+    only)."""
+    root = os.path.realpath(".")
+    origin = os.path.join(root, ".venv", "lib", "py", "site-packages", "acme", "__init__.py")
+
+    from rebar.grounding import resolve as _resolve
+
+    loc = {"module": "acme", "attr": None, "origin": origin}
+    monkeypatch.setattr(
+        _resolve,
+        "resolve_in_environment",
+        lambda name, container=None, language=None: loc,
+    )
+    out = _resolve_symbol()("acme")
+    assert out.startswith("EXISTS")
+    assert "third-party/stdlib" in out
+    assert "repo-local" not in out
+
+
+def test_resolve_symbol_first_party_src_is_repo_local(monkeypatch) -> None:
+    """Genuine first-party source (under the root, NOT in a dependency root) still
+    classifies as repo-local — the fix must not over-exclude."""
+    root = os.path.realpath(".")
+    origin = os.path.join(root, "src", "rebar", "grounding", "resolve.py")
+
+    from rebar.grounding import resolve as _resolve
+
+    loc = {"module": "rebar.grounding.resolve", "attr": None, "origin": origin}
+    monkeypatch.setattr(
+        _resolve,
+        "resolve_in_environment",
+        lambda name, container=None, language=None: loc,
+    )
+    out = _resolve_symbol()("rebar.grounding.resolve")
+    assert out.startswith("EXISTS")
+    assert "repo-local" in out

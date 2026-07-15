@@ -31,6 +31,7 @@ from rebar.llm.errors import LLMConfigError, LLMRunnerError
 from rebar.llm.fs_tools import (
     _SCAN_MAX_FILES,
     _discovery_filter,
+    _is_dependency_path,
     _safe_path,
     _within_root,
 )
@@ -177,7 +178,16 @@ def grounding_tools(repo_path: str | None) -> list[Callable]:
             )
         origin = str(loc.get("origin") or "?")
         qualified = loc["module"] + (f".{loc['attr']}" if loc.get("attr") else "")
-        inside = _within_root(os.path.realpath(origin), root) if os.path.isabs(origin) else False
+        real_origin = os.path.realpath(origin) if os.path.isabs(origin) else ""
+        # Repo-local ONLY when under the root AND not inside an installed-dependency
+        # root: a repo-nested virtualenv (`<repo>/.venv/…/site-packages/…`) is under
+        # the root but is third-party, not first-party source (bug: in-tree .venv
+        # misclassified as repo-local).
+        inside = (
+            bool(real_origin)
+            and _within_root(real_origin, root)
+            and not _is_dependency_path(real_origin)
+        )
         scope = "repo-local" if inside else "third-party/stdlib (site-packages)"
         return (
             f"EXISTS: {qualified} resolves in the installed environment [{scope}, origin={origin}]."
