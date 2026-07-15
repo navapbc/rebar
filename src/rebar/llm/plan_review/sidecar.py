@@ -40,7 +40,12 @@ IMPACT_MODEL_VERSION = "plan-v2"
 # RETAIN sidecars per ticket (recent history for offline analysis; each review
 # supersedes the prior, and prior runs were already captured at emit time) and removes
 # older ones, bounding growth without touching the reducer/compaction hot paths.
-RETAIN_PER_TICKET = 10
+#
+# Bound raised 10 -> 50 (story fde0): drift-refresh re-reviews on one ticket can exceed 10
+# rounds, so 10 dropped still-relevant recent history; 50 covers observed single-digit
+# remediation-loop depth with headroom while still capping unbounded growth. This is the
+# SINGLE definition of the cap — code_review.sidecar imports it (no second literal).
+RETAIN_PER_TICKET = 50
 
 
 def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None) -> bool:
