@@ -18,6 +18,15 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+      # Fail a commit made directly on main/master AT COMMIT TIME, so the repo's
+      # "land through Gerrit, never commit to main" rule (enforced server-side by the
+      # GitHub ruleset + Gerrit gates) also fails fast locally instead of only at push.
+      # Branches are listed explicitly (the tool default is already ('master','main'),
+      # but explicit args document intent and survive any upstream default change).
+      # Bypassable with `git commit --no-verify` by design — this is a local guardrail,
+      # not the enforcement boundary.
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
 
   # The code gate — runs `make lint` (ruff check + ruff format --check). CHECK-ONLY:
   # it fails if the code isn't formatted/clean and points you at `make format`; it
