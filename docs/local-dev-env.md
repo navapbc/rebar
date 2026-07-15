@@ -22,6 +22,13 @@ make install                                    # editable '.[dev]' install + th
 export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (review-plan, verify-completion)
 ```
 
+> **Starting a NEW worktree? One command does the whole setup.** `make worktree name=<branch>`
+> creates a fresh worktree at `../<branch>` (override with `dir=<path>`) branched from a
+> freshly-fetched `origin/main`, then provisions its `.venv` and runs the canonical
+> `make install` above inside it — the one-command form of the manual "fresh worktree + local
+> venv" sequence this repo mandates. Then `cd ../<branch> && source .venv/bin/activate` and
+> export your `ANTHROPIC_API_KEY`.
+
 > **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
 > tickets should own its **own** identity + SSH signing key (never the shared bot). One-time
 > setup — create/own an identity ticket, set the current-identity pointer, and point

@@ -26,7 +26,7 @@ ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin
 
-.PHONY: help install hooks format lint typecheck config-check check test vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks worktree format lint typecheck config-check check test vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -65,6 +65,30 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 		echo "ERROR: pre-commit hook NOT found at $$hook after install — the commit gate is NOT active."; \
 		exit 1; \
 	fi
+
+worktree:  ## Create a fresh worktree from origin/main + provision its venv & hooks. Usage: make worktree name=<branch> [dir=<path>]
+	@# One-command form of the manual setup the repo mandates (fresh worktree branched
+	@# from current origin/main, with its OWN local venv + the commit gate wired) — so
+	@# agents/humans stop hand-running the sequence. Delegates to the canonical `make
+	@# install` for provisioning rather than forking its steps. The Gerrit commit-msg
+	@# hook needs no re-fetch: worktrees share the common git dir's hooks, so a worktree
+	@# created from this checkout inherits it automatically.
+	@if [ -z "$(name)" ]; then \
+		echo "usage: make worktree name=<branch> [dir=<path>]"; \
+		echo "  Creates a worktree at <path> (default ../<branch>) branched from a freshly-"; \
+		echo "  fetched origin/main, then provisions .venv + editable install + the pre-commit gate."; \
+		exit 2; \
+	fi
+	@target_dir="$(if $(dir),$(dir),../$(name))"; \
+	echo "→ git fetch origin"; \
+	git fetch origin; \
+	echo "→ git worktree add $$target_dir -b $(name) origin/main"; \
+	git worktree add "$$target_dir" -b "$(name)" origin/main; \
+	echo "→ provisioning $$target_dir/.venv (python3 -m venv) then canonical 'make install'"; \
+	( cd "$$target_dir" && python3 -m venv .venv && . .venv/bin/activate && $(MAKE) install ); \
+	echo ""; \
+	echo "✓ worktree ready: $$target_dir"; \
+	echo "  activate it with:  cd $$target_dir && source .venv/bin/activate"
 
 format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target).
 	ruff check --fix $(sources)
