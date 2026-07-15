@@ -415,6 +415,16 @@ class McpConfig:
     auth_resource_server_url: str = ""
     auth_required_scopes: tuple[str, ...] = ()
     auth_static_tokens_file: str = ""
+    # JWKS/JWT verifier (S3): the `jwt` strategy's flat keys. Each auto-derives a
+    # REBAR_MCP_<KEY_UPPER> env var. algorithms is asymmetric-only on a JWKS source.
+    auth_jwt_jwks_uri: str = ""
+    auth_jwt_issuer: str = ""
+    auth_jwt_algorithms: tuple[str, ...] = ("RS256", "ES256")
+    auth_jwt_leeway: int = 60
+    auth_jwt_jwks_refetch_cooldown: int = 30
+    auth_jwt_jwks_timeout: int = 10
+    auth_jwt_expected_typ: str = ""
+    auth_jwt_allow_private_jwks_host: bool = False
 
 
 @dataclass
@@ -579,6 +589,14 @@ _SECTIONS: dict[str, dict] = {
         "auth_resource_server_url": lambda v, k: _as_str(v, k),
         "auth_required_scopes": lambda v, k: _as_str_tuple(v, k),
         "auth_static_tokens_file": lambda v, k: _as_str(v, k),
+        "auth_jwt_jwks_uri": lambda v, k: _as_str(v, k),
+        "auth_jwt_issuer": lambda v, k: _as_str(v, k),
+        "auth_jwt_algorithms": lambda v, k: _as_str_tuple(v, k),
+        "auth_jwt_leeway": lambda v, k: _as_int(v, k, minimum=0),
+        "auth_jwt_jwks_refetch_cooldown": lambda v, k: _as_int(v, k, minimum=0),
+        "auth_jwt_jwks_timeout": lambda v, k: _as_int(v, k, minimum=1),
+        "auth_jwt_expected_typ": lambda v, k: _as_str(v, k),
+        "auth_jwt_allow_private_jwks_host": lambda v, k: _as_bool(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),

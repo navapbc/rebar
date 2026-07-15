@@ -233,6 +233,69 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         ),
         "deprecated": False,
     },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_JWKS_URI",
+        "description": (
+            "HTTPS JWKS endpoint the `jwt` verifier fetches signing keys from (an OIDC "
+            "provider's .well-known/jwks.json)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_ISSUER",
+        "description": (
+            "Expected `iss` claim for the `jwt` verifier; falls back to "
+            "REBAR_MCP_AUTH_ISSUER_URL when unset."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_ALGORITHMS",
+        "description": (
+            "Comma-separated PINNED, asymmetric-only JWS algorithms for the `jwt` verifier "
+            "(default RS256,ES256); a symmetric algorithm on a JWKS source is refused."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_LEEWAY",
+        "description": (
+            "Clock-skew leeway in seconds applied to exp/nbf validation by the `jwt` "
+            "verifier (default 60)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_JWKS_REFETCH_COOLDOWN",
+        "description": (
+            "Minimum seconds between JWKS refetches triggered by an unknown key id "
+            "(the concurrency-safe flood guard; default 30)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT",
+        "description": (
+            "HTTP timeout in seconds for the `jwt` verifier's JWKS fetch (default 10)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_EXPECTED_TYP",
+        "description": (
+            "When set, the `jwt` verifier requires the JWT header `typ` to equal this "
+            "(e.g. at+JWT per RFC 9068); unset skips the check."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST",
+        "description": (
+            "Set to 1 to permit a private/link-local/loopback JWKS host (SSRF guard is "
+            "on by default); off by default."
+        ),
+        "deprecated": False,
+    },
 )
 
 
