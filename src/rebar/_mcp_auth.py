@@ -40,6 +40,8 @@ logger = logging.getLogger("rebar.mcp.auth")
 __all__ = [
     "AuthConfigError",
     "CompositeTokenVerifier",
+    "IntrospectionError",
+    "IntrospectionTokenVerifier",
     "JWKSTokenVerifier",
     "StaticBearerVerifier",
     "build_composite_verifier",
@@ -62,6 +64,14 @@ class AuthConfigError(RuntimeError):
     not-yet-implemented strategy, an enabled-but-empty composite, or a malformed
     static-token secrets record. Propagates out of ``build_server`` so a misconfigured
     authenticated server refuses to start rather than booting wide open."""
+
+
+class IntrospectionError(RuntimeError):
+    """Raised by :class:`IntrospectionTokenVerifier` for a fail-closed transport/parse
+    failure — a non-200 status, a timeout/connection error, or a malformed body (not
+    valid JSON, or JSON lacking a boolean ``active`` field). The composite treats a
+    raised exception as non-acceptance → deny, so introspection never yields acceptance
+    on a failure. Message text is passed through :func:`redact` so no token/secret leaks."""
 
 
 def redact(message: str, *secrets: str) -> str:
@@ -261,6 +271,138 @@ class JWKSTokenVerifier:
             return None
 
 
+class IntrospectionTokenVerifier:
+    """An RFC 7662 OAuth 2.0 token-introspection verifier (S4).
+
+    On every ``verify_token`` it POSTs the opaque token to a configured Authorization
+    Server ``/introspect`` endpoint, authenticating with ``client_secret_basic`` (HTTP
+    Basic ``client_id:secret``, the secret sourced at construction from the env var NAMED
+    by ``client_secret_env`` — never from config). It accepts only ``active: true`` with a
+    matching RFC 8707 audience, and maps the response into an ``AccessToken``.
+
+    Fail-closed by construction: the client secret env var must be present + non-empty, the
+    endpoint must be ``https``, and a private/link-local/loopback literal-IP host is refused
+    unless ``allow_private_host``. Fail-closed at request time: a non-200 status, a transport
+    error (timeout/connection), a non-JSON body, or a body lacking a boolean ``active`` field
+    each **raise** :class:`IntrospectionError` (the composite treats that as deny). There is
+    NO caching in v1 — every call re-introspects, giving instant revocation."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        client_id: str,
+        client_secret_env: str,
+        resource: str,
+        allow_private_host: bool = False,
+        allow_missing_aud: bool = False,
+        connect_timeout: float = 5.0,
+        read_timeout: float = 10.0,
+        transport=None,
+    ) -> None:
+        import httpx  # ships in the base deps
+
+        # The client secret is read from the env var NAMED by client_secret_env (fail-closed
+        # if unset/empty) and kept only in memory — never logged; route logging through redact.
+        secret = os.environ.get(client_secret_env) or ""
+        if not secret:
+            raise AuthConfigError(
+                f"mcp.auth_introspection_client_secret_env names env var "
+                f"{client_secret_env!r} which is unset or empty"
+            )
+
+        # SSRF guards (construction-time; DNS is NOT resolved here).
+        parsed = urlparse(endpoint)
+        if parsed.scheme != "https":
+            raise AuthConfigError(
+                f"mcp.auth_introspection_endpoint must be an https:// URL "
+                f"(got scheme {parsed.scheme!r})"
+            )
+        host = parsed.hostname or ""
+        if not allow_private_host:
+            try:
+                ip = ipaddress.ip_address(host)
+            except ValueError:
+                ip = None  # a DNS name (not a literal IP) is allowed; not resolved here
+            if ip is not None and (ip.is_loopback or ip.is_private or ip.is_link_local):
+                raise AuthConfigError(
+                    f"mcp.auth_introspection_endpoint host {host!r} is "
+                    f"private/link-local/loopback; set "
+                    f"mcp.auth_introspection_allow_private_host=true to permit it"
+                )
+
+        self._endpoint = endpoint
+        self._client_id = client_id
+        self._secret = secret
+        self._resource = resource
+        self._allow_missing_aud = allow_missing_aud
+        self._client = httpx.AsyncClient(
+            transport=transport,
+            timeout=httpx.Timeout(
+                connect=connect_timeout,
+                read=read_timeout,
+                write=read_timeout,
+                pool=read_timeout,
+            ),
+        )
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        import httpx
+
+        try:
+            resp = await self._client.post(
+                self._endpoint,
+                data={"token": token},
+                auth=(self._client_id, self._secret),
+            )
+        except httpx.HTTPError as exc:
+            raise IntrospectionError(
+                f"introspection request failed: {redact(str(exc), token, self._secret)}"
+            ) from exc
+
+        if resp.status_code != 200:
+            raise IntrospectionError(f"introspection endpoint returned status {resp.status_code}")
+        try:
+            body = resp.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise IntrospectionError(
+                f"introspection response is not valid JSON: {redact(str(exc), token, self._secret)}"
+            ) from exc
+        if not isinstance(body, dict) or not isinstance(body.get("active"), bool):
+            raise IntrospectionError("introspection response lacks a boolean 'active' field")
+
+        if body["active"] is not True:
+            return None
+
+        # Audience (RFC 7662 §2.2 — `aud` may be a string OR a list of strings).
+        if "aud" not in body:
+            if not self._allow_missing_aud:
+                return None
+        else:
+            aud = body["aud"]
+            if isinstance(aud, str):
+                if self._resource != aud:
+                    return None
+            elif isinstance(aud, (list, tuple)):
+                if self._resource not in aud:
+                    return None
+            else:
+                return None
+
+        client_id = body.get("client_id") or body.get("sub") or "unknown"
+        scope = body.get("scope", "")
+        scopes = scope.split() if isinstance(scope, str) else []
+        expires_at = int(body["exp"]) if "exp" in body else None  # NEVER 0 when absent
+        return AccessToken(
+            token=token,
+            client_id=client_id,
+            scopes=scopes,
+            resource=self._resource,
+            subject=body.get("sub"),
+            expires_at=expires_at,
+        )
+
+
 def _split_scopes(claims: dict) -> list[str]:
     """Map an OAuth token's scopes to a list: space-delimited ``scope`` plus a list
     (or space-delimited string) ``scp`` claim, de-duplicated preserving order."""
@@ -345,6 +487,17 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
                     timeout=mcp_cfg.auth_jwt_jwks_timeout,
                     expected_typ=mcp_cfg.auth_jwt_expected_typ,
                     allow_private_jwks_host=mcp_cfg.auth_jwt_allow_private_jwks_host,
+                )
+            )
+        elif strategy == "introspection":
+            verifiers.append(
+                IntrospectionTokenVerifier(
+                    endpoint=mcp_cfg.auth_introspection_endpoint,
+                    client_id=mcp_cfg.auth_introspection_client_id,
+                    client_secret_env=mcp_cfg.auth_introspection_client_secret_env,
+                    resource=mcp_cfg.auth_resource_server_url,
+                    allow_private_host=mcp_cfg.auth_introspection_allow_private_host,
+                    allow_missing_aud=mcp_cfg.auth_introspection_allow_missing_aud,
                 )
             )
         else:

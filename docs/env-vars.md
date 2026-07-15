@@ -76,6 +76,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_ENABLED` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_ID` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ENDPOINT` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_ISSUER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_JWT_ALGORITHMS` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -129,7 +134,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_119 variables._
+_124 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -146,7 +151,8 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:191` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
-- `src/rebar/_mcp_auth.py:434` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:307` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:587` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:492` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:505` — `os.environ.get(<non-literal>)`
