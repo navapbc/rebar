@@ -366,7 +366,7 @@ def test_enrich_operator_attested_clears_ac_unverifiable_upstream() -> None:
             "evidence": ["the fix is deployed to prod and the two-vote gate passes"],
         }
     ]
-    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "missing_oracle"}, "binary": {}}}
     assert review_kernel.impact_plan(verifs[0]["severity_attributes"]) >= 0.85
     enrich_operator_attested(findings, verifs, desc)
     attrs = verifs[0]["severity_attributes"]

@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from rebar.llm import contracts
 from rebar.llm.errors import StructuredOutputError
@@ -40,16 +40,13 @@ from .decide import GRADED_BINARY
 
 logger = logging.getLogger(__name__)
 
-# ── token-budget chunking constants (the principled replacement for a magic count-batch:
-#    split the verify request by TOKEN budget vs the model window, not an arbitrary count) ──
+# ── token-budget chunking: split verify requests by TOKEN budget vs model window ──
 DEFAULT_VERIFY_WINDOW_HEADROOM = 0.8  # config-overridable: verify.verify_window_headroom
-# Per-finding OUTPUT reserve: the verify response carries one verification object per finding
-# (severity_attributes + the binary sub-answers), so output scales with the finding count and
-# must be reserved. A documented, adjustable constant (NOT a derived value).
+# Per-finding OUTPUT reserve: the verify response carries one verification object per
+# finding, so output scales with finding count. A documented, adjustable constant.
 PER_FINDING_VERIFY_TOKENS = 256
-# A documented approximation of the verifier SYSTEM prompt's size, reserved on top of the
-# rendered per-finding instructions (the system prompt is ~constant, so it is a flat reserve
-# rather than re-estimated per chunk).
+# Approximate size of the ~constant verifier SYSTEM prompt: a flat reserve on top of the
+# rendered per-finding instructions, not re-estimated per chunk.
 VERIFY_SYSTEM_RESERVE_TOKENS = 2_000
 
 
@@ -84,10 +81,9 @@ VERIFIER_RULES: tuple[tuple[str, str], ...] = (
 VERIFIER_RULES_SCAFFOLD = "\n".join(f"- {name}: {text}" for name, text in VERIFIER_RULES)
 
 
-# The binary sub-question descriptions + na-defaults, at MODULE scope so BOTH the base
-# `verification_model` and the plan-review `plan_review_verification_model` build the SAME
-# Binary vocabulary from ONE source (no drift). Kept out of the functions (which lazily
-# import pydantic) because these are plain data, not pydantic types.
+# The binary sub-question descriptions + na-defaults, at MODULE scope so the base and
+# plan-review models build the SAME Binary vocabulary from ONE source (no drift). Kept out
+# of the functions (which lazily import pydantic) because these are plain data.
 _BINARY_DESC = {
     "is_verifiable": "yes|no|insufficient|na — finding stated concretely enough to test.",
     "evidence_entails_finding": (
@@ -230,13 +226,11 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
     shape as :func:`verification_model`, but its ``severity_attributes`` is a ``PlanSeverityAttrs``
     that ADDS 7 plan-severity axes + a detection axis on top of the base five. Registered as the
     plan-review-specific ``plan_review_verification`` contract; the kernel ``verification`` (used
-    by code-review + the kernel default) is UNCHANGED.
-
-    Each new axis is graded ``none|low|medium|high`` and defaults to ``"none"`` (detection to
-    ``""``), so an older/absent verifier ABSTAINS: a missing axis maps to 0 in
-    :func:`rebar.llm.review_kernel.decide.impact_plan` and never inflates impact (back-compat).
-    ``impact_plan`` aggregates the seven axes by MAX, floors the four hard-override axes, and
-    applies the detection amplifier — see that function for the exact compose."""
+    by code-review + the kernel default) is UNCHANGED. Ordinal axes grade
+    ``none|low|medium|high``; ``ac_unverifiable`` grades by ORACLE KIND (its Literal, plan-v3).
+    Every axis defaults to ``"none"`` (detection to ``""``), so an older/absent verifier ABSTAINS
+    (a missing axis maps to 0 in :func:`rebar.llm.review_kernel.decide.impact_plan`); see
+    ``impact_plan`` for the MAX/floor/amplifier compose."""
     from pydantic import BaseModel, ConfigDict, Field
 
     forbid = ConfigDict(extra="forbid") if strict else ConfigDict()
@@ -256,10 +250,16 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
         likelihood: str = Field(default="low", description="low|medium|high")
         reversibility: str = Field(default="easy", description="easy|moderate|hard")
         # ── The 7 plan-severity axes (decide.impact_plan aggregates these by MAX). ──
-        ac_unverifiable: str = Field(
+        ac_unverifiable: Literal[
+            "none", "underspecified_oracle", "broken_oracle", "missing_oracle"
+        ] = Field(
             default="none",
-            description="none|low|medium|high — an acceptance criterion cannot be objectively "
-            "verified as written. HARD-OVERRIDE axis (any non-none floors impact to 0.85).",
+            description="Oracle-kind grade (closed set — NOT the ordinal ladder): missing_oracle"
+            " = no verification method exists as phrased; broken_oracle = a stated proving"
+            " command/symbol/count is factually wrong so the stated verification CANNOT pass;"
+            " underspecified_oracle = a check is constructible but the exact command/file/value"
+            " is not spelled out. HARD-OVERRIDE for missing/broken ONLY (floors impact to 0.85);"
+            " underspecified scores below every blocking threshold and never floors.",
         )
         dod_uncertifiable: str = Field(
             default="none",

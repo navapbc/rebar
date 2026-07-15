@@ -36,18 +36,52 @@ def test_single_high_non_override_axis() -> None:
 
 # ── impact_plan: hard override ───────────────────────────────────────────────────────────
 def test_hard_override_floors_low_axis_to_085() -> None:
-    # A merely 'low' ac_unverifiable (0.33) is a hard-override axis -> floored to 0.85 (auto-high).
-    assert impact_plan({"ac_unverifiable": "low"}) == 0.85
+    # A merely 'low' dod_uncertifiable (0.33) is a hard-override axis -> floored to 0.85.
+    assert impact_plan({"dod_uncertifiable": "low"}) == 0.85
 
 
-def test_each_override_axis_triggers_floor() -> None:
-    for axis in (
-        "ac_unverifiable",
-        "dod_uncertifiable",
-        "undecomposed",
-        "divergent_implementation",
-    ):
+def test_each_ordinal_override_axis_triggers_floor() -> None:
+    # The three ordinal override axes keep the any-non-none floor (story
+    # large-sleepful-needlefish left them untouched).
+    for axis in ("dod_uncertifiable", "undecomposed", "divergent_implementation"):
         assert impact_plan({axis: "low"}) >= 0.85, axis
+
+
+# ── impact_plan: ac_unverifiable oracle-kind grades (story large-sleepful-needlefish) ────
+def test_missing_and_broken_oracle_keep_the_floor() -> None:
+    assert impact_plan({"ac_unverifiable": "missing_oracle"}) >= 0.85
+    assert impact_plan({"ac_unverifiable": "broken_oracle"}) >= 0.85
+
+
+def test_underspecified_oracle_never_floors() -> None:
+    # The dominant floor-driven class (56% of the calibration-3 sample) is a refinement
+    # demand: it surfaces and is coached but scores below every blocking threshold.
+    v = impact_plan({"ac_unverifiable": "underspecified_oracle"})
+    assert v == decide.UNDERSPECIFIED_ORACLE_CONTRIB
+    assert v < 0.60
+
+
+def test_underspecified_contrib_stays_below_lowest_blocking_threshold() -> None:
+    # INVARIANT: a future threshold recalibration below the contrib must fail loudly here,
+    # not silently re-enable auto-blocks for specificity demands.
+    import json
+    from importlib import resources
+
+    routing = json.loads(
+        (resources.files("rebar.llm.plan_review") / "criteria_routing.json").read_text()
+    )
+    blocking_thrs = [
+        e["block_threshold"]
+        for e in routing.values()
+        if isinstance(e, dict) and e.get("default_posture") == "blocking"
+    ]
+    assert decide.UNDERSPECIFIED_ORACLE_CONTRIB < min(blocking_thrs)
+
+
+def test_legacy_ordinal_grade_maps_to_zero_under_plan_v3() -> None:
+    # plan-v3 never scores legacy records (ADR 0036 segmentation); if a legacy string reaches
+    # the scorer anyway it contributes nothing rather than silently flooring.
+    assert impact_plan({"ac_unverifiable": "low"}) == 0.0
 
 
 def test_non_override_axis_does_not_floor() -> None:
@@ -88,7 +122,7 @@ def test_dod_uncertifiable_forces_full_detection_weight() -> None:
 def test_deterministic() -> None:
     # AC4: verdicts stay stable on same-material pairs -> impact_plan is a pure function.
     attrs = {
-        "ac_unverifiable": "medium",
+        "ac_unverifiable": "missing_oracle",
         "vague_directive": "high",
         "silent_vs_self_revealing": "silent",
     }
@@ -104,9 +138,8 @@ def test_stranded_band_finding_now_clears_070() -> None:
         "blast_radius": "module",
         "likelihood": "medium",
         "reversibility": "easy",
-        "ac_unverifiable": "high",  # the plan-severity signal the mean ignored
+        "ac_unverifiable": "missing_oracle",  # the plan-severity signal the mean ignored
     }
-    assert 0.60 <= impact(attrs) < 0.70  # stranded under the mean
     assert impact_plan(attrs) >= 0.70  # cleared under the redesign
 
 
@@ -132,7 +165,7 @@ def test_pass3_decide_defaults_to_mean_impact() -> None:
 
 
 def test_pass3_decide_uses_impact_fn_when_given() -> None:
-    attrs = {"prod_impact": "high", "ac_unverifiable": "high"}
+    attrs = {"prod_impact": "high", "ac_unverifiable": "missing_oracle"}
     d = pass3_decide(
         _verif(attrs), block_threshold=0.7, blocking_enabled=True, impact_fn=impact_plan
     )
@@ -142,10 +175,10 @@ def test_pass3_decide_uses_impact_fn_when_given() -> None:
 
 def test_pass3_over_findings_threads_impact_fn() -> None:
     findings = [{"finding": "x", "criteria": ["E2"]}]
-    verifs = {0: _verif({"ac_unverifiable": "high"})}
+    verifs = {0: _verif({"ac_unverifiable": "missing_oracle"})}
     plan = pass3_over_findings(
         findings, verifs, threshold_for=lambda c: (0.7, True), impact_fn=impact_plan
     )
     base = pass3_over_findings(findings, verifs, threshold_for=lambda c: (0.7, True))
-    assert plan[0]["impact"] == impact_plan({"ac_unverifiable": "high"})
-    assert base[0]["impact"] == impact({"ac_unverifiable": "high"})
+    assert plan[0]["impact"] == impact_plan({"ac_unverifiable": "missing_oracle"})
+    assert base[0]["impact"] == impact({"ac_unverifiable": "missing_oracle"})

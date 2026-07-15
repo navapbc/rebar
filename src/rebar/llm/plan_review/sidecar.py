@@ -32,7 +32,7 @@ EVENT_TYPE = "REVIEW_RESULT"
 # old-formula vs new-formula findings and never pool across versions (the same cohort-tagging
 # discipline as the per-finding `cohort` carrier; a MISSING tag reads as "unknown/skip" offline).
 # Bump this whenever `decide.impact_plan` changes shape → a fresh calibration cohort.
-IMPACT_MODEL_VERSION = "plan-v2"
+IMPACT_MODEL_VERSION = "plan-v3"
 
 # Retention bound (child db7b AC4). REVIEW_RESULT is reducer-IGNORED, so rebar's event
 # COMPACTION intentionally PRESERVES it (never snapshots/absorbs a non-KNOWN type) —

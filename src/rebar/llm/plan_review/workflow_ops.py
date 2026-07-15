@@ -112,7 +112,10 @@ def enrich_operator_attested(
         )
         if any(oa in combined for oa in oa_texts):
             attrs["operator_attested"] = True
-            if attrs.get("ac_unverifiable") not in (None, "", "none"):
+            # A recorded attestation IS the oracle, so it clears missing/underspecified —
+            # but never broken_oracle: a factually wrong stated command is not cured by
+            # attesting the outcome (story large-sleepful-needlefish).
+            if attrs.get("ac_unverifiable") in ("missing_oracle", "underspecified_oracle"):
                 attrs["ac_unverifiable"] = "none"
 
 

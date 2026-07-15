@@ -45,10 +45,10 @@ def test_enrich_leaves_non_operator_attested_ac_finding_alone() -> None:
             "evidence": ["the parser handles empty input"],  # references the NON-OA AC
         }
     ]
-    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "missing_oracle"}, "binary": {}}}
     enrich_operator_attested(findings, verifs, desc)
     attrs = verifs[0]["severity_attributes"]
-    assert attrs.get("ac_unverifiable") == "high"  # untouched
+    assert attrs.get("ac_unverifiable") == "missing_oracle"  # untouched
     assert not attrs.get("operator_attested")
     assert review_kernel.impact_plan(attrs) >= 0.85
 
@@ -56,9 +56,9 @@ def test_enrich_leaves_non_operator_attested_ac_finding_alone() -> None:
 def test_enrich_underscore_near_miss_does_not_clear() -> None:
     desc = "## Acceptance Criteria\n- [ ] [operator_attested] the deploy is confirmed live\n"
     findings = [{"finding": "x", "evidence": ["the deploy is confirmed live"], "location": "AC"}]
-    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "missing_oracle"}, "binary": {}}}
     enrich_operator_attested(findings, verifs, desc)
-    assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "high"
+    assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "missing_oracle"
 
 
 def test_enrich_is_a_noop_when_no_finding_references_the_oa_ac() -> None:
@@ -66,9 +66,9 @@ def test_enrich_is_a_noop_when_no_finding_references_the_oa_ac() -> None:
     findings = [
         {"finding": "unrelated concern about naming", "evidence": ["src/x.py"], "location": "x"}
     ]
-    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "missing_oracle"}, "binary": {}}}
     enrich_operator_attested(findings, verifs, desc)
-    assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "high"
+    assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "missing_oracle"
 
 
 def test_enrich_handles_missing_verif_and_bad_shapes() -> None:
@@ -79,7 +79,7 @@ def test_enrich_handles_missing_verif_and_bad_shapes() -> None:
         {"finding": "no verif"},
     ]
     # index 1 is absent from verifs (a finding with no verification)
-    verifs = {0: {"severity_attributes": {"ac_unverifiable": "high"}, "binary": {}}}
+    verifs = {0: {"severity_attributes": {"ac_unverifiable": "missing_oracle"}, "binary": {}}}
     enrich_operator_attested(findings, verifs, desc)  # must not raise
     assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "none"
 
@@ -108,7 +108,10 @@ def test_operator_attested_finding_survives_on_other_axes() -> None:
     ]
     verifs = {
         0: {
-            "severity_attributes": {"ac_unverifiable": "high", "divergent_implementation": "high"},
+            "severity_attributes": {
+                "ac_unverifiable": "missing_oracle",
+                "divergent_implementation": "high",
+            },
             "binary": {},
         }
     }

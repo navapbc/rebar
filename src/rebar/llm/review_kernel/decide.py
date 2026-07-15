@@ -143,6 +143,21 @@ _PLAN_HARD_OVERRIDE_AXES = (
     "divergent_implementation",
 )
 _PLAN_HARD_OVERRIDE_FLOOR = 0.85
+# ac_unverifiable is graded by ORACLE KIND, not the ordinal severity ladder (story
+# large-sleepful-needlefish, calibration-3 evidence: 56% of its floor-driven blocks demanded
+# only a more specific command/file/value). broken/missing keep the hard floor;
+# underspecified contributes below every blocking threshold and never floors.
+# INVARIANT: UNDERSPECIFIED_ORACLE_CONTRIB stays strictly below the lowest blocking
+# block_threshold in plan_review/criteria_routing.json (0.60 after calibration 3) — pinned by
+# test_impact_plan.py so a future recalibration below it fails loudly.
+UNDERSPECIFIED_ORACLE_CONTRIB = 0.55
+ORACLE_GRADE01: dict[str | None, float] = {
+    "none": 0.0,
+    "underspecified_oracle": UNDERSPECIFIED_ORACLE_CONTRIB,
+    "broken_oracle": 1.0,
+    "missing_oracle": 1.0,
+}
+_ORACLE_FLOOR_GRADES = ("broken_oracle", "missing_oracle")
 
 
 def impact_plan(attrs: dict[str, Any]) -> float:
@@ -153,9 +168,12 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     2. DETECTION AMPLIFIER: ``mult`` = 0.8 for a ``self_revealing`` finding, else 1.0; a present
        ``dod_uncertifiable`` forces 1.0 (a DoD you cannot certify is never "self-revealing").
        ``amplified = min(1.0, impact_sev * mult)``;
-    3. HARD OVERRIDE (applied LAST, as a floor): if ANY of {ac_unverifiable, dod_uncertifiable,
-       undecomposed, divergent_implementation} is present (non-none), the result is floored at
-       0.85.
+    3. HARD OVERRIDE (applied LAST, as a floor): if any of {dod_uncertifiable, undecomposed,
+       divergent_implementation} is present (non-none), OR ac_unverifiable is graded
+       broken_oracle/missing_oracle, the result is floored at 0.85. ac_unverifiable is graded
+       by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story large-sleepful-needlefish): an
+       underspecified_oracle contributes ``UNDERSPECIFIED_ORACLE_CONTRIB`` (below every
+       blocking threshold) and never floors.
 
     The override is floored AFTER the amplifier on purpose. The ticket's stated compose
     (``impact_sev = max(impact_sev, 0.85)`` THEN ``× mult``) lets a self-revealing override
@@ -163,13 +181,23 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     intent (flagged by this ticket's own plan-review, findings COH/E1/G6). Flooring last
     guarantees an override finding is always ≥ 0.85, mirroring impact_code's reversibility
     floor. All three mechanisms (MAX, override, amplifier) are present, per AC2."""
-    contribs = [_SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES]
+    contribs = [
+        _SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES if a != "ac_unverifiable"
+    ]
+    contribs.append(ORACLE_GRADE01.get(attrs.get("ac_unverifiable"), 0.0))
     impact_sev = max(contribs) if contribs else 0.0
     mult = 0.8 if attrs.get("silent_vs_self_revealing") == "self_revealing" else 1.0
     if _SEV01.get(attrs.get("dod_uncertifiable"), 0.0) > 0.0:
         mult = 1.0  # a DoD you cannot certify forces full detection weight
     amplified = min(1.0, impact_sev * mult)
-    has_override = any(_SEV01.get(attrs.get(a), 0.0) > 0.0 for a in _PLAN_HARD_OVERRIDE_AXES)
+    has_override = (
+        any(
+            _SEV01.get(attrs.get(a), 0.0) > 0.0
+            for a in _PLAN_HARD_OVERRIDE_AXES
+            if a != "ac_unverifiable"
+        )
+        or attrs.get("ac_unverifiable") in _ORACLE_FLOOR_GRADES
+    )
     result = max(amplified, _PLAN_HARD_OVERRIDE_FLOOR) if has_override else amplified
     return round(result, 4)
 

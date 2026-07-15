@@ -145,6 +145,25 @@ other LLM criterion stays advisory (`0.95`), including the false-positive-prone
 T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
 (P1/P5/P8) still blocks unconditionally.
 
+**The hard-override floor is oracle-graded for `ac_unverifiable` (plan-v3, story
+`large-sleepful-needlefish`).** `impact_plan` floors a finding at 0.85 when
+`dod_uncertifiable` / `undecomposed` / `divergent_implementation` is present at any
+grade — but `ac_unverifiable` is graded by ORACLE KIND, a closed vocabulary enforced at
+verification-parse time (`review_kernel.verify.PlanSeverityAttrs`): **`missing_oracle`**
+(no verification method exists as phrased) and **`broken_oracle`** (a stated proving
+command/symbol/count is factually wrong, so the stated verification cannot pass) keep
+the 0.85 floor; **`underspecified_oracle`** (a check exists or is clearly constructible
+— the plan just doesn't spell out the exact command/file/expected value) contributes
+`UNDERSPECIFIED_ORACLE_CONTRIB` (0.55, pinned below every blocking threshold) and never
+floors — it surfaces and is coached instead of auto-blocking. The split is grounded in
+the calibration-3 floor-attribution evidence recorded on the story's ticket: 35.5% of
+all plan-v2 blocks were floor-driven, `ac_unverifiable` carried 48.9% of them, and 56%
+of a classified sample were specificity demands, not missing oracles. Operator-attested
+enrichment clears `missing_oracle`/`underspecified_oracle` (the recorded attestation IS
+the oracle) but never `broken_oracle`. Legacy plan-v2 sidecars keep the old ordinal
+grades and are read as-is — calibration replay segments by `impact_model_version`
+(ADR 0036), which this change bumps to `plan-v3`.
+
 ### The Pass-4 move registry
 
 The coach maps each surviving advisory finding to one **move** and renders the prose

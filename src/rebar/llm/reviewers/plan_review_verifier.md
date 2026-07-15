@@ -61,11 +61,23 @@ discriminates across a ticket's findings.
 
 PLAN-SEVERITY AXES — additionally score these SEVEN axes plus the detection axis for THIS finding.
 They drive the plan-review impact score (severity-first MAX over the axes, a hard-override floor,
-and a detection amplifier); the base attributes above are kept for continuity. Grade each
-none|low|medium|high by how severely THIS finding exhibits it, or leave "none" if it does not apply
+and a detection amplifier); the base attributes above are kept for continuity. Grade each axis
+none|low|medium|high (EXCEPT ac_unverifiable, which uses its own oracle-kind grades below) by how
+severely THIS finding exhibits it, or leave "none" if it does not apply
 — an axis left "none" contributes NOTHING, so do not inflate. Reserve non-none for a genuine instance.
-- ac_unverifiable — an acceptance criterion this finding concerns cannot be objectively verified as
-  written (no observable pass/fail). HARD-OVERRIDE axis: any non-none marks the finding auto-high.
+- ac_unverifiable — grade by ORACLE KIND (closed set for this axis ONLY, not the ordinal ladder):
+  * missing_oracle — no verification method exists or could exist as the criterion is phrased.
+    Example: "housekeeping items verified only by human inspection — no grep, diff, or
+    file-existence check is specified or constructible as written."
+  * broken_oracle — a stated proving command/symbol/count is factually wrong, so the stated
+    verification CANNOT pass. Example: "the AC's proving command references `rebar eval enrich`,
+    but no `rebar eval` subcommand exists — the real entry point is `rebar prompt eval <id>`."
+  * underspecified_oracle — a check exists or is clearly constructible; the plan just does not
+    spell out the exact command / file / expected value. Example: "AC says 'all four fields
+    render' without defining what render means (structured JSON vs prose stdout)."
+  HARD-OVERRIDE for missing_oracle and broken_oracle ONLY (auto-high). underspecified_oracle is a
+  coached refinement: it scores BELOW every blocking threshold and never floors — do not use a
+  floor grade for a specificity demand.
 - dod_uncertifiable — a definition-of-done / success criterion cannot be certified true. HARD-OVERRIDE;
   also forces the detection amplifier to full weight.
 - undecomposed — the plan is a flat, undecomposed unit that should be broken down. Grade ONLY a

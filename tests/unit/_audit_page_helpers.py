@@ -97,7 +97,7 @@ def emit_plan_round(
         "coverage": {"metrics": {}},
         "coaching": coaching or [],
         "model": model,
-        "impact_model_version": "plan-v2",
+        "impact_model_version": plan_sidecar.IMPACT_MODEL_VERSION,
         "material_fingerprint": material,
     }
     assert plan_sidecar.emit(payload, material=material, repo_root=repo)

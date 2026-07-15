@@ -24,7 +24,7 @@ def test_plan_review_payload_stamps_version() -> None:
     from rebar.llm.plan_review import sidecar
 
     payload = sidecar.build_payload({"verdict": "PASS", "ticket_id": "T1"}, material="m")
-    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "plan-v2"
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "plan-v3"
 
 
 def test_code_review_payload_stamps_version() -> None:
