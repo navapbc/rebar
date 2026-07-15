@@ -75,6 +75,12 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_ENABLED` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_ISSUER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_REQUIRED_SCOPES` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_STRATEGIES` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_HTTP_ALLOWED_HOSTS` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_HTTP_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -117,7 +123,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_107 variables._
+_113 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -134,6 +140,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:191` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:230` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:492` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:505` — `os.environ.get(<non-literal>)`
