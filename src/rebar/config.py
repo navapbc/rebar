@@ -37,6 +37,7 @@ from rebar._config_schema import SyncConfig as SyncConfig
 from rebar._config_schema import TicketClarityConfig as TicketClarityConfig
 from rebar._config_schema import TicketConfig as TicketConfig
 from rebar._config_schema import TrackerConfig as TrackerConfig
+from rebar._config_schema import UiConfig as UiConfig
 from rebar._config_schema import VerifyConfig as VerifyConfig
 from rebar._deprecations import warn_deprecated
 
