@@ -1,0 +1,32 @@
+{# Completion panel — criterion-centric, NO chevron. Fixed position between plan and code. #}
+<section id="gate-completion"{% if completion.ran and not completion.is_pass %} class="failing"{% endif %}>
+  <h2>Completion</h2>
+  {% if not completion.ran %}
+    <div class="empty">Not yet run.</div>
+  {% elif completion.is_pass %}
+    <h3>PASS — acceptance criteria</h3>
+    {% for c in completion.criteria %}
+      <div class="crit-row">
+        <span class="glyph {{ 'met' if c.met else 'unmet' }}">{{ '✓' if c.met else '✗' }}</span>
+        <span class="badge">{{ c.kind }}</span>
+        <span>
+          {{ c.criterion }}
+          {% if c.citation %}<span class="citation">— {{ c.citation }}</span>{% endif %}
+          {% if c.lacking %}<span class="lacking">lacking attestation</span>{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+  {% else %}
+    <h3>FAIL — failing findings</h3>
+    {% for f in completion.findings %}
+      <div class="crit-row">
+        <span class="glyph unmet">&#10007;</span>
+        <span>
+          {{ f.criterion or f.finding or "" }}
+          {% if f.citation %}<span class="citation">— {{ f.citation }}</span>{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+    {% if not completion.findings %}<div class="empty">FAIL (no findings recorded).</div>{% endif %}
+  {% endif %}
+</section>
