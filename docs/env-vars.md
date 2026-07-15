@@ -75,6 +75,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_AUTH_CUSTOM_IMPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_ENABLED` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -138,7 +139,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_128 variables._
+_129 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -155,9 +156,9 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:191` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
-- `src/rebar/_mcp_auth.py:409` — `os.environ.get(<non-literal>)`
-- `src/rebar/_mcp_auth.py:610` — `os.environ.get(<non-literal>)`
-- `src/rebar/_mcp_auth.py:706` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:411` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`
+- `src/rebar/_mcp_auth.py:760` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:492` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:505` — `os.environ.get(<non-literal>)`
@@ -169,7 +170,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config.py:427` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:447` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
-- `src/rebar/mcp_server.py:624` — `os.environ.get(<non-literal>)`
+- `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:28` — `os.environ.get(<non-literal>)`

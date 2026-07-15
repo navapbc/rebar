@@ -370,6 +370,15 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         ),
         "deprecated": False,
     },
+    {
+        "name": "REBAR_MCP_AUTH_CUSTOM_IMPORT",
+        "description": (
+            "The `custom` strategy's `module:factory` import string, resolving to a factory "
+            "that returns a TokenVerifier; a TRUSTED operator config value that loads and "
+            "executes the operator-configured code at startup (fail-closed on any load error)."
+        ),
+        "deprecated": False,
+    },
 )
 
 
