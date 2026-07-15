@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Trusted signing environments for op-cert verification (story 76d2 / epic op-cert).
+#
+# A project pins, OUT OF BAND on the code branch (Gerrit-gated + CODEOWNERS-protected, NEVER
+# the auto-pushed tickets branch), the public keys it trusts for op-certs from specific gate
+# environments. rebar.attest.trusted_env reads this file; the required-environment check
+# verifies a cert against the PINNED key for its env_id (never the cert's own self-claimed
+# keyid). See docs/identity.md + ADR 0045.
+#
+# ERA-ANCHOR MODEL (story 4214, Option B — the SUPERSEDING resolution): era boundaries are
+# TICKETS-BRANCH LOG POSITIONS (`{timestamp}-{uuid}` strings), NOT git-main SHAs. Use
+# `added_at_log_position` / `revoked_at_log_position` — the legacy `added_at_commit` /
+# `revoked_at_commit` main-SHA form is REJECTED by the loader.
+#
+# OPERATOR: at deploy, REPLACE the two placeholders below —
+#   - `public_key`: the REAL ssh-ed25519 authorized-keys line of the key you seeded into SSM
+#     /rebar/prod/opcert-ed25519-key (`ssh-keygen -y -f <privkey>` prints it); and
+#   - `added_at_log_position`: the CURRENT tickets-branch tip log position at deploy time,
+# and keep `env_id` equal to the compose service's REBAR_OPCERT_ENV_ID.
+# ---------------------------------------------------------------------------
+environments:
+  - env_id: "9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65"
+    keys:
+      # PLACEHOLDER public key — replace with the deployed environment's real ed25519 public
+      # key at deploy (the private half lives ONLY in SSM /rebar/prod/opcert-ed25519-key).
+      - public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPLACEHOLDERreplaceWithRealOpcertPublicKeyAtDeploy0 rebar-opcert-prod"
+        # PLACEHOLDER era anchor — replace with the tickets-branch tip at deploy time.
+        added_at_log_position: "1784000000000000000-00000000-0000-0000-0000-000000000000"
+        revoked_at_log_position: null

@@ -113,6 +113,45 @@ services:
     logging:
       driver: journald
 
+  # --- trusted op-cert gate service (story 76d2) ---------------------------
+  # The FastAPI gate service (infra/compose/Dockerfile.opcert / rebar.opcert_service.app).
+  # Reached ONLY through the SigV4-authenticated API Gateway -> HOST nginx /opcert/ (which
+  # enforces the X-Opcert-Guard origin guard) -> this container's loopback-published port.
+  # It fetches authoritative state itself and NEVER pushes (REBAR_SYNC_PUSH=off), so a gate's
+  # SIGNATURE append lands only in the discarded per-job workspace.
+  opcert:
+    build:
+      # Build context is the REPO ROOT so `pip install .` sees the whole package.
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.opcert
+    restart: unless-stopped
+    # ANTHROPIC_API_KEY (the gate's LLM ops) + REBAR_OPCERT_GUARD (appended by
+    # infra/scripts/materialize-opcert-guard.sh, the SSM-materialized origin guard) come
+    # from the regenerated .env.
+    env_file:
+      - .env
+    environment:
+      # The environment's identity (the DSSE principal / SSHSIG key id). MUST equal the
+      # env_id pinned in .rebar/trusted_environments.yaml. Operator overrides at deploy.
+      REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
+      # The SSM SecureString holding the passphrase-free Ed25519 op-cert PRIVATE key. The
+      # worker fetches + materializes it per-job to a 0600 temp file (rebar.opcert_service.keyprov).
+      REBAR_OPCERT_SSM_KEY_PARAM: "/rebar/prod/opcert-ed25519-key"
+      # Authoritative-state sources the worker fetches ITSELF (never trusts the client): the
+      # review remote's `main` tip becomes the signed merged_log_commit; the tickets branch is
+      # mounted read-only as a rebar tracker worktree.
+      REBAR_OPCERT_REVIEW_REMOTE_URL: "${REBAR_OPCERT_REVIEW_REMOTE_URL:-https://github.com/navapbc/rebar.git}"
+      REBAR_OPCERT_TICKETS_REMOTE_URL: "${REBAR_OPCERT_TICKETS_REMOTE_URL:-https://github.com/navapbc/rebar.git}"
+      REBAR_OPCERT_REVIEW_BRANCH: "main"
+      # STORE-READ-ONLY: never push a gate write to the shared tickets branch.
+      REBAR_SYNC_PUSH: "off"
+    ports:
+      # Publish on host loopback for the HOST nginx /opcert/ proxy. Host port 8090 (Gerrit
+      # owns 8080, review-bot owns REVIEW_BOT_PORT); container port is fixed 8080 (uvicorn).
+      - "127.0.0.1:8090:8080"
+    logging:
+      driver: journald
+
 # External named volumes for the stateful Gerrit site subdirs. Declared external:true
 # so `docker compose down -v` does NOT destroy them. compose-up.sh creates each one
 # (idempotently) as a local `bind` volume onto /var/gerrit/site/<subdir> on the EBS
