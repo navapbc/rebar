@@ -475,3 +475,48 @@ jobs:
           git config --global init.defaultBranch main
       - name: README quickstart golden-path (against the installed rebar)
         run: python scripts/check_readme_quickstart.py
+
+  # Artifact-provenance probe (story 6168). Builds the wheel + sdist the way `python -m
+  # build` does (sdist first, then wheel FROM the extracted sdist — a tree with no .git),
+  # then runs the same import/CLI/schema probes the release wheel-test/sdist-test jobs run
+  # and asserts a non-null baked `_build_info.COMMIT`. This catches the "wheel bakes
+  # COMMIT = None" packaging defect in ordinary CI, not only in a release run.
+  artifact-probe:
+    name: artifact provenance (wheel/sdist probe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Build wheel + sdist (REBAR_BUILD_COMMIT baked)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python -m pip install --upgrade pip build
+          REBAR_BUILD_COMMIT="${GITHUB_SHA::7}" python -m build
+      - name: Probe the built wheel (no source tree on the path)
+        run: |
+          python -m venv /tmp/wheel-probe
+          # shellcheck disable=SC1091
+          . /tmp/wheel-probe/bin/activate
+          pip install dist/*.whl
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'wheel baked COMMIT is empty/None'"
+      - name: Probe install-from-sdist (REBAR_BUILD_COMMIT unset, preserve-existing)
+        run: |
+          python -m venv /tmp/sdist-probe
+          # shellcheck disable=SC1091
+          . /tmp/sdist-probe/bin/activate
+          unset REBAR_BUILD_COMMIT
+          pip install --upgrade pip
+          pip install dist/*.tar.gz
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'sdist install lost the baked COMMIT'"

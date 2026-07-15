@@ -148,3 +148,47 @@ def test_docs_pinning_section() -> None:
     doc = RELEASING_DOC.read_text(encoding="utf-8")
     for needle in ("pip-compile --generate-hashes", "MCP publisher", "full-SHA"):
         assert needle in doc, f"docs/releasing.md Pinning section missing `{needle}`"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Story 6168 (build-once) extensions — checks (g)/(h)/(i)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_g_publish_hash_gated_no_rebuild() -> None:
+    """(g) The publish job verifies the bundle with `sha256sum -c SHA256SUMS` and does NOT
+    rebuild (no `python -m build` in publish) — it promotes the exact built bytes."""
+    registry = _wf()["jobs"]
+    assert "publish" in registry, "release.yml missing the publish job"
+    pub = yaml.safe_dump(registry["publish"])
+    assert "sha256sum -c SHA256SUMS" in pub, "publish must hash-gate the bundle before publishing"
+    assert "python -m build" not in pub, "publish must NOT rebuild — promote the built bytes"
+
+
+def test_h_wheel_and_sdist_test_jobs_with_probes() -> None:
+    """(h) A wheel-test job and an sdist-test job exist, each needs: the build-once job and
+    runs the named probes; sdist-test runs with REBAR_BUILD_COMMIT unset and asserts a
+    non-null baked COMMIT."""
+    jobs = _wf()["jobs"]
+    names = set(jobs)
+    wheel_job = next((n for n in names if "wheel" in n and "test" in n), None)
+    sdist_job = next((n for n in names if "sdist" in n and "test" in n), None)
+    assert wheel_job, "a wheel-test job is missing"
+    assert sdist_job, "an sdist-test job is missing"
+    wt = yaml.safe_dump(jobs[wheel_job])
+    st = yaml.safe_dump(jobs[sdist_job])
+    for probe in ("import rebar", "rebar --help", "rebar-mcp --help", "_build_info"):
+        assert probe in wt, f"wheel-test job missing probe: {probe}"
+    assert "_build_info.COMMIT" in wt, "wheel-test must assert a non-null baked COMMIT"
+    assert "_build_info.COMMIT" in st, "sdist-test must assert a non-null baked COMMIT"
+
+
+def test_i_build_once_bundle_with_sha256sums() -> None:
+    """(i) A single build-once job produces one bundle containing the wheel, the sdist, and a
+    SHA256SUMS file, and uploads the evidence-artifacts fragment consumed by consolidate."""
+    text = _text()
+    assert "SHA256SUMS" in text, "the build-once job must produce a SHA256SUMS file"
+    assert "REBAR_BUILD_COMMIT" in text, (
+        "the build-once job must set REBAR_BUILD_COMMIT before build"
+    )
+    assert "evidence-artifacts" in text, (
+        "the evidence-artifacts fragment (wheel/sdist sums) is missing"
+    )
