@@ -433,6 +433,15 @@ class McpConfig:
     auth_introspection_client_secret_env: str = ""
     auth_introspection_allow_private_host: bool = False
     auth_introspection_allow_missing_aud: bool = False
+    # Trusted-proxy verifier (S5): the `proxy` strategy's flat keys. A fronting proxy
+    # (oauth2-proxy / gateway / ALB) authenticates the caller and forwards the identity
+    # on a header; rebar trusts it ONLY when a shared-secret header matches. The secret is
+    # NEVER stored in config — auth_proxy_secret_env NAMES the env var holding it. Each key
+    # auto-derives a REBAR_MCP_<KEY_UPPER> env var.
+    auth_proxy_secret_env: str = ""
+    auth_proxy_secret_header: str = "x-proxy-auth"
+    auth_proxy_identity_header: str = "x-forwarded-user"
+    auth_proxy_scopes: tuple[str, ...] = ()
 
 
 @dataclass
@@ -610,6 +619,10 @@ _SECTIONS: dict[str, dict] = {
         "auth_introspection_client_secret_env": lambda v, k: _as_str(v, k),
         "auth_introspection_allow_private_host": lambda v, k: _as_bool(v, k),
         "auth_introspection_allow_missing_aud": lambda v, k: _as_bool(v, k),
+        "auth_proxy_secret_env": lambda v, k: _as_str(v, k),
+        "auth_proxy_secret_header": lambda v, k: _as_str(v, k),
+        "auth_proxy_identity_header": lambda v, k: _as_str(v, k),
+        "auth_proxy_scopes": lambda v, k: _as_str_tuple(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),

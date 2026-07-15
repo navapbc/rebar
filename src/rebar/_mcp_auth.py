@@ -23,6 +23,7 @@ token or secret substring is ever emitted.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import hmac
 import ipaddress
@@ -43,10 +44,111 @@ __all__ = [
     "IntrospectionError",
     "IntrospectionTokenVerifier",
     "JWKSTokenVerifier",
+    "PROXY_IDENTITY",
+    "ProxyAuthMiddleware",
+    "ProxyTokenVerifier",
     "StaticBearerVerifier",
     "build_composite_verifier",
     "redact",
 ]
+
+# Request-scoped trusted-proxy identity (S5). ``ProxyAuthMiddleware`` sets this per
+# request AFTER validating the shared-secret header; ``ProxyTokenVerifier`` reads it.
+# A ContextVar is the correct seam because the forwarded identity lives on HTTP headers
+# the token-only ``verify_token`` contract never sees, and each ASGI request runs in its
+# own context so the value never leaks across concurrent requests.
+PROXY_IDENTITY: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rebar_proxy_identity", default=None
+)
+
+
+def _normalize_header_name(name: bytes | str) -> str:
+    """Normalize a header name for comparison: decode, lowercase, ``_``→``-``. This
+    defeats underscore/case smuggling (``X_Forwarded_User`` / ``X-FORWARDED-USER``)."""
+    if isinstance(name, bytes):
+        name = name.decode("latin-1")
+    return name.lower().replace("_", "-")
+
+
+class ProxyAuthMiddleware:
+    """Pure-ASGI header-guard middleware for the trusted-proxy verifier (S5).
+
+    Runs BEFORE the MCP app. On every http request it strips the entire
+    ``X-Forwarded-*`` family plus the configured secret/identity headers (normalizing
+    underscore/case so a client cannot smuggle an identity), then — only if the inbound
+    secret header matches the shared secret in constant time AND an identity header is
+    present — records the identity in :data:`PROXY_IDENTITY` and appends a synthetic
+    ``Authorization: Bearer proxy`` header so the SDK's bearer backend invokes the
+    composite (which runs :class:`ProxyTokenVerifier`). Without a valid secret it sets
+    the identity to ``None`` and leaves any real ``Authorization`` header intact (having
+    stripped only the forwarded/secret/identity headers), so spoofed identity is never
+    trusted."""
+
+    def __init__(self, app, *, secret: str, secret_header: str, identity_header: str) -> None:
+        self._app = app
+        self._secret = secret
+        self._secret_header = _normalize_header_name(secret_header)
+        self._identity_header = _normalize_header_name(identity_header)
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+
+        inbound = scope.get("headers") or []
+        stripped: list[tuple[bytes, bytes]] = []
+        secret_value: str | None = None
+        identity_value: str | None = None
+        for raw_name, raw_value in inbound:
+            norm = _normalize_header_name(raw_name)
+            if norm == self._secret_header:
+                secret_value = raw_value.decode("latin-1")
+                continue  # never forward the secret header downstream
+            if norm == self._identity_header:
+                identity_value = raw_value.decode("latin-1")
+                continue  # captured; never forwarded as-is
+            if norm.startswith("x-forwarded"):
+                continue  # strip the whole forwarded family (anti-spoof)
+            stripped.append((raw_name, raw_value))
+
+        secret_ok = secret_value is not None and hmac.compare_digest(secret_value, self._secret)
+        if secret_ok and identity_value:
+            PROXY_IDENTITY.set(identity_value)
+            # Synthetic bearer so the SDK's BearerAuthBackend runs the composite (which
+            # includes ProxyTokenVerifier); the token string itself is ignored.
+            stripped.append((b"authorization", b"Bearer proxy"))
+        else:
+            PROXY_IDENTITY.set(None)
+
+        new_scope = dict(scope)
+        new_scope["headers"] = stripped
+        await self._app(new_scope, receive, send)
+
+
+class ProxyTokenVerifier:
+    """A ``TokenVerifier``-shaped component that maps the request-scoped proxy identity
+    (:data:`PROXY_IDENTITY`, set by :class:`ProxyAuthMiddleware` only on a valid shared
+    secret) to an :class:`AccessToken`. It IGNORES the token string — identity comes from
+    the ContextVar — and returns ``None`` when no proxy identity is present, so it flows
+    through the SAME composite (and its independent RFC 8707 audience re-check) as every
+    other verifier rather than around it."""
+
+    def __init__(self, *, resource: str, scopes) -> None:
+        self._resource = resource
+        self._scopes = tuple(scopes)
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        ident = PROXY_IDENTITY.get()
+        if ident is None:
+            return None
+        return AccessToken(
+            token=token,
+            client_id=ident,
+            scopes=list(self._scopes),
+            resource=self._resource,
+            expires_at=None,
+        )
+
 
 # Symmetric (HMAC) JWS algorithms — forbidden on a JWKS source. Configuring one
 # alongside a JWKS URI is the RS256↔HS256 key-confusion attack surface (an attacker
@@ -498,6 +600,23 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
                     resource=mcp_cfg.auth_resource_server_url,
                     allow_private_host=mcp_cfg.auth_introspection_allow_private_host,
                     allow_missing_aud=mcp_cfg.auth_introspection_allow_missing_aud,
+                )
+            )
+        elif strategy == "proxy":
+            # Fail-closed: the shared secret MUST be present + non-empty at startup, or
+            # the trusted-proxy verifier refuses to start (a proxy that can't prove
+            # itself must never be trusted). The secret is NEVER in config — the env var
+            # NAMED by auth_proxy_secret_env holds it.
+            secret = os.environ.get(mcp_cfg.auth_proxy_secret_env) or ""
+            if not secret:
+                raise AuthConfigError(
+                    f"mcp.auth_proxy_secret_env names env var "
+                    f"{mcp_cfg.auth_proxy_secret_env!r} which is unset or empty"
+                )
+            verifiers.append(
+                ProxyTokenVerifier(
+                    resource=mcp_cfg.auth_resource_server_url,
+                    scopes=mcp_cfg.auth_proxy_scopes,
                 )
             )
         else:
