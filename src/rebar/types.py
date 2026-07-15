@@ -219,13 +219,13 @@ class SignResult(TypedDict):
     algorithm: str
     signed_at: int
     ticket_id: str
-    signature: NotRequired[str | None]
-    key_id: NotRequired[str | None]
-    head_sha: NotRequired[str | None]
-    envelope: NotRequired[str | None]
-    principal: NotRequired[str | None]
+    envelope: str
+    principal: str
     material_fingerprint: NotRequired[str | None]
     merged_log_commit: NotRequired[str | None]
+    head_sha: NotRequired[str | None]
+    signature: NotRequired[str | None]
+    key_id: NotRequired[str | None]
 
 
 class VerifySignatureResult(TypedDict):

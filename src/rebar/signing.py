@@ -65,6 +65,12 @@ ALGORITHM = "HMAC-SHA256"
 # prior signature.
 PAYLOAD_VERSION = 1
 
+# The gated OP-CERT kinds (story 8f1d, contract phase): signed + accepted EXCLUSIVELY as
+# asymmetric op-certs (rebar.opcert.v1 DSSE/SSHSIG). The legacy symmetric HMAC scheme is retired
+# for them (a shared HMAC secret would let any verifier forge a verdict). The generic HMAC utility
+# (compute_signature / verify_record / .signing-key) is UNCHANGED for non-op-cert consumers.
+OPCERT_KINDS = frozenset({"plan-review", "completion-verifier"})
+
 
 class SigningError(Exception):
     """A signing/verification failure carrying a stderr message + exit code.
@@ -446,6 +452,32 @@ def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
     }
 
 
+def _hmac_opcert_not_certified(record: dict, kind: str) -> dict:
+    """Uniform not-certified verdict for a legacy HMAC record of an op-cert kind (story 8f1d).
+
+    HMAC is retired for ``OPCERT_KINDS``, so the record can never certify. Same base keys as
+    :func:`verify_record` (``compute_validity`` / ``signature_findings`` read it unchanged);
+    ``verdict='unknown_scheme'`` — the scheme is no longer accepted for this kind."""
+    raw_manifest = record.get("manifest")
+    manifest = raw_manifest if isinstance(raw_manifest, list) else []
+    return {
+        "manifest": manifest,
+        "step_count": len(manifest),
+        "algorithm": record.get("algorithm"),
+        "key_id": record.get("key_id") if isinstance(record.get("key_id"), str) else None,
+        "signed_at": record.get("signed_at"),
+        "head_sha": record.get("head_sha"),
+        "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
+        "rebar_version": rebar_version_from_manifest(manifest),
+        "verified": False,
+        "verdict": "unknown_scheme",
+        "reason": (
+            f"HMAC is a retired scheme for op-cert kind {kind!r}; this legacy HMAC "
+            "attestation no longer certifies — re-run the gate to re-issue an asymmetric op-cert"
+        ),
+    }
+
+
 def verify_attestation_record(
     record: dict | None,
     ticket_id: str,
@@ -467,10 +499,22 @@ def verify_attestation_record(
     op-cert verifier so it can enforce the SIGNED subject binding (cross-ticket / cross-kind replay
     defense, finding A). It is irrelevant to the legacy HMAC path. ``key`` is the HMAC secret for
     the legacy path; when omitted it is resolved read-only (a missing key never mints one).
-    ``repo_root`` locates the tracker for the op-cert principal + pubkey."""
+    ``repo_root`` locates the tracker for the op-cert principal + pubkey.
+
+    Contract phase (story 8f1d): the ``OPCERT_KINDS`` no longer accept the legacy HMAC scheme.
+    A non-envelope (HMAC) record whose effective kind is an op-cert kind reads NOT-certified
+    (``unknown_scheme``, validity-on-read, record never mutated); re-running the gate re-issues an
+    asymmetric op-cert. Non-op-cert HMAC records still verify through :func:`verify_record`."""
     record = record if isinstance(record, dict) else {}
     if record.get("envelope"):
         return verify_opcert_record(record, ticket_id, kind=kind, repo_root=repo_root)
+    # A legacy HMAC record: resolve its effective kind (explicit slot, else the SIGNED manifest[0]
+    # the reducer keys on) and refuse a genuine HMAC signature for the op-cert kinds.
+    from rebar.reducer._processors import attestation_kind
+
+    effective_kind = kind if kind is not None else attestation_kind(record.get("manifest"), record)
+    if effective_kind in OPCERT_KINDS and record.get("signature"):
+        return _hmac_opcert_not_certified(record, effective_kind)
     if key is None:
         key = signing_key(str(config.tracker_dir(repo_root)), create_if_missing=False)
     return verify_record(record, ticket_id, key)

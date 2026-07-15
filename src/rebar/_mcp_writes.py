@@ -235,13 +235,16 @@ def register_write_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
-        """Sign a manifest of verified steps with the environment signing key.
+        """Sign a manifest of verified steps as an asymmetric op-cert.
 
-        Computes an HMAC-SHA256 over the steps with this environment's key
-        (REBAR_SIGNING_KEY or the gitignored .signing-key) and records a
-        SIGNATURE event. Returns {ticket_id, manifest, algorithm, signature,
-        key_id, head_sha, signed_at}. Use verify_signature to certify it
-        later — only this environment (holding the key) can certify."""
+        Mints a rebar.opcert.v1 DSSE op-cert over the steps with this
+        environment's Ed25519 key (the gitignored .opcert-key) and records a
+        SIGNATURE event. Returns {ticket_id, manifest, algorithm:'sshsig',
+        envelope, principal, material_fingerprint, merged_log_commit,
+        head_sha, signed_at}. The op-cert kinds (plan-review /
+        completion-verifier) are signed and accepted ONLY as op-certs — the
+        legacy symmetric HMAC scheme is retired for them (story 8f1d). Use
+        verify_signature to certify it later."""
         return SignResultOut.model_validate(rebar.sign_manifest(ticket_id, manifest))
 
     @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
