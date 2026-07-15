@@ -22,12 +22,16 @@ token or secret substring is ever emitted.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from mcp.server.auth.provider import AccessToken
 
@@ -36,10 +40,17 @@ logger = logging.getLogger("rebar.mcp.auth")
 __all__ = [
     "AuthConfigError",
     "CompositeTokenVerifier",
+    "JWKSTokenVerifier",
     "StaticBearerVerifier",
     "build_composite_verifier",
     "redact",
 ]
+
+# Symmetric (HMAC) JWS algorithms — forbidden on a JWKS source. Configuring one
+# alongside a JWKS URI is the RS256↔HS256 key-confusion attack surface (an attacker
+# signs HS256 using the published RSA public key as the HMAC secret), so we refuse
+# start. Closed, explicitly-enumerated family; case-insensitive match.
+_SYMMETRIC_ALGS: frozenset[str] = frozenset({"HS256", "HS384", "HS512"})
 
 # The CLOSED strategy vocabulary. Adding a name here (and a builder branch below) is how
 # a later story lands a new verifier; an entry outside this set is a hard startup error.
@@ -92,6 +103,185 @@ class StaticBearerVerifier:
         return None
 
 
+class JWKSTokenVerifier:
+    """A provider-generic OIDC/JWT verifier backed by a JWKS endpoint (S3).
+
+    Validates a JWT's signature against keys fetched from ``jwks_uri`` (via PyJWT's
+    ``PyJWKClient``) under a PINNED, asymmetric-only algorithm allowlist, plus the
+    ``iss``/``aud``/``exp``/``nbf`` claims and (optionally) the header ``typ``. It never
+    derives the algorithm from the token header (RFC 8725), so ``alg:none`` and
+    RS256↔HS256 confusion are structurally impossible.
+
+    Construction is fail-closed: a symmetric algorithm alongside a JWKS source, a
+    non-HTTPS URI, or a private/link-local/loopback literal-IP host (unless
+    ``allow_private_jwks_host``) each raise :class:`AuthConfigError`.
+
+    The blocking JWKS HTTP fetch is offloaded via :func:`asyncio.to_thread` so it never
+    blocks the event loop, and an unknown-``kid`` refetch cooldown — a check-and-update of
+    the last-refetch timestamp made atomic under an ``asyncio.Lock`` — bounds a
+    random-``kid`` flood to at most one fetch per cooldown window even under concurrency."""
+
+    def __init__(
+        self,
+        *,
+        jwks_uri: str,
+        issuer: str,
+        resource: str,
+        algorithms,
+        leeway: int,
+        refetch_cooldown: int,
+        timeout: int,
+        expected_typ: str,
+        allow_private_jwks_host: bool,
+    ) -> None:
+        import jwt  # lazy: pyjwt ships in the optional [mcp] extra
+
+        self._algorithms = tuple(algorithms)
+        # Algorithm pinning: refuse any symmetric family member on a JWKS source.
+        for alg in self._algorithms:
+            if alg.upper() in _SYMMETRIC_ALGS:
+                raise AuthConfigError(
+                    f"symmetric algorithm {alg!r} is not allowed on a JWKS source "
+                    f"(asymmetric-only: RS*/PS*/ES*/EdDSA) — RS256/HS256 confusion guard"
+                )
+        if not self._algorithms:
+            raise AuthConfigError("mcp.auth_jwt_algorithms must list at least one algorithm")
+
+        # SSRF guards on the JWKS URI (construction-time; DNS is NOT resolved here).
+        parsed = urlparse(jwks_uri)
+        if parsed.scheme != "https":
+            raise AuthConfigError(
+                f"mcp.auth_jwt_jwks_uri must be an https:// URL (got scheme {parsed.scheme!r})"
+            )
+        host = parsed.hostname or ""
+        if not allow_private_jwks_host:
+            try:
+                ip = ipaddress.ip_address(host)
+            except ValueError:
+                ip = None  # a DNS name (not a literal IP) is allowed; not resolved here
+            if ip is not None and (ip.is_loopback or ip.is_private or ip.is_link_local):
+                raise AuthConfigError(
+                    f"mcp.auth_jwt_jwks_uri host {host!r} is private/link-local/loopback; "
+                    f"set mcp.auth_jwt_allow_private_jwks_host=true to permit it"
+                )
+
+        self._jwks_uri = jwks_uri
+        self._issuer = issuer
+        self._resource = resource
+        self._leeway = leeway
+        self._refetch_cooldown = refetch_cooldown
+        self._expected_typ = expected_typ
+        # Pass timeout as a KEYWORD so PyJWKClient's fetch is bounded (a test asserts this).
+        self._client = jwt.PyJWKClient(jwks_uri, timeout=timeout)
+
+        # Concurrency-safe unknown-kid refetch cooldown state.
+        self._lock = asyncio.Lock()
+        self._known_kids: set[str] = set()
+        self._last_refetch: float | None = None
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        import jwt
+
+        try:
+            header = jwt.get_unverified_header(token)
+        except jwt.InvalidTokenError as exc:
+            logger.debug("jwks verifier: bad header: %s", redact(str(exc), token))
+            return None
+
+        # Cross-JWT-confusion typ check (RFC 8725 §3.11), only when configured.
+        if self._expected_typ and header.get("typ") != self._expected_typ:
+            return None
+
+        kid = header.get("kid") or ""
+        signing_key = await self._resolve_signing_key(token, kid)
+        if signing_key is None:
+            return None
+
+        try:
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=list(self._algorithms),
+                audience=self._resource,
+                issuer=self._issuer,
+                leeway=self._leeway,
+                options={"require": ["exp"]},
+            )
+        except jwt.InvalidTokenError as exc:
+            logger.debug("jwks verifier: invalid token: %s", redact(str(exc), token))
+            return None
+
+        scopes = _split_scopes(claims)
+        return AccessToken(
+            token=token,
+            client_id=claims.get("sub", ""),
+            scopes=scopes,
+            resource=self._resource,
+            expires_at=int(claims["exp"]),
+        )
+
+    async def _resolve_signing_key(self, token: str, kid: str):
+        """Resolve the JWKS signing key, cooldown-gating fetches for unknown kids.
+
+        Returns the signing key, or ``None`` when the kid is unknown-and-cooldown-gated
+        or the JWKS fetch fails (a fetch failure surfaces as deny to the composite). The
+        check-and-update of the last-refetch timestamp is atomic under a lock so a burst
+        of distinct unknown kids triggers at most one fetch per cooldown window."""
+        import jwt
+
+        async with self._lock:
+            if kid not in self._known_kids:
+                now = time.monotonic()
+                if (
+                    self._last_refetch is not None
+                    and self._refetch_cooldown > 0
+                    and now - self._last_refetch < self._refetch_cooldown
+                ):
+                    # Cooldown window still open for a previously-attempted fetch: deny
+                    # without fetching (flood guard).
+                    return None
+                # Timestamp on every ATTEMPT (success OR failure) so a failing endpoint
+                # cannot be used to bypass the flood guard.
+                self._last_refetch = now
+                try:
+                    signing_key = await asyncio.to_thread(
+                        self._client.get_signing_key_from_jwt, token
+                    )
+                except (jwt.InvalidTokenError, jwt.exceptions.PyJWKClientError, OSError) as exc:
+                    logger.debug("jwks verifier: key fetch failed: %s", redact(str(exc), token))
+                    return None
+                self._known_kids.add(kid)
+                return signing_key
+
+        # Known kid: no cooldown gate. The client caches keys, so this does not refetch.
+        try:
+            return await asyncio.to_thread(self._client.get_signing_key_from_jwt, token)
+        except (jwt.InvalidTokenError, jwt.exceptions.PyJWKClientError, OSError) as exc:
+            logger.debug("jwks verifier: key resolve failed: %s", redact(str(exc), token))
+            return None
+
+
+def _split_scopes(claims: dict) -> list[str]:
+    """Map an OAuth token's scopes to a list: space-delimited ``scope`` plus a list
+    (or space-delimited string) ``scp`` claim, de-duplicated preserving order."""
+    scopes: list[str] = []
+    raw_scope = claims.get("scope", "")
+    if isinstance(raw_scope, str):
+        scopes.extend(raw_scope.split())
+    scp = claims.get("scp", [])
+    if isinstance(scp, str):
+        scopes.extend(scp.split())
+    elif isinstance(scp, (list, tuple)):
+        scopes.extend(str(s) for s in scp)
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in scopes:
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 class CompositeTokenVerifier:
     """An ordered chain of verifiers that is the SINGLE audience/fail-closed choke point.
 
@@ -141,6 +331,20 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
                 StaticBearerVerifier(
                     tokens_file=mcp_cfg.auth_static_tokens_file,
                     resource=mcp_cfg.auth_resource_server_url,
+                )
+            )
+        elif strategy == "jwt":
+            verifiers.append(
+                JWKSTokenVerifier(
+                    jwks_uri=mcp_cfg.auth_jwt_jwks_uri,
+                    issuer=mcp_cfg.auth_jwt_issuer or mcp_cfg.auth_issuer_url,
+                    resource=mcp_cfg.auth_resource_server_url,
+                    algorithms=mcp_cfg.auth_jwt_algorithms,
+                    leeway=mcp_cfg.auth_jwt_leeway,
+                    refetch_cooldown=mcp_cfg.auth_jwt_jwks_refetch_cooldown,
+                    timeout=mcp_cfg.auth_jwt_jwks_timeout,
+                    expected_typ=mcp_cfg.auth_jwt_expected_typ,
+                    allow_private_jwks_host=mcp_cfg.auth_jwt_allow_private_jwks_host,
                 )
             )
         else:
