@@ -18,6 +18,7 @@ Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
 
 ```
 Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-review history + completion attestation/sidecar + associated code reviews; --output defaults to json)
+       rebar audit serve [--host 127.0.0.1] [--port 8765]   (start the optional, read-only audit web UI; disabled by default — enable with `[ui] enabled = true` and install the `nava-rebar[ui]` extra; binds loopback unless --host is overridden)
 ```
 
 ### `bridge-fsck`

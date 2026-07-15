@@ -137,6 +137,12 @@ mcp.readonly         = false
 mcp.allow_llm        = false
 mcp.allow_jira_sync  = false   # live (applying) Jira writes (env REBAR_MCP_ALLOW_JIRA_SYNC)
 
+# audit web UI (optional, read-only)
+ui.enabled = false   # gates `rebar audit serve` — the disabled-by-default, loopback-bound
+                     # read-only audit web UI (env REBAR_UI_ENABLED). When false, no web
+                     # dependency is imported and `serve` refuses to start; enabling it also
+                     # requires the `nava-rebar[ui]` extra.
+
 # scratch space
 scratch.base_dir = ""   # default <repo>/.rebar/scratch (env REBAR_SCRATCH_BASE_DIR; alias SCRATCH_BASE_DIR)
 
