@@ -333,14 +333,18 @@ persists across a series of edits and lapses to a normal full review only after 
 goes idle). Any precondition failing → a **byte-identical full review**. The
 **evidence gate** completes the triple gate and is likewise always-on.
 
-> **Known limitation — the floor does not engage during BLOCK loops.** Eligibility's
-> baseline is the prior **certified PASS** signature (the signed manifest supplies the
-> material/SHA/registry reference points), and a BLOCK verdict never signs — so a
-> ticket iterating under consecutive BLOCK verdicts never qualifies for remediation
-> mode, and its advisory volume is never floored. Post-flip field data (2026-07-14):
-> 287/382 plan reviews ineligible, 240 of them because no certified signature existed.
-> Story `a850-1392-55b0-4514` (epic `deadsmooth-provincial-shrew`) rekeys eligibility
-> to fall back to the prior `REVIEW_RESULT` sidecar so BLOCK loops qualify. Field evidence (782
+> **Two eligibility baselines — signature first, sidecar fallback (story a850).** When a
+> valid **certified PASS** signature exists, it supplies the material/SHA/registry
+> reference points exactly as originally designed (`baseline: "signature"`, byte-identical
+> decision shape). When none exists — the BLOCK-loop regime, since a BLOCK never signs —
+> eligibility falls back to the prior `REVIEW_RESULT` payload (`baseline: "sidecar"`),
+> which since story a850 stamps `material_fingerprint` + `verified_at_sha` + `regver` on
+> every verdict (PASS and BLOCK alike; in local-mode reads the SHA falls back to the
+> committed git HEAD so local BLOCK loops still qualify). The sidecar branch's reasons are
+> exactly `{sidecar_baseline, plan_changed, code_unchanged, registry_unchanged,
+> within_window}`; a pre-a850 sidecar without the stamps simply fails `sidecar_baseline`
+> (fail-safe). Field motivation (2026-07-14): 287/382 post-flip reviews were ineligible,
+> 240 of them only because no certified signature existed. Field evidence (782
 post-recalibration runs: 32% verdict instability on byte-identical plans, 95% of remediation
 edits minting new findings) motivated making both unconditional; the `discriminates_novelty`
 eval (`rebar prompt eval plan-review-novelty`) remains available to re-run.

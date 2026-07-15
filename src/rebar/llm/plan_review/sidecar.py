@@ -57,7 +57,7 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
 
     try:
         tracker = _config.tracker_dir(repo_root)
-        payload = build_payload(verdict, material=material)
+        payload = build_payload(verdict, material=material, repo_root=repo_root)
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the review
         # Observability floor: the sidecar is best-effort observability — a failed emit
@@ -376,7 +376,37 @@ def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
         return []
 
 
-def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> dict[str, Any]:
+def review_code_sha(repo_root=None) -> str | None:
+    """The review-time code SHA, by the SAME two-step rule on both the emit side (the
+    ``verified_at_sha`` stamp below) and the eligibility-check side
+    (``attest.remediation_mode_candidate``'s sidecar branch): the active gate-snapshot SHA
+    (``current_code_sha()``, a ContextVar reader) when present, else the committed git HEAD of
+    ``repo_root`` (local-mode reads have no snapshot — without this fallback the sidecar
+    eligibility baseline would be structurally inert exactly in local BLOCK loops), else None
+    (best-effort; never raises)."""
+    try:
+        from rebar.llm.config import current_code_sha
+
+        sha = current_code_sha()
+        if sha:
+            return sha
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_root) if repo_root else None,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return out.stdout.strip() or None
+    except Exception:  # noqa: BLE001 — best-effort: no resolvable SHA → None (baseline precondition fails)
+        return None
+
+
+def build_payload(
+    verdict: dict[str, Any], *, material: str | None = None, repo_root=None
+) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates
     offline by joining on ticket_id + finding id), plus the coverage record and the
@@ -445,6 +475,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "group_criteria": f.get("group_criteria"),
         }
 
+    _baseline_sha = review_code_sha(repo_root)
+    try:
+        from .manifest import registry_version
+
+        _baseline_regver = registry_version(repo_root)
+    except Exception:  # noqa: BLE001 — best-effort baseline stamp; None fails the precondition later
+        _baseline_regver = None
     all_findings = (
         verdict.get("blocking", [])
         + verdict.get("advisory", [])
@@ -459,6 +496,13 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "ticket_id": verdict.get("ticket_id"),
         "ticket_type": verdict.get("ticket_type"),
         "material_fingerprint": material,
+        # Remediation-eligibility baseline (story a850): the review-time code SHA + registry
+        # version, stamped on EVERY verdict (PASS and BLOCK alike, always self-sourced at emit)
+        # so a BLOCK loop leaves a usable baseline even though a BLOCK never signs. Sourcing
+        # failures stamp None (emit stays best-effort); an absent/None field simply fails the
+        # sidecar-branch precondition (fail-safe).
+        "verified_at_sha": _baseline_sha,
+        "regver": _baseline_regver,
         "model": verdict.get("model"),
         "runner": verdict.get("runner"),
         # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage for

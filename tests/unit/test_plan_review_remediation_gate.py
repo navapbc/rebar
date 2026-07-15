@@ -45,6 +45,7 @@ def _setup(
     cur_regver: str = "REG1",
     prior_findings=_DEFAULT,
     last_ts: int | None = 1_000 * _MIN_NS,
+    sidecar_baseline: bool = True,
 ) -> None:
     if prior_findings is _DEFAULT:
         prior_findings = [{"finding": "the prior defect"}]
@@ -63,10 +64,21 @@ def _setup(
         sidecar,
         "latest_review_result",
         lambda tid, repo_root=None: (
-            {"findings": prior_findings} if prior_findings is not None else None
+            {
+                "findings": prior_findings,
+                # story a850: every sidecar stamps the eligibility baseline; tests control
+                # presence via sidecar_baseline (None values = a pre-a850 / failed-stamp payload).
+                "material_fingerprint": prior_material if sidecar_baseline else None,
+                "verified_at_sha": prior_sha if sidecar_baseline else None,
+                "regver": prior_regver if sidecar_baseline else None,
+            }
+            if prior_findings is not None
+            else None
         ),
     )
     monkeypatch.setattr(sidecar, "latest_review_timestamp", lambda tid, repo_root=None: last_ts)
+    # the sidecar branch resolves its CURRENT side through review_code_sha (one rule, both sides)
+    monkeypatch.setattr(sidecar, "review_code_sha", lambda repo_root=None: cur_sha)
 
 
 def _decide(now_ns: int = 1_000 * _MIN_NS + 5 * _MIN_NS) -> dict:
@@ -81,11 +93,62 @@ def test_all_preconditions_met_is_eligible(monkeypatch) -> None:
     assert all(d["reasons"].values())
 
 
-def test_no_signature_not_eligible(monkeypatch) -> None:
-    _setup(monkeypatch, signed=False)
+def test_no_signature_no_sidecar_baseline_not_eligible(monkeypatch) -> None:
+    """No signature AND no usable sidecar baseline (a pre-a850 payload without the stamps) →
+    ineligible, decided by the SIDECAR branch (no `signed` key there)."""
+    _setup(monkeypatch, signed=False, sidecar_baseline=False)
     d = _decide()
     assert d["eligible"] is False
-    assert d["reasons"]["signed"] is False
+    assert d["baseline"] == "sidecar"
+    assert d["reasons"]["sidecar_baseline"] is False
+    assert "signed" not in d["reasons"]
+
+
+def test_no_signature_with_sidecar_baseline_is_eligible(monkeypatch) -> None:
+    """The a850 headline case: a BLOCK loop (no signature ever minted) with a stamped prior
+    sidecar, plan changed, code + registry unchanged, within window → ELIGIBLE."""
+    _setup(monkeypatch, signed=False)
+    d = _decide()
+    assert d["eligible"] is True
+    assert d["baseline"] == "sidecar"
+    assert set(d["reasons"]) == {
+        "sidecar_baseline",
+        "plan_changed",
+        "code_unchanged",
+        "registry_unchanged",
+        "within_window",
+    }
+
+
+def test_sidecar_branch_code_drift_not_eligible(monkeypatch) -> None:
+    _setup(monkeypatch, signed=False, cur_sha="sha-drifted")
+    d = _decide()
+    assert d["eligible"] is False
+    assert d["reasons"]["code_unchanged"] is False
+
+
+def test_sidecar_branch_registry_skew_not_eligible(monkeypatch) -> None:
+    _setup(monkeypatch, signed=False, cur_regver="REG2")
+    d = _decide()
+    assert d["eligible"] is False
+    assert d["reasons"]["registry_unchanged"] is False
+
+
+def test_signature_branch_unchanged_and_tagged(monkeypatch) -> None:
+    """A valid signature keeps today's decision shape verbatim (plus the baseline tag) —
+    the sidecar fallback is not consulted."""
+    _setup(monkeypatch)
+    d = _decide()
+    assert d["eligible"] is True
+    assert d["baseline"] == "signature"
+    assert set(d["reasons"]) == {
+        "signed",
+        "plan_changed",
+        "code_unchanged",
+        "registry_unchanged",
+        "prior_sidecar",
+        "within_window",
+    }
 
 
 def test_plan_unchanged_not_eligible(monkeypatch) -> None:

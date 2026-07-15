@@ -193,14 +193,16 @@ def remediation_mode_candidate(
     preconditions (ALL required):
 
     - ``signed`` — a certified prior plan-review signature exists (the baseline the SHA/regver/
-      material are read from).
+      material are read from). With NO usable plan-review signature (a BLOCK loop — a BLOCK
+      never signs) the decision falls through to :func:`_sidecar_branch_decision`, whose
+      baseline is the prior ``REVIEW_RESULT`` payload; the decision dict carries
+      ``baseline: "signature" | "sidecar"``.
     - ``plan_changed`` — the current plan material fingerprint differs from the prior signed one
       (an edited plan — else there is nothing to re-review under the floor).
-    - ``code_unchanged`` — the current run's ``verified_at_sha`` equals the prior signed one (the
-      reviewed code did not drift; reuses the already-signed snapshot ref, no new diff machinery).
+    - ``code_unchanged`` — the current run's ``verified_at_sha`` equals the prior signed one
+      (the reviewed code did not drift; reuses the already-signed snapshot ref).
     - ``registry_unchanged`` — the criteria-routing registry version equals the prior signed one.
-    - ``prior_sidecar`` — a prior ``REVIEW_RESULT`` sidecar WITH finding text is available (the
-      Pass-2 novelty sub-call's prior findings — child e344).
+    - ``prior_sidecar`` — a prior ``REVIEW_RESULT`` sidecar WITH finding text exists (child e344).
     - ``within_window`` — the last review of ANY kind (the newest sidecar) is within
       ``window_minutes``, measured from that last review (RESET on each review).
 
@@ -225,10 +227,23 @@ def remediation_mode_candidate(
     # The gate is fail-safe: a broken signal can only DENY remediation mode, never crash the
     # plan review it gates.
     try:
-        result = signing.verify_signature(ticket_id, repo_root=repo_root)
-        manifest = result.get("manifest") if result.get("verified") else None
+        # Baseline resolution (story a850): the SIGNATURE branch is authoritative when a valid
+        # certified plan-review manifest exists. BOTH no-usable-signature paths (verification
+        # error; non-plan-review manifest) fall through to the SIDECAR branch — a BLOCK never
+        # signs, so without the fallback the floor was inert in exactly the BLOCK-loop regime.
+        manifest = None
+        try:
+            result = signing.verify_signature(ticket_id, repo_root=repo_root)
+            manifest = result.get("manifest") if result.get("verified") else None
+        except Exception:  # noqa: BLE001 — a broken signature read falls through to the sidecar branch
+            manifest = None
         if not is_plan_review_manifest(manifest):
-            return {"eligible": False, "reasons": reasons}
+            return _sidecar_branch_decision(
+                ticket_id,
+                window_minutes=window_minutes,
+                now_ns=now_ns,
+                repo_root=repo_root,
+            )
         reasons["signed"] = True
 
         # plan CHANGED: the current material fingerprint differs from the prior signed one.
@@ -278,9 +293,58 @@ def remediation_mode_candidate(
         logger.warning(
             "remediation-mode candidate check failed; treating as not eligible", exc_info=True
         )
-        return {"eligible": False, "reasons": reasons}
+        return {"eligible": False, "reasons": reasons, "baseline": "signature"}
 
-    return {"eligible": all(reasons.values()), "reasons": reasons}
+    return {"eligible": all(reasons.values()), "reasons": reasons, "baseline": "signature"}
+
+
+def _sidecar_branch_decision(
+    ticket_id: str, *, window_minutes: int, now_ns: int | None, repo_root=None
+) -> dict[str, Any]:
+    """The SIDECAR-baseline eligibility branch (story a850), used only when no valid certified
+    plan-review manifest exists (a BLOCK loop — a BLOCK never signs). Baselines come from the
+    most recent ``REVIEW_RESULT`` payload (stamped since a850). The reasons dict has EXACTLY
+    the five keys below — ``sidecar_baseline`` subsumes prior-sidecar existence, no ``signed``
+    key — so ``eligible = all(reasons.values())`` cannot be structurally inert. Fail-safe:
+    any read error → that precondition stays False → full review."""
+    from . import sidecar
+
+    reasons: dict[str, bool] = {
+        "sidecar_baseline": False,
+        "plan_changed": False,
+        "code_unchanged": False,
+        "registry_unchanged": False,
+        "within_window": False,
+    }
+    try:
+        prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
+        base_material = (prior or {}).get("material_fingerprint")
+        base_sha = (prior or {}).get("verified_at_sha")
+        base_regver = (prior or {}).get("regver")
+        reasons["sidecar_baseline"] = bool(base_material and base_sha and base_regver)
+        current_material = current_material_fingerprint(ticket_id, repo_root=repo_root)
+        reasons["plan_changed"] = (
+            base_material is not None
+            and current_material is not None
+            and current_material != base_material
+        )
+        # Both sides come from ONE rule (review_code_sha: snapshot SHA else git HEAD).
+        reasons["code_unchanged"] = bool(base_sha) and base_sha == sidecar.review_code_sha(
+            repo_root
+        )
+        reasons["registry_unchanged"] = base_regver is not None and base_regver == registry_version(
+            repo_root
+        )
+        last_ts = sidecar.latest_review_timestamp(ticket_id, repo_root=repo_root)
+        if last_ts is not None:
+            current_ns = now_ns if now_ns is not None else time.time_ns()
+            reasons["within_window"] = (
+                0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
+            )
+    except Exception:  # noqa: BLE001 — fail-safe: any read error → not eligible → full review, never crash
+        logger.warning("remediation sidecar-branch check failed; not eligible", exc_info=True)
+        return {"eligible": False, "reasons": reasons, "baseline": "sidecar"}
+    return {"eligible": all(reasons.values()), "reasons": reasons, "baseline": "sidecar"}
 
 
 def refresh_attestation(
