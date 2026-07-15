@@ -72,6 +72,57 @@ def test_spec_alignment_batch_case_runs() -> None:
     assert sc.score("recall_on_gaps_and_conflicts", case, out).passed is True
 
 
+def _novelty_fake(answer: str) -> FakeRunner:
+    """A FakeRunner canned as the novelty sub-call's structured output: one novelties item
+    answering all three matches-prior sub-answers with ``answer`` (``"no"`` → novelty 1.0,
+    ``"yes"`` → 0.0)."""
+    return FakeRunner(
+        structured={
+            "novelties": [
+                {
+                    "index": 0,
+                    "matches_prior": {
+                        "restates_prior_defect": answer,
+                        "cites_prior_location": answer,
+                        "matches_prior_fix": answer,
+                    },
+                    "matched_prior_id": "" if answer == "no" else "prior-1",
+                }
+            ]
+        }
+    )
+
+
+def test_plan_review_novelty_novel_case_routes_and_scores() -> None:
+    # bug cuddlesome-titanous-seamonkey: plan-review-novelty must dispatch (no ValueError)
+    # and return the {"novelty": float} shape the discriminates_novelty scorer reads.
+    case = {
+        "id": "N1-novel",
+        "pair": "idempotency",
+        "kind": "novel",
+        "expect": "high_novelty",
+        "prior_finding": "The plan states no idempotency test; a retried webhook double-charges.",
+        "finding": "The migration drops the legacy table before the backfill completes.",
+    }
+    out = eval_solver.run_case("plan-review-novelty", case, runner=_novelty_fake("no"))
+    assert out["novelty"] == 1.0
+    assert sc.score("discriminates_novelty", case, out).passed is True
+
+
+def test_plan_review_novelty_carryover_case_routes_and_scores() -> None:
+    case = {
+        "id": "N1-carryover",
+        "pair": "idempotency",
+        "kind": "carryover",
+        "expect": "low_novelty",
+        "prior_finding": "The plan states no idempotency test; a retried webhook double-charges.",
+        "finding": "A duplicate webhook delivery is not guarded by an idempotency check.",
+    }
+    out = eval_solver.run_case("plan-review-novelty", case, runner=_novelty_fake("yes"))
+    assert out["novelty"] == 0.0
+    assert sc.score("discriminates_novelty", case, out).passed is True
+
+
 def test_fixture_files_are_written_into_the_store() -> None:
     case = {"id": "f1", "expect": "pass", "files": {"a/b.txt": "hello"}}
     with eval_solver.case_store(case) as root:

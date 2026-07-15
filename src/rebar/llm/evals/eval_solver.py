@@ -103,6 +103,50 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
     return {"findings": list(findings)}
 
 
+def _run_novelty_case(case: dict, *, runner: Runner, repo_root: str | None) -> dict:
+    """Run the plan-review Pass-2 NOVELTY sub-call (child 150b) over ONE labeled
+    {carryover, novel} case: the case's current ``finding`` is scored against its
+    ``prior_finding`` through the SAME ``score_novelty`` kernel path the Pass-3 rising
+    floor uses, mirroring the RunRequest wiring in ``plan_review._score_floor_novelty``.
+    Inline text — no ``case_store`` / ticket scaffolding. Returns ``{"novelty": <float>}``,
+    the shape the ``discriminates_novelty`` scorer reads (bug cuddlesome-titanous-seamonkey)."""
+    from rebar.llm.config import resolve_gate_config
+    from rebar.llm.plan_review import passes
+    from rebar.llm.review_kernel.verify import score_novelty
+    from rebar.llm.runner import RunRequest
+
+    cfg = resolve_gate_config(repo_root)
+    plan = case.get("plan") or case.get("input") or ""
+    system = passes._resolve_system(passes.PASS_NOVELTY, plan, cfg)
+    # ``criteria`` is required by the kernel finding listing (finding_listing); an eval
+    # case carries none, so it is empty.
+    findings: list[dict] = [{"finding": case.get("finding") or "", "criteria": []}]
+    prior = [{"id": case.get("pair") or "prior-1", "finding": case.get("prior_finding") or ""}]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        req = RunRequest(
+            system_prompt=system,
+            instructions=f"{instructions}\n\n## Prior-review findings (context)\n{context}",
+            config=cfg,
+            reviewers=["plan-novelty"],
+            mode="structured",
+            output_schema="plan_review_novelty",
+            execution_mode="single_turn",
+        )
+        return runner.run(req).get("novelties", []) or []
+
+    novelty_map = score_novelty(
+        findings,
+        prior_findings=prior,
+        run_chunk=run_chunk,
+        window_tokens=100_000,
+        est_tokens=lambda s: len(s) // 4 + 1,
+    )
+    # One finding at index 0; score_novelty's fail-safe maps a failed/malformed sub-call
+    # to 0.0 (carryover), so a broken live run surfaces as the novel cases failing.
+    return {"novelty": novelty_map.get(0, 0.0)}
+
+
 def _code_review_prompt_id(prompt_id: str) -> str | None:
     """Resolve ``prompt_id`` to a code-review PROMPT id this arm can eval as a single-prompt
     run over a case's diff, else ``None``. The evaluable set is the base reviewer
@@ -161,13 +205,13 @@ def run_case(
     ``runner`` is a ``FakeRunner`` offline or the config/live runner in CI. A ``prompt_id`` that
     names a plan-review criterion (built-in or activated project criterion, bare or
     ``plan-review-<id>``) runs as its Pass-1 finder over ``case['input']`` (no store scaffolding);
-    the three agentic reviewers keep their disposable-store path. ``repo_root`` (default
-    ``config.repo_root()``) is the root the criterion registry/overlay resolves against. Raises
-    ``ValueError`` for an unknown, non-criterion ``prompt_id``."""
+    ``plan-review-novelty`` runs the Pass-2 novelty sub-call over the case's
+    ``finding``/``prior_finding`` pair; the three agentic reviewers keep their disposable-store
+    path. ``repo_root`` (default ``config.repo_root()``) is the root the criterion
+    registry/overlay resolves against. Raises ``ValueError`` for an unknown, non-criterion
+    ``prompt_id``."""
     from rebar.llm import completion, operations, spec_scan
 
-    # Criterion arm (story 55b8): a plan-review criterion is a finder over inline text — no
-    # disposable store. Checked FIRST so a criterion id never falls through to case_store.
     if repo_root is None:
         from rebar import config as _config
 
@@ -175,6 +219,18 @@ def run_case(
             repo_root = str(_config.repo_root())
         except Exception:  # noqa: BLE001 — no repo ⇒ packaged criteria only
             repo_root = None
+
+    # Novelty arm (bug cuddlesome-titanous-seamonkey): the Pass-2 novelty sub-call scores a
+    # case's finding against its prior_finding — inline text, no disposable store. Checked by
+    # EXACT id BEFORE the criterion arm, which would otherwise strip the prefix and misread
+    # the id as a (nonexistent) criterion "novelty".
+    from rebar.llm.plan_review import passes as _passes
+
+    if prompt_id == _passes.PASS_NOVELTY:
+        return _run_novelty_case(case, runner=runner, repo_root=repo_root)
+
+    # Criterion arm (story 55b8): a plan-review criterion is a finder over inline text — no
+    # disposable store. Checked before case_store so a criterion id never falls through.
     cid = _criterion_id(prompt_id, repo_root)
     if cid is not None:
         return _run_criterion_case(cid, case, runner=runner, repo_root=repo_root)
