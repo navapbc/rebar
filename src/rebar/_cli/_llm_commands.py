@@ -533,8 +533,24 @@ def _render_plan_review_text(result: dict) -> None:
         f"overflow={overflow} "
         f"dropped={counts.get('dropped', 0)} indeterminate={counts.get('indeterminate', 0)}\n"
     )
-    for f in result.get("blocking", []):
-        sys.stdout.write(f"  [BLOCK {','.join(f.get('criteria', []))}] {f.get('finding', '')}\n")
+    blocking = result.get("blocking", [])
+    group_sizes: dict = {}
+    for f in blocking:
+        if f.get("group_id"):
+            group_sizes[f["group_id"]] = group_sizes.get(f["group_id"], 0) + 1
+    for f in blocking:
+        # Fix-unit grouping (story 5e64): render only each group's primary — the folded
+        # members are the same defect co-cited by other criteria, summarized by the suffix.
+        if f.get("group_id") and not f.get("is_primary"):
+            continue
+        suffix = ""
+        folded = group_sizes.get(f.get("group_id"), 1) - 1
+        if folded and f.get("group_criteria"):
+            others = [c for c in f["group_criteria"] if c not in (f.get("criteria") or [])]
+            suffix = f"  (+{folded} co-criteria: {', '.join(others)})"
+        sys.stdout.write(
+            f"  [BLOCK {','.join(f.get('criteria', []))}] {f.get('finding', '')}{suffix}\n"
+        )
     for f in result.get("advisory", []):
         sys.stdout.write(
             f"  [advisory {','.join(f.get('criteria', []))} "

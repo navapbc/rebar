@@ -293,6 +293,35 @@ def _classify_completion(
         return {}
 
 
+def _group_blocking_fix_units(verdict: dict[str, Any]) -> None:
+    """Blocking fix-unit grouping (story 5e64): one plan defect co-cited by N criteria mints N
+    blocking findings (observed x10, ticket a879). STAMP-ONLY — no finding ever leaves
+    ``verdict["blocking"]`` (the sidecar's ``build_payload`` concatenates the existing buckets, so
+    moving findings would silently drop them): every finding in a multi-member group gains
+    ``group_id`` (the criteria-free :func:`sidecar.fix_unit_key`) and ``is_primary``; the primary
+    (highest priority; ties: alphabetically-first sorted criteria entry, then lowest id; missing
+    priority sorts as 0.0) also gains ``group_criteria`` (the group's criteria union). Only the
+    CLI renderer collapses a group to its primary — library/MCP consumers see all findings."""
+    blocking = verdict.get("blocking") or []
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for f in blocking:
+        groups.setdefault(sidecar.fix_unit_key(f), []).append(f)
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+
+        def _rank(f: dict[str, Any]) -> tuple[float, str, str]:
+            crits = sorted(f.get("criteria") or [])
+            return (-(f.get("priority") or 0.0), crits[0] if crits else "", str(f.get("id") or ""))
+
+        members.sort(key=_rank)
+        union = sorted({c for f in members for c in (f.get("criteria") or [])})
+        for i, f in enumerate(members):
+            f["group_id"] = key
+            f["is_primary"] = i == 0
+        members[0]["group_criteria"] = union
+
+
 def _maybe_apply_completion_floor(
     ticket_id: str,
     verdict: dict[str, Any],
@@ -532,6 +561,10 @@ def _run_plan_review(
     _maybe_apply_completion_floor(
         ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
+
+    # Blocking fix-unit grouping (story 5e64) — stamp-only, after the floors and before the
+    # sidecar emit so the group stamps land in the persisted payload.
+    _group_blocking_fix_units(verdict)
 
     # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.
     verdict["sidecar_emitted"] = (

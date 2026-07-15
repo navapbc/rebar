@@ -282,6 +282,27 @@ def norm_id(finding: dict[str, Any]) -> str:
     return "n" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
+def _norm_tokens(text: str) -> str:
+    """The shared significant-token normalization (lowercase, alphanumeric token split,
+    stop-token filtering, sorted de-duplicated join) that makes fingerprints reword-tolerant."""
+    tokens = {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > _NORM_STOP_TOKENS}
+    return " ".join(sorted(tokens))
+
+
+def fix_unit_key(finding: dict[str, Any]) -> str:
+    """A CRITERIA-FREE fix-unit fingerprint: same-location + same-claim findings share it even
+    when different criteria cite them. ``norm_id`` cannot serve here — it bakes the sorted
+    criteria list into its hash, so one defect co-cited by N criteria mints N distinct norm_ids.
+    Location is token-set normalized (not exact-string) because independent finder criteria
+    format the same location differently (path:line vs prose section names)."""
+    basis = (
+        _norm_tokens(str(finding.get("location", "") or ""))
+        + "|"
+        + _norm_tokens(str(finding.get("finding", "")))
+    )
+    return "g" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+
 # ── recall: prior-review concerns re-surfaced POST-Pass-1 (story disused-unpoliced-solenodon) ──
 # Verdict-flips on identical material are a RECALL problem: the fresh finder MISSES a valid finding
 # a prior review caught. `prior_concerns()` returns the prior findings worth re-checking; run_pass1
@@ -416,6 +437,12 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "scenarios": f.get("scenarios", []),
             "block_threshold": f.get("block_threshold"),
             "blocking_enabled": f.get("blocking_enabled"),
+            # Blocking fix-unit grouping (story 5e64): the criteria-free group key + the
+            # primary flag/criteria-union stamps, so offline replay can collapse one defect
+            # co-cited by N criteria into one fix-unit. Absent (None) on ungrouped findings.
+            "group_id": f.get("group_id"),
+            "is_primary": f.get("is_primary"),
+            "group_criteria": f.get("group_criteria"),
         }
 
     all_findings = (
