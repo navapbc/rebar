@@ -10,6 +10,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 
 | Tool | Summary |
 |------|---------|
+| `audit_trail` | The full audit read surface for a ticket (story 46f0): its FULL retained |
 | `bridge_fsck` | Audit bridge mappings -> {orphaned, duplicates, stale}. |
 | `check_ac` | Check the ticket has an Acceptance Criteria block |
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
@@ -81,4 +82,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_ticket / review_code / scan_spec / verify_completion / review_plan); off by default. |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
 
-_48 tools._
+_49 tools._

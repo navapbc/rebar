@@ -283,6 +283,50 @@ def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str
         return None, -1
 
 
+def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
+    """Return **all** retained code-review ``REVIEW_RESULT`` sidecar payloads on ``ticket_id``,
+    newest→oldest, as a list of usable payload dicts (``[]`` when none).
+
+    The full-history analogue of :func:`_latest_payload_with_ts` (story 46f0's audit read
+    layer): same ticket-dir resolution and the same :data:`ACCEPTED_SCHEMAS` guard (accepts
+    both ``code_review_result_v1`` and ``_v2``), same best-effort posture — it **never
+    raises**. NOTE: this reads the events on the GIVEN ticket id directly (the code_review
+    artifact ticket), NOT via the session/change title lookup ``latest_code_review_result``
+    performs. Unreadable/foreign-schema files are skipped (logged once); a missing ticket dir
+    or any error degrades to ``[]``."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        out: list[dict[str, Any]] = []
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("code_review sidecar %s unreadable; skipping", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") in ACCEPTED_SCHEMAS:
+                out.append(payload)
+        return out
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "code_review sidecar history read failed; treating as no history", exc_info=True
+        )
+        return []
+
+
 def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | None:
     """Return the most-recent SURFACED code-review findings + ``deps`` map for a TYPED memory key,
     or ``None`` when nothing usable — the reader the region-gated novelty floor consumes.

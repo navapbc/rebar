@@ -2,7 +2,7 @@
 
 The generator (scripts/gen_cli_reference.py) emits docs/cli-reference.md from the CLI's
 own help data: the 50 help-backed subcommands (rebar._cli._help) with full usage text,
-plus the 16 intercept-arm commands with curated one-liners whose key set is drift-gated
+plus the 17 intercept-arm commands with curated one-liners whose key set is drift-gated
 against the intercept ladder in rebar._cli.__init__.
 """
 
@@ -30,6 +30,7 @@ def _load():
 gen = _load()
 
 _LADDER = {
+    "audit",  # story 46f0: audit read-layer aggregator (`audit show <ticket>`)
     "config",
     "criteria",
     "enrich",
@@ -68,7 +69,7 @@ def test_render_lists_every_help_backed_command():
 
 
 def test_render_lists_every_intercept_command():
-    """All 16 intercept-arm commands appear, backtick-wrapped, in the output."""
+    """All 17 intercept-arm commands appear, backtick-wrapped, in the output."""
     doc = gen.render()
     for cmd in _LADDER:
         assert f"`{cmd}`" in doc, f"intercept command {cmd!r} missing from reference"
@@ -115,7 +116,7 @@ def test_parity_selfcheck_fails_on_intercept_drift(monkeypatch):
 
 
 def test_ladder_intercepts_parses_source():
-    """ladder_intercepts() derives the 16 names from _cli/__init__.py source, not a
+    """ladder_intercepts() derives the 17 names from _cli/__init__.py source, not a
     hardcoded copy — so a new intercept arm is detected."""
     assert gen.ladder_intercepts() == _LADDER
 

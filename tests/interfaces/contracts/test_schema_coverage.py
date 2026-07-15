@@ -119,6 +119,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     # run has written a status file; with no bridge it prints a human hint + exit 1.
     # Driving it would require standing up the Jira bridge, so it is documented
     # EXEMPT here (mirrors the env-dependent exemptions in the MCP guard).
+    "audit": lambda s: ["audit", "show", s["task"]],
     "bridge-status": EXEMPT_BRIDGE,
 }
 

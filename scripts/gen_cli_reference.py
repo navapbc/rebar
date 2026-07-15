@@ -38,6 +38,11 @@ CLI_INIT = REPO_ROOT / "src" / "rebar" / "_cli" / "__init__.py"
 # programmatically (``rebar enrich --help`` prints JSON, others vary), so the descriptions are
 # hand-maintained here. The key set is drift-gated against ``ladder_intercepts()``.
 INTERCEPT_COMMANDS: dict[str, str] = {
+    "audit": (
+        "Show a ticket's audit trail: its full retained plan-review history, its completion "
+        "attestation + sidecar record, and the associated code reviews "
+        "(`audit show <ticket> [--output json|text]`)."
+    ),
     "config": (
         "Show the resolved rebar configuration from the working-tree config files "
         "(a read-only config-transparency view; no store init)."

@@ -6,12 +6,18 @@ The `rebar` CLI has two command families. **Help-backed subcommands** are the di
 
 ## Help-backed subcommands
 
-The 50 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 51 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
 ```
 Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
+```
+
+### `audit`
+
+```
+Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-review history + completion attestation/sidecar + associated code reviews; --output defaults to json)
 ```
 
 ### `bridge-fsck`
@@ -401,10 +407,11 @@ Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match
 
 ## Intercept-arm commands
 
-The 22 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
+The 23 advanced commands handled before the dispatcher. Each owns its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage.
 
 | Command | Description |
 |---------|-------------|
+| `audit` | Show a ticket's audit trail: its full retained plan-review history, its completion attestation + sidecar record, and the associated code reviews (`audit show <ticket> [--output json|text]`). |
 | `config` | Show the resolved rebar configuration from the working-tree config files (a read-only config-transparency view; no store init). |
 | `criteria` | Run per-criterion calibration evals against the shared review-criteria registry. |
 | `enrich` | Drain and report the cross-ticket overlap enrichment queue (`rebar enrich [--drain|--once|status]`). |

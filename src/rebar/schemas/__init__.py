@@ -108,6 +108,7 @@ REVIEW_RESULT = "review_result"
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
 # outputSchema); the CLI/library JSON path is pinned via the "verify_completion" key.
 COMPLETION_VERDICT = "completion_verdict"
+AUDIT_TRAIL = "audit_trail"
 # `rebar verify-identity --format json` report entry (epic gnu-whale-ichor / AC7, bff8).
 # verify-identity is an INTERCEPT command (not in the CLI help-arm system), so the --output
 # coverage guard never drives it live; registered in OUTPUT_SCHEMAS below under a synthetic
@@ -289,6 +290,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "check_ac": GATE_RESULT,
     "quality_check": GATE_RESULT,
     "summary": SUMMARY,
+    "audit": AUDIT_TRAIL,
     "fsck": FSCK,
     "review": REVIEW_RESULT,
     # completion-verification op: like `review`, no CLI help arm (so the --output

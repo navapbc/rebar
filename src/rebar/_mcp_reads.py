@@ -119,6 +119,19 @@ def register_read_tools(mcp, ctx) -> None:
         return DepsGraphOut.model_validate(rebar.deps(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
+    def audit_trail(ticket_id: str) -> dict:
+        """The full audit read surface for a ticket (story 46f0): its FULL retained
+        plan-review sidecar history (newest-first), its completion attestation + sidecar
+        record, and the associated code reviews (``code_review`` tickets that link
+        ``relates_to`` this ticket, each with its own retained sidecar history). Best-effort
+        aggregation over the observability sidecars — individual reader failures degrade to
+        ``[]`` / ``None`` rather than raising. Always available (a read tool, so it is served
+        even under ``REBAR_MCP_READONLY=1``)."""
+        from rebar.audit.read import audit_trail as _audit_trail
+
+        return _audit_trail(ticket_id)
+
+    @mcp.tool(annotations=_ANN["READ_ONLY"])
     def ready_tickets(sort: str | None = None) -> list[TicketStateOut]:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;

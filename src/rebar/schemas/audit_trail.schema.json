@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/audit_trail.schema.json",
+  "title": "AuditTrail",
+  "description": "Result of `rebar audit show <ticket> --output json` (story 46f0): a ticket's full retained review history. `plan_reviews` and `code_reviews` are always arrays (newest-first, [] when none). `completion` is an object {attestation, sidecar} or null (null only when both are absent). Each `code_reviews` entry is {ticket_id, sidecars: []}.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ticket", "plan_reviews", "completion", "code_reviews"],
+  "properties": {
+    "ticket": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The ticket's current details (from rebar.show_ticket)."
+    },
+    "plan_reviews": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true },
+      "description": "Full retained plan-review sidecar history, newest-first; [] if none."
+    },
+    "completion": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "CompletionRecord {attestation: object|null, sidecar: object|null}, or null when both are absent.",
+      "properties": {
+        "attestation": { "type": ["object", "null"] },
+        "sidecar": { "type": ["object", "null"] }
+      }
+    },
+    "code_reviews": {
+      "type": "array",
+      "description": "Code-review tickets linked via relates_to, each with its own newest-first sidecar history; [] if none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["ticket_id", "sidecars"],
+        "properties": {
+          "ticket_id": { "type": "string" },
+          "sidecars": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+        }
+      }
+    }
+  }
+}

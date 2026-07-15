@@ -1,0 +1,1 @@
+Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-review history + completion attestation/sidecar + associated code reviews; --output defaults to json)
