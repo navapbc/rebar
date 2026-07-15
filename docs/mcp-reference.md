@@ -89,5 +89,11 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated allowlist of exact Origin values accepted by the Streamable-HTTP DNS-rebinding protection; empty defaults to loopback. |
 | `REBAR_MCP_HTTP_TLS_AT_EDGE` | Set to 1 to acknowledge TLS is terminated at the edge; required to bind the Streamable-HTTP transport to a non-loopback host. |
 | `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | Set to 1 to acknowledge running the Streamable-HTTP transport without a token verifier; required to boot the HTTP transport while auth is off. |
+| `REBAR_MCP_AUTH_ENABLED` | Set to 1 to enable MCP authentication (the composite token verifier + Resource-Server wiring); off by default. |
+| `REBAR_MCP_AUTH_STRATEGIES` | Comma-separated, ordered list of token-verifier strategies to compose (closed set: static, jwt, introspection, proxy, custom). |
+| `REBAR_MCP_AUTH_ISSUER_URL` | OAuth authorization-server issuer URL advertised in the Protected-Resource Metadata (RFC 9728) when auth is enabled. |
+| `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | The single resource identifier (RFC 8707 audience) for this server; the composite verifier re-checks every accepted token against it. |
+| `REBAR_MCP_AUTH_REQUIRED_SCOPES` | Comma-separated scopes a caller must hold; the SDK returns 403 insufficient_scope when a principal lacks one. |
+| `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | Path to the JSON secrets file for the static-bearer verifier (stores only SHA-256 digests of the accepted tokens). |
 
 _49 tools._
