@@ -43,7 +43,7 @@ from fastapi.responses import JSONResponse
 
 from rebar.review_bot import reconcile as _reconcile
 from rebar.review_bot import voter as _voter
-from rebar.review_bot.config import ReceiverConfig
+from rebar.review_bot.config import ReceiverConfig, configure_logging, review_timeout_seconds
 
 logger = logging.getLogger("rebar.review_bot")
 
@@ -56,41 +56,31 @@ DEFAULT_PORT = 8000
 #: single-box PoC (reviews serialize on the per-(change,rev) lock anyway).
 WORKER_COUNT = 1
 
-#: Wall-clock cap (seconds) on a SINGLE review before the worker abandons it and moves
-#: to the next event. The single background worker drains the queue serially, so a review
-#: that hangs indefinitely (a clone/subprocess/LLM call blocked forever — as happened when
-#: the root disk filled mid-clone, incident 2731) would otherwise wedge the worker on one
-#: ``await`` and every subsequent change would silently back up behind it. The per-event
-#: try/except only guards against EXCEPTIONS, not a HANG — hence this bounded timeout.
-#: Reviews take seconds–minutes, so the default is deliberately generous (20 min); override
-#: with the ``REVIEW_TIMEOUT_SECONDS`` env var.
-DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
+#: The per-review wall-clock timeout now lives in ``config.review_timeout_seconds()`` so the
+#: live worker (below) AND the backfill reconciler (``reconcile.reconcile_once``) bound a single
+#: review with the SAME value — the reconciler previously had NO timeout, so one hung backfill
+#: review could freeze all backfill (incident 2731 / bug 9d7c is the live-worker analogue).
+
+#: Bounded grace (seconds) to DRAIN the in-memory review queue on shutdown BEFORE the worker is
+#: cancelled, so a routine autodeploy restart doesn't abandon acknowledged (``202``) webhooks.
+#: Anything still queued when the window elapses is left for the backfill reconciler (fail-safe,
+#: never fail-lose). Keep it below the container ``stop_grace_period`` (see docker-compose.yml)
+#: so the drain completes before Docker escalates SIGTERM → SIGKILL.
+DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
 
 
-def _review_timeout_seconds() -> float:
-    """Per-review wall-clock timeout from ``REVIEW_TIMEOUT_SECONDS`` (default
-    ``DEFAULT_REVIEW_TIMEOUT_SECONDS``). A missing / unparseable / non-positive value falls
-    back to the default (a 0 or negative timeout would abandon every review immediately)."""
-    raw = os.environ.get("REVIEW_TIMEOUT_SECONDS")
+def _shutdown_drain_seconds() -> float:
+    """Bounded queue-drain window on shutdown from ``SHUTDOWN_DRAIN_SECONDS`` (default
+    ``DEFAULT_SHUTDOWN_DRAIN_SECONDS``); a missing / unparseable / non-positive value falls
+    back to the default."""
+    raw = os.environ.get("SHUTDOWN_DRAIN_SECONDS")
     if not raw:
-        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
     try:
         val = float(raw.strip())
     except ValueError:
-        logger.warning(
-            "REVIEW_TIMEOUT_SECONDS=%r is not a number; using %d",
-            raw,
-            DEFAULT_REVIEW_TIMEOUT_SECONDS,
-        )
-        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
-    if val <= 0:
-        logger.warning(
-            "REVIEW_TIMEOUT_SECONDS=%r is not positive; using %d",
-            raw,
-            DEFAULT_REVIEW_TIMEOUT_SECONDS,
-        )
-        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
-    return val
+        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+    return val if val > 0 else float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
 
 
 def _config() -> ReceiverConfig:
@@ -127,6 +117,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if janitor_stop is not None:
             janitor_stop.set()
+        # Graceful drain (deploy resilience): let the still-running worker finish the QUEUED
+        # events before we cancel it, so a routine autodeploy restart does not abandon
+        # acknowledged (202 "queued") webhooks (the in-memory queue is otherwise lost on every
+        # restart). Bounded by _shutdown_drain_seconds(); anything still queued when the window
+        # elapses is left for the backfill reconciler — fail-safe, never fail-lose.
+        queue: asyncio.Queue | None = getattr(app.state, "queue", None)
+        if queue is not None:
+            with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
+                await asyncio.wait_for(queue.join(), timeout=_shutdown_drain_seconds())
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -143,7 +142,7 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
     worker continues to the next event. It must never die AND never stall on one event and
     starve the queue (bug 9d7c — the single worker silently backing up behind a hung review
     when the disk filled mid-clone)."""
-    review_timeout = _review_timeout_seconds()
+    review_timeout = review_timeout_seconds()
     while True:
         event = await queue.get()
         try:
@@ -181,6 +180,12 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
         finally:
             queue.task_done()
 
+
+# Configure rebar's structured logging (the _emit() INFO events) so they reach stdout→journald.
+# uvicorn configures only its own uvicorn.* loggers; without this the rebar.* loggers have no
+# handler and every INFO line is silently dropped (the observability outage this fixes). Called
+# at import, before the app is built, so startup logs are captured too.
+configure_logging()
 
 app = FastAPI(
     title="rebar review-bot",
