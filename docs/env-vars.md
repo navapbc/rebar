@@ -122,9 +122,9 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:481` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:494` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:498` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:482` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:495` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:499` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:383` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`

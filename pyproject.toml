@@ -91,6 +91,13 @@ mcp = ["mcp>=1.9"]
 # from the fail-closed VOTER_ERROR path (voter.py); the journald → host-probe path
 # (infra observability.sh) is the reliable fallback when in-container IMDS is unreachable.
 reviewbot = ["fastapi", "uvicorn[standard]", "boto3"]
+# Audit web UI (story a3d7). OPTIONAL — never required by core rebar. A read-only,
+# disabled-by-default local surface (`rebar audit serve`, gated by `[ui] enabled`) that
+# serves an index of tickets with audit data. All web imports are lazy (they live inside
+# src/rebar/audit/server.py, which nothing in core imports, so `import rebar` stays
+# dependency-free); only *running* the server needs this extra. `uvicorn[standard]` pulls
+# the production-grade ASGI server + its stack; `jinja2` renders the (minimal) index page.
+ui = ["fastapi", "uvicorn[standard]", "jinja2"]
 # LLM agent-operations framework (rebar.llm). OPTIONAL — never required by core
 # rebar (the engine stays stdlib-only, `dependencies = []`). The in-process runner is the
 # provider-agnostic pydantic-ai runtime (the LangChain/LangGraph stack was dropped in the

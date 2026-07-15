@@ -392,6 +392,14 @@ class McpConfig:
 
 
 @dataclass
+class UiConfig:
+    # Gates the optional, read-only audit web UI (`rebar audit serve`, story a3d7).
+    # Default OFF: when false, `rebar audit serve` refuses to start and no web
+    # dependency is imported. Requires the `nava-rebar[ui]` extra when enabled.
+    enabled: bool = False
+
+
+@dataclass
 class ReconcilerConfig:
     jira_cli_timeout: int = 0
     # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
@@ -454,6 +462,7 @@ class Config:
     compact: CompactConfig = field(default_factory=CompactConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
+    ui: UiConfig = field(default_factory=UiConfig)
     reconciler: ReconcilerConfig = field(default_factory=ReconcilerConfig)
     jira: JiraConfig = field(default_factory=JiraConfig)
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
@@ -480,6 +489,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "compact": CompactConfig,
     "sync": SyncConfig,
     "mcp": McpConfig,
+    "ui": UiConfig,
     "reconciler": ReconcilerConfig,
     "jira": JiraConfig,
     "scratch": ScratchConfig,
@@ -529,6 +539,9 @@ _SECTIONS: dict[str, dict] = {
         "readonly": lambda v, k: _as_bool(v, k),
         "allow_llm": lambda v, k: _as_bool(v, k),
         "allow_jira_sync": lambda v, k: _as_bool(v, k),
+    },
+    "ui": {
+        "enabled": lambda v, k: _as_bool(v, k),
     },
     "reconciler": {
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
