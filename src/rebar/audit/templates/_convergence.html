@@ -1,0 +1,34 @@
+{# Per-gate convergence viz. `conv` = section.convergence. ≤3 rounds → bars; ≥4 → line.
+   Always plus a visually-hidden sr-only table of per-round per-series counts. #}
+{% set conv = section.convergence %}
+{% if conv.form == "bars" %}
+  <div class="conv-bars" aria-hidden="true">
+    {% for bar in conv.bars %}
+      <div class="conv-bar" style="height: {{ bar.height_pct }}%;" title="round {{ bar.round }}"></div>
+    {% endfor %}
+  </div>
+{% else %}
+  <svg class="conv-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    {% for pl in conv.polylines %}
+      <polyline class="{{ pl.css }}" points="{{ pl.points }}"></polyline>
+    {% endfor %}
+  </svg>
+{% endif %}
+
+<table class="sr-only">
+  <caption>Convergence: per-round finding counts by decision series</caption>
+  <thead>
+    <tr>
+      <th scope="col">round</th>
+      {% for s in conv.series %}<th scope="col">{{ s.label }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in conv.table_rows %}
+      <tr>
+        <th scope="row">{{ row.round }}</th>
+        {% for cell in row.cells %}<td>{{ cell.count }}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>

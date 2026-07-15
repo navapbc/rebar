@@ -1,0 +1,39 @@
+{# Sticky gate-status strip: all three gate verdicts + magnitude counts, each an in-page anchor. #}
+<nav class="strip" aria-label="gate status">
+  {% set p = strip.plan %}
+  <a class="chip" href="#gate-plan">
+    <span class="gate">PLAN</span>
+    {% if p.ran %}
+      <span class="verdict verdict-{{ p.verdict }}">{{ p.verdict }}</span>
+      <span class="count">{{ p.blocking }} blocking</span>
+    {% else %}
+      <span class="verdict verdict-none">not run</span>
+    {% endif %}
+  </a>
+
+  {% set c = strip.completion %}
+  <a class="chip" href="#gate-completion">
+    <span class="gate">COMPLETION</span>
+    {% if c.ran %}
+      {% if c.status == "PASS" %}
+        <span class="verdict verdict-PASS">PASS</span>
+        <span class="count">{{ c.met }}/{{ c.total }} met</span>
+      {% else %}
+        <span class="verdict verdict-FAIL">FAIL</span>
+      {% endif %}
+    {% else %}
+      <span class="verdict verdict-none">not run</span>
+    {% endif %}
+  </a>
+
+  {% set cr = strip.code %}
+  <a class="chip" href="#gate-code">
+    <span class="gate">CODE</span>
+    {% if cr.ran %}
+      <span class="verdict verdict-{{ cr.verdict }}">{{ cr.verdict }}</span>
+      <span class="count">{{ cr.blocking }} blocking</span>
+    {% else %}
+      <span class="verdict verdict-none">not run</span>
+    {% endif %}
+  </a>
+</nav>

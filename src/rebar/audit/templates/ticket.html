@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>audit · {{ ticket_id }}</title>
+<style>
+  :root {
+    --ink: #1a1a1a; --muted: #666; --line: #ddd; --bg: #fff; --panel: #f6f6f6;
+    --block: #b3261e; --advisory: #8a6d00; --dropped: #555; --indeterminate: #444;
+    --pass: #1a7f37; --fail: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--ink); background: var(--bg); max-width: 60rem;
+    margin: 0 auto; padding: 0 1rem 4rem;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 1.5rem; margin: 1rem 0 0.25rem; }
+  h2 { font-size: 1.2rem; margin: 0 0 0.5rem; }
+  h3 { font-size: 1rem; margin: 0.75rem 0 0.25rem; }
+  h4 { font-size: 0.85rem; margin: 0.5rem 0 0.15rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  a { color: inherit; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
+
+  /* Sticky gate-status strip */
+  .strip {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    display: flex; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.6rem 0; border-bottom: 1px solid var(--line); margin-bottom: 1rem;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none;
+    border: 1px solid var(--line); border-radius: 999px; padding: 0.25rem 0.7rem;
+    font-size: 0.85rem; background: var(--panel); color: var(--ink);
+  }
+  .chip .gate { font-weight: 600; letter-spacing: 0.03em; }
+  .chip .verdict { font-weight: 700; padding: 0 0.35rem; border-radius: 4px; color: #fff; }
+  .verdict-PASS, .v-pass { background: var(--pass); }
+  .verdict-FAIL, .v-fail { background: var(--fail); }
+  .verdict-none { background: var(--muted); }
+  .count { color: var(--muted); }
+
+  section { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; margin: 0 0 1.25rem; }
+  section.failing > h2 { color: var(--fail); }
+  .roundhdr { color: var(--muted); font-size: 0.82rem; margin: 0 0 0.5rem; }
+  .selector { font-size: 0.85rem; margin: 0 0 0.75rem; }
+  .selector a { text-decoration: none; padding: 0 0.3rem; }
+  .selector .disabled { color: var(--line); padding: 0 0.3rem; }
+
+  details.group { border-top: 1px solid var(--line); padding: 0.35rem 0; }
+  details.group > summary { cursor: pointer; font-weight: 600; }
+  details.finding { margin: 0.4rem 0; padding: 0.4rem 0.6rem; background: var(--panel); border-radius: 6px; }
+  details.finding > summary { cursor: pointer; list-style: none; }
+  .pass-block { margin: 0.3rem 0 0.3rem 0.8rem; padding-left: 0.6rem; border-left: 2px solid var(--line); }
+  .decision-chip { display: inline-block; color: #fff; border-radius: 4px; padding: 0 0.35rem; font-size: 0.75rem; font-weight: 700; }
+  .dc-block { background: var(--block); } .dc-advisory { background: var(--advisory); }
+  .dc-dropped { background: var(--dropped); } .dc-indeterminate { background: var(--indeterminate); }
+  .kv { font-size: 0.85rem; margin: 0.15rem 0; }
+  .kv .k { color: var(--muted); }
+  .norm { color: var(--muted); font-size: 0.72rem; margin-top: 0.3rem; }
+
+  /* Threshold meter */
+  .meter { position: relative; height: 8px; border-radius: 4px; background: #e6e6e6; margin: 0.4rem 0; }
+  .meter-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 4px; }
+  .meter-block .meter-fill { background: var(--block); }
+  .meter-advisory .meter-fill { background: var(--advisory); }
+  .meter-dropped .meter-fill { background: var(--dropped); }
+  .meter-indeterminate .meter-fill { background: var(--indeterminate); }
+  .meter-tick { position: absolute; top: -2px; width: 2px; height: 12px; background: var(--ink); }
+  .meter-caption { color: var(--muted); font-size: 0.75rem; font-style: italic; }
+
+  /* Convergence */
+  .conv-bars { display: flex; align-items: flex-end; gap: 6px; height: 64px; margin: 0.5rem 0; }
+  .conv-bar { width: 28px; background: var(--muted); border-radius: 3px 3px 0 0; align-self: flex-end; }
+  .conv-line { width: 100%; max-width: 24rem; height: 64px; margin: 0.5rem 0; }
+  .conv-line polyline { fill: none; stroke-width: 2; }
+  .conv-block { stroke: var(--block); } .conv-advisory { stroke: var(--advisory); }
+  .conv-dropped { stroke: var(--dropped); } .conv-indeterminate { stroke: var(--indeterminate); }
+
+  /* Completion panel */
+  .crit-row { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.35rem 0; border-top: 1px solid var(--line); }
+  .glyph { font-weight: 700; }
+  .glyph.met { color: var(--pass); } .glyph.unmet { color: var(--fail); }
+  .badge { font-size: 0.72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 0.3rem; color: var(--muted); }
+  .lacking { color: var(--fail); font-size: 0.75rem; font-weight: 600; }
+  .citation { color: var(--muted); font-size: 0.82rem; }
+
+  .empty { color: var(--muted); font-style: italic; background: var(--panel); border-radius: 6px; padding: 0.6rem 0.8rem; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+  <h1>{{ ticket.title }}</h1>
+  <p class="meta">
+    {{ ticket_id }} · status: {{ ticket.status }}{% if ticket.assignee %} · assignee: {{ ticket.assignee }}{% endif %}
+  </p>
+
+  {% include "_gate_strip.html" %}
+
+  {% set section = plan %}{% set gate_id = "gate-plan" %}{% set gate_title = "Plan review" %}{% set is_plan = True %}
+  {% include "_gate_section.html" %}
+
+  {% include "_completion.html" %}
+
+  {% set section = code %}{% set gate_id = "gate-code" %}{% set gate_title = "Code review" %}{% set is_plan = False %}
+  {% include "_gate_section.html" %}
+</body>
+</html>

@@ -1,0 +1,61 @@
+{# One finding = one atomic <details>. Four-pass provenance for plan findings; only the
+   fields present for code-review findings. `f` is the finding view-model. #}
+<details class="finding">
+  <summary>
+    <span class="decision-chip dc-{{ f.decision }}">{{ f.decision_label }}</span>
+    {{ f.finding }}
+  </summary>
+
+  {# Threshold meter (plan findings). #}
+  {% if f.has_meter %}
+    <div class="meter {{ f.meter_class }}">
+      <div class="meter-fill" style="width: {{ f.meter_fill_pct }}%;"></div>
+      <div class="meter-tick" style="left: {{ f.meter_tick_pct }}%;"></div>
+    </div>
+    <p class="meter-caption">priority {{ f.priority }} · block threshold {{ f.block_threshold }}</p>
+  {% elif f.meter_missing %}
+    <p class="meter-caption">threshold not recorded (v1)</p>
+  {% endif %}
+
+  {# Pass 1 — Finding. #}
+  <div class="pass-block">
+    <h4>Finding</h4>
+    <p class="kv"><span class="k">finding:</span> {{ f.finding }}</p>
+    {% if f.criteria %}<p class="kv"><span class="k">criteria:</span> {{ f.criteria | join(", ") }}</p>{% endif %}
+    {% if f.location %}<p class="kv"><span class="k">location:</span> {{ f.location }}</p>{% endif %}
+    {% if f.evidence %}<p class="kv"><span class="k">evidence:</span> {{ f.evidence | join(" | ") }}</p>{% endif %}
+    {% if f.scenarios %}<p class="kv"><span class="k">scenarios:</span> {{ f.scenarios | join(" | ") }}</p>{% endif %}
+    {% if f.impact %}<p class="kv"><span class="k">impact:</span> {{ f.impact }}</p>{% endif %}
+    {% if f.suggested_fix %}<p class="kv"><span class="k">suggested fix:</span> {{ f.suggested_fix }}</p>{% endif %}
+  </div>
+
+  {# Pass 2 — Verification (omitted entirely when absent). #}
+  {% if f.verification %}
+    <div class="pass-block">
+      <h4>Verification</h4>
+      {% for key, val in f.verification.items() %}
+        <p class="kv"><span class="k">{{ key }}:</span> {{ val }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Pass 3 — Decision (plan findings only). #}
+  {% if f.is_plan %}
+    <div class="pass-block">
+      <h4>Decision</h4>
+      <p class="kv"><span class="k">decision:</span> {{ f.decision }}</p>
+      {% if f.reason %}<p class="kv"><span class="k">reason:</span> {{ f.reason }}</p>{% endif %}
+    </div>
+  {% endif %}
+
+  {# Pass 4 — Coaching (only when this finding matched a coaching move). #}
+  {% if f.coaching %}
+    <div class="pass-block">
+      <h4>Coaching</h4>
+      {% if f.coaching.move_name %}<p class="kv"><span class="k">move:</span> {{ f.coaching.move_name }}</p>{% endif %}
+      {% if f.coaching.coaching %}<p class="kv">{{ f.coaching.coaching }}</p>{% endif %}
+    </div>
+  {% endif %}
+
+  {% if f.norm_id %}<p class="norm">norm_id: {{ f.norm_id }}</p>{% endif %}
+</details>
