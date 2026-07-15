@@ -15,7 +15,18 @@ sources = src tests
 # target refuses to run on a mismatched version so generated output is reproducible.
 GIT_CLIFF_VERSION := 2.13.1
 
-.PHONY: help install hooks format lint typecheck config-check check test vendor-security-rules changelog
+# Release supply-chain lint (story 08a8): the GENERIC action-security checks run scoped
+# to release.yml under `make lint` — zizmor (installed via the [dev] extra) + actionlint.
+# actionlint is a standalone Go binary; when it is not already on PATH (CI ubuntu), the
+# `actionlint-bin` target installs a PINNED version verified against a hard-coded SHA-256
+# into a repo-local, git-ignored bin. Bump the pin + digest together (they are checked with
+# `sha256sum -c --strict`, so a wrong digest fails the install loudly).
+RELEASE_WORKFLOW := .github/workflows/release.yml
+ACTIONLINT_VERSION := 1.7.12
+ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+LOCAL_BIN := .tools/bin
+
+.PHONY: help install hooks format lint typecheck config-check check test vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -59,9 +70,46 @@ format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target)
 	ruff check --fix $(sources)
 	ruff format $(sources)
 
-lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check. The gate CI runs.
+lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + scoped zizmor/actionlint on release.yml. The gate CI runs.
 	ruff check $(sources)
 	ruff format --check $(sources)
+	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
+	@# Scoped to release.yml — NOT repo-wide (F1/F3 harden other workflows separately).
+	@# zizmor is a cross-platform pip tool (in [dev]) — run it on every host.
+	zizmor $(RELEASE_WORKFLOW)
+	@# actionlint is an OS/arch-specific Go binary. Use one already on PATH / in .tools; else
+	@# install the PINNED build — but ONLY on Linux, where the pinned linux_amd64 asset runs
+	@# and GNU sha256sum verifies it. On a non-Linux host WITHOUT actionlint (e.g. the macOS CI
+	@# matrix leg), skip it with a notice: release.yml only runs on ubuntu and the Linux CI leg
+	@# is the gating run, so the audit is not lost. This is a static, host-independent check.
+	@al="$$(command -v actionlint || echo $(LOCAL_BIN)/actionlint)"; \
+	if [ -x "$$al" ]; then \
+		echo "$$al $(RELEASE_WORKFLOW)"; "$$al" $(RELEASE_WORKFLOW); \
+	elif [ "$$(uname -s)" = "Linux" ]; then \
+		$(MAKE) actionlint-bin; echo "$(LOCAL_BIN)/actionlint $(RELEASE_WORKFLOW)"; "$(LOCAL_BIN)/actionlint" $(RELEASE_WORKFLOW); \
+	else \
+		echo "lint: actionlint unavailable on $$(uname -s); skipping release.yml actionlint audit (gated on the Linux CI leg)"; \
+	fi
+
+actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-verified install if absent).
+	@if command -v actionlint >/dev/null 2>&1; then \
+		echo "actionlint: using $$(command -v actionlint)"; \
+	elif [ -x "$(LOCAL_BIN)/actionlint" ]; then \
+		echo "actionlint: using $(LOCAL_BIN)/actionlint"; \
+	else \
+		echo "actionlint not found — installing pinned v$(ACTIONLINT_VERSION) into $(LOCAL_BIN)"; \
+		mkdir -p "$(LOCAL_BIN)"; \
+		tmp="$$(mktemp -d)"; \
+		url="https://github.com/rhysd/actionlint/releases/download/v$(ACTIONLINT_VERSION)/actionlint_$(ACTIONLINT_VERSION)_linux_amd64.tar.gz"; \
+		curl -fsSL "$$url" -o "$$tmp/actionlint.tar.gz"; \
+		echo "$(ACTIONLINT_SHA256_LINUX_AMD64)  $$tmp/actionlint.tar.gz" | sha256sum -c --strict; \
+		tar -C "$(LOCAL_BIN)" -xzf "$$tmp/actionlint.tar.gz" actionlint; \
+		rm -rf "$$tmp"; \
+		echo "actionlint: installed $(LOCAL_BIN)/actionlint"; \
+	fi
+
+verify-mcp-pin:  ## Verify the embedded mcp-publisher SHA-256 matches the live pinned download.
+	python scripts/verify_mcp_publisher_pin.py
 
 typecheck:  ## ERRORS ONLY: mypy over the whole library (gating; full src/rebar).
 	mypy src/rebar

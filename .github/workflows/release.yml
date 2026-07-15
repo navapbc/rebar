@@ -5,6 +5,13 @@ name: release
 # run (workflow_dispatch) builds + validates the distributions but does NOT publish,
 # so it doubles as a release dry-run.
 #
+# Supply-chain hardening (story 08a8): every executable this workflow depends on is
+# pinned to an immutable reference — actions to full commit SHAs, the build toolchain
+# to a hash-locked requirements file consumed by a `--no-isolation` build, and the
+# mcp-publisher binary to an exact version whose SHA-256 is verified before it is ever
+# executed (in an unprivileged job, separate from the OIDC-privileged publish). See
+# docs/releasing.md ("Pinning").
+#
 # One-time PyPI setup (Account → Publishing → add a pending publisher):
 #   PyPI project name: nava-rebar
 #   Owner:             navapbc
@@ -24,26 +31,69 @@ permissions:
   contents: read
 
 jobs:
+  evidence_shapin:
+    name: Record pinned action SHAs (evidence)
+    runs-on: ubuntu-latest
+    steps:
+      # The supply-chain-pin evidence fragment: the immutable action references this
+      # release run trusts. Kept in-workflow (not resolved at runtime) so the evidence
+      # is exactly what the file pins.
+      - name: Write evidence-shapin fragment
+        run: |
+          {
+            echo "== pinned action SHAs (evidence-shapin) =="
+            echo "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0"
+            echo "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0"
+            echo "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1"
+            echo "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1"
+            echo "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0"
+          } > evidence-shapin.txt
+          cat evidence-shapin.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: evidence-shapin
+          path: evidence-shapin.txt
+
   build:
     name: Build distributions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.12"
-      - name: Build sdist + wheel
+      # Hash-locked, --no-isolation build. Instead of pulling `build`/`twine` from PyPI
+      # unpinned, install the EXACT toolchain from the hash-locked lock into a fresh venv
+      # (--require-hashes fails on any unpinned/mismatched hash; --no-deps installs only the
+      # lock's entries), capture it as evidence, assert nothing ambient leaked into the env
+      # (the guard closes the --no-isolation hole), then build without a second isolated env.
+      - name: Build sdist + wheel (hash-locked, --no-isolation)
         run: |
-          python -m pip install --upgrade build
-          python -m build
+          python -m venv .release-venv
+          # shellcheck disable=SC1091
+          . .release-venv/bin/activate
+          python -m pip install --require-hashes --no-deps -r .github/release-requirements.txt
+          pip list --format=freeze > tool-versions.txt
+          python scripts/check_build_env_locked.py \
+            --lock .github/release-requirements.txt \
+            --freeze <(pip freeze)
+          python -m build --no-isolation
       - name: Validate metadata (PyPI-readiness)
         run: |
-          python -m pip install --upgrade twine
+          # shellcheck disable=SC1091
+          . .release-venv/bin/activate
           python -m twine check dist/*
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: dist
           path: dist/
+      # The build-toolchain evidence fragment (the frozen tool versions actually used).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: evidence-build
+          path: tool-versions.txt
 
   publish:
     name: Publish to PyPI
@@ -57,12 +107,12 @@ jobs:
     permissions:
       id-token: write   # mint the short-lived OIDC token for Trusted Publishing
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: dist
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
           # PEP 740 digital attestations: the action generates + uploads
           # provenance attestations for each artifact, signed via the same OIDC
@@ -82,7 +132,7 @@ jobs:
     permissions:
       contents: write   # create the release + upload its asset
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: dist
           path: dist/
@@ -106,14 +156,62 @@ jobs:
             gh release create "$TAG" --title "$TAG" --generate-notes --latest --verify-tag dist/*
           fi
 
+  mcp_verify:
+    name: Verify pinned mcp-publisher
+    runs-on: ubuntu-latest
+    # UNPRIVILEGED by design: this job downloads + digest-verifies the mcp-publisher
+    # binary but holds NO id-token: write. The OIDC token lives only in mcp_registry,
+    # which consumes the verified artifact — so an unverified/substituted archive can
+    # never be executed with the registry-publishing OIDC identity.
+    permissions:
+      contents: read
+    steps:
+      # Download → verify → extract as three discrete steps (never a piped
+      # download-into-extract, which would unpack an unverified stream). The URL +
+      # SHA-256 are the immutable mcp-publisher pin;
+      # `sha256sum -c --strict` fails the job on any byte mismatch BEFORE extraction.
+      # Regenerate the pair with docs/releasing.md ("Pinning"); verify locally with
+      # `make verify-mcp-pin`.
+      - name: Download + digest-verify mcp-publisher
+        env:
+          MCP_PUBLISHER_URL: "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_linux_amd64.tar.gz"
+          MCP_PUBLISHER_SHA256: "1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf"
+        run: |
+          curl -fsSL "$MCP_PUBLISHER_URL" -o mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c --strict
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      # The mcp-publisher evidence fragment (the pinned version + verified digest).
+      - name: Write evidence-mcp fragment
+        env:
+          MCP_PUBLISHER_URL: "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_linux_amd64.tar.gz"
+          MCP_PUBLISHER_SHA256: "1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf"
+        run: |
+          {
+            echo "== mcp-publisher (evidence-mcp) =="
+            echo "version: v1.8.0"
+            echo "url: ${MCP_PUBLISHER_URL}"
+            echo "sha256 (verified): ${MCP_PUBLISHER_SHA256}"
+          } > evidence-mcp.txt
+          cat evidence-mcp.txt
+      # Hand the verified binary to the OIDC-privileged job as an artifact.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: mcp-publisher-verified
+          path: mcp-publisher
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: evidence-mcp
+          path: evidence-mcp.txt
+
   mcp_registry:
     name: Publish to MCP Registry
-    needs: publish
+    needs: [publish, mcp_verify]
     runs-on: ubuntu-latest
     # Runs after PyPI so the registry's package-ownership check (the `mcp-name:`
     # annotation on the published PyPI release) resolves against a live version.
     # Same version-tag gate as publish, so workflow_dispatch dry-runs don't publish.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # zizmor:ignore[excessive-permissions] -- id-token: write is consumed by mcp-publisher login github-oidc (runtime OIDC token request; zizmor cannot introspect shell commands)
     permissions:
       id-token: write   # mint the OIDC token that authenticates to the registry
       contents: read    # checkout server.json
@@ -121,12 +219,16 @@ jobs:
       # server.json lives in the repo tree; the tag commit already carries the
       # bumped version (the "Release X.Y.Z" commit sets it before tagging), so no
       # in-workflow version rewrite is needed.
-      - uses: actions/checkout@v7
-      # Fetch the mcp-publisher release binary (os/arch-detected), per
-      # https://modelcontextprotocol.io/registry/github-actions.
-      - name: Install mcp-publisher
-        run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      # Use the digest-verified binary from mcp_verify — not a fresh unverified
+      # download. upload-artifact drops the exec bit, so restore it before running.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: mcp-publisher-verified
+      - name: Restore exec bit on the verified binary
+        run: chmod +x mcp-publisher
       # GitHub Actions OIDC: the runner's id-token proves this is navapbc/rebar,
       # which authorizes the io.github.navapbc/* namespace — no stored secret, the
       # same trust model as the PyPI Trusted Publishing above.
@@ -177,3 +279,29 @@ jobs:
           done
           echo "::error::mcp-publisher publish failed for ${version} after 5 attempts"
           exit 1
+
+  consolidate_evidence:
+    name: Consolidate release evidence
+    # The fragment producers: action-pin evidence, build-toolchain evidence, and the
+    # mcp-publisher digest evidence. (F3 later adds an evidence-artifacts fragment for
+    # the wheel/sdist sums — this job's evidence-* glob will pick it up automatically.)
+    needs: [evidence_shapin, build, mcp_verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: evidence-*
+          path: evidence
+      - name: Concatenate fragments into release-evidence.txt
+        run: |
+          : > release-evidence.txt
+          for f in $(find evidence -name '*.txt' | sort); do
+            cat "$f" >> release-evidence.txt
+            echo >> release-evidence.txt
+          done
+          echo "===== release-evidence.txt ====="
+          cat release-evidence.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-evidence
+          path: release-evidence.txt
