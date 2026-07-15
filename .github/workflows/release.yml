@@ -55,7 +55,7 @@ jobs:
           path: evidence-shapin.txt
 
   build:
-    name: Build distributions
+    name: Build distributions (build-once)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -64,12 +64,21 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.12"
+      # BUILD ONCE (story 6168): the wheel + sdist are built exactly once here, their
+      # SHA-256 digests recorded, and the SAME bytes flow to test + publish — the tested
+      # artifact IS the published artifact (no rebuild between test and publish). The
+      # release commit's short SHA is baked into the wheel/sdist via REBAR_BUILD_COMMIT so
+      # the sdist→wheel rebuild path can't lose provenance to `COMMIT = None` (see
+      # hatch_build.py / docs/releasing.md "Build-once").
+      #
       # Hash-locked, --no-isolation build. Instead of pulling `build`/`twine` from PyPI
       # unpinned, install the EXACT toolchain from the hash-locked lock into a fresh venv
       # (--require-hashes fails on any unpinned/mismatched hash; --no-deps installs only the
       # lock's entries), capture it as evidence, assert nothing ambient leaked into the env
       # (the guard closes the --no-isolation hole), then build without a second isolated env.
       - name: Build sdist + wheel (hash-locked, --no-isolation)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           python -m venv .release-venv
           # shellcheck disable=SC1091
@@ -79,12 +88,27 @@ jobs:
           python scripts/check_build_env_locked.py \
             --lock .github/release-requirements.txt \
             --freeze <(pip freeze)
+          # Bake the exact release commit (short SHA) into the artifacts. Set BEFORE the
+          # build so the sdist ships it and the wheel-from-sdist rebuild sees it (env wins).
+          REBAR_BUILD_COMMIT="${GITHUB_SHA::7}"
+          export REBAR_BUILD_COMMIT
+          echo "Baking REBAR_BUILD_COMMIT=${REBAR_BUILD_COMMIT} into the distributions"
           python -m build --no-isolation
       - name: Validate metadata (PyPI-readiness)
         run: |
           # shellcheck disable=SC1091
           . .release-venv/bin/activate
-          python -m twine check dist/*
+          python -m twine check dist/*.whl dist/*.tar.gz
+      # Record the SHA-256 of each built artifact into a SHA256SUMS manifest that travels
+      # WITH the bytes. Every downstream job (publish especially) re-verifies against it, so
+      # a substituted/corrupted artifact between jobs fails the release fast.
+      - name: Record SHA256SUMS over the built artifacts
+        run: |
+          ( cd dist && sha256sum ./*.whl ./*.tar.gz > SHA256SUMS )
+          echo "===== dist/SHA256SUMS ====="
+          cat dist/SHA256SUMS
+      # ONE named bundle: wheel + sdist + SHA256SUMS. Downstream jobs download THIS and
+      # promote the exact bytes — they never rebuild.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: dist
@@ -94,12 +118,90 @@ jobs:
         with:
           name: evidence-build
           path: tool-versions.txt
+      # The built-artifact evidence fragment (the wheel/sdist digests). consolidate_evidence
+      # concatenates every evidence-* fragment, so this is picked up automatically.
+      - name: Write evidence-artifacts fragment
+        run: |
+          {
+            echo "== built artifact digests (evidence-artifacts) =="
+            echo "REBAR_BUILD_COMMIT: ${GITHUB_SHA::7}"
+            cat dist/SHA256SUMS
+          } > evidence-artifacts.txt
+          cat evidence-artifacts.txt
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: evidence-artifacts
+          path: evidence-artifacts.txt
+
+  wheel_test:
+    name: Test the built wheel
+    needs: build
+    runs-on: ubuntu-latest
+    # NO repo checkout: the working dir has no `src/rebar` on the path, so `import rebar`
+    # resolves to the INSTALLED wheel — never the source tree. This is what catches a
+    # packaging defect (missing data files, a `COMMIT = None` bake) that an editable
+    # install would mask.
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install the exact wheel by filename
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+      - name: Probe the installed wheel
+        run: |
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          # Every packaged JSON schema loads (proves the data files shipped + parse).
+          python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
+          # The build-baked provenance SHA survived the sdist→wheel path (not None).
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'wheel baked COMMIT is empty/None'"
+
+  sdist_test:
+    name: Test install-from-sdist
+    needs: build
+    runs-on: ubuntu-latest
+    # NO repo checkout and REBAR_BUILD_COMMIT UNSET: installing from the sdist rebuilds the
+    # wheel in a tree with no `.git` and no env override, so a non-null `_build_info.COMMIT`
+    # here PROVES the preserve-existing precedence step (the sdist shipped the baked SHA).
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install from the sdist (REBAR_BUILD_COMMIT unset, no .git)
+        env:
+          REBAR_BUILD_COMMIT: ""
+        run: |
+          # Explicitly clear the env override so the rebuild exercises preserve-existing.
+          unset REBAR_BUILD_COMMIT
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.tar.gz
+      - name: Probe the sdist install
+        run: |
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
+          # Preserve-existing must have kept the SHA the sdist shipped — non-null.
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'sdist install lost the baked COMMIT (preserve-existing failed)'"
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build, wheel_test, sdist_test]
     runs-on: ubuntu-latest
-    # Only publish on a version-tag push; a manual dispatch stops after build.
+    # Only publish on a version-tag push; a manual dispatch stops after build + tests.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi
@@ -111,6 +213,14 @@ jobs:
         with:
           name: dist
           path: dist/
+      # HASH GATE: the bytes we publish must be byte-identical to what build-once produced
+      # and the test jobs exercised. Verify against SHA256SUMS and FAIL on any mismatch;
+      # there is deliberately NO `python -m build` here — publish promotes, never rebuilds.
+      - name: Verify the bundle against SHA256SUMS (no rebuild)
+        run: |
+          ( cd dist && sha256sum -c SHA256SUMS )
+          # twine/PyPI must not see the manifest as a distribution — drop it post-verify.
+          rm -f dist/SHA256SUMS
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
@@ -282,9 +392,10 @@ jobs:
 
   consolidate_evidence:
     name: Consolidate release evidence
-    # The fragment producers: action-pin evidence, build-toolchain evidence, and the
-    # mcp-publisher digest evidence. (F3 later adds an evidence-artifacts fragment for
-    # the wheel/sdist sums — this job's evidence-* glob will pick it up automatically.)
+    # The fragment producers: action-pin evidence, build-toolchain evidence, the built-
+    # artifact digests (evidence-artifacts — wheel/sdist SHA-256s from the build-once job,
+    # story 6168), and the mcp-publisher digest evidence. This job's evidence-* glob picks
+    # up every fragment; `needs: build` covers both evidence-build and evidence-artifacts.
     needs: [evidence_shapin, build, mcp_verify]
     runs-on: ubuntu-latest
     steps:
