@@ -178,6 +178,15 @@ Report through the structured output:
     record proof as a ticket comment/artifact — naming the specific reference (change URL/id),
     the observed outcome (votes/logs/console), and when. For a codebase-verifiable failure you
     may omit it (the `detail` already says what is missing).
+- `criteria`: the POSITIVE per-criterion record — one entry for **every** acceptance/success/close
+  criterion you evaluated, whether it passed or failed (distinct from `findings`, which stays
+  failures-only). This makes a PASS lossless: it records what you checked and why it passed, not
+  just what failed. Each entry:
+  - `criterion`: the evaluated requirement (verbatim or clearly identifying).
+  - `met`: `true` or `false` — your judgment for this criterion.
+  - `citation`: the code or attestation evidence for the judgment (the `path`/`line_start`/
+    `line_end` you saw, a `url`, or a freeform `source`); may be null if none applies.
+  - `kind`: `codebase-verifiable` or `operator-attested` (how you classified the criterion).
 - `summary`: a short overall assessment (and the no-explicit-criteria rationale when relevant).
 
 ## Constraints

@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "COMPLETION_VERDICT"
 SCHEMA = "completion_verifier_fail_v1"
+# The PASS-side sidecar schema (story e7e0): a PASS now leaves a durable record too, carrying
+# the lossless positive per-criterion `criteria[]`. Distinct schema tag so the FAIL reader
+# (`latest_fail_verdict`, guarded to SCHEMA) and the PASS reader (`latest_pass_record`, guarded
+# to SCHEMA_PASS) never confuse the two. The FAIL path/schema/reader are UNCHANGED.
+SCHEMA_PASS = "completion_verifier_pass_v1"
 
 # Retention bound: COMPLETION_VERDICT is reducer-IGNORED and compaction intentionally
 # PRESERVES it (never snapshots/absorbs a non-KNOWN type), so bound its growth here by
@@ -142,18 +147,78 @@ def latest_fail_verdict(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
         return None
 
 
+def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
+    """Return the **most-recent** PASS ``COMPLETION_VERDICT`` sidecar payload for ``ticket_id``,
+    or ``None`` when none is usable.
+
+    Mirrors :func:`latest_fail_verdict` exactly, but schema-guarded to :data:`SCHEMA_PASS` (the
+    lossless PASS record carrying ``criteria[]``): it walks the ticket's sidecar events
+    newest→oldest and returns the first usable payload whose ``schema`` == :data:`SCHEMA_PASS`
+    (a corrupt/foreign newest file does not blind the caller to an older valid one).
+    Observability-only and best-effort — it **never raises**, so a missing/garbled record
+    degrades gracefully to ``None``."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        # Filenames are timestamp-prefixed (fixed-width ns epoch), so reverse order is
+        # newest-first. Return the first USABLE PASS payload, tolerating a corrupt newest.
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("COMPLETION_VERDICT sidecar %s unreadable; trying older", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") == SCHEMA_PASS:
+                return payload
+        return None
+    except FileNotFoundError:
+        return None  # ticket dir absent → no prior PASS record
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "COMPLETION_VERDICT PASS sidecar read failed; treating as no prior record",
+            exc_info=True,
+        )
+        return None
+
+
 def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> dict[str, Any]:
-    """The slim, queryable sidecar payload for a completion FAIL verdict.
+    """The slim, queryable sidecar payload for a completion verdict.
 
     The verdict is normalized through the shared :func:`rebar.llm.completion.reconcile_verdict`
     guardrail (idempotent — production verdicts are already reconciled) on a shallow copy, so
     the sidecar always carries the FAIL⇔findings invariant and the remediation guidance that
     reconcile attaches to every FAIL, regardless of the caller. Keeps only the fields worth
-    querying offline; runtime-only carriers are dropped to keep the record lean."""
+    querying offline; runtime-only carriers are dropped to keep the record lean.
+
+    Branches on the (reconciled) verdict: a **PASS** emits the ``SCHEMA_PASS`` record carrying the
+    lossless positive ``criteria[]`` (findings empty on PASS); a **FAIL** keeps the EXACT prior
+    ``SCHEMA`` payload (findings/remediation/certifiable) unchanged."""
     from rebar.llm.completion import reconcile_verdict
 
     v = dict(verdict)  # shallow copy — reconcile_verdict mutates its argument in place
     reconcile_verdict(v)
+    if str(v.get("verdict", "")).upper() == "PASS":
+        return {
+            "schema": SCHEMA_PASS,
+            "verdict": v.get("verdict"),
+            "ticket_id": v.get("ticket_id"),
+            "criteria": v.get("criteria", []) or [],
+            "findings": [],  # failures-only; a PASS has none
+            "runner": v.get("runner"),
+            "model": v.get("model"),
+            "material_fingerprint": material,
+        }
     return {
         "schema": SCHEMA,
         "verdict": v.get("verdict"),

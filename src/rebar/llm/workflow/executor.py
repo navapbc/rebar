@@ -640,7 +640,24 @@ def _dispatch(
 ) -> StepResult:
     if ctx.kind == "agent":
         result = runner.run(ctx)
-        return result if isinstance(result, StepResult) else StepResult(outputs=dict(result))
+        sr = result if isinstance(result, StepResult) else StepResult(outputs=dict(result))
+        # Materialize the declared output-schema's default-valued fields when a lean/canned
+        # runner emitted a sparse payload, so downstream wiring can reference an always-present
+        # model default (e.g. completion_verdict's `criteria: []`) instead of raising on a
+        # missing output. A live structured run already emits these via model_dump(exclude_none);
+        # runner-supplied values always win (defaults are merged UNDER the outputs).
+        schema = ctx.step.get("output_schema") if isinstance(ctx.step, dict) else None
+        if schema:
+            from rebar.llm import contracts
+
+            defaults = {
+                k: v for k, v in contracts.default_outputs(schema).items() if k not in sr.outputs
+            }
+            if defaults:
+                sr = StepResult(
+                    outputs={**defaults, **sr.outputs}, status=sr.status, error=sr.error
+                )
+        return sr
     name = ctx.step.get("uses")
     handler = registry.get(name) if name is not None else None
     if handler is None:

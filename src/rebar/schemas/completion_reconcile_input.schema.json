@@ -8,6 +8,7 @@
     "ticket_id": { "type": "string", "description": "The canonical ticket id (for the verdict target)." },
     "raw_verdict": { "type": "string", "description": "The agent's raw verdict string." },
     "raw_findings": { "type": "array", "description": "The agent's raw findings list." },
+    "raw_criteria": { "type": "array", "description": "The agent's raw positive per-criterion records (carried through to the reconciled verdict)." },
     "summary": { "type": ["string", "null"], "description": "Optional agent summary." },
     "runner": { "type": ["string", "null"], "description": "Runner id from the agent run." },
     "model": { "type": ["string", "null"], "description": "Model id from the agent run." },

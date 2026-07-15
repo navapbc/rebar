@@ -16,6 +16,25 @@
       "description": "One finding per FAILING criterion (empty on PASS). Reuses the canonical `finding` shape; the failing requirement rides on `finding.criterion` (an additional property). A finding may also carry an optional `remediation` string — a per-finding next move (for an operator-attested criterion judged NOT MET: record proof as a ticket comment/artifact naming the reference, observed outcome, and when) — distinct from the top-level generic `remediation`.",
       "items": { "$ref": "common.schema.json#/$defs/finding" }
     },
+    "criteria": {
+      "type": "array",
+      "description": "OPTIONAL positive per-criterion evaluation records — the lossless PASS capture that rides alongside the failures-only `findings`. One record per evaluated criterion (met or not). Empty/absent on the legacy path.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": { "type": "string", "description": "The evaluated criterion (verbatim or clearly identifying)." },
+          "met": { "type": "boolean", "description": "Whether this criterion is demonstrably met." },
+          "citation": {
+            "description": "Evidence for the evaluation (nullable): file+line / url / freeform source.",
+            "oneOf": [
+              { "$ref": "common.schema.json#/$defs/citation" },
+              { "type": "null" }
+            ]
+          },
+          "kind": { "type": "string", "description": "codebase-verifiable | operator-attested (the criterion's evidence kind)." }
+        }
+      }
+    },
     "summary": {
       "type": "string",
       "description": "Optional verifier summary; carries the no-explicit-criteria PASS rationale when applicable."
