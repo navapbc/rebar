@@ -66,10 +66,9 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
     Best-effort and exception-swallowing — a failed prune never fails the close; the
     sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
     try:
-        import subprocess
-
         from rebar import config as _config
         from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._store.event_append import delete_events
 
         tracker = str(_config.tracker_dir(repo_root))
         rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
@@ -83,21 +82,9 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         if not old:
             return 0
         rels = [f"{rid}/{f}" for f in old]
-        subprocess.run(["git", "-C", tracker, "rm", "-q", *rels], check=True, capture_output=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                tracker,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"prune: COMPLETION_VERDICT sidecar for {rid} (retain {keep})",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
+        # a raw git rm + whole-index commit here races normal store writes.
+        delete_events(tracker, rels, f"prune: COMPLETION_VERDICT sidecar for {rid} (retain {keep})")
         return len(old)
     except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the close
         logger.warning("COMPLETION_VERDICT sidecar prune failed; continuing", exc_info=True)

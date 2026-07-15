@@ -124,7 +124,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
     remove older ones. Returns the count removed. Best-effort and exception-swallowing (the
     sidecars are reducer-ignored, so removing old ones is safe)."""
     try:
-        import subprocess
+        from rebar._store.event_append import delete_events
 
         tracker = _tracker(None, repo_root)
         rid = _resolve(ticket_id, tracker)
@@ -138,21 +138,9 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         if not old:
             return 0
         rels = [f"{rid}/{f}" for f in old]
-        subprocess.run(["git", "-C", tracker, "rm", "-q", *rels], check=True, capture_output=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                tracker,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"prune: TICKET_DIGEST sidecar for {rid} (retain {keep})",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
+        # a raw git rm + whole-index commit here races normal store writes.
+        delete_events(tracker, rels, f"prune: TICKET_DIGEST sidecar for {rid} (retain {keep})")
         return len(old)
     except Exception:  # noqa: BLE001 — best-effort retention; broad-but-logged, never raises
         logger.warning("TICKET_DIGEST sidecar prune failed; continuing", exc_info=True)

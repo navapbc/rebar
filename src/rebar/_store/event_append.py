@@ -240,6 +240,91 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
     )
 
 
+def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[str]:
+    """``git -C tracker rm -q -- <relpaths>``, riding out index.lock contention (and
+    reclaiming a stale lock) via :func:`_with_index_lock_retry`. Stages the deletions AND
+    removes the worktree files; a non-lock failure surfaces immediately."""
+    return _with_index_lock_retry(
+        tracker,
+        lambda: subprocess.run(
+            ["git", "-C", tracker, "rm", "-q", "--", *relpaths],
+            capture_output=True,
+            text=True,
+        ),
+    )
+
+
+def _git_commit_paths(
+    tracker: str, commit_msg: str, relpaths: list[str]
+) -> subprocess.CompletedProcess[str]:
+    """``git -C tracker commit -q --no-verify -m <msg> -- <relpaths>`` (a PATHSPEC-scoped
+    partial commit), riding out index.lock contention via :func:`_with_index_lock_retry`.
+
+    The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
+    this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
+    the write lock's braces."""
+    argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
+    return _with_index_lock_retry(
+        tracker,
+        lambda: subprocess.run(argv, capture_output=True, text=True),
+    )
+
+
+def _restore_paths(tracker: str, relpaths: list[str]) -> None:
+    """Restore *relpaths* to their committed HEAD state in both index and worktree
+    (best-effort). Undoes a staged ``git rm`` whose commit then failed, so a failed delete
+    leaves the store exactly as it was (the events stay present and committed)."""
+    try:
+        subprocess.run(
+            ["git", "-C", tracker, "checkout", "HEAD", "--", *relpaths],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        pass
+
+
+def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_msg: str) -> int:
+    """Delete committed event files under the write lock, pathspec-scoped.
+
+    The retention-prune counterpart to :func:`stage_and_commit`. Sidecar prunes remove
+    older reducer-ignored events, and — like every other store write — they MUST serialize
+    through the unified write lock rather than racing it with a raw ``git rm`` + whole-index
+    ``git commit``. This acquires :func:`rebar._store.lock.write_lock`, checks the rebase
+    guard, ``git rm``s exactly *relpaths*, and commits ONLY those paths
+    (:func:`_git_commit_paths` — never a whole-index commit that could commit a concurrent
+    writer's staged event under this message), riding out index.lock contention via the
+    shared retry. On a commit failure the staged deletions are restored to HEAD.
+
+    Returns the number of paths deleted (``0`` for an empty list — a no-op that takes no
+    lock and makes no commit). Raises :class:`StoreError` (1), :class:`RebaseGuard` (75),
+    or :class:`LockTimeout` (1), same as the canonical writer; callers wanting the
+    best-effort sidecar posture keep their own ``try``/``except``."""
+    tracker = _lock.canonical_tracker(tracker)
+    _ensure_initialized(tracker)
+    paths = [r for r in relpaths if r]
+    if not paths:
+        return 0
+    with _lock.write_lock(tracker, dual_window=True):
+        _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
+        rm = _git_rm(tracker, paths)
+        if rm.returncode != 0:
+            rm_err = (rm.stderr or rm.stdout).strip()
+            raise StoreError(
+                "Error: git rm failed while holding lock" + (f": {rm_err}" if rm_err else ""),
+                1,
+            )
+        commit = _git_commit_paths(tracker, commit_msg, paths)
+        if commit.returncode != 0:
+            _restore_paths(tracker, paths)  # leave the store as it was
+            git_err = (commit.stderr or commit.stdout).strip()
+            raise StoreError(
+                "Error: git commit failed while holding lock" + (f": {git_err}" if git_err else ""),
+                1,
+            )
+    return len(paths)
+
+
 def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
     """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
 
