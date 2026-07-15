@@ -326,3 +326,27 @@ def _resource_block(tf: str, kind: str, label: str, *, data: bool = False) -> st
             if depth == 0:
                 return tf[start : i + 1]
     return None
+
+
+def test_dockerfile_opcert_uses_ssh_dash_v_for_version_check() -> None:
+    """Regression (bug accc): the OpenSSH >= 8.9 build assertion must read the version from
+    `ssh -V` (which prints `OpenSSH_X.Y...` to stderr), NOT `ssh-keygen -V` (a validity-interval
+    flag that errors without an argument, yielding an empty version so the check ALWAYS fails and
+    the image never builds)."""
+    dockerfile = (_REPO / "infra" / "compose" / "Dockerfile.opcert").read_text(encoding="utf-8")
+    assert "ssh -V 2>&1" in dockerfile, "OpenSSH version must be read from `ssh -V`"
+    assert "ssh-keygen -V 2>&1" not in dockerfile, "must not use `ssh-keygen -V` (wrong flag)"
+
+
+def test_nginx_template_raises_map_hash_bucket_size_for_guard() -> None:
+    """Regression (bug accc): the op-cert guard value is a 48-char token longer than nginx's
+    default 64-byte map-hash bucket, so the template must raise `map_hash_bucket_size` — else
+    `nginx -t` fails with 'could not build map_hash' and the /opcert/ route can never load."""
+    tmpl = (_REPO / "infra" / "nginx" / "rebar.conf.template").read_text(encoding="utf-8")
+    assert re.search(r"map_hash_bucket_size\s+\d+\s*;", tmpl), (
+        "template must set map_hash_bucket_size"
+    )
+    # and it must appear before the guard map block it protects
+    idx_size = tmpl.find("map_hash_bucket_size")
+    idx_map = tmpl.find("map $http_x_opcert_guard")
+    assert 0 <= idx_size < idx_map, "map_hash_bucket_size must precede the guard map block"

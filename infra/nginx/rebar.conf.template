@@ -32,6 +32,10 @@
 # (unlike a missing literal include, which is a config error): so on a FRESH boot with no
 # materialized file, nginx STILL STARTS CLEANLY and /opcert/ serves 403 to everyone until
 # the guard is materialized. A guard rotation just rewrites that one file + reloads nginx.
+# The guard value is a 48-char random token, longer than nginx's default 64-byte map hash
+# bucket — raise it so `nginx -t` can build the map hash (else: "could not build map_hash,
+# you should increase map_hash_bucket_size").
+map_hash_bucket_size 128;
 map $http_x_opcert_guard $opcert_guard_ok {
     default 0;
     include /etc/nginx/opcert-guard*.conf;

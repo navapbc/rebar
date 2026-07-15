@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && ver="$(ssh-keygen -V 2>&1 | sed -nE 's/.*OpenSSH_([0-9]+\.[0-9]+).*/\1/p')" \
+    && ver="$(ssh -V 2>&1 | sed -nE 's/.*OpenSSH_([0-9]+\.[0-9]+).*/\1/p')" \
     && echo "detected OpenSSH ${ver}" \
     && awk -v v="$ver" 'BEGIN { split(v, p, "."); if (p[1] < 8 || (p[1] == 8 && p[2] < 9)) exit 1 }' \
     || { echo "ERROR: OpenSSH >= 8.9 is required (op-cert SSHSIG signing)" >&2; exit 1; }
