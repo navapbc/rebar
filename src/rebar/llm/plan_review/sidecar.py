@@ -174,6 +174,55 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
         return None
 
 
+def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
+    """Return **all** retained ``REVIEW_RESULT`` sidecar payloads for ``ticket_id``,
+    newest→oldest, as a list of usable ``build_payload`` dicts (``[]`` when none).
+
+    The full-history analogue of :func:`latest_review_result` (story 46f0's audit read
+    layer): same ticket-dir resolution, same schema guard (accepts both
+    ``plan_review_result_v1`` and ``_v2``), same observability-only, best-effort posture —
+    it **never raises**. Where ``latest_review_result`` returns the first usable payload,
+    this returns every usable one, so an offline consumer can walk the retained
+    plan-review history. Unreadable/foreign-schema files are skipped (logged once);
+    a missing ticket dir or any error degrades to ``[]``."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        # Filenames are timestamp-prefixed (fixed-width ns epoch), so reverse order is
+        # newest-first. Collect every USABLE v1/v2 payload, tolerating corrupt files.
+        out: list[dict[str, Any]] = []
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                logger.warning("REVIEW_RESULT sidecar %s unreadable; skipping", fname)
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") in (
+                "plan_review_result_v1",
+                "plan_review_result_v2",
+            ):
+                out.append(payload)
+        return out
+    except FileNotFoundError:
+        return []  # ticket dir absent → no retained history
+    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+        logger.warning(
+            "REVIEW_RESULT sidecar history read failed; treating as no history", exc_info=True
+        )
+        return []
+
+
 def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
     """Return the nanosecond timestamp of the **most-recent** ``REVIEW_RESULT`` sidecar for
     ``ticket_id`` (the "last review of ANY kind" marker — every review, PASS or BLOCK, emits a

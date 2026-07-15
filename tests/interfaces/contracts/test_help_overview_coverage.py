@@ -43,9 +43,21 @@ def _routable_subcommands() -> frozenset[str]:
         | _cli._WRITES_FULL
         | _cli._IO
     )
-    # Arms ``_dispatch`` routes by explicit ``if sub == …`` rather than a frozenset.
+    # Arms ``_dispatch`` routes by explicit ``if sub == …`` rather than a frozenset, plus
+    # ``audit`` which is routed by a ``main()`` intercept (owns its own subcommand parsing,
+    # like reconcile) yet carries pinned help text (help/audit.txt) so it is a known
+    # subcommand — hence it must be counted routable here (story 46f0).
     individual = frozenset(
-        {"init", "scratch", "delete", "fsck", "fsck-recover", "bridge-probe", "grounding-info"}
+        {
+            "init",
+            "scratch",
+            "delete",
+            "fsck",
+            "fsck-recover",
+            "bridge-probe",
+            "grounding-info",
+            "audit",
+        }
     )
     return grouped | individual
 

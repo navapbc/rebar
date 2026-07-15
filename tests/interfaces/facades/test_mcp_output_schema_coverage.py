@@ -89,6 +89,10 @@ EXEMPT_GENERIC: dict[str, str] = {
 
 # Tools that HAVE a canonical schema but advertise NO outputSchema by design.
 NO_SCHEMA_EXEMPT: dict[str, str] = {
+    "audit_trail": "audit read-layer aggregator (story 46f0): a best-effort READ that composes "
+    "the observability sidecars into a free-form AuditTrail dict "
+    "({ticket, plan_reviews, completion, code_reviews}) whose nested payloads are the "
+    "sidecars' own loose shapes, so it advertises NO outputSchema by design.",
     "explain_criterion": "plan-review criteria authoring-guide lookup (epic cite-stone-sea / "
     "WS10): a pure registry/guide READ that returns a plain dict — {criterion_id, section} on "
     "success or {error, kind} on failure — a FREE-FORM doc section, not a schema-backed model, "

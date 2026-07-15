@@ -463,6 +463,16 @@ def main(argv: list[str] | None = None) -> int:
 
         return _identity.identity_cli(rest)
 
+    # audit intercept (native audit read-layer aggregator; owns its own --help, like
+    # reconcile/review). `audit` HAS pinned help text (help/audit.txt registers it as a
+    # known subcommand), so `rebar audit --help` / `rebar help audit` fall through to the
+    # shared help machinery below; only an actual invocation (`rebar audit show …`) is
+    # intercepted here, so both help forms render the SAME pinned text byte-for-byte.
+    if argv and argv[0] == "audit" and not (len(argv) >= 2 and argv[1] in ("--help", "-h")):
+        from rebar._cli._audit_commands import audit_cli
+
+        return audit_cli(argv[1:])
+
     # config intercept (native config-transparency read; owns its own --help, like
     # reconcile/review). No store init: it reads working-tree config files only.
     if argv and argv[0] == "config":
