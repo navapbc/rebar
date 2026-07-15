@@ -24,7 +24,12 @@ from rebar._commands import fsck as fsck_mod
 from rebar._commands.init import _GITATTRIBUTES, _GITIGNORE, _RETIRED_GITATTRIBUTES_LINES
 from rebar._store import ensures
 
-ALL_UNITS = {"env-id", "gc-config", "merge-ours", "gitattributes", "gitignore"}
+# The units this drift matrix can fabricate legacy drift on (the original five).
+DRIFTABLE_UNITS = {"env-id", "gc-config", "merge-ours", "gitattributes", "gitignore"}
+# The full registered set recorded in `.ensure-applied` after a sweep. store-compat
+# (story 21dd) is stamped + converged at init and is never drifted by this matrix, so
+# it is asserted `ok`/applied (via ALL_UNITS) but is not among the driftable scenarios.
+ALL_UNITS = DRIFTABLE_UNITS | {"store-compat"}
 
 
 @pytest.fixture
@@ -108,7 +113,7 @@ DRIFT_SCENARIOS = [
     pytest.param({"env-id"}, id="S5-no-env-id"),
     pytest.param({"gc-config", "gitignore"}, id="S6-partial-gc+gitignore"),
     pytest.param({"env-id", "merge-ours", "gitattributes"}, id="S7-three-behind"),
-    pytest.param(ALL_UNITS, id="S8-fully-legacy"),
+    pytest.param(DRIFTABLE_UNITS, id="S8-fully-legacy"),
 ]
 
 
@@ -169,12 +174,12 @@ def test_run_ensures_recorrects_live_redrift(repo: Path) -> None:
 # ── operator path: fsck --repair converges a fully-legacy store ──────────────
 def test_fsck_repair_converges_fully_legacy_store(repo: Path, capsys) -> None:
     tracker = _tracker(repo)
-    _make_behind(tracker, ALL_UNITS)
+    _make_behind(tracker, DRIFTABLE_UNITS)
 
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     out = capsys.readouterr().out
-    assert "ensures: swept 5 unit(s)" in out
-    assert "5 changed" in out  # all five were behind
+    assert "ensures: swept 6 unit(s)" in out
+    assert "5 changed" in out  # all five driftable units were behind (store-compat stays ok)
     _assert_converged(tracker)
     assert ensures.applied_ids(tracker) == ALL_UNITS
 
@@ -195,10 +200,10 @@ def test_pre_feature_store_reports_pending(repo: Path) -> None:
     ensures._reset_pending_cache()
 
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 0/5 applied" in out
+    assert "ensures: 0/6 applied" in out
     assert "run `rebar fsck --repair` to converge" in out
 
     # After the operator repairs, the same read-only line reports fully applied.
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     ensures._reset_pending_cache()
-    assert "ensures: 5/5 applied" in rebar.fsck(repo_root=str(repo))
+    assert "ensures: 6/6 applied" in rebar.fsck(repo_root=str(repo))

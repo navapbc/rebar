@@ -27,7 +27,7 @@ from pathlib import Path
 
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._store import lock
+from rebar._store import compat, lock
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
@@ -420,6 +420,10 @@ def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bo
         except lock.LockTimeout:
             disp["error"] = "lock-timeout"
             return disp
+        except compat.StoreIncompatibleError as exc:
+            # Story 21dd: fail closed on an incompatible store — repair is a mutation.
+            disp["error"] = f"store-incompatible: {exc}"
+            return disp
         try:
             for name in plan["retire"]:
                 fp = os.path.join(ticket_dir, name)
@@ -507,8 +511,10 @@ def _push_pending(tracker: str) -> str | None:
     return None
 
 
-def _transform_json(text: str) -> str:
-    """Port of the dispatcher's text→json transform (ticket-fsck.sh lines 37-69)."""
+def _transform_json(text: str, compat_error: dict | None = None) -> str:
+    """Port of the dispatcher's text→json transform (ticket-fsck.sh lines 37-69). Story
+    21dd: attach a ``{"kind","detail"}`` ``compat_error`` (incompatible/corrupt store) so
+    ``jq -e '.compat_error.kind'`` detects it WITHOUT the read being blocked."""
     issues, fixed = [], []
     for line in text.splitlines():
         if not line.strip():
@@ -534,7 +540,10 @@ def _transform_json(text: str) -> str:
         else:
             item["detail"] = rest
         issues.append(item)
-    return json.dumps({"issues": issues, "fixed": fixed, "issue_count": len(issues)})
+    payload: dict = {"issues": issues, "fixed": fixed, "issue_count": len(issues)}
+    if compat_error is not None:
+        payload["compat_error"] = compat_error
+    return json.dumps(payload)
 
 
 def _has_remote(tracker: str) -> bool:
@@ -792,9 +801,16 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     )
     rc = 0 if issue_count == 0 else 1
 
+    # Story 21dd: the read-only diagnostic surfaces an incompatible/corrupt store as a
+    # structured `compat_error` (JSON) + WARNING, WITHOUT blocking (repair is gated via
+    # lock.acquire() instead); the exit code is unchanged.
+    compat_error = compat.describe_store_compat(tracker)
+    if compat_error is not None:
+        sys.stderr.write(f"WARNING: {compat_error['detail']}\n")
+
     if fmt == "json":
         full = "\n".join(lines + [summary])
-        sys.stdout.write(_transform_json(full) + "\n")
+        sys.stdout.write(_transform_json(full, compat_error) + "\n")
         return rc
     sys.stdout.write("\n".join(lines + [summary]) + "\n")
     return rc

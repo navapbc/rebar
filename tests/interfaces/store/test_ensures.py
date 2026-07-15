@@ -54,7 +54,7 @@ def _tickets_head(tracker: Path) -> str:
 def test_registry_id_set_is_frozen() -> None:
     """The advertised id list and the actual callable map must agree — a rename or
     a typo (which would silently strand a unit as forever-pending) is caught here."""
-    expected = {"env-id", "gc-config", "merge-ours", "gitattributes", "gitignore"}
+    expected = {"env-id", "gc-config", "merge-ours", "gitattributes", "gitignore", "store-compat"}
     assert set(ensures.REGISTRY_IDS) == expected
     assert set(ensures._registry().keys()) == expected
     assert ensures.registry_ids() == frozenset(expected)

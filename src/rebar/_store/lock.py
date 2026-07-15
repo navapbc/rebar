@@ -33,6 +33,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from rebar._store.compat import check_store_compat
+
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"
 # Ownership stamp written inside the mkdir lock dir so a future acquirer can detect
@@ -287,6 +289,11 @@ def acquire(
     then (when ``dual_window``) the mkdir leg. Raises :class:`LockTimeout` if either
     leg cannot be taken in budget."""
     tracker = canonical_tracker(tracker)
+    # Story 21dd: fail CLOSED on a store whose committed .store-compat.json this rebar
+    # cannot interpret, BEFORE any lock-held write. This single insertion at the write-
+    # lock chokepoint covers write_lock() and every direct acquire() caller (txn,
+    # compact, fsck repair). Reads never acquire the write lock, so they stay available.
+    check_store_compat(tracker)
     total_wait = timeout * attempts
     lock_path = os.path.join(tracker, WRITE_LOCK_NAME)
     lock_dir = os.path.join(tracker, MKDIR_LOCK_NAME)

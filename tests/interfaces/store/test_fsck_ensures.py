@@ -50,7 +50,7 @@ def _tickets_head(tracker: Path) -> str:
 # ── read-only ensures: N/M line ───────────────────────────────────────────────
 def test_plain_fsck_prints_converged_line(repo: Path) -> None:
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 5/5 applied" in out
+    assert "ensures: 6/6 applied" in out
     assert "run `rebar fsck --repair`" not in out  # converged → no nudge
 
 
@@ -59,7 +59,7 @@ def test_plain_fsck_pending_line_and_no_sweep(repo: Path) -> None:
     (tracker / ensures.APPLIED_MARKER).unlink()  # simulate a pre-feature/pending store
     before = _tickets_head(tracker)
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 0/5 applied" in out
+    assert "ensures: 0/6 applied" in out
     assert "run `rebar fsck --repair` to converge" in out
     # read-only fsck must NOT sweep: no marker rewritten, no commits.
     assert not (tracker / ensures.APPLIED_MARKER).exists()
@@ -85,10 +85,10 @@ def test_repair_converges_pending_store(repo: Path, capsys) -> None:
     ensures._reset_pending_cache()
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     out = capsys.readouterr().out
-    assert "ensures: swept 5 unit(s)" in out
-    # marker rewritten → converged, and the re-scan line now reads 5/5.
+    assert "ensures: swept 6 unit(s)" in out
+    # marker rewritten → converged, and the re-scan line now reads 6/6.
     assert ensures.applied_ids(tracker) == set(ensures.REGISTRY_IDS)
-    assert "ensures: 5/5 applied" in out
+    assert "ensures: 6/6 applied" in out
 
 
 def test_repair_ensure_phase_is_idempotent(repo: Path, capsys) -> None:
