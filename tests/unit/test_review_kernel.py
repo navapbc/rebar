@@ -503,6 +503,8 @@ def test_coach_renders_deterministically_from_template() -> None:
             "subject": "the retry policy",
             "finding_refs": ["f0"],
             "coaching": "Spike the retry policy first.",
+            # story 8086: coach() tags each note with its finding's decision bucket
+            "decision": "advisory",
         }
     ]
 

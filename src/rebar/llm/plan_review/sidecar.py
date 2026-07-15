@@ -520,6 +520,9 @@ def build_payload(
                 "subject": c.get("subject"),
                 "finding_refs": c.get("finding_refs", []),
                 "coaching": c.get("coaching"),
+                # story 8086: which decision bucket the coached finding sits in
+                # ("block" | "advisory"); absent (None) on pre-8086 records.
+                "decision": c.get("decision"),
             }
             for c in verdict.get("coaching", [])
         ],

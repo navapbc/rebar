@@ -832,11 +832,8 @@ def load_move_registry(repo_root=None) -> dict[str, dict[str, Any]]:
     return moves
 
 
-# The Pass-4 coach MECHANISM — the surviving-findings listing (`coach_instructions`, an alias of
-# the kernel `coach_listing`), the deterministic render (`render_coach_notes`), the subject
-# validator (`_validate_subject`), and the applicability filter — lives in the shared review
-# kernel (`rebar.llm.review_kernel.coach`) as the single source (epic vivid-gang-day WS3) and is
-# re-exported at the top of this module. `MOVE_REGISTRY` above is plan-review's catalog INSTANCE.
+# The Pass-4 coach MECHANISM (listing/render/validator/applicability) lives in the shared
+# review kernel (epic vivid-gang-day WS3), re-exported at the top of this module.
 
 
 def pass4_coach(
@@ -846,15 +843,16 @@ def pass4_coach(
     plan: str,
     surviving: list[dict[str, Any]],
     move_registry: dict[str, dict[str, Any]],
+    blocking: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Map each surviving advisory finding to a move and render coaching prose DETERMINISTICALLY
-    from the move's locked template, via the shared kernel coach mechanism
-    (:func:`rebar.llm.review_kernel.coach`). The LLM only picks the move + names a bounded
-    noun-phrase subject (validated); it never authors prose. plan-review's active triggers are the
-    criteria carried by the surviving findings (existing always-applicable moves ignore them)."""
+    """Map each coachable finding to a move + prose rendered DETERMINISTICALLY from the move's
+    locked template via the shared kernel coach; the LLM only picks the move + a bounded,
+    validated subject. Triggers = the criteria the coachable findings carry. NOTE (8086): the
+    live path is the workflow ops; this bespoke entry is unit-test-only, widened identically."""
     from rebar.llm import review_kernel
 
-    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
+    blocking = blocking or []
+    triggers = {c for f in blocking + surviving for c in f.get("criteria", []) or []}
 
     def _pick(instructions: str, applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         req = RunRequest(
@@ -868,4 +866,6 @@ def pass4_coach(
         )
         return runner.run(req).get("notes", []) or []
 
-    return review_kernel.coach(surviving, move_registry, pick=_pick, active_triggers=triggers)
+    return review_kernel.coach(
+        surviving, move_registry, pick=_pick, active_triggers=triggers, blocking=blocking
+    )

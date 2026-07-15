@@ -24,7 +24,7 @@ code moves). The kernel owns:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 # A move registry is ``{move_id: {name, template, applies_when?}}``.
@@ -120,7 +120,7 @@ def coach_listing(surviving: list[dict[str, Any]], registry: MoveRegistry) -> st
     listing = "\n".join(f"- id={f['id']} :: {f['finding'][:200]}" for f in surviving)
     moves = "\n".join(f"  {mid}: {m['name']}" for mid, m in sorted(registry.items()))
     return (
-        f"## Move registry\n{moves}\n\n## Surviving advisory findings (by id)\n{listing}\n\n"
+        f"## Move registry\n{moves}\n\n## Surviving findings (by id)\n{listing}\n\n"
         "Emit one note per finding you can map to a useful move (skip findings no move fits)."
     )
 
@@ -160,28 +160,39 @@ def validate_subject(subject: str) -> str | None:
 
 
 def render_coach_notes(
-    raw_notes: list[dict[str, Any]], registry: MoveRegistry
+    raw_notes: list[dict[str, Any]],
+    registry: MoveRegistry,
+    decision_map: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Render the Pass-4 LLM's raw move picks ``{move_id, subject, finding_refs}`` into
     deterministic coaching prose from each move's LOCKED template. The subject validator gates
     every note (an invalid/imperative/code-bearing subject ⇒ no coaching for that finding); a
     ``move_id`` NOT in ``registry`` (e.g. a pick outside the applicable subset) is dropped — so
-    the LLM can never select a move outside the applicable set."""
+    the LLM can never select a move outside the applicable set.
+
+    ``decision_map`` (story 8086: coaching over blocking findings too) maps finding id →
+    ``"block" | "advisory"``; when given, each rendered note is stamped with the decision of
+    its referenced finding(s) ("block" wins when a note references both) so consumers can
+    distinguish must-fix coaching from optional coaching."""
     notes: list[dict[str, Any]] = []
     for n in raw_notes:
         move = registry.get(n.get("move_id", ""))
         subject = validate_subject(n.get("subject", ""))
         if not move or subject is None:
             continue
-        notes.append(
-            {
-                "move_id": n["move_id"],
-                "move_name": move["name"],
-                "subject": subject,
-                "finding_refs": n.get("finding_refs", []) or [],
-                "coaching": move["template"].format(subject=subject),
-            }
-        )
+        refs = n.get("finding_refs", []) or []
+        note = {
+            "move_id": n["move_id"],
+            "move_name": move["name"],
+            "subject": subject,
+            "finding_refs": refs,
+            "coaching": move["template"].format(subject=subject),
+        }
+        if decision_map is not None:
+            decisions = {decision_map.get(str(r)) for r in refs} - {None}
+            if decisions:
+                note["decision"] = "block" if "block" in decisions else "advisory"
+        notes.append(note)
     return notes
 
 
@@ -198,20 +209,28 @@ def coach(
     *,
     pick: PickMoves,
     active_triggers: Iterable[str] = (),
+    blocking: Iterable[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
-    """Pass-4 over the surviving advisory findings. The mechanism, in order:
+    """Pass-4 over the surviving findings — blocking + advisory (story 8086: blocking
+    findings, the ones an agent MUST remediate, get the same move-shaped coaching; blocking
+    entries list first). The mechanism, in order:
 
-    1. **gate-on-surviving>0** — 0 surviving ⇒ return ``[]`` with NO ``pick`` (LLM) call;
+    1. **gate-on-coachable>0** — 0 findings (neither bucket) ⇒ return ``[]`` with NO ``pick``
+       (LLM) call;
     2. **applicability filter** — keep only the moves that apply given ``active_triggers``;
     3. **pick** — the LLM picks among ONLY the applicable moves (``move_id`` + bounded subject);
     4. **render** — deterministic prose from the move template, gated by the subject validator.
 
     A pick outside the applicable set is dropped at step 4 (render keys on the applicable
     registry), so the LLM can never select a move outside the applicable subset."""
-    if not surviving:
+    coachable = list(blocking) + list(surviving)
+    if not coachable:
         return []
     applicable = applicable_moves(registry, active_triggers)
     if not applicable:
         return []
-    raw = pick(coach_listing(surviving, applicable), applicable) or []
-    return render_coach_notes(raw, applicable)
+    decision_map = {str(f.get("id")): "block" for f in blocking} | {
+        str(f.get("id")): "advisory" for f in surviving
+    }
+    raw = pick(coach_listing(coachable, applicable), applicable) or []
+    return render_coach_notes(raw, applicable, decision_map=decision_map)

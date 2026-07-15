@@ -2,12 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/plan_review_coach_inputs_output.schema.json",
   "title": "PlanReviewCoachInputsOutput",
-  "description": "OUTPUT of `plan_review_coach_inputs`: the prompt-template `plan` text and the Pass-4 coach `instructions` (move registry + surviving-findings listing) fed into the workflow's coach_notes prompt step (its `with: {plan, instructions}`).",
+  "description": "OUTPUT of `plan_review_coach_inputs`: the prompt-template `plan` text, the Pass-4 coach `instructions` (move registry + coachable-findings listing), and `findings` \u2014 the coachable union (blocking first, then surviving advisory; story 8086) that drives the coach_gate branch and the coach prompt's surviving binding.",
   "type": "object",
   "properties": {
-    "plan": { "type": "string", "description": "The assembled plan text (PlanContext.plan_text) — resolves the coach prompt's {{plan}}." },
-    "instructions": { "type": "string", "description": "The Pass-4 coach instructions: the same move-registry + surviving-findings listing the bespoke pass4_coach builds." }
+    "plan": {
+      "type": "string",
+      "description": "The assembled plan text (PlanContext.plan_text) \u2014 resolves the coach prompt's {{plan}}."
+    },
+    "instructions": {
+      "type": "string",
+      "description": "The Pass-4 coach instructions: the same move-registry + coachable-findings listing the bespoke pass4_coach builds."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Blocking + surviving findings (blocking first) fed to coach_gate and the coach prompt."
+    }
   },
-  "required": ["plan", "instructions"],
+  "required": [
+    "plan",
+    "instructions",
+    "findings"
+  ],
   "additionalProperties": false
 }

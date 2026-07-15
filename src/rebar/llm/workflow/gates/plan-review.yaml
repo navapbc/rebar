@@ -178,21 +178,23 @@ steps:
           with:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
-        # Pass-4 coach is gated on there being a surviving advisory: a clean PASS (0
-        # surviving) takes the else arm — coach renders with notes:[] and makes NO coach
+            blocking: ${{ steps.decide.outputs.blocking }}
+        # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
+        # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
+        # findings takes the else arm — coach renders with notes:[] and makes NO coach
         # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
         - id: coach_gate
           needs:
           - coach_inputs
           branch:
-            when: ${{ steps.decide.outputs.surfaced }}
+            when: ${{ steps.coach_inputs.outputs.findings }}
             then:
             - id: coach_notes
               prompt: plan-review-coach
               mode: structured
               output_schema: plan_review_coach
               with:
-                surviving: ${{ steps.decide.outputs.surfaced }}
+                surviving: ${{ steps.coach_inputs.outputs.findings }}
                 plan: ${{ steps.coach_inputs.outputs.plan }}
                 instructions: ${{ steps.coach_inputs.outputs.instructions }}
             - id: coach
@@ -256,21 +258,23 @@ steps:
           with:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
-        # Pass-4 coach is gated on there being a surviving advisory: a clean PASS (0
-        # surviving) takes the else arm — coach renders with notes:[] and makes NO coach
+            blocking: ${{ steps.decide.outputs.blocking }}
+        # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
+        # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
+        # findings takes the else arm — coach renders with notes:[] and makes NO coach
         # LLM call, matching the bespoke pass4_coach early-return (WS4 crimp-polar-jag).
         - id: coach_gate
           needs:
           - coach_inputs
           branch:
-            when: ${{ steps.decide.outputs.surfaced }}
+            when: ${{ steps.coach_inputs.outputs.findings }}
             then:
             - id: coach_notes
               prompt: plan-review-coach
               mode: structured
               output_schema: plan_review_coach
               with:
-                surviving: ${{ steps.decide.outputs.surfaced }}
+                surviving: ${{ steps.coach_inputs.outputs.findings }}
                 plan: ${{ steps.coach_inputs.outputs.plan }}
                 instructions: ${{ steps.coach_inputs.outputs.instructions }}
             - id: coach

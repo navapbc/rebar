@@ -358,21 +358,26 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     ),
 )
 def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
-    """Emit {plan, instructions} feeding the workflow's Pass-4 coach prompt step."""
+    """Emit {plan, instructions, findings} feeding the workflow's Pass-4 coach prompt step.
+    ``findings`` (story 8086) is the coachable union — BLOCKING first, then surviving
+    advisory — so blocking findings (the ones an agent must remediate) get coaching too;
+    it also drives the coach_gate branch condition (fires when EITHER bucket is non-empty)."""
     from . import orchestrator, passes
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     surviving = list(ctx.inputs.get("surviving") or [])
+    blocking = list(ctx.inputs.get("blocking") or [])
+    coachable = blocking + surviving
     # The deterministic applicability filter (WS3): the LLM only sees the moves that apply
-    # given the active triggers (plan-review's = the criteria the surviving findings carry).
+    # given the active triggers (plan-review's = the criteria the coachable findings carry).
     # Existing plan-review moves declare no `applies_when` ⇒ always-applicable ⇒ the listing is
     # unchanged; the field + filter are the mechanism a future gate (b744) uses.
     moves = passes.load_move_registry(ctx.repo_root)
-    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
+    triggers = {c for f in coachable for c in f.get("criteria", []) or []}
     applicable = passes.applicable_moves(moves, triggers)
-    instructions = passes.coach_instructions(surviving, applicable)
-    return {"plan": pctx.plan_text, "instructions": instructions}
+    instructions = passes.coach_instructions(coachable, applicable)
+    return {"plan": pctx.plan_text, "instructions": instructions, "findings": coachable}
 
 
 @register_step(
@@ -492,12 +497,20 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     }
     # Render over the SAME applicable subset the coach prompt picked among (WS3): a move_id
     # outside the applicable set is dropped, so the LLM can never select outside it. Triggers =
-    # the criteria the surviving (surfaced) findings carry (matching coach_inputs).
+    # the criteria the coachable (blocking + surfaced) findings carry (matching coach_inputs,
+    # story 8086). The decision map stamps each note with its finding's decision.
     moves = passes.load_move_registry(ctx.repo_root)
     surviving = list(ctx.inputs.get("surfaced") or [])
-    triggers = {c for f in surviving for c in f.get("criteria", []) or []}
+    blocking_in = list(ctx.inputs.get("blocking") or [])
+    coachable = blocking_in + surviving
+    triggers = {c for f in coachable for c in f.get("criteria", []) or []}
     applicable = passes.applicable_moves(moves, triggers)
-    coaching = passes.render_coach_notes(list(ctx.inputs.get("notes") or []), applicable)
+    decision_map = {str(f.get("id")): "block" for f in blocking_in} | {
+        str(f.get("id")): "advisory" for f in surviving
+    }
+    coaching = passes.render_coach_notes(
+        list(ctx.inputs.get("notes") or []), applicable, decision_map=decision_map
+    )
 
     # finalize_verdict needs only ctx.ticket_id + ctx.ticket_type — a minimal context (no
     # rebar read) suffices here (the precheck already canonicalized the id/type).
