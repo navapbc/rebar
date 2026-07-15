@@ -37,18 +37,17 @@ def _proj(tmp: Path) -> Path:
 
 
 # ── removed alias: verify.require_verdict_for_close is now an unknown key ──────
-def test_removed_verdict_alias_ignored_and_warns(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The scheduled ``verify.require_verdict_for_close`` alias was removed pre-1.0
-    (DE7): it no longer maps to the canonical key — it is just an unknown key now
-    (warned + ignored), so the canonical stays at its default (False)."""
+def test_removed_verdict_key_is_a_load_bearing_tombstone(tmp_path: Path) -> None:
+    """``verify.require_verdict_for_close`` is a load-bearing TOMBSTONE (story 36c7):
+    the removed close-gate key still set in config must FAIL LOUD with a targeted
+    RemovedInputError naming its replacement — not be silently ignored as an unknown
+    key (its removal changes close-gate semantics, so a silent drop is unsafe)."""
+    from rebar._deprecations import RemovedInputError
+
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
-        c = cfg.load_config(root=p)
-    assert c.verify.overlap_enabled is False  # canonical key still parses; not aliased
-    assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
+    with pytest.raises(RemovedInputError, match="require_completion_verification_for_close"):
+        cfg.load_config(root=p)
 
 
 # ── removed key: verify.require_signature_for_close is now an unknown key ──────
@@ -167,15 +166,19 @@ def test_strict_loads_known_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert c.verify.require_plan_review_for_claim is True and c.sync.push == "off"
 
 
-def test_strict_errors_on_removed_verdict_alias(
+def test_removed_verdict_key_tombstone_fires_regardless_of_unknown_key_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The removed ``require_verdict_for_close`` alias (DE7) is now a truly-unknown
-    key, so under the strict cutover it hard-errors like any other unknown key."""
+    """The ``require_verdict_for_close`` TOMBSTONE (story 36c7) fires as a
+    RemovedInputError independent of the unknown-key policy — the tombstone path is
+    checked BEFORE the generic unknown-key path, so even the lenient (default) policy
+    fails loud on this load-bearing removed key."""
+    from rebar._deprecations import RemovedInputError
+
     monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
-    with pytest.raises(cfg.ConfigError, match="require_verdict_for_close"):
+    with pytest.raises(RemovedInputError, match="require_verdict_for_close"):
         cfg.load_config(root=p)
 
 

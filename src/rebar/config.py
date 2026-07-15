@@ -101,7 +101,17 @@ def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:
 def tracker_dir_override() -> str | None:
     """The explicit ticket-store location override, or ``None`` when unset:
     ``REBAR_TRACKER_DIR``. The decoupled/relocated store is a supported feature
-    (EV-3b)."""
+    (EV-3b).
+
+    The removed ``TICKETS_TRACKER_DIR`` alias is a load-bearing tombstone checked
+    HERE — the single env-read source, reached by ``tracker_dir()`` AND directly by
+    ``rebar_reconciler/inbound_translate.py:_resolve_tracker_dir`` (both bypass
+    ``load_config``). A ``load_config``-only check would leave those paths silently
+    reading the wrong store."""
+    if "TICKETS_TRACKER_DIR" in os.environ:
+        from rebar._deprecations import RemovedInputError, removed_input
+
+        raise RemovedInputError(removed_input("env", "TICKETS_TRACKER_DIR"))
     return os.environ.get("REBAR_TRACKER_DIR") or None
 
 
@@ -496,6 +506,13 @@ def _env_signature() -> tuple:
     # config, so each must miss the cache.
     for legacy in _LEGACY_ENV_ALIASES:
         sig.append((legacy, os.environ.get(legacy)))
+    # Every tombstoned (REMOVED) env var — a retired var appearing mid-process must
+    # invalidate the cache so the top-of-load_config tombstone scan re-fires.
+    from rebar._deprecations import tombstones
+
+    for ri in tombstones():
+        if ri.kind == "env":
+            sig.append((ri.name, os.environ.get(ri.name)))
     return tuple(sig)
 
 
@@ -591,6 +608,18 @@ def load_config(
     ``cli_overrides`` defaults to the process-wide :data:`_CLI_OVERRIDES` (set by the
     ``rebar -c`` flag); pass an explicit dict to override it, or an explicit ``{}`` to
     deliberately opt OUT of the process global (no ``cli`` layer for this call)."""
+    # Tombstone checks for REMOVED env vars + the legacy flat config file, BEFORE the
+    # cache lookup so they fire even on a WARM cache hit (a retired input must never be
+    # silently served from cache). ``raise_or_warn_env`` raises RemovedInputError for
+    # an error-class env var and WARNs for a warn-class one (skip_llm: the LLM-scoped
+    # env tombstones are enforced in rebar.llm.config, not on every core resolve).
+    from rebar._deprecations import RemovedInputError, raise_or_warn_env, removed_input
+
+    raise_or_warn_env(os.environ)
+    _legacy_conf = repo_root(root) / ".rebar" / "config.conf"
+    if _legacy_conf.exists():
+        raise RemovedInputError(removed_input("file", ".rebar/config.conf"))
+
     effective_cli = cli_overrides if cli_overrides is not None else _CLI_OVERRIDES
     key = (
         str(root) if root is not None else None,

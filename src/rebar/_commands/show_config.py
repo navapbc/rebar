@@ -82,9 +82,82 @@ def _render_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _raw_toml_tables(root: str | None) -> dict:
+    """The RAW (uncoerced) merged nested TOML tables (user then project, project wins),
+    ``{section: {key: value}}`` — read directly, NOT through the coercing/raising
+    ``load_config`` path, so ``config validate`` can inspect keys (incl. tombstoned ones
+    that ``coerce_sparse`` would drop) without aborting on the first removed input."""
+    merged: dict[str, dict] = {}
+
+    def _merge(table: dict) -> None:
+        for sect, val in table.items():
+            if isinstance(val, dict):
+                merged.setdefault(sect, {}).update(val)
+
+    try:
+        up = _config.user_config_path()
+        if up.is_file():
+            _merge(_config._read_toml_table(up, pyproject=False))
+        proj = _config._discover_project_config(root)
+        if proj is not None:
+            path, kind = proj
+            _merge(_config._read_toml_table(path, pyproject=(kind == "pyproject")))
+    except _config.ConfigError:
+        # An unreadable/malformed config file: validate should still report the env +
+        # file tombstones it can, so treat the TOML side as empty rather than aborting.
+        return merged
+    return merged
+
+
+def _validate(root: str | None) -> int:
+    """``rebar config validate``: scan the live env + parsed TOML + the legacy config
+    file for REMOVED inputs, report every match, and exit non-zero iff any error-class
+    input is present (a clean environment exits 0). Non-raising — reports the whole
+    migration surface at once rather than aborting on the first removed input."""
+    import os
+
+    from rebar._deprecations import scan_tombstones
+
+    toml_tables = _raw_toml_tables(root)
+    legacy = _config.repo_root(root) / ".rebar" / "config.conf"
+    file_paths = [".rebar/config.conf"] if legacy.is_file() else []
+
+    hits = scan_tombstones(env=dict(os.environ), toml_tables=toml_tables, file_paths=file_paths)
+    if not hits:
+        print("rebar config validate: OK — no removed inputs are set.")
+        return 0
+
+    has_error = False
+    for ri, ctx in hits:
+        has_error = has_error or ri.behavior == "error"
+        level = "ERROR" if ri.behavior == "error" else "WARN"
+        repl = ri.replacement if ri.replacement else "(no replacement)"
+        print(f"{level}: {ri.kind} {ctx} was removed in {ri.removed_in} — use {repl} instead")
+    if has_error:
+        sys.stderr.write(
+            "rebar config validate: one or more REMOVED inputs are still set "
+            "(see above); migrate them.\n"
+        )
+        return 1
+    return 0
+
+
 def config_cli(argv: list[str]) -> int:
-    """``rebar config`` entrypoint. ``--output text`` (default) or ``json``;
+    """``rebar config`` entrypoint. Subcommand ``validate`` scans for removed inputs;
+    otherwise shows resolved config. ``--output text`` (default) or ``json``;
     ``--root`` overrides the repo root used for project-config discovery."""
+    if argv and argv[0] == "validate":
+        vparser = argparse.ArgumentParser(
+            prog="rebar config validate",
+            description="Scan the environment + config for REMOVED (tombstoned) inputs. "
+            "Exits non-zero if any load-bearing removed input is still set.",
+        )
+        vparser.add_argument(
+            "--root", default=None, help="repo root for config discovery (default: auto)"
+        )
+        vargs = vparser.parse_args(argv[1:])
+        return _validate(vargs.root)
+
     parser = argparse.ArgumentParser(
         prog="rebar config",
         description="Show the resolved rebar configuration and the precedence layer "

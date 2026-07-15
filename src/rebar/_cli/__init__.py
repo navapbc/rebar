@@ -345,6 +345,23 @@ def main(argv: list[str] | None = None) -> int:
 
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # A REMOVED, still-set, load-bearing input (env var / TOML key / legacy file) raises
+    # RemovedInputError (a BaseException) from anywhere in the dispatch body below. Catch
+    # it at this single boundary so the command surfaces the targeted migration message +
+    # a non-zero exit, NOT a raw traceback. (BaseException would otherwise print one.)
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        return _main_dispatch(argv)
+    except RemovedInputError as e:
+        sys.stderr.write(str(e) + "\n")
+        return 1
+
+
+def _main_dispatch(argv: list[str]) -> int:
+    """The full CLI dispatch body: the ``-c`` override parse, every in-process
+    intercept (reconcile/review/…/identity/config/audit), and ``return _dispatch(...)``.
+    Wrapped by :func:`main` in a ``RemovedInputError`` handler (see there)."""
     # Global config overrides (git -c style): `rebar -c section.key=value [...] <cmd>`,
     # repeatable, BEFORE the subcommand. They install the highest-precedence `cli`
     # layer (CLI > env > project > user > defaults) for every config consumer this
