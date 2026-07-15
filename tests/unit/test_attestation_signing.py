@@ -324,3 +324,48 @@ def test_rebar_version_stamp_is_inert_to_validity_parsers() -> None:
     assert attest.manifest_material(base) == attest.manifest_material(without) == "fp-1"
     assert attest.manifest_regver(base) == attest.manifest_regver(without) == "rv-1"
     assert attest.manifest_deps(base) == attest.manifest_deps(without) == {"a.py": "h1"}
+
+
+# ── build-provenance hook precedence (story 6168) ─────────────────────────────
+# Fast, build-free unit coverage of hatch_build._resolve_build_commit — the four-step
+# precedence (env → preserve-existing → git → None) and the release-context fail-fast
+# on a set-but-empty REBAR_BUILD_COMMIT. The slow build-based oracle (a real
+# `python -m build` sdist→wheel round-trip) lives in tests/unit/test_build_provenance.py
+# and is additionally exercised by release.yml's wheel-test / sdist-test jobs.
+def _hook_module():
+    import importlib.util
+
+    root = Path(rebar.__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("_hb_probe", root / "hatch_build.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_resolve_build_commit_env_var_wins() -> None:
+    mod = _hook_module()
+    resolved = mod._resolve_build_commit(
+        Path("/does/not/matter"), existing="oldsha0", env={"REBAR_BUILD_COMMIT": "abc1234"}
+    )
+    assert resolved == "abc1234"
+
+
+def test_resolve_build_commit_preserves_existing_when_env_unset() -> None:
+    mod = _hook_module()
+    # No env override → the SHA baked into the sdist-shipped _build_info.py is preserved.
+    assert mod._resolve_build_commit(Path("/no/git/here"), existing="baked77", env={}) == "baked77"
+
+
+def test_resolve_build_commit_falls_back_to_none_outside_git() -> None:
+    mod = _hook_module()
+    # No env, no existing bake, and a path that is not a git tree → None (never raises).
+    assert mod._resolve_build_commit(Path("/no/git/here"), existing=None, env={}) is None
+
+
+def test_resolve_build_commit_raises_on_set_but_empty_env() -> None:
+    mod = _hook_module()
+    for blank in ("", "   "):
+        with pytest.raises(ValueError, match="set but empty"):
+            mod._resolve_build_commit(
+                Path("/anywhere"), existing="baked77", env={"REBAR_BUILD_COMMIT": blank}
+            )

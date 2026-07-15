@@ -144,9 +144,48 @@ make verify-mcp-pin   # downloads the pinned URL and asserts its SHA-256 == the 
 ```
 
 **Evidence.** Each pin-bearing job emits a named evidence fragment (`evidence-shapin` for the
-action SHAs, `evidence-build` for the frozen tool versions, `evidence-mcp` for the verified
-publisher digest); a final `consolidate_evidence` job concatenates them into
-`release-evidence.txt`, uploaded as a release artifact.
+action SHAs, `evidence-build` for the frozen tool versions, `evidence-artifacts` for the
+built wheel/sdist digests, `evidence-mcp` for the verified publisher digest); a final
+`consolidate_evidence` job concatenates them into `release-evidence.txt`, uploaded as a
+release artifact.
+
+---
+
+## Build-once — the tested bytes are the published bytes
+
+The release workflow **builds the wheel + sdist exactly once** (the `build` job) and flows
+those *same bytes* through testing and publishing — nothing is rebuilt between "we tested it"
+and "we shipped it". The shape:
+
+- **`build` (build-once).** Runs the hash-locked `--no-isolation` build with
+  `REBAR_BUILD_COMMIT=${GITHUB_SHA::7}` exported first, so the release commit's short SHA is
+  baked into the artifacts (see below). It records `SHA-256` of each artifact into a
+  `SHA256SUMS` manifest and uploads **one** bundle — wheel + sdist + `SHA256SUMS` — plus the
+  `evidence-artifacts` fragment (the digests).
+- **`wheel_test` / `sdist_test`** (`needs: build`). Each downloads that bundle and probes the
+  artifact with **no repo checkout on the path**, so `import rebar` resolves to the installed
+  package, never the source tree. `wheel_test` installs the wheel by filename; `sdist_test`
+  installs from the sdist with `REBAR_BUILD_COMMIT` **unset** and no `.git`. Both assert a
+  **non-null** `rebar._build_info.COMMIT`, load every packaged JSON schema, and run
+  `rebar --help` / `rebar-mcp --help`.
+- **`publish`** (`needs: [build, wheel_test, sdist_test]`). Downloads the *same* bundle,
+  re-verifies it with `sha256sum -c SHA256SUMS`, and publishes **without rebuilding** (there
+  is deliberately no `python -m build` in this job). A byte that changed between build and
+  publish fails the hash gate.
+
+### Baked build provenance (why `REBAR_BUILD_COMMIT`)
+
+`python -m build` builds the sdist first, then builds the **wheel from the extracted sdist** —
+a tree with no `.git`. The naive `git rev-parse` hook therefore baked `COMMIT = None` into the
+published wheel, losing the gate-code provenance the signing resolver falls back to on non-git
+installs. `hatch_build.py` now resolves the commit by a four-step precedence:
+`REBAR_BUILD_COMMIT` env → an existing non-null `COMMIT` already baked into the sdist-shipped
+`_build_info.py` (preserve-existing) → `git rev-parse --short HEAD` → `None`. The release build
+sets the env var, so both the sdist and the wheel-from-sdist bake the exact release SHA; a dev
+`pip install .` (env unset) still falls back to git/None and never fails. **A set-but-empty
+`REBAR_BUILD_COMMIT` is a hard error** — release context must not silently lose provenance. The
+`sdist_test` job (env unset) proves the preserve-existing path end-to-end; ordinary CI catches
+the defect too via the `artifact-probe` job in `test.yml`.
 
 ---
 
@@ -252,13 +291,20 @@ claims **at login time** — if you publicize membership *after* logging in, re-
 `io.github.<you>/*`. The interactive JWT also expires, which is exactly why the
 normal path is the OIDC job above.
 
-### 5. Post-release smoke test — update the local install from the channel, then probe
-Once the version is live on PyPI, **update your local install from the
-distribution channel** and run the end-to-end **live probe** against it. This is
-the release gate that verifies the *published* artifact (not your working tree)
-actually installs and that every CLI command works against the real engine —
-catching the class of bug where a local editable checkout passes but the shipped
-package is broken.
+### 5. Smoke test — PRE-publication, against the exact wheel/sdist
+The install-and-probe smoke test now runs **before** anything is published, in-workflow,
+against the **exact bytes** that will be shipped. Under build-once (above) the `wheel_test`
+and `sdist_test` jobs — which `publish` `needs:` — install the built wheel/sdist with **no
+repo checkout on the path**, run `import rebar`, `rebar --help`, `rebar-mcp --help`, load
+every packaged JSON schema, and assert a non-null baked `_build_info.COMMIT`. A packaging
+defect (missing data file, a `COMMIT = None` bake, a broken entry point) therefore **blocks
+the publish** instead of surfacing only after the immutable artifact is already live. Because
+`publish` promotes the *same* hash-gated bundle those jobs tested (no rebuild), a green
+`wheel_test`/`sdist_test` is a guarantee about the published artifact, not a separate build.
+
+You can still run the post-publication live probe below as belt-and-suspenders (it drives the
+channel-installed binary end-to-end), but it is no longer the *only* gate against a broken
+shipped package — the pre-publication jobs are.
 ```bash
 # 1) Pull the just-published version FROM THE CHANNEL (with the mcp extra so
 #    rebar-mcp is covered too). --force replaces any stale local/editable install.

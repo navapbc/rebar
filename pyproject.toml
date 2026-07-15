@@ -157,6 +157,10 @@ dev = [
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
+    # PEP 517 front-end used by the build-provenance E2E tests (they run `python -m build`
+    # to exercise the sdist→wheel path and assert the baked COMMIT — story 6168). Also what
+    # the release workflow's build-once job uses. A floor is fine: this is dev/CI-only.
+    "build>=1.2",
     # Lint/format tool — pinned EXACTLY (not a floor) so `make format`, `make lint`,
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
