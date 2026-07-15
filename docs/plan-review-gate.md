@@ -129,14 +129,17 @@ Decision rules: the only veto is `cited_reference_accurate == "no"` (fires only
 when a finding cites a specific code reference) → **dropped**; `validity < 0.5` →
 **dropped**; else **block** iff the criterion has opted into blocking *and*
 `priority ≥ block_threshold` (a criterion left at its `0.95` default ⇒ near-certain
-*and* high-impact); else **advisory**. After the first dogfood-data calibration (story
-`3d3d`; see `docs/experiments/plan-review-threshold-calibration.md`), **seven criteria
-that the verifier rarely refutes and that empirically drive plan revisions** — **G6,
-COH, T5e, E2, G5, F1, T4** — are `default_posture: blocking` at `block_threshold: 0.70`
-(a precision-first cut: only a verifier-confirmed, high-impact finding from one of these
-blocks). Every other LLM criterion stays advisory (`0.95`), including the demonstrably
-false-positive-prone set (G1G2/T6/T5b/E5/E6/F4) and the confident-but-routinely-ignored
-set (T3/T10/T8). The DET floor (P1/P5/P8) still blocks unconditionally.
+*and* high-impact); else **advisory**. Two dogfood-data calibrations have run (stories
+`3d3d`, then `usable-chattery-coelacanth`; see
+`docs/experiments/plan-review-threshold-calibration.md`). The current blocking tiers —
+the source of truth is `src/rebar/llm/plan_review/criteria_routing.json` — are:
+**G6, COH, T5e, E2, G5, F1 at `block_threshold: 0.60`** (calibration 1 flipped them to
+blocking at 0.70; calibration 2 lowered them to 0.60 on zero-false-positive band
+adjudication), **T1, T4, T8, G1G2 at `0.70`** (T4 from calibration 1; T1/T8/G1G2
+promoted in calibration 2), and **E4 at `0.75`** (promoted in calibration 2). Every
+other LLM criterion stays advisory (`0.95`), including the false-positive-prone
+T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
+(P1/P5/P8) still blocks unconditionally.
 
 ### The Pass-4 move registry
 
@@ -328,7 +331,16 @@ finding text exists; and the last review of any kind is within the freshness win
 (default 60 min, measured from the last review and **reset on each review**, so the loop
 persists across a series of edits and lapses to a normal full review only after the agent
 goes idle). Any precondition failing → a **byte-identical full review**. The
-**evidence gate** completes the triple gate and is likewise always-on. Field evidence (782
+**evidence gate** completes the triple gate and is likewise always-on.
+
+> **Known limitation — the floor does not engage during BLOCK loops.** Eligibility's
+> baseline is the prior **certified PASS** signature (the signed manifest supplies the
+> material/SHA/registry reference points), and a BLOCK verdict never signs — so a
+> ticket iterating under consecutive BLOCK verdicts never qualifies for remediation
+> mode, and its advisory volume is never floored. Post-flip field data (2026-07-14):
+> 287/382 plan reviews ineligible, 240 of them because no certified signature existed.
+> Story `a850-1392-55b0-4514` (epic `deadsmooth-provincial-shrew`) rekeys eligibility
+> to fall back to the prior `REVIEW_RESULT` sidecar so BLOCK loops qualify. Field evidence (782
 post-recalibration runs: 32% verdict instability on byte-identical plans, 95% of remediation
 edits minting new findings) motivated making both unconditional; the `discriminates_novelty`
 eval (`rebar prompt eval plan-review-novelty`) remains available to re-run.
@@ -539,11 +551,17 @@ hidden.
 Shipped advisory-by-default with high thresholds; **threshold calibration and tier
 re-validation were explicitly post-implementation** (calibration is only meaningful
 against the running system — the eval suite + sidecar collect the real data to tune
-later). The **first calibration has now run** (story `3d3d`): the `REVIEW_RESULT`
-sidecar corpus was replayed to flip the seven dual-signal criteria above to blocking at
+later). **Two calibrations have now run**: the first (story `3d3d`) replayed the
+`REVIEW_RESULT` sidecar corpus to flip seven dual-signal criteria to blocking at
 `0.70`, validated by re-reviewing a 20-ticket high-finding/overlay sample
-(`docs/experiments/plan-review-threshold-calibration.md`). Recalibrate on a cadence as
-more sidecar data accrues. Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
+(`docs/experiments/plan-review-threshold-calibration.md`); the second (story
+`usable-chattery-coelacanth`, 2026-07-08) lowered those to `0.60` and promoted
+T1/T8/G1G2 (`0.70`) and E4 (`0.75`) on human adjudication showing under-blocking. The
+current table lives in `src/rebar/llm/plan_review/criteria_routing.json` (pinned by
+`tests/unit/test_threshold_recalibration.py`). Recalibrate on a cadence as more
+sidecar data accrues — ADR 0036 mandates the replay be segmented by
+`impact_model_version` (the calibration-2 thresholds predate the `plan-v2` impact
+model shipped the same day, so a plan-v2-segmented replay is the standing next step). Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
 registry and the experiment-grounded defaults.
 
 ## Definition-of-done for a cutover/engine swap (live exercise required)

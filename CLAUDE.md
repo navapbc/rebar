@@ -309,6 +309,21 @@ least one bullet/checklist line. A ticket missing the `## Acceptance Criteria`
 checklist fails both gates regardless of how rich the rest of the description is.
 (`session_log` is exempt from all of this — see the Session logs section above.)
 
+**Author to the plan-review criteria, not just this structural floor.** The table
+above satisfies the heuristic gates only; the plan-review claim gate judges content
+against the full criteria registry, and plans written to the template alone
+predictably eat first-round blocks. BEFORE writing a plan, read the authoring
+checklists in [docs/plan-review-criteria-guide.md](docs/plan-review-criteria-guide.md)
+(or print one section with `rebar explain <criterion-id>`) — start with the
+**blocking tier**: F1 (measurable, observable ACs with a concrete proving command
+each), E2 (no placeholders — state defaults), G5 (single-concern sizing), G6
+(positive rationale for the chosen approach), COH (no cross-section contradictions),
+T5e (maintainability), T1 (prior-art for novel architecture), T4 (destructive steps
+as justified choices with rollback), T8 (LLM/prompt structural completeness), G1G2 +
+E4 (verify every "X already exists / Y handles Z" claim against the codebase before
+asserting it), and any overlays your plan's content triggers (security → T5c,
+UI/accessibility → T5d, infra → T10, migrations → T11).
+
 **Marking operator-attested criteria (`[operator-attested]`).** The completion verifier
 recognizes two criterion kinds (ADR 0043). By default every AC item is
 **codebase-verifiable** — the verifier proves it against real code and never trusts the
