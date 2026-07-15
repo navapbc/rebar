@@ -403,6 +403,18 @@ class McpConfig:
     http_allowed_origins: tuple[str, ...] = ()
     http_tls_at_edge: bool = False
     allow_unauthenticated_http: bool = False
+    # Authentication seam (S2): OFF by default. When auth_enabled, build_server wires a
+    # composite token verifier (the SINGLE audience/fail-closed choke point) to the SDK's
+    # Resource-Server support. auth_strategies is the ORDERED, closed vocabulary of verifiers
+    # to compose ({static, jwt, introspection, proxy, custom}); S2 ships only `static`. The
+    # remaining keys tune the Resource-Server identity + the static-bearer secrets file. Each
+    # auto-derives a REBAR_MCP_<KEY_UPPER> env var.
+    auth_enabled: bool = False
+    auth_strategies: tuple[str, ...] = ()
+    auth_issuer_url: str = ""
+    auth_resource_server_url: str = ""
+    auth_required_scopes: tuple[str, ...] = ()
+    auth_static_tokens_file: str = ""
 
 
 @dataclass
@@ -561,6 +573,12 @@ _SECTIONS: dict[str, dict] = {
         "http_allowed_origins": lambda v, k: _as_str_tuple(v, k),
         "http_tls_at_edge": lambda v, k: _as_bool(v, k),
         "allow_unauthenticated_http": lambda v, k: _as_bool(v, k),
+        "auth_enabled": lambda v, k: _as_bool(v, k),
+        "auth_strategies": lambda v, k: _as_str_tuple(v, k),
+        "auth_issuer_url": lambda v, k: _as_str(v, k),
+        "auth_resource_server_url": lambda v, k: _as_str(v, k),
+        "auth_required_scopes": lambda v, k: _as_str_tuple(v, k),
+        "auth_static_tokens_file": lambda v, k: _as_str(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),
