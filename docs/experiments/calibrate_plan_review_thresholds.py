@@ -31,24 +31,36 @@ DET_CRITERIA = {"P1", "P5", "P6", "P7", "P8", "P9", "P2", "P3", "P4"}  # always 
 MIN_N = 25  # statistical-power floor for an auto-proposal; below this -> Step 5 interactive
 
 
-def load(impact_model_version: str | None = None) -> dict[str, list[dict]]:
+def load(
+    impact_model_version: str | None = None,
+) -> tuple[dict[str, list[dict]], dict[str, int]]:
     """Bucket REVIEW_RESULT sidecars by ticket. When ``impact_model_version`` is given, SEGMENT the
     corpus to that formula version: a sidecar tagged with a DIFFERENT version is skipped, and a
     sidecar with NO ``impact_model_version`` tag is treated as "unknown" and ALSO skipped — never
     silently pooled across versions (story raptorial-galloping-dragon; mirrors the missing-`cohort`
-    discipline). With ``None`` (the default) behaviour is unchanged: all sidecars are pooled."""
+    discipline). With ``None`` (the default) behaviour is unchanged: all sidecars are pooled.
+
+    Returns ``(by_ticket, skipped)`` where ``skipped`` counts the excluded remainder by reason
+    (``different_version`` / ``untagged`` / ``unparseable``), so a segmented run can report what
+    it did NOT analyze (calibration-3 requirement — a segment size without its complement is
+    unauditable)."""
     by_ticket: dict[str, list[dict]] = collections.defaultdict(list)
+    skipped = {"different_version": 0, "untagged": 0, "unparseable": 0}
     for fp in glob.glob(".tickets-tracker/*/*-REVIEW_RESULT.json"):
         try:
             d = json.load(open(fp))
         except Exception:
+            skipped["unparseable"] += 1
             continue
         data = d.get("data", {})
         if (
             impact_model_version is not None
             and data.get("impact_model_version") != impact_model_version
         ):
-            continue  # segment by version; a missing tag (None) never equals a requested version
+            # segment by version; a missing tag (None) never equals a requested version
+            tagged = data.get("impact_model_version") is not None
+            skipped["different_version" if tagged else "untagged"] += 1
+            continue
         by_ticket[data.get("ticket_id")].append(
             {
                 "ts": os.path.basename(fp).split("-")[0],
@@ -61,7 +73,7 @@ def load(impact_model_version: str | None = None) -> dict[str, list[dict]]:
         )
     for rs in by_ticket.values():
         rs.sort(key=lambda r: r["ts"])
-    return by_ticket
+    return by_ticket, skipped
 
 
 def ran_criteria(rev: dict) -> set[str]:
@@ -81,13 +93,18 @@ def main() -> None:
         "different version OR with no version tag are skipped (never pooled). Default: pool all.",
     )
     args = ap.parse_args()
-    by_ticket = load(impact_model_version=args.impact_model_version)
+    by_ticket, skipped = load(impact_model_version=args.impact_model_version)
     if args.impact_model_version:
         print(f"[segmented to impact_model_version={args.impact_model_version}]")
     revs = [r for rs in by_ticket.values() for r in rs]
     print(
         f"corpus: {len(revs)} sidecars / {len(by_ticket)} tickets / "
-        f"{sum(len(r['findings']) for r in revs)} findings\n"
+        f"{sum(len(r['findings']) for r in revs)} findings"
+    )
+    print(
+        f"skipped remainder: {sum(skipped.values())} sidecars "
+        f"(different_version={skipped['different_version']}, untagged={skipped['untagged']}, "
+        f"unparseable={skipped['unparseable']})\n"
     )
 
     # ---- per-criterion accumulators ----

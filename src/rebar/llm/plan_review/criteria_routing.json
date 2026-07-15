@@ -391,8 +391,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.6,
-    "default_posture": "blocking",
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
     "checklist": [
       {
         "key": "coupling_risk",

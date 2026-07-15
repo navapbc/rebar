@@ -69,13 +69,16 @@ def test_replay_segments_by_version(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.chdir(tmp_path)
 
     # Segmented to plan-v2 → only the two v2 sidecars; v1 and untagged are skipped.
-    seg = calib.load(impact_model_version="plan-v2")
+    seg, skipped = calib.load(impact_model_version="plan-v2")
     assert {t for t in seg} == {"t1", "t2"}
     # Untagged is NEVER pooled into a requested version.
     assert "t4" not in seg and "t3" not in seg
-    # No version → pool all four (back-compat).
-    allrevs = calib.load()
+    # The excluded remainder is counted by reason, so a segmented run is auditable.
+    assert skipped == {"different_version": 1, "untagged": 1, "unparseable": 0}
+    # No version → pool all four (back-compat), nothing skipped.
+    allrevs, skipped_all = calib.load()
     assert {t for t in allrevs} == {"t1", "t2", "t3", "t4"}
+    assert sum(skipped_all.values()) == 0
 
 
 # ── permissive-rollout invariant (no impact-graded hard block) ────────────────────────────
@@ -100,8 +103,11 @@ def test_code_review_approved_blocking_criteria_set() -> None:
 # blocking from `default_posture == 'blocking'` (criteria/model.py), NOT `blocking_enabled` (absent
 # here), so THIS is the meaningful permissive invariant: the impact redesign added no NEW blocking
 # criterion. Adding one to the routing fails this test → forces a deliberate re-approval.
+# Calibration 3 (task relishable-ammonitic-hoverfly) demoted T5e to advisory: the plan-v2
+# segmented replay classed it FP-PRONE (validity 0.391, 59% verifier-drop, surviving p90
+# priority 0.27) — see docs/experiments/plan-review-threshold-calibration.md "Calibration 3".
 _PLAN_REVIEW_APPROVED_BLOCKING = frozenset(
-    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "T1", "T4", "T5e", "T8"}
+    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "T1", "T4", "T8"}
 )
 
 
