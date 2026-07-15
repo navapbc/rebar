@@ -172,6 +172,26 @@
           "name": "REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD",
           "description": "Set to 1 to accept an active introspection response that OMITS `aud` (many AS do); off by default (fail-closed reject).",
           "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_PROXY_SECRET_ENV",
+          "description": "The NAME of the env var holding the trusted-proxy shared secret (never the secret itself); must be present + non-empty at startup or the `proxy` verifier refuses to start (fail-closed).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_PROXY_SECRET_HEADER",
+          "description": "The header the fronting proxy sends its shared secret on; the identity is trusted only when this matches (constant-time; default x-proxy-auth).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER",
+          "description": "The header carrying the proxy-authenticated principal identity, trusted only when the secret header validates (default x-forwarded-user).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_PROXY_SCOPES",
+          "description": "Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes).",
+          "isRequired": false
         }
       ]
     }

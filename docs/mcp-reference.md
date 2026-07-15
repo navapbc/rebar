@@ -108,5 +108,9 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV` | The NAME of the env var holding the introspection client secret (never the secret itself); must be present + non-empty at startup or the server refuses to start (fail-closed). |
 | `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | Set to 1 to permit a private/link-local/loopback introspection endpoint host (SSRF guard is on by default); off by default. |
 | `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | Set to 1 to accept an active introspection response that OMITS `aud` (many AS do); off by default (fail-closed reject). |
+| `REBAR_MCP_AUTH_PROXY_SECRET_ENV` | The NAME of the env var holding the trusted-proxy shared secret (never the secret itself); must be present + non-empty at startup or the `proxy` verifier refuses to start (fail-closed). |
+| `REBAR_MCP_AUTH_PROXY_SECRET_HEADER` | The header the fronting proxy sends its shared secret on; the identity is trusted only when this matches (constant-time; default x-proxy-auth). |
+| `REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER` | The header carrying the proxy-authenticated principal identity, trusted only when the secret header validates (default x-forwarded-user). |
+| `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 
 _49 tools._

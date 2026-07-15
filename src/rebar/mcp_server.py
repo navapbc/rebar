@@ -337,6 +337,39 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         ),
         "deprecated": False,
     },
+    {
+        "name": "REBAR_MCP_AUTH_PROXY_SECRET_ENV",
+        "description": (
+            "The NAME of the env var holding the trusted-proxy shared secret (never the "
+            "secret itself); must be present + non-empty at startup or the `proxy` verifier "
+            "refuses to start (fail-closed)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_PROXY_SECRET_HEADER",
+        "description": (
+            "The header the fronting proxy sends its shared secret on; the identity is "
+            "trusted only when this matches (constant-time; default x-proxy-auth)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER",
+        "description": (
+            "The header carrying the proxy-authenticated principal identity, trusted only "
+            "when the secret header validates (default x-forwarded-user)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_PROXY_SCOPES",
+        "description": (
+            "Comma-separated fixed scope set granted to proxy-authenticated principals; "
+            "empty by default (the principal holds no scopes)."
+        ),
+        "deprecated": False,
+    },
 )
 
 
@@ -575,6 +608,31 @@ def build_server(cfg=None):
         # stdio has no HTTP surface — the verifier is constructed (so a bad config still
         # fails closed at startup) but the SDK only enforces auth over HTTP.
         mcp = FastMCP("rebar", token_verifier=token_verifier, auth=auth_settings)
+
+    # Trusted-proxy header-guard (S5): when the `proxy` strategy is active, the forwarded
+    # identity lives on HTTP headers the token-only verify_token seam never sees, so wrap
+    # the Streamable-HTTP ASGI app with ProxyAuthMiddleware — it validates the shared
+    # secret (constant-time), strips the X-Forwarded-* family / secret / identity headers
+    # to defeat spoofing, and on a valid secret records the identity in a request-scoped
+    # ContextVar that ProxyTokenVerifier (already in the composite) reads. The factory
+    # already validated the secret env var is non-empty, so `secret` here is non-empty.
+    if auth_enabled and "proxy" in mcp_cfg.auth_strategies:
+        import os
+
+        from rebar._mcp_auth import ProxyAuthMiddleware
+
+        _secret = os.environ.get(mcp_cfg.auth_proxy_secret_env) or ""
+        _orig_app = mcp.streamable_http_app
+
+        def _wrapped_streamable_http_app(*args, **kwargs):
+            return ProxyAuthMiddleware(
+                _orig_app(*args, **kwargs),
+                secret=_secret,
+                secret_header=mcp_cfg.auth_proxy_secret_header,
+                identity_header=mcp_cfg.auth_proxy_identity_header,
+            )
+
+        mcp.streamable_http_app = _wrapped_streamable_http_app  # type: ignore[method-assign]
 
     # Shared handles + gate helpers the tool closures capture. Each registrar rebinds
     # these to their original local names so the tool bodies are copied verbatim.
