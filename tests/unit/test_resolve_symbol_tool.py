@@ -48,3 +48,42 @@ def test_resolve_symbol_never_raises_on_garbage() -> None:
     # A non-identifier is rejected safely (never handed to importlib as a path).
     out = _resolve_symbol()("os; rm -rf /")
     assert out.startswith("UNRESOLVED")
+
+
+def test_resolve_symbol_venv_inside_repo_is_third_party(tmp_path, monkeypatch) -> None:
+    """A module whose origin lives under the repo's OWN venv (repo_root/.venv/...)
+    is third-party, not repo-local, even though the path sits inside the repo root
+    (bug c810: the documented worktree setup puts .venv inside the checkout)."""
+    import sys
+
+    from rebar.grounding import resolve as _resolve
+
+    venv = tmp_path / ".venv"
+    origin = venv / "lib" / "python3.12" / "site-packages" / "yaml" / "__init__.py"
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(
+        _resolve,
+        "resolve_in_environment",
+        lambda *a, **k: {"module": "yaml", "origin": str(origin)},
+    )
+    (tool,) = pai_tools.grounding_tools(str(tmp_path))
+    out = tool("yaml")
+    assert out.startswith("EXISTS")
+    assert "third-party/stdlib" in out
+
+
+def test_resolve_symbol_repo_module_still_repo_local(tmp_path, monkeypatch) -> None:
+    """The venv exclusion must not overreach: a module whose origin lives in the
+    repo's own source tree still classifies repo-local."""
+    from rebar.grounding import resolve as _resolve
+
+    origin = tmp_path / "src" / "mypkg" / "__init__.py"
+    monkeypatch.setattr(
+        _resolve,
+        "resolve_in_environment",
+        lambda *a, **k: {"module": "mypkg", "origin": str(origin)},
+    )
+    (tool,) = pai_tools.grounding_tools(str(tmp_path))
+    out = tool("mypkg")
+    assert out.startswith("EXISTS")
+    assert "repo-local" in out

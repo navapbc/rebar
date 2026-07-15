@@ -142,6 +142,34 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
     return [read_file, list_directory, search_files]
 
 
+def _environment_roots() -> tuple[str, ...]:
+    """Realpaths of the installed Python environment's own trees (interpreter
+    prefixes + stdlib + site-packages dirs). A module whose origin lives under
+    one of these is third-party/stdlib even when the environment itself (e.g. a
+    ``.venv``) sits INSIDE the repo root (bug c810): the venv is part of the
+    installed environment, not repo code."""
+    import site
+    import sys
+    import sysconfig
+
+    candidates: list[str] = [
+        sys.prefix,
+        sys.exec_prefix,
+        sys.base_prefix,
+        sys.base_exec_prefix,
+    ]
+    try:
+        candidates.extend(site.getsitepackages())
+        candidates.append(site.getusersitepackages())
+    except (AttributeError, OSError):  # pragma: no cover - absent in some embedded interpreters
+        pass
+    paths = sysconfig.get_paths()
+    candidates.extend(
+        paths.get(key) or "" for key in ("purelib", "platlib", "stdlib", "platstdlib")
+    )
+    return tuple({os.path.realpath(c) for c in candidates if c})
+
+
 def grounding_tools(repo_path: str | None) -> list[Callable]:
     """Environment-aware symbol resolver (bug 406f). The finder's ``filesystem_tools``
     are repo-scoped and CANNOT see a third-party dependency that lives in
@@ -177,7 +205,13 @@ def grounding_tools(repo_path: str | None) -> list[Callable]:
             )
         origin = str(loc.get("origin") or "?")
         qualified = loc["module"] + (f".{loc['attr']}" if loc.get("attr") else "")
-        inside = _within_root(os.path.realpath(origin), root) if os.path.isabs(origin) else False
+        real_origin = os.path.realpath(origin) if os.path.isabs(origin) else ""
+        # The environment's own trees (a venv INSIDE the repo, e.g. ./.venv)
+        # are third-party/stdlib, never repo-local — check them FIRST (bug c810).
+        env_local = bool(real_origin) and any(
+            _within_root(real_origin, env_root) for env_root in _environment_roots()
+        )
+        inside = bool(real_origin) and not env_local and _within_root(real_origin, root)
         scope = "repo-local" if inside else "third-party/stdlib (site-packages)"
         return (
             f"EXISTS: {qualified} resolves in the installed environment [{scope}, origin={origin}]."
