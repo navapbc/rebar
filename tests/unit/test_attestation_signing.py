@@ -369,3 +369,88 @@ def test_resolve_build_commit_raises_on_set_but_empty_env() -> None:
             mod._resolve_build_commit(
                 Path("/anywhere"), existing="baked77", env={"REBAR_BUILD_COMMIT": blank}
             )
+
+
+# ── AC3 (story 6168): the hook's fail-fast + git-fallback pinned by REAL builds ──
+import ast  # noqa: E402
+import shutil  # noqa: E402
+import sys  # noqa: E402
+import zipfile  # noqa: E402
+
+_REPO_ROOT = Path(rebar.__file__).resolve().parents[2]
+
+
+def _has_build() -> bool:
+    try:
+        import build  # noqa: F401
+
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+def _wheel_baked_commit(outdir: Path) -> str | None:
+    wheels = list(outdir.glob("*.whl"))
+    assert wheels, "no wheel produced"
+    with zipfile.ZipFile(wheels[0]) as zf:
+        name = next(n for n in zf.namelist() if n.endswith("rebar/_build_info.py"))
+        # Parse the trivial `COMMIT = "..."` with ast (never exec — matches hatch_build.py).
+        for node in ast.parse(zf.read(name).decode()).body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "COMMIT" for t in node.targets
+            ):
+                v = node.value
+                return v.value if isinstance(v, ast.Constant) else None
+    return None
+
+
+@pytest.mark.skipif(not _has_build(), reason="python -m build not available")
+def test_hook_fails_when_rebar_build_commit_empty(tmp_path: Path) -> None:
+    """AC3(a): `REBAR_BUILD_COMMIT=""` (set-but-empty, release context) fails the real build."""
+    tree = tmp_path / "src"
+    tree.mkdir()
+    tar = subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), "archive", "HEAD"], capture_output=True, check=True
+    ).stdout
+    subprocess.run(["tar", "-x", "-C", str(tree)], input=tar, check=True)
+    import os
+
+    env = {**os.environ, "REBAR_BUILD_COMMIT": ""}
+    cp = subprocess.run(
+        [sys.executable, "-m", "build", "--outdir", str(tmp_path / "d"), str(tree)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert cp.returncode != 0, "an empty REBAR_BUILD_COMMIT must fail the build (release fail-fast)"
+
+
+@pytest.mark.skipif(
+    not _has_build() or shutil.which("git") is None, reason="python -m build / git not available"
+)
+def test_hook_falls_back_to_git_when_env_unset(tmp_path: Path) -> None:
+    """AC3(b): with `REBAR_BUILD_COMMIT` UNSET, a build from a git checkout bakes the
+    `git rev-parse --short HEAD` value (via the sdist's baked SHA preserved into the wheel)."""
+    import os
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--no-hardlinks", str(_REPO_ROOT), str(clone)], check=True
+    )
+    short = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    env = {k: v for k, v in os.environ.items() if k != "REBAR_BUILD_COMMIT"}
+    cp = subprocess.run(
+        [sys.executable, "-m", "build", "--outdir", str(tmp_path / "d"), str(clone)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert cp.returncode == 0, f"unset-env build must succeed (dev fallback): {cp.stderr[-1500:]}"
+    assert _wheel_baked_commit(tmp_path / "d") == short, (
+        "unset REBAR_BUILD_COMMIT must fall back to the git short SHA"
+    )

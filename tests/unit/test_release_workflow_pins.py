@@ -127,7 +127,9 @@ def test_single_annotated_zizmor_suppression() -> None:
 # ── (f) evidence-fragment pipeline + consolidation ────────────────────────────
 def test_evidence_fragments_and_consolidation() -> None:
     text = _text()
-    for frag in ("evidence-shapin", "evidence-build", "evidence-mcp"):
+    # F4's three fragments PLUS F3/6168's evidence-artifacts (wheel/sdist SHA-256 sums),
+    # all consumed by the consolidation job (AC4 requires check (f) to include it).
+    for frag in ("evidence-shapin", "evidence-build", "evidence-mcp", "evidence-artifacts"):
         assert frag in text, f"evidence fragment `{frag}` is not wired in release.yml"
     # A consolidation job downloads the fragments and concatenates them.
     assert "release-evidence.txt" in text, "the consolidated release-evidence.txt is missing"
