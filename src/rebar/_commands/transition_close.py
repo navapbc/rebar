@@ -241,6 +241,19 @@ def _completion_precheck(
         except Exception:  # noqa: BLE001 — defense-in-depth: persistence is best-effort observability and must NEVER mask the FAIL, even if emit itself raises
             logger.warning("completion FAIL sidecar emit raised; still blocking", exc_info=True)
         raise CommandError(message, returncode=1)
+    # PASS: persist the lossless PASS record to the durable, queryable sidecar (story e7e0)
+    # BEFORE any sign/early-return, so EVERY PASS close — including the local (opt-in) and the
+    # certifiable=False (force-closed-descendant) unsigned paths below — leaves the positive
+    # per-criterion `criteria[]` capture, mirroring the FAIL branch's emit. Best-effort:
+    # persistence is observability and must NEVER affect the close outcome, so the emit is
+    # wrapped and any exception logged and swallowed.
+    from rebar.llm import completion_sidecar
+
+    result.setdefault("ticket_id", resolved_id)
+    try:
+        completion_sidecar.emit(result, material=None, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — best-effort observability sidecar; must never affect the close
+        logger.warning("completion PASS sidecar emit raised; close proceeds", exc_info=True)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
     # verdict suppresses signing; the default close path is attested and signs (a verdict with

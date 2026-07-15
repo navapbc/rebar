@@ -573,3 +573,66 @@ def test_pass_close_leaves_no_fail_record(rebar_repo: Path, monkeypatch) -> None
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "closed"
     assert cs.latest_fail_verdict(tid, repo_root=str(rebar_repo)) is None
+
+
+# ── e7e0 held-out (restored) ──
+def PASS_with_criteria(ticket_id, **kw):
+    """A PASS verdict carrying the new positive per-criterion array (findings stays empty)."""
+    return {
+        "verdict": "PASS",
+        "findings": [],
+        "criteria": [
+            {
+                "criterion": "AC1: done",
+                "met": True,
+                "citation": {"kind": "source", "description": "src/x.py:1-9"},
+                "kind": "codebase-verifiable",
+            }
+        ],
+        "runner": "fake",
+        "model": "m",
+    }
+
+
+def test_pass_close_persists_criteria_record(rebar_repo, monkeypatch) -> None:
+    """A PASS close now leaves a durable per-criterion audit record (completion_verifier_pass_v1),
+    mirroring the FAIL sidecar — so a successfully-closed ticket has a queryable completion trail.
+    Asserts on the emitted event JSON via the real reader."""
+    import json
+
+    from rebar.llm import completion_sidecar as cs
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS_with_criteria)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+    rec = cs.latest_pass_record(tid, repo_root=str(rebar_repo))
+    assert rec is not None, "no durable PASS record was persisted"
+    assert rec["schema"] == "completion_verifier_pass_v1"
+    assert rec["verdict"] == "PASS"
+    blob = json.dumps(rec)
+    assert "AC1: done" in blob  # the positive per-criterion record is captured
+    assert rec["criteria"][0]["met"] is True
+    assert rec["criteria"][0]["kind"] == "codebase-verifiable"
+    # the FAIL reader stays None on a PASS (separate schema), so existing FAIL consumers are safe
+    assert cs.latest_fail_verdict(tid, repo_root=str(rebar_repo)) is None
+
+
+def test_pass_close_persist_failure_never_blocks_the_close(rebar_repo, monkeypatch) -> None:
+    """The PASS-path emit is best-effort observability: if it raises, the close still succeeds
+    (the sidecar must never be load-bearing on the happy path)."""
+    from rebar.llm import completion_sidecar as cs
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS_with_criteria)
+
+    def _boom_emit(*a, **k):
+        raise RuntimeError("pass sidecar write blew up")
+
+    monkeypatch.setattr(cs, "emit", _boom_emit)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"  # close still succeeds despite the emit blowing up

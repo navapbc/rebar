@@ -323,5 +323,8 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
     # (reconcile_verdict) does the FAIL<->findings normalization; certifiable is added by the
     # reconcile op.
     expected["certifiable"] = True
+    # The reconcile op also carries the POSITIVE per-criterion `criteria[]` through the workflow
+    # (story e7e0); on the no-summary common case here the agent emitted none, so it is [].
+    expected["criteria"] = []
     expected = _findings.validate_structured(expected, "completion_verdict")
     assert got == expected, "workflow reconcile diverged from completion.py's deterministic tail"

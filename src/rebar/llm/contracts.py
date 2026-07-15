@@ -17,6 +17,7 @@ so ``import rebar.llm`` / ``import rebar.llm.contracts`` pull no heavy dependenc
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 from rebar.llm import findings
 
@@ -37,6 +38,32 @@ def response_model_for(output_schema: str | None) -> type:
     if output_schema and output_schema in _CONTRACTS:
         return _CONTRACTS[output_schema]()
     return findings.findings_response_model()
+
+
+def default_outputs(output_schema: str | None) -> dict:
+    """The materializable DEFAULT-valued top-level fields of a REGISTERED contract model —
+    the fields a live structured run always emits (pydantic ``model_dump(exclude_none=True)``
+    of a fresh instance keeps a non-None default like ``[]``, drops a ``None`` default).
+
+    Used by the workflow executor to guarantee an agent structured step's outputs always
+    carry its model's default-valued fields (e.g. ``completion_verdict``'s ``criteria: []``),
+    so downstream wiring (``${{ steps.<id>.outputs.criteria }}``) can reference them even when
+    a lean/canned runner emitted a sparse payload. Returns ``{}`` for an unregistered name (no
+    findings-model fallback — only a real contract has a meaningful default set)."""
+    if not output_schema or output_schema not in _CONTRACTS:
+        return {}
+    from pydantic import BaseModel
+    from pydantic_core import PydanticUndefined
+
+    model = cast("type[BaseModel]", _CONTRACTS[output_schema]())
+    out: dict = {}
+    for name, fld in model.model_fields.items():
+        default = fld.get_default(call_default_factory=True)
+        # Skip required fields (PydanticUndefined) and None-defaults (a live run's
+        # exclude_none drops those); keep concrete defaults like ``[]``.
+        if default is not None and default is not PydanticUndefined:
+            out[name] = default
+    return out
 
 
 def completion_verdict_response_model() -> type:
@@ -72,6 +99,23 @@ def completion_verdict_response_model() -> type:
             ),
         )
 
+    class Criterion(BaseModel):
+        """One POSITIVE per-criterion evaluation record — the lossless PASS capture that rides
+        alongside the failures-only ``findings``. One per evaluated criterion (met or not)."""
+
+        criterion: str = Field(
+            description="The evaluated criterion (verbatim or clearly identifying)."
+        )
+        met: bool = Field(description="Whether this criterion is demonstrably met.")
+        # reason: Citation is a runtime-built pydantic model (a value, not a static type);
+        # pydantic needs the real class in the annotation to validate the citation.
+        citation: Citation | None = Field(  # type: ignore[valid-type]
+            default=None, description="Evidence: file+line / url / freeform source (nullable)."
+        )
+        kind: str = Field(
+            description="codebase-verifiable | operator-attested (the criterion's evidence kind)."
+        )
+
     class CompletionVerdict(BaseModel):
         """Structured output of the completion verifier: a PASS/FAIL verdict and, on FAIL,
         one finding per failing criterion."""
@@ -79,6 +123,13 @@ def completion_verdict_response_model() -> type:
         verdict: str = Field(description="PASS or FAIL (normalized by the operation).")
         findings: list[VerdictFinding] = Field(
             default_factory=list, description="One per FAILING criterion; empty on PASS."
+        )
+        criteria: list[Criterion] = Field(
+            default_factory=list,
+            description=(
+                "Positive per-criterion evaluation records (met status + citation + kind); "
+                "empty on the legacy path."
+            ),
         )
         summary: str | None = Field(
             default=None, description="Optional summary / no-explicit-criteria PASS rationale."

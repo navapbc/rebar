@@ -39,7 +39,7 @@ def test_response_model_for_selects_by_output_schema() -> None:
     assert "verdict" not in contracts.response_model_for("review_result").model_fields
     # completion contract → the verdict shape
     cv = contracts.response_model_for("completion_verdict")
-    assert set(cv.model_fields) == {"verdict", "findings", "summary"}
+    assert set(cv.model_fields) == {"verdict", "findings", "criteria", "summary"}
     # unknown name → falls back to the findings default (never raises)
     assert "verdict" not in contracts.response_model_for("nonexistent").model_fields
 
@@ -50,9 +50,9 @@ def test_completion_verdict_pins_to_schema() -> None:
     NOT a finding-$def property."""
     cv = contracts.completion_verdict_response_model()
     schema = schemas.load(schemas.COMPLETION_VERDICT)
-    # the model owns verdict/findings/summary; the schema lists those (+ provenance the op adds)
-    assert {"verdict", "findings", "summary"} <= set(schema["properties"])
-    assert set(cv.model_fields) == {"verdict", "findings", "summary"}
+    # the model owns verdict/findings/criteria/summary; the schema lists those (+ op provenance)
+    assert {"verdict", "findings", "criteria", "summary"} <= set(schema["properties"])
+    assert set(cv.model_fields) == {"verdict", "findings", "criteria", "summary"}
     # criterion is NOT in the shared finding $def, but a finding carrying it still validates
     finding_props = schemas.load(schemas.COMMON)["$defs"]["finding"]["properties"]
     assert "criterion" not in finding_props

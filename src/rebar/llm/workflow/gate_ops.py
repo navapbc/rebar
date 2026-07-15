@@ -143,6 +143,11 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     result["findings"] = [
         findings.normalize_finding(f, reviewer_id=_REVIEWER_ID) for f in result["findings"]
     ]
+    # Carry the POSITIVE per-criterion records through the workflow (close-gate) path. This is
+    # the lossless PASS capture that rides ALONGSIDE the failures-only `findings`; it is
+    # untouched by reconcile_verdict (which only edits verdict/findings/remediation) and passes
+    # validate_structured (an optional array). Empty on the legacy path (agent omitted criteria).
+    result["criteria"] = list(ctx.inputs.get("raw_criteria") or [])
     findings.resolve_citations(result, cfg.repo_path)
     reconcile_verdict(result)
     # Carry the precheck's certification decision onto the verdict. `certifiable=False` (a

@@ -59,6 +59,7 @@ steps:
         ticket_id: ${{ steps.precheck.outputs.canonical_id }}
         raw_verdict: ${{ steps.verify.outputs.verdict }}
         raw_findings: ${{ steps.verify.outputs.findings }}
+        raw_criteria: ${{ steps.verify.outputs.criteria }}
         runner: ${{ steps.verify.outputs.runner }}
         model: ${{ steps.verify.outputs.model }}
         trace_id: ${{ steps.verify.outputs.trace_id }}
