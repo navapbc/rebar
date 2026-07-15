@@ -10,9 +10,10 @@
 # row. Membership (which files are soft-cap-exempt) is the sibling bare-path allowlist; the
 # two are kept in sync by tests/unit/test_module_size_contract.py.
 #
-# NOTE (transient): reconcile.py is pinned to 1083 = its largest size across the in-flight
-# janitor stack (it ratchets down to 1064 as the reconciler decomposition lands); the slack
-# lets the ratchet stay green if the stack lands piecemeal rather than atomically.
+# NOTE (transient): reconcile.py is pinned to 1093 (was 1083; +10 for story 21dd's
+# store-compat outbound-push gate in _apply_mutations) = its largest size across the
+# in-flight janitor stack (it ratchets down as the reconciler decomposition lands); the
+# slack lets the ratchet stay green if the stack lands piecemeal rather than atomically.
 #
 # NOTE (epic foliaged-merry-collie — review-gate impact redesign): det_floor.py 849->946 (the G5
 # store-derived decomposition signal, child spangly-beggarly-blackrhino) and passes.py 839->852
@@ -24,7 +25,7 @@
 # 852->861 (d4cf's G7 parent-realign coach move) grew for the calibration epic; ceilings raised to
 # the landed size (remedy rows in architecture.md).
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 806
-src/rebar/_engine/rebar_reconciler/reconcile.py 1083
+src/rebar/_engine/rebar_reconciler/reconcile.py 1093
 src/rebar/config.py 840
 src/rebar/llm/plan_review/det_floor.py 975
 src/rebar/llm/plan_review/passes.py 871
@@ -33,3 +34,4 @@ src/rebar/llm/workflow/gate_dispatch.py 910
 src/rebar/llm/runner.py 850
 src/rebar/_engine/rebar_reconciler/outbound_differ.py 862
 src/rebar/_engine/rebar_reconciler/dispatch_one.py 886
+src/rebar/_commands/fsck.py 816

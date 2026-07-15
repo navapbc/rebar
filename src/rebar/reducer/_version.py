@@ -17,6 +17,21 @@ version and is *preserved-and-ignored*:
 
 ``KNOWN_EVENT_TYPES`` is the single source of truth for that set; the reducer's
 processor dispatch and the compaction preserve-filter both key off it.
+
+Two DISTINCT compatibility mechanisms — do not conflate them (story 21dd):
+
+  * **Event-schema compatibility** (this module): OPTIONAL-ADDITIVE, forward-compat,
+    *preserve-and-ignore*. A newer clone's unknown event *type* is tolerated — the
+    file survives, its effect is simply invisible until the older clone upgrades.
+    This is deliberately permissive so clones on different versions interoperate.
+  * **Store-format compatibility** (``rebar._store.compat`` + the committed
+    ``.store-compat.json``): FAIL-CLOSED. A store whose ``format_version`` /
+    ``required_capabilities`` this binary cannot interpret blocks every mutating /
+    externally-publishing operation before any side effect (reads stay available). An
+    ABSENT record is implicit-legacy (version 0) and passes through.
+
+The event log tolerates forward drift; the store format refuses it. ``SCHEMA_VERSION``
+governs only the former.
 """
 
 from __future__ import annotations

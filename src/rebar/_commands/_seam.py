@@ -345,6 +345,7 @@ def append_event(
     """
     from rebar._store import event_append as _store_append
     from rebar._store import hlc
+    from rebar._store.compat import StoreIncompatibleError
     from rebar._store.event_append import StoreError
     from rebar._store.lock import LockTimeout, RebaseGuard
 
@@ -388,5 +389,7 @@ def append_event(
         return
     try:
         _store_append.write_and_push(str(tracker), ticket_id, event)
-    except (StoreError, RebaseGuard, LockTimeout) as exc:
+    except (StoreError, RebaseGuard, LockTimeout, StoreIncompatibleError) as exc:
+        # StoreIncompatibleError (story 21dd): the write-lock gate fails closed on a
+        # store this rebar cannot interpret — surface it as a non-zero CommandError.
         raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from rebar._store import fsutil
+from rebar._store.compat import StoreIncompatibleError
 from rebar._store.lock import LockTimeout, canonical_tracker, write_lock
 
 logger = logging.getLogger("rebar")
@@ -68,6 +69,7 @@ REGISTRY_IDS: tuple[str, ...] = (
     "merge-ours",
     "gitattributes",
     "gitignore",
+    "store-compat",
 )
 
 
@@ -88,6 +90,7 @@ def _registry() -> dict[str, object]:
         "merge-ours": init._merge_ours_unit,
         "gitattributes": init._gitattributes_unit,
         "gitignore": init._gitignore_unit,
+        "store-compat": init._store_compat_unit,
     }
 
 
@@ -130,9 +133,14 @@ def run_ensures(
     """Run EVERY ensure unit unconditionally under the store write lock and rewrite
     ``.ensure-applied`` with the non-failed ids. Returns the per-unit outcomes.
 
-    Never raises: a unit that raises is caught (skip-and-continue → ``failed`` and
-    excluded from the marker); a write-lock acquisition failure is logged and
-    treated like a whole-sweep no-op (init/boot never abort on ensure trouble).
+    Never raises — with ONE deliberate exception (story 21dd): a unit that raises is
+    caught (skip-and-continue → ``failed`` and excluded from the marker); a write-lock
+    acquisition failure is logged and treated like a whole-sweep no-op (init/boot never
+    abort on ensure trouble). The sole propagated error is
+    :class:`~rebar._store.compat.StoreIncompatibleError` (raised by the store-compat gate
+    inside ``lock.acquire()``): it is re-raised so the fail-closed guarantee is not
+    swallowed on the ensure-sweep path (init / MCP-boot / ``fsck --repair`` must refuse an
+    incompatible store, not log a benign sweep no-op).
 
     ``timeout``/``attempts`` bound the write-lock acquisition; ``None`` keeps
     ``write_lock``'s defaults. A caller that must not block (e.g. MCP boot) passes a
@@ -158,6 +166,13 @@ def run_ensures(
             _write_applied(tracker, [o.id for o in outcomes if o.status != "failed"])
     except LockTimeout as exc:
         logger.warning("run_ensures: write lock unavailable, skipping sweep: %s", exc)
+    except StoreIncompatibleError:
+        # Story 21dd (fail-closed integrity): the write-lock gate fired on a store this
+        # rebar cannot interpret. StoreIncompatibleError subclasses Exception, so the
+        # broad handler below would SWALLOW it into a no-op — turning the fail-closed
+        # gate into a silent bypass at MCP boot / `fsck --repair`. Re-raise so the
+        # caller (init/CLI → non-zero, MCP boot → CommandError) fails closed.
+        raise
     except Exception as exc:  # noqa: BLE001 — an ensure sweep must never abort its caller
         logger.warning("run_ensures: unexpected error, skipping sweep: %s", exc)
     return outcomes
