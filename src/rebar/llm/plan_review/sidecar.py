@@ -439,8 +439,17 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "metrics": (verdict.get("coverage", {}) or {}).get("metrics", {}),
         "coverage": verdict.get("coverage", {}),
         "findings": [_slim(f) for f in all_findings],
+        # Persist the FULL pass-4 coaching record (story a3db) — move_name, subject, and the
+        # rendered coaching prose, not just {move_id, finding_refs} — so an audit UI can
+        # re-render the note. Schema-tolerant: a missing field yields None, never KeyError.
         "coaching": [
-            {"move_id": c.get("move_id"), "finding_refs": c.get("finding_refs", [])}
+            {
+                "move_id": c.get("move_id"),
+                "move_name": c.get("move_name"),
+                "subject": c.get("subject"),
+                "finding_refs": c.get("finding_refs", []),
+                "coaching": c.get("coaching"),
+            }
             for c in verdict.get("coaching", [])
         ],
     }
