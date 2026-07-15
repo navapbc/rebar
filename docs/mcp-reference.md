@@ -112,5 +112,6 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SECRET_HEADER` | The header the fronting proxy sends its shared secret on; the identity is trusted only when this matches (constant-time; default x-proxy-auth). |
 | `REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER` | The header carrying the proxy-authenticated principal identity, trusted only when the secret header validates (default x-forwarded-user). |
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
+| `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
 _49 tools._

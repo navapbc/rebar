@@ -442,6 +442,11 @@ class McpConfig:
     auth_proxy_secret_header: str = "x-proxy-auth"
     auth_proxy_identity_header: str = "x-forwarded-user"
     auth_proxy_scopes: tuple[str, ...] = ()
+    # Pluggable custom verifier (S6): the `custom` strategy's flat key. A `module:factory`
+    # import string resolving to a factory returning a TokenVerifier-shaped object. This is
+    # a TRUSTED operator config value that executes code at load — never read from a request.
+    # Auto-derives REBAR_MCP_AUTH_CUSTOM_IMPORT.
+    auth_custom_import: str = ""
 
 
 @dataclass
@@ -623,6 +628,7 @@ _SECTIONS: dict[str, dict] = {
         "auth_proxy_secret_header": lambda v, k: _as_str(v, k),
         "auth_proxy_identity_header": lambda v, k: _as_str(v, k),
         "auth_proxy_scopes": lambda v, k: _as_str_tuple(v, k),
+        "auth_custom_import": lambda v, k: _as_str(v, k),
     },
     "ui": {
         "enabled": lambda v, k: _as_bool(v, k),

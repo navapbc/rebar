@@ -26,6 +26,7 @@ import asyncio
 import contextvars
 import hashlib
 import hmac
+import importlib
 import ipaddress
 import json
 import logging
@@ -49,6 +50,7 @@ __all__ = [
     "ProxyTokenVerifier",
     "StaticBearerVerifier",
     "build_composite_verifier",
+    "load_custom_verifier",
     "redact",
 ]
 
@@ -556,6 +558,52 @@ class CompositeTokenVerifier:
         return None
 
 
+def load_custom_verifier(import_path: str):
+    """Resolve a ``"module.path:factory"`` import string to a TokenVerifier (S6).
+
+    The import path is a TRUSTED operator config value (``mcp.auth_custom_import``) that
+    executes code at load — it is read ONLY from resolved config, never from a request.
+    Resolution:
+
+    * Split on the LAST ``:`` into ``(module_path, factory_attr)``; a malformed string
+      (no ``:``, empty module, or empty attr) is a hard :class:`AuthConfigError`.
+    * ``importlib.import_module(module_path)`` resolves the module WITHOUT inserting the
+      current working directory into ``sys.path`` (no ``""``/cwd is prepended anywhere), so
+      a module resolvable only from the cwd fails to import (anti cwd-shadowing/hijack).
+    * ``getattr(module, factory_attr)`` is the factory; it is CALLED to produce the verifier.
+    * The resolved object must implement the protocol — a callable ``verify_token`` — or it
+      is rejected.
+
+    ANY failure (unresolvable import, missing attr, a factory that raises, or an object
+    lacking a callable ``verify_token``) is a fail-closed startup error: it is caught and
+    re-raised as :class:`AuthConfigError`. This function NEVER returns a partial/``None``
+    verifier."""
+    module_path, sep, factory_attr = import_path.rpartition(":")
+    if not sep or not module_path or not factory_attr:
+        raise AuthConfigError(
+            f"mcp.auth_custom_import must be a 'module.path:factory' import string "
+            f"(got {redact(import_path)!r})"
+        )
+    try:
+        # NOTE: importlib.import_module does NOT add cwd to sys.path, and we deliberately do
+        # not prepend "" / os.getcwd() — a cwd-only module must fail to import.
+        module = importlib.import_module(module_path)
+        factory = getattr(module, factory_attr)
+        verifier = factory()
+    except Exception as exc:  # noqa: BLE001 — any load failure is a fail-closed startup error
+        raise AuthConfigError(
+            f"mcp.auth_custom_import {redact(import_path)!r} could not be loaded: "
+            f"{redact(str(exc))}"
+        ) from exc
+    verify = getattr(verifier, "verify_token", None)
+    if not callable(verify):
+        raise AuthConfigError(
+            f"mcp.auth_custom_import {redact(import_path)!r} resolved to an object that "
+            f"does not implement the TokenVerifier protocol (no callable 'verify_token')"
+        )
+    return verifier
+
+
 def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
     """Build the composite verifier from ``mcp_cfg.auth_strategies`` (ordered).
 
@@ -619,6 +667,12 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
                     scopes=mcp_cfg.auth_proxy_scopes,
                 )
             )
+        elif strategy == "custom":
+            # Operator-configured verifier loaded from a trusted `module:factory` import
+            # string. The composite still applies the mandatory RFC 8707 audience re-check
+            # against auth_resource_server_url, so a custom verifier's resource is NOT
+            # special-cased here.
+            verifiers.append(load_custom_verifier(mcp_cfg.auth_custom_import))
         else:
             # Recognized vocabulary, but the verifier ships in a later story.
             raise AuthConfigError(f"strategy {strategy!r} is not implemented yet")
