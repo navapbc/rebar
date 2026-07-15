@@ -60,3 +60,4 @@ src/rebar/_build_info.py
 infra/terraform/tf.plan
 infra/terraform/tf.plan.json
 infra/terraform/.terraform/
+.tools/

@@ -1,0 +1,7 @@
+# Release build-environment lock (story 08a8). These are the ONLY tools the
+# hash-locked `--no-isolation` build in .github/workflows/release.yml installs.
+# Regenerate the pinned .txt with:
+#   pip-compile --generate-hashes --output-file=.github/release-requirements.txt .github/release-requirements.in
+build          # PEP 517 front-end (python -m build --no-isolation)
+hatchling      # the build backend declared in pyproject [build-system]
+twine          # distribution metadata validation (twine check dist/*)
