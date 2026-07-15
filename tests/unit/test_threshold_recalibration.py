@@ -6,6 +6,12 @@ The approved pre-redesign changes to `criteria_routing.json`:
   - promote to blocking: G1G2 @ 0.70, T1 @ 0.70, T8 @ 0.70, E4 @ 0.75.
 No other criterion changes.
 
+Amended by calibration 3 (task relishable-ammonitic-hoverfly, plan-v2 segmented replay):
+  - T5e demoted to advisory @ 0.95 (FP-PRONE: validity 0.391, verifier drops 59% of its
+    findings, surviving p90 priority 0.27). The other ten blocking criteria KEEP their
+    calibration-2 thresholds; see docs/experiments/plan-review-threshold-calibration.md
+    "Calibration 3".
+
 Proving command:
     .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
 """
@@ -15,8 +21,10 @@ from __future__ import annotations
 from rebar.llm.criteria.model import threshold_for
 from rebar.llm.plan_review import registry
 
-# The SIX lowered (block_threshold 0.70 -> 0.60), all already blocking.
-LOWERED = {"COH", "E2", "F1", "G5", "G6", "T5e"}
+# The SIX lowered at calibration 2 (0.70 -> 0.60) MINUS T5e, demoted to advisory at
+# calibration 3 (see module docstring).
+LOWERED = {"COH", "E2", "F1", "G5", "G6"}
+CAL3_DEMOTED = {"T5e"}
 # The FOUR promoted to default_posture=blocking, with their new thresholds.
 PROMOTED = {"G1G2": 0.70, "T1": 0.70, "T8": 0.70, "E4": 0.75}
 
@@ -53,7 +61,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "T5b": (0.95, "advisory"),
     "T5c": (0.95, "advisory"),
     "T5d": (0.95, "advisory"),
-    "T5e": (0.6, "blocking"),
+    "T5e": (0.95, "advisory"),
     "T6": (0.95, "advisory"),
     "T7": (0.95, "advisory"),
     "T8": (0.7, "blocking"),
@@ -73,6 +81,13 @@ def test_six_lowered_criteria_at_060_blocking() -> None:
     for cid in LOWERED:
         assert r[cid]["block_threshold"] == 0.6, cid
         assert r[cid]["default_posture"] == "blocking", cid
+
+
+def test_cal3_demoted_t5e_is_advisory_at_095() -> None:
+    r = _routing()
+    for cid in CAL3_DEMOTED:
+        assert r[cid]["block_threshold"] == 0.95, cid
+        assert r[cid]["default_posture"] == "advisory", cid
 
 
 def test_t4_unchanged_at_070_blocking() -> None:

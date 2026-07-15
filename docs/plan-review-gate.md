@@ -129,14 +129,18 @@ Decision rules: the only veto is `cited_reference_accurate == "no"` (fires only
 when a finding cites a specific code reference) → **dropped**; `validity < 0.5` →
 **dropped**; else **block** iff the criterion has opted into blocking *and*
 `priority ≥ block_threshold` (a criterion left at its `0.95` default ⇒ near-certain
-*and* high-impact); else **advisory**. Two dogfood-data calibrations have run (stories
-`3d3d`, then `usable-chattery-coelacanth`; see
+*and* high-impact); else **advisory**. Three dogfood-data calibrations have run (stories
+`3d3d`, then `usable-chattery-coelacanth`, then the plan-v2 segmented replay in task
+`relishable-ammonitic-hoverfly`; see
 `docs/experiments/plan-review-threshold-calibration.md`). The current blocking tiers —
 the source of truth is `src/rebar/llm/plan_review/criteria_routing.json` — are:
-**G6, COH, T5e, E2, G5, F1 at `block_threshold: 0.60`** (calibration 1 flipped them to
+**G6, COH, E2, G5, F1 at `block_threshold: 0.60`** (calibration 1 flipped them to
 blocking at 0.70; calibration 2 lowered them to 0.60 on zero-false-positive band
 adjudication), **T1, T4, T8, G1G2 at `0.70`** (T4 from calibration 1; T1/T8/G1G2
-promoted in calibration 2), and **E4 at `0.75`** (promoted in calibration 2). Every
+promoted in calibration 2), and **E4 at `0.75`** (promoted in calibration 2).
+Calibration 3 (the first replay segmented to the plan-v2 impact model, per ADR 0036)
+demoted **T5e to advisory** — FP-PRONE on the segmented corpus (validity 0.391, 59%
+verifier-drop rate, surviving p90 priority 0.27) — and kept the other ten tiers. Every
 other LLM criterion stays advisory (`0.95`), including the false-positive-prone
 T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
 (P1/P5/P8) still blocks unconditionally.

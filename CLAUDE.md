@@ -318,7 +318,7 @@ checklists in [docs/plan-review-criteria-guide.md](docs/plan-review-criteria-gui
 **blocking tier**: F1 (measurable, observable ACs with a concrete proving command
 each), E2 (no placeholders — state defaults), G5 (single-concern sizing), G6
 (positive rationale for the chosen approach), COH (no cross-section contradictions),
-T5e (maintainability), T1 (prior-art for novel architecture), T4 (destructive steps
+T1 (prior-art for novel architecture), T4 (destructive steps
 as justified choices with rollback), T8 (LLM/prompt structural completeness), G1G2 +
 E4 (verify every "X already exists / Y handles Z" claim against the codebase before
 asserting it), and any overlays your plan's content triggers (security → T5c,
