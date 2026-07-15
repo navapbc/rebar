@@ -72,6 +72,17 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
+| `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_ALLOWED_HOSTS` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_PATH` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_PORT` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_TLS_AT_EDGE` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_READONLY` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_TRANSPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_NO_SYNC` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SYNC_PULL` |
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
@@ -104,7 +115,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_94 variables._
+_105 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

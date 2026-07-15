@@ -76,9 +76,16 @@ __all__ = [
     "VerifySignatureResultOut",
     "WorkflowRunOut",
     "MCP_ENV_VARS",
+    "McpStartupError",
     "build_server",
     "main",
 ]
+
+
+class McpStartupError(RuntimeError):
+    """Raised when the MCP server cannot start under the requested configuration —
+    a fail-closed startup gate (e.g. an unauthenticated HTTP transport without the
+    acknowledgement, or a non-loopback bind missing its allowlists / TLS ack)."""
 
 
 # ── Canonical MCP environment-variable contract ──────────────────────────────
@@ -120,6 +127,61 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         "description": (
             "Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise "
             "reconcile is dry-run only."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_TRANSPORT",
+        "description": (
+            "Transport for the MCP server: 'stdio' (default) or 'http' (the optional "
+            "Streamable-HTTP transport)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_HOST",
+        "description": "Bind host for the Streamable-HTTP transport (default 127.0.0.1).",
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_PORT",
+        "description": "Bind port for the Streamable-HTTP transport (1-65535; default 8000).",
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_PATH",
+        "description": "URL path the Streamable-HTTP transport serves on (default /mcp).",
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_ALLOWED_HOSTS",
+        "description": (
+            "Comma-separated allowlist of exact host:port values accepted by the "
+            "Streamable-HTTP DNS-rebinding protection; empty defaults to loopback."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_ALLOWED_ORIGINS",
+        "description": (
+            "Comma-separated allowlist of exact Origin values accepted by the "
+            "Streamable-HTTP DNS-rebinding protection; empty defaults to loopback."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_HTTP_TLS_AT_EDGE",
+        "description": (
+            "Set to 1 to acknowledge TLS is terminated at the edge; required to bind "
+            "the Streamable-HTTP transport to a non-loopback host."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP",
+        "description": (
+            "Set to 1 to acknowledge running the Streamable-HTTP transport without a "
+            "token verifier; required to boot the HTTP transport while auth is off."
         ),
         "deprecated": False,
     },
@@ -238,7 +300,78 @@ def _dump(item):
     return item
 
 
-def build_server():
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _resolve_http_runtime(mcp_cfg, *, auth_enabled: bool):
+    """Resolve the Streamable-HTTP runtime (host, port, path, TransportSecuritySettings)
+    from config, applying the two fail-closed startup gates and the loopback-bind
+    defaults. Raises :class:`McpStartupError` when a gate refuses the boot.
+
+    Gates:
+      * Unauthenticated-HTTP gate — refuse an auth-off HTTP boot unless the operator
+        sets ``REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP``.
+      * Non-loopback bind — a non-loopback host must supply BOTH allowlists AND
+        acknowledge TLS-at-edge; a loopback host fills any empty allowlist with the
+        explicit loopback defaults for the configured port.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    host = mcp_cfg.http_host
+    port = mcp_cfg.http_port
+    path = mcp_cfg.http_path
+
+    # Gate 1: refuse to serve HTTP without either a token verifier or an explicit ack.
+    if not auth_enabled and not mcp_cfg.allow_unauthenticated_http:
+        raise McpStartupError(
+            "refusing to start the Streamable-HTTP transport without authentication: "
+            "no token verifier is configured. Set "
+            "REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP=1 (mcp.allow_unauthenticated_http) to "
+            "acknowledge running the HTTP transport unauthenticated."
+        )
+
+    allowed_hosts = list(mcp_cfg.http_allowed_hosts)
+    allowed_origins = list(mcp_cfg.http_allowed_origins)
+    is_loopback = host.strip().lower() in _LOOPBACK_HOSTS
+
+    if is_loopback:
+        # Fill each empty allowlist independently with explicit loopback defaults.
+        if not allowed_hosts:
+            allowed_hosts = [f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"]
+        if not allowed_origins:
+            allowed_origins = [
+                f"http://127.0.0.1:{port}",
+                f"http://localhost:{port}",
+                f"http://[::1]:{port}",
+            ]
+    else:
+        # Gate 2: a non-loopback bind must be explicit about who may reach it AND that
+        # TLS is terminated in front of it. Distinguish the two failure modes.
+        if not allowed_hosts or not allowed_origins:
+            raise McpStartupError(
+                f"refusing to bind the Streamable-HTTP transport to non-loopback host "
+                f"{host!r} with an empty allowlist: set both mcp.http_allowed_hosts "
+                "(REBAR_MCP_HTTP_ALLOWED_HOSTS) and mcp.http_allowed_origins "
+                "(REBAR_MCP_HTTP_ALLOWED_ORIGINS) to the exact host:port / origin values "
+                "that may reach this server."
+            )
+        if not mcp_cfg.http_tls_at_edge:
+            raise McpStartupError(
+                f"refusing to bind the Streamable-HTTP transport to non-loopback host "
+                f"{host!r} without a TLS acknowledgement: set mcp.http_tls_at_edge "
+                "(REBAR_MCP_HTTP_TLS_AT_EDGE=1) to confirm TLS is terminated at the edge "
+                "in front of this server."
+            )
+
+    ts = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+    return host, port, path, ts
+
+
+def build_server(cfg=None):
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:  # pragma: no cover - dependency guard
@@ -247,7 +380,24 @@ def build_server():
             "Install it with: pip install 'nava-rebar[mcp]'"
         ) from exc
 
-    mcp = FastMCP("rebar")
+    if cfg is None:
+        cfg = rebar.config.load_config()
+    mcp_cfg = cfg.mcp
+
+    if mcp_cfg.transport == "http":
+        # S1 ships no token verifiers yet, so auth is always off on this path.
+        host, port, path, ts = _resolve_http_runtime(mcp_cfg, auth_enabled=False)
+        # Construct the bind + transport-security AT FastMCP() time, not via late
+        # attribute assignment, so the SDK wires the ASGI app with them.
+        mcp = FastMCP(
+            "rebar",
+            host=host,
+            port=port,
+            streamable_http_path=path,
+            transport_security=ts,
+        )
+    else:
+        mcp = FastMCP("rebar")
 
     # Shared handles + gate helpers the tool closures capture. Each registrar rebinds
     # these to their original local names so the tool bodies are copied verbatim.
@@ -318,7 +468,11 @@ def main() -> None:
     except Exception:  # noqa: BLE001 — boot must never abort on the ensure sweep
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 
-    build_server().run()
+    # Load config once; a malformed config (ConfigError) may propagate and fail startup
+    # (fail-closed). The transport selection drives both build_server and run().
+    cfg = rebar.config.load_config()
+    server = build_server(cfg)
+    server.run(transport="streamable-http" if cfg.mcp.transport == "http" else "stdio")
 
 
 if __name__ == "__main__":
