@@ -137,6 +137,11 @@ services:
       # The SSM SecureString holding the passphrase-free Ed25519 op-cert PRIVATE key. The
       # worker fetches + materializes it per-job to a 0600 temp file (rebar.opcert_service.keyprov).
       REBAR_OPCERT_SSM_KEY_PARAM: "/rebar/prod/opcert-ed25519-key"
+      # boto3 (the SSM key fetch) needs a region; the instance profile supplies the credentials
+      # via IMDS, but the region is not auto-discovered inside the container -> set it explicitly
+      # (else the job fails "You must specify a region").
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
       # Authoritative-state sources the worker fetches ITSELF (never trusts the client): the
       # review remote's `main` tip becomes the signed merged_log_commit; the tickets branch is
       # mounted read-only as a rebar tracker worktree.

@@ -350,3 +350,19 @@ def test_nginx_template_raises_map_hash_bucket_size_for_guard() -> None:
     idx_size = tmpl.find("map_hash_bucket_size")
     idx_map = tmpl.find("map $http_x_opcert_guard")
     assert 0 <= idx_size < idx_map, "map_hash_bucket_size must precede the guard map block"
+
+
+def test_opcert_compose_service_sets_aws_region() -> None:
+    """Regression (bug accc): the opcert service's boto3 SSM key fetch needs a region — the
+    instance profile supplies credentials via IMDS but the region is not auto-discovered inside
+    the container, so the compose service must set AWS_REGION (else every job fails 'You must
+    specify a region')."""
+    import yaml as _yaml
+
+    compose = _yaml.safe_load(
+        (_REPO / "infra" / "compose" / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    env = compose["services"]["opcert"].get("environment", {})
+    # environment may be a dict or a list of "K=V"; normalize to a key set
+    keys = set(env) if isinstance(env, dict) else {e.split("=", 1)[0] for e in env}
+    assert "AWS_REGION" in keys, "opcert service must set AWS_REGION for the boto3 SSM client"
