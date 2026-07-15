@@ -97,14 +97,16 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_engine/rebar_reconciler/binding_store.py`, `src/rebar/_engine/rebar_reconciler/binding_walk.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
+| `REVIEW_BOT_LOG_LEVEL` | `src/rebar/review_bot/config.py` |  |
 | `REVIEW_BOT_PORT` | `src/rebar/review_bot/app.py` |  |
-| `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/app.py` |  |
+| `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SCRATCH_BASE_DIR` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SCRATCH_BASE_DIR` |
+| `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/app.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
 
-_94 variables._
+_96 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -134,5 +136,5 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:28` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:38` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:84` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:94` — `os.environ.get(<non-literal>)`

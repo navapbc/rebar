@@ -19,9 +19,65 @@ without standing up the ASGI app.
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+#: Default per-review wall-clock timeout (seconds). Shared by the live worker
+#: (``app._worker``) and the backfill reconciler so both bound a single review identically.
+DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
+
+#: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
+#: is idempotent (a reload/re-import never stacks duplicate handlers).
+_REVIEWBOT_LOG_HANDLER_MARKER = "_reviewbot_handler"
+
+
+def review_timeout_seconds() -> float:
+    """Per-review wall-clock timeout from ``REVIEW_TIMEOUT_SECONDS`` (default
+    :data:`DEFAULT_REVIEW_TIMEOUT_SECONDS`). A missing / unparseable / non-positive value
+    falls back to the default (a 0 or negative timeout would abandon every review instantly).
+
+    Single-sourced here (not in ``app``) so ``reconcile`` can bound a backfill review with the
+    SAME timeout the live worker uses without importing the fastapi-laden ``app`` module."""
+    raw = os.environ.get("REVIEW_TIMEOUT_SECONDS")
+    if not raw:
+        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+    try:
+        val = float(raw.strip())
+    except ValueError:
+        return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+    return val if val > 0 else float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+
+
+def configure_logging() -> None:
+    """Attach a stdout handler to the ``rebar`` logger so the review-bot's structured
+    ``_emit()`` INFO events (``voter_voted`` / ``voter_skip`` / ``merge_detection`` / all
+    ``reconcile_*``) reach stdout → journald.
+
+    Why this is needed: the container runs ``uvicorn rebar.review_bot.app:app``; uvicorn
+    configures only its own ``uvicorn.*`` loggers and never the root or ``rebar.*`` loggers,
+    so a ``logging.getLogger("rebar.review_bot.voter").info(...)`` record has no handler and
+    falls through to Python's ``lastResort`` — which emits WARNING and above only. Every INFO
+    ``_emit`` line was therefore silently dropped, blinding operators (only the
+    ``print()``-to-stderr markers ``VOTER_ERROR`` / ``ARTIFACT_EMIT_ERROR`` survived).
+
+    Idempotent (marker-guarded); level from ``REVIEW_BOT_LOG_LEVEL`` (default INFO, invalid →
+    INFO); ``propagate=False`` so records do not double-log through uvicorn/root. Targets the
+    ``rebar`` logger specifically (not root) to avoid duplicating uvicorn's access logs."""
+    level_name = os.environ.get("REVIEW_BOT_LOG_LEVEL", "INFO").strip().upper()
+    level = getattr(logging, level_name, logging.INFO)
+    if not isinstance(level, int):  # e.g. an attr that exists but is not a level constant
+        level = logging.INFO
+    lg = logging.getLogger("rebar")
+    if not any(getattr(h, _REVIEWBOT_LOG_HANDLER_MARKER, False) for h in lg.handlers):
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        setattr(handler, _REVIEWBOT_LOG_HANDLER_MARKER, True)
+        lg.addHandler(handler)
+    lg.setLevel(level)
+    lg.propagate = False
 
 
 def _int_env(name: str, default: int) -> int:
