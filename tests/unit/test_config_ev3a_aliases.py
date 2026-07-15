@@ -112,11 +112,17 @@ def test_mcp_allow_jira_sync_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
     cfg.reset_config_cache()
     assert mcp_server._allow_jira_sync() is True
-    # the removed REBAR_MCP_ALLOW_RECONCILE_LIVE alias (DE7) no longer enables it
+    # REBAR_MCP_ALLOW_RECONCILE_LIVE is a load-bearing TOMBSTONE (story 36c7): still
+    # setting the removed sync-gate alias must FAIL LOUD (RemovedInputError, a
+    # BaseException the gate's fail-safe ConfigError handler cannot swallow), not be
+    # silently treated as "off".
+    from rebar._deprecations import RemovedInputError
+
     monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC")
     monkeypatch.setenv("REBAR_MCP_ALLOW_RECONCILE_LIVE", "1")
     cfg.reset_config_cache()
-    assert mcp_server._allow_jira_sync() is False
+    with pytest.raises(RemovedInputError, match="REBAR_MCP_ALLOW_JIRA_SYNC"):
+        mcp_server._allow_jira_sync()
 
 
 def test_mcp_allow_jira_sync_failsafe_on_garbage(

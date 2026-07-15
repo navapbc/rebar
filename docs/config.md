@@ -379,18 +379,48 @@ names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
 `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
 `RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
 `REBAR_ID_GUARD_MODE`→
-`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). **Removed pre-1.0 (DE7 — no
-longer honored):** the flat `.rebar/config.conf` reader (use `rebar.toml` / a
-`[tool.rebar]` pyproject table), and the env aliases `REBAR_PUSH` (use
-`REBAR_SYNC_PUSH`), `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), and
-`REBAR_MCP_ALLOW_RECONCILE_LIVE` (use `REBAR_MCP_ALLOW_JIRA_SYNC`). **Also removed pre-1.0
-(ticket unclear-verymad-sablefish):** the env alias `REBAR_LLM_MAX_ITERS` (use
-`REBAR_LLM_MAX_STEPS`) and the `reconciler.lock_backend` config key (the ref lock is the
-only backend). Also removed (no alias):
+`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
 dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var
 standardization story `60ce`.
+
+### Fail-loud tombstone registry for removed inputs (story 36c7)
+
+A **removed** env var / TOML key / legacy file is not the same as an unknown key. Unknown
+keys keep the forward-compat policy above (warn, or error only under
+`REBAR_CONFIG_UNKNOWN_KEYS=error`). But a *retired-but-still-set* input that used to affect
+**store location, write/sync gates, auth, security, or lifecycle policy** must not be
+silently ignored — silently dropping it reverts the operator's intent to a default, which is
+unsafe. rebar keeps a **tombstone registry** (`rebar._deprecations._TOMBSTONE_REGISTRY`,
+distinct from the alias registry) that classifies each removed input:
+
+- **`error` (load-bearing) → FAIL LOUD.** rebar raises a targeted migration error naming
+  the old name + replacement + removed-in and exits **non-zero** — never a raw traceback.
+  Implemented as `RemovedInputError`, which subclasses `BaseException` (not `Exception`)
+  deliberately, so no `except ConfigError` / `except Exception` fallback in the
+  config→tracker→MCP path can swallow it into a silent default. Error-class tombstones:
+  `TICKETS_TRACKER_DIR` (use `REBAR_TRACKER_DIR`), `REBAR_MCP_ALLOW_RECONCILE_LIVE`
+  (use `REBAR_MCP_ALLOW_JIRA_SYNC`), `REBAR_LLM_MAX_ITERS` (use `REBAR_LLM_MAX_STEPS`),
+  the config key `verify.require_verdict_for_close`
+  (use `verify.require_completion_verification_for_close`), and the flat
+  `.rebar/config.conf` reader (use `rebar.toml` / a `[tool.rebar]` pyproject table).
+- **`warn` (operationally inert) → WARN and continue (exit 0).** Renamed/dropped tunables
+  with no behavioural bite: `REBAR_PUSH` (use `REBAR_SYNC_PUSH`),
+  `REBAR_RECONCILER_LOCK_MAX_RETRIES` / `REBAR_RECONCILER_LOCK_RETRY_BUDGET` (dropped),
+  and the config keys `reconciler.lock_backend` / `reconciler.lock_max_retries` (the ref
+  lock is the only backend).
+
+**`rebar config validate`** is a non-raising sweep that reports **every** tombstoned input
+(and its replacement + removed-in) currently set in the environment / parsed config / as the
+legacy file, then exits **non-zero iff any error-class input is present** (a clean
+environment exits 0). Use it to audit a config for removed inputs without aborting on the
+first one:
+
+```console
+$ rebar config validate
+rebar config validate: OK — no removed inputs are set.
+```
 
 **Session provenance (one shared resolver).** rebar records "which coding-agent
 session emitted an event" via ONE shared resolver

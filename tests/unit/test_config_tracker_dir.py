@@ -39,12 +39,21 @@ def test_override_canonical(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.tracker_dir_override() == "/tmp/canon-tracker"
 
 
-def test_removed_legacy_alias_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
-    # TICKETS_TRACKER_DIR was removed pre-1.0 (DE7): it no longer overrides the store
-    # location (the override reads as unset). Only REBAR_TRACKER_DIR is honored.
+def test_removed_legacy_alias_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    # TICKETS_TRACKER_DIR is a load-bearing TOMBSTONE (story 36c7): still-setting the
+    # removed store-location alias must FAIL LOUD from tracker_dir_override (the single
+    # env-read source, which reconciler/read paths reach directly), NOT be silently
+    # ignored into the wrong store. The autouse _clean_env does not delete it, so the
+    # test manages TICKETS_TRACKER_DIR itself.
+    from rebar._deprecations import RemovedInputError
+
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.setenv("TICKETS_TRACKER_DIR", "/tmp/legacy")
-    assert cfg.tracker_dir_override() is None
+    try:
+        with pytest.raises(RemovedInputError):
+            cfg.tracker_dir_override()
+    finally:
+        monkeypatch.delenv("TICKETS_TRACKER_DIR", raising=False)
 
 
 def test_tracker_dir_uses_canonical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

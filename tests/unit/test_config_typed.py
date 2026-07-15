@@ -160,10 +160,11 @@ def test_unknown_key_and_section_warn_not_drop(caplog: pytest.LogCaptureFixture)
     assert "[bogus_section]" in text
 
 
-def test_removed_verdict_alias_is_unknown_key(caplog: pytest.LogCaptureFixture) -> None:
-    # The require_verdict_for_close alias was removed pre-1.0 (DE7): it no longer maps
-    # to the canonical key — it is just an unknown key (warned + ignored).
-    with caplog.at_level(logging.WARNING, logger="rebar.config"):
-        c = Config.from_mapping({"verify": {"require_verdict_for_close": True}})
-    assert c.verify.require_plan_review_for_claim is False
-    assert any("require_verdict_for_close" in r.getMessage() for r in caplog.records)
+def test_removed_verdict_key_is_a_load_bearing_tombstone() -> None:
+    # require_verdict_for_close is a load-bearing TOMBSTONE (story 36c7): coercion must
+    # FAIL LOUD with RemovedInputError naming the replacement, not swallow it as an
+    # unknown key (its removal changes close-gate semantics).
+    from rebar._deprecations import RemovedInputError
+
+    with pytest.raises(RemovedInputError, match="require_completion_verification_for_close"):
+        Config.from_mapping({"verify": {"require_verdict_for_close": True}})

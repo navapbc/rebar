@@ -33,6 +33,7 @@ import rebar
 # so the per-cluster registrars can share them WITHOUT importing this module (which
 # would form an import cycle). Re-exported here for back-compat: existing callers
 # import e.g. ``rebar.mcp_server.NextBatchOut`` / ``ValidateReportOut`` directly.
+from rebar._deprecations import RemovedInputError
 from rebar._mcp_llm import register_llm_tools
 from rebar._mcp_models import (
     BridgeFsckOut,
@@ -308,6 +309,12 @@ def main() -> None:
         _tracker = str(_config.tracker_dir())
         if os.path.isdir(_tracker):
             _ensures.run_ensures(_tracker, timeout=5, attempts=1)
+    except RemovedInputError:
+        # A removed, still-set, load-bearing input must fail MCP startup hard rather
+        # than be swallowed into a silent boot. BaseException already skips the broad
+        # ``except Exception`` below; this explicit re-raise makes the intent loud and
+        # survives a future widening of the handler.
+        raise
     except Exception:  # noqa: BLE001 — boot must never abort on the ensure sweep
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 

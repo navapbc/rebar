@@ -128,15 +128,21 @@ def test_precedence_full_chain(tmp_path: Path, monkeypatch) -> None:
     cfg.set_cli_overrides(None)
 
 
-def test_max_steps_legacy_env_alias_removed(tmp_path: Path, monkeypatch) -> None:
-    # The REBAR_LLM_MAX_ITERS alias was removed (ticket 5899, breaking): only the
-    # canonical REBAR_LLM_MAX_STEPS is honored, so the legacy name no longer overrides
-    # the file value.
+def test_max_iters_env_is_a_load_bearing_tombstone(tmp_path: Path, monkeypatch) -> None:
+    # REBAR_LLM_MAX_ITERS is a load-bearing TOMBSTONE (story 36c7): still-setting the
+    # removed knob must FAIL LOUD from LLMConfig.from_env with a RemovedInputError naming
+    # REBAR_LLM_MAX_STEPS — not be silently ignored (a silent drop reverts the operator's
+    # intended step budget to the default).
+    from rebar._deprecations import RemovedInputError
+
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[llm]\nmax_steps = 5\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "40")  # removed alias — ignored now
-    assert _cfg(p).max_iterations == 5
-    monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "40")  # canonical still wins
+    monkeypatch.setenv("REBAR_LLM_MAX_ITERS", "40")
+    with pytest.raises(RemovedInputError, match="REBAR_LLM_MAX_STEPS"):
+        _cfg(p)
+    # The canonical name is honored (no tombstone), overriding the file value.
+    monkeypatch.delenv("REBAR_LLM_MAX_ITERS")
+    monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "40")
     assert _cfg(p).max_iterations == 40
 
 

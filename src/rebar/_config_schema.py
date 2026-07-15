@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from rebar._deprecations import warn_deprecated
+from rebar._deprecations import raise_or_warn_cfg_key, warn_deprecated
 
 logger = logging.getLogger("rebar.config")
 
@@ -606,6 +606,13 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
         if not isinstance(val, dict):
             raise ConfigError(f"[{sect}]: expected a table/section, got {type(val).__name__}")
         d = dict(val)
+        # Tombstoned (REMOVED) TOML keys: route to a targeted RemovedInputError (error)
+        # or WARN (warn), BEFORE the generic unknown-key path — a retired lifecycle/gate
+        # key must fail loud, not be swallowed as a forward-compat "unknown key". This is
+        # separate from the genuinely-unknown-key policy in _warn_unknown.
+        for tkey in list(d):
+            if raise_or_warn_cfg_key(sect, tkey) is not None:
+                d.pop(tkey)  # warn-class: consumed here so _warn_unknown does not re-flag it
         for old, new in _ALIASES.get(sect, {}).items():
             if old in d:
                 if new not in d:
