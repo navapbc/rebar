@@ -140,11 +140,12 @@ def test_hmac_record_is_additively_unchanged(store: Path) -> None:
     assert "material_fingerprint" not in rec
     assert "merged_log_commit" not in rec
     assert rec.get("algorithm") == "HMAC-SHA256"  # still an HMAC record, unchanged in kind
-    # The op-cert extension is additive: an HMAC op-cert still CERTIFIES via the HMAC verify path
-    # (verify_signature reads the raw record, not the hex-stripped public_state view).
+    # Contract phase (story 8f1d): HMAC is a RETIRED scheme for the op-cert kinds. The record is
+    # byte-unchanged (append-only history untouched), but validity-on-read now reports it
+    # NOT-certified — a forgeable HMAC op-cert can no longer certify.
     verdict = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
-    assert verdict["verified"] is True
-    assert verdict["verdict"] == "certified"
+    assert verdict["verified"] is False
+    assert verdict["verdict"] == "unknown_scheme"
 
 
 def test_opcert_survives_later_events(store: Path, tmp_path: Path) -> None:

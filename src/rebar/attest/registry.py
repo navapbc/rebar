@@ -18,9 +18,10 @@ Security properties (pinned by tests):
   policy-pinned ``namespace``; ``trust_root`` (which keys to trust) is a
   caller/deployment concern, supplied at the call site.
 
-API STUB — signatures are pinned here so the SSHSIG (56d9) and HMAC-legacy
-(7e53) schemes can register against a stable surface; bodies are filled by the
-implementer.
+The SSHSIG scheme (56d9) registers against this surface; each attestation kind pins its
+policy here. NOTE (story 8f1d, contract phase): the legacy HMAC-SHA256 scheme has been
+retired for the op-cert kinds and is no longer registered — those kinds resolve only the
+asymmetric ``sshsig`` scheme, and an unpinned kind fails closed (``unknown_kind``).
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ class Policy:
 
 
 class Scheme(Protocol):
-    """A signing scheme plugged into the registry (SSHSIG, HMAC-legacy, ...)."""
+    """A signing scheme plugged into the registry (e.g. SSHSIG)."""
 
     name: str
 

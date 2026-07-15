@@ -104,23 +104,23 @@ try:
         stale: list = []
 
     class SignResultOut(_Out):
-        # Mirrors src/rebar/schemas/sign_result.schema.json. Expand phase (story 8d8e): admits BOTH
-        # the legacy HMAC record (signature/key_id/head_sha) and the op-cert record (envelope/
-        # principal/material_fingerprint/merged_log_commit); only manifest/algorithm/signed_at/
-        # ticket_id are always present.
+        # Mirrors src/rebar/schemas/sign_result.schema.json. Contract phase (story 8f1d): the
+        # dual-shape window is closed — `sign_manifest` mints ONLY the op-cert record, so envelope/
+        # principal are required and the legacy HMAC fields (signature/key_id) are retired
+        # (kept nullable only so a reader tolerates a pre-contract record).
         ticket_id: str
         manifest: list[str] = []
         algorithm: str
         signed_at: int
-        # Legacy HMAC shape (optional — absent on an op-cert record).
-        signature: str | None = None
-        key_id: str | None = None
-        head_sha: str | None = None
-        # Op-cert shape (optional — absent on a legacy HMAC record).
-        envelope: str | None = None
-        principal: str | None = None
+        # Op-cert shape (always present on a freshly-minted op-cert record).
+        envelope: str
+        principal: str
         material_fingerprint: str | None = None
         merged_log_commit: str | None = None
+        head_sha: str | None = None
+        # RETIRED legacy HMAC shape — never emitted now, nullable for pre-contract records.
+        signature: str | None = None
+        key_id: str | None = None
 
     class VerifySignatureResultOut(_Out):
         # Mirrors src/rebar/schemas/verify_signature_result.schema.json.
