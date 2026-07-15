@@ -66,7 +66,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `run_workflow` | Start a workflow run; returns {run_id, ticket_id, status:'running'} _(live workflows whose steps make LLM calls additionally require `REBAR_MCP_ALLOW_LLM`)_ |
 | `set_file_impact` | Record file impact (list of {path, reason}) for conflict-aware |
 | `set_verify_commands` | Record DD-level verify commands (list of {dd_id, dd_text, command}). |
-| `sign_manifest` | Sign a manifest of verified steps with the environment signing key. |
+| `sign_manifest` | Sign a manifest of verified steps as an asymmetric op-cert. |
 | `sign_review` | Cheaply (re)persist the plan-review attestation for an already-computed, still-valid _(hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it persists a signature event, not a billable LLM call)_ |
 | `tag_ticket` | Add a tag to a ticket. |
 | `transition_ticket` | Transition a ticket's status (optimistic concurrency). Returns the |

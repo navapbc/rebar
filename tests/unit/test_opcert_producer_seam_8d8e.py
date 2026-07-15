@@ -292,8 +292,8 @@ def test_completion_verifier_manifest_signs_as_opcert(store: Path) -> None:
     assert res["verdict"] == "certified"
 
 
-# ── expand-phase read-both: legacy HMAC + envelope coexist, kind-keyed ────────────────
-def test_read_both_hmac_and_envelope_coexist(store: Path) -> None:
+# ── contract-phase read path: legacy HMAC op-cert is REJECTED; envelope certifies ─────
+def test_contract_hmac_opcert_rejected_envelope_certifies(store: Path) -> None:
     from rebar._commands._seam import append_event
 
     tid = rebar.create_ticket("task", "coexist", repo_root=str(store))
@@ -314,9 +314,10 @@ def test_read_both_hmac_and_envelope_coexist(store: Path) -> None:
     signing.sign_manifest(tid, ["plan-review: PASS"], kind="plan-review", repo_root=str(store))
 
     verdicts = signing.verify_attestations(tid, repo_root=str(store))
-    # Kind-keyed coexistence: the legacy HMAC record and the new envelope record BOTH verify.
-    assert verdicts["completion-verifier"]["verdict"] == "certified"  # legacy HMAC still verifies
-    assert verdicts["completion-verifier"]["algorithm"] == signing.ALGORITHM
+    # Contract phase (story 8f1d): the legacy HMAC op-cert record no longer certifies (validity
+    # on read; the record is not mutated), while the asymmetric envelope op-cert does.
+    assert verdicts["completion-verifier"]["verdict"] == "unknown_scheme"
+    assert verdicts["completion-verifier"]["verified"] is False
     assert verdicts["plan-review"]["verdict"] == "certified"  # new envelope verifies
     assert verdicts["plan-review"]["algorithm"] == "sshsig"
     att = rebar.show_ticket(tid, repo_root=str(store))["attestations"]
@@ -377,7 +378,8 @@ def test_verify_attestation_record_dispatches_on_shape(store: Path) -> None:
     tracker = _tracker(store)
     key = signing.signing_key(str(tracker))
 
-    # HMAC-shaped record → routes to the unchanged verify_record HMAC path.
+    # HMAC-shaped record for an OP-CERT kind → REJECTED (contract phase, story 8f1d): HMAC is a
+    # retired scheme for plan-review / completion-verifier, so it never certifies.
     hmac_manifest = ["plan-review: PASS"]
     hmac_rec = {
         "manifest": hmac_manifest,
@@ -386,7 +388,20 @@ def test_verify_attestation_record_dispatches_on_shape(store: Path) -> None:
         "key_id": signing.key_fingerprint(key),
     }
     hmac_res = signing.verify_attestation_record(hmac_rec, resolved, key=key, repo_root=str(store))
-    assert hmac_res["verdict"] == "certified" and hmac_res["algorithm"] == signing.ALGORITHM
+    assert hmac_res["verdict"] == "unknown_scheme" and hmac_res["verified"] is False
+
+    # A non-op-cert HMAC record → still routes to the UNCHANGED verify_record HMAC path.
+    generic_manifest = ["generic-note: ok"]
+    generic_rec = {
+        "manifest": generic_manifest,
+        "algorithm": signing.ALGORITHM,
+        "signature": signing.compute_signature(resolved, generic_manifest, key),
+        "key_id": signing.key_fingerprint(key),
+    }
+    generic_res = signing.verify_attestation_record(
+        generic_rec, resolved, key=key, repo_root=str(store)
+    )
+    assert generic_res["verdict"] == "certified" and generic_res["algorithm"] == signing.ALGORITHM
 
     # Envelope-shaped record → routes to the op-cert verifier.
     env_rec = signing.sign_manifest(
