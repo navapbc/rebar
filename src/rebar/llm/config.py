@@ -545,6 +545,14 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
+        # Tombstone: the removed REBAR_LLM_MAX_ITERS knob (use REBAR_LLM_MAX_STEPS). This
+        # is enforced HERE (not in the core config layer) so a retired LLM knob fails loud
+        # only when the LLM stack actually loads. RemovedInputError is a BaseException, so
+        # the broad ``except Exception`` in this method's tracker-probe path can't swallow it.
+        if "REBAR_LLM_MAX_ITERS" in os.environ:
+            from rebar._deprecations import RemovedInputError, removed_input
+
+            raise RemovedInputError(removed_input("env", "REBAR_LLM_MAX_ITERS"))
         # The runner is DERIVED, not a public env knob (EV-4). The provider-agnostic
         # in-process ``pydantic_ai`` runner is THE runtime (story d6d1 cutover: the
         # in-process graph stack was dropped after the PydanticAI runner was validated

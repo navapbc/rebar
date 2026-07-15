@@ -20,13 +20,19 @@
 # (the Pass-1 finding-memory recall, child disused-unpoliced-solenodon) grew for the impact-redesign
 # epic; their ceilings are raised here to the landed size (remedy rows already in architecture.md).
 #
+# NOTE (story 36c7 — fail-loud tombstone registry): config.py 839->868 (+29 for the env/legacy-file
+# tombstone scan at the top of load_config, the TICKETS_TRACKER_DIR gate in tracker_dir_override,
+# and the tombstoned-name additions to _env_signature). The logic itself lives in _deprecations.py;
+# config.py only carries the call sites. Remedy row (split dataclass/schema from env/cache) already
+# in architecture.md.
+#
 # NOTE (epic 9d50 — 2026-07-12 review-gate calibration): det_floor.py 957->975 (a8e5's DET-tier
 # hygiene backstop — det_finding_has_subject + the two emission-point filters) and passes.py
 # 852->861 (d4cf's G7 parent-realign coach move) grew for the calibration epic; ceilings raised to
 # the landed size (remedy rows in architecture.md).
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 806
 src/rebar/_engine/rebar_reconciler/reconcile.py 1093
-src/rebar/config.py 839
+src/rebar/config.py 868
 src/rebar/llm/plan_review/det_floor.py 975
 src/rebar/llm/plan_review/passes.py 871
 src/rebar/llm/workflow/lint_refs.py 870
