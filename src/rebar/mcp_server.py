@@ -185,6 +185,54 @@ MCP_ENV_VARS: tuple[dict, ...] = (
         ),
         "deprecated": False,
     },
+    {
+        "name": "REBAR_MCP_AUTH_ENABLED",
+        "description": (
+            "Set to 1 to enable MCP authentication (the composite token verifier + "
+            "Resource-Server wiring); off by default."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_STRATEGIES",
+        "description": (
+            "Comma-separated, ordered list of token-verifier strategies to compose "
+            "(closed set: static, jwt, introspection, proxy, custom)."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_ISSUER_URL",
+        "description": (
+            "OAuth authorization-server issuer URL advertised in the Protected-Resource "
+            "Metadata (RFC 9728) when auth is enabled."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_RESOURCE_SERVER_URL",
+        "description": (
+            "The single resource identifier (RFC 8707 audience) for this server; the "
+            "composite verifier re-checks every accepted token against it."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_REQUIRED_SCOPES",
+        "description": (
+            "Comma-separated scopes a caller must hold; the SDK returns 403 "
+            "insufficient_scope when a principal lacks one."
+        ),
+        "deprecated": False,
+    },
+    {
+        "name": "REBAR_MCP_AUTH_STATIC_TOKENS_FILE",
+        "description": (
+            "Path to the JSON secrets file for the static-bearer verifier (stores only "
+            "SHA-256 digests of the accepted tokens)."
+        ),
+        "deprecated": False,
+    },
 )
 
 
@@ -384,9 +432,30 @@ def build_server(cfg=None):
         cfg = rebar.config.load_config()
     mcp_cfg = cfg.mcp
 
+    # Auth seam (S2): OFF by default. When enabled, build the composite token verifier
+    # (the SINGLE audience/fail-closed choke point) and the Resource-Server AuthSettings,
+    # and pass BOTH to FastMCP so the SDK serves RFC 9728 PRM + the 401 challenge and
+    # enforces required_scopes. A misconfigured composite raises AuthConfigError, which
+    # propagates out of build_server (fail-closed startup).
+    auth_enabled = bool(mcp_cfg.auth_enabled)
+    token_verifier = None
+    auth_settings = None
+    if auth_enabled:
+        from mcp.server.auth.settings import AuthSettings
+
+        from rebar._mcp_auth import build_composite_verifier
+
+        token_verifier = build_composite_verifier(mcp_cfg)
+        auth_settings = AuthSettings(
+            issuer_url=mcp_cfg.auth_issuer_url,
+            resource_server_url=mcp_cfg.auth_resource_server_url,
+            required_scopes=list(mcp_cfg.auth_required_scopes) or None,
+        )
+
     if mcp_cfg.transport == "http":
-        # S1 ships no token verifiers yet, so auth is always off on this path.
-        host, port, path, ts = _resolve_http_runtime(mcp_cfg, auth_enabled=False)
+        # Pass the real auth_enabled: an authenticated HTTP boot no longer needs the
+        # allow_unauthenticated_http acknowledgement.
+        host, port, path, ts = _resolve_http_runtime(mcp_cfg, auth_enabled=auth_enabled)
         # Construct the bind + transport-security AT FastMCP() time, not via late
         # attribute assignment, so the SDK wires the ASGI app with them.
         mcp = FastMCP(
@@ -395,9 +464,13 @@ def build_server(cfg=None):
             port=port,
             streamable_http_path=path,
             transport_security=ts,
+            token_verifier=token_verifier,
+            auth=auth_settings,
         )
     else:
-        mcp = FastMCP("rebar")
+        # stdio has no HTTP surface — the verifier is constructed (so a bad config still
+        # fails closed at startup) but the SDK only enforces auth over HTTP.
+        mcp = FastMCP("rebar", token_verifier=token_verifier, auth=auth_settings)
 
     # Shared handles + gate helpers the tool closures capture. Each registrar rebinds
     # these to their original local names so the tool bodies are copied verbatim.
