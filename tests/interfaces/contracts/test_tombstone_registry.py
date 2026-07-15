@@ -240,3 +240,28 @@ def test_docs_config_md_documents_tombstones() -> None:
     text = (repo_root / "docs" / "config.md").read_text(encoding="utf-8")
     assert "tombstone" in text
     assert "rebar config validate" in text
+
+
+# ── AC6 structural guard: every broad except in mcp_server has a RemovedInputError re-raise ──
+def test_mcp_server_broad_excepts_guard_removed_input_error() -> None:
+    """A reproducible source-reading check (not a hand grep): every
+    `except Exception` / `except BaseException` in mcp_server.py must have an
+    `except RemovedInputError: raise` guard immediately above it, so a retired
+    error-class input fails the MCP server hard instead of being swallowed by the
+    boot/request broad handler."""
+    src = Path(rebar.__file__).resolve().parent / "mcp_server.py"
+    lines = src.read_text(encoding="utf-8").splitlines()
+    broad = [
+        i
+        for i, ln in enumerate(lines)
+        if ln.lstrip().startswith(("except Exception", "except BaseException"))
+    ]
+    assert broad, "expected at least one broad except in mcp_server.py"
+    for i in broad:
+        # Scan the few lines immediately above for `except RemovedInputError:` + `raise`.
+        window = lines[max(0, i - 8) : i]
+        joined = "\n".join(window)
+        assert "except RemovedInputError:" in joined and "raise" in joined, (
+            f"broad except at mcp_server.py:{i + 1} lacks a RemovedInputError re-raise guard "
+            f"immediately above it"
+        )

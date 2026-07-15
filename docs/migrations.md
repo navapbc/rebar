@@ -190,9 +190,17 @@ bypass at MCP boot / `fsck --repair`. `run_ensures` therefore **re-raises** it e
 of the broad handler, so the incompatible-store signal reaches the caller and fails closed.
 
 **Rollback safety.** Rolling back to a pre-v1.0 binary is safe: an older binary does not read
-`.store-compat.json` at all (it has no gate), and the committed record is inert to it. A v1.0
-binary reading a *newer* store's record is exactly the fail-closed case above (refuse rather than
-corrupt) — the intended one-way protection.
+`.store-compat.json` at all (it has no gate), and the committed record is inert to it (an
+ignored-unknown file — the same preserve-and-ignore contract as an unknown event type: the old
+binary neither parses nor errors on it, and its replay/compaction/fsck leave it byte-unchanged).
+A v1.0 binary reading a *newer* store's record is exactly the fail-closed case above (refuse rather
+than corrupt) — the intended one-way protection. **Belt-and-suspenders compensating path:** if a
+store must be made writable again by an intentionally-downgraded fleet that would otherwise be
+blocked by a record they cannot interpret, the record can simply be **deleted** — `git rm
+.store-compat.json` on the `tickets` branch returns every binary to the ABSENT → implicit-legacy
+pass-through state, and the idempotent `store-compat` ensure unit re-stamps it on the next covered
+write by a binary that understands the current format. Deleting the record is therefore a safe,
+reversible escape hatch, not a destructive operation.
 
 ## Legacy signature-mirror retirement (352b)
 
