@@ -74,6 +74,82 @@ fix and ship a new version (PyPI is immutable; see Hard rules).
 
 ---
 
+## Pinning — every release executable is an immutable reference
+
+The release workflow (`.github/workflows/release.yml`) hardens its supply chain so that
+**every executable it runs is identified by an immutable reference**, not a mutable tag. A
+tag like `actions/checkout@v7` or `.../releases/latest/...` can be silently repointed at new
+(possibly hostile) code after review; a commit SHA or a content digest cannot. The generic
+checks (full-SHA action pins, `persist-credentials: false`, over-broad/OIDC permissions) are
+enforced by **zizmor + actionlint scoped to `release.yml`** under `make lint`; the
+rebar-specific structure is pinned by `tests/unit/test_release_workflow_pins.py`.
+
+**(a) Actions are pinned to full 40-char commit SHAs.** Every `uses:` names a specific
+commit with a trailing `# vX.Y.Z` comment for readability, e.g.
+`actions/checkout@9c091bb...  # v7.0.0`. Resolve the SHA for an action's current stable
+release tag (dereferencing an annotated tag to its commit) with `gh`:
+
+```bash
+# Lightweight tag → the ref already points at the commit:
+gh api repos/actions/checkout/git/refs/tags/v7.0.0 --jq .object.sha
+# Annotated tag → the ref points at a tag object; dereference it to the commit:
+gh api repos/<owner>/<repo>/git/tags/<tag-object-sha> --jq .object.sha
+```
+
+To bump an action: pick the new stable tag, resolve its commit SHA as above, replace the
+SHA **and** update the `# vX.Y.Z` comment. Never hand-edit a SHA — resolve it.
+
+**(b) The build toolchain is hash-locked and built `--no-isolation`.** `build`, `hatchling`,
+and `twine` (plus their transitive deps) are pinned with hashes in
+`.github/release-requirements.txt`, compiled from `.github/release-requirements.in`. The
+`build` job installs that lock into a fresh venv with `pip install --require-hashes --no-deps`
+(so a tampered artifact fails the hash check), then builds with `python -m build
+--no-isolation` (reusing that pinned env instead of an unpinned isolated one). Because
+`--no-isolation` exposes the whole interpreter to the build backend,
+`scripts/check_build_env_locked.py` asserts the installed set is a subset of the lock (base
+`pip`/`setuptools`/`wheel` aside) and fails the release otherwise. Regenerate the lock after
+editing the `.in`:
+
+```bash
+pip-compile --generate-hashes \
+  --output-file=.github/release-requirements.txt .github/release-requirements.in
+# (equivalently, with uv: uv pip compile --generate-hashes -o .github/release-requirements.txt \
+#   .github/release-requirements.in)
+```
+
+**(c) The MCP publisher is exact-versioned + digest-verified.** The **MCP publisher** binary
+(`mcp-publisher`) is pinned to an exact release version and its SHA-256, not
+`releases/latest`. An unprivileged `mcp_verify` job downloads the pinned URL, verifies it
+with `sha256sum -c --strict` **before** extraction, and hands the verified binary to the
+OIDC-privileged `mcp_registry` job as an artifact — so the archive is never executed with the
+registry-publishing OIDC identity until its digest matches. The pin lives in `release.yml` as
+the `MCP_PUBLISHER_URL` / `MCP_PUBLISHER_SHA256` env pair.
+
+To update the MCP publisher pin (version + SHA-256):
+
+```bash
+VER=v1.8.0   # the new mcp-publisher release
+URL="https://github.com/modelcontextprotocol/registry/releases/download/${VER}/mcp-publisher_linux_amd64.tar.gz"
+# The real digest — from upstream checksums.txt (preferred) or by hashing the download:
+curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${VER}/registry_${VER#v}_checksums.txt" \
+  | grep mcp-publisher_linux_amd64.tar.gz
+#   …or: curl -fsSL "$URL" | sha256sum
+```
+
+Set both `MCP_PUBLISHER_URL` and `MCP_PUBLISHER_SHA256` in `release.yml` to the new pair,
+then prove the pin matches the live artifact before committing:
+
+```bash
+make verify-mcp-pin   # downloads the pinned URL and asserts its SHA-256 == the embedded value
+```
+
+**Evidence.** Each pin-bearing job emits a named evidence fragment (`evidence-shapin` for the
+action SHAs, `evidence-build` for the frozen tool versions, `evidence-mcp` for the verified
+publisher digest); a final `consolidate_evidence` job concatenates them into
+`release-evidence.txt`, uploaded as a release artifact.
+
+---
+
 ## Release procedure
 
 ### 1. Bump versions (one commit)
