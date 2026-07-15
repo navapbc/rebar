@@ -178,7 +178,17 @@ if ! bash "${REPO_ROOT}/infra/gerrit/materialize-g2p-config.sh"; then
   echo "compose-up: WARN — g2p config materialization failed; CI dispatch disabled until fixed" >&2
 fi
 
+# op-cert origin guard (story 76d2): materialise the guard from SSM into the HOST-nginx map
+# file + the compose .env and reload nginx, BEFORE `docker compose up` (the materialize
+# precedent ordering). FAIL-CLOSED: this script exits non-zero if the guard is missing, but a
+# failure here must not block the WHOLE stack booting — /opcert/ stays 403 (structural deny-all
+# via the template's `default 0` glob include) until the guard is materialized, exactly the
+# fail-closed posture we want.
+if ! bash "${REPO_ROOT}/infra/scripts/materialize-opcert-guard.sh"; then
+  echo "compose-up: WARN — op-cert guard materialization failed; /opcert/ stays fail-closed (403) until fixed" >&2
+fi
+
 # --- 4. Bring the stack up (build the review-bot image, pull Gerrit) -------
 docker compose -f "${COMPOSE_FILE}" up -d --build
 
-echo "compose-up: stack is up (gerrit + review-bot). nginx/certbot are host services." >&2
+echo "compose-up: stack is up (gerrit + review-bot + opcert). nginx/certbot are host services." >&2
