@@ -1,0 +1,37 @@
+{# A gate detail section (plan or code). Rendered in FIXED order by the page; id anchors the strip. #}
+{% set failing = section.ran and section.round and section.round.verdict == "FAIL" %}
+<section id="{{ gate_id }}"{% if failing %} class="failing"{% endif %}>
+  <h2>{{ gate_title }}</h2>
+  {% if not section.ran %}
+    <div class="empty">Not yet run.</div>
+  {% else %}
+    {% set r = section.round %}
+    <p class="roundhdr">
+      verdict: {{ r.verdict }}{% if r.model %} · model: {{ r.model }}{% endif %}{% if r.impact_model_version %} · {{ r.impact_model_version }}{% endif %}{% if r.material_fingerprint %} · material: {{ r.material_fingerprint }}{% endif %}
+    </p>
+
+    {% set sel = section.selector %}
+    <p class="selector">
+      {% if sel.older_href %}<a href="{{ sel.older_href }}">&#9666;</a>{% else %}<span class="disabled">&#9666;</span>{% endif %}
+      round {{ sel.n }} of {{ sel.N }}
+      {% if sel.newer_href %}<a href="{{ sel.newer_href }}">&#9656;</a>{% else %}<span class="disabled">&#9656;</span>{% endif %}
+    </p>
+
+    {% set conv = section.convergence %}
+    {% include "_convergence.html" %}
+
+    {% for group in r.groups %}
+      {% if group.open %}
+        <details class="group" open>
+          <summary>{{ group.label }} ({{ group.count }})</summary>
+          {% for f in group.findings %}{% include "_finding.html" %}{% endfor %}
+        </details>
+      {% else %}
+        <details class="group">
+          <summary>{{ group.label }} ({{ group.count }})</summary>
+          {% for f in group.findings %}{% include "_finding.html" %}{% endfor %}
+        </details>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+</section>

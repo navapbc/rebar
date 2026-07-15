@@ -18,13 +18,48 @@ CLI arm turns the resulting ``ModuleNotFoundError`` (raised when it calls ``serv
 from __future__ import annotations
 
 import html
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import rebar
+from rebar.audit.page import build_context
 from rebar.audit.read import audit_trail
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastapi import FastAPI
+    from jinja2 import Environment
+
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
+_JINJA_ENV: Environment | None = None
+
+
+def _jinja_env() -> Environment:
+    """The lazily-built, cached Jinja2 environment over the package's ``templates/`` dir.
+
+    ``jinja2`` is imported here (not at module top) so ``import rebar.audit.server`` stays
+    free of the web stack — the same importability contract fastapi/uvicorn observe. HTML
+    autoescaping is on (the page renders untrusted ticket/finding prose)."""
+    global _JINJA_ENV
+    if _JINJA_ENV is None:
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+        _JINJA_ENV = Environment(
+            loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
+    return _JINJA_ENV
+
+
+def _render_ticket(
+    ticket_id: str, *, repo_root: str | None, plan_round=None, code_round=None
+) -> str:
+    """Render the read-only per-ticket audit page for ``ticket_id``.
+
+    Composes the best-effort :func:`audit_trail` read surface, shapes it with
+    :func:`rebar.audit.page.build_context`, and renders the server-side Jinja2 template."""
+    trail = audit_trail(ticket_id, repo_root=repo_root)
+    ctx = build_context(trail, plan_round=plan_round, code_round=code_round)
+    return _jinja_env().get_template("ticket.html").render(**ctx)
 
 
 def _has_audit_data(trail: dict[str, Any]) -> bool:
@@ -85,6 +120,14 @@ def create_app(repo_root: str | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:  # pragma: no cover - exercised via TestClient in tests
         return _render_index(_audited_tickets(repo_root=repo_root))
+
+    @app.get("/ticket/{ticket_id}", response_class=HTMLResponse)
+    def ticket_page(
+        ticket_id: str, plan_round: str | None = None, code_round: str | None = None
+    ) -> str:
+        return _render_ticket(
+            ticket_id, repo_root=repo_root, plan_round=plan_round, code_round=code_round
+        )
 
     return app
 
