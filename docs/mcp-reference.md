@@ -95,5 +95,13 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | The single resource identifier (RFC 8707 audience) for this server; the composite verifier re-checks every accepted token against it. |
 | `REBAR_MCP_AUTH_REQUIRED_SCOPES` | Comma-separated scopes a caller must hold; the SDK returns 403 insufficient_scope when a principal lacks one. |
 | `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | Path to the JSON secrets file for the static-bearer verifier (stores only SHA-256 digests of the accepted tokens). |
+| `REBAR_MCP_AUTH_JWT_JWKS_URI` | HTTPS JWKS endpoint the `jwt` verifier fetches signing keys from (an OIDC provider's .well-known/jwks.json). |
+| `REBAR_MCP_AUTH_JWT_ISSUER` | Expected `iss` claim for the `jwt` verifier; falls back to REBAR_MCP_AUTH_ISSUER_URL when unset. |
+| `REBAR_MCP_AUTH_JWT_ALGORITHMS` | Comma-separated PINNED, asymmetric-only JWS algorithms for the `jwt` verifier (default RS256,ES256); a symmetric algorithm on a JWKS source is refused. |
+| `REBAR_MCP_AUTH_JWT_LEEWAY` | Clock-skew leeway in seconds applied to exp/nbf validation by the `jwt` verifier (default 60). |
+| `REBAR_MCP_AUTH_JWT_JWKS_REFETCH_COOLDOWN` | Minimum seconds between JWKS refetches triggered by an unknown key id (the concurrency-safe flood guard; default 30). |
+| `REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT` | HTTP timeout in seconds for the `jwt` verifier's JWKS fetch (default 10). |
+| `REBAR_MCP_AUTH_JWT_EXPECTED_TYP` | When set, the `jwt` verifier requires the JWT header `typ` to equal this (e.g. at+JWT per RFC 9068); unset skips the check. |
+| `REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST` | Set to 1 to permit a private/link-local/loopback JWKS host (SSRF guard is on by default); off by default. |
 
 _49 tools._
