@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar.review_bot import voter as _voter
-from rebar.review_bot.config import ReceiverConfig
+from rebar.review_bot.config import ReceiverConfig, review_timeout_seconds
 from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
 
@@ -212,7 +212,20 @@ async def reconcile_once(
         except GerritError as exc:
             _emit("reconcile_check_error", change_id=change_id, error=str(exc))
             continue
-        result = await _voter.review_and_vote(ev, config=cfg, gerrit=gc, dedup=store)
+        # Bound the backfill review with the SAME per-review timeout the live worker uses
+        # (app._worker). Without this a single hung review (blocked clone/subprocess/LLM) would
+        # freeze the ENTIRE reconcile loop indefinitely — the backfill safety-net having no
+        # safety-net of its own. On timeout: abandon this candidate, emit the greppable degraded
+        # marker (stderr + metric), and continue; the change stays vote-less (fail-closed) and
+        # is retried next pass.
+        try:
+            result = await asyncio.wait_for(
+                _voter.review_and_vote(ev, config=cfg, gerrit=gc, dedup=store),
+                timeout=review_timeout_seconds(),
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            _degraded("review_timeout", change_id=change_id, revision=revision)
+            continue
         if result.get("status") == "voted":
             reviewed += 1
 

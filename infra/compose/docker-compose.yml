@@ -78,6 +78,11 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.reviewbot
     restart: unless-stopped
+    # Give the graceful in-memory-queue drain (app.py lifespan) time to finish before Docker
+    # escalates SIGTERM → SIGKILL on a redeploy/restart, so acknowledged (202) webhooks are not
+    # abandoned. Must exceed SHUTDOWN_DRAIN_SECONDS (default 45s). Default would be 10s (SIGKILL
+    # mid-drain). Anything not drained in the window still falls to the backfill reconciler.
+    stop_grace_period: 60s
     env_file:
       - .env
     environment:

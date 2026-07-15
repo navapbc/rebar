@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -1162,3 +1163,173 @@ def test_worker_abandons_hung_review_and_keeps_draining(monkeypatch, tmp_path):
     # (3) a countable timeout marker was emitted for the abandoned review.
     assert markers, "no VOTER_ERROR timeout marker emitted for the hung review"
     assert "timed out" in str(markers[0].get("error", ""))
+
+
+# ── logging configuration (ticket c130: structured _emit INFO must reach stdout) ──
+def _clear_reviewbot_log_handlers() -> None:
+    """Remove any handler this fix installed on the ``rebar`` logger + restore defaults,
+    so each logging test starts from a clean, uncontaminated state."""
+    lg = logging.getLogger("rebar")
+    for h in list(lg.handlers):
+        if getattr(h, "_reviewbot_handler", False):
+            lg.removeHandler(h)
+    lg.propagate = True
+    lg.setLevel(logging.NOTSET)
+
+
+def test_configure_logging_emits_rebar_info_to_stdout(capsys):
+    """A ``rebar.review_bot.*`` INFO record reaches stdout after ``configure_logging()``.
+
+    Before the fix, rebar's loggers have no handler, so an INFO record falls through to
+    Python's ``lastResort`` (WARNING+ only) and is silently dropped — the production defect.
+    Imports from ``config`` (fastapi-free) so this runs in the default CI suite.
+    """
+    from rebar.review_bot.config import configure_logging
+
+    _clear_reviewbot_log_handlers()
+    configure_logging()
+    logging.getLogger("rebar.review_bot.voter").info('{"event": "voter_voted", "probe": "c130"}')
+    out = capsys.readouterr().out
+    assert '"event": "voter_voted"' in out
+    assert "c130" in out
+    _clear_reviewbot_log_handlers()
+
+
+def test_configure_logging_is_idempotent():
+    """Configuring twice must not stack duplicate handlers (no double log lines)."""
+    from rebar.review_bot.config import configure_logging
+
+    _clear_reviewbot_log_handlers()
+    configure_logging()
+    configure_logging()
+    installed = [
+        h for h in logging.getLogger("rebar").handlers if getattr(h, "_reviewbot_handler", False)
+    ]
+    assert len(installed) == 1
+    _clear_reviewbot_log_handlers()
+
+
+def test_configure_logging_env_level_override(monkeypatch):
+    """``REVIEW_BOT_LOG_LEVEL`` sets the level; an invalid value falls back to INFO."""
+    from rebar.review_bot.config import configure_logging
+
+    _clear_reviewbot_log_handlers()
+    monkeypatch.setenv("REVIEW_BOT_LOG_LEVEL", "DEBUG")
+    configure_logging()
+    assert logging.getLogger("rebar").level == logging.DEBUG
+
+    _clear_reviewbot_log_handlers()
+    monkeypatch.setenv("REVIEW_BOT_LOG_LEVEL", "NOTALEVEL")
+    configure_logging()
+    assert logging.getLogger("rebar").level == logging.INFO
+    _clear_reviewbot_log_handlers()
+
+
+# ── deploy resilience (ticket 89be: drain on shutdown + reconciler timeout parity) ──
+def test_reconcile_once_times_out_a_hung_review_and_continues(monkeypatch, tmp_path):
+    """A backfill review that never returns must NOT freeze the reconcile loop. reconcile_once
+    bounds each review with review_timeout_seconds() (parity with the live worker); on timeout it
+    abandons the candidate (fail-closed) and the pass returns. Pre-fix (no timeout) this hangs."""
+    import rebar.review_bot.reconcile as rec
+
+    cfg = _cfg(tmp_path)
+    ev = _event(change_id="rebar~main~Ihang", revision="rhang")
+
+    class _GC:
+        def list_events(self, cursor):
+            return [ev]
+
+        def has_llm_review_vote(self, change_id, revision="current"):
+            return False
+
+    async def _hang(*a, **k):
+        await asyncio.sleep(3600)  # never returns within the test
+
+    monkeypatch.setattr(rec._voter, "review_and_vote", _hang, raising=True)
+    monkeypatch.setenv("REVIEW_TIMEOUT_SECONDS", "0.05")
+    store = DedupStore(cfg.dedup_db_path)
+
+    # The outer wait_for is the RED guard: pre-fix reconcile_once awaits the hung review forever
+    # and this raises TimeoutError; post-fix it returns quickly having abandoned the candidate.
+    result = asyncio.run(
+        asyncio.wait_for(rec.reconcile_once(config=cfg, gerrit=_GC(), dedup=store), timeout=5)
+    )
+    assert result == {"scanned": 1, "reviewed": 0}
+
+
+def _idle_reconcile_loop(*a, **k):
+    async def _loop():
+        while True:
+            await asyncio.sleep(3600)
+
+    return _loop()
+
+
+def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
+    """On shutdown the still-running worker drains queued events instead of the queue being
+    dropped — so a routine autodeploy restart does not abandon acknowledged (202) webhooks.
+    Pre-fix the worker is cancelled immediately and the queued events are lost."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    processed: list = []
+
+    async def _fake_review(event, *, config, force=False):
+        await asyncio.sleep(0.02)
+        processed.append(event)
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", _fake_review, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            for i in range(5):
+                fake_app.state.queue.put_nowait(_event(revision=f"d{i}"))
+            # exit immediately → the shutdown drain must process all 5 before cancelling
+
+    asyncio.run(_run())
+    assert len(processed) == 5
+
+
+def test_lifespan_drain_is_bounded(monkeypatch, tmp_path):
+    """The drain is bounded by SHUTDOWN_DRAIN_SECONDS: a review that never returns must not hang
+    shutdown — the drain times out and the worker is cancelled (the rest falls to reconcile)."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    async def _slow_review(event, *, config, force=False):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", _slow_review, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            fake_app.state.queue.put_nowait(_event())
+
+    # Must return within the outer bound despite the hung review (bounded drain then cancel).
+    asyncio.run(asyncio.wait_for(_run(), timeout=5))
+
+
+def test_reviewbot_compose_sets_stop_grace_period():
+    """docker-compose review-bot service declares a stop_grace_period so the drain has time
+    before Docker escalates to SIGKILL."""
+    import pathlib
+
+    yaml = pytest.importorskip("yaml")
+    root = pathlib.Path(__file__).resolve().parents[2]
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    assert d["services"]["review-bot"].get("stop_grace_period")
