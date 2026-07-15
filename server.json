@@ -77,6 +77,36 @@
           "name": "REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP",
           "description": "Set to 1 to acknowledge running the Streamable-HTTP transport without a token verifier; required to boot the HTTP transport while auth is off.",
           "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_ENABLED",
+          "description": "Set to 1 to enable MCP authentication (the composite token verifier + Resource-Server wiring); off by default.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_STRATEGIES",
+          "description": "Comma-separated, ordered list of token-verifier strategies to compose (closed set: static, jwt, introspection, proxy, custom).",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_ISSUER_URL",
+          "description": "OAuth authorization-server issuer URL advertised in the Protected-Resource Metadata (RFC 9728) when auth is enabled.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_RESOURCE_SERVER_URL",
+          "description": "The single resource identifier (RFC 8707 audience) for this server; the composite verifier re-checks every accepted token against it.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_REQUIRED_SCOPES",
+          "description": "Comma-separated scopes a caller must hold; the SDK returns 403 insufficient_scope when a principal lacks one.",
+          "isRequired": false
+        },
+        {
+          "name": "REBAR_MCP_AUTH_STATIC_TOKENS_FILE",
+          "description": "Path to the JSON secrets file for the static-bearer verifier (stores only SHA-256 digests of the accepted tokens).",
+          "isRequired": false
         }
       ]
     }
