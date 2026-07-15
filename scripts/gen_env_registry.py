@@ -149,6 +149,15 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     # union them in explicitly — they are real, settable config surface.
     for alias_name in aliases:
         reads.setdefault(alias_name, set()).add("src/rebar/config.py (alias resolver)")
+    # The REBAR_MCP_* gate vars are DERIVED from mcp config keys (env REBAR_MCP_<KEY_UPPER>),
+    # not read through a literal os.environ call the AST scanner can see, so union them in
+    # from the canonical MCP_ENV_VARS list — they are real, settable config surface.
+    from rebar.mcp_server import MCP_ENV_VARS
+
+    for entry in MCP_ENV_VARS:
+        name = entry["name"]
+        if name.startswith("REBAR_MCP_"):
+            reads.setdefault(name, set()).add("src/rebar/_config_schema.py (mcp config)")
     lines: list[str] = []
     lines.append("# Environment variable registry")
     lines.append("")

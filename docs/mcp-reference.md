@@ -81,5 +81,13 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_READONLY` | Set to 1 to expose only the read tools (no write/mutation tools). |
 | `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_ticket / review_code / scan_spec / verify_completion / review_plan); off by default. |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
+| `REBAR_MCP_TRANSPORT` | Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport). |
+| `REBAR_MCP_HTTP_HOST` | Bind host for the Streamable-HTTP transport (default 127.0.0.1). |
+| `REBAR_MCP_HTTP_PORT` | Bind port for the Streamable-HTTP transport (1-65535; default 8000). |
+| `REBAR_MCP_HTTP_PATH` | URL path the Streamable-HTTP transport serves on (default /mcp). |
+| `REBAR_MCP_HTTP_ALLOWED_HOSTS` | Comma-separated allowlist of exact host:port values accepted by the Streamable-HTTP DNS-rebinding protection; empty defaults to loopback. |
+| `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | Comma-separated allowlist of exact Origin values accepted by the Streamable-HTTP DNS-rebinding protection; empty defaults to loopback. |
+| `REBAR_MCP_HTTP_TLS_AT_EDGE` | Set to 1 to acknowledge TLS is terminated at the edge; required to bind the Streamable-HTTP transport to a non-loopback host. |
+| `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | Set to 1 to acknowledge running the Streamable-HTTP transport without a token verifier; required to boot the HTTP transport while auth is off. |
 
 _49 tools._

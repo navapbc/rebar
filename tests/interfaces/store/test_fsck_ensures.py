@@ -127,7 +127,8 @@ class _StubServer:
     def __init__(self) -> None:
         self.ran = False
 
-    def run(self) -> None:
+    def run(self, *args, **kwargs) -> None:
+        # main() now calls server.run(transport=...); accept and ignore it.
         self.ran = True
 
 
@@ -141,8 +142,8 @@ def test_mcp_startup_sweeps_before_run(repo: Path, monkeypatch) -> None:
         order.append("ensures")
         return []
 
-    def _fake_build_server():
-        def _run():
+    def _fake_build_server(cfg=None):
+        def _run(*args, **kwargs):
             order.append("run")
             stub.ran = True
 
@@ -177,7 +178,7 @@ def test_mcp_startup_never_aborts_on_sweep_error(repo: Path, monkeypatch) -> Non
         raise RuntimeError("boom")
 
     monkeypatch.setattr(ensures, "run_ensures", _boom)
-    monkeypatch.setattr(mcp_server, "build_server", lambda: stub)
+    monkeypatch.setattr(mcp_server, "build_server", lambda cfg=None: stub)
     monkeypatch.setattr("sys.argv", ["rebar-mcp"])
     mcp_server.main()
     assert stub.ran, "boot must proceed to build_server().run() even if the sweep raises"

@@ -79,7 +79,7 @@ Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.9"]
+mcp = ["mcp>=1.28.1,<2"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -153,7 +153,7 @@ grounding-t2 = [
 ]
 dev = [
     "pytest>=8",
-    "mcp>=1.9",
+    "mcp>=1.28.1,<2",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
