@@ -175,22 +175,73 @@ def _with_index_lock_retry(
     return result
 
 
+# git intermittently fails to READ ``HEAD`` on CI runners during an index-mutating op that
+# must resolve it first — most often ``git commit``, which parses HEAD (``parse_commit``) to
+# set the new commit's parent. Under a SHARED tracker worktree the HEAD commit's loose object
+# in ``.git/objects/`` is transiently unreadable (a runner-FS read hiccup, NOT data
+# corruption), and git aborts with ``fatal: could not parse HEAD`` (exit 128) BEFORE writing
+# anything. It is the READ-side analogue of event_append's WRITE-side object-DB ``git add``
+# transient (``_TRANSIENT_ADD_MARKERS``): the identical invocation succeeds on retry — a
+# re-run on the same state passes (a Gerrit ``recheck`` on the same patchset goes green) — so
+# retrying ONLY this signature turns a runner-FS blip from a hard write loss (which red-lights
+# unrelated CI) into a self-healed write. The op is safe to re-run because it failed at the
+# HEAD-parse step before mutating the store (idempotent). Kept a tight, greppable marker set
+# (only the proven ``could not parse HEAD`` signature) so it never masks a genuine error.
+# Bug childsafe-special-springtail.
+_TRANSIENT_HEAD_MARKERS = ("could not parse head",)
+_TRANSIENT_HEAD_ATTEMPTS = 3
+_TRANSIENT_HEAD_BACKOFF_S = 0.1
+
+
+def _is_transient_head_error(text: str) -> bool:
+    """True if *text* is git's transient HEAD-parse read signature (case-insensitive)."""
+    low = text.lower()
+    return any(marker in low for marker in _TRANSIENT_HEAD_MARKERS)
+
+
+def _with_transient_head_retry(
+    run_once: Callable[[], subprocess.CompletedProcess],
+) -> subprocess.CompletedProcess:
+    """Run *run_once* (an idempotent index-mutating git invocation), retrying ONLY the
+    transient ``could not parse HEAD`` read signature with a bounded backoff. On success or
+    a NON-transient failure the result is returned immediately (behavior unchanged — a real
+    error still surfaces at once). The retried invocation MUST be idempotent: git fails at
+    the HEAD-parse step before writing anything, so re-running the SAME op is safe. This is
+    the INNER composition loop — :func:`run_git_write` wraps it in :func:`_with_index_lock_retry`
+    (index.lock is the OUTER retry, this HEAD-parse transient the inner)."""
+    result = run_once()
+    for attempt in range(1, _TRANSIENT_HEAD_ATTEMPTS):
+        if result.returncode == 0:
+            return result
+        if not _is_transient_head_error(result.stderr or result.stdout or ""):
+            return result
+        time.sleep(_TRANSIENT_HEAD_BACKOFF_S * attempt)
+        result = run_once()
+    return result
+
+
 def run_git_write(
     tracker: str | os.PathLike[str],
     *args: str,
     check: bool = False,
 ) -> subprocess.CompletedProcess:
     """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
-    git's ``.git/index.lock`` contention. Runs the op and, ONLY on the index.lock
-    signature, reclaims a provably-stale lock, backs off, and retries up to the attempt
-    cap (see :func:`_with_index_lock_retry`). A success or any non-lock failure returns
-    at once, so a genuine error is unchanged. ``check=True`` raises
+    git's ``.git/index.lock`` contention AND the transient ``could not parse HEAD`` read
+    fault. Runs the op and, ONLY on the index.lock signature, reclaims a provably-stale lock,
+    backs off, and retries (see :func:`_with_index_lock_retry`); ONLY on the transient
+    HEAD-parse read signature, backs off and retries the identical (idempotent) op (see
+    :func:`_with_transient_head_retry`). The two compose — index.lock is the OUTER retry, the
+    HEAD-parse transient the INNER — so each self-heals without interfering. A success or any
+    OTHER failure returns at once, so a genuine error is unchanged. ``check=True`` raises
     :class:`subprocess.CalledProcessError` on the final non-zero exit (default ``False``
     so callers that inspect ``returncode`` / raise their own error get the result verbatim).
 
-    Safe to route ANY tracker git op through: index.lock only appears on index-mutating
-    commands, so a read op simply never trips the retry."""
-    result = _with_index_lock_retry(str(tracker), lambda: run_git(tracker, *args, check=False))
+    Safe to route ANY tracker git op through: index.lock and the HEAD-parse transient only
+    appear on index-mutating commands, so a read op simply never trips either retry."""
+    result = _with_index_lock_retry(
+        str(tracker),
+        lambda: _with_transient_head_retry(lambda: run_git(tracker, *args, check=False)),
+    )
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode,

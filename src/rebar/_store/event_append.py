@@ -42,7 +42,7 @@ from rebar._store.canonical import canonical_bytes  # the single canonical seria
 # Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
 # re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
 from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
-from rebar._store.gitutil import _with_index_lock_retry
+from rebar._store.gitutil import _with_index_lock_retry, _with_transient_head_retry
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 from rebar.reducer._version import (  # single source of truth for the type names
     KEY_ADD,
@@ -227,15 +227,21 @@ def _git_add(
 
 def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
     """``git -C tracker commit -q --no-verify -m <msg>``, riding out index.lock
-    contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`. A
-    non-lock failure (including a genuine "nothing to commit" / UU wedge) surfaces
-    immediately, unchanged — the caller's UU-recovery path still handles it."""
+    contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry` AND the
+    transient ``could not parse HEAD`` read fault via :func:`_with_transient_head_retry`
+    (``git commit`` parses HEAD to set the new commit's parent; on a shared tracker that
+    read intermittently blips on CI runners — the SAME gitutil retry the transition/claim
+    path uses, composed here index.lock-OUTER / HEAD-parse-INNER). A non-lock, non-transient
+    failure (including a genuine "nothing to commit" / UU wedge) surfaces immediately,
+    unchanged — the caller's UU-recovery path still handles it."""
     return _with_index_lock_retry(
         tracker,
-        lambda: subprocess.run(
-            ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-            capture_output=True,
-            text=True,
+        lambda: _with_transient_head_retry(
+            lambda: subprocess.run(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+                capture_output=True,
+                text=True,
+            )
         ),
     )
 
@@ -262,11 +268,15 @@ def _git_commit_paths(
 
     The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
     this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
-    the write lock's braces."""
+    the write lock's braces. Rides out index.lock contention AND the transient
+    ``could not parse HEAD`` read fault via the same composed gitutil retries as
+    :func:`_git_commit`."""
     argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
     return _with_index_lock_retry(
         tracker,
-        lambda: subprocess.run(argv, capture_output=True, text=True),
+        lambda: _with_transient_head_retry(
+            lambda: subprocess.run(argv, capture_output=True, text=True)
+        ),
     )
 
 
@@ -618,9 +628,13 @@ def _recover_from_unmerged(
         ["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged], capture_output=True, text=True
     )
     _git_add(tracker, list(event_relpaths))
-    retry = subprocess.run(
-        ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-        capture_output=True,
-        text=True,
+    # Same transient ``could not parse HEAD`` self-heal as _git_commit — this UU-recovery
+    # commit reads HEAD too, and must not lose a resolved write to a runner-FS read blip.
+    retry = _with_transient_head_retry(
+        lambda: subprocess.run(
+            ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+            capture_output=True,
+            text=True,
+        )
     )
     return (retry.returncode == 0, None)
