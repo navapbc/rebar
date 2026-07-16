@@ -118,7 +118,7 @@ def _diff_links(
         mapped = _RELATION_TO_JIRA_LINK.get(relation)
         if mapped is None:
             continue  # no reliable Jira link type — skip (no-op)
-        jira_type, _swap = mapped
+        jira_type, swap = mapped
         target_id = dep.get("target_id")
         if not target_id:
             continue
@@ -135,6 +135,7 @@ def _diff_links(
                 "type": jira_type,
                 "to_key": target_key,
                 "relation": relation,
+                "swap": swap,
                 "link_uuid": dep.get("link_uuid"),
             }
         )

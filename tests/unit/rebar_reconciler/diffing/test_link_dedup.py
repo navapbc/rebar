@@ -112,6 +112,23 @@ def test_outbound_diff_links_emits_when_absent(outbound_differ):
     assert out[0]["to_key"] == "DIG-2"
 
 
+def test_outbound_diff_links_marks_swap_by_relation(outbound_differ):
+    """The emitted ADD must carry the swap_endpoints flag so the applier writes the
+    correct Jira direction (bug c8ed): depends_on -> (Blocks, swap=True), blocks ->
+    (Blocks, swap=False). Previously the flag was discarded, so depends_on deps were
+    written to Jira reversed."""
+    binding = StubBindingStore({"local-a": "DIG-1", "local-b": "DIG-2"})
+
+    def _emit(relation: str) -> dict:
+        dep = {"target_id": "local-b", "relation": relation, "link_uuid": "u-1"}
+        ticket = {"ticket_id": "local-a", "deps": [dep]}
+        out = outbound_differ._diff_links(ticket, {"issuelinks": []}, binding)
+        return out[0]
+
+    assert _emit("depends_on").get("swap") is True, "depends_on must carry swap=True"
+    assert _emit("blocks").get("swap") is False, "blocks must carry swap=False"
+
+
 def test_outbound_diff_links_dedup_is_direction_agnostic(outbound_differ):
     """An existing Blocks link where DIG-2 is the INWARD side still suppresses
     the add (the dedup is direction-agnostic, per _existing_jira_links)."""

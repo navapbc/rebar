@@ -129,6 +129,33 @@ def test_update_one_skips_already_present_link(batch: ModuleType) -> None:
     )
 
 
+def test_update_one_swaps_endpoints_for_depends_on(batch: ModuleType) -> None:
+    """A depends_on dep (swap=True) must be written to Jira as "B Blocks A" (bug c8ed).
+
+    depends_on maps to ("Blocks", swap=True): "REB-1 depends_on REB-2" == "REB-2 Blocks
+    REB-1", so REB-2 is the outward/blocker side. The applier previously ignored the swap
+    and wrote "REB-1 Blocks REB-2" (inverted) — backwards Jira links + perpetual inbound
+    cycle-warning noise. It must swap --out/--in for a swap=True entry.
+    """
+    client = _RecordingClient(existing_links=[])
+    mutation = _batch_dict(
+        "REB-1",
+        [
+            {
+                "action": "add",
+                "type": "Blocks",
+                "to_key": "REB-2",
+                "relation": "depends_on",
+                "swap": True,
+            }
+        ],
+    )
+    batch.update_one(mutation, client)
+    assert client.set_relationship_calls == [("REB-2", "REB-1", "Blocks")], (
+        f"depends_on must swap endpoints (REB-2 blocks REB-1); got {client.set_relationship_calls}"
+    )
+
+
 # ===========================================================================
 # INBOUND — fetcher must enrich the snapshot with issuelinks
 # ===========================================================================

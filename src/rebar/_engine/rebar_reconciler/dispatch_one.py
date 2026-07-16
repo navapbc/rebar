@@ -827,13 +827,17 @@ def _update_one_dispatch_links(mutation, client, issue_key) -> tuple[int, int]:
             # Counted only here — AFTER the dedup skip — so a fully-deduped mutation
             # is computed==0 (no canary), but a genuine drop is computed>0 applied==0.
             _links_computed += 1
+            # Bug c8ed: honor swap_endpoints. A depends_on dep (swap=True) means
+            # "to_key Blocks issue_key" — the dep TARGET is the outward/blocker side —
+            # so swap --out/--in. blocks (swap=False) writes issue_key -> to_key as-is.
+            out_key, in_key = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _call_with_retry(client.set_relationship, issue_key, to_key, link_type)
+                _call_with_retry(client.set_relationship, out_key, in_key, link_type)
                 _links_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                 print(  # noqa: T201
-                    f"update_one: set_relationship failed for {issue_key} -> "
-                    f"{to_key} ({link_type}): {exc!r}",
+                    f"update_one: set_relationship failed for {out_key} -> "
+                    f"{in_key} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
 
