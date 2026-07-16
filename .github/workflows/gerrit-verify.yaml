@@ -302,21 +302,25 @@ jobs:
       - name: lint (ruff check + format --check, gating)
         run: make lint
 
-      # pre-commit (all hooks, all files) in the Verified gate too (mirrors test.yml):
-      # runs the EXACT hooks in .pre-commit-config.yaml (check-yaml/toml/merge-conflict/
-      # added-large-files + the make lint/typecheck hooks), so the hook set a contributor
-      # commits through is enforced pre-merge, not just post-merge. Belt-and-suspenders:
-      # a green commit hook == green Verified gate.
+      # pre-commit (hygiene hooks, all files) in the Verified gate too (mirrors test.yml):
+      # runs the hygiene hooks in .pre-commit-config.yaml (check-yaml/toml/merge-conflict/
+      # added-large-files), so the hook set a contributor commits through is enforced
+      # pre-merge, not just post-merge. Belt-and-suspenders for those hooks.
       #
-      # SKIP the `no-commit-to-branch` hook (mirrors test.yml): it is a LOCAL commit-time
-      # guardrail against committing while HEAD is on main/master, not a CI gate. The
-      # Gerrit change is checked out at a `refs/changes/*` ref (detached HEAD), so the
-      # hook passes today — but skipping it keeps the Verified gate robust if the checkout
-      # ever lands HEAD on a real main/master branch, and keeps the two CI runners in sync.
+      # SKIP three hooks in CI (env below), identical to test.yml so the two runners never
+      # drift:
+      #  - `no-commit-to-branch`: a LOCAL commit-time guardrail against committing while HEAD
+      #    is on main/master, not a CI gate. The Gerrit change is checked out at a detached
+      #    `refs/changes/*` ref, so it passes today — but skipping it keeps the gate robust
+      #    if a checkout ever lands HEAD on a real main/master branch.
+      #  - `lint` and `typecheck`: these local hooks just re-invoke `make lint` / `make
+      #    typecheck`, which already run as their own named steps in this job — skipping the
+      #    hook copies avoids running each linter twice. They stay in .pre-commit-config.yaml
+      #    so a local `git commit` still runs them.
       - name: pre-commit (all hooks, all files, gating)
         run: pre-commit run --all-files --show-diff-on-failure
         env:
-          SKIP: no-commit-to-branch
+          SKIP: no-commit-to-branch,lint,typecheck
 
       - name: mypy — full library (gating)
         run: make typecheck

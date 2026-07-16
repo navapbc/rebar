@@ -54,21 +54,24 @@ jobs:
       - name: lint (ruff check + format --check, gating)
         run: make lint
 
-      # GATING: parity between the local pre-commit gate and CI. Runs the EXACT hooks
+      # GATING: parity between the local pre-commit gate and CI. Runs the hygiene hooks
       # in .pre-commit-config.yaml across all files (check-yaml/toml/merge-conflict/
-      # added-large-files + the `make lint` hook), so the hook set a contributor commits
-      # through is also enforced server-side — not just `make lint`. This is the
-      # belt-and-suspenders that guarantees a green commit hook == green CI.
+      # added-large-files), so the hook set a contributor commits through is also
+      # enforced server-side. This is the belt-and-suspenders for those hooks.
       #
-      # SKIP the `no-commit-to-branch` hook: it is a LOCAL commit-time guardrail (it
-      # fails a `git commit` made while HEAD is on main/master). CI legitimately checks
-      # out and runs on `main` (post-merge branch CI), so the hook would fire here and
-      # fail the whole job on every main push. The real "land through Gerrit" boundary
-      # is server-side (GitHub ruleset + the two Gerrit votes), not this hook.
+      # SKIP three hooks in CI (env below):
+      #  - `no-commit-to-branch`: a LOCAL commit-time guardrail (fails a `git commit` made
+      #    while HEAD is on main/master). CI legitimately runs on `main` (post-merge branch
+      #    CI), so it would fire and fail every main push; the real "land through Gerrit"
+      #    boundary is server-side (GitHub ruleset + the two Gerrit votes), not this hook.
+      #  - `lint` and `typecheck`: these local hooks just re-invoke `make lint` / `make
+      #    typecheck`, which already run as their own named steps in this job — running them
+      #    again here is pure duplicate work. They stay in .pre-commit-config.yaml so a local
+      #    `git commit` still runs them; CI runs each linter exactly once (the direct steps).
       - name: pre-commit (all hooks, all files, gating)
         run: pre-commit run --all-files --show-diff-on-failure
         env:
-          SKIP: no-commit-to-branch
+          SKIP: no-commit-to-branch,lint,typecheck
 
       # GATING: mypy over the WHOLE library. Previously core-only (reducer/graph/
       # _store) with the rest tracked as an advisory "full tree" ratchet — that debt
