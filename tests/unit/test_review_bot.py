@@ -1333,3 +1333,21 @@ def test_reviewbot_compose_sets_stop_grace_period():
     root = pathlib.Path(__file__).resolve().parents[2]
     d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
     assert d["services"]["review-bot"].get("stop_grace_period")
+
+
+def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():
+    """The review-bot container runs as root over a uid-1000-owned persistent tickets volume;
+    without git safe.directory the dubious-ownership guard refuses every op on it, so every
+    code_review artifact emission fails. Assert the compose service injects
+    safe.directory=<tickets dir> via GIT_CONFIG_* (equivalent to `git -c`, HOME-independent)."""
+    import pathlib
+
+    yaml = pytest.importorskip("yaml")
+    root = pathlib.Path(__file__).resolve().parents[2]
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    env = d["services"]["review-bot"]["environment"]
+    if isinstance(env, list):  # compose allows either a dict or a list of "K=V"
+        env = dict(e.split("=", 1) for e in env)
+    assert str(env.get("GIT_CONFIG_COUNT")) == "1"
+    assert env.get("GIT_CONFIG_KEY_0") == "safe.directory"
+    assert env.get("GIT_CONFIG_VALUE_0") == "/var/gerrit/site/reviewbot-tickets"

@@ -95,6 +95,18 @@ services:
       # create_ticket/link/emit calls that pass repo_root=None) at the PERSISTENT tickets worktree,
       # NOT the container's /app cwd — so artifact writes land in the pushable clone.
       REBAR_TRACKER_DIR: "/var/gerrit/site/reviewbot-tickets"
+      # Trust the persistent tickets volume for git. The container runs as root (no USER in
+      # Dockerfile.reviewbot) but that named volume is owned uid 1000 (a legacy population that
+      # survives rebuilds), so git's dubious-ownership guard (>=2.35.2) refused EVERY op on it —
+      # the ensure-tickets convergence AND rebar's runtime `git commit` in emit_code_review_artifact
+      # — making 100% of code_review artifact emissions fail (ARTIFACT_EMIT_ERROR). safe.directory
+      # is only honored from command-line/system/global config (never repo-local), so inject it via
+      # GIT_CONFIG_* — equivalent to `git -c safe.directory=...` (confirmed to resolve the guard on
+      # the box), HOME-independent (HOME is unset here), applied to every git process from startup.
+      # Keep the path in sync with REBAR_TRACKER_DIR above.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "/var/gerrit/site/reviewbot-tickets"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
