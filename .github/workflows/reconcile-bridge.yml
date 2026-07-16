@@ -69,11 +69,12 @@ jobs:
 
     env:
       MODE: ${{ github.event.inputs.mode || 'live' }}
-      # Bug ad48: set the signing-key path at JOB level so EVERY rebar write step (the inline
-      # inbound signer + the commit-back) sees identity.signing_key — cross-step $GITHUB_ENV
-      # propagation did not reach the write steps. The "Materialize the Rebar Bot signing key"
-      # step writes the file at this exact path; absent secret ⇒ no file ⇒ unsigned fallback.
-      REBAR_IDENTITY_SIGNING_KEY: ${{ runner.temp }}/rebar-bot-signing-key
+      # NOTE: REBAR_IDENTITY_SIGNING_KEY is exported by the "Materialize the Rebar Bot signing
+      # key" step (via $GITHUB_ENV) and is deliberately NOT set here. Job-level `env:` cannot
+      # reference ${{ runner.temp }} — the `runner` context is unavailable outside steps, so a
+      # job-level entry using it is a parse-time startup failure that produces ZERO jobs (the
+      # reconciler never runs). Both rebar-write steps (Run reconciler, Commit reconciler events
+      # back) run after Materialize, so they see identity.signing_key without a job-level entry.
 
     steps:
       - name: Checkout repository
