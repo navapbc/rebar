@@ -93,3 +93,35 @@ def test_case_insensitive_name_match(tmp_path: Path) -> None:
     freeze = "Build==1.2.2.post1\nHatchling==1.27.0\nTwine==6.1.0\n"
     cp = _run(LOCK, freeze, tmp_path)
     assert cp.returncode == 0, f"name match must be case-insensitive: {cp.stderr}"
+
+
+# ── PEP 503 name normalization (bug caressive-noteworthy-goldfish) ────────────
+# `pip freeze` reports a distribution by its metadata name, which may use `.`/`_`
+# (`jaraco.classes`, `readme_renderer`, `pyproject_hooks`) while the pip-compile lock
+# pins the PEP 503-normalized name with `-` (`jaraco-classes`, `readme-renderer`).
+# Per PEP 503 these are the SAME package (runs of `-_.` collapse to a single `-`), so
+# the guard must not report a lock-pinned dep as "absent" just because the spelling
+# differs. This blocked the first real release through the pinned build-once pipeline.
+_NORM_LOCK = (
+    "jaraco-classes==3.4.0 \\\n    --hash=sha256:aaaa\n"
+    "readme-renderer==45.0 \\\n    --hash=sha256:bbbb\n"
+    "pyproject-hooks==1.2.0 \\\n    --hash=sha256:cccc\n"
+)
+
+
+def test_pep503_dotted_and_underscored_names_match_hyphenated_lock(tmp_path: Path) -> None:
+    # freeze uses dots/underscores; lock uses hyphens -> must be recognized as the same
+    # pinned packages and pass (this is the exact real-world failure that was observed).
+    freeze = "jaraco.classes==3.4.0\nreadme_renderer==45.0\npyproject_hooks==1.2.0\n"
+    cp = _run(_NORM_LOCK, freeze, tmp_path)
+    assert cp.returncode == 0, (
+        f"PEP 503-equivalent names must match the hyphenated lock: {cp.stdout}{cp.stderr}"
+    )
+
+
+def test_pep503_normalized_version_mismatch_still_fails(tmp_path: Path) -> None:
+    # Normalization must not mask a genuine version mismatch on the same (normalized) name.
+    freeze = "jaraco.classes==9.9.9\nreadme_renderer==45.0\npyproject_hooks==1.2.0\n"
+    cp = _run(_NORM_LOCK, freeze, tmp_path)
+    assert cp.returncode != 0, "a version mismatch on a normalized name must still fail"
+    assert "jaraco" in (cp.stdout + cp.stderr).lower()

@@ -23,6 +23,7 @@ aside); non-zero (with the offending packages on stderr) otherwise.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,18 @@ from pathlib import Path
 # release lock. They are not a supply-chain risk for the build backend and pip refuses to
 # operate without them, so they are exempt from the subset check.
 BASE_ALLOWLIST = {"pip", "setuptools", "wheel"}
+
+
+def _canonical(name: str) -> str:
+    """PEP 503-canonicalize a distribution name: collapse runs of `-_.` to a single `-`.
+
+    `pip freeze` reports a distribution by its metadata name (e.g. `jaraco.classes`,
+    `readme_renderer`), while a pip-compile lock pins the normalized form
+    (`jaraco-classes`, `readme-renderer`). Per PEP 503 these are the SAME package, so both
+    sides must be canonicalized before comparison — otherwise a lock-pinned dependency is
+    falsely reported "absent" purely because of `.`/`_`-vs-`-` spelling.
+    """
+    return re.sub(r"[-_.]+", "-", name).strip().lower()
 
 
 def _parse_pins(text: str) -> dict[str, str]:
@@ -49,11 +62,11 @@ def _parse_pins(text: str) -> dict[str, str]:
         if "==" not in line:
             continue
         name, _, version = line.partition("==")
-        name = name.strip().lower()
         # A version may carry an environment marker (`; python_version …`) or an extras
-        # suffix on the name (`pkg[extra]`) — normalise both away.
+        # suffix on the name (`pkg[extra]`) — normalise both away, then PEP 503-canonicalize
+        # the name so `.`/`_`/`-` spellings from `pip freeze` vs the lock compare equal.
         version = version.split(";", 1)[0].strip()
-        name = name.split("[", 1)[0].strip()
+        name = _canonical(name.split("[", 1)[0])
         if name and version:
             pins[name] = version
     return pins
