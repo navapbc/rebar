@@ -10,6 +10,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-16
+
 ### Breaking
 
 - Reject whitespace-only ticket titles on create/edit across the CLI, library, and
@@ -1057,7 +1059,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.7.1...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/navapbc/rebar/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/navapbc/rebar/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/navapbc/rebar/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/navapbc/rebar/compare/v0.5.2...v0.6.0

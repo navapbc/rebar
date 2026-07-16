@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # scripts stay `rebar` / `rebar-mcp` — those are independent of the dist name.
 # `rebar` itself is taken on PyPI (Eventbrite), so we publish under `nava-rebar`.
 name = "nava-rebar"
-version = "0.7.1"
+version = "0.8.0"
 description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
 readme = "README.md"
 # Floor is 3.11: the reconciler uses enum.StrEnum (new in 3.11) — see

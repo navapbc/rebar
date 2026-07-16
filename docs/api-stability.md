@@ -1,6 +1,6 @@
 # API stability
 
-`nava-rebar` is versioned **0.x** (currently 0.7.1). Under SemVer, 0.x means the
+`nava-rebar` is versioned **0.x** (currently 0.8.0). Under SemVer, 0.x means the
 public API may still change between minor versions — but "may change" is not the
 same for every surface. This page states, per surface, **what you can depend on
 today** and how changes are communicated, so you can build against rebar without

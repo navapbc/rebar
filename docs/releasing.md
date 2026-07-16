@@ -236,13 +236,29 @@ the defect too via the `artifact-probe` job in `test.yml`.
 
 ## Release procedure
 
-### 1. Bump versions (one commit)
+### 1. Bump versions + land the commit through Gerrit (one commit)
+Bump **all** version-carrying files in lockstep — the release workflow's `authorize`
+job asserts version-lockstep and `tests/unit/test_version_sync.py` (a CI gate) fails if
+the `docs/api-stability.md` prose marker drifts from `pyproject.toml`:
 ```bash
-# pyproject.toml:  version = "X.Y.Z"
-# server.json:     "version": "X.Y.Z"  AND  packages[0].version: "X.Y.Z"
-git add pyproject.toml server.json && git commit -m "Release X.Y.Z" && git push origin main
+# pyproject.toml:        version = "X.Y.Z"
+# server.json:           "version": "X.Y.Z"  AND  every packages[].version: "X.Y.Z"
+# docs/api-stability.md: "... (currently X.Y.Z)."   (enforced by test_version_sync)
+# CHANGELOG.md:          promote [Unreleased] -> [X.Y.Z] (step 1a)
+git add pyproject.toml server.json docs/api-stability.md CHANGELOG.md
 ```
-(Local sanity: `python -m build && python -m twine check dist/*`.)
+**Land it through Gerrit — never push the release commit directly to `main`** (a
+repository ruleset rejects direct pushes; see "Git workflow" in CLAUDE.md /
+CONTRIBUTING.md). Commit with the
+`rebar-ticket:` + DCO trailers and push for review, then earn both votes and Submit:
+```bash
+git commit -s -m "<ticket-alias>: release X.Y.Z" -m "rebar-ticket: <ticket-alias>"
+git push gerrit HEAD:refs/for/main
+# wait for LLM-Review +1 AND Verified +1, then Submit (POST /a/changes/<n>/submit)
+```
+(Local sanity before pushing: `make lint && make typecheck && make test`, and
+`python -m build && python -m twine check dist/*`.) The release is dispatched from
+`main` **only after this commit has landed** (step 2).
 
 ### 1a. Update CHANGELOG.md (before tagging)
 `CHANGELOG.md` is the **user-facing** changelog (Keep a Changelog shape),
@@ -252,7 +268,10 @@ pinned tool once — a standalone Rust binary, **not** a pyproject dev extra:
 ```bash
 pipx install git-cliff==2.13.1
 ```
-Then, for the release you are cutting:
+Then, for the release you are cutting (if `[Unreleased]` already holds hand-curated
+entries, you can skip `make changelog` and simply **retitle** `## [Unreleased]` to
+`## [X.Y.Z] - <today>`, opening a fresh empty `## [Unreleased]` above it and adding the
+`[X.Y.Z]` footer compare-link):
 ```bash
 make changelog VERSION=vX.Y.Z   # prepends the [X.Y.Z] section from unreleased commits
 # hand-curate (~5 min) the freshly prepended top section: drop noise, tighten
