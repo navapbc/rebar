@@ -126,8 +126,9 @@ The release workflow (`.github/workflows/release.yml`) hardens its supply chain 
 tag like `actions/checkout@v7` or `.../releases/latest/...` can be silently repointed at new
 (possibly hostile) code after review; a commit SHA or a content digest cannot. The generic
 checks (full-SHA action pins, `persist-credentials: false`, over-broad/OIDC permissions) are
-enforced by **zizmor + actionlint scoped to `release.yml`** under `make lint`; the
-rebar-specific structure is pinned by `tests/unit/test_release_workflow_pins.py`.
+enforced by **zizmor scoped to `release.yml`** under `make lint` (which also runs
+**actionlint across all workflows** — bug 8002); the rebar-specific structure is pinned by
+`tests/unit/test_release_workflow_pins.py`.
 
 **(a) Actions are pinned to full 40-char commit SHAs.** Every `uses:` names a specific
 commit with a trailing `# vX.Y.Z` comment for readability, e.g.

@@ -15,8 +15,9 @@ sources = src tests
 # target refuses to run on a mismatched version so generated output is reproducible.
 GIT_CLIFF_VERSION := 2.13.1
 
-# Release supply-chain lint (story 08a8): the GENERIC action-security checks run scoped
-# to release.yml under `make lint` — zizmor (installed via the [dev] extra) + actionlint.
+# Release supply-chain lint (story 08a8): under `make lint`, zizmor (installed via the [dev]
+# extra) audits release.yml, and actionlint validates ALL workflows (bug 8002 — an invalid
+# workflow that release.yml-only actionlint would miss took the reconcile bridge down for ~2d).
 # actionlint is a standalone Go binary; when it is not already on PATH (CI ubuntu), the
 # `actionlint-bin` target installs a PINNED version verified against a hard-coded SHA-256
 # into a repo-local, git-ignored bin. Bump the pin + digest together (they are checked with
@@ -94,25 +95,27 @@ format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target)
 	ruff check --fix $(sources)
 	ruff format $(sources)
 
-lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + scoped zizmor/actionlint on release.yml. The gate CI runs.
+lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml) + actionlint (all workflows). The gate CI runs.
 	ruff check $(sources)
 	ruff format --check $(sources)
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
-	@# Scoped to release.yml — NOT repo-wide (F1/F3 harden other workflows separately).
-	@# zizmor is a cross-platform pip tool (in [dev]) — run it on every host.
+	@# zizmor stays scoped to release.yml (widening the security audit is separate work);
+	@# actionlint below validates ALL workflows. zizmor is a cross-platform pip tool (in [dev]).
 	zizmor $(RELEASE_WORKFLOW)
-	@# actionlint is an OS/arch-specific Go binary. Use one already on PATH / in .tools; else
-	@# install the PINNED build — but ONLY on Linux, where the pinned linux_amd64 asset runs
+	@# actionlint validates ALL workflows — the context-availability / parse-error class (e.g.
+	@# the reconcile-bridge `runner`-in-job-env startup failure, bug 8002) that release.yml-only
+	@# linting missed. It is an OS/arch-specific Go binary: use one already on PATH / in .tools;
+	@# else install the PINNED build — but ONLY on Linux, where the pinned linux_amd64 asset runs
 	@# and GNU sha256sum verifies it. On a non-Linux host WITHOUT actionlint (e.g. the macOS CI
-	@# matrix leg), skip it with a notice: release.yml only runs on ubuntu and the Linux CI leg
-	@# is the gating run, so the audit is not lost. This is a static, host-independent check.
+	@# matrix leg), skip with a notice — the Linux CI leg is the gating run, so coverage is not
+	@# lost. Given no path args, actionlint auto-discovers every .github/workflows/*.{yml,yaml}.
 	@al="$$(command -v actionlint || echo $(LOCAL_BIN)/actionlint)"; \
 	if [ -x "$$al" ]; then \
-		echo "$$al $(RELEASE_WORKFLOW)"; "$$al" $(RELEASE_WORKFLOW); \
+		echo "$$al (all workflows)"; "$$al"; \
 	elif [ "$$(uname -s)" = "Linux" ]; then \
-		$(MAKE) actionlint-bin; echo "$(LOCAL_BIN)/actionlint $(RELEASE_WORKFLOW)"; "$(LOCAL_BIN)/actionlint" $(RELEASE_WORKFLOW); \
+		$(MAKE) actionlint-bin; echo "$(LOCAL_BIN)/actionlint (all workflows)"; "$(LOCAL_BIN)/actionlint"; \
 	else \
-		echo "lint: actionlint unavailable on $$(uname -s); skipping release.yml actionlint audit (gated on the Linux CI leg)"; \
+		echo "lint: actionlint unavailable on $$(uname -s); skipping workflow actionlint audit (gated on the Linux CI leg)"; \
 	fi
 
 actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-verified install if absent).
