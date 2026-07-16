@@ -188,23 +188,16 @@ def _prune_queue_events(ticket_id: str, tracker: str) -> None:
     if not old:
         return
     try:
+        from rebar._store.event_append import delete_events
+
         rid = _queue._resolve(ticket_id, tracker)
         rels = [f"{rid}/{f}" for f in old]
-        subprocess.run(["git", "-C", tracker, "rm", "-q", *rels], check=True, capture_output=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                tracker,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"prune: enrich queue {rid}",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
+        # a raw git rm + whole-index commit here races normal store writes — it sweeps a
+        # concurrent locked writer's just-staged event into this prune commit (sweep-and-strand)
+        # and advances HEAD under the writer's ref update. delete_events serializes under the
+        # unified write lock and commits ONLY these paths (pathspec-scoped).
+        delete_events(tracker, rels, f"prune: enrich queue {rid}")
     except Exception:  # noqa: BLE001 — best-effort prune; never fails the drain
         logger.warning("enrich queue prune failed; continuing", exc_info=True)
 

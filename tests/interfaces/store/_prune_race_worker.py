@@ -1,0 +1,56 @@
+"""Standalone worker for the enrich-queue prune concurrency regression test.
+
+Run as a SEPARATE process (faithful to concurrent ``rebar review-plan`` invocations):
+  writer <store> <ticket> <bursts>        — locked append_event bursts (SIGNATURE+REVIEW_RESULT)
+  pruner <store> <rounds> <ticket>...     — the enrich-queue prune committer, sustained per round
+
+A writer prints its swallowed-raise count to stdout. Push is forced off (single-store race).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def main() -> None:
+    role, store = sys.argv[1], sys.argv[2]
+    os.environ["REBAR_SYNC_PUSH"] = "off"
+    from rebar import config
+
+    tracker = config.tracker_dir(store)
+    if role == "writer":
+        tid, bursts = sys.argv[3], int(sys.argv[4])
+        from rebar._commands._seam import append_event
+
+        raised = 0
+        for j in range(bursts):
+            for et in ("SIGNATURE", "REVIEW_RESULT"):
+                try:
+                    append_event(
+                        tid,
+                        et,
+                        {"schema": "plan_review_result_v1", "j": j, "et": et},
+                        tracker,
+                        repo_root=store,
+                    )
+                except BaseException:  # noqa: BLE001 — mirror the swallow at the review call sites
+                    raised += 1
+        print(raised)
+    else:  # pruner
+        rounds, tids = int(sys.argv[3]), sys.argv[4:]
+        from rebar.llm.enrich_drain import _prune_queue_events
+        from rebar.llm.overlap import queue as _queue
+
+        t = str(tracker)
+        for _ in range(rounds):
+            for tid in tids:
+                try:
+                    _queue.enqueue(tid, soak_min=0, repo_root=store)
+                    _prune_queue_events(tid, t)
+                except BaseException:  # noqa: BLE001 — the drain swallows prune failures
+                    pass
+
+
+if __name__ == "__main__":
+    main()
