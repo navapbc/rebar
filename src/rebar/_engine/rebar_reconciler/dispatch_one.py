@@ -824,16 +824,15 @@ def _update_one_dispatch_links(mutation, client, issue_key) -> tuple[int, int]:
                 continue
             if existing_links is not None and (link_type, to_key) in existing_links:
                 continue  # already present (either direction) — no duplicate add
-            # Counted only here — AFTER the dedup skip — so a fully-deduped mutation
-            # is computed==0 (no canary), but a genuine drop is computed>0 applied==0.
+            # Counted AFTER the dedup skip so a fully-deduped mutation is computed==0 (no canary).
             _links_computed += 1
+            frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _call_with_retry(client.set_relationship, issue_key, to_key, link_type)
+                _call_with_retry(client.set_relationship, frm, to, link_type)
                 _links_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                 print(  # noqa: T201
-                    f"update_one: set_relationship failed for {issue_key} -> "
-                    f"{to_key} ({link_type}): {exc!r}",
+                    f"update_one: set_relationship failed for {frm} -> {to} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
 
