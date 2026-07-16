@@ -19,7 +19,20 @@ _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 _OPTIONALITY_YML = _ROOT / ".github" / "workflows" / "optionality.yml"
+_PRECOMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
 _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
+
+# Pre-commit hooks whose PASS/FAIL depends on the current git branch / HEAD state rather
+# than on file content. `pre-commit run --all-files` therefore behaves DIFFERENTLY between
+# the two CI runners even when they run the identical command: gerrit-verify.yaml checks the
+# change out at a `refs/changes/*` ref (detached HEAD, hook silent) while test.yml runs on the
+# pushed `main` branch (hook fires). That *context* drift is invisible to the command-signature
+# parity above, so a branch-sensitive hook reddens post-merge branch CI while the pre-merge
+# Verified gate stays green — exactly bug `pillared-doddering-fawn`. Each such hook, when
+# present in .pre-commit-config.yaml, MUST be listed in the `SKIP` of BOTH workflows'
+# `pre-commit run --all-files` step (its "don't commit to main" intent is enforced server-side
+# by the GitHub ruleset + Gerrit votes, not by this CI hook).
+_BRANCH_SENSITIVE_HOOKS = {"no-commit-to-branch"}
 
 # Each gating check keyed by a STABLE command signature (not the step name — names differ
 # in wording between the two files, e.g. the pip-audit step). Every signature here must
@@ -118,3 +131,88 @@ def test_optionality_contract_gates_the_verified_path() -> None:
         "optionality.yml (push/PR lane) must delegate to the same reusable workflow so its checks "
         "cannot drift from the Verified-lane checks."
     )
+
+
+def _precommit_config_hook_ids() -> set[str]:
+    """The set of hook ids declared in .pre-commit-config.yaml."""
+    import yaml
+
+    cfg = yaml.safe_load(_read(_PRECOMMIT_CONFIG))
+    return {
+        hook["id"]
+        for repo in (cfg.get("repos") or [])
+        for hook in (repo.get("hooks") or [])
+        if "id" in hook
+    }
+
+
+def _precommit_all_files_steps(workflow_text: str) -> list[dict]:
+    """Every step in a workflow whose `run` invokes `pre-commit run --all-files`,
+    with `env` resolved to the merged workflow-/job-/step-level environment (SKIP may be
+    set at any of those scopes)."""
+    import yaml
+
+    wf = yaml.safe_load(workflow_text)
+    wf_env = wf.get("env") or {}
+    steps: list[dict] = []
+    for job in (wf.get("jobs") or {}).values():
+        job_env = job.get("env") or {}
+        for step in job.get("steps") or []:
+            if "pre-commit run --all-files" in (step.get("run") or ""):
+                merged = {**wf_env, **job_env, **(step.get("env") or {})}
+                steps.append({"run": step.get("run") or "", "env": merged})
+    return steps
+
+
+def _hook_is_skipped(hook: str, step: dict) -> bool:
+    """True if `hook` is skipped for this pre-commit step, via the SKIP env var (a
+    comma/space-separated list of hook ids) or an inline `SKIP=<...>` in the run script."""
+    import re
+
+    skip_env = str(step["env"].get("SKIP", ""))
+    if hook in re.split(r"[,\s]+", skip_env.strip()):
+        return True
+    # Inline form, e.g. `SKIP=no-commit-to-branch pre-commit run --all-files`.
+    for m in re.finditer(r"SKIP=([^\s]+)", step["run"]):
+        if hook in re.split(r"[,]+", m.group(1)):
+            return True
+    return False
+
+
+def test_branch_sensitive_precommit_hooks_skipped_in_ci() -> None:
+    """A branch-sensitive pre-commit hook must be SKIPped in BOTH CI runners' `pre-commit
+    run --all-files` step. Otherwise the identical command passes pre-merge on the detached
+    Gerrit change ref (Verified +1 → the change lands) but fails post-merge on the `main`
+    branch, reddening branch CI with no way for the pre-merge gate to catch it. This closes
+    the *context/behavioral* drift gap that the command-signature parity above cannot see
+    (bug `pillared-doddering-fawn`)."""
+    hook_ids = _precommit_config_hook_ids()
+    # Non-vacuity guard: `no-commit-to-branch` must REMAIN in .pre-commit-config.yaml.
+    # It is the local commit-time guardrail against committing to main/master (the real
+    # "land through Gerrit" boundary is server-side). Without this assertion the loop
+    # below passes vacuously if the hook is ever deleted from config (`active` empties),
+    # which would silently drop the guardrail AND retire this drift guard in one stroke —
+    # so pin its presence here (bug `pillared-doddering-fawn` AC: hook preserved, not removed).
+    assert "no-commit-to-branch" in hook_ids, (
+        ".pre-commit-config.yaml no longer declares the `no-commit-to-branch` hook — the "
+        "local commit-time guardrail against committing to main/master was removed. Restore "
+        "it (the CI skip in this guard exists precisely because the hook is present), or, if "
+        "its removal is deliberate, update this test with the rationale."
+    )
+    active = _BRANCH_SENSITIVE_HOOKS & hook_ids
+    for label, path in (("test.yml", _TEST_YML), ("gerrit-verify.yaml", _GERRIT_YML)):
+        steps = _precommit_all_files_steps(_read(path))
+        assert steps, (
+            f"{label}: no `pre-commit run --all-files` step found — the parity signature is "
+            "stale (the step was renamed/removed). Update this guard to match."
+        )
+        for hook in sorted(active):
+            for step in steps:
+                assert _hook_is_skipped(hook, step), (
+                    f"{label}: the `pre-commit run --all-files` step does not SKIP the "
+                    f"branch-sensitive hook {hook!r}. That hook passes on a detached Gerrit "
+                    f"change ref (Verified gate) but FAILS on the `main` branch (post-merge "
+                    f"branch CI), so it reddens `main` while the pre-merge Verified vote stays "
+                    f"green — the drift that caused bug `pillared-doddering-fawn`. Add "
+                    f"`env:\\n  SKIP: {hook}` to the step (in BOTH workflows)."
+                )
