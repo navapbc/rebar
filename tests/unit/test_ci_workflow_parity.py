@@ -34,6 +34,15 @@ _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
 # by the GitHub ruleset + Gerrit votes, not by this CI hook).
 _BRANCH_SENSITIVE_HOOKS = {"no-commit-to-branch"}
 
+# Pre-commit hooks that are REDUNDANT in CI because they only re-invoke a check that already
+# runs as its own named CI step. The local `lint`/`typecheck` hooks shell out to `make lint` /
+# `make typecheck`, which both workflows run directly; letting `pre-commit run --all-files`
+# run them again would execute each linter TWICE per job. They must therefore be listed in the
+# CI `SKIP` of BOTH workflows' pre-commit step so each linter runs exactly once (the direct
+# steps). Distinct from _BRANCH_SENSITIVE_HOOKS: these are deterministic content checkers, not
+# branch-context-dependent — the reason to skip is de-duplication, not a main-branch false fail.
+_CI_REDUNDANT_HOOKS = {"lint", "typecheck"}
+
 # Each gating check keyed by a STABLE command signature (not the step name — names differ
 # in wording between the two files, e.g. the pip-audit step). Every signature here must
 # appear in BOTH workflows: the pre-merge Verified gate and the post-merge branch CI.
@@ -203,3 +212,37 @@ def test_branch_sensitive_precommit_hooks_skipped_in_ci() -> None:
                     f"green — the drift that caused bug `pillared-doddering-fawn`. Add "
                     f"`env:\\n  SKIP: {hook}` to the step (in BOTH workflows)."
                 )
+
+
+def test_ci_redundant_hooks_skipped_in_precommit() -> None:
+    """The `lint`/`typecheck` pre-commit hooks (which just re-invoke `make lint` / `make
+    typecheck`) must be SKIPped in BOTH workflows' `pre-commit run --all-files` step, because
+    each of those `make` targets already runs as its own named CI step. Without the skip, every
+    CI job runs each linter TWICE (once directly, once via the hook) — pure duplicate work
+    (ticket `ecumenical-equal-sidewinder`). This guard fails the build if the double-run is
+    reintroduced. It also asserts the direct step still exists, so a linter runs exactly once —
+    never zero times."""
+    active = _CI_REDUNDANT_HOOKS & _precommit_config_hook_ids()
+    # Each redundant hook's stand-alone step is what keeps it running once after the skip.
+    _direct_step_sig = {"lint": "make lint", "typecheck": "make typecheck"}
+    for label, path in (("test.yml", _TEST_YML), ("gerrit-verify.yaml", _GERRIT_YML)):
+        text = _read(path)
+        steps = _precommit_all_files_steps(text)
+        assert steps, (
+            f"{label}: no `pre-commit run --all-files` step found — the parity signature is "
+            "stale (the step was renamed/removed). Update this guard to match."
+        )
+        for hook in sorted(active):
+            for step in steps:
+                assert _hook_is_skipped(hook, step), (
+                    f"{label}: the `pre-commit run --all-files` step does not SKIP the "
+                    f"redundant hook {hook!r}. It only re-invokes "
+                    f"`{_direct_step_sig[hook]}`, which already runs as its own named step — "
+                    f"so CI runs the linter TWICE per job. Add {hook!r} to the step's `SKIP` "
+                    f"env (in BOTH workflows), per ticket `ecumenical-equal-sidewinder`."
+                )
+            assert _direct_step_sig[hook] in text, (
+                f"{label}: `{_direct_step_sig[hook]}` no longer runs as its own step, yet the "
+                f"{hook!r} hook is skipped in the pre-commit run — the linter would run ZERO "
+                f"times in CI. Keep the direct `{_direct_step_sig[hook]}` step."
+            )
