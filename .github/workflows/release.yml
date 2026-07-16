@@ -1,9 +1,23 @@
 name: release
 
-# Build and publish nava-rebar to PyPI via Trusted Publishing (OIDC) — no stored
-# token. Publishing is gated to version tags (push a tag like `v0.1.0`); a manual
-# run (workflow_dispatch) builds + validates the distributions but does NOT publish,
-# so it doubles as a release dry-run.
+# Build and publish nava-rebar to PyPI via Trusted Publishing (OIDC) — no stored token.
+#
+# Release-source authorization (story fd84, Finding 1): the release is initiated ONLY by
+# `workflow_dispatch` run from `refs/heads/main` — never by a pushed `v*` tag. Because the
+# GitHub mirror's `main` is exactly the Gerrit-reviewed-and-landed history, releasing from
+# `main` guarantees the source was reviewed **by construction** (the mainstream OSS pattern:
+# release only from the protected branch). The `authorize` job asserts, BEFORE any build:
+#   (1) the run is on refs/heads/main,
+#   (2) version-lockstep — the `version` input == pyproject `[project].version` ==
+#       server.json top-level + every packages[].version,
+#   (3) ancestry — HEAD is reachable from origin/main (belt-and-suspenders vs the ref guard),
+#   (4) env-preflight — the `pypi` environment has required reviewers AND a main-only
+#       deployment-branch policy (fail-closed drift detection at release time).
+# The guard LOGIC lives in scripts/release_guards.py (unit-tested); the wiring is enforced by
+# tests/unit/test_release_workflow_pins.py. Publish happens DIRECTLY via OIDC Trusted
+# Publishing (no intermediate tag relay); the `v*` tag + GitHub Release are created only AFTER
+# a successful publish (record only — a tag is an output, never a trigger). A hand-pushed `v*`
+# tag can no longer reach the re-keyed `pypi` environment and therefore cannot publish.
 #
 # Supply-chain hardening (story 08a8): every executable this workflow depends on is
 # pinned to an immutable reference — actions to full commit SHAs, the build toolchain
@@ -17,20 +31,75 @@ name: release
 #   Owner:             navapbc
 #   Repository:        rebar
 #   Workflow filename: release.yml
-#   Environment:       pypi
-# Also create a GitHub environment named `pypi` (Settings → Environments) — add
-# required-reviewers protection there if you want a manual approval gate.
+#   Environment:       pypi   (the OIDC `sub` is environment-scoped, so it is
+#                              ref-independent — dispatch-from-main matches the same entry)
+# The GitHub environment named `pypi` (Settings → Environments) MUST have required-reviewers
+# protection AND a `main`-only deployment-branch policy — the `authorize` env-preflight fails
+# the release closed if either is missing.
 
 on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version — must equal pyproject/server.json (e.g. 0.7.2)"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  authorize:
+    name: Authorize release source (dispatch-from-main + lockstep + ancestry + env preflight)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # (1) Ref guard — a dispatch MUST run from refs/heads/main. Because the mirror's `main`
+      # is the Gerrit-reviewed history, this makes "the source is reviewed" true by construction.
+      - name: Guard — dispatch must run from refs/heads/main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::release must be dispatched from refs/heads/main (got: $REF)"
+            exit 1
+          fi
+      # fetch-depth: 0 so the ancestry check below sees full history (a shallow clone defeats it).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+      # (2) Version-lockstep — the intended version and every manifest must agree BEFORE build.
+      - name: Guard — version lockstep (input == pyproject == server.json)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python scripts/release_guards.py version-lockstep \
+            --version "$VERSION" --pyproject pyproject.toml --server-json server.json
+      # (3) Ancestry — HEAD must be reachable from origin/main (redundant with the ref guard
+      # under dispatch-from-main, kept as defense-in-depth).
+      - name: Guard — HEAD is an ancestor of origin/main
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin main
+          python scripts/release_guards.py ancestry --sha "$SHA" --ref origin/main
+      # (4) Env-preflight — fail the release CLOSED if the pypi environment lost its required
+      # reviewers or its main-only branch policy (drift detected exactly when it matters).
+      - name: Guard — pypi environment preflight (required reviewers + main-only branch policy)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "/repos/${GH_REPO}/environments/pypi" > env.json
+          gh api "/repos/${GH_REPO}/environments/pypi/deployment-branch-policies" > branch-policies.json
+          python scripts/release_guards.py env-preflight \
+            --response env.json --branch-policies branch-policies.json
+
   evidence_shapin:
     name: Record pinned action SHAs (evidence)
     runs-on: ubuntu-latest
@@ -56,6 +125,10 @@ jobs:
 
   build:
     name: Build distributions (build-once)
+    # Gated on the release-source authorization: no artifact is built (and therefore nothing
+    # can flow to publish) until dispatch-from-main + version-lockstep + ancestry + env-preflight
+    # all pass. Every publishing job is a `needs:` descendant of build, so authorize gates them all.
+    needs: authorize
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -201,8 +274,10 @@ jobs:
     name: Publish to PyPI
     needs: [build, wheel_test, sdist_test]
     runs-on: ubuntu-latest
-    # Only publish on a version-tag push; a manual dispatch stops after build + tests.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Publish on an authorized dispatch-from-main run (the `authorize` job upstream of `build`
+    # already enforced ref==main + version-lockstep + ancestry + env-preflight). The `pypi`
+    # environment's required reviewers below are the second human gate on every publish.
+    if: github.event_name == 'workflow_dispatch'
     environment:
       name: pypi
       url: https://pypi.org/p/nava-rebar
@@ -236,34 +311,39 @@ jobs:
     name: Create GitHub Release
     needs: publish
     runs-on: ubuntu-latest
-    # Same gate as publish: only a version-tag push creates a release. Runs after
-    # PyPI so a GitHub Release never appears for a version that failed to publish.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Runs after a successful publish so a GitHub Release never appears for a version that
+    # failed to publish. The `v*` tag is an OUTPUT here (created at the release SHA), never a
+    # trigger — the workflow is dispatch-only, so this tag cannot start another release run.
+    if: github.event_name == 'workflow_dispatch'
     permissions:
-      contents: write   # create the release + upload its asset
+      contents: write   # create the tag + release + upload its asset
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: dist
           path: dist/
-      # Create the GitHub Release for this tag with auto-generated notes (commit/PR
-      # list since the previous release) and mark it Latest, attaching the built
-      # sdist + wheel. --verify-tag ensures the tag exists; the step is idempotent —
-      # if a release already exists for the tag it is updated rather than failing.
-      - name: Create GitHub Release
+      # Create the GitHub Release for this version with auto-generated notes (commit/PR list
+      # since the previous release) and mark it Latest, attaching the built sdist + wheel. The
+      # version comes from the dispatch input (NOT a pre-pushed tag). `gh release create`
+      # without `--verify-tag` CREATES the lightweight `v<version>` tag at --target (the run
+      # SHA, already asserted an ancestor of main) when it does not pre-exist — no tag relay /
+      # PAT needed. The step is idempotent: an existing release for the tag is updated in place.
+      - name: Create the v* tag + GitHub Release (record only, post-publish)
         env:
           GH_TOKEN: ${{ github.token }}
-          # This job does not check out the repo, so `gh` has no local git remote
-          # to infer the target from — GH_REPO gives it the repo explicitly (the
-          # `gh release` subcommands + --generate-notes all resolve via the API).
+          # This job does not check out the repo, so `gh` has no local git remote to infer
+          # the target from — GH_REPO gives it the repo explicitly (the `gh release`
+          # subcommands + --generate-notes all resolve via the API).
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
         run: |
+          TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --latest --draft=false
             gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes --latest --verify-tag dist/*
+            gh release create "$TAG" --target "$SHA" --title "$TAG" --generate-notes --latest dist/*
           fi
 
   mcp_verify:
@@ -319,16 +399,16 @@ jobs:
     runs-on: ubuntu-latest
     # Runs after PyPI so the registry's package-ownership check (the `mcp-name:`
     # annotation on the published PyPI release) resolves against a live version.
-    # Same version-tag gate as publish, so workflow_dispatch dry-runs don't publish.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Same authorized-dispatch gate as publish (version comes from the dispatch input).
+    if: github.event_name == 'workflow_dispatch'
     # zizmor:ignore[excessive-permissions] -- id-token: write is consumed by mcp-publisher login github-oidc (runtime OIDC token request; zizmor cannot introspect shell commands)
     permissions:
       id-token: write   # mint the OIDC token that authenticates to the registry
       contents: read    # checkout server.json
     steps:
-      # server.json lives in the repo tree; the tag commit already carries the
-      # bumped version (the "Release X.Y.Z" commit sets it before tagging), so no
-      # in-workflow version rewrite is needed.
+      # server.json lives in the repo tree at the dispatched `main` SHA, which already carries
+      # the bumped version (asserted by the authorize job's version-lockstep against the same
+      # dispatch input), so no in-workflow version rewrite is needed.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
@@ -350,9 +430,9 @@ jobs:
       # (404)"). Wait until PyPI serves this exact version before publishing.
       - name: Wait for PyPI to serve this version
         env:
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version }}
         run: |
-          version="${TAG#v}"
+          version="${VERSION}"
           echo "Waiting for PyPI to serve nava-rebar ${version} (the registry validates against it)…"
           for attempt in $(seq 1 30); do   # up to 30 × 10s = 5 min
             if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/nava-rebar/${version}/json")" = "200" ]; then
@@ -369,9 +449,9 @@ jobs:
       # (versions are immutable) is treated as success rather than looping to failure.
       - name: Publish server.json to the MCP Registry
         env:
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version }}
         run: |
-          version="${TAG#v}"
+          version="${VERSION}"
           in_registry() {
             curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.navapbc/rebar" | python3 -c "import json,sys; v='${version}'; d=json.load(sys.stdin); print(any((s.get('server',s) or {}).get('version')==v for s in d.get('servers',[])))" 2>/dev/null | grep -qx True
           }
