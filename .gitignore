@@ -10,3 +10,5 @@
 .graph-cache.json
 .ensure-applied
 .ensure-hinted
+.opcert-key
+.opcert-key.pub
