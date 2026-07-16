@@ -194,3 +194,77 @@ def test_i_build_once_bundle_with_sha256sums() -> None:
     assert "evidence-artifacts" in text, (
         "the evidence-artifacts fragment (wheel/sdist sums) is missing"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Story fd84 (Finding 1) — dispatch-from-main + version-lockstep + ancestry +
+#  env-preflight release-source authorization
+# ══════════════════════════════════════════════════════════════════════════════
+def test_fd84_trigger_is_dispatch_only_with_version_input() -> None:
+    """The release is initiated by `workflow_dispatch` with a `version` input, and the
+    tag-push publish trigger is GONE (a hand-pushed `v*` tag can no longer publish)."""
+    wf = _wf()
+    # PyYAML parses the bare `on:` key as boolean True.
+    on = wf.get("on", wf.get(True))
+    assert isinstance(on, dict), f"`on:` should be a mapping, got {on!r}"
+    assert "workflow_dispatch" in on, "release.yml must be workflow_dispatch-triggered"
+    assert "push" not in on, "the `push:`/tag publish trigger must be removed"
+    wd = on["workflow_dispatch"]
+    assert isinstance(wd, dict) and "inputs" in wd and "version" in wd["inputs"], (
+        "workflow_dispatch must declare a `version` input"
+    )
+
+
+def test_fd84_authorize_job_guards_precede_build() -> None:
+    """An authorize job runs the three guards (ref==main, version-lockstep, ancestry) and
+    the build job needs it, so no build/publish happens until authorization passes."""
+    jobs = _wf()["jobs"]
+    auth = next((n for n in jobs if "authoriz" in n.lower()), None)
+    assert auth, "release.yml is missing the release-source authorization job"
+    at = yaml.safe_dump(jobs[auth])
+    assert "refs/heads/main" in at, "authorize must guard `github.ref == refs/heads/main`"
+    assert "release_guards.py" in at, "authorize must call the extracted guard helpers"
+    assert "version-lockstep" in at, "authorize must run the version-lockstep guard"
+    assert "ancestry" in at, "authorize must run the ancestry guard"
+    assert "merge-base" in at or "ancestry" in at, "ancestry guard must use git merge-base"
+    assert "env-preflight" in at, "authorize must run the pypi env-preflight guard"
+    # fetch-depth: 0 is required so the ancestry check has full history.
+    assert "fetch-depth: 0" in at, "authorize checkout must use fetch-depth: 0 for ancestry"
+    # The build job (and thus the whole publish chain) is gated on authorize.
+    build_needs = jobs["build"].get("needs")
+    build_needs = [build_needs] if isinstance(build_needs, str) else (build_needs or [])
+    assert auth in build_needs, "the build job must `needs:` the authorize job"
+
+
+def test_fd84_no_tag_context_if_guards_remain() -> None:
+    """No job still gates on the old tag-push context; version is derived from the dispatch
+    input, not `github.ref_name`."""
+    text = _text()
+    assert "startsWith(github.ref, 'refs/tags/v')" not in text, (
+        "a stale tag-context `if:` guard remains — re-key it to the dispatch input"
+    )
+    assert "github.ref_name" not in text, (
+        "a stale `github.ref_name` version derivation remains — use inputs.version"
+    )
+    assert "inputs.version" in text, "jobs must derive the version from the dispatch input"
+
+
+def test_fd84_release_guards_script_exists_and_preflight_wired() -> None:
+    """The extracted guard helper exists and the env-preflight reads the live pypi
+    environment (required reviewers + main-only branch policy) fail-closed."""
+    script = ROOT / "scripts" / "release_guards.py"
+    assert script.exists(), "scripts/release_guards.py (the extracted guards) is missing"
+    text = _text()
+    assert "/environments/pypi" in text, "the env-preflight must query GET .../environments/pypi"
+
+
+def test_fd84_tag_created_after_publish_not_a_trigger() -> None:
+    """The `v*` tag + GitHub Release are created only AFTER a successful publish (record
+    only): the github_release job needs publish and no longer relies on a pre-pushed tag."""
+    jobs = _wf()["jobs"]
+    # The GitHub-Release job must run after publish.
+    ghr = jobs.get("github_release")
+    assert ghr is not None, "the github_release job is missing"
+    needs = ghr.get("needs")
+    needs = [needs] if isinstance(needs, str) else (needs or [])
+    assert "publish" in needs, "github_release must run after (needs) publish"

@@ -6,8 +6,9 @@ step-by-step runbook for cutting a release and updating every channel.
 
 ## Channels & where they live
 - **PyPI** — `nava-rebar` (import pkg `rebar`; commands `rebar` / `rebar-mcp`).
-  Published automatically by `.github/workflows/release.yml` on a `vX.Y.Z` tag,
-  via **Trusted Publishing (OIDC)** — no token stored anywhere.
+  Published by `.github/workflows/release.yml` via a **`workflow_dispatch`-from-`main`
+  run** (never a pushed tag — see "Release-source authorization" below), using
+  **Trusted Publishing (OIDC)** — no token stored anywhere.
 - **Homebrew tap** — repo `navapbc/homebrew-rebar`, `Formula/rebar.rb`. Users:
   `brew install navapbc/rebar/rebar`.
 - **MCP Registry** — manifest `server.json` (`io.github.navapbc/rebar`),
@@ -15,14 +16,22 @@ step-by-step runbook for cutting a release and updating every channel.
 - **GitHub Releases** — the human-facing "what's the latest version" surface at
   `github.com/navapbc/rebar/releases`. Not a distribution channel (nothing
   installs from it), but it must not lag the others. Created **automatically** by
-  `.github/workflows/release.yml` on a `vX.Y.Z` tag (auto-generated notes, marked
-  Latest, with the built sdist + wheel attached) — no manual step.
+  `.github/workflows/release.yml` **after a successful publish** (the `v*` tag is an
+  output of the run, created at the released `main` SHA — not a pre-pushed trigger),
+  with auto-generated notes, marked Latest, and the built sdist + wheel attached — no
+  manual step.
 
 ## Accounts / prerequisites (one-time — already done)
 No separate accounts; everything rides on GitHub.
 - PyPI **pending publisher** is registered: project `nava-rebar`, repo
-  `navapbc/rebar`, workflow `release.yml`, environment `pypi`.
-- GitHub **environment `pypi`** exists, restricted to `v*` tags.
+  `navapbc/rebar`, workflow `release.yml`, environment `pypi`. The OIDC subject is
+  **environment-scoped** (`repo:navapbc/rebar:environment:pypi`), so it is
+  ref-independent — the trusted-publisher entry matches on workflow filename +
+  environment and is unaffected by the tag→dispatch trigger change.
+- GitHub **environment `pypi`** exists with **required reviewers** AND a **`main`-only
+  deployment-branch policy**. These are load-bearing: the release's `authorize` job
+  runs an env-preflight that **fails the release closed** if either is missing (drift
+  is caught at release time, not silently). See "Release-source authorization".
 - The Homebrew tap repo exists and is public.
 - MCP Registry publishing authenticates in CI via GitHub Actions OIDC
   (`mcp-publisher login github-oidc`); the `io.github.navapbc/*` namespace is
@@ -33,9 +42,45 @@ No separate accounts; everything rides on GitHub.
 - **PyPI is immutable.** A version can never be re-uploaded or amended (even after
   deletion). Every change ships as a NEW version (you can only *yank* a bad one).
   → metadata fixes (license, etc.) require a version bump.
-- Keep `pyproject.toml` `version`, `server.json` `version` + `packages[].version`
-  in lockstep, and the Homebrew formula's `url`/`sha256` pointing at the matching
-  PyPI sdist.
+- `pyproject.toml` `version`, `server.json` `version` + every `packages[].version`,
+  and the dispatch `version` input must agree — this is **machine-enforced** now, not
+  a manual runbook step: the release's `authorize` job runs `release_guards.py
+  version-lockstep` and **fails before build** on any mismatch. Keep the Homebrew
+  formula's `url`/`sha256` pointing at the matching PyPI sdist (still manual — step 3).
+
+## Release-source authorization (dispatch-from-`main`)
+
+The release is initiated **only** by a `workflow_dispatch` run of `release.yml` **from
+the `main` ref** — there is **no tag-triggered publish path**. Because the GitHub
+mirror's `main` is exactly the Gerrit-reviewed-and-landed history, releasing from
+`main` guarantees the published source was reviewed **by construction** (the mainstream
+OSS pattern: release only from the protected branch). A hand-pushed `v*` tag can no
+longer reach the `pypi` environment and therefore **cannot publish**.
+
+Before any artifact is built, the `authorize` job asserts four things (all in
+`scripts/release_guards.py`, unit-tested in `tests/unit/test_release_guards.py`):
+
+1. **Ref guard** — the run is on `refs/heads/main` (else abort).
+2. **Version-lockstep** — the `version` input equals `pyproject.toml`'s
+   `[project].version`, `server.json`'s top-level `version`, and every
+   `packages[].version` (else abort before build).
+3. **Ancestry** — the dispatched HEAD is reachable from `origin/main`
+   (`git merge-base --is-ancestor`; checkout uses `fetch-depth: 0`). Belt-and-suspenders
+   with the ref guard.
+4. **Env-preflight** — `GET /repos/navapbc/rebar/environments/pypi` must show a
+   `required_reviewers` protection rule with a non-empty `reviewers` list, and a
+   `main`-only deployment-branch policy (`deployment-branch-policies` list == exactly
+   `{main}`). If either is missing the release **fails closed** — drift is caught when
+   it matters, not silently.
+
+The `publish` job then runs in the `pypi` environment (required reviewers = the second
+human approval on every publish) and publishes **directly via OIDC Trusted Publishing**
+— no intermediate tag relay, no PAT. After a successful publish, `github_release`
+creates the `v*` tag at the released SHA and the GitHub Release (record only; the tag is
+an **output**, never a trigger). **To cut a release:** bump versions (step 1), land the
+bump on `main` through Gerrit, then run the workflow from `main` with the matching
+`version` input (`gh workflow run release.yml --ref main -f version=X.Y.Z`) and approve
+the `pypi` deployment when prompted.
 
 ## Supply-chain attestations (PyPI digital attestations)
 
@@ -221,15 +266,22 @@ never regenerates the whole file, so curated history is never overwritten (re-ru
 with an already-present `VERSION` is a no-op). The one-time bootstrap that generated
 the file back through v0.1.0 is not repeated.
 
-### 2. Tag → PyPI publishes automatically
+### 2. Dispatch the release from `main` (publishes via OIDC)
+The version bump from step 1 must already be **landed on `main`** through Gerrit (the
+release only runs from `main` — see "Release-source authorization"). Then dispatch the
+workflow with the matching `version`:
 ```bash
-git tag -a vX.Y.Z -m "nava-rebar X.Y.Z" && git push origin vX.Y.Z
-gh run watch "$(gh run list --workflow=release.yml --event=push -L1 --json databaseId -q '.[0].databaseId')" --exit-status
+gh workflow run release.yml --ref main -f version=X.Y.Z
+gh run watch "$(gh run list --workflow=release.yml --event=workflow_dispatch -L1 --json databaseId -q '.[0].databaseId')" --exit-status
 ```
-The workflow builds + `twine check`s + publishes via OIDC, then its
-`github_release` job **creates the GitHub Release** for the tag (auto-generated
-notes, marked Latest, sdist + wheel attached). (A `workflow_dispatch` run builds
-without publishing or releasing — use it as a dry run.)
+The `authorize` job first asserts ref==`main`, version-lockstep, ancestry, and the
+`pypi` env-preflight (required reviewers + `main`-only branch policy) — any failure
+**aborts before build**. It then builds once, tests the exact wheel/sdist, and
+publishes via OIDC after you **approve the `pypi` deployment** (the required-reviewers
+gate). After publish, `github_release` **creates the `v*` tag at the released SHA and
+the GitHub Release** (auto-generated notes, marked Latest, sdist + wheel attached) — the
+tag is a record output, not a trigger. There is **no tag-push publish path**: pushing a
+`vX.Y.Z` tag by hand does nothing.
 
 Verify the version is live on the channel:
 ```bash
