@@ -238,14 +238,12 @@ the defect too via the `artifact-probe` job in `test.yml`.
 
 ### 1. Bump versions + land the commit through Gerrit (one commit)
 Bump **all** version-carrying files in lockstep — the release workflow's `authorize`
-job asserts version-lockstep and `tests/unit/test_version_sync.py` (a CI gate) fails if
-the `docs/api-stability.md` prose marker drifts from `pyproject.toml`:
+job asserts version-lockstep across them before it will build:
 ```bash
 # pyproject.toml:        version = "X.Y.Z"
 # server.json:           "version": "X.Y.Z"  AND  every packages[].version: "X.Y.Z"
-# docs/api-stability.md: "... (currently X.Y.Z)."   (enforced by test_version_sync)
 # CHANGELOG.md:          promote [Unreleased] -> [X.Y.Z] (step 1a)
-git add pyproject.toml server.json docs/api-stability.md CHANGELOG.md
+git add pyproject.toml server.json CHANGELOG.md
 ```
 **Land it through Gerrit — never push the release commit directly to `main`** (a
 repository ruleset rejects direct pushes; see "Git workflow" in CLAUDE.md /

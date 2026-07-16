@@ -71,8 +71,8 @@ It identifies the originating event producer, not a current file path.*
 The event log is the **wire format between clones running different rebar
 versions** — they share one `origin/tickets` and merge each other's event files
 as a union. The format carries an explicit version constant:
-`reducer/_version.py: SCHEMA_VERSION` (currently `3`). Bump it when the
-wire format changes in a way other clones must be aware of. (v2 = P2.1: the
+`reducer/_version.py: SCHEMA_VERSION` (see that file for the current value). Bump it
+when the wire format changes in a way other clones must be aware of. (v2 = P2.1: the
 filename prefix became a single-integer HLC value; same width and encoding, so
 older clones still string-compare correctly — the change is semantic ordering, not
 a body change. v3 = P2.3: the new `TAG_DELTA` event body — the **first** bump that
