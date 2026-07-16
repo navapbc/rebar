@@ -307,8 +307,16 @@ jobs:
       # added-large-files + the make lint/typecheck hooks), so the hook set a contributor
       # commits through is enforced pre-merge, not just post-merge. Belt-and-suspenders:
       # a green commit hook == green Verified gate.
+      #
+      # SKIP the `no-commit-to-branch` hook (mirrors test.yml): it is a LOCAL commit-time
+      # guardrail against committing while HEAD is on main/master, not a CI gate. The
+      # Gerrit change is checked out at a `refs/changes/*` ref (detached HEAD), so the
+      # hook passes today — but skipping it keeps the Verified gate robust if the checkout
+      # ever lands HEAD on a real main/master branch, and keeps the two CI runners in sync.
       - name: pre-commit (all hooks, all files, gating)
         run: pre-commit run --all-files --show-diff-on-failure
+        env:
+          SKIP: no-commit-to-branch
 
       - name: mypy — full library (gating)
         run: make typecheck
