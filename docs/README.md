@@ -69,6 +69,9 @@ Day-to-day use of rebar through the CLI.
   (generated from the CLI's own help data; do not edit by hand).
 - **[mcp-reference.md](mcp-reference.md)** — the complete MCP tool reference, grouped by
   gate tier (generated from the MCP server's own registrars; do not edit by hand).
+- **[mcp-auth.md](mcp-auth.md)** — the operator guide to the optional OAuth 2.1
+  Resource-Server authentication for the MCP server over HTTP (the five verifier modes,
+  the composite audience choke point, transport hardening, and behind-a-proxy deployment).
 - **[README.md](README.md)** — this index of the `docs/` tree.
 - **[import-export.md](import-export.md)** — moving tickets in and out of the store
   as NDJSON with `rebar export` / `rebar import` (a lossy interop projection, not a
