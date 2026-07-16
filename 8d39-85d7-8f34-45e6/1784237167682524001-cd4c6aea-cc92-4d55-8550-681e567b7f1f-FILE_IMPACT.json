@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"rebar.toml","reason":"the require_authenticated + enforce_since flip"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1784237167682524001,"uuid":"cd4c6aea-cc92-4d55-8550-681e567b7f1f"}
