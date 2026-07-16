@@ -124,6 +124,32 @@ def test_managed_link_absent_locally_emits_remove(outbound_differ: ModuleType) -
     assert removes[0]["type"] == "Blocks"
 
 
+_OUT_BLOCKS_LINK = {"id": "10002", "type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-2"}}
+
+
+def test_managed_outward_blocks_removed_maps_to_depends_on(outbound_differ: ModuleType) -> None:
+    """The REMOVE path carries its OWN inward/outward direction logic (a copy of the ADD path's).
+    A managed `depends_on` is stored in Jira as an OUTWARD `Blocks` (B blocks A == A depends_on B);
+    when unlinked locally it must map back to `depends_on`, not `blocks`. This is the sibling of the
+    c8ed ADD-path swap bug — the outward branch had no coverage before this."""
+    store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
+    child = _child(managed_refs=[["depends_on", "local-2"]], deps=[])  # managed, then unlinked
+    result, _ = outbound_differ.compute_outbound_mutations(
+        local_tickets=[child], jira_snapshot=_snapshot([_OUT_BLOCKS_LINK]), binding_store=store
+    )
+    removes = [
+        lk
+        for m in result
+        for lk in (m.links or [])
+        if lk.get("action") == "remove" and lk.get("to_key") == "PROJ-2"
+    ]
+    assert removes, f"managed outward-Blocks unlinked locally must emit a REMOVE; got {result}"
+    assert removes[0]["type"] == "Blocks"
+    assert removes[0]["relation"] == "depends_on", (
+        f"outward Blocks must map back to depends_on (not blocks); got {removes[0]}"
+    )
+
+
 def test_unmanaged_jira_link_is_not_removed(outbound_differ: ModuleType) -> None:
     """A Jira link we NEVER managed (absent from managed_refs — e.g. a human added it in Jira)
     must NOT be removed; it is adopted inbound instead."""

@@ -112,21 +112,46 @@ def test_outbound_diff_links_emits_when_absent(outbound_differ):
     assert out[0]["to_key"] == "DIG-2"
 
 
-def test_outbound_diff_links_marks_swap_by_relation(outbound_differ):
-    """The emitted ADD must carry the swap_endpoints flag so the applier writes the
-    correct Jira direction (bug c8ed): depends_on -> (Blocks, swap=True), blocks ->
-    (Blocks, swap=False). Previously the flag was discarded, so depends_on deps were
-    written to Jira reversed."""
+# The FULL rebar relation vocabulary, split by whether it maps to a Jira link type.
+# Parametrizing over ALL of it (not a single `blocks` representative) is what keeps the
+# c8ed class of bug — a per-entry behavior wrong in an untested entry — from recurring.
+_MAPPED_RELATIONS = [
+    ("blocks", "Blocks", False),
+    ("depends_on", "Blocks", True),  # A depends_on B == B blocks A → swap endpoints
+    ("relates_to", "Relates", False),
+]
+_UNMAPPED_RELATIONS = ["duplicates", "supersedes", "discovered_from"]
+
+
+def _emit_relation(outbound_differ, relation: str) -> list:
     binding = StubBindingStore({"local-a": "DIG-1", "local-b": "DIG-2"})
+    ticket = {
+        "ticket_id": "local-a",
+        "deps": [{"target_id": "local-b", "relation": relation, "link_uuid": "u-1"}],
+    }
+    return outbound_differ._diff_links(ticket, {"issuelinks": []}, binding)
 
-    def _emit(relation: str) -> dict:
-        dep = {"target_id": "local-b", "relation": relation, "link_uuid": "u-1"}
-        ticket = {"ticket_id": "local-a", "deps": [dep]}
-        out = outbound_differ._diff_links(ticket, {"issuelinks": []}, binding)
-        return out[0]
 
-    assert _emit("depends_on").get("swap") is True, "depends_on must carry swap=True"
-    assert _emit("blocks").get("swap") is False, "blocks must carry swap=False"
+@pytest.mark.parametrize(("relation", "jira_type", "swap"), _MAPPED_RELATIONS)
+def test_outbound_diff_links_maps_relation_type_and_swap(
+    outbound_differ, relation, jira_type, swap
+):
+    """Every MAPPED relation emits the correct Jira link type AND swap flag — the orientation
+    contract the applier relies on. Bug c8ed dropped depends_on's swap; relates_to had no test
+    at all. Parametrized over the whole map so no entry can hide behind single-representative
+    coverage again — assert the *orientation* (type + swap), not merely that a mutation exists."""
+    out = _emit_relation(outbound_differ, relation)
+    assert len(out) == 1
+    assert out[0]["type"] == jira_type
+    assert out[0]["to_key"] == "DIG-2"
+    assert out[0].get("swap") is swap
+
+
+@pytest.mark.parametrize("relation", _UNMAPPED_RELATIONS)
+def test_outbound_diff_links_skips_unmapped_relations(outbound_differ, relation):
+    """Relations with no reliable Jira link type (duplicates / supersedes / discovered_from)
+    must be SKIPPED — a no-op, never synced as some wrong link type. Untested before c8ed."""
+    assert _emit_relation(outbound_differ, relation) == []
 
 
 def test_outbound_diff_links_dedup_is_direction_agnostic(outbound_differ):
