@@ -79,15 +79,24 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
 # flags, so its enforcement posture and grandfather boundary come from HERE.
 #
-# require_authenticated: ENFORCEMENT ON (epic dc09 / pristine-horrible-whapuku, story 8d39).
-# Write-signing is rolled out across ALL writers — local (identity.signing_key), CI
-# (reconcile-bridge REBAR_BOT_SIGNING_KEY), and Gerrit-side (review-bot) all produce signed,
-# `verified` events; the transactional write path signs too (bug 0ba4). Confirmed by the
-# pre-flip validation: no active process writes unsigned non-SNAPSHOT in-scope events. With
-# this ON the merge-gate FAILS on any ENFORCED in-scope event that is not `verified`, so a
-# forged / unsigned / wrong-key write cannot land on `main`. Rollback = set back to `false` in
-# a single Gerrit change (no data cleanup). Env override: REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
-require_authenticated = true
+# require_authenticated: ROLLED BACK TO OFF (advisory). The flip to `true` (epic dc09 /
+# pristine-horrible-whapuku, story 8d39) failed CI: its stated pre-flip precondition — "no
+# active process writes unsigned non-SNAPSHOT in-scope events" — was FALSE, and
+# `verify-identity` then failed on EVERY push to main with 182 enforced in-scope events not
+# `verified`. Two sources must be fixed BEFORE re-flipping:
+#   1. UNSIGNED COMPLETION_VERDICT sidecars (e.g. rec-0000): a bot-identity completion-verified
+#      close emits PASS verdicts through the signing seam but runs with NO resolvable
+#      identity.signing_key, so finalize_event writes them unsigned (best-effort). Give that
+#      writer a signing key (or exempt reducer-ignored sidecar event types from the gate).
+#   2. 180 `key_not_valid_at_era` events: compaction persists `commit_sha: null` into the
+#      SNAPSHOT authorship_ledger and retires the raw file, and the gate can't re-resolve the
+#      null, so validly-signed, era-valid events are mis-rejected (fail-closed). Fix compaction
+#      to stop persisting null + have the gate re-resolve null ledger commits via
+#      authorship.resolve_position_commit.
+# While OFF the gate is advisory (re-verifies + reports, exits 0). Re-flip to `true` only once
+# `rebar verify-identity` reports 0 enforced-not-verified. Env override:
+# REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
+require_authenticated = false
 
 # Grandfather boundary — a git ref on the `tickets` tracker branch. Only events whose
 # introducing commit is this ref or a descendant are ENFORCED; everything at/before it is
