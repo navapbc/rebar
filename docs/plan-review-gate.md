@@ -189,10 +189,77 @@ and fills a bounded noun-phrase `{subject}`). The built-in registry
 | 13 | realign to parent plan | "Realign {subject} to the parent's plan — the parent wins on conflict; if the parent is genuinely wrong, update the PARENT first (which forces its re-review), never silently diverge the leaf." |
 
 **Project-extensible:** a project adds or overrides moves by id via
-`.rebar/plan_review_moves.json` (`{move_id: {name, template}}`; the template must
-contain a single `{subject}` placeholder). The **C1 subject validator**
-(`passes._validate_subject`) rejects code/imperatives/overlong subjects so the move
-can only ever name what to investigate, never hand over a solution.
+`.rebar/plan_review_moves.json` (`{move_id: {name, template, applies_when?}}`; the
+template must contain a single `{subject}` placeholder). An absent or empty
+`applies_when` makes the move **always applicable**; a non-empty list makes it apply only
+when its entries **intersect** the active criterion triggers of the surviving findings.
+The **C1 subject validator** (`passes._validate_subject`) rejects
+code/imperatives/overlong subjects so the move can only ever name what to investigate,
+never hand over a solution.
+
+### Dogfooding a project portability guard
+
+rebar dogfoods its own extension boundary with a real project criterion,
+`project.portability` (epic `jira-reb-1003`), which flags a plan that bakes in an
+assumption breaking one of rebar's supported client shapes. It is a **project** criterion
+— authored in this repo's `.rebar/` overlay, never a packaged built-in — yet it composes
+across all four passes with no core change.
+
+**Pass 1 — the finder (criterion + rubric).** Activated and routed in
+`.rebar/criteria_routing.json`:
+
+```json
+{
+  "plan_review": {
+    "project.portability": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": { "scope": ["container", "leaf"] },
+      "default_posture": "blocking",
+      "block_threshold": 0.9
+    }
+  },
+  "activate": ["project.portability"]
+}
+```
+
+Its rubric lives at `.rebar/prompts/plan-review-project-portability.md`
+(`execution_mode: single_turn`) under four second-level headings — `## Finding threshold`,
+`## Required finding fields`, `## Supported client-shape matrix`, and `## Non-findings` —
+and emits a finding only when all four counterexample elements are present, typed as:
+
+- `location: str` — the plan citation;
+- `finding: str` — the assumption plus its causal mechanism;
+- `scenarios: list[str]` — the alternate client shape plus the observable breakage;
+- `evidence: list[str]` — the plan quote plus grounding facts;
+- `criteria: list[str]` — containing `project.portability`.
+
+A finding's alternate shape must come from the supported client-shape matrix:
+
+- `Harness`: Python library, CLI, remote MCP; no Claude Code or Codex dependency.
+- `Target project`: Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.
+- `Platform and venue`: macOS, Windows, Linux, BSD, CI, servers, developer workstations.
+- `Project location and access`: in-checkout current working directory, explicitly located workspace, server outside the checkout, no unrestricted-local-filesystem assumption.
+
+Two non-findings keep it from firing on benign plans:
+`Silence about portability is not a finding`, and
+`Project-specific behavior behind project configuration or an explicit extension boundary is allowed`.
+
+**Pass 2 and Pass 3 — unchanged.** Pass 2 verifies the finding's validity and impact, and
+Pass 3 decides its disposition, exactly as for a built-in; the project criterion plugs into
+the generic machinery with no override.
+
+**Pass 4 — the coaching move.** A project-owned move in `.rebar/plan_review_moves.json`,
+id `project-portability`, name `restore rebar portability`, `applies_when
+[project.portability]`, with the locked template
+`Rework {subject} so it remains portable across supported rebar client shapes; keep project-specific behavior in project configuration or an explicit extension boundary.`
+— Pass 4 consumes this project move for the surviving `project.portability` findings.
+
+**Calibration.** A balanced eight-case corpus at
+`.rebar/evals/plan-review-project-portability.eval.yaml` (four must-fire, four
+must-not-fire) is run live with `rebar criteria eval project.portability --runs 3`; the
+release thresholds are `recall: 1.0`, `false_accept: 0.0`, `agreement: 1.0`, per-case
+`stability >= 0.6666666667`, plus expected-vs-observed fire/no-fire `kappa >= 0.70`.
 
 ### The advisory cap
 
