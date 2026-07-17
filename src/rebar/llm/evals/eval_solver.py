@@ -71,9 +71,21 @@ def _criterion_id(prompt_id: str, repo_root: str | None) -> str | None:
 
     cid = prompt_id[len("plan-review-") :] if prompt_id.startswith("plan-review-") else prompt_id
     try:
-        return cid if cid in registry.by_id(repo_root) else None
+        known = registry.by_id(repo_root)
     except Exception:  # noqa: BLE001 — registry unresolvable ⇒ treat as non-criterion
         return None
+    if cid in known:
+        return cid
+    # A namespaced project criterion `project.<name>` has physical prompt id
+    # `plan-review-project-<name>` (the forward map replaces the `.` with a `-`); recover
+    # the dotted logical id so its live calibration resolves (bug 2340). `<name>` never
+    # contains a dot, so only the first dash — the `project.` namespace boundary — is
+    # restored; built-in and unknown ids fall through unchanged.
+    if cid.startswith("project-"):
+        dotted = "project." + cid[len("project-") :]
+        if dotted in known:
+            return dotted
+    return None
 
 
 def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str | None) -> dict:
