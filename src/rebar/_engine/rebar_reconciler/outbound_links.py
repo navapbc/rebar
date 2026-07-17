@@ -47,6 +47,15 @@ _JIRA_LINK_TO_RELATION: dict[str, str] = {
     "Relates": "relates_to",
 }
 
+# Inverse of a directional rebar relation (blocks<->depends_on; symmetric relations
+# invert to themselves via ``.get(rel, rel)``). MIRRORS
+# inbound_differ._INVERSE_RELATION — both the inbound ADD path and this REMOVE path
+# must disambiguate a Jira Blocks link by direction the SAME way, or a managed
+# unlink computes the wrong relation and silently fails the managed_refs gate. The
+# two copies are pinned together by the live-ground-truth
+# test_link_direction_absolute.py (bug 4b59 / epic 58b0).
+_INVERSE_RELATION: dict[str, str] = {"blocks": "depends_on", "depends_on": "blocks"}
+
 
 def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
     """Index a Jira issue's ``issuelinks`` as a ``{(type_name, target_key)}`` set.
@@ -195,12 +204,14 @@ def _diff_link_removals(
         outward = link.get("outwardIssue")
         inward_key = inward.get("key") if isinstance(inward, dict) else None
         outward_key = outward.get("key") if isinstance(outward, dict) else None
-        if inward_key:
-            other_key = inward_key
-            relation = base_relation
-        elif outward_key:
+        # LIVE-JIRA direction (bug 4b59, mirrors inbound_differ._resolve_inbound_link):
+        # outwardIssue "blocks" -> base relation; inwardIssue "is blocked by" -> inverse.
+        if outward_key:
             other_key = outward_key
-            relation = "depends_on" if base_relation == "blocks" else base_relation
+            relation = base_relation
+        elif inward_key:
+            other_key = inward_key
+            relation = _INVERSE_RELATION.get(base_relation, base_relation)
         else:
             continue
         local_target = get_local_id(other_key)

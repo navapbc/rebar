@@ -53,6 +53,29 @@ def _load_adf():
     return mod
 
 
+_LINK_DIR_KEY = "rebar_reconciler.link_direction"
+_LinkDirModule = None
+
+
+def _load_link_direction():
+    """Lazy-load the sibling link_direction module (mirrors _load_adf)."""
+    global _LinkDirModule
+    if _LinkDirModule is not None:
+        return _LinkDirModule
+    if _LINK_DIR_KEY in sys.modules:
+        _LinkDirModule = sys.modules[_LINK_DIR_KEY]
+        return _LinkDirModule
+    path = Path(__file__).parent / "link_direction.py"
+    spec = importlib.util.spec_from_file_location(_LINK_DIR_KEY, path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(f"link_direction.py not found at {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[_LINK_DIR_KEY] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    _LinkDirModule = mod
+    return mod
+
+
 # ---------------------------------------------------------------------------
 # BindingStore protocol — codes against PR #401's interface
 # ---------------------------------------------------------------------------
@@ -446,94 +469,68 @@ def _diff_comments_inbound(
     return mutations
 
 
-# ---------------------------------------------------------------------------
-# Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
-# ---------------------------------------------------------------------------
-#
-# Reverse map: Jira link-type name -> rebar relation. Canonical definition is
-# acli_graph._JIRA_LINK_TO_RELATION (Cycle 1); re-declared locally because the
-# differ is loaded standalone via spec_from_file_location in tests (no package
-# context). Keep in sync with acli_graph. ``Blocks`` reverses to ``blocks``
-# (the OUTWARD direction); the inbound differ uses link directionality
-# (inwardIssue vs outwardIssue) to pick ``blocks`` vs ``depends_on``.
-_JIRA_LINK_TO_RELATION: dict[str, str] = {
-    "Blocks": "blocks",
-    "Relates": "relates_to",
-}
+# Link diff (story 25ae, Cycle 2). The Jira-issuelink -> rebar-relation DIRECTION
+# logic (resolve_inbound_link, deps_as_set, INVERSE_RELATION) lives in the sibling
+# ``link_direction`` module — one source of truth shared with the REMOVE path
+# (outbound_links), pinned to live-Jira ground truth by test_link_direction_absolute.py
+# (bug 4b59). Loaded via _load_link_direction() to keep standalone test imports working.
 
 
 def _diff_links_inbound(
     jira_fields: dict[str, Any],
     local_ticket: dict[str, Any],
     binding_store: Any,
+    local_tickets_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Reflect Jira issuelinks into rebar relations. ADD-only.
 
-    Direction semantics (verified live): for the local issue X carrying this
-    ``issuelinks`` array, an entry naming the OTHER issue Y as
-    ``inwardIssue.key`` with ``type.name == "Blocks"`` means **X blocks Y**
-    (X is the outward/blocker side) -> rebar relation ``blocks`` on X targeting
-    Y. An entry naming Y as ``outwardIssue.key`` with Blocks means **Y blocks X**
-    == **X depends_on Y** -> rebar relation ``depends_on`` on X targeting Y.
-    For the symmetric ``Relates`` type, either side maps to ``relates_to``.
+    Direction semantics: delegated to ``link_direction.resolve_inbound_link``
+    (pinned to captured live-Jira ground truth) — ``outwardIssue`` Blocks ->
+    ``blocks``, ``inwardIssue`` Blocks -> ``depends_on``.
 
-    For each link entry:
-      - resolve the other-issue Jira key -> local id (skip unbound, retry next
-        pass);
-      - reverse-map ``type.name`` (+ direction) to a rebar relation (skip
-        link types with no mapping);
-      - emit ``{"action":"add","target_id":<local>,"relation":<rel>}`` only when
-        the local ticket does NOT already carry a matching dep (no churn).
-
-    No REMOVE mutations (additive-only, mirroring ``_diff_labels_inbound``'s
-    inbound ADD semantics for the link direction).
+    Idempotency — INVERSE-AWARE, CROSS-TICKET dedup (bug 4b59). rebar stores each
+    blocking edge ONCE, one-directionally; Jira shows it from BOTH endpoints, so a
+    naive per-ticket dedup re-emits the counterpart's edge as a spurious *mirror*
+    (~400 store-wide). Skip an emit when this ticket already carries ``(relation,
+    target)``; OR the COUNTERPART carries the inverse edge ``(inverse, this-ticket)``;
+    OR the counterpart is absent from the ACTIVE local set (``local_tickets_by_id`` is
+    built from ``rebar list --full``, EXCLUDING archived/deleted — a mirror there is
+    un-verifiable). Live-validated: converges to 0 emits for already-synced links.
+    ``local_tickets_by_id`` is optional (legacy/unit callers get direction-only dedup);
+    production MUST pass it. ADD-only (no REMOVE mutations).
     """
     issuelinks = jira_fields.get("issuelinks") or []
     if not isinstance(issuelinks, list):
         return []
 
-    # Existing local deps as a {(relation, target_id)} set for dedup.
-    existing_deps: set[tuple[str, str]] = set()
-    for dep in local_ticket.get("deps") or []:
-        if isinstance(dep, dict):
-            rel = dep.get("relation")
-            tgt = dep.get("target_id")
-            if rel and tgt:
-                existing_deps.add((rel, tgt))
+    ld = _load_link_direction()
+    this_id = local_ticket.get("ticket_id")
+    existing_deps = ld.deps_as_set(local_ticket)
 
     mutations: list[dict[str, Any]] = []
     emitted: set[tuple[str, str]] = set()
     for link in issuelinks:
         if not isinstance(link, dict):
             continue
-        link_type = link.get("type") or {}
-        type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue
-        base_relation = _JIRA_LINK_TO_RELATION.get(type_name)
-        if base_relation is None:
-            continue  # link type with no rebar relation mapping — skip
-
-        inward = link.get("inwardIssue")
-        outward = link.get("outwardIssue")
-        if isinstance(inward, dict) and inward.get("key"):
-            # X (local) is OUTWARD side: X <type> Y -> base relation.
-            other_key = inward.get("key")
-            relation = base_relation
-        elif isinstance(outward, dict) and outward.get("key"):
-            # X (local) is INWARD side: Y <type> X. For Blocks this is
-            # "Y blocks X" == "X depends_on Y"; symmetric Relates is unchanged.
-            other_key = outward.get("key")
-            relation = "depends_on" if base_relation == "blocks" else base_relation
-        else:
-            continue
+        other_key, relation = ld.resolve_inbound_link(link)
+        if other_key is None or relation is None:
+            continue  # unmapped link type / malformed entry
 
         target_id = binding_store.get_local_id(other_key)
         if not target_id:
             continue  # unbound — retry next pass
         key = (relation, target_id)
         if key in existing_deps or key in emitted:
-            continue  # local already carries this dep — no churn
+            continue  # this ticket already carries the dep — no churn
+
+        if local_tickets_by_id is not None:
+            counterpart = local_tickets_by_id.get(target_id)
+            if counterpart is None:
+                continue  # counterpart archived/deleted/unbound — don't mirror to a dormant ticket
+            inverse = ld.INVERSE_RELATION.get(relation, relation)
+            if (inverse, this_id) in ld.deps_as_set(counterpart):
+                continue  # counterpart already owns this edge (inverse form) — no mirror
+
         emitted.add(key)
         mutations.append({"action": "add", "target_id": target_id, "relation": relation})
     return mutations
@@ -742,7 +739,9 @@ def compute_inbound_mutations(
         changed = _diff_jira_vs_local(jira_fields, local_ticket, binding_store=binding_store)
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
-        link_mutations = _diff_links_inbound(jira_fields, local_ticket, binding_store)
+        link_mutations = _diff_links_inbound(
+            jira_fields, local_ticket, binding_store, local_tickets_by_id
+        )
 
         # Bidirectional suppression (bug 3bf8): filter out inbound mutations
         # that would clobber a just-emitted outbound change for this target.

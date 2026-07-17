@@ -173,14 +173,17 @@ def test_outbound_diff_links_dedup_is_direction_agnostic(outbound_differ):
 
 def test_inbound_diff_links_skips_already_present(inbound_differ):
     """A Jira issuelink already represented in the local ticket's deps →
-    _diff_links_inbound returns [] (no churn)."""
+    _diff_links_inbound returns [] (no churn).
+
+    LIVE-JIRA direction (bug 4b59): DIG-1's issuelinks carrying ``inwardIssue: DIG-2``
+    with type Blocks means 'DIG-1 is blocked by DIG-2' == local-a DEPENDS_ON local-b.
+    (This fixture previously encoded the reversed convention — asserting 'blocks' —
+    which is exactly the anti-oracle that let the inbound inversion ship.)"""
     binding = StubBindingStore({"local-a": "DIG-1", "local-b": "DIG-2"})
-    # Jira: DIG-1 has a Blocks link with DIG-2 on the inward side → X blocks Y
-    # → rebar relation 'blocks' on local-a targeting local-b.
     jira_fields = {"issuelinks": [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-2"}}]}
     local_ticket = {
         "ticket_id": "local-a",
-        "deps": [{"target_id": "local-b", "relation": "blocks"}],
+        "deps": [{"target_id": "local-b", "relation": "depends_on"}],
     }
 
     out = inbound_differ._diff_links_inbound(jira_fields, local_ticket, binding)
@@ -188,12 +191,13 @@ def test_inbound_diff_links_skips_already_present(inbound_differ):
 
 
 def test_inbound_diff_links_emits_when_absent(inbound_differ):
-    """Control: the SAME Jira link with NO matching local dep emits one add."""
+    """Control: the SAME Jira link with NO matching local dep emits one add —
+    with the ABSOLUTE-correct relation (inwardIssue Blocks -> depends_on)."""
     binding = StubBindingStore({"local-a": "DIG-1", "local-b": "DIG-2"})
     jira_fields = {"issuelinks": [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-2"}}]}
     local_ticket = {"ticket_id": "local-a", "deps": []}
 
     out = inbound_differ._diff_links_inbound(jira_fields, local_ticket, binding)
     assert len(out) == 1
-    assert out[0]["relation"] == "blocks"
+    assert out[0]["relation"] == "depends_on"
     assert out[0]["target_id"] == "local-b"
