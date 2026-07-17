@@ -65,15 +65,6 @@ def _disk_events(tracker: str, tid: str) -> int:
     )
 
 
-@pytest.mark.skip(
-    reason="TEMPORARILY DISABLED (bug 88eb / amicable-unsure-barasinga) to unblock CI. This "
-    "test currently fails on the git 2.54 CI matrix — root cause CONFIRMED: git >= 2.47's "
-    "`git commit` spawns a DETACHED background `git maintenance run --auto` (repack --cruft "
-    "--write-midx) that runs OUTSIDE rebar's write lock and races concurrent writers on the "
-    "shared linked-worktree object DB, corrupting it (invalid object / Error building trees). "
-    "rebar's own lock is sound (0 overlaps); the fix disables background auto-maintenance on "
-    "the tickets worktree. RE-ENABLE (remove this skip) once that fix lands — owned by 88eb."
-)
 def test_enrich_queue_prune_never_drops_concurrent_locked_writes(tmp_path: Path) -> None:
     store = _fresh_store(tmp_path)
     writer_tids = [rebar.create_ticket("task", f"w{i}", repo_root=store) for i in range(_WRITERS)]
