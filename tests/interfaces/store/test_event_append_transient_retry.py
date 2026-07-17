@@ -213,3 +213,25 @@ def test_single_write_retries_transient_commit_odb_failure(
 
     r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
     assert "COMMENT tk-c" in r.stdout
+
+
+def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
+    """A stranded YOUNG ``.git/index.lock`` must not wedge writes for 300s (Mode B cascade).
+
+    An abnormally-terminated git subprocess (SIGKILL/OOM/FS-fault under CI pressure) can leave
+    an ``index.lock`` orphan. Because every store write runs under the exclusive write lock,
+    that orphan is PROVABLY not held by a live peer, so it must be reclaimed IMMEDIATELY rather
+    than blocked behind ``_INDEX_LOCK_STALE_S`` (300s) — otherwise every subsequent locked
+    ``append_event`` raises for ~5 minutes (the catastrophic 73%-write-loss cascade)."""
+    from rebar._commands.fsck import _resolve_tracker_git_dir
+
+    tracker = _fresh_tracker(tmp_path, "orphan-lock")
+    lock = Path(_resolve_tracker_git_dir(tracker)) / "index.lock"
+    lock.write_text("")  # young orphan: age ~0, far under the 300s stale threshold
+
+    rc = event_append.stage_and_commit(tracker, "tk-o", _event("u-orphan"))
+    assert rc == 0, "a locked write must reclaim the orphan index.lock and succeed"
+    assert not lock.exists(), "the orphan index.lock must be reclaimed, not left to wedge"
+
+    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    assert "COMMENT tk-o" in r.stdout

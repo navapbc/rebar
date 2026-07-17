@@ -103,11 +103,19 @@ def _is_index_lock_error(text: str) -> bool:
 _reclaim_probe: Callable[[], None] | None = None
 
 
-def _reclaim_if_stale_index_lock(tracker: str) -> None:
+def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
     """Remove the tracker's git ``index.lock`` ONLY IF provably stale (mtime age >
     ``_INDEX_LOCK_STALE_S``). Best-effort and safe: a young/live lock (age <= threshold,
     or unstat-able, or absent) is LEFT in place — removing a lock a live peer holds can
-    corrupt the index. Reuses fsck's git-dir resolution so the same lock path is meant."""
+    corrupt the index. Reuses fsck's git-dir resolution so the same lock path is meant.
+
+    ``force=True`` bypasses the age gate: the caller HOLDS the exclusive store write lock, so
+    no live rebar peer can hold ``index.lock`` — any present lock is provably an orphan left by
+    an abnormally-terminated git (SIGKILL/OOM/FS-fault). The age gate exists only to protect
+    UNLOCKED contexts from a live peer's lock; under the write lock a YOUNG orphan would
+    otherwise wedge every write for the full 300s threshold (the Mode B catastrophic cascade).
+    The device+inode identity re-validation below is STILL applied under force, so a TOCTOU
+    replacement is never removed."""
     from rebar._commands.fsck import _resolve_tracker_git_dir
 
     git_dir = _resolve_tracker_git_dir(tracker)
@@ -118,8 +126,8 @@ def _reclaim_if_stale_index_lock(tracker: str) -> None:
         st = os.stat(lock_file)
     except OSError:
         return  # no lock file (or unstat-able) → nothing to reclaim
-    if time.time() - st.st_mtime <= _INDEX_LOCK_STALE_S:
-        return  # young/live lock → never reclaim
+    if not force and time.time() - st.st_mtime <= _INDEX_LOCK_STALE_S:
+        return  # young/live lock (unlocked context) → never reclaim
     if _reclaim_probe is not None:
         _reclaim_probe()
     # Re-validate identity (device+inode) AND age at the moment of removal: a peer may
@@ -132,7 +140,7 @@ def _reclaim_if_stale_index_lock(tracker: str) -> None:
         return  # already gone (a peer reclaimed it first) → nothing to do
     if (st2.st_dev, st2.st_ino) != (st.st_dev, st.st_ino):
         return  # replaced by a different file (a fresh lock) → do NOT remove
-    if time.time() - st2.st_mtime <= _INDEX_LOCK_STALE_S:
+    if not force and time.time() - st2.st_mtime <= _INDEX_LOCK_STALE_S:
         return  # refreshed in place → now live → do NOT remove
     try:
         os.remove(lock_file)
@@ -150,7 +158,10 @@ _retry_probe: Callable[[int, subprocess.CompletedProcess], None] | None = None
 
 
 def _with_index_lock_retry(
-    tracker: str, run_once: Callable[[], subprocess.CompletedProcess]
+    tracker: str,
+    run_once: Callable[[], subprocess.CompletedProcess],
+    *,
+    force_reclaim: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run *run_once* (an index-mutating git invocation), retrying ONLY the index.lock
     contention signature with a bounded backoff. On success or a NON-lock failure the
@@ -158,7 +169,12 @@ def _with_index_lock_retry(
     once). Between lock retries a provably-stale lock is reclaimed; a young lock that
     never releases exhausts the attempts and its final failing result is returned. This
     is the composition seam: a caller that also retries a DIFFERENT signature (e.g.
-    event_append's object-DB ``git add`` retry) passes its own inner loop as *run_once*."""
+    event_append's object-DB ``git add`` retry) passes its own inner loop as *run_once*.
+
+    ``force_reclaim=True`` (passed by the store-write git helpers, which hold the exclusive
+    write lock) reclaims a stranded index.lock regardless of age — under the write lock the
+    lock is provably an orphan, so a YOUNG one is cleared on the first retry instead of
+    wedging every write for the 300s stale threshold (the Mode B cascade)."""
     result = run_once()
     if _retry_probe is not None:
         _retry_probe(1, result)
@@ -167,7 +183,7 @@ def _with_index_lock_retry(
             return result
         if not _is_index_lock_error(result.stderr or result.stdout or ""):
             return result
-        _reclaim_if_stale_index_lock(tracker)
+        _reclaim_if_stale_index_lock(tracker, force=force_reclaim)
         time.sleep(_INDEX_LOCK_BACKOFF_S * attempt)
         result = run_once()
         if _retry_probe is not None:
