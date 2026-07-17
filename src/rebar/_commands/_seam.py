@@ -325,6 +325,27 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
             )
 
 
+def finalize_event(
+    event: dict, ticket_id: str, event_type: str, data: dict, tracker, repo_root
+) -> None:
+    """Stamp denormalized author attribution AND apply write-time authorship signing / the
+    opt-in write-gate onto ``event`` IN PLACE — the single shared finalize seam that EVERY
+    ticket-event write path routes through (``append_event`` and the transactional cores in
+    ``txn.py`` / ``delete.py``), so signing is uniform and no operation can silently skip it
+    (a new op gets signing for free by routing its writes here).
+
+    NO commit and NO push: the caller owns the atomic write + git commit — ``append_event``
+    commits a single event, while the txn/delete cores atomically commit several events under
+    one held lock, so the shared unit is this pre-commit finalize step, not the commit itself.
+    Best-effort signing (a signing failure logs + writes unsigned); raises :class:`CommandError`
+    ONLY when ``identity.require_authenticated`` is on and a NON-exempt event cannot be signed
+    (the write-gate) — exemption (session_log/code_review/identity) is decided inside
+    ``_apply_authorship``, so every caller inherits the same gate + exemption semantics.
+    """
+    event.update(attribution_fields(repo_root))
+    _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
+
+
 def append_event(
     ticket_id: str,
     event_type: str,
@@ -367,18 +388,13 @@ def append_event(
         "author": author(author_fallback),
         "data": data,
     }
-    # Denormalized author attribution (epic gnu-whale-ichor): stamp author_email
-    # (always) + author_id (when a current identity resolves) alongside `author`.
-    # Merged BEFORE the batch-sink branch so a buffered event is byte-identical to a
-    # directly-committed one. Canonical serialization sorts keys, so envelope order is
-    # irrelevant to the on-disk bytes.
-    event.update(attribution_fields(repo_root))
-    # Optional write-time authorship signing + the opt-in UX write-gate (epic
-    # gnu-whale-ichor / 3183). Runs AFTER attribution (so `author_id` is available to sign
-    # with) and BEFORE the batch-sink branch (so a buffered event is byte-identical to a
-    # directly-committed one). Best-effort signing; may raise CommandError ONLY when the
-    # write-gate is on and the event cannot be signed for a non-exempt type.
-    _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
+    # Attribution + optional write-time authorship signing / the opt-in write-gate, via the
+    # SHARED finalize seam (the ONE signing path every write routes through — epic
+    # gnu-whale-ichor / 3183). Runs BEFORE the batch-sink branch so a buffered event is
+    # byte-identical to a directly-committed one (canonical serialization sorts keys, so
+    # envelope order is irrelevant). May raise CommandError ONLY when the write-gate is on
+    # and a non-exempt event cannot be signed.
+    finalize_event(event, ticket_id, event_type, data, tracker, repo_root)
     # Deferred-commit sink (B2): when a batch buffer is active, hand the composed
     # event to it instead of committing. The caller flushes the buffer via
     # batch_stage_and_commit. Guards above (init gate, env_id/author/hlc) have run,
