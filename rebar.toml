@@ -79,31 +79,27 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
 # flags, so its enforcement posture and grandfather boundary come from HERE.
 #
-# require_authenticated: ROLLED BACK TO OFF (advisory). The flip to `true` (epic dc09 /
-# pristine-horrible-whapuku, story 8d39) failed CI: its stated pre-flip precondition — "no
-# active process writes unsigned non-SNAPSHOT in-scope events" — was FALSE, and
-# `verify-identity` then failed on EVERY push to main with 182 enforced in-scope events not
-# `verified`. Two sources must be fixed BEFORE re-flipping:
-#   1. UNSIGNED COMPLETION_VERDICT sidecars (e.g. rec-0000): a bot-identity completion-verified
-#      close emits PASS verdicts through the signing seam but runs with NO resolvable
-#      identity.signing_key, so finalize_event writes them unsigned (best-effort). Give that
-#      writer a signing key (or exempt reducer-ignored sidecar event types from the gate).
-#   2. 180 `key_not_valid_at_era` events: compaction persists `commit_sha: null` into the
-#      SNAPSHOT authorship_ledger and retires the raw file, and the gate can't re-resolve the
-#      null, so validly-signed, era-valid events are mis-rejected (fail-closed). Fix compaction
-#      to stop persisting null + have the gate re-resolve null ledger commits via
-#      authorship.resolve_position_commit.
-# While OFF the gate is advisory (re-verifies + reports, exits 0). Re-flip to `true` only once
-# `rebar verify-identity` reports 0 enforced-not-verified. Env override:
+# require_authenticated: ENFORCEMENT ON. The two defects that broke the first flip (epic dc09 /
+# story 8d39) are now FIXED IN CODE, not worked around (Gerrit change 771):
+#   1. Reducer-ignored observability sidecars (COMPLETION_VERDICT/REVIEW_RESULT/... — the event
+#      types NOT in reducer.KNOWN_EVENT_TYPES) are OUT of the gate scope: they carry no ticket
+#      state and may be emitted best-effort-unsigned, so they can no longer fail the gate.
+#   2. Compacted ledger entries with a null commit_sha are re-resolved via
+#      authorship.resolve_position_commit before the era check (and compaction no longer
+#      persists null), so validly-signed, era-valid events are no longer mis-rejected.
+# The prior rollout's real gap — verification measured producers in a window and force-closed,
+# and verify-identity only ran POST-merge — is closed: verify-identity is now a PRE-MERGE job in
+# the Gerrit Verified gate (Gerrit change 772), so THIS change's own Verified vote is a
+# whole-store measurement that reports 0 enforced-not-verified BEFORE it can merge. Rollback =
+# set back to `false` in a single Gerrit change (no data cleanup). Env override:
 # REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
-require_authenticated = false
+require_authenticated = true
 
 # Grandfather boundary — a git ref on the `tickets` tracker branch. Only events whose
 # introducing commit is this ref or a descendant are ENFORCED; everything at/before it is
-# reported but never fails the gate. Pinned to the tracker HEAD at the rollout-prep point
-# so that when require_authenticated is flipped on, all pre-signing historical events are
-# grandfathered and only newly-signed writes are enforced. Pinned (story 8d91) to the
-# enforcement-cutover marker: an existing gate-exempt session_log commit chosen AFTER the
-# pre-flip validation confirmed every active writer signs, so ALL pre-signing historical +
-# mixed-build unsigned events are grandfathered. Env override: REBAR_IDENTITY_ENFORCE_SINCE.
-enforce_since = "8dcef776c3dd9e68935b74b82137e1ffd8f04f10"
+# reported but never fails the gate. RE-PINNED to the tracker HEAD at re-flip time so ALL
+# pre-flip events are grandfathered (historical unsigned, mixed-build, and the remediation own
+# tracking-ticket writes); only NEW writes after this anchor are enforced. With the scope +
+# ledger fixes above this makes the pre-merge whole-store gate report 0 enforced-not-verified.
+# Env override: REBAR_IDENTITY_ENFORCE_SINCE.
+enforce_since = "0cf8c03530d379991933740d9e4d1fa46ce4484a"
