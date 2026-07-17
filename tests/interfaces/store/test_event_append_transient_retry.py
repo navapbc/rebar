@@ -169,3 +169,47 @@ def test_nontransient_add_failure_still_fails_immediately(
     with pytest.raises(event_append.StoreError):
         event_append.stage_and_commit(tracker, "tk-1", _event("u-hard"))
     assert state["adds"] == 1, "a non-transient add failure must NOT be retried"
+
+
+# A transient object-DB temp-create fault also strikes `git commit` (which writes new
+# tree + commit loose objects via the same `create_tmpfile` path as `git add`). The commit
+# variant carries the same errno-independent "unable to create temporary file" marker.
+_TRANSIENT_COMMIT_STDERR = (
+    "error: unable to create temporary file: No such file or directory\n"
+    "fatal: failed to write commit object"
+)
+
+
+def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
+    """Make the FIRST `git commit` return *stderr* with rc=128; delegate every other git
+    call (and later commits) to the real subprocess.run."""
+    real_run = event_append.subprocess.run
+    state = {"commits": 0}
+
+    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+        if isinstance(cmd, list) and "commit" in cmd:
+            state["commits"] += 1
+            if state["commits"] == 1:
+                return subprocess.CompletedProcess(cmd, 128, stdout="", stderr=stderr)
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+
+
+def test_single_write_retries_transient_commit_odb_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A git COMMIT object-DB temp-create transient must self-heal on retry, exactly like the
+    git ADD path. `_git_commit` retried only index.lock + "could not parse HEAD" — not the
+    object-DB write signature — so a CI-runner FS blip during commit's loose-object write
+    surfaced as a hard StoreError and dropped a concurrent locked write (the enrich-prune
+    concurrency flake). Injects the object-DB signature on the FIRST commit; the write must
+    self-heal on the retried commit."""
+    tracker = _fresh_tracker(tmp_path, "commit-odb")
+    _fail_first_commit(monkeypatch, _TRANSIENT_COMMIT_STDERR)
+
+    rc = event_append.stage_and_commit(tracker, "tk-c", _event("u-commit"))
+    assert rc == 0
+
+    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    assert "COMMENT tk-c" in r.stdout
