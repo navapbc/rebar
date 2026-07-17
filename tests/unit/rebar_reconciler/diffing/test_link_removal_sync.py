@@ -101,8 +101,10 @@ def _snapshot(issuelinks):
     }
 
 
-# A Jira "Blocks" link with PROJ-2 on the INWARD side == local "blocks" relation to local-2.
-_BLOCKS_LINK = {"id": "10001", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}
+# LIVE-JIRA direction (bug 4b59): a Blocks link with PROJ-2 on the OUTWARD side ==
+# 'local-1 blocks local-2' == local "blocks" relation to local-2. (Previously encoded
+# on the inward side with a "blocks" managed_ref — the reversed convention.)
+_BLOCKS_LINK = {"id": "10001", "type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-2"}}
 
 
 # ── outbound REMOVE pass ─────────────────────────────────────────────────────
@@ -124,18 +126,22 @@ def test_managed_link_absent_locally_emits_remove(outbound_differ: ModuleType) -
     assert removes[0]["type"] == "Blocks"
 
 
-_OUT_BLOCKS_LINK = {"id": "10002", "type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-2"}}
+# LIVE-JIRA direction (bug 4b59): a managed `depends_on` (A depends_on B == B blocks A)
+# is stored in A's own issue as an INWARD Blocks (A "is blocked by" B).
+_INWARD_BLOCKS_LINK = {"id": "10002", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}
 
 
-def test_managed_outward_blocks_removed_maps_to_depends_on(outbound_differ: ModuleType) -> None:
-    """The REMOVE path carries its OWN inward/outward direction logic (a copy of the ADD path's).
-    A managed `depends_on` is stored in Jira as an OUTWARD `Blocks` (B blocks A == A depends_on B);
-    when unlinked locally it must map back to `depends_on`, not `blocks`. This is the sibling of the
-    c8ed ADD-path swap bug — the outward branch had no coverage before this."""
+def test_managed_inward_blocks_removed_maps_to_depends_on(outbound_differ: ModuleType) -> None:
+    """The REMOVE path carries its OWN inward/outward direction logic (a mirror of the ADD
+    path's), pinned to live Jira: an INWARD `Blocks` (A is blocked by B) is `A depends_on B`,
+    so a managed `depends_on` unlinked locally must map back to `depends_on`, not `blocks`.
+    (Previously this fixture paired an OUTWARD Blocks with `depends_on` — the reversed
+    convention that is the sibling of the c8ed/3b86 ADD-path inversion. The absolute
+    mapping is independently pinned by test_link_direction_absolute.py.)"""
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     child = _child(managed_refs=[["depends_on", "local-2"]], deps=[])  # managed, then unlinked
     result, _ = outbound_differ.compute_outbound_mutations(
-        local_tickets=[child], jira_snapshot=_snapshot([_OUT_BLOCKS_LINK]), binding_store=store
+        local_tickets=[child], jira_snapshot=_snapshot([_INWARD_BLOCKS_LINK]), binding_store=store
     )
     removes = [
         lk
@@ -143,10 +149,10 @@ def test_managed_outward_blocks_removed_maps_to_depends_on(outbound_differ: Modu
         for lk in (m.links or [])
         if lk.get("action") == "remove" and lk.get("to_key") == "PROJ-2"
     ]
-    assert removes, f"managed outward-Blocks unlinked locally must emit a REMOVE; got {result}"
+    assert removes, f"managed inward-Blocks unlinked locally must emit a REMOVE; got {result}"
     assert removes[0]["type"] == "Blocks"
     assert removes[0]["relation"] == "depends_on", (
-        f"outward Blocks must map back to depends_on (not blocks); got {removes[0]}"
+        f"inward Blocks must map back to depends_on (not blocks); got {removes[0]}"
     )
 
 
@@ -185,18 +191,20 @@ def test_outbound_remove_suppresses_inbound_link_readd(
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     child = _child(managed_refs=[["blocks", "local-2"]], deps=[])
     snapshot = _snapshot([_BLOCKS_LINK])
+    # The counterpart must be in the ACTIVE local set (bug 4b59: the inbound differ's
+    # inverse-aware dedup skips a link whose counterpart is absent — production always
+    # has it). Empty deps so the edge reads as genuinely absent and inbound re-adds it.
+    local_by_id = {"local-1": child, "local-2": {"ticket_id": "local-2", "deps": []}}
 
     outs, _ = outbound_differ.compute_outbound_mutations(
         local_tickets=[child], jira_snapshot=snapshot, binding_store=store
     )
     # Without coordination the inbound differ would re-add the still-present Jira link.
-    bare, _ = inbound_differ.compute_inbound_mutations(snapshot, store, {"local-1": child}, [])
+    bare, _ = inbound_differ.compute_inbound_mutations(snapshot, store, local_by_id, [])
     bare_link_adds = [lk for m in bare for lk in (getattr(m, "links", []) or [])]
     assert bare_link_adds, "control: inbound WOULD re-add the link without the outbound remove"
 
-    coord, suppressed = inbound_differ.compute_inbound_mutations(
-        snapshot, store, {"local-1": child}, outs
-    )
+    coord, suppressed = inbound_differ.compute_inbound_mutations(snapshot, store, local_by_id, outs)
     coord_link_adds = [lk for m in coord for lk in (getattr(m, "links", []) or [])]
     assert not coord_link_adds, "the inbound link re-add must be suppressed by the outbound remove"
     assert suppressed >= 1
@@ -304,9 +312,14 @@ def test_two_passes_managed_unlink_stays_removed(
     store = StubBindingStore({"local-1": "PROJ-1", "local-2": "PROJ-2"})
     # Locally DETACHED a managed link: deps empty, managed_refs still records it.
     child = _child(managed_refs=[["blocks", "local-2"]], deps=[])
+    # LIVE-JIRA direction (bug 4b59): 'local-1 blocks local-2' is an OUTWARD Blocks on
+    # local-1's issue (was inwardIssue under the reversed convention).
     jira = _MutableJira(
-        {"PROJ-1": [{"id": "L1", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}]}
+        {"PROJ-1": [{"id": "L1", "type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-2"}}]}
     )
+    # Counterpart present in the active local set so the inverse-aware dedup treats the
+    # still-present Jira link as a genuine re-add candidate (production always has it).
+    local_by_id = {"local-1": child, "local-2": {"ticket_id": "local-2", "deps": []}}
 
     def _run_pass() -> tuple[list, int]:
         snapshot = _snapshot(jira.issuelinks("PROJ-1"))
@@ -320,7 +333,7 @@ def test_two_passes_managed_unlink_stays_removed(
                 jira,
             )
         inbound, suppressed = inbound_differ.compute_inbound_mutations(
-            snapshot, store, {"local-1": child}, outs
+            snapshot, store, local_by_id, outs
         )
         inbound_link_adds = [lk for im in inbound for lk in (getattr(im, "links", []) or [])]
         return inbound_link_adds, suppressed
