@@ -564,10 +564,18 @@ class AcliGraphMixin:
         to_key: str,
         link_type: str = "Blocks",
     ) -> dict[str, Any]:
-        """Create a link between two Jira issues.
+        """Create a link so that ``from_key <link_type> to_key`` (e.g. "from blocks to").
 
         Raises subprocess.CalledProcessError on ACLI failure.
         """
+        # Bug 3b86: ACLI's ``--out``/``--in`` are INVERTED relative to the naive reading.
+        # Empirically (live-validated 2026-07-16): ``link create --out X --in Y --type Blocks``
+        # creates "Y blocks X" — the ``--in`` issue is the BLOCKER (outward), the ``--out``
+        # issue is the BLOCKED (inward). So to make ``from_key blocks to_key`` we must pass
+        # ``--out to_key --in from_key``. (The earlier ``--out from_key --in to_key`` reversed
+        # every written link; it looked correct only because rebar reads links direction-
+        # agnostically and most links were adopted from Jira rather than written by us.)
+        #
         # Story 25ae: the installed ACLI rejects an unconditional ``--json`` on
         # ``link create`` ("unknown flag"). Run WITHOUT ``--json``; only retry
         # with it for forward-version tolerance (older builds that DO accept it
@@ -579,9 +587,9 @@ class AcliGraphMixin:
             "link",
             "create",
             "--out",
-            from_key,
-            "--in",
             to_key,
+            "--in",
+            from_key,
             "--type",
             link_type,
         ]
