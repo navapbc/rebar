@@ -118,5 +118,5 @@ same reasoning that a lying `- [x]` checkbox always was.
   the author to record proof (reference id, observed outcome, when).
 - Existing tickets are unaffected (untagged → codebase-verifiable).
 - The change is confined to the verifier prompt, the `VerdictFinding.remediation` field, the
-  eval spec fixtures/rubric, this ADR, and the `CLAUDE.md` authoring note. `common.schema.json`
+  eval spec fixtures/rubric, this ADR, and the `docs/plan-review-criteria-guide.md` authoring note. `common.schema.json`
   and other reviewers are untouched.

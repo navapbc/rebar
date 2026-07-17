@@ -567,6 +567,6 @@ This is enforced deterministically by `tests/unit/test_reviewer_prompt_hygiene.p
 
 ---
 
-Track your work in rebar (see [`CLAUDE.md`](CLAUDE.md) and [`docs/`](docs/)); the Gerrit
+Track your work in rebar (see [`AGENTS.md`](AGENTS.md) and [`docs/`](docs/)); the Gerrit
 server + review-bot architecture is documented in
 [`docs/gerrit-aws-setup.md`](docs/gerrit-aws-setup.md).

@@ -247,7 +247,7 @@ job asserts version-lockstep across them before it will build:
 git add pyproject.toml server.json CHANGELOG.md
 ```
 **Land it through Gerrit — never push the release commit directly to `main`** (a
-repository ruleset rejects direct pushes; see "Git workflow" in CLAUDE.md /
+repository ruleset rejects direct pushes; see "Git workflow" in AGENTS.md /
 CONTRIBUTING.md). Commit with the
 `rebar-ticket:` + DCO trailers and push for review, then earn both votes and Submit:
 ```bash

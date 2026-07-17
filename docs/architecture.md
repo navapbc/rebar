@@ -62,7 +62,7 @@ over one git-backed store.
     `exclude_session_logs` flag is the **compile-exclusion seam** — the
     graph/health hot paths and default `list` set it so verbose `session_log`
     bodies never tax those compiles, while `search` and single-ticket `show`
-    leave it off so logs stay discoverable (see CLAUDE.md "Session logs").
+    leave it off so logs stay discoverable (see event-schema.md "The session_log ticket type").
   - **Graph** (`rebar.graph`, code at `src/rebar/graph/`) — relations + cycle
     detection. Excludes `session_log` tickets from the dependency graph (they
     carry non-blocking links only and never block/unblock work); `deps` on a
@@ -230,7 +230,7 @@ clients converge by **git merge-as-union + optimistic concurrency** — no
 cross-client lock (except the grandfathered reconciler pass-lock). The full
 invariants (I1–I9) and the sync/reconvergence algorithm are in
 `docs/concurrency.md`; the agent-facing tool set and workflow are in
-`CLAUDE.md`.
+`AGENTS.md`.
 
 ## Module-size policy
 

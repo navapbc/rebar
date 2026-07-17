@@ -7,7 +7,7 @@ Contract (authoritative):
   * The prune contract (`src/rebar/_store/event_append.py` `delete_events` docstring): a
     sidecar/queue prune MUST route through the locked, pathspec-scoped `delete_events`
     rather than racing a raw `git rm` + whole-index `git commit`.
-  * CLAUDE.md durability: a committed event is durable and reader-visible; readers list the
+  * concurrency.md durability: a committed event is durable and reader-visible; readers list the
     worktree, so a committed event MUST remain a file in the tracker worktree.
 
 `rebar.llm.enrich_drain._prune_queue_events` ran a raw, UNLOCKED, whole-index `git rm` +

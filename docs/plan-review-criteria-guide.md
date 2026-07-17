@@ -459,12 +459,12 @@ Checklist:
 ## T5e
 **Maintainability (overlay)** — exec:1-TURN, advisory, facet:overlay-maintainability
 
-OVERLAY — apply only if the plan crosses component boundaries, adds business rules/thresholds/integration points, or introduces a new pattern/contract/pipeline stage; otherwise PASS as not-applicable. Binary checks: (a) coupling_risk — new cross-component dependencies are acknowledged, justified, and mitigated (via an interface or event boundary), not silently introduced; (b) changeability — rules/thresholds expected to evolve are configurable, not hardcoded; (c) documentation — a novel architectural decision is captured in an ADR / CLAUDE.md / design doc update. SEVERITY: a new pipeline stage or cross-component coupling with no doc/ADR is MAJOR on documentation; hardcoded soon-to-change thresholds are MINOR. ANTI-FP: each sub-check is not-applicable (PASS) where the plan introduces no new coupling/rules/decisions. PASS if the change keeps the system maintainable.
+OVERLAY — apply only if the plan crosses component boundaries, adds business rules/thresholds/integration points, or introduces a new pattern/contract/pipeline stage; otherwise PASS as not-applicable. Binary checks: (a) coupling_risk — new cross-component dependencies are acknowledged, justified, and mitigated (via an interface or event boundary), not silently introduced; (b) changeability — rules/thresholds expected to evolve are configurable, not hardcoded; (c) documentation — a novel architectural decision is captured in an ADR / AGENTS.md / design doc update. SEVERITY: a new pipeline stage or cross-component coupling with no doc/ADR is MAJOR on documentation; hardcoded soon-to-change thresholds are MINOR. ANTI-FP: each sub-check is not-applicable (PASS) where the plan introduces no new coupling/rules/decisions. PASS if the change keeps the system maintainable.
 
 Checklist:
 - New cross-component dependencies acknowledged, justified, mitigated (interface/event boundary), not silently introduced.
 - Rules/thresholds expected to evolve are configurable, not hardcoded.
-- A novel architectural decision is captured in an ADR / CLAUDE.md / design-doc update.
+- A novel architectural decision is captured in an ADR / AGENTS.md / design-doc update.
 
 ## T6
 **UX non-happy-path [overlay]** — exec:1-TURN, advisory, facet:overlay-ux

@@ -1,6 +1,6 @@
 # rebar project configuration (tracked/shared — the per-project `rebar.toml`,
 # preferred by config discovery over the git-ignored `.rebar/config.conf`).
-# See docs/llm-framework.md and CLAUDE.md for the close gate + LLM module.
+# See docs/llm-framework.md and AGENTS.md for the close gate + LLM module.
 
 [verify]
 # Run the LLM completion-verifier when a client closes a work ticket: a FAIL verdict

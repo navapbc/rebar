@@ -481,7 +481,7 @@ warm-up window and the
 ## The `idea` status ↔ Jira `IDEA`
 
 rebar's `idea` status (a parking lot for captured-but-undesigned work — see the
-`idea` section in `CLAUDE.md`) round-trips to a Jira status named **`IDEA`**. It is
+`idea` section in `ticket-model.md`) round-trips to a Jira status named **`IDEA`**. It is
 a **unique (injective) mapping**, so — unlike `blocked`/`cancelled`, which share a
 Jira status and are reconstructed from `rebar-status:` annotation labels — no
 annotation label is needed, and the reconciler's terminal-set is unchanged.
