@@ -4,9 +4,11 @@ Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
 linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
 ``.pre-commit-config.yaml`` + ``.gitattributes`` (``merge=ours`` for the per-pass
 mutable root files) on it, generates ``.env-id`` + ``.signing-key``,
-normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=true`` — rebar trusts
-stock ``git gc`` now that recovery is non-destructive, see the ``gc-config`` ensure
-unit ``_gc_config_unit`` run via ``rebar._store.ensures.run_ensures``),
+normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=false`` +
+``maintenance.autoDetach=false`` — keep stock ``git gc`` but run it FOREGROUND so a
+background repack of the shared object DB never races concurrent writers, bug 88eb /
+ADR 0051; see the ``gc-config`` ensure unit ``_gc_config_unit`` run via
+``rebar._store.ensures.run_ensures``),
 and excludes the tracker from the host repo. Idempotent: re-running on an
 initialized repo recovers any stale rebase/merge on the tickets branch, re-applies
 the gc-config migration, and returns 0. A 30s mkdir lock
@@ -91,30 +93,47 @@ def _realpath(p: str) -> str:
 
 
 def _gc_config_unit(tracker: str) -> EnsureOutcome:
-    """Trust stock ``git gc`` on the tickets worktree (epic 97e7 / P1.4).
+    """Keep stock ``git gc`` but run it FOREGROUND on the tickets worktree, never
+    detached (epic 97e7 / P1.4, corrected by bug 88eb / amicable-unsure-barasinga).
 
-    rebar no longer forces ``gc.auto=0``: union recovery (sync.py) keeps every
-    ticket commit ref-reachable, so stock background gc is safe by construction and
-    only ever collects truly unreachable objects. Two idempotent steps, so an
-    existing tracker self-heals on any ensure sweep:
+    The tickets store is a linked worktree that SHARES the parent repo's object
+    database. WU-1 originally set ``gc.autoDetach=true`` so a triggered gc would fork
+    and "never serialize a foreground ticket write" — but that is exactly the hazard:
+    a DETACHED ``git gc`` / ``git maintenance run --auto`` (git >= 2.47 runs the latter)
+    repacks the SHARED object DB in the background, OUTSIDE rebar's write lock, racing
+    concurrent writers and corrupting the store (``invalid object`` / ``Error building
+    trees`` -> dropped writes; bug 88eb, proven on git 2.54). git's own docs warn a
+    concurrent ``git gc`` "may corrupt the repository". WU-1's "safe by construction"
+    argument only covers SERIAL reachability; it never accounted for a CONCURRENT
+    background repack.
 
-    - ``--unset gc.auto`` sheds the stale ``gc.auto=0`` an older rebar wrote.
-    - ``gc.autoDetach=true`` ensures a triggered background gc forks and never
-      serializes a foreground ticket write.
+    Fix: keep auto-gc ENABLED (so loose growth is still bounded — the WU-1 goal) but
+    force it to run in the FOREGROUND of the write command that triggers it. That
+    command already holds rebar's write lock, so the repack runs serialized under the
+    lock (no concurrent writer) instead of detaching past it. Three idempotent steps
+    (an existing tracker self-heals on any ensure sweep):
 
-    Check-then-act: acts only when either value is off the desired state, so a
-    converged tracker reports ``ok`` and mutates nothing (ensure-registry unit)."""
+    - ``--unset gc.auto`` sheds any stale ``gc.auto=0`` (auto-gc stays at git's default
+      threshold, so repack still fires and bounds loose-object growth).
+    - ``gc.autoDetach=false`` — a triggered ``git gc --auto`` runs foreground.
+    - ``maintenance.autoDetach=false`` — git >= 2.47 routes auto-maintenance through
+      ``git maintenance run --auto`` and honors THIS knob (``gc.autoDetach`` is only its
+      fallback), so BOTH must be false or the background repack still detaches.
+
+    Check-then-act: acts only when a value is off the desired state, so a converged
+    tracker reports ``ok`` and mutates nothing (ensure-registry unit)."""
     changed = False
     if _git(tracker, "config", "--get", "gc.auto").returncode == 0:
         _git(tracker, "config", "--unset", "gc.auto")
         changed = True
-    if _git(tracker, "config", "--get", "gc.autoDetach").stdout.strip() != "true":
-        _git(tracker, "config", "gc.autoDetach", "true")
-        changed = True
+    for key in ("gc.autoDetach", "maintenance.autoDetach"):
+        if _git(tracker, "config", "--get", key).stdout.strip() != "false":
+            _git(tracker, "config", key, "false")
+            changed = True
     return EnsureOutcome(
         "gc-config",
         "changed" if changed else "ok",
-        "gc.auto unset + gc.autoDetach=true",
+        "gc.auto unset + gc.autoDetach=false + maintenance.autoDetach=false",
     )
 
 

@@ -11,12 +11,18 @@ the unrelated- and diverged-history paths reconverge by ``git merge`` (a UNION
 that keeps both parents), never by a reset that orphans local commits. So:
 
     after reconverge, every commit rebar cares about is reachable from the
-    ``tickets`` ref ⇒ stock ``git gc`` is safe by construction (it can only ever
+    ``tickets`` ref ⇒ a SERIAL ``git gc`` is safe by construction (it can only ever
     collect truly unreachable objects).
 
-This is why rebar no longer forces ``gc.auto=0`` (see the ``gc-config`` ensure unit
-``init._gc_config_unit``, run via ``rebar._store.ensures.run_ensures``)
-and why the reflog is no longer load-bearing. UUID-named event files never collide
+This reachability guarantee is why rebar no longer needs ``gc.auto=0`` to protect a
+reflog-only recovery net (the reflog is no longer load-bearing). **It does NOT make a
+CONCURRENT gc safe:** the tickets store is a linked worktree sharing the object DB, and
+a *detached* background ``git gc`` / ``git maintenance run --auto`` repacks it OUTSIDE
+the write lock, racing in-flight writers and corrupting the store (bug 88eb). So the
+``gc-config`` ensure unit (``init._gc_config_unit``, run via
+``rebar._store.ensures.run_ensures``) keeps auto-gc enabled but forces it FOREGROUND
+(``gc.autoDetach=false`` + ``maintenance.autoDetach=false``) so it runs serialized under
+the write lock — see ADR 0051. UUID-named event files never collide
 on merge; the only shared mutable root file (``.bridge_state/*``) resolves via the
 tickets-branch ``.gitattributes`` ``merge=ours`` (it is per-pass
 derived caches the reconciler rebuilds). Resolution by case: unrelated histories →
@@ -107,7 +113,7 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
 
 def _union_merge(tracker: str, remote: str, *extra: str) -> None:
     """Merge ``origin/<branch>`` into HEAD as a union — both parents are kept, so no
-    local commit is ever orphaned (this is what lets stock ``git gc`` be safe; the
+    local commit is ever orphaned (this is what lets a SERIAL ``git gc`` be safe; the
     reflog is no longer load-bearing). ``extra`` carries ``--allow-unrelated-histories``
     for the no-common-ancestor case. On the rare genuine conflict: abort, keep
     local, hint fsck — never discard local commits."""

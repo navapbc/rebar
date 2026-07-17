@@ -70,9 +70,11 @@ def _commit_tracker_file(tracker: Path, name: str, content: str, msg: str) -> No
 # ── fabricate legacy drift on a chosen subset ────────────────────────────────
 def _make_behind(tracker: Path, units: set[str]) -> None:
     if "gc-config" in units:
-        # An older rebar force-set gc.auto=0 and never set autoDetach.
+        # Legacy drift: an older rebar force-set gc.auto=0; WU-1-era rebar left the
+        # DETACH posture (gc.autoDetach=true) that bug 88eb / ADR 0051 corrects.
         _git(tracker, "config", "gc.auto", "0")
-        _git(tracker, "config", "--unset", "gc.autoDetach")
+        _git(tracker, "config", "gc.autoDetach", "true")
+        _git(tracker, "config", "--unset", "maintenance.autoDetach")
     if "merge-ours" in units:
         _git(tracker, "config", "--unset", "merge.ours.driver")
     if "gitattributes" in units:
@@ -94,7 +96,8 @@ def _make_behind(tracker: Path, units: set[str]) -> None:
 # ── per-unit convergence assertions ──────────────────────────────────────────
 def _assert_converged(tracker: Path) -> None:
     assert _git(tracker, "config", "--get", "gc.auto").returncode != 0, "gc.auto still set"
-    assert _git(tracker, "config", "--get", "gc.autoDetach").stdout.strip() == "true"
+    assert _git(tracker, "config", "--get", "gc.autoDetach").stdout.strip() == "false"
+    assert _git(tracker, "config", "--get", "maintenance.autoDetach").stdout.strip() == "false"
     assert _git(tracker, "config", "--get", "merge.ours.driver").stdout.strip() == "true"
     ga = _git(tracker, "show", "tickets:.gitattributes").stdout
     assert all(r.strip() not in ga.splitlines() for r in _RETIRED_GITATTRIBUTES_LINES)
