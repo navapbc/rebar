@@ -453,6 +453,16 @@ def verify_s5(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "post_claim_edit_class": hit["post_claim_edit_class"] if hit else None,
         }
 
+    # §5.2's "persisted-review subset" (§5 published: 8) = the post-claim-edited tickets that had a
+    # persisted plan review to compare against — the 3 MISSED + 4 CAUGHT-BUT-IGNORED + 1 UNKNOWABLE
+    # cases. Re-derive as the count of those case tickets present in the corpus; verdict vs §5's 8.
+    _persisted_cases = [
+        *S5_PUBLISHED["missed_cases"],
+        *S5_PUBLISHED["caught_but_ignored_cases"],
+        *S5_PUBLISHED["unknowable_cases"],
+    ]
+    _persisted_present = sum(1 for c in _persisted_cases if _case(c)["present"])
+
     return {
         "reviewed_tickets": {
             "derived": reviewed,
@@ -474,6 +484,15 @@ def verify_s5(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "post_claim_edit_class_distribution": dict(class_dist),
         "published_post_claim_edits": S5_PUBLISHED["post_claim_edits"],
         "published_rate": S5_PUBLISHED["post_claim_edit_rate"],
+        "persisted_review_subset": {
+            "published": len(_persisted_cases),
+            "derived": _persisted_present,
+            "verdict": (
+                "AGREES"
+                if _persisted_present == len(_persisted_cases)
+                else f"CORRECTED-TO {_persisted_present}"
+            ),
+        },
         "missed_cases": {c: _case(c) for c in S5_PUBLISHED["missed_cases"]},
         "caught_but_ignored_cases": {c: _case(c) for c in S5_PUBLISHED["caught_but_ignored_cases"]},
         "unknowable_cases": {c: _case(c) for c in S5_PUBLISHED["unknowable_cases"]},
