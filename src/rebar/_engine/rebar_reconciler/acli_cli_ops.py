@@ -513,12 +513,49 @@ def _parse_acli_comments(parsed: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _parse_paginated_comments(stdout: str) -> list[dict[str, Any]]:
+    """Flatten ACLI ``comment list --paginate --json`` output to ALL comment dicts.
+
+    With ``--paginate`` ACLI emits ONE JSON object PER PAGE, concatenated (NOT a
+    single document) — verified live: a 5000-comment issue yields ~101 back-to-back
+    ``{"comments": [...], "isLast": …, "startAt": …}`` objects. A single
+    ``json.loads`` raises ``JSONDecodeError('Extra data')`` on the second page and
+    would silently drop every comment past page 1 — the bug that let 13 issues
+    re-post to the 5000-comment cap (bug 1f3d).
+
+    Decode each object in sequence (``raw_decode``) and concatenate its comments via
+    :func:`_parse_acli_comments` (which normalises the per-page wrapped-dict / bare-list
+    shapes and drops non-dict noise). A single-object or bare-list payload (the
+    non-paginated shape) is handled as a one-iteration case, so this is a safe
+    superset of ``_parse_acli_comments(json.loads(stdout))``.
+    """
+    decoder = json.JSONDecoder()
+    comments: list[dict[str, Any]] = []
+    idx, length = 0, len(stdout)
+    while idx < length:
+        while idx < length and stdout[idx] in " \t\r\n":
+            idx += 1
+        if idx >= length:
+            break
+        obj, end = decoder.raw_decode(stdout, idx)
+        idx = end
+        comments.extend(_parse_acli_comments(obj))
+    return comments
+
+
 def get_comments(
     jira_key: str,
     *,
     acli_cmd: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Get all comments on a Jira issue via ACLI."""
+    """Get ALL comments on a Jira issue via ACLI.
+
+    ``--paginate`` is REQUIRED: without it ACLI returns only the first page (default
+    ``--limit 50``, oldest first), which made the outbound dedup re-post everything
+    past page 1 and inflate high-traffic issues to Jira's 5000-comment cap (bug 1f3d).
+    ``--paginate`` streams one JSON object per page, so parse via
+    :func:`_parse_paginated_comments`, not a single ``json.loads``.
+    """
     cmd = [
         "jira",
         "workitem",
@@ -526,7 +563,8 @@ def get_comments(
         "list",
         "--key",
         jira_key,
+        "--paginate",
         "--json",
     ]
     result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=True)  # READ
-    return _parse_acli_comments(json.loads(result.stdout))
+    return _parse_paginated_comments(result.stdout)

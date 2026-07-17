@@ -231,13 +231,36 @@ def _diff_comments(
     # issue with no comments, and indistinguishable from an absent key if we
     # only check truthiness).
     if _COMMENT_FIELD_KEY in jira_issue:
-        # Snapshot-carried path (fixtures, synthetic, or snapshot enriched with
-        # comment data). Use directly — do NOT call client.
+        # Snapshot-carried path (fixtures, synthetic, or the bulk get_comment_map
+        # enrichment). Normally used directly — do NOT call the client.
         comment_field = jira_issue[_COMMENT_FIELD_KEY]
-        if isinstance(comment_field, dict):
-            jira_comments: list = comment_field.get("comments", [])
-        else:
-            jira_comments = []
+        embedded = comment_field.get("comments", []) if isinstance(comment_field, dict) else []
+        total = comment_field.get("total") if isinstance(comment_field, dict) else None
+        jira_comments: list = embedded if isinstance(embedded, list) else []
+        # Truncation guard (bug 1f3d): the bulk ``/search/jql`` enrichment
+        # (get_comment_map) CAPS embedded comments at ~20 per issue while reporting
+        # the true ``total``. Deduping against a truncated set re-posts every comment
+        # past the cap — the exact 5000-comment inflation this fix exists to stop
+        # (the per-ticket get_comments pagination fix alone does NOT close it, because
+        # the SNAPSHOT path is production's primary source). When the field is
+        # demonstrably truncated and a live client is available, fetch the COMPLETE
+        # paginated set per-ticket instead.
+        if (
+            isinstance(total, int)
+            and len(jira_comments) < total
+            and local_comments
+            and client is not None
+        ):
+            try:
+                fetched = client.get_comments(jira_key)
+                if isinstance(fetched, list):
+                    jira_comments = fetched
+            except Exception as exc:  # noqa: BLE001 — fail-open to the truncated subset (bug 4292)
+                print(  # noqa: T201
+                    f"WARNING: outbound_differ: live comment re-fetch for {jira_key!r} "
+                    f"failed ({exc!r}); using the truncated snapshot set (may re-post).",
+                    file=sys.stderr,
+                )
     else:
         # Live search path: snapshot lacks comment field.
         # When there are no local comments, nothing to compare — skip the
