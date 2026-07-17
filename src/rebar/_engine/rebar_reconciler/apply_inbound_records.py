@@ -67,7 +67,11 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
         import rebar
 
         rebar.ensure_identity_for(
-            "jira", account_id, display_name or account_id, repo_root=repo_root
+            "jira",
+            account_id,
+            display_name or account_id,
+            repo_root=repo_root,
+            creation_channel="jira",
         )
     except Exception:  # noqa: BLE001 — best-effort ghost mint; never fail the inbound apply
         logger.debug(
@@ -142,6 +146,14 @@ def _inbound_create_write_create_event(
         # 2f13 (additive): mint/reuse a ghost identity for the inbound assignee when it
         # carries an opaque accountId — best-effort, never fails the create.
         _ensure_inbound_assignee_identity(fields["assignee"], repo_root)
+    # Creation-channel provenance (story e622): this inbound Jira CREATE is written
+    # DIRECTLY (bypassing composer.create_core), so we stamp the channel here. Validate
+    # first so the direct writer honours the same closed-vocabulary contract create_core
+    # enforces. This is a RECORDED value (not a heuristic inference), so we deliberately
+    # do NOT set creation_channel_inferred.
+    from rebar.reducer._version import validate_creation_channel
+
+    create_data["creation_channel"] = validate_creation_channel("jira")
     create_path = _write_event_file(tracker_dir, local_id, "CREATE", create_data)
     return tracker_dir, raw_labels, create_path
 

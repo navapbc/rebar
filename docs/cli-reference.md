@@ -222,6 +222,21 @@ source_id and deferred-push performance are added in a follow-up. Run summary
 (counts, warnings) is printed to stderr.
 ```
 
+**`creation_channel` vs `source_*` (story e622).** An imported ticket is a *fresh
+local creation through the import ingress*, so its `creation_channel` is **`import`** —
+even if the exported source record carried another channel (e.g. `python`/`cli`). That is
+distinct from the `source_*` provenance (`source_id` / `source_author` / `source_created_at`
+/ `source_env`), which preserves *where the ticket came from* in the origin store. The two
+answer different questions: `creation_channel=import` = "this local ticket was born via
+import"; `source_*` = "its ancestor lived in that other store". The source record's own
+`creation_channel` is never copied over.
+
+Related: an inbound **Jira** CREATE (via the reconciler, not this command) records
+`creation_channel="jira"`, and a legacy Jira-originated ticket with no recorded channel is
+*inferred* as `jira` (marked `creation_channel_inferred=true`) from its immutable genesis
+envelope. That inferred marker is heuristic **audit** metadata, **not a security
+attestation** — see `docs/event-schema.md` "Creation-channel provenance".
+
 ### `init`
 
 ```

@@ -160,11 +160,18 @@ def _event_meta() -> tuple[int, str, str, str]:
     import time as _time
     import uuid as _uuid
 
+    # Function-body ABSOLUTE import (story e622): this module is spec-loaded by
+    # path in tests, so a sibling `rebar_reconciler.*` import would not resolve —
+    # but an absolute `rebar.*` import does. The "reconciler" defaults are the
+    # legacy-Jira signature the reducer's inference keys on; sourcing them from
+    # the single source of truth keeps the writer and the inference in lockstep.
+    from rebar.reducer._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
+
     return (
         _time.time_ns(),
         str(_uuid.uuid4()),
-        _rebar_env("ENV_ID", "reconciler"),
-        _rebar_env("AUTHOR", "reconciler"),
+        _rebar_env("ENV_ID", LEGACY_JIRA_ENV_ID),
+        _rebar_env("AUTHOR", LEGACY_JIRA_AUTHOR),
     )
 
 
