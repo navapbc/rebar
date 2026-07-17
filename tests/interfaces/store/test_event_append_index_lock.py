@@ -2,17 +2,21 @@
 reclaimed-if-stale, not surfaced as a hard write failure (ticket middle-actinium-thrush /
 snide-cut-mussel).
 
-rebar's own ``write_lock`` only serializes writes *within one clone*. The tickets tracker
-is a shared git worktree, so concurrent rebar processes (or a crashed git that left a stale
-lock) collide on git's own ``index.lock`` — which ``write_lock`` does not cover. git then
-refuses the ``add``/``commit`` with ``Unable to create '…/index.lock': File exists. Another
-git process seems to be running`` and the write fails hard, losing the event.
+rebar's ``write_lock`` (dual-window fcntl + mkdir) serializes ALL rebar git ops on a tracker
+across processes on a host — so a ``.git/index.lock`` present while a store write holds the
+lock is NOT a live rebar peer's; it is an ORPHAN left by an abnormally-terminated git
+(SIGKILL/OOM/FS-fault). git refuses the ``add``/``commit`` with ``Unable to create
+'…/index.lock': File exists. Another git process seems to be running`` and the write fails
+hard, losing the event — and, blocked behind the 300s stale threshold, wedges EVERY write for
+5 minutes (the catastrophic Mode B cascade) unless the orphan is reclaimed at once.
 
 The contract these tests pin:
   * a **provably-stale** lock (old mtime, crashed holder) is reclaimed and the write succeeds;
   * a **contended** lock that the holder releases mid-retry is ridden out and the write succeeds;
-  * a **live/young** lock that is never released is NOT reclaimed (safety: never nuke a lock
-    a live peer may hold) — the write still fails rather than risk index corruption;
+  * under the exclusive write lock a young lock is an ORPHAN and is force-reclaimed at once
+    (``force=True``), so a locked write self-heals instead of wedging for 300s;
+  * the UNLOCKED reclaim (``force=False``) still leaves a young lock intact — outside the write
+    lock it may be a live peer's, so removing it risks index corruption;
   * a non-lock failure is unaffected.
 
 These tests use REAL git locks (a real file at the tracker's ``index.lock`` path), not mocks.
@@ -99,16 +103,24 @@ def test_contended_index_lock_cleared_during_backoff_succeeds(tmp_path: Path) ->
     assert _committed(tracker, "tk-cont")
 
 
-def test_live_young_index_lock_is_not_reclaimed(tmp_path: Path) -> None:
-    """A young lock that is never released must NOT be force-removed — reclaiming a lock a
-    live peer holds risks index corruption. The write fails rather than nuke it."""
+def test_unlocked_reclaim_preserves_young_lock_but_force_reclaims_orphan(tmp_path: Path) -> None:
+    """The UNLOCKED reclaim (``force=False``) must NOT remove a young lock — outside the write
+    lock it may be a LIVE peer's, and removing it risks index corruption. Under the exclusive
+    write lock, however (which serializes ALL rebar git on a tracker — verified: no natural
+    index.lock contention), a young lock is provably an ORPHAN and IS force-reclaimed
+    (``force=True``); the end-to-end locked-write self-heal is covered by
+    ``test_orphan_index_lock_under_write_lock_self_heals`` in the transient-retry suite."""
+    from rebar._store.gitutil import _reclaim_if_stale_index_lock
+
     tracker = _fresh_tracker(tmp_path, "young")
     lock = _index_lock_path(tracker)
-    lock.write_text("")  # fresh mtime, never released
+    lock.write_text("")  # fresh mtime (age ~0), never released
 
-    with pytest.raises(event_append.StoreError):
-        event_append.stage_and_commit(tracker, "tk-young", _event("u-young"))
-    assert lock.exists(), "a live/young lock must be left intact (not reclaimed)"
+    _reclaim_if_stale_index_lock(tracker, force=False)
+    assert lock.exists(), "unlocked reclaim must leave a young lock intact (possible live peer)"
+
+    _reclaim_if_stale_index_lock(tracker, force=True)
+    assert not lock.exists(), "under the write lock a young lock is an orphan → force-reclaimed"
 
 
 def test_nonlock_failure_is_unaffected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

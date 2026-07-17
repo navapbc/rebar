@@ -242,6 +242,7 @@ def _git_add(
             ),
             attempts=attempts,
         ),
+        force_reclaim=True,
     )
 
 
@@ -267,6 +268,7 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
                 )
             )
         ),
+        force_reclaim=True,
     )
 
 
@@ -281,6 +283,7 @@ def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[st
             capture_output=True,
             text=True,
         ),
+        force_reclaim=True,
     )
 
 
@@ -303,6 +306,7 @@ def _git_commit_paths(
                 lambda: subprocess.run(argv, capture_output=True, text=True)
             )
         ),
+        force_reclaim=True,
     )
 
 
