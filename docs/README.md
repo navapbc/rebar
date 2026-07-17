@@ -24,6 +24,9 @@ Jump straight to what you're trying to do:
   then [your-first-change.md](your-first-change.md).
 - **Drive rebar over MCP** (an LLM client / agent) → [llm-framework.md](llm-framework.md)
   for the agent surfaces and gate operations.
+- **Adopt rebar in your own project** (teach your agents to drive it) →
+  [../templates/AGENTS.md](../templates/AGENTS.md), a copyable, provider-neutral
+  `AGENTS.md` with placeholders for your project's own build/test/landing commands.
 - **Contribute a code change** → [your-first-change.md](your-first-change.md) and
   [local-dev-env.md](local-dev-env.md), with the review/landing flow in
   [../CONTRIBUTING.md](../CONTRIBUTING.md).
