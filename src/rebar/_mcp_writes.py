@@ -66,6 +66,7 @@ def register_write_tools(mcp, ctx) -> None:
                 description=description,
                 tags=tags,
                 return_alias=True,
+                _creation_channel="mcp",
             )
         )
 
@@ -81,7 +82,14 @@ def register_write_tools(mcp, ctx) -> None:
         {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the
         CREATE and surface in show_ticket. Returns {id, alias}."""
         return CreateResultOut.model_validate(
-            rebar.create_identity(name, email, mappings=mappings, keys=keys, return_alias=True)
+            rebar.create_identity(
+                name,
+                email,
+                mappings=mappings,
+                keys=keys,
+                return_alias=True,
+                _creation_channel="mcp",
+            )
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
@@ -93,7 +101,7 @@ def register_write_tools(mcp, ctx) -> None:
         (reject) skips the completion gates. Promote a kept idea with
         transition_ticket(id, "idea", "open"). Returns {id, alias}."""
         return CreateResultOut.model_validate(
-            rebar.idea(title, description=description, return_alias=True)
+            rebar.idea(title, description=description, return_alias=True, _creation_channel="mcp")
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
@@ -145,6 +153,7 @@ def register_write_tools(mcp, ctx) -> None:
             summary=summary,
             relates_to=relates_to,
             discovered_from=discovered_from,
+            _creation_channel="mcp",
         )
         return CreateResultOut.model_validate({"id": res["id"], "alias": res.get("alias")})
 

@@ -146,3 +146,36 @@ KNOWN_EVENT_TYPES = frozenset(
         KEY_REVOKE,
     }
 )
+
+# ── Creation-channel vocabulary (epic jira-reb-977, story 6fe2) ─────────────────
+# The closed set of public ingresses that can stamp a genesis CREATE event with a
+# `creation_channel`. This runtime constant MUST stay in lockstep with the schema
+# `creation_channel` enum `$def` in `schemas/common.schema.json`; a contract test
+# (`tests/interfaces/contracts/test_creation_channel_vocabulary.py`) pins the two
+# together so the vocabulary cannot drift between the wire schema and the validator.
+#   * cli / mcp / python — the three LOCAL public interfaces (this story).
+#   * jira / import       — reserved for later stories (Jira-inbound / NDJSON import).
+#   * unknown             — a PROJECTION-ONLY fallback for a legacy CREATE that carried
+#                           no channel; it is NEVER a valid live-write value.
+CREATION_CHANNELS = frozenset({"cli", "mcp", "python", "jira", "import", "unknown"})
+
+
+def validate_creation_channel(value: str) -> str:
+    """Return ``value`` iff it is a valid LIVE-WRITE creation channel, else raise.
+
+    A live write must name a real ingress from :data:`CREATION_CHANNELS`, so any value
+    outside that set is rejected. ``"unknown"`` is ALSO rejected here even though it is
+    a member of the vocabulary: it is a projection-only fallback the reducer applies to
+    a legacy CREATE that carried no channel, never a value a writer may stamp. Raises
+    :class:`ValueError` on any violation."""
+    if value == "unknown":
+        raise ValueError(
+            "creation_channel 'unknown' is a projection-only fallback and cannot be "
+            "written at genesis"
+        )
+    if value not in CREATION_CHANNELS:
+        raise ValueError(
+            f"invalid creation_channel {value!r}; must be one of "
+            f"{sorted(CREATION_CHANNELS - {'unknown'})}"
+        )
+    return value

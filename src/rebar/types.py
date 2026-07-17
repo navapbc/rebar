@@ -23,6 +23,7 @@ TicketType = Literal["bug", "epic", "story", "task", "session_log", "code_review
 Relation = Literal[
     "blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"
 ]
+CreationChannel = Literal["cli", "mcp", "python", "jira", "import", "unknown"]
 
 
 # --- shared objects (common.schema.json) ---
@@ -113,6 +114,8 @@ class TicketState(TypedDict):
     source_created_at: NotRequired[int | None]
     source_author: NotRequired[str | None]
     source_env: NotRequired[str | None]
+    creation_channel: NotRequired[CreationChannel]
+    creation_channel_inferred: NotRequired[Literal[True]]
 
 
 class TicketStateLLM(TypedDict):

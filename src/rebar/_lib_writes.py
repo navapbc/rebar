@@ -55,6 +55,7 @@ def create_ticket(
     source: dict | None = ...,
     return_alias: Literal[False] = ...,
     repo_root=...,
+    _creation_channel: str = ...,
 ) -> str: ...
 
 
@@ -71,6 +72,7 @@ def create_ticket(
     source: dict | None = ...,
     return_alias: Literal[True],
     repo_root=...,
+    _creation_channel: str = ...,
 ) -> CreateResult: ...
 
 
@@ -86,6 +88,7 @@ def create_ticket(
     source: dict | None = None,
     return_alias: bool = False,
     repo_root=None,
+    _creation_channel: str = "python",
 ) -> str | CreateResult:
     """Create a ticket.
 
@@ -97,6 +100,11 @@ def create_ticket(
     ``source_created_at``, ``source_author``, ``source_env`` are recorded on the
     CREATE event and surfaced in compiled state, so an imported ticket preserves
     where it came from while still getting a fresh local id + HLC timestamp.
+
+    ``_creation_channel`` is INTERNAL (leading underscore; not part of the documented
+    public signature): a direct library call defaults to ``"python"``, and the MCP
+    adapter passes ``"mcp"`` through it so a genesis CREATE records its interface. A
+    later import story overrides it via the ``source=`` path.
     """
     # Composed in-process via the shared create_core (validation/alias/CREATE
     # event); the bash create path was retired with the Tier B cutover.
@@ -114,6 +122,7 @@ def create_ticket(
             tags=tags,
             source=source,
             repo_root=repo_root,
+            creation_channel=_creation_channel,
         )
     except CommandError as exc:
         raise RebarError(
@@ -132,6 +141,7 @@ def idea(
     description: str | None = None,
     return_alias: bool = False,
     repo_root=None,
+    _creation_channel: str = "python",
 ) -> str | CreateResult:
     """Capture an undesigned idea: create an ``epic`` in status ``idea`` atomically.
 
@@ -142,6 +152,9 @@ def idea(
 
     Returns the canonical 16-hex ticket id (default), or ``{"id", "alias"}`` with
     ``return_alias=True`` — same shape as :func:`create_ticket`.
+
+    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
+    ``"python"``; the MCP adapter passes ``"mcp"``.
     """
     from rebar._commands import composer
     from rebar._commands._seam import CommandError
@@ -153,6 +166,7 @@ def idea(
             description=description,
             status="idea",
             repo_root=repo_root,
+            creation_channel=_creation_channel,
         )
     except CommandError as exc:
         raise RebarError(
@@ -174,6 +188,7 @@ def create_identity(
     tags: list[str] | None = None,
     repo_root=None,
     return_alias: bool = False,
+    _creation_channel: str = "python",
 ) -> str | CreateResult:
     """Mint an ``identity`` entity ticket in one CREATE event; return its id.
 
@@ -182,13 +197,22 @@ def create_identity(
     compiled state. ``tags`` (e.g. ``["placeholder"]`` for a ghost) ride the SAME CREATE
     event atomically. Returns the canonical 16-hex id (default), or ``{"id", "alias"}``
     with ``return_alias=True`` — same shape as :func:`create_ticket`.
+
+    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
+    ``"python"``; the MCP adapter passes ``"mcp"``.
     """
     from rebar._commands import identity as _identity
     from rebar._commands._seam import CommandError
 
     try:
         res = _identity.create_identity_core(
-            name, email, mappings=mappings, keys=keys, tags=tags, repo_root=repo_root
+            name,
+            email,
+            mappings=mappings,
+            keys=keys,
+            tags=tags,
+            repo_root=repo_root,
+            creation_channel=_creation_channel,
         )
     except CommandError as exc:
         raise RebarError(
@@ -459,7 +483,13 @@ def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=
 
 
 def append_session_log(
-    entry: str, *, summary=None, relates_to=None, discovered_from=None, repo_root=None
+    entry: str,
+    *,
+    summary=None,
+    relates_to=None,
+    discovered_from=None,
+    repo_root=None,
+    _creation_channel: str = "python",
 ) -> dict:
     """Append ``entry`` to the current session_log, creating one on first use.
 
@@ -468,7 +498,11 @@ def append_session_log(
     current log via a local pointer; subsequent calls append to that same log.
     Optional ``relates_to`` / ``discovered_from`` link the log to the work it
     documents (blocking links remain refused). Returns
-    ``{"id", "alias", "created"}``."""
+    ``{"id", "alias", "created"}``.
+
+    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
+    ``"python"``; the MCP adapter passes ``"mcp"`` — it stamps the session_log's genesis
+    CREATE when this call creates one."""
     from rebar._commands import session_log
     from rebar._commands._seam import CommandError
 
@@ -479,16 +513,25 @@ def append_session_log(
             relates_to=relates_to,
             discovered_from=discovered_from,
             repo_root=repo_root,
+            creation_channel=_creation_channel,
         )
     except CommandError as exc:
         raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
 
 
 def start_session_log(
-    *, summary=None, relates_to=None, discovered_from=None, repo_root=None
+    *,
+    summary=None,
+    relates_to=None,
+    discovered_from=None,
+    repo_root=None,
+    _creation_channel: str = "python",
 ) -> dict:
     """Explicitly create a NEW session_log and make it the current one (rotating
-    away from any prior log). Returns ``{"id", "alias"}``."""
+    away from any prior log). Returns ``{"id", "alias"}``.
+
+    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
+    ``"python"``; the MCP adapter passes ``"mcp"``."""
     from rebar._commands import session_log
     from rebar._commands._seam import CommandError
 
@@ -498,6 +541,7 @@ def start_session_log(
             relates_to=relates_to,
             discovered_from=discovered_from,
             repo_root=repo_root,
+            creation_channel=_creation_channel,
         )
     except CommandError as exc:
         raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None

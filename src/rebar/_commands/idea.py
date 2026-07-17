@@ -64,6 +64,7 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
             description=description,
             status="idea",
             repo_root=repo_root,
+            creation_channel="cli",
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:

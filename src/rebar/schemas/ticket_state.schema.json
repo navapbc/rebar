@@ -79,6 +79,14 @@
     "source_env": {
       "type": ["string", "null"],
       "description": "Provenance (P1.2 import): the ticket's original environment id in the source store."
+    },
+    "creation_channel": {
+      "$ref": "common.schema.json#/$defs/creation_channel",
+      "description": "The public ingress that produced the ticket's genesis CREATE event (cli/mcp/python/jira/import). A legacy CREATE that carried no channel projects the projection-only fallback `unknown`. Immutable once set — an EDIT can never overwrite it. Distinct from actor/environment/source_* provenance: those record WHO/WHERE, this records WHICH INTERFACE."
+    },
+    "creation_channel_inferred": {
+      "const": true,
+      "description": "Marks a `creation_channel` that was INFERRED for a legacy CREATE (a later story's concern) rather than recorded at genesis. Present (always `true`) only when inference ran; absent on tickets whose channel was stamped at CREATE."
     }
   }
 }

@@ -16,6 +16,11 @@
       "type": "string",
       "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"]
     },
+    "creation_channel": {
+      "type": "string",
+      "enum": ["cli", "mcp", "python", "jira", "import", "unknown"],
+      "description": "The public ingress that produced a ticket's genesis CREATE event: `cli` (the rebar CLI), `mcp` (the MCP server), `python` (the direct library facade), `jira` (Jira-inbound), `import` (NDJSON import), or `unknown` (a legacy CREATE that carried no channel; projection-only, never a valid live-write value)."
+    },
     "priority": {
       "type": "integer",
       "minimum": 0,
