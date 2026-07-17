@@ -43,7 +43,7 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 
 | TYPE | Written by | Effect on replayed state |
 |------|-----------|--------------------------|
-| `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`, and MAY carry an optional `status` (the reducer defaults it to `open` when absent). A non-`open` genesis `status` is produced ONLY by the `rebar idea` command/`create_idea` MCP tool/`rebar.idea(...)` library entry — which emit a single CREATE with `status=idea` for an `epic`, so an idea is born in `idea` (never momentarily `open`/claimable) with no intervening `STATUS` event. There is no general `create --status` flag. Exactly one CREATE per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see CLAUDE.md "Session logs". |
+| `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`, and MAY carry an optional `status` (the reducer defaults it to `open` when absent). A non-`open` genesis `status` is produced ONLY by the `rebar idea` command/`create_idea` MCP tool/`rebar.idea(...)` library entry — which emit a single CREATE with `status=idea` for an `epic`, so an idea is born in `idea` (never momentarily `open`/claimable) with no intervening `STATUS` event. There is no general `create --status` flag. Exactly one CREATE per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see [The session_log ticket type](#the-session_log-ticket-type) below. |
 | `STATUS` | `_commands/txn.py` (transition/claim) | Sets `status`; carries `current_status` (the optimistic-concurrency expectation) and `parent_status_uuid` (the prior STATUS uuid) for fork resolution. |
 | `EDIT` | `ticket-edit.sh`, `_commands/txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/parent) into state (last-writer-by-replay-order). **Tags are no longer mutated via `EDIT` (P2.3)** — historical `EDIT.fields.tags` still replays as the base, but no upgraded writer emits it; use `TAG_DELTA`. |
 | `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
@@ -65,6 +65,39 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 in-process Python write path (`rebar._commands` leaf/lifecycle writers +
 `rebar._store` append/commit, with `rebar.reducer`/`rebar.graph` for replay/relations).
 It identifies the originating event producer, not a current file path.*
+
+## The session_log ticket type
+
+`session_log` is a first-class ticket type (one of the valid `ticket_type`s in the
+`CREATE` row above) for **verbose, durable, agent-facing logs** stored in the rebar
+store and surfaced later by keyword. It is deliberately kept out of the
+dependency-graph / store-health hot paths so its large bodies never tax the
+operations that run constantly during the parallel-agent workflow. Its behavior
+differs from the work types:
+
+- **Gate- and lifecycle-exempt.** `clarity_check` / `check_ac` / `quality_check`
+  treat it as exempt (always pass), and `validate` never flags it (orphan / empty /
+  etc.). It **cannot** be `claim`ed or `transition`ed — it refuses the `STATUS`
+  event; `show`, `comment`, and `edit` work normally.
+- **Visibility — searchable, hidden from `list`.** Included in keyword `search` and
+  in single-ticket `show`, and listed by `recent_session_logs` /
+  `list_tickets(ticket_type="session_log")`, but **excluded** from the default `list`
+  and from `ready` / `next_batch` / `deps` / `validate` (the graph/health compiles,
+  via `reduce_all_tickets(exclude_session_logs=…)`), so log size and count never
+  affect those hot paths.
+- **Non-blocking links only.** `relates_to` / `discovered_from` are permitted on a
+  `session_log` endpoint (so a log can reference the work it documents); `blocks` /
+  `depends_on` are **refused** on either endpoint, and a log never enters the
+  dependency graph (see the `LINK` / `UNLINK` row above).
+- **Never synced to Jira.** `reconcile` excludes `session_log` (it is in the
+  reconciler's `EXCLUDED_SYNC_TYPES` and absent from the local→Jira type map), and it
+  never appears in `bridge_fsck`.
+- **Title convention (guidance, NOT enforced).** Titles should carry a short summary
+  of the work, not merely a date / time / session id; nothing validates this.
+
+Capturing and retrieving session logs — the `rebar session-log` helper, the local
+git-ignored `.rebar/current_session_log` pointer, and the per-session auto-rotation
+behavior — is documented for day-to-day use in [user-guide.md](user-guide.md).
 
 ## Schema version & forward compatibility
 

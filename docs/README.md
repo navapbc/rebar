@@ -65,6 +65,10 @@ Day-to-day use of rebar through the CLI.
   rebar from the command line: create/claim/comment/link/transition tickets, search
   and list, the `idea` parking lot, session logs, and the quality gates as you
   experience them. Start here.
+- **[ticket-model.md](ticket-model.md)** — the agent-facing reference for the four
+  ticket-model concepts: the `idea` status, the parent/child hierarchy, links (the
+  six relations + promotion), and tags. The concept layer over
+  [event-schema.md](event-schema.md)'s event mechanics.
 - **[cli-reference.md](cli-reference.md)** — the complete CLI command reference
   (generated from the CLI's own help data; do not edit by hand).
 - **[mcp-reference.md](mcp-reference.md)** — the complete MCP tool reference, grouped by
