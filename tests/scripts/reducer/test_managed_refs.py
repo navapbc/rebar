@@ -252,7 +252,9 @@ def test_unlink_after_compaction_still_propagates_removal(
             "assignee": "",
             "labels": [],
             "issuelinks": [
-                {"id": "L1", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}
+                # LIVE-JIRA direction (bug 4b59): 'local-1 blocks local-2' is an OUTWARD
+                # Blocks on local-1's issue (was inwardIssue under the reversed convention).
+                {"id": "L1", "type": {"name": "Blocks"}, "outwardIssue": {"key": "PROJ-2"}}
             ],
         }
     }

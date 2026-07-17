@@ -227,11 +227,16 @@ def test_inbound_differ_reads_enriched_issuelinks() -> None:
         }
     }
     binding = _BindingStore({"REB-1": "local-1", "REB-2": "local-2"})
+    # Both endpoints must be in the ACTIVE local set (bug 4b59: the inverse-aware dedup
+    # skips a link whose counterpart is absent). Empty deps => the link reads as new.
     local_by_id = {
         "local-1": {"ticket_id": "local-1", "title": "x", "deps": []},
+        "local-2": {"ticket_id": "local-2", "title": "y", "deps": []},
     }
     muts, _ = inbound.compute_inbound_mutations(snapshot, binding, local_by_id)
     links = [lk for m in muts for lk in m.links]
+    # LIVE-JIRA direction: REB-1's issuelink with outwardIssue REB-2 == 'local-1 blocks
+    # local-2' -> relation 'blocks' (was asserted as depends_on under the reversed convention).
     assert any(
-        lk.get("relation") == "depends_on" and lk.get("target_id") == "local-2" for lk in links
+        lk.get("relation") == "blocks" and lk.get("target_id") == "local-2" for lk in links
     ), f"inbound differ should emit a dep from the enriched issuelink; got {links!r}"
