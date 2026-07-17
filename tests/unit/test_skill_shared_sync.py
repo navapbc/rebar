@@ -1,13 +1,13 @@
 """Drift gate for the shared skill test-design standard (task 43c9).
 
-``examples/claude-skills/shared/test-design.md`` is the canonical copy; each
+``examples/agent-skills/shared/test-design.md`` is the canonical copy; each
 consuming skill ships a byte-identical real-file copy so a skill directory is
 self-contained in every load context (checkout, symlinked skills dir, plain
 copy). This gate fails when a copy diverges or goes missing — sync with:
 
     for s in rebar-debug rebar-implement rebar-brainstorm; do
-        cp examples/claude-skills/shared/test-design.md \
-           examples/claude-skills/$s/test-design.md
+        cp examples/agent-skills/shared/test-design.md \
+           examples/agent-skills/$s/test-design.md
     done
 
 The consumer set is deliberately hardcoded: adding a consumer means adding it
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILLS_DIR = REPO_ROOT / "examples" / "claude-skills"
+SKILLS_DIR = REPO_ROOT / "examples" / "agent-skills"
 CANONICAL = SKILLS_DIR / "shared" / "test-design.md"
 CONSUMERS = ("rebar-debug", "rebar-implement", "rebar-brainstorm")
 

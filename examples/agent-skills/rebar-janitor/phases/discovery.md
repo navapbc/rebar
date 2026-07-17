@@ -7,7 +7,7 @@
 ## Phase 0 — Orient (do this first, ~1 min)
 
 - Identify languages, frameworks, build system, and the rough module/directory layout.
-- Read the repo's agent guidance (`CLAUDE.md`, `CONTRIBUTING.md`) — you'll need it in Phase 5 to
+- Read the repo's agent guidance (`AGENTS.md`, `CONTRIBUTING.md`) — you'll need it in Phase 5 to
   infer how this project tracks work (its tracker, ticket vocabulary, conventions).
 - Locate any prior audit artifacts at `.rebar-janitor/`; if present, read `tools.md` and the last
   report to reuse known-good queries and track regressions/progress.
