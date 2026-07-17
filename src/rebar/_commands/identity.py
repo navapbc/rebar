@@ -279,6 +279,7 @@ def create_identity_core(
     *,
     tags: list[str] | None = None,
     repo_root=None,
+    creation_channel: str = "python",
 ) -> dict:
     """Mint an ``identity`` ticket in ONE CREATE event; return ``{id, alias, title}``.
 
@@ -286,7 +287,12 @@ def create_identity_core(
     payload (see :func:`rebar._commands.composer.create_core`). ``tags`` (e.g. a
     ``placeholder`` marker for a ghost identity) rides the SAME CREATE event so it is
     atomic — no separate ``tag`` call, no tagless window. Raises :class:`CommandError`
-    on validation failure."""
+    on validation failure.
+
+    ``creation_channel`` (story 6fe2) is threaded to the genesis CREATE. This is the
+    SHARED signature local/library callers reach through the ``"python"`` default and
+    ``identity_cli`` overrides to ``"cli"``; a later Jira story supplies ``"jira"`` at
+    the inbound boundary."""
     reject_private_key_material(keys or [])
     return create_core(
         "identity",
@@ -299,6 +305,7 @@ def create_identity_core(
             "keys": keys or [],
         },
         repo_root=repo_root,
+        creation_channel=creation_channel,
     )
 
 
@@ -330,6 +337,7 @@ def ensure_identity_for(
     display_name: str,
     *,
     repo_root=None,
+    creation_channel: str = "python",
 ) -> str:
     """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
     its id (2f13, epic gnu-whale-ichor). Idempotent and provider-neutral:
@@ -344,7 +352,11 @@ def ensure_identity_for(
       back to ``external_id`` when blank), an empty email, the single ``{provider,
       external_id}`` mapping, and the ``placeholder`` tag riding the SAME CREATE event.
 
-    Never raises on a lookup problem — a resolve failure falls through to a mint."""
+    Never raises on a lookup problem — a resolve failure falls through to a mint.
+
+    ``creation_channel`` (story 6fe2) is threaded to a minted placeholder's genesis
+    CREATE; it defaults to ``"python"`` (a later Jira story supplies ``"jira"`` at the
+    inbound boundary)."""
     import os
 
     existing = None
@@ -376,6 +388,7 @@ def ensure_identity_for(
         mappings=[{"provider": provider, "external_id": external_id}],
         tags=[_PLACEHOLDER_TAG],
         repo_root=repo_root,
+        creation_channel=creation_channel,
     )
     return res["id"]
 
@@ -662,6 +675,7 @@ def identity_cli(argv: list[str], *, repo_root=None) -> int:
                 mappings=opts["mappings"],
                 keys=opts["keys"],
                 repo_root=repo_root,
+                creation_channel="cli",
             )
             if opts["use_self"]:
                 use_identity(res["id"], repo_root=repo_root)

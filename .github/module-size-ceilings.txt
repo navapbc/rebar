@@ -41,3 +41,4 @@ src/rebar/llm/runner.py 850
 src/rebar/_engine/rebar_reconciler/outbound_differ.py 862
 src/rebar/_engine/rebar_reconciler/dispatch_one.py 886
 src/rebar/_commands/fsck.py 816
+src/rebar/reducer/_processors.py 855

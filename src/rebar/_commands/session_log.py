@@ -126,13 +126,28 @@ def _link_optional(log_id: str, *, relates_to=None, discovered_from=None, repo_r
         link_core(log_id, discovered_from, "discovered_from", repo_root=repo_root, quiet=True)
 
 
-def start(*, summary=None, relates_to=None, discovered_from=None, repo_root=None) -> dict:
+def start(
+    *,
+    summary=None,
+    relates_to=None,
+    discovered_from=None,
+    repo_root=None,
+    creation_channel: str = "python",
+) -> dict:
     """Explicitly create a NEW session_log and make it the current one.
 
     Returns ``{"id", "alias"}``. ``summary`` becomes the title (the documented
-    short-work-summary convention); absent, a default title is used.
+    short-work-summary convention); absent, a default title is used. ``creation_channel``
+    stamps the session_log's genesis CREATE (``python`` for the library, ``cli`` from the
+    CLI, ``mcp`` from the MCP adapter).
     """
-    res = create_core("session_log", summary or _DEFAULT_TITLE, description="", repo_root=repo_root)
+    res = create_core(
+        "session_log",
+        summary or _DEFAULT_TITLE,
+        description="",
+        repo_root=repo_root,
+        creation_channel=creation_channel,
+    )
     _write_pointer(res["id"], _resolve_session_fp(), repo_root)
     _link_optional(
         res["id"], relates_to=relates_to, discovered_from=discovered_from, repo_root=repo_root
@@ -140,10 +155,19 @@ def start(*, summary=None, relates_to=None, discovered_from=None, repo_root=None
     return {"id": res["id"], "alias": res["alias"]}
 
 
-def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_root=None) -> dict:
+def append(
+    entry,
+    *,
+    summary=None,
+    relates_to=None,
+    discovered_from=None,
+    repo_root=None,
+    creation_channel: str = "python",
+) -> dict:
     """Append ``entry`` (a COMMENT) to the current session_log, creating one on
     first use. Returns ``{"id", "alias", "created"}`` (``created`` True iff this
-    call created the log)."""
+    call created the log). ``creation_channel`` stamps the genesis CREATE only when this
+    call creates the log (an append to an existing log writes a COMMENT, not a CREATE)."""
     if not entry:
         raise CommandError("Error: session-log entry must be non-empty")
     tracker = tracker_dir(repo_root)
@@ -168,6 +192,7 @@ def append(entry, *, summary=None, relates_to=None, discovered_from=None, repo_r
             relates_to=relates_to,
             discovered_from=discovered_from,
             repo_root=repo_root,
+            creation_channel=creation_channel,
         )
         current_id, alias, created = res["id"], res["alias"], True
     else:
@@ -217,11 +242,11 @@ def session_log_cli(argv: list[str]) -> int:
         if verb == "start":
             if positionals:
                 raise CommandError(f"Error: 'start' takes no positional args\n{_USAGE}")
-            result = start(**opts)
+            result = start(creation_channel="cli", **opts)
         elif verb == "append":
             if len(positionals) != 1:
                 raise CommandError(f"Error: 'append' requires exactly one <entry>\n{_USAGE}")
-            result = append(positionals[0], **opts)
+            result = append(positionals[0], creation_channel="cli", **opts)
         else:
             print(f"Error: unknown session-log action '{verb}'\n{_USAGE}", file=sys.stderr)
             return 1
