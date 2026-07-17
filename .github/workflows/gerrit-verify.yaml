@@ -438,6 +438,70 @@ jobs:
       - name: README quickstart golden-path (against the installed rebar)
         run: python scripts/check_readme_quickstart.py
 
+  verify-identity:
+    # PRE-MERGE whole-store authenticated-authorship gate. Mitigates the gap that let the
+    # require_authenticated flip (change 759) merge green and only fail post-merge: the
+    # standalone verify-identity.yaml runs on GitHub push/pull_request, i.e. only AFTER a
+    # Gerrit change lands on the mirror — it never gated the Gerrit change itself. Running it
+    # here folds it into the Verified vote, so the whole-store enforcement check runs BEFORE
+    # merge. Enforcement posture is CONFIG-driven (identity.require_authenticated in THIS
+    # change's rebar.toml): advisory (exit 0, report-only) while off, blocking once flipped on
+    # — so a future re-flip's own Verified vote is the proof that the whole store verifies.
+    name: verify-identity (whole-store authorship gate)
+    needs: clear-vote
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Install rebar (core)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+      - name: Mount the tickets store (FULL history for commit-ancestry era scoping)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A plain code checkout has no store, so verify-identity would exit 2 ("store not
+          # found"). Mount the `tickets` branch on a real worktree — on the ACTUAL branch (not
+          # detached) so tracker.branch matches, and with a FULL fetch (no --depth) so
+          # merge-base / commit-ancestry scoping against identity.enforce_since works over the
+          # whole history. Retried so a transient GitHub blip is not read as a store problem.
+          git worktree prune || true
+          rm -rf .tickets-tracker
+          ok=0
+          for attempt in 1 2 3; do
+            if git fetch \
+                 "https://github.com/${{ github.repository }}" \
+                 '+tickets:refs/remotes/gh-tickets'; then ok=1; break; fi
+            echo "tickets-branch fetch attempt $attempt failed; retrying..." >&2
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::could not fetch the tickets branch after 3 attempts — INFRASTRUCTURE" \
+                 "issue, not an authorship problem. Comment 'recheck' to retry." >&2
+            exit 1
+          fi
+          git worktree add -B tickets .tickets-tracker refs/remotes/gh-tickets
+      - name: verify-identity (config-driven posture; reads rebar.toml from this change)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export REBAR_TRACKER_DIR="$PWD/.tickets-tracker"
+          rebar verify-identity
+
   vote:
     name: cast Verified
     if: ${{ always() }}
@@ -445,7 +509,7 @@ jobs:
     # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
     # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, build-and-test, optionality, golden-path]
+    needs: [clear-vote, require-ticket, build-and-test, optionality, golden-path, verify-identity]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
