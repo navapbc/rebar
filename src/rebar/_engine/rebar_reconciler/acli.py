@@ -32,7 +32,7 @@ from rebar_reconciler.acli_cli_ops import (
     _create_issue_from_json,
     _create_issue_no_json,
     _extract_parent_key,
-    _parse_acli_comments,
+    _parse_paginated_comments,
     _verify_created_issue,
 )
 from rebar_reconciler.acli_graph import AcliGraphMixin
@@ -651,7 +651,13 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             resp.read()
 
     def get_comments(self, jira_key: str) -> list[dict[str, Any]]:
-        """Get all comments on a Jira issue."""
+        """Get ALL comments on a Jira issue.
+
+        ``--paginate`` is REQUIRED (bug 1f3d): without it ACLI returns only the first
+        page (50, oldest), so the outbound dedup re-posts everything past page 1 and
+        inflates high-traffic issues to Jira's 5000-comment cap. ``--paginate`` streams
+        one JSON object per page — parse via ``_parse_paginated_comments``.
+        """
         cmd = [
             "jira",
             "workitem",
@@ -659,10 +665,11 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             "list",
             "--key",
             jira_key,
+            "--paginate",
             "--json",
         ]
         result = self._run(cmd, retry_on_timeout=True)  # READ — idempotent
-        return _parse_acli_comments(json.loads(result.stdout))
+        return _parse_paginated_comments(result.stdout)
 
     def set_parent(self, jira_key: str, parent_key: str | None) -> None:
         """Set or clear the parent of a Jira issue via REST PUT.
