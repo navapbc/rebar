@@ -144,6 +144,17 @@ resource "aws_iam_role" "opcert_admin" {
   name               = "rebar-opcert-admin"
   assume_role_policy = data.aws_iam_policy_document.opcert_admin_assume.json
 
+  # The trust principals are OPERATOR-SUPPLIED AT DEPLOY (`var.opcert_admin_principal_arns`,
+  # empty by default) — the SAME operator-owned pattern as the key SSM param above, so it gets
+  # the SAME guard. Without this, the terraform-drift check (`terraform plan` with no -var,
+  # .github/workflows/terraform-drift.yml) renders an empty principal and reports a permanent
+  # phantom "1 to change" against the live operator-applied principal, reddening the daily
+  # drift sweep forever and masking real drift. Terraform owns the role's existence, not who
+  # may assume it — the operator manages the trust list out-of-band (see the deploy runbook).
+  lifecycle {
+    ignore_changes = [assume_role_policy]
+  }
+
   tags = {
     Project = "rebar"
   }
