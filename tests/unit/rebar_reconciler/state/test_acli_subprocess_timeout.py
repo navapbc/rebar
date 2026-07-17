@@ -382,3 +382,21 @@ def test_run_acli_429_retries_with_rate_limit_backoff(tmp_path, monkeypatch, cap
     # Exactly one retry backoff, honoring Retry-After=1 (no uniform 2s/4s backoff).
     assert delays == [1.0], f"expected one Retry-After=1 backoff, got {delays}"
     assert any("429" in r.message for r in caplog.records)
+
+
+def test_set_relationship_emits_correct_acli_flag_order(record_run):
+    """set_relationship(from, to) must emit ``--out to --in from`` (bug 3b86).
+
+    ACLI's ``--out``/``--in`` are inverted vs the naive reading — the ``--in`` issue is the
+    BLOCKER — so ``--out to_key --in from_key`` is what makes the link read "from blocks to".
+    Passing them the other way (the old code) reversed every written link. Pinning the ACTUAL
+    emitted command is the only unit-level guard for link direction: a stub client that mocks
+    ``set_relationship`` cannot catch a flag-order regression.
+    """
+    client = _make_client()
+    client.set_relationship("FROM-1", "TO-2", "Blocks")
+    link_cmds = [c for c, _retry in record_run if "link" in c and "create" in c]
+    assert link_cmds, f"no `link create` command recorded: {[c for c, _ in record_run]!r}"
+    cmd = link_cmds[0]
+    assert cmd[cmd.index("--out") + 1] == "TO-2", f"--out must carry to_key (TO-2): {cmd!r}"
+    assert cmd[cmd.index("--in") + 1] == "FROM-1", f"--in must carry from_key (FROM-1): {cmd!r}"

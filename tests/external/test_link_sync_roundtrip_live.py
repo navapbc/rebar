@@ -455,3 +455,85 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
                     client.delete_issue(key)
                 except Exception as exc:  # noqa: BLE001
                     print(f"CLEANUP WARNING: delete_issue({key}) failed: {exc!r}")
+
+
+@_skip
+@pytest.mark.parametrize(("relation", "a_is_blocker"), [("blocks", True), ("depends_on", False)])
+def test_link_sync_writes_absolute_direction_live(relation: str, a_is_blocker: bool) -> None:
+    """Outbound must write the link with the semantically CORRECT blocker (bug 3b86).
+
+    "A blocks B"      => A is the blocker (A on the outward/blocks side).
+    "A depends_on B"  == "B blocks A" => B is the blocker (B on the outward/blocks side).
+
+    Why this test exists: ``test_link_sync_differ_apply_roundtrip_live`` only checked that a
+    Blocks link existed in EITHER direction and that outbound↔inbound *agree* — a consistency
+    check that stays green even when the link is written backwards — and it never covered
+    ``depends_on``. So a reversed write went undetected (``blocks`` was reversed for a long
+    time; c8ed then reversed ``depends_on``). This asserts the ABSOLUTE orientation, per
+    relation, through the production apply path (``batch_dispatch.update_one``).
+    """
+    _ensure_engine_on_path()
+    client = _build_client()
+    outbound = _load_module("outbound_differ", RECONCILER_DIR / "outbound_differ.py")
+    from rebar_reconciler.batch_dispatch import update_one
+
+    key_a: str | None = None
+    key_b: str | None = None
+    try:
+        key_a = _new_key(
+            client.create_issue(
+                {"ticket_type": "task", "title": f"rebar dir-{relation} A (auto-delete)"}
+            )
+        )
+        key_b = _new_key(
+            client.create_issue(
+                {"ticket_type": "task", "title": f"rebar dir-{relation} B (auto-delete)"}
+            )
+        )
+        bind = StubBindingStore({"loc-a": key_a, "loc-b": key_b})
+        ticket = _make_ticket(
+            "loc-a", deps=[{"target_id": "loc-b", "relation": relation, "link_uuid": "u1"}]
+        )
+
+        links = outbound._diff_links(ticket, {"issuelinks": client.get_issue_links(key_a)}, bind)
+        assert links and links[0].get("type") == "Blocks", f"expected a Blocks ADD; got {links!r}"
+        batch = {
+            "action": "update",
+            "direction": "outbound",
+            "key": key_a,
+            "fields": {},
+            "local_id": "loc-a",
+            "follow_on": None,
+            "comments": [],
+            "labels": [],
+            "links": links,
+        }
+        update_one(batch, client)
+
+        # Determine the ACTUAL blocker from A's live links: from A's perspective an
+        # outwardIssue==B means "A blocks B"; an inwardIssue==B means "B blocks A".
+        a_blocks_b = b_blocks_a = False
+        live = client.get_issue_links(key_a)
+        for lk in live:
+            if (lk.get("type") or {}).get("name") != "Blocks":
+                continue
+            if (lk.get("outwardIssue") or {}).get("key") == key_b:
+                a_blocks_b = True
+            if (lk.get("inwardIssue") or {}).get("key") == key_b:
+                b_blocks_a = True
+        assert a_blocks_b ^ b_blocks_a, f"expected exactly one Blocks direction A↔B; got {live!r}"
+        if a_is_blocker:
+            assert a_blocks_b, (
+                f"'A {relation} B' must write A as the blocker (A blocks B); got 'B blocks A'"
+            )
+        else:
+            assert b_blocks_a, (
+                f"'A {relation} B' must write B as the blocker (B blocks A); got 'A blocks B'"
+            )
+    finally:
+        for key in (key_a, key_b):
+            if key:
+                try:
+                    client.delete_issue(key)
+                except Exception:  # noqa: BLE001 — cleanup best-effort
+                    pass
