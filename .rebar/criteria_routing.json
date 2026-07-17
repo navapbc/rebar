@@ -1,0 +1,13 @@
+{
+  "plan_review": {
+    "project.portability": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": { "scope": ["container", "leaf"] },
+      "default_posture": "blocking",
+      "block_threshold": 0.9,
+      "checklist": []
+    }
+  },
+  "activate": ["project.portability"]
+}

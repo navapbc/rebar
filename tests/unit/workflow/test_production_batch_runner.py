@@ -111,13 +111,20 @@ def test_runner_findings_equal_bespoke_run_pass1(_stub_reads):
 
 
 # ── tier split matches exec_tier; unknown ids skipped ──────────────────────────
-def test_tier_split_matches_exec_tier_and_skips_unknown(_stub_reads):
+def test_tier_split_matches_exec_tier_and_skips_unknown(tmp_path, _stub_reads):
     # E2 is a single-turn (1-TURN) criterion; E4 is AGENT-tier.
     assert registry.exec_tier(registry.by_id()["E2"]) != "AGENT"
     assert registry.exec_tier(registry.by_id()["E4"]) == "AGENT"
 
     fake = FakeRunner(structured={"analysis": "", "findings": []})
-    req = _make_req([{"prompt": "E2"}, {"prompt": "E4"}, {"prompt": "NOPE-not-a-criterion"}])
+    # Pin repo_root to an overlay-free tmp dir so this built-in tier-split assertion is
+    # isolated from any activated project.* criterion in the real repo's `.rebar/`
+    # overlay (e.g. the dogfood project.portability), which the runner would otherwise
+    # fan in via config.repo_root() and add to `single`.
+    req = _make_req(
+        [{"prompt": "E2"}, {"prompt": "E4"}, {"prompt": "NOPE-not-a-criterion"}],
+        repo_root=str(tmp_path),
+    )
     result = ProductionBatchRunner(runner=fake).run(req, None)
 
     res = result.outputs["batch_plan"]["batch_resolution"]

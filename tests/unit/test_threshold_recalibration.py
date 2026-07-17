@@ -72,7 +72,11 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
 
 
 def _routing() -> dict:
-    return registry.by_id()
+    # Built-in routing only — these pins govern the packaged built-in criteria table.
+    # Exclude any activated project.* overlay criterion (e.g. the dogfood
+    # project.portability), which the ambient real-repo `.rebar/` overlay merges in but
+    # is out of scope for the built-in threshold recalibration this module verifies.
+    return {cid: v for cid, v in registry.by_id().items() if not cid.startswith("project.")}
 
 
 # ── AC1: the approved 11 criteria match the table exactly ────────────────────────────────
