@@ -14,6 +14,7 @@ NON-transient add failure still fails immediately (no behavior change there).
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -235,3 +236,88 @@ def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
 
     r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
     assert "COMMENT tk-o" in r.stdout
+
+
+def _loose_object_path(tracker: str, relpath: str) -> Path:
+    """The on-disk loose-object path for whatever blob ``relpath`` is staged as."""
+    sha = subprocess.run(
+        ["git", "-C", tracker, "rev-parse", f":{relpath}"], capture_output=True, text=True
+    ).stdout.strip()
+    op = subprocess.run(
+        ["git", "-C", tracker, "rev-parse", "--git-path", f"objects/{sha[:2]}/{sha[2:]}"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return Path(op) if os.path.isabs(op) else Path(tracker) / op
+
+
+def _plant_poison(tracker: str, path: str = "tk-poison/evt.json") -> str:
+    """Stage ``path`` then DELETE its loose object — an index entry whose object VANISHED,
+    exactly as a gc repack / partial write under pressure leaves it. Left staged, it poisons
+    every subsequent commit's tree build."""
+    p = Path(tracker) / path
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('{"poison":1}')
+    subprocess.run(["git", "-C", tracker, "add", "--", path], check=True)
+    _loose_object_path(tracker, path).unlink()
+    return path
+
+
+def test_cross_path_poisoned_index_self_heals(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A vanished-object index entry left by an EARLIER write must not cascade into every
+    later write (bug 4c1c / Mode D (residual of ac26) — the enrich-prune ``invalid object … Error
+    building trees`` loss).
+
+    The poison belongs to a DIFFERENT path than the current write, so the per-path unstage
+    never clears it; only a full index reset to HEAD does. A new write for another ticket
+    must self-heal (drop the cross-path poison, commit) rather than raise, and leave no
+    lingering wedge for the write after it. The heal must also be OBSERVABLE — it logs a
+    warning naming the orphaned worktree path, so a silent local↔remote divergence can't hide."""
+    tracker = _fresh_tracker(tmp_path, "poison-xpath")
+    event_append.stage_and_commit(tracker, "tk-0", _event("u0"))  # baseline HEAD
+    poison_path = _plant_poison(tracker)  # earlier write's entry whose object vanished, staged
+
+    with caplog.at_level("WARNING"):
+        rc = event_append.stage_and_commit(tracker, "tk-1", _event("u1"))
+    assert rc == 0, "a write must reset the poisoned index and commit, not cascade-fail"
+    rc2 = event_append.stage_and_commit(tracker, "tk-2", _event("u2"))
+    assert rc2 == 0, "the poison must be gone — no lingering cascade for the next write"
+
+    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    assert "COMMENT tk-1" in r.stdout and "COMMENT tk-2" in r.stdout
+    # The anomaly is recorded (not silently papered over) and names the dropped orphan.
+    heal_logs = [r for r in caplog.records if "poisoned index" in r.getMessage()]
+    assert heal_logs, "a poisoned-index heal must emit a warning"
+    assert poison_path in heal_logs[-1].getMessage(), "the orphaned worktree path must be named"
+
+
+def test_own_vanished_object_is_regenerated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When THIS write's own object vanishes between add and commit (the serialized case: the
+    vanishing writer is first to hit its own poison), the self-heal must REGENERATE it from the
+    intact worktree file and commit — no write lost (bug 4c1c / Mode D)."""
+    tracker = _fresh_tracker(tmp_path, "poison-own")
+    event_append.stage_and_commit(tracker, "tk-0", _event("u0"))  # baseline HEAD
+
+    real_add = event_append._git_add
+    state = {"n": 0}
+
+    def vanishing_add(trk, relpaths, **kw):  # noqa: ANN001,ANN003
+        res = real_add(trk, relpaths, **kw)
+        state["n"] += 1
+        if state["n"] == 1:  # vanish ONLY on the first add; the recovery re-add must succeed
+            for rp in relpaths:
+                op = _loose_object_path(trk, rp)
+                if op.exists():
+                    op.unlink()
+        return res
+
+    monkeypatch.setattr(event_append, "_git_add", vanishing_add)
+    rc = event_append.stage_and_commit(tracker, "tk-1", _event("u1"))
+    assert rc == 0, "the vanished own-object must be regenerated on re-add and commit"
+
+    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    assert "COMMENT tk-1" in r.stdout

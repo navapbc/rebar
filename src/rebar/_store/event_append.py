@@ -29,6 +29,7 @@ Exit-code parity (surfaced as ``StoreError.returncode`` → the seam's ``Command
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -49,6 +50,8 @@ from rebar.reducer._version import (  # single source of truth for the type name
     KEY_REVOKE,
     TAG_DELTA,
 )
+
+_log = logging.getLogger(__name__)
 
 # I2 event-type enum (matches write_commit_event's `case` allow-list).
 EVENT_TYPES = frozenset(
@@ -410,6 +413,13 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
                 # makes git refuse the commit entirely. Self-heal regenerable paths to
                 # HEAD and retry; surface an actionable error for a non-regenerable one.
                 healed, detail = _recover_from_unmerged(tracker, [relative_path], commit_msg)
+                if not healed and detail is None:
+                    # A poisoned index (an index entry whose object VANISHED — a gc repack or
+                    # a partial write under pressure) makes git refuse this AND every later
+                    # commit until the whole index is reset to HEAD (bug 4c1c / Mode D).
+                    healed = _recover_from_invalid_object(
+                        tracker, [relative_path], commit_msg, commit.stderr or commit.stdout
+                    )
                 if not healed:
                     # Drop the staged blob from the index too (not just disk) so the failed
                     # event cannot be committed by the next successful write.
@@ -501,6 +511,12 @@ def batch_stage_and_commit(
             commit = _git_commit(tracker, commit_msg)
             if commit.returncode != 0:
                 healed, detail = _recover_from_unmerged(tracker, relpaths, commit_msg)
+                if not healed and detail is None:
+                    # Poisoned-index (vanished-object) self-heal — see stage_and_commit and
+                    # _recover_from_invalid_object (bug 4c1c / Mode D).
+                    healed = _recover_from_invalid_object(
+                        tracker, relpaths, commit_msg, commit.stderr or commit.stdout
+                    )
                 if not healed:
                     _rollback_batch(tracker, renamed)
                     git_err = (commit.stderr or commit.stdout).strip()
@@ -671,3 +687,82 @@ def _recover_from_unmerged(
         )
     )
     return (retry.returncode == 0, None)
+
+
+# git ``write-tree`` refuses the commit with this signature when an index entry references
+# an object that is MISSING from the object DB (``git commit`` builds a tree from the index's
+# cached shas, and only ``write-tree`` verifies each blob EXISTS — corrupt CONTENT is not
+# re-read at commit, so the trigger is a vanished object, not a garbled one).
+_INVALID_OBJECT_MARKERS = ("invalid object", "error building trees")
+
+
+def _is_invalid_object_error(text: str) -> bool:
+    low = (text or "").lower()
+    return any(marker in low for marker in _INVALID_OBJECT_MARKERS)
+
+
+def _staged_index_paths(tracker: str) -> list[str]:
+    """Paths currently staged in the index. ``ls-files --cached`` reads ``.git/index``
+    directly (no object access), so it is safe to call on a poisoned index."""
+    r = subprocess.run(
+        ["git", "-C", tracker, "ls-files", "--cached"], capture_output=True, text=True
+    )
+    return r.stdout.splitlines() if r.returncode == 0 else []
+
+
+def _recover_from_invalid_object(
+    tracker: str, event_relpaths: list[str], commit_msg: str, commit_stderr: str
+) -> bool:
+    """Self-heal a commit git refused because the index references a MISSING object (bug
+    4c1c / Mode D (residual of ac26) — the enrich-prune ``invalid object … Error building trees``
+    cascade). A loose object that vanished between ``git add`` and ``git commit`` — a
+    background gc repack, or a partial object write under FS/memory pressure — poisons the
+    SHARED index, and because the failed commit leaves that entry staged, EVERY subsequent
+    write's commit fails identically until it is dropped (proven cascade). The per-path
+    ``_unstage`` cannot clear it: the poison belongs to an EARLIER write's path, not the
+    current one, so each writer unstages the wrong path and the poison persists.
+
+    Reset the WHOLE index to HEAD (``read-tree HEAD`` drops any poisoned entries regardless
+    of which path they belong to, and touches ONLY the index — every worktree event file
+    stays on disk, so no committed data is lost), re-stage THIS write's file(s) — which
+    REGENERATES a missing object from the intact worktree file when the vanished object was
+    this very write's — and retry the commit. Serialized under the write lock, the vanishing
+    write is the first to hit its own poison, so it self-heals before any peer sees it.
+
+    Returns ``True`` iff the retry committed; a non-invalid-object failure returns ``False``
+    immediately (left for the caller to raise), leaving the index untouched."""
+    if not _is_invalid_object_error(commit_stderr):
+        return False
+    # A poisoned index is an ANOMALY worth RECORDING, never a routine path: in the wild this
+    # signature is as often a leaked GIT_INDEX_FILE or an external writer as it is a vanished
+    # object, and a *recurring* heal points at hardware or a bug — so surface every heal
+    # instead of silently papering over it. Capture the staged set first (ls-files reads the
+    # index directly, so it is safe on a poisoned index) to name any file the reset orphans.
+    staged_before = _staged_index_paths(tracker)
+    # HEAD must exist for read-tree HEAD; the cascade only arises after prior writes, so it
+    # always does. If it somehow doesn't, the retry commit simply fails → the caller raises.
+    read_tree = subprocess.run(
+        ["git", "-C", tracker, "read-tree", "HEAD"], capture_output=True, text=True
+    )
+    _git_add(tracker, list(event_relpaths))
+    retry = _with_transient_head_retry(
+        lambda: _with_transient_add_retry(
+            lambda: subprocess.run(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
+                capture_output=True,
+                text=True,
+            )
+        )
+    )
+    healed = retry.returncode == 0
+    # An orphan is an EARLIER failed write's file dropped from the index by the reset but left
+    # in the worktree — visible to local replay yet uncommitted/unpushed. Name it so a real
+    # local↔remote divergence is observable rather than silent (follow-up: reconcile it).
+    orphaned = sorted(set(staged_before) - set(event_relpaths))
+    _log.warning(
+        "self-healed a poisoned index (invalid/missing object): read_tree_ok=%s healed=%s%s",
+        read_tree.returncode == 0,
+        healed,
+        f" orphaned_worktree_paths={orphaned}" if orphaned else "",
+    )
+    return healed
