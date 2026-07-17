@@ -16,6 +16,11 @@ import sys
 def main() -> None:
     role, store = sys.argv[1], sys.argv[2]
     os.environ["REBAR_SYNC_PUSH"] = "off"
+    # This test exercises the prune-vs-locked-write concurrency invariant (I5), which is
+    # orthogonal to authorship enforcement. Keep the write-gate OFF so the fresh (unsigned)
+    # store's writes are never REFUSED under a repo-level identity.require_authenticated=true —
+    # otherwise a correctly-refused unsignable write would masquerade as a prune-dropped write.
+    os.environ["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "0"
     from rebar import config
 
     tracker = config.tracker_dir(store)
