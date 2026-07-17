@@ -239,6 +239,41 @@ compaction-like operations MUST never retire an event whose content a
 not-yet-folded state could still need, and never assume the per-clone lock
 excludes remote writers.
 
+### I9a — Creation-channel provenance across a full downgrade (pause `compact`)
+`creation_channel` / `creation_channel_inferred` are additive genesis fields (see
+[event-schema.md](event-schema.md)). They ride the CREATE `data` and, after compaction,
+`SNAPSHOT.data.compiled_state`. A **full downgrade** — running a rebar binary that predates
+the field over a store that already has it — is safe for reads but has one durable-loss edge,
+because the old binary's reducer does not project the field. During the downgrade window a
+ticket sits in one of **three states**:
+
+| Ticket state during the downgrade window | Provenance on disk | Recovers on upgrade? |
+|------------------------------------------|--------------------|----------------------|
+| **New-code `SNAPSHOT` replayed by old code** | **Retained** — the keys live in `compiled_state`, and old `process_snapshot` restores it with a generic `for key,value` loop, so the fields survive even though the old reducer never names them. | Yes — verbatim. |
+| **Never-compacted ticket** (active CREATE) | **Retained** — the value stays in the active CREATE `data`; the old reducer simply ignores the key. | Yes — replaying the active CREATE re-projects it. |
+| **First OLD-code compaction of a raw, creation-bearing CREATE** | **Dropped from the new SNAPSHOT's `compiled_state`** (the old reducer built it without the field) — **but the CREATE is retained as a `.retired` source** (invariant I1), so the raw genesis data is never lost. | Yes — via full-log rebuild. |
+
+Only the **third** state loses the field from the *durable* SNAPSHOT, and compaction is the
+**only** operation that can produce it. Therefore:
+
+- **STOP every `rebar compact` invocation for the entire downgrade window.** Pause scheduled
+  compaction and `compact` / `compact-all`, and do not close tickets through a compact-on-close
+  path, until every clone is back on a binary that understands the field. With `compact`
+  paused, no ticket can enter state 3, so the downgrade is fully lossless (states 1–2 retain
+  the value).
+- **If the pause is violated, capture the affected IDs.** The tickets compacted during the
+  window are exactly the ones whose SNAPSHOT `compiled_state` now lacks `creation_channel`
+  while a retained `.retired` CREATE still exists — record them from the compaction commit
+  range (the `ticket: COMPACT <id>` / `REBUILD SNAPSHOT <id>` commit messages on the `tickets`
+  branch) as you find them. After upgrading, `rebar fsck` surfaces the same set as
+  `SNAPSHOT_STALE_CHANNEL` findings.
+- **Recover with a full-log rebuild.** `rebar fsck --repair-snapshots` rebuilds each flagged
+  snapshot via `rebuild_snapshot_from_full_log`, which reduces with `include_retired=True` — it
+  replays the retained `.retired` CREATE and re-projects `creation_channel` (including the
+  legacy-Jira `jira` + `inferred` inference) into a refreshed SNAPSHOT. Reads are correct even
+  before the rebuild: `process_snapshot` re-infers a channel-less snapshot at restore time
+  (story 568c); the rebuild just persists it durably.
+
 ---
 
 ## The sync / reconvergence algorithm

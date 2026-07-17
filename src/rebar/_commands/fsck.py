@@ -37,6 +37,7 @@ _STRUCTURED_KINDS = {
     "corrupt_create",
     "missing_create",
     "snapshot_inconsistent",
+    "snapshot_stale_channel",
     "orphan_event",
     "status_fork_resolved",
 }
@@ -200,7 +201,12 @@ def _scan(
         findings = _snap_findings()
         # RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then
         # re-check (folds the orphan back in) — the remediation A3 runs against the live store.
-        rebuildable = any("SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f for f in findings)
+        # SNAPSHOT_STALE_CHANNEL (story 568c) rebuilds the same way: replaying the retained
+        # CREATE under include_retired re-projects the missing creation_channel.
+        rebuildable = any(
+            "SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f or "SNAPSHOT_STALE_CHANNEL" in f
+            for f in findings
+        )
         if repair_snapshots and not no_mutate and rebuildable:
             from rebar._commands.compact import rebuild_snapshot_from_full_log
 
@@ -273,6 +279,19 @@ def _scan(
     return lines, issue_count
 
 
+def _has_retired_create(ticket_dir: str) -> bool:
+    """True when the ticket retains its genesis CREATE as a folded ``*.retired`` source
+    (``{ts}-{uuid}-CREATE.json.retired``). Compaction renames folded events rather than
+    deleting them (invariant I1), so a compacted ticket normally still carries its CREATE
+    here — which is what lets ``rebuild_snapshot_from_full_log`` (``include_retired=True``)
+    replay the CREATE and re-project ``creation_channel`` into a refreshed SNAPSHOT."""
+    try:
+        names = os.listdir(ticket_dir)
+    except OSError:
+        return False
+    return any(n.endswith("-CREATE.json" + RETIRED_SUFFIX) for n in names)
+
+
 def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> list[str]:
     out: list[str] = []
     try:
@@ -280,7 +299,27 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
             snapshot = json.load(f)
     except (json.JSONDecodeError, OSError):
         return out
-    source_uuids = snapshot.get("data", {}).get("source_event_uuids", [])
+    _data = snapshot.get("data", {})
+    # Creation-channel provenance drift (story 568c): a PRE-feature SNAPSHOT — one whose
+    # compiled_state was compacted before `creation_channel` existed — carries no channel, and
+    # on SNAPSHOT-only replay there is no CREATE to re-infer from. Read-time re-inference
+    # (process_snapshot) already keeps reads correct, but the DURABLE snapshot stays stale.
+    # When the ticket still retains its CREATE as a folded `.retired` source, the snapshot is
+    # rebuildable: `--repair-snapshots` re-projects the channel via
+    # rebuild_snapshot_from_full_log (which replays the retained CREATE). Gate strictly on a
+    # real compiled_state dict that lacks the key AND a retained CREATE, so a post-feature
+    # snapshot (channel present) never trips this.
+    _compiled = _data.get("compiled_state")
+    if (
+        isinstance(_compiled, dict)
+        and "creation_channel" not in _compiled
+        and _has_retired_create(ticket_dir)
+    ):
+        out.append(
+            f"SNAPSHOT_STALE_CHANNEL: {ticket_id}/{snapshot_filename} — compiled_state "
+            "predates creation_channel; rebuild from the retained CREATE to persist it"
+        )
+    source_uuids = _data.get("source_event_uuids", [])
     if not source_uuids:
         return out
 
