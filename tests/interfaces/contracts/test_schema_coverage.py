@@ -229,3 +229,28 @@ def test_cli_output_advertiser_real_output_validates(cmd: str, rebar_repo: Path)
                 validator.validate(item)
         else:
             validator.validate(payload)
+
+
+def test_output_schemas_pin_creation_channel_trust_boundary() -> None:
+    """The public output-schema docs MUST pin the creation-channel diagnostic trust
+    boundary (epic jira-reb-977): ``creation_channel_inferred`` is heuristic AUDIT
+    metadata, NOT a security attestation. Pinned here so the distinction cannot silently
+    drift out of docs/output-schemas.md."""
+    text = (Path(__file__).resolve().parents[3] / "docs" / "output-schemas.md").read_text()
+    lowered = text.lower()
+    assert "creation_channel_inferred" in text
+    assert "audit" in lowered, "trust-boundary must call the marker AUDIT metadata"
+    assert "security attestation" in lowered, "trust-boundary must deny a security attestation"
+
+
+def test_concurrency_docs_pin_creation_channel_downgrade_matrix() -> None:
+    """docs/concurrency.md MUST document the creation-channel full-downgrade recovery
+    contract (story 568c): the compaction pause, affected-ID capture, and full-log rebuild
+    from the retained CREATE — so the downgrade matrix cannot silently drift out."""
+    text = (Path(__file__).resolve().parents[3] / "docs" / "concurrency.md").read_text()
+    lowered = text.lower()
+    assert "creation_channel" in text
+    assert "downgrade" in lowered, "must cover the full-downgrade schema states"
+    assert "compact" in lowered, "must require pausing compaction during the downgrade window"
+    assert "affected" in lowered, "must cover affected-ID capture if the pause is violated"
+    assert "rebuild" in lowered or ".retired" in text, "must cover full-log rebuild recovery"

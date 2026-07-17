@@ -447,3 +447,140 @@ def test_integ_cache_warm_before_compaction_returns_correct_state_after(
     assert state_after["title"] == "Cache test", (
         f"Expected title='Cache test' from SNAPSHOT compiled_state, got {state_after['title']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# creation_channel projection through SNAPSHOT restore (story 568c)
+# ---------------------------------------------------------------------------
+
+_CHANNEL_BASE = {
+    "ticket_type": "task",
+    "title": "T",
+    "status": "open",
+    "created_at": 1742605200,
+    "comments": [],
+    "deps": [],
+    "parent_id": None,
+    "source_event_uuids": [_UUID2],
+}
+
+
+def _snapshot_only_dir(tmp_path: Path, name: str, compiled: dict) -> Path:
+    tdir = tmp_path / name
+    tdir.mkdir()
+    _write_event(
+        tdir,
+        1742605200,
+        _UUID,
+        "SNAPSHOT",
+        {"compiled_state": compiled, "source_event_uuids": [_UUID2]},
+    )
+    return tdir
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_legacy_creation_channel_infers_jira(tmp_path: Path, reducer: ModuleType) -> None:
+    # A pre-feature SNAPSHOT (compiled_state has no creation_channel) whose restored
+    # envelope bears the exact legacy-Jira signature must re-infer jira at read time.
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "jira-dig-1",
+        "author": "reconciler",
+        "env_id": "reconciler",
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-legacy", compiled)))
+    assert state["creation_channel"] == "jira"
+    assert state["creation_channel_inferred"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_legacy_creation_channel_near_miss_unknown(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    # jira-* id but a non-reconciler author: near-miss → unknown, no marker.
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "jira-dig-1",
+        "author": "someone-else",
+        "env_id": "reconciler",
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-nearmiss", compiled)))
+    assert state["creation_channel"] == "unknown"
+    assert "creation_channel_inferred" not in state
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_recorded_creation_channel_not_clobbered(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    # A recorded channel in compiled_state must survive SNAPSHOT restore VERBATIM — even
+    # when the envelope would otherwise match the legacy-Jira inference signature. This
+    # pins the load-bearing guard (re-inference is skipped when a channel is present).
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "jira-dig-1",
+        "author": "reconciler",
+        "env_id": "reconciler",
+        "creation_channel": "cli",
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-recorded", compiled)))
+    assert state["creation_channel"] == "cli"
+    assert "creation_channel_inferred" not in state
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_already_inferred_creation_channel_preserved(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "jira-dig-1",
+        "author": "reconciler",
+        "env_id": "reconciler",
+        "creation_channel": "jira",
+        "creation_channel_inferred": True,
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-inferred", compiled)))
+    assert state["creation_channel"] == "jira"
+    assert state["creation_channel_inferred"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_provisional_unknown_creation_channel_infers_jira(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    # A provisional, marker-less "unknown" in compiled_state (not a concrete recorded value)
+    # with the exact legacy-Jira envelope is re-evaluated to jira at restore time.
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "jira-dig-1",
+        "author": "reconciler",
+        "env_id": "reconciler",
+        "creation_channel": "unknown",
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-prov-jira", compiled)))
+    assert state["creation_channel"] == "jira"
+    assert state["creation_channel_inferred"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_snapshot_provisional_unknown_creation_channel_near_miss_stays_unknown(
+    tmp_path: Path, reducer: ModuleType
+) -> None:
+    # Provisional "unknown" but a NON-jira id → re-evaluation keeps it unknown (no false jira).
+    compiled = {
+        **_CHANNEL_BASE,
+        "ticket_id": "local-1",
+        "author": "reconciler",
+        "env_id": "reconciler",
+        "creation_channel": "unknown",
+    }
+    state = reducer.reduce_ticket(str(_snapshot_only_dir(tmp_path, "chan-prov-unk", compiled)))
+    assert state["creation_channel"] == "unknown"
+    assert "creation_channel_inferred" not in state

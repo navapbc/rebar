@@ -269,10 +269,26 @@ that is present on every ticket, not only imported ones.
 
 **Forward/back-compat + compaction.** The key is additive: an older clone's reducer simply
 projects `unknown` for a CREATE that predates the field, and ignores nothing (it reads
-`data` generically). A post-feature `SNAPSHOT` carries `creation_channel` in its
-`compiled_state` and restores it verbatim; a pre-feature snapshot lacks it and reduces to
-`unknown` on fresh replay. The key never enters the Jira reconciler (local reducer-state
-only).
+`data` generically). The key never enters the Jira reconciler (local reducer-state only).
+
+**Where the provenance lives in a `SNAPSHOT` (survives compaction + rebuild).** Genesis
+`creation_channel` provenance lives in **`SNAPSHOT.data.compiled_state`** — the reduced
+ticket state the compactor folds — **not** in the `SNAPSHOT` envelope. The envelope's own
+`author` / `env_id` identify the **compactor** (whoever ran `compact`), so they must never be
+read as the ticket's genesis channel. Compaction preserves the recorded value:
+`_snapshot_strip_keys()` (`compact.py`) strips only `{updated_at, signature}`, so both
+`creation_channel` and `creation_channel_inferred` ride into `compiled_state` and
+`process_snapshot` restores them verbatim on SNAPSHOT-only replay. A full-log rebuild
+(`rebuild_snapshot_from_full_log`, `include_retired=True`) re-projects the same value by
+replaying the retained `.retired` CREATE. A **pre-feature** `SNAPSHOT` (compacted before the
+field existed) carries no channel in its `compiled_state`; because a SNAPSHOT-only replay has
+no CREATE to re-infer from, `process_snapshot` **re-infers at restore time** (story 568c) —
+the exact legacy-Jira signature (`jira-*` id + `reconciler` author/env_id) yields
+`jira` + `creation_channel_inferred=true`, every other case yields `unknown`. The
+`"creation_channel" not in compiled_state` guard makes this migration touch ONLY pre-feature
+snapshots, so a recorded channel is never clobbered. `fsck` flags such a stale snapshot as
+`SNAPSHOT_STALE_CHANNEL` when a retained CREATE exists, and `fsck --repair-snapshots` rebuilds
+it to persist the channel durably.
 
 ## Compaction (I9)
 
