@@ -1,13 +1,18 @@
-"""Stock ``git gc`` is trusted on the tickets worktree (epic 97e7 / P1.4, WU-1).
+"""Stock ``git gc`` is kept but forced FOREGROUND on the tickets worktree
+(epic 97e7 / P1.4, corrected by bug 88eb — see ADR 0051).
 
-rebar no longer forces ``gc.auto=0``. These tests pin the new posture:
+A DETACHED auto-gc / ``git maintenance run --auto`` repacks the SHARED linked-worktree
+object DB in the background, outside rebar's write lock, racing concurrent writers and
+corrupting the store (bug 88eb). So auto-gc stays ENABLED (loose growth is still bounded)
+but must never detach. These tests pin the new posture:
 
-  * ``init`` ``--unset``s any stale ``gc.auto`` and sets ``gc.autoDetach=true``,
-    and that migration is idempotent across re-inits (incl. healing a tracker that
-    an older rebar left at ``gc.auto=0``).
-  * The safety invariant holds end-to-end: because every ticket commit is
-    reachable from the ``tickets`` ref, a hostile ``git gc --prune=now`` collects
-    nothing rebar cares about — all tickets remain replayable afterwards.
+  * ``init`` ``--unset``s any stale ``gc.auto`` and sets ``gc.autoDetach=false`` AND
+    ``maintenance.autoDetach=false`` (git >= 2.47 honors the latter; ``gc.autoDetach`` is
+    only its fallback), and that migration is idempotent across re-inits — including
+    healing a tracker an older rebar left at ``gc.auto=0`` OR at ``gc.autoDetach=true``.
+  * The serial-gc safety invariant still holds: a hostile ``git gc --prune=now`` (run
+    SERIALLY, not concurrently) collects nothing rebar cares about — all tickets remain
+    replayable afterwards.
 """
 
 from __future__ import annotations
@@ -46,30 +51,39 @@ def _config(tracker: Path, key: str) -> subprocess.CompletedProcess:
     )
 
 
-# ── migration: gc.auto unset, autoDetach set, idempotent ──────────────────────
-def test_init_unsets_gc_auto_and_sets_autodetach(fresh_repo: Path) -> None:
+# ── migration: gc.auto unset, auto-gc forced FOREGROUND, idempotent ────────────
+def test_init_unsets_gc_auto_and_forces_foreground_maintenance(fresh_repo: Path) -> None:
     rebar.init_repo(repo_root=str(fresh_repo))
     tracker = _tracker(fresh_repo)
-    # gc.auto must be UNSET (so stock gc.auto default governs) — non-zero exit.
+    # gc.auto must be UNSET (so stock gc.auto default governs — repack still fires and
+    # bounds loose-object growth) — non-zero exit.
     assert _config(tracker, "gc.auto").returncode != 0, "init must not force gc.auto"
-    assert _config(tracker, "gc.autoDetach").stdout.strip() == "true"
+    # Auto-gc must never DETACH: a backgrounded repack of the shared object DB races
+    # concurrent writers and corrupts the store (bug 88eb / ADR 0051). BOTH knobs must be
+    # false (git >= 2.47 honors maintenance.autoDetach; gc.autoDetach is only its fallback).
+    assert _config(tracker, "gc.autoDetach").stdout.strip() == "false"
+    assert _config(tracker, "maintenance.autoDetach").stdout.strip() == "false"
 
 
 def test_gc_config_migration_heals_legacy_and_is_idempotent(fresh_repo: Path) -> None:
     rebar.init_repo(repo_root=str(fresh_repo))
     tracker = _tracker(fresh_repo)
-    # Simulate a tracker an OLDER rebar left at gc.auto=0.
+    # Simulate legacy trackers: an OLDER rebar left gc.auto=0; WU-1-era rebar left
+    # gc.autoDetach=true (the DETACH that bug 88eb corrects) and no maintenance.autoDetach.
     subprocess.run(["git", "-C", str(tracker), "config", "gc.auto", "0"], check=True)
-    assert _config(tracker, "gc.auto").stdout.strip() == "0"
+    subprocess.run(["git", "-C", str(tracker), "config", "gc.autoDetach", "true"], check=True)
+    subprocess.run(["git", "-C", str(tracker), "config", "--unset", "maintenance.autoDetach"])
 
-    # Re-init heals it (idempotent migration).
+    # Re-init heals all three (idempotent migration).
     rebar.init_repo(repo_root=str(fresh_repo))
     assert _config(tracker, "gc.auto").returncode != 0, "re-init must unset stale gc.auto"
-    assert _config(tracker, "gc.autoDetach").stdout.strip() == "true"
+    assert _config(tracker, "gc.autoDetach").stdout.strip() == "false", "must un-detach gc"
+    assert _config(tracker, "maintenance.autoDetach").stdout.strip() == "false"
 
     # A third init is a no-op and must not error.
     rebar.init_repo(repo_root=str(fresh_repo))
     assert _config(tracker, "gc.auto").returncode != 0
+    assert _config(tracker, "gc.autoDetach").stdout.strip() == "false"
 
 
 # ── the safety invariant: gc --prune=now loses no reachable ticket data ───────

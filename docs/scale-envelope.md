@@ -71,20 +71,26 @@ edits, transitions, comments, and links each add an event.
 
 ## Git maintenance & gc
 
-rebar **trusts stock `git gc`** on the tickets worktree — it does **not** force
-`gc.auto=0`. Because union recovery (`_store/sync.py`) keeps every ticket commit
-ref-reachable, background gc is safe by construction and only ever collects truly
-unreachable objects. At init (and on every re-init, so older trackers self-heal)
-rebar:
+rebar keeps **stock `git gc`** enabled on the tickets worktree — it does **not** force
+`gc.auto=0` — but runs it **FOREGROUND, never detached**. Because union recovery
+(`_store/sync.py`) keeps every ticket commit ref-reachable, a *serial* gc only ever
+collects truly unreachable objects; but the tickets store is a linked worktree sharing
+the object DB, so a *detached* background gc/maintenance would repack it OUTSIDE the write
+lock and corrupt it under concurrent writes (bug 88eb / ADR 0051). At init (and on every
+re-init, so older trackers self-heal) rebar:
 
-- **`--unset gc.auto`** — sheds any stale `gc.auto=0` an older rebar wrote;
-- **`gc.autoDetach=true`** — a triggered background gc forks and never serializes a
-  foreground ticket write.
+- **`--unset gc.auto`** — sheds any stale `gc.auto=0` (auto-gc stays at git's default
+  threshold, so repack still bounds loose growth);
+- **`gc.autoDetach=false`** + **`maintenance.autoDetach=false`** — a triggered repack runs
+  in the FOREGROUND of the write command that holds the lock (serialized), never detaching
+  into a concurrent background process. Both knobs are set because git ≥ 2.47 honors
+  `maintenance.autoDetach` and treats `gc.autoDetach` as only its fallback.
 
-(Older rebar builds *did* set `gc.auto=0`; that was reversed — see
-`init._migrate_gc_config` and `docs/concurrency.md`.)
+(Older rebar builds set `gc.auto=0`, then WU-1 set `gc.autoDetach=true`; both are healed
+to the foreground posture — see `init._gc_config_unit`, `docs/concurrency.md`, ADR 0051.)
 
-**When to run maintenance yourself.** Background gc handles packing. For the
+**When to run maintenance yourself.** Foreground auto-gc handles packing (at a brief
+global write pause when it fires — ADR 0051). For the
 event-store's own compaction of long/verbose tickets (e.g. large session logs),
 use:
 

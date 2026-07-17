@@ -370,15 +370,29 @@ forced `gc.auto=0`: the reflog was the recovery net, and stock `git gc` could
 expire it. The fix follows the universal peer pattern (git-bug, git-appraise,
 jujutsu): make recovery **non-destructive** so the reflog is never load-bearing.
 
-> **INVARIANT.** After union recovery, every commit rebar cares about is
-> ref-reachable from the `tickets` branch; therefore stock `git gc` is safe by
-> construction — it only ever collects truly *unreachable* objects.
+> **INVARIANT (serial gc only).** After union recovery, every commit rebar cares
+> about is ref-reachable from the `tickets` branch; therefore a **serially-run**
+> `git gc` is safe by construction — it only ever collects truly *unreachable*
+> objects. This says nothing about a **concurrent** gc (see the caveat below).
 
 This is jujutsu's "gc-reachability == recovery guarantee" co-design, achieved for
-free: if commits are never orphaned, gc has nothing unsafe to collect. So rebar no
-longer touches `gc.auto` (init `--unset`s any stale `gc.auto=0` and sets
-`gc.autoDetach=true` so a forked background gc never serializes a foreground
-write); stock background `git gc` reclaims loose/pack growth on its own. The two
+free: if commits are never orphaned, a serial gc has nothing unsafe to collect. So
+rebar no longer needs `gc.auto=0` to protect the reflog.
+
+> **CAVEAT — concurrent background gc is NOT safe (bug 88eb / ADR 0051).** The tickets
+> store is a **linked worktree sharing the object DB**, written concurrently by many
+> processes. A *detached* auto-gc — `gc.autoDetach=true`, or git ≥ 2.47's
+> `git maintenance run --auto` — repacks that shared object DB in the **background,
+> outside the write lock**, racing in-flight writers and corrupting the store
+> (`invalid object` / `Error building trees` → dropped writes; git's own docs warn a
+> concurrent `git gc` "may corrupt the repository"). WU-1's original
+> `gc.autoDetach=true` — chosen precisely so gc "never serializes a foreground write" —
+> was therefore the bug, not the fix. The `gc-config` ensure unit now keeps auto-gc
+> ENABLED but forces it **FOREGROUND** (`--unset gc.auto` + `gc.autoDetach=false` +
+> `maintenance.autoDetach=false`): a triggered repack runs synchronously inside the
+> lock-holding `git commit`, i.e. **serialized under the write lock**, so no writer
+> races it. It reclaims loose/pack growth on its own, at the cost of an occasional
+> brief global write pause when it fires (see Scale-up posture; ADR 0051). The two
 union merges can in principle conflict only on the **shared mutable root files**
 (`.bridge_state/bindings.json`, the `.reconciler-*` lock/gate files), which the
 tickets-branch `.gitattributes` resolves `merge=ours` (they are per-pass derived
@@ -386,10 +400,17 @@ caches the reconciler rebuilds, never ticket events; `merge=union` would line-un
 JSON into invalid JSON). UUID-named ticket-event files never collide. A genuine
 conflict still aborts → keeps local → hints `fsck` (never a hard read failure).
 
-**Scale-up posture.** `git gc`'s default cadence (`gc.auto`, ~6700 loose objects)
-suffices for normal stores; very large/active stores can schedule `git maintenance
-run` out of band. Git's own ~30-day unreachable-reflog window remains as a free
-backstop — but rebar no longer *depends* on it for correctness.
+**Scale-up posture.** Auto-gc's default cadence (`gc.auto`, ~6700 loose objects)
+suffices for normal stores. Because the repack now runs **foreground under the write
+lock** (ADR 0051), each firing is a brief GLOBAL write pause for that store — measured
+~0.16 s at 2k objects, ~2 s at 10k, growing with total store size. It fires roughly
+every ~1,700 commits; reads are never paused. The scaling ceiling is the 60 s
+write-lock budget: a store nearing ~300k+ objects (where a single foreground repack
+could approach that budget) should migrate to **disabled auto-maintenance +
+`git maintenance run --task=gc` serialized under the write lock out of band** (the
+git-upstream / GitLab-Gitaly pattern; the ADR 0051 escape hatch). Git's own ~30-day
+unreachable-reflog window remains a free backstop — but rebar no longer *depends* on it
+for correctness.
 
 ### Read-freshness policy (uniform across CLI, library, and MCP)
 
