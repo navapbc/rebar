@@ -1,0 +1,335 @@
+{
+  "A1": {
+    "advisory_application_rate": 0.05042016806722689,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 119,
+      "blocking_findings": 0,
+      "tickets": 54
+    }
+  },
+  "COH": {
+    "advisory_application_rate": 0.11538461538461539,
+    "blocking_fp_proxy": 0.1,
+    "sample_counts": {
+      "advisory_findings": 104,
+      "blocking_findings": 10,
+      "tickets": 58
+    }
+  },
+  "E1": {
+    "advisory_application_rate": 0.06315789473684211,
+    "blocking_fp_proxy": 0.14285714285714285,
+    "sample_counts": {
+      "advisory_findings": 285,
+      "blocking_findings": 7,
+      "tickets": 104
+    }
+  },
+  "E2": {
+    "advisory_application_rate": 0.10330578512396695,
+    "blocking_fp_proxy": 0.0,
+    "sample_counts": {
+      "advisory_findings": 242,
+      "blocking_findings": 24,
+      "tickets": 101
+    }
+  },
+  "E3": {
+    "advisory_application_rate": 0.08602150537634409,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 93,
+      "blocking_findings": 0,
+      "tickets": 62
+    }
+  },
+  "E4": {
+    "advisory_application_rate": 0.08741258741258741,
+    "blocking_fp_proxy": 0.02631578947368421,
+    "sample_counts": {
+      "advisory_findings": 286,
+      "blocking_findings": 38,
+      "tickets": 77
+    }
+  },
+  "E5": {
+    "advisory_application_rate": 0.11464968152866242,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 157,
+      "blocking_findings": 0,
+      "tickets": 60
+    }
+  },
+  "E6": {
+    "advisory_application_rate": 0.10454545454545454,
+    "blocking_fp_proxy": 0.023255813953488372,
+    "sample_counts": {
+      "advisory_findings": 220,
+      "blocking_findings": 43,
+      "tickets": 93
+    }
+  },
+  "F1": {
+    "advisory_application_rate": 0.1016949152542373,
+    "blocking_fp_proxy": 0.038461538461538464,
+    "sample_counts": {
+      "advisory_findings": 118,
+      "blocking_findings": 52,
+      "tickets": 102
+    }
+  },
+  "F4": {
+    "advisory_application_rate": 0.15384615384615385,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 13,
+      "blocking_findings": 0,
+      "tickets": 22
+    }
+  },
+  "G1G2": {
+    "advisory_application_rate": 0.11241217798594848,
+    "blocking_fp_proxy": 0.022727272727272728,
+    "sample_counts": {
+      "advisory_findings": 427,
+      "blocking_findings": 44,
+      "tickets": 90
+    }
+  },
+  "G3": {
+    "advisory_application_rate": 0.0,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 68,
+      "blocking_findings": 0,
+      "tickets": 12
+    }
+  },
+  "G4": {
+    "advisory_application_rate": 0.00980392156862745,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 102,
+      "blocking_findings": 0,
+      "tickets": 13
+    }
+  },
+  "G5": {
+    "advisory_application_rate": 0.07142857142857142,
+    "blocking_fp_proxy": 0.0,
+    "sample_counts": {
+      "advisory_findings": 28,
+      "blocking_findings": 1,
+      "tickets": 25
+    }
+  },
+  "G6": {
+    "advisory_application_rate": 0.057432432432432436,
+    "blocking_fp_proxy": 0.041666666666666664,
+    "sample_counts": {
+      "advisory_findings": 296,
+      "blocking_findings": 72,
+      "tickets": 110
+    }
+  },
+  "G7": {
+    "advisory_application_rate": 0.36363636363636365,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 11,
+      "blocking_findings": 0,
+      "tickets": 8
+    }
+  },
+  "ISF": {
+    "advisory_application_rate": 0.5,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 2,
+      "blocking_findings": 0,
+      "tickets": 5
+    }
+  },
+  "P5": {
+    "advisory_application_rate": 0.1111111111111111,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 9,
+      "blocking_findings": 0,
+      "tickets": 9
+    }
+  },
+  "P6": {
+    "advisory_application_rate": 0.10843373493975904,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 83,
+      "blocking_findings": 0,
+      "tickets": 82
+    }
+  },
+  "P7": {
+    "advisory_application_rate": 0.25,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 4,
+      "blocking_findings": 0,
+      "tickets": 4
+    }
+  },
+  "P9": {
+    "advisory_application_rate": 0.09302325581395349,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 43,
+      "blocking_findings": 0,
+      "tickets": 42
+    }
+  },
+  "T1": {
+    "advisory_application_rate": 0.06334841628959276,
+    "blocking_fp_proxy": 0.034482758620689655,
+    "sample_counts": {
+      "advisory_findings": 221,
+      "blocking_findings": 29,
+      "tickets": 86
+    }
+  },
+  "T10": {
+    "advisory_application_rate": 0.013513513513513514,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 74,
+      "blocking_findings": 0,
+      "tickets": 12
+    }
+  },
+  "T11": {
+    "advisory_application_rate": 0.21311475409836064,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 61,
+      "blocking_findings": 0,
+      "tickets": 22
+    }
+  },
+  "T12": {
+    "advisory_application_rate": 0.0,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 23,
+      "blocking_findings": 0,
+      "tickets": 11
+    }
+  },
+  "T2": {
+    "advisory_application_rate": 0.025,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 40,
+      "blocking_findings": 0,
+      "tickets": 19
+    }
+  },
+  "T3": {
+    "advisory_application_rate": 0.03125,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 224,
+      "blocking_findings": 0,
+      "tickets": 57
+    }
+  },
+  "T4": {
+    "advisory_application_rate": 0.0759493670886076,
+    "blocking_fp_proxy": 0.0,
+    "sample_counts": {
+      "advisory_findings": 79,
+      "blocking_findings": 2,
+      "tickets": 64
+    }
+  },
+  "T5a": {
+    "advisory_application_rate": 0.1111111111111111,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 18,
+      "blocking_findings": 0,
+      "tickets": 9
+    }
+  },
+  "T5b": {
+    "advisory_application_rate": 0.056179775280898875,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 178,
+      "blocking_findings": 0,
+      "tickets": 54
+    }
+  },
+  "T5c": {
+    "advisory_application_rate": 0.0,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 81,
+      "blocking_findings": 0,
+      "tickets": 15
+    }
+  },
+  "T5d": {
+    "advisory_application_rate": 0.0,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 4,
+      "blocking_findings": 0,
+      "tickets": 1
+    }
+  },
+  "T5e": {
+    "advisory_application_rate": 0.06557377049180328,
+    "blocking_fp_proxy": 0.5,
+    "sample_counts": {
+      "advisory_findings": 122,
+      "blocking_findings": 2,
+      "tickets": 78
+    }
+  },
+  "T6": {
+    "advisory_application_rate": 0.07142857142857142,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 42,
+      "blocking_findings": 0,
+      "tickets": 18
+    }
+  },
+  "T7": {
+    "advisory_application_rate": 0.125,
+    "blocking_fp_proxy": 0.0,
+    "sample_counts": {
+      "advisory_findings": 56,
+      "blocking_findings": 1,
+      "tickets": 49
+    }
+  },
+  "T8": {
+    "advisory_application_rate": 0.10061601642710473,
+    "blocking_fp_proxy": 0.03508771929824561,
+    "sample_counts": {
+      "advisory_findings": 487,
+      "blocking_findings": 57,
+      "tickets": 81
+    }
+  },
+  "T9": {
+    "advisory_application_rate": 0.10067114093959731,
+    "blocking_fp_proxy": null,
+    "sample_counts": {
+      "advisory_findings": 149,
+      "blocking_findings": 0,
+      "tickets": 59
+    }
+  }
+}

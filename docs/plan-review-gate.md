@@ -567,6 +567,29 @@ from a chunk where other criteria were co-resident rather than being reviewed in
 does not stamp it — has **no `cohort` key**; offline analysis MUST treat a **missing `cohort` as
 "unknown"** (skip it), never as an empty/isolated set.
 
+## Blocking-FP-proxy demotion (dogfood alarm)
+
+The gate's own false-positive drift is watched offline by the R7 gate-eval instrumentation
+(`docs/experiments/plan-review-gate/harnesses/gate_eval_instrumentation.py`, epic 6982). It
+joins each reviewed ticket's outcome (post-claim edits, reopens, force-closes) to that ticket's
+persisted `REVIEW_RESULT` sidecar findings and emits, per criterion, a trailing
+**`blocking_fp_proxy`** = the fraction of that criterion's blocking findings whose ticket was
+subsequently force-closed or reopened (a conservative lower-bound proxy for "adjudicated
+not-block-worthy"; force-close can also happen for orthogonal operator-attestation reasons, so
+this under-counts rather than over-counts).
+
+**Alarm rule.** When a criterion's trailing `blocking_fp_proxy` **exceeds 10%** (the Tricorder
+trust cliff), a human reviews that criterion's recent blocks and, if they are genuinely
+not-block-worthy, **demotes it from blocking to advisory** via an ordinary
+`criteria_routing.json` change (`default_posture: "advisory"`). This is dogfood monitoring, not
+an automatic action — the >10% figure triggers review, not an auto-demote.
+
+**Precedent.** The demotion-on-FP-evidence precedent is **T5e**, demoted to advisory in
+calibration-3 (task relishable-ammonitic-hoverfly). (T3/T10 are a *different* precedent —
+criteria kept non-blocking from the start; they were never demoted, so they are not the
+demotion precedent.) The companion coaching lever for advisory *latency* (as opposed to
+blocking FPs) is the R6 [Advisory triage](#advisory-triage-apply-now-vs-defer) stage.
+
 ## The CI rigor signal
 
 `rebar verify-signature <ticket>` certifies the attestation; a CI process treats a
