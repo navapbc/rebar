@@ -79,19 +79,22 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
 # flags, so its enforcement posture and grandfather boundary come from HERE.
 #
-# require_authenticated: keep OFF until write-signing is actually rolled out (self-identity
-# + identity.signing_key configured on the write paths). While off the merge-gate is
-# advisory — it re-verifies and reports every in-scope event's authorship but exits 0, so
-# it cannot block a landing. The store currently holds 0 signed events, so turning this on
-# before signing is live would fail every push (bug 27ae / sanguine-shockproof-queenant).
-# Flip to true in the SAME change that enables signing. Env override:
-# REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
-require_authenticated = false
+# require_authenticated: ENFORCEMENT ON (epic dc09 / pristine-horrible-whapuku, story 8d39).
+# Write-signing is rolled out across ALL writers — local (identity.signing_key), CI
+# (reconcile-bridge REBAR_BOT_SIGNING_KEY), and Gerrit-side (review-bot) all produce signed,
+# `verified` events; the transactional write path signs too (bug 0ba4). Confirmed by the
+# pre-flip validation: no active process writes unsigned non-SNAPSHOT in-scope events. With
+# this ON the merge-gate FAILS on any ENFORCED in-scope event that is not `verified`, so a
+# forged / unsigned / wrong-key write cannot land on `main`. Rollback = set back to `false` in
+# a single Gerrit change (no data cleanup). Env override: REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
+require_authenticated = true
 
 # Grandfather boundary — a git ref on the `tickets` tracker branch. Only events whose
 # introducing commit is this ref or a descendant are ENFORCED; everything at/before it is
 # reported but never fails the gate. Pinned to the tracker HEAD at the rollout-prep point
-# so that when require_authenticated is later flipped on, all pre-signing historical events
-# are grandfathered and only newly-signed writes are enforced. Env override:
-# REBAR_IDENTITY_ENFORCE_SINCE.
-enforce_since = "ce3f8bcbe13d37e93a0758f7f73cb3ebeac3b043"
+# so that when require_authenticated is flipped on, all pre-signing historical events are
+# grandfathered and only newly-signed writes are enforced. Pinned (story 8d91) to the
+# enforcement-cutover marker: an existing gate-exempt session_log commit chosen AFTER the
+# pre-flip validation confirmed every active writer signs, so ALL pre-signing historical +
+# mixed-build unsigned events are grandfathered. Env override: REBAR_IDENTITY_ENFORCE_SINCE.
+enforce_since = "8dcef776c3dd9e68935b74b82137e1ffd8f04f10"
