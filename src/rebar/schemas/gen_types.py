@@ -119,6 +119,13 @@ class _Generator:
         if "enum" in node:
             self._used_typing.add("Literal")
             return "Literal[" + ", ".join(repr(v) for v in node["enum"]) + "]"
+        # A JSON-Schema `const` pins the value to a single literal (e.g.
+        # `{"const": true}` on `creation_channel_inferred` -> `Literal[True]`).
+        # `enum` handles a set of values; `const` is the one-value case, which
+        # otherwise falls through to `Any`.
+        if "const" in node:
+            self._used_typing.add("Literal")
+            return f"Literal[{node['const']!r}]"
 
         jtype = node.get("type")
         if isinstance(jtype, list):

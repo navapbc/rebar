@@ -43,7 +43,7 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 
 | TYPE | Written by | Effect on replayed state |
 |------|-----------|--------------------------|
-| `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`, and MAY carry an optional `status` (the reducer defaults it to `open` when absent). A non-`open` genesis `status` is produced ONLY by the `rebar idea` command/`create_idea` MCP tool/`rebar.idea(...)` library entry — which emit a single CREATE with `status=idea` for an `epic`, so an idea is born in `idea` (never momentarily `open`/claimable) with no intervening `STATUS` event. There is no general `create --status` flag. Exactly one CREATE per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see [The session_log ticket type](#the-session_log-ticket-type) below. |
+| `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`, an UNCONDITIONAL `creation_channel` (the ingress that produced this genesis — one of `cli`/`mcp`/`python`/`jira`/`import`; see "Creation-channel provenance" below), and MAY carry an optional `status` (the reducer defaults it to `open` when absent). A non-`open` genesis `status` is produced ONLY by the `rebar idea` command/`create_idea` MCP tool/`rebar.idea(...)` library entry — which emit a single CREATE with `status=idea` for an `epic`, so an idea is born in `idea` (never momentarily `open`/claimable) with no intervening `STATUS` event. There is no general `create --status` flag. Exactly one CREATE per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see [The session_log ticket type](#the-session_log-ticket-type) below. |
 | `STATUS` | `_commands/txn.py` (transition/claim) | Sets `status`; carries `current_status` (the optimistic-concurrency expectation) and `parent_status_uuid` (the prior STATUS uuid) for fork resolution. |
 | `EDIT` | `ticket-edit.sh`, `_commands/txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/parent) into state (last-writer-by-replay-order). **Tags are no longer mutated via `EDIT` (P2.3)** — historical `EDIT.fields.tags` still replays as the base, but no upgraded writer emits it; use `TAG_DELTA`. |
 | `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
@@ -191,6 +191,53 @@ post-feature `SNAPSHOT` carries `claimed_session` in its `compiled_state` and re
 it verbatim; a pre-feature snapshot lacks the key and restores to an explicit `None`
 (the `process_snapshot` guard), so a snapshot-served state and a fresh-replay state
 agree. The key never enters the Jira reconciler (local reducer-state only).
+
+## Creation-channel provenance (`creation_channel`)
+
+Every genesis `CREATE` records **which public interface produced it** as an additive,
+immutable `data["creation_channel"]` (epic jira-reb-977, story 6fe2). Unlike the
+present-only `source_*` provenance keys, it is stamped **unconditionally** on the CREATE
+`data`, and the reducer (`_processors.py:process_create`) projects it into compiled state
+as `state["creation_channel"]` (enumerated in `ticket_state.schema.json` + `rebar.types`).
+
+**Closed six-value enum** (`common.schema.json#/$defs/creation_channel`, mirrored by the
+runtime `rebar.reducer._version.CREATION_CHANNELS`; a contract test pins the two in sync):
+
+| value | meaning |
+|-------|---------|
+| `cli` | the `rebar` CLI (`create` / `idea` / `identity create` / `session-log`) |
+| `mcp` | the MCP server's write tools (`create_ticket` / `create_idea` / `create_identity` / `log_session`) |
+| `python` | a direct `rebar.*` library call (the default at the library boundary) |
+| `jira` | Jira-inbound attribution — reserved for a later story (not yet emitted) |
+| `import` | NDJSON `rebar import` — reserved for a later story (not yet emitted) |
+| `unknown` | **projection-only fallback**: a legacy `CREATE` that carried no field reduces to `unknown`. NEVER a valid live-write value — `validate_creation_channel` rejects it, so no writer may stamp it |
+
+**Default-per-interface.** The three local ingresses all converge on
+`composer.create_core`, which now REQUIRES the channel (keyword-only, no default) so each
+converging caller must declare it: the CLI helpers pass `"cli"`, the MCP adapter threads
+`"mcp"` through a private `_creation_channel` keyword on the `rebar.*` facade (kept out of
+the documented public signature), and a direct library call takes the facade's `"python"`
+default. `create_identity_core` / `ensure_identity_for` carry a `creation_channel="python"`
+default that `identity_cli` overrides to `"cli"` (a later Jira story supplies `"jira"` at
+the inbound boundary).
+
+**Immutability.** `creation_channel` (and the later-story marker
+`creation_channel_inferred`, a `{"const": true}` flag) are in
+`_processors.py:_IMMUTABLE_EDIT_FIELDS`, so `process_edit` skips them — an `EDIT` can never
+overwrite genesis provenance. Other specialized processors never assign these fields.
+
+**How it differs from actor/environment/`source_*` provenance.** `author`/`author_id` and
+`env_id` record **who** wrote the event and in **which environment**; `source_*` records
+**where an imported ticket came from** in a foreign store. `creation_channel` records
+**which of rebar's own interfaces** the genesis write came through — an orthogonal axis
+that is present on every ticket, not only imported ones.
+
+**Forward/back-compat + compaction.** The key is additive: an older clone's reducer simply
+projects `unknown` for a CREATE that predates the field, and ignores nothing (it reads
+`data` generically). A post-feature `SNAPSHOT` carries `creation_channel` in its
+`compiled_state` and restores it verbatim; a pre-feature snapshot lacks it and reduces to
+`unknown` on fresh replay. The key never enters the Jira reconciler (local reducer-state
+only).
 
 ## Compaction (I9)
 

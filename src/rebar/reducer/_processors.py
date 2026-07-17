@@ -183,6 +183,14 @@ def process_create(
         _src_val = data.get(_src_key)
         if _src_val is not None:
             state[_src_key] = _src_val
+    # Creation-channel provenance (epic jira-reb-977, story 6fe2): the public ingress
+    # (cli/mcp/python/jira/import) that produced this genesis CREATE. Projected
+    # UNCONDITIONALLY — a post-feature CREATE always carries it; a LEGACY CREATE with no
+    # field provisionally projects "unknown" (the projection-only fallback). We do NOT
+    # set `creation_channel_inferred` here (a later story owns legacy inference); this is
+    # a provisional projection only. `process_edit` guards both keys against overwrite so
+    # genesis provenance is immutable.
+    state["creation_channel"] = data.get("creation_channel", "unknown")
     # Identity entity payload (epic gnu-whale-ichor): an `identity` ticket's CREATE
     # carries email / mappings / keys. Surface them additively — present only when the
     # CREATE carried them, so a non-identity ticket's state is byte-for-byte unchanged
@@ -482,16 +490,28 @@ def process_revert(state: dict, event: dict, data: dict, event_uuid: str) -> Non
             state["status"] = "open"
 
 
+# Genesis-provenance fields an EDIT event may NEVER overwrite (story 6fe2): the
+# creation channel and its (later-story) inference marker are stamped once at CREATE
+# and are immutable, so `process_edit` skips them even if a (buggy/malicious) EDIT
+# names them. Other specialized processors never assign these fields.
+_IMMUTABLE_EDIT_FIELDS = frozenset({"creation_channel", "creation_channel_inferred"})
+
+
 def process_edit(state: dict, data: dict) -> None:
     """Apply an EDIT event: merge data.fields into state (last-writer-wins).
 
     Tags stored as comma-separated string in event; convert to list.
     If the value is already a list (e.g. from a SNAPSHOT), keep it.
     Unknown field names (not present in state) are silently ignored.
+
+    Immutable genesis provenance (``_IMMUTABLE_EDIT_FIELDS``) is skipped so an EDIT can
+    never overwrite the ``creation_channel`` / ``creation_channel_inferred`` set at CREATE.
     """
     fields = data.get("fields", {})
     for field_name, new_value in fields.items():
         if field_name not in state:
+            continue
+        if field_name in _IMMUTABLE_EDIT_FIELDS:
             continue
         if field_name == "tags":
             if isinstance(new_value, list):

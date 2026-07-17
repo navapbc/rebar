@@ -83,6 +83,7 @@ def create_core(
     status: str | None = None,
     identity: dict | None = None,
     repo_root=None,
+    creation_channel: str,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
 
@@ -98,8 +99,20 @@ def create_core(
     copied into the event data when non-None. The new ticket always gets a fresh
     local id and a fresh HLC timestamp; provenance is additive metadata, never a
     foreign-timestamp injection.
+
+    ``creation_channel`` (epic jira-reb-977, story 6fe2): the public ingress that
+    produced this genesis CREATE — one of ``cli`` / ``mcp`` / ``python`` / ``jira`` /
+    ``import`` (``unknown`` is projection-only and rejected here). It is REQUIRED
+    (keyword-only, no default) so every converging caller of this internal seam must
+    declare its channel; it is validated via
+    :func:`rebar.reducer._version.validate_creation_channel` and stored UNCONDITIONALLY
+    into the CREATE ``data`` (unlike the present-only ``source_*`` fields), then
+    projected immutably into compiled ticket state.
     """
     from rebar.reducer import reduce_ticket
+    from rebar.reducer._version import validate_creation_channel
+
+    validate_creation_channel(creation_channel)
 
     tracker = tracker_dir(repo_root)
 
@@ -159,6 +172,10 @@ def create_core(
         "tags": tags_list,
         "priority": int(prio),
         "id": ticket_id,
+        # Creation-channel provenance (story 6fe2): stamped UNCONDITIONALLY (unlike the
+        # present-only source_*/identity fields) so every genesis CREATE records which
+        # interface produced it; the reducer projects it immutably into ticket state.
+        "creation_channel": creation_channel,
     }
     if assignee:
         data["assignee"] = assignee
@@ -259,6 +276,7 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             description=description,
             tags=tags,
             repo_root=repo_root,
+            creation_channel="cli",
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:

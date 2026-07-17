@@ -68,6 +68,29 @@ Structured via `--output json`:
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.
 
+### `creation_channel` in `ticket_state`
+
+`show` / `list` / `search` / `ready` carry an optional **`creation_channel`** field on
+every ticket (epic jira-reb-977, story 6fe2): the public interface that produced the
+ticket's genesis `CREATE`, from a closed six-value enum
+(`common.schema.json#/$defs/creation_channel`):
+
+- **`cli`** — the `rebar` CLI; **`mcp`** — the MCP server's write tools; **`python`** — a
+  direct `rebar.*` library call (the default at the library boundary).
+- **`jira`** (Jira-inbound) and **`import`** (NDJSON `rebar import`) are reserved for later
+  stories — the enum lists them but nothing emits them yet.
+- **`unknown`** is a **projection-only fallback**: a legacy ticket whose `CREATE` predates
+  the field reduces to `unknown`. It is never a valid live-write value (the write path's
+  `validate_creation_channel` rejects it).
+
+The field is **immutable** — stamped once at `CREATE` and never overwritten by an `EDIT`.
+A companion `creation_channel_inferred` (`{"const": true}`) marks a later-story inferred
+channel and is otherwise absent. `creation_channel` is orthogonal to actor/environment
+provenance (`author`/`env_id` = who/where) and to `source_*` (where an imported ticket came
+from): it records **which of rebar's own interfaces** the create came through, and is
+present on every ticket rather than only imported ones. The generated `rebar.types` names
+it `TicketState.creation_channel: NotRequired[CreationChannel]`.
+
 ## `error_envelope` — the machine-readable failure channel
 
 When a command **fails** while `--output json` is requested, it emits an
