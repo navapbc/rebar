@@ -124,14 +124,15 @@ actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-
 	elif [ -x "$(LOCAL_BIN)/actionlint" ]; then \
 		echo "actionlint: using $(LOCAL_BIN)/actionlint"; \
 	else \
+		set -e; \
 		echo "actionlint not found — installing pinned v$(ACTIONLINT_VERSION) into $(LOCAL_BIN)"; \
 		mkdir -p "$(LOCAL_BIN)"; \
 		tmp="$$(mktemp -d)"; \
+		trap 'rm -rf "$$tmp"' EXIT; \
 		url="https://github.com/rhysd/actionlint/releases/download/v$(ACTIONLINT_VERSION)/actionlint_$(ACTIONLINT_VERSION)_linux_amd64.tar.gz"; \
-		curl -fsSL "$$url" -o "$$tmp/actionlint.tar.gz"; \
+		curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL "$$url" -o "$$tmp/actionlint.tar.gz"; \
 		echo "$(ACTIONLINT_SHA256_LINUX_AMD64)  $$tmp/actionlint.tar.gz" | sha256sum -c --strict; \
 		tar -C "$(LOCAL_BIN)" -xzf "$$tmp/actionlint.tar.gz" actionlint; \
-		rm -rf "$$tmp"; \
 		echo "actionlint: installed $(LOCAL_BIN)/actionlint"; \
 	fi
 
