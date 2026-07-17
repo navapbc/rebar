@@ -229,3 +229,15 @@ def test_cli_output_advertiser_real_output_validates(cmd: str, rebar_repo: Path)
                 validator.validate(item)
         else:
             validator.validate(payload)
+
+
+def test_output_schemas_pin_creation_channel_trust_boundary() -> None:
+    """The public output-schema docs MUST pin the creation-channel diagnostic trust
+    boundary (epic jira-reb-977): ``creation_channel_inferred`` is heuristic AUDIT
+    metadata, NOT a security attestation. Pinned here so the distinction cannot silently
+    drift out of docs/output-schemas.md."""
+    text = (Path(__file__).resolve().parents[3] / "docs" / "output-schemas.md").read_text()
+    lowered = text.lower()
+    assert "creation_channel_inferred" in text
+    assert "audit" in lowered, "trust-boundary must call the marker AUDIT metadata"
+    assert "security attestation" in lowered, "trust-boundary must deny a security attestation"
