@@ -159,6 +159,19 @@ KNOWN_EVENT_TYPES = frozenset(
 #                           no channel; it is NEVER a valid live-write value.
 CREATION_CHANNELS = frozenset({"cli", "mcp", "python", "jira", "import", "unknown"})
 
+# ── Legacy-Jira signature (story e622, epic jira-reb-977) ───────────────────────
+# The (author, env_id) an inbound Jira CREATE has carried since before the
+# `creation_channel` feature: the reconciler stamps both as the literal
+# "reconciler" when REBAR_AUTHOR / REBAR_ENV_ID are unset (see
+# inbound_translate._event_meta). These constants are the SINGLE SOURCE OF TRUTH
+# shared by the writer (that default) and the reducer's legacy-Jira inference
+# (`_project_legacy_creation_channel`), so the signature can never drift between
+# the two sides. They are NOT part of the creation_channel vocabulary — they are
+# the envelope fingerprint used to infer a `jira` origin for a channel-less
+# legacy CREATE.
+LEGACY_JIRA_AUTHOR = "reconciler"
+LEGACY_JIRA_ENV_ID = "reconciler"
+
 
 def validate_creation_channel(value: str) -> str:
     """Return ``value`` iff it is a valid LIVE-WRITE creation channel, else raise.

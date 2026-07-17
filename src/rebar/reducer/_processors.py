@@ -12,6 +12,7 @@ import logging
 import os
 
 from ._managed_refs import add_managed_ref, seed_managed_refs_from_current
+from ._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,12 @@ def process_create(
     # a provisional projection only. `process_edit` guards both keys against overwrite so
     # genesis provenance is immutable.
     state["creation_channel"] = data.get("creation_channel", "unknown")
+    # Legacy-Jira inference (story e622): a CREATE that carried NO recorded channel
+    # provisionally projected "unknown" above. When (and only when) the envelope bears
+    # the legacy-Jira signature, infer a `jira` origin and mark it heuristic. A CREATE
+    # that recorded a real channel is left untouched (guarded on the raw field).
+    if data.get("creation_channel") is None:
+        _project_legacy_creation_channel(state)
     # Identity entity payload (epic gnu-whale-ichor): an `identity` ticket's CREATE
     # carries email / mappings / keys. Surface them additively — present only when the
     # CREATE carried them, so a non-identity ticket's state is byte-for-byte unchanged
@@ -205,6 +212,38 @@ def process_create(
     # identity keeps the seeded empty keyring.
     _bootstrap_genesis_keyring(state, f"{event.get('timestamp')}-{event.get('uuid')}")
     return None
+
+
+def _project_legacy_creation_channel(state: dict) -> None:
+    """Infer a `jira` origin for a channel-less legacy CREATE (story e622).
+
+    A CREATE written before the `creation_channel` feature carries no recorded
+    channel and provisionally projects ``"unknown"``. This heuristic upgrades that
+    projection to ``"jira"`` — and flags it as inferred — ONLY when the envelope bears
+    the exact legacy-Jira signature: a ``jira-`` ticket id AND the reconciler's default
+    author AND its default env_id. On every near-miss the channel stays ``"unknown"``
+    and NO inferred marker is set.
+
+    Trust boundary: this is heuristic AUDIT metadata, not a security attestation. It
+    reads ONLY the immutable genesis envelope (ticket_id / author / env_id) — never
+    tags, bindings, source_*, comments, or any other mutable state — so it yields zero
+    false positives (nothing a later edit could forge into a spurious `jira`).
+
+    Pure ``(state) -> None`` by design: the SNAPSHOT-fold path a later story adds reuses
+    this exact state-shaped interface (it has ``ticket_id``/``author``/``env_id`` folded
+    the same way), so the inference lives in one place.
+    """
+    ticket_id = state.get("ticket_id")
+    if (
+        isinstance(ticket_id, str)
+        and ticket_id.startswith("jira-")
+        and state.get("author") == LEGACY_JIRA_AUTHOR
+        and state.get("env_id") == LEGACY_JIRA_ENV_ID
+    ):
+        state["creation_channel"] = "jira"
+        state["creation_channel_inferred"] = True
+    else:
+        state["creation_channel"] = "unknown"
 
 
 def _fold_claimed_session(state: dict, data: dict) -> None:

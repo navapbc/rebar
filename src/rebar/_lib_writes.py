@@ -231,14 +231,24 @@ def ensure_identity_for(
     display_name: str,
     *,
     repo_root=None,
+    creation_channel: str = "python",
 ) -> str:
     """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
     its id (2f13). Idempotent: reuses an existing mapping (upgrading a placeholder's title
     in place when it is still a ghost), else mints a ``placeholder`` identity. Never raises
-    on a lookup problem — see :func:`rebar._commands.identity.ensure_identity_for`."""
+    on a lookup problem — see :func:`rebar._commands.identity.ensure_identity_for`.
+
+    ``creation_channel`` (story e622) is threaded to a minted placeholder's genesis CREATE;
+    it defaults to ``"python"`` and the Jira inbound path passes ``"jira"``."""
     from rebar._commands import identity as _identity
 
-    return _identity.ensure_identity_for(provider, external_id, display_name, repo_root=repo_root)
+    return _identity.ensure_identity_for(
+        provider,
+        external_id,
+        display_name,
+        repo_root=repo_root,
+        creation_channel=creation_channel,
+    )
 
 
 def create_placeholder(

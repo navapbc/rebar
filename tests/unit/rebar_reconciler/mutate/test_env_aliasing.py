@@ -50,3 +50,20 @@ def test_rebar_env_reads_rebar_only(modname, filename, monkeypatch):
     # REBAR_* is honored.
     monkeypatch.setenv("REBAR_WS1ALIAS", "from-rebar")
     assert mod._rebar_env("WS1ALIAS", "fallback-default") == "from-rebar"
+
+
+def test_inbound_translate_event_meta_uses_shared_legacy_constants(monkeypatch):
+    """Spec-loaded inbound_translate resolves the absolute ``rebar.reducer._version``
+    import for its author/env defaults — no sibling reconciler-package context needed —
+    and those defaults ARE the shared legacy-Jira constants (story e622)."""
+    from rebar.reducer._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
+
+    assert LEGACY_JIRA_AUTHOR == "reconciler"
+    assert LEGACY_JIRA_ENV_ID == "reconciler"
+
+    mod = _load("inbound_translate", "inbound_translate.py")
+    monkeypatch.delenv("REBAR_AUTHOR", raising=False)
+    monkeypatch.delenv("REBAR_ENV_ID", raising=False)
+    _ts, _uuid, env_id, author = mod._event_meta()
+    assert env_id == LEGACY_JIRA_ENV_ID
+    assert author == LEGACY_JIRA_AUTHOR

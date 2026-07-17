@@ -208,8 +208,8 @@ runtime `rebar.reducer._version.CREATION_CHANNELS`; a contract test pins the two
 | `cli` | the `rebar` CLI (`create` / `idea` / `identity create` / `session-log`) |
 | `mcp` | the MCP server's write tools (`create_ticket` / `create_idea` / `create_identity` / `log_session`) |
 | `python` | a direct `rebar.*` library call (the default at the library boundary) |
-| `jira` | Jira-inbound attribution — reserved for a later story (not yet emitted) |
-| `import` | NDJSON `rebar import` — reserved for a later story (not yet emitted) |
+| `jira` | Jira-inbound attribution: the reconciler's inbound materialization path stamps `jira` on the CREATE it writes directly for an imported Jira issue (and on a Jira-minted placeholder assignee identity). Story e622. |
+| `import` | NDJSON `rebar import`: the fresh LOCAL ticket an import creates records `import` — regardless of the channel the exported source record carried (that origin lives on in `source_*`, not in `creation_channel`). Story e622. |
 | `unknown` | **projection-only fallback**: a legacy `CREATE` that carried no field reduces to `unknown`. NEVER a valid live-write value — `validate_creation_channel` rejects it, so no writer may stamp it |
 
 **Default-per-interface.** The three local ingresses all converge on
@@ -218,8 +218,43 @@ converging caller must declare it: the CLI helpers pass `"cli"`, the MCP adapter
 `"mcp"` through a private `_creation_channel` keyword on the `rebar.*` facade (kept out of
 the documented public signature), and a direct library call takes the facade's `"python"`
 default. `create_identity_core` / `ensure_identity_for` carry a `creation_channel="python"`
-default that `identity_cli` overrides to `"cli"` (a later Jira story supplies `"jira"` at
-the inbound boundary).
+default that `identity_cli` overrides to `"cli"`, and the reconciler's inbound assignee
+mint overrides to `"jira"` (story e622).
+
+**Jira-inbound + import are RECORDED, not inferred (story e622).** Two writers bypass
+`composer.create_core` and stamp the channel on the CREATE `data` themselves:
+
+- **Inbound Jira.** `apply_inbound_records._inbound_create_write_create_event` assembles
+  the CREATE `data` directly and writes it via `_write_event_file`; it now sets
+  `data["creation_channel"] = validate_creation_channel("jira")` (validated against the
+  same closed vocabulary `create_core` enforces). Because this is a real recorded value,
+  it carries **no** `creation_channel_inferred` marker.
+- **NDJSON import.** `_io/_provenance.create_kwargs` pins `_creation_channel="import"`, so
+  the imported ticket's genesis CREATE records `import`. This is deliberately independent
+  of the exported source record's own channel — an imported ticket is a *fresh local
+  creation through the import ingress*; the foreign store's identity is preserved only as
+  `source_*`, never copied into `creation_channel`.
+
+**Legacy-Jira inference (`creation_channel_inferred`).** A Jira-originated CREATE written
+*before* this feature carried no channel and would provisionally project `unknown`. The
+reducer's `_processors._project_legacy_creation_channel` (called at the end of
+`process_create`, and only when the CREATE recorded **no** channel) upgrades that
+projection to `jira` — and sets `state["creation_channel_inferred"] = True` — **only** when
+the genesis envelope bears the exact legacy-Jira signature: the ticket id starts with
+`jira-` **and** the author equals `LEGACY_JIRA_AUTHOR` **and** the env_id equals
+`LEGACY_JIRA_ENV_ID` (both `"reconciler"`, defined once in `reducer/_version.py` and reused
+by the reconciler writer so the signature can never drift). On **any** near-miss — a
+non-`jira-` id, a wrong/missing author, or a wrong/missing env_id — the channel stays
+`unknown` and no marker is set. A post-feature CREATE that recorded a real channel is never
+touched.
+
+> **Trust boundary — `creation_channel_inferred` is heuristic AUDIT metadata, NOT a
+> security attestation.** A recorded channel (`jira`/`import`/`cli`/`mcp`/`python`) reflects
+> the actual ingress; an *inferred* `jira` is a best-effort backfill for pre-feature
+> history. The inference reads ONLY the immutable genesis envelope (ticket_id / author /
+> env_id) — never tags, bindings, `source_*`, comments, or any mutable state — so it yields
+> zero false positives, but it is not a cryptographic proof of origin and must not be relied
+> on as one. When origin trust matters, use the signed-attestation machinery, not this flag.
 
 **Immutability.** `creation_channel` (and the later-story marker
 `creation_channel_inferred`, a `{"const": true}` flag) are in
