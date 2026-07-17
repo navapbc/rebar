@@ -77,19 +77,33 @@ ticket's genesis `CREATE`, from a closed six-value enum
 
 - **`cli`** — the `rebar` CLI; **`mcp`** — the MCP server's write tools; **`python`** — a
   direct `rebar.*` library call (the default at the library boundary).
-- **`jira`** (Jira-inbound) and **`import`** (NDJSON `rebar import`) are reserved for later
-  stories — the enum lists them but nothing emits them yet.
+- **`jira`** (Jira-inbound) and **`import`** (NDJSON `rebar import`) are now emitted
+  (story e622): the reconciler stamps `jira` on the CREATE it writes for an inbound Jira
+  issue, and `rebar import` stamps `import` on the fresh local ticket. An imported ticket
+  reports `import` even when the exported source record carried a different channel — the
+  source's origin is preserved as `source_*`, never copied into `creation_channel`.
 - **`unknown`** is a **projection-only fallback**: a legacy ticket whose `CREATE` predates
   the field reduces to `unknown`. It is never a valid live-write value (the write path's
   `validate_creation_channel` rejects it).
 
 The field is **immutable** — stamped once at `CREATE` and never overwritten by an `EDIT`.
-A companion `creation_channel_inferred` (`{"const": true}`) marks a later-story inferred
-channel and is otherwise absent. `creation_channel` is orthogonal to actor/environment
-provenance (`author`/`env_id` = who/where) and to `source_*` (where an imported ticket came
-from): it records **which of rebar's own interfaces** the create came through, and is
-present on every ticket rather than only imported ones. The generated `rebar.types` names
-it `TicketState.creation_channel: NotRequired[CreationChannel]`.
+A companion **`creation_channel_inferred`** (`{"const": true}`) marks a *heuristically
+inferred* channel: a channel-less legacy CREATE bearing the exact legacy-Jira envelope
+signature (`jira-` id + `reconciler` author + `reconciler` env_id) reduces to
+`creation_channel="jira"` with `creation_channel_inferred=true`; a recorded channel never
+carries the marker, and it is otherwise absent.
+
+> **Trust boundary.** `creation_channel_inferred` is heuristic **audit** metadata, **not a
+> security attestation**. A recorded channel reflects the real ingress; an inferred `jira`
+> is a best-effort backfill for pre-feature history, derived only from the immutable genesis
+> envelope (ticket_id / author / env_id). Do not treat it as cryptographic proof of origin —
+> use the signed-attestation machinery when origin trust matters.
+
+`creation_channel` is orthogonal to actor/environment provenance (`author`/`env_id` =
+who/where) and to `source_*` (where an imported ticket came from): it records **which of
+rebar's own interfaces** the create came through, and is present on every ticket rather than
+only imported ones. The generated `rebar.types` names it
+`TicketState.creation_channel: NotRequired[CreationChannel]`.
 
 ## `error_envelope` — the machine-readable failure channel
 
