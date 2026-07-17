@@ -111,6 +111,15 @@ def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
             signer_pubkey = None
 
         commit_sha = authorship.resolve_event_commit(position_str, ticket_dir, repo_root=repo_root)
+        if commit_sha is None:
+            # resolve_event_commit can return None at fold time (its ticket-scoped pathspec
+            # may miss the introducing commit). Fall back to the GLOBAL position resolver so
+            # we persist the REAL introducing commit rather than a null the merge-gate later
+            # fail-closes to ``key_not_valid_at_era`` (bug B). Only persist null if BOTH fail.
+            tracker = os.path.dirname(ticket_dir)
+            commit_sha = authorship.resolve_position_commit(
+                position_str, tracker, repo_root=repo_root
+            )
 
         ledger.append(
             {

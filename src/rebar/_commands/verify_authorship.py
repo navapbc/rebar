@@ -46,6 +46,7 @@ import os
 import sys
 
 from rebar import config
+from rebar.reducer import KNOWN_EVENT_TYPES
 
 # Classifications (also the human-facing labels; ``verified`` is the only pass).
 VERIFIED = "verified"
@@ -338,6 +339,16 @@ def _event_from_file(ticket_id: str, filename: str, path: str) -> list[_ScopedEv
     if event.get("event_type") == "SNAPSHOT":
         return _ledger_events(event, ticket_id)
 
+    # Reducer-IGNORED observability sidecars (COMPLETION_VERDICT, REVIEW_RESULT,
+    # TICKET_DIGEST, ENQUEUE_ENRICH, the plan-review/digest sidecars, …) are NOT in
+    # ``rebar.reducer.KNOWN_EVENT_TYPES``: they carry no ticket state, are not "authored
+    # work", and are emitted by best-effort seams that may have no signing key. Classifying
+    # them would false-fail the authorship gate under enforcement (an unsigned sidecar reads
+    # as ``unsigned``), so they are OUT of scope — skipped exactly as the reducer's
+    # forward-compat path preserves-and-ignores them.
+    if event.get("event_type") not in KNOWN_EVENT_TYPES:
+        return []
+
     author_sig = event.get("author_sig")
     # The position ({timestamp}-{uuid}) is always computed so an event's introducing commit
     # can be resolved for grandfathering even when it is unsigned (the classification path
@@ -498,6 +509,16 @@ def cli(argv: list[str]) -> int:
     report: list[dict] = []  # one entry per NON-verified in-scope event
     enforced_not_verified = 0
     for ev in events:
+        # A compacted LEDGER entry can carry a null commit_sha when compaction could not
+        # resolve the introducing commit at fold time (bug B). Re-resolve it here from the
+        # recorded ``position`` (which resolves to the real introducing commit) so BOTH the
+        # era classification (_verify_signed's ledger branch reads ``ev.commit_sha``) and the
+        # enforcement decision (_resolve_commit returns ``ev.commit_sha``) use the real
+        # commit — otherwise a validly-signed event fail-closes to ``key_not_valid_at_era``.
+        if ev.event is None and ev.commit_sha is None and ev.position:
+            ev.commit_sha = authorship.resolve_position_commit(
+                ev.position, tracker, repo_root=args.root
+            )
         cls = _classify(ev, tracker, args.root)
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
