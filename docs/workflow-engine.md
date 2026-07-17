@@ -26,7 +26,7 @@ model), [workflow-editor.md](workflow-editor.md) (the visual editor),
 ## Part 1 — Using workflows and gates
 
 You interact with the engine mostly through the **two gates**, which run automatically
-during the normal ticket lifecycle (see the project guide / `CLAUDE.md`):
+during the normal ticket lifecycle (see the project guide / `AGENTS.md`):
 
 - **Plan-review gate** — a ticket needs a passing plan review *before it can be
   claimed* (`open → in_progress`). Run it with `rebar review-plan <id>` (MCP

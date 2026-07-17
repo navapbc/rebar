@@ -459,7 +459,7 @@ main checkout verifies the main checkout's `HEAD`, not your worktree edits):
 > its certification signal. This is the bf50/5f39 contagion that motivated **bug 02a3**: bf50's
 > "all child stories closed (signed)" AC hard-FAILed a fully-landed 19-story epic when child 5f39
 > was force-closed for operator attestation. Assert what was *delivered*; let the gate decide
-> whether the close is signed. (See CLAUDE.md's "Ticket template the gates enforce" section.)
+> whether the close is signed. (See the ticket-template guidance in `plan-review-criteria-guide.md`.)
 
 **Trust model.** The signature is only *secure/meaningful* when rebar runs as the **MCP
 server**, whose environment signing key is canonical; a CLI/library install signs with a local

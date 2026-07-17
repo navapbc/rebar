@@ -304,7 +304,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
         # subsequent concurrent sibling forks against this event's identity and
         # resolves by the lexical-UUID rule above — deterministically and
-        # independent of replay order, exactly as this docstring / CLAUDE.md
+        # independent of replay order, exactly as this docstring / docs/concurrency.md
         # describe. Bug 8874: the previous `data["parent_status_uuid"]` stored the
         # common-parent pointer, so two siblings from an EMPTY parent compared the
         # incoming uuid against "" and the later-replayed event won by insertion

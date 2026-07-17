@@ -127,7 +127,7 @@ LAST_RECONCILER_LOG=""
 run_reconciler() {
     local output
     # Template form (not `-t`): the -t flag has divergent macOS/GNU semantics
-    # and is prohibited by CLAUDE.md rule:mktemp-tmp. Production/orchestrator
+    # and is prohibited by AGENTS.md rule:mktemp-tmp. Production/orchestrator
     # context, so a literal /tmp template is fine (no per-test TMPDIR contract).
     # The XXXXXX run MUST be trailing: BSD/macOS mkstemp fails on a ".log" suffix
     # after the X's (GNU tolerates it, BSD does not), so omit the suffix.

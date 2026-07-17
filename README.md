@@ -351,7 +351,7 @@ bucketed into critical / major / minor / warning findings (`--output json`,
 *per-ticket* structural gates that each take an `<id>` and verify a ticket is
 *shaped* like dispatchable work — every type needs an `## Acceptance Criteria`
 checklist. See the ticket template and gate reference in
-[CLAUDE.md](CLAUDE.md#ticket-template-the-gates-enforce).)
+[docs/plan-review-criteria-guide.md](docs/plan-review-criteria-guide.md).)
 
 **Links.** `rebar link <id1> <id2> <relation>` **requires** a relation; the six
 relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,

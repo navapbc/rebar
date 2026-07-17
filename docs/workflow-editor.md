@@ -157,4 +157,4 @@ The IR↔BPMN round-trip was de-risked up front by
 (see the [de-risk POC index](experiments/workflow-remediation-pocs/README.md)).
 
 See also [docs/llm-framework.md](llm-framework.md) (the agent/runner side of the workflow
-engine) and the agent-facing tool guide in the repo-root `CLAUDE.md`.
+engine) and the agent-facing tool guide in the repo-root `AGENTS.md`.

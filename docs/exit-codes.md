@@ -40,7 +40,7 @@ to an emitted code are contract changes and must be called out in release notes.
   --epic/--sort`, plus `--output`) accepts
   the space form *and* the equals form interchangeably — matching the
   write/composer commands (`claim --assignee <you>`) and the `--opt <value>`
-  convention used throughout `CLAUDE.md`. So `rebar session-logs --limit 30` and
+  convention used throughout `AGENTS.md`. So `rebar session-logs --limit 30` and
   `rebar session-logs --limit=30` are equivalent; a space-form flag is **never**
   mistaken for an unknown option (the historical footgun where a parse error read
   as "no results"). The one exception is a value that itself begins with `-`

@@ -1,0 +1,51 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# This repository's canonical, cross-vendor agent guidance now lives in AGENTS.md,
+# which Codex reads natively. The prior Claude-specific doc fallback has been retired
+# now that the guidance migration is complete; this fallback points Codex at AGENTS.md
+# explicitly.
+project_doc_fallback_filenames = ["AGENTS.md"]
+project_doc_max_bytes = 131072
+
+# Commands spawned by Codex do not otherwise see exports from interactive
+# ~/.zshrc. Load the shell profile, retain secret-named variables long enough
+# to filter them, and expose only the project/runtime names below.
+[shell_environment_policy]
+inherit = "all"
+experimental_use_profile = true
+ignore_default_excludes = true
+include_only = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "JIRA_API_TOKEN",
+  "JIRA_URL",
+  "JIRA_USER",
+  "REBAR_*",
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "PWD",
+  "OLDPWD",
+  "TMPDIR",
+  "LANG",
+  "LC_*",
+  "TERM",
+  "COLORTERM",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "CI",
+  "SSH_AUTH_SOCK",
+  "GIT_*",
+  "VIRTUAL_ENV",
+  "PYTHONPATH",
+  "XDG_*",
+  "CODEX_*",
+  "CLAUDE_CODE_SESSION_ID",
+  "SESSION_ID",
+  "MAKEFLAGS",
+  "HOMEBREW_*",
+]

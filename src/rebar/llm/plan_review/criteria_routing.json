@@ -404,7 +404,7 @@
       },
       {
         "key": "documentation",
-        "check": "A novel architectural decision is captured in an ADR / CLAUDE.md / design-doc update."
+        "check": "A novel architectural decision is captured in an ADR / AGENTS.md / design-doc update."
       }
     ],
     "trigger": "crosses component boundaries, adds business rules/thresholds, or new patterns/contracts"
