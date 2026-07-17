@@ -108,31 +108,34 @@ def _write_unlink(
     link_uuid: str,
     env_id: str,
     author: str,
-    attribution: dict | None = None,
+    repo_root=None,
 ) -> str | None:
     if not source_dir.is_dir():
         return None
     ts = hlc.next_tick(source_dir.parent, source_dir.name)
     ev_uuid = str(uuid.uuid4())
+    unlink_data = {"link_uuid": link_uuid, "target_id": target_id}
     event = {
         "event_type": "UNLINK",
         "timestamp": ts,
         "uuid": ev_uuid,
         "env_id": env_id,
         "author": author,
-        "data": {"link_uuid": link_uuid, "target_id": target_id},
+        "data": unlink_data,
     }
-    # Denormalized author attribution (epic gnu-whale-ichor): author_email / author_id
-    # alongside `author`; absent -> unchanged envelope (back-compat).
-    if attribution:
-        event.update(attribution)
+    # Attribution + write-time signing / write-gate via the SHARED finalize seam (bug 0ba4),
+    # BEFORE the file is written so a require_authenticated refusal leaves nothing on disk.
+    from rebar._commands._seam import finalize_event
+
+    tracker = str(source_dir.parent)
+    finalize_event(event, source_dir.name, "UNLINK", unlink_data, tracker, repo_root)
     dest = source_dir / f"{ts}-{ev_uuid}-UNLINK.json"
     dest.write_text(canonical_str(event), encoding="utf-8")
     return str(dest)
 
 
 def scan_and_write_unlinks(
-    tracker: str, deleted_id: str, env_id: str, author: str, attribution: dict | None = None
+    tracker: str, deleted_id: str, env_id: str, author: str, repo_root=None
 ) -> list[str]:
     """Write UNLINK events for every net-active LINK referencing ``deleted_id``;
     return the written file paths (port of ticket-delete-unlink-scan.py)."""
@@ -150,7 +153,7 @@ def scan_and_write_unlinks(
                 link_uuid = dep.get("link_uuid", "")
                 target_id = dep.get("target_id", "")
                 if link_uuid and target_id:
-                    p = _write_unlink(source_dir, target_id, link_uuid, env_id, author, attribution)
+                    p = _write_unlink(source_dir, target_id, link_uuid, env_id, author, repo_root)
                     if p:
                         written.append(p)
         else:
@@ -159,7 +162,7 @@ def scan_and_write_unlinks(
                     link_uuid = dep.get("link_uuid", "")
                     if link_uuid:
                         p = _write_unlink(
-                            source_dir, deleted_id, link_uuid, env_id, author, attribution
+                            source_dir, deleted_id, link_uuid, env_id, author, repo_root
                         )
                         if p:
                             written.append(p)
@@ -215,7 +218,7 @@ def _write_event(
     env_id: str,
     author: str,
     data: dict,
-    attribution: dict | None = None,
+    repo_root=None,
 ) -> str:
     ts = hlc.next_tick(os.path.dirname(ticket_dir), os.path.basename(ticket_dir))
     ev = str(uuid.uuid4())
@@ -227,9 +230,12 @@ def _write_event(
         "author": author,
         "data": data,
     }
-    # Denormalized author attribution (epic gnu-whale-ichor) — see _write_unlink.
-    if attribution:
-        event.update(attribution)
+    # Attribution + write-time signing / write-gate via the SHARED finalize seam (bug 0ba4) —
+    # see _write_unlink. BEFORE the file is written so a refusal leaves nothing on disk.
+    from rebar._commands._seam import finalize_event
+
+    tkt_id, tkt_tracker = os.path.basename(ticket_dir), os.path.dirname(ticket_dir)
+    finalize_event(event, tkt_id, event_type, data, tkt_tracker, repo_root)
     path = os.path.join(ticket_dir, f"{ts}-{ev}-{event_type}.json")
     with open(path, "w", encoding="utf-8") as f:
         f.write(canonical_str(event))
@@ -302,7 +308,6 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
     env_id = _seam.env_id(Path(tracker))
     author = _seam.author("Unknown")
-    attribution = _seam.attribution_fields(repo_root)
 
     # The atomic write+commit aborts loudly on any git failure (a failed commit must
     # NOT report success and leave the store half-deleted). On failure, roll back the
@@ -311,7 +316,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     unlink_paths: list[str] = []
     written: list[str] = []
     try:
-        unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author, attribution)
+        unlink_paths = scan_and_write_unlinks(tracker, ticket_id, env_id, author, repo_root)
         written.extend(p for p in unlink_paths if p)
 
         if already_tombstoned:
@@ -333,10 +338,10 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
             return 0
 
         status_path = _write_event(
-            ticket_dir, "STATUS", env_id, author, {"status": "deleted"}, attribution
+            ticket_dir, "STATUS", env_id, author, {"status": "deleted"}, repo_root
         )
         written.append(status_path)
-        archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {}, attribution)
+        archived_path = _write_event(ticket_dir, "ARCHIVED", env_id, author, {}, repo_root)
         written.append(archived_path)
         tombstone_path = os.path.join(ticket_dir, ".tombstone.json")
         with open(tombstone_path, "w", encoding="utf-8") as f:

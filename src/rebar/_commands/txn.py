@@ -36,7 +36,7 @@ import os
 import subprocess
 import uuid
 
-from rebar._commands._seam import CommandError
+from rebar._commands._seam import CommandError, finalize_event
 from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
@@ -166,7 +166,7 @@ def transition_core(
     author: str,
     close_reason: str = "",
     force_close_reason: str = "",
-    attribution: dict | None = None,
+    repo_root=None,
 ) -> None:
     """Write the append-only STATUS(``target_status``) event under the write lock.
 
@@ -255,10 +255,11 @@ def transition_core(
             "parent_status_uuid": parent_status_uuid,
             "data": status_data,
         }
-        # Denormalized author attribution (epic gnu-whale-ichor): merge author_email /
-        # author_id alongside `author`. Absent -> unchanged envelope (back-compat).
-        if attribution:
-            event.update(attribution)
+        # Attribution + write-time signing / the opt-in write-gate via the SHARED finalize seam
+        # (bug 0ba4) — the SAME signing path append_event uses, so a transition/close STATUS is
+        # signed identically to a CREATE/COMMENT. Placed BEFORE `final_path` is assigned so a
+        # require_authenticated refusal (CommandError) leaves nothing on disk to roll back.
+        finalize_event(event, ticket_id, "STATUS", status_data, tracker_dir, repo_root)
 
         final_filename = event_append.event_filename(timestamp, event_uuid, "STATUS")
         final_path = os.path.join(ticket_dir_path, final_filename)
@@ -287,7 +288,7 @@ def claim_core(
     env_id: str,
     author: str,
     assignee: str = "",
-    attribution: dict | None = None,
+    repo_root=None,
 ) -> None:
     """Atomic claim: move an ``open`` ticket to ``in_progress`` AND set its assignee
     in ONE locked critical section (single commit). Rejects with
@@ -347,9 +348,10 @@ def claim_core(
             "parent_status_uuid": parent_status_uuid,
             "data": status_data,
         }
-        # Denormalized author attribution (epic gnu-whale-ichor) — see transition_core.
-        if attribution:
-            status_event.update(attribution)
+        # Attribution + write-time signing / write-gate via the SHARED finalize seam (bug 0ba4)
+        # — see transition_core. BEFORE `status_path`/`edit_path` are assigned so a
+        # require_authenticated refusal (CommandError) rolls back cleanly (both paths still None).
+        finalize_event(status_event, ticket_id, "STATUS", status_data, tracker_dir, repo_root)
         status_filename = event_append.event_filename(ts1, uuid1, "STATUS")
         status_path = os.path.join(ticket_dir_path, status_filename)
         fsutil.atomic_write(status_path, canonical_str(status_event), encoding="utf-8")
@@ -360,16 +362,16 @@ def claim_core(
         if assignee:
             ts2 = hlc.next_tick(tracker_dir, ticket_id)
             uuid2 = str(uuid.uuid4())
+            edit_data = {"fields": {"assignee": assignee}}
             edit_event = {
                 "timestamp": ts2,
                 "uuid": uuid2,
                 "event_type": "EDIT",
                 "env_id": env_id,
                 "author": author,
-                "data": {"fields": {"assignee": assignee}},
+                "data": edit_data,
             }
-            if attribution:
-                edit_event.update(attribution)
+            finalize_event(edit_event, ticket_id, "EDIT", edit_data, tracker_dir, repo_root)
             edit_filename = event_append.event_filename(ts2, uuid2, "EDIT")
             edit_path = os.path.join(ticket_dir_path, edit_filename)
             fsutil.atomic_write(edit_path, canonical_str(edit_event), encoding="utf-8")

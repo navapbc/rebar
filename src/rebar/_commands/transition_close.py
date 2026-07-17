@@ -420,9 +420,8 @@ def close_ticket(
 
     env_id = _seam.env_id(config.tracker_dir(repo_root))
     author = _seam.author("Unknown")
-    attribution = _seam.attribution_fields(repo_root)
-
-    # Locked write (exit 10 on optimistic-concurrency mismatch).
+    # Locked write (exit 10 on optimistic-concurrency mismatch). transition_core stamps
+    # attribution + signs the STATUS event via the shared finalize seam (bug 0ba4), given repo_root.
     txn.transition_core(
         tracker,
         ticket_id,
@@ -432,7 +431,7 @@ def close_ticket(
         author=author,
         close_reason=reason,
         force_close_reason=force_close,
-        attribution=attribution,
+        repo_root=repo_root,
     )
 
     # PASS attestation: sign the verified verdict AFTER the close is confirmed. A crash in this

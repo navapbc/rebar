@@ -181,14 +181,15 @@ def claim_compute(
 
     env_id = _seam.env_id(config.tracker_dir(repo_root))
     author = _seam.author("Unknown")
-    attribution = _seam.attribution_fields(repo_root)
+    # claim_core stamps attribution + signs the STATUS + EDIT events via the shared finalize
+    # seam (bug 0ba4), given repo_root.
     txn.claim_core(
         tracker,
         ticket_id,
         env_id=env_id,
         author=author,
         assignee=assignee,
-        attribution=attribution,
+        repo_root=repo_root,
     )
     # claim_core commits inline (not via write_and_push); push best-effort so a
     # claim that isn't followed by an append_event write still reaches origin.
