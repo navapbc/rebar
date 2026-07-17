@@ -1,0 +1,7 @@
+{
+  "project-portability": {
+    "name": "restore rebar portability",
+    "template": "Rework {subject} so it remains portable across supported rebar client shapes; keep project-specific behavior in project configuration or an explicit extension boundary.",
+    "applies_when": ["project.portability"]
+  }
+}
