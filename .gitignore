@@ -13,6 +13,14 @@ bridge_state/
 # (Gerrit-gated + CODEOWNERS-protected), NEVER the auto-pushed tickets branch.
 .rebar/*
 !.rebar/trusted_environments.yaml
+# Project plan-review criteria overlay (epic jira-reb-1003): these live on the code
+# branch (Gerrit-gated), like trusted_environments.yaml — NOT the auto-pushed tickets
+# branch. Un-ignore each committed overlay file surgically; sibling local overrides stay
+# ignored.
+!.rebar/criteria_routing.json
+!.rebar/prompts/
+.rebar/prompts/*
+!.rebar/prompts/plan-review-project-portability.md
 .claude/
 session-logs/
 CLAUDE.local.md
