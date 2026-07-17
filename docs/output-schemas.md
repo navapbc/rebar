@@ -105,6 +105,17 @@ rebar's own interfaces** the create came through, and is present on every ticket
 only imported ones. The generated `rebar.types` names it
 `TicketState.creation_channel: NotRequired[CreationChannel]`.
 
+**Same value regardless of how state was compiled.** These two fields are produced
+identically by full-log replay, **SNAPSHOT-only replay**, and a **snapshot rebuild**, so
+`show` / `list` / `search` / `export` report the same `creation_channel` /
+`creation_channel_inferred` no matter whether a ticket has been compacted (story 568c). A
+post-feature `SNAPSHOT` restores the recorded value verbatim from its `compiled_state`; a
+pre-feature `SNAPSHOT` (compacted before the field existed) re-infers it at restore time from
+the restored genesis envelope — yielding `jira`+`inferred` on the legacy-Jira signature and
+`unknown` otherwise — and a full-log rebuild (`fsck --repair-snapshots`) replays the retained
+CREATE to persist the same value durably. Compaction is therefore transparent to these
+fields: a caller cannot tell from the output whether the ticket was compacted.
+
 ## `error_envelope` — the machine-readable failure channel
 
 When a command **fails** while `--output json` is requested, it emits an

@@ -850,3 +850,15 @@ def process_snapshot(state: dict, data: dict) -> None:
     if "keyring" not in compiled_state or _stale_epoch_era:
         state.pop("keyring_epoch", None)
         _bootstrap_genesis_keyring(state, str(state.get("created_at") or ""))
+
+    # Creation-channel provenance migration (story 568c): a PRE-feature SNAPSHOT (written
+    # before `creation_channel` existed) carries no channel in its compiled_state, so a
+    # SNAPSHOT-only replay has no CREATE to re-infer from and would leave genesis provenance
+    # unset. Re-infer it at restore time from the restored genesis envelope
+    # (ticket_id/author/env_id ride compiled_state and are folded above), mirroring the
+    # `managed_refs`/`attestations` migration idiom. The guard is LOAD-BEARING: a POST-feature
+    # SNAPSHOT already carries a recorded channel (e.g. "cli"), and
+    # `_project_legacy_creation_channel`'s else-branch would CLOBBER it with "unknown" if it
+    # ran unconditionally — so gate strictly on the key's ABSENCE from compiled_state.
+    if "creation_channel" not in compiled_state:
+        _project_legacy_creation_channel(state)
