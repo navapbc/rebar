@@ -18,6 +18,7 @@ bridge_state/
 # branch. Un-ignore each committed overlay file surgically; sibling local overrides stay
 # ignored.
 !.rebar/criteria_routing.json
+!.rebar/plan_review_moves.json
 !.rebar/prompts/
 .rebar/prompts/*
 !.rebar/prompts/plan-review-project-portability.md
