@@ -1,7 +1,12 @@
-# Example Claude Code skills
+# Example agent skills
 
-This directory holds a small set of [Claude Code](https://docs.claude.com/en/docs/claude-code)
-**skills** as worked examples of how an agentic development workflow can be built around rebar.
+This directory holds a small set of **agent skills** as worked examples of how an agentic
+development workflow can be built around rebar. Each is written in the `SKILL.md` format — a
+plain-Markdown skill file (a `name`/`description` front-matter block plus a protocol body).
+The format is portable: it started with Claude Code's Agent Skills and is now read by a
+growing set of coding-agent harnesses (for example Codex, Cursor, Copilot, and Gemini CLI),
+which each discover skills from their own tool-specific location. Because the format is
+shared, these examples are useful to any harness, not just one.
 
 They are illustrative, not required: rebar does not depend on them, and you do not need them to
 use rebar. They exist to show one way an agent can plan, build, and track work with rebar as the
@@ -23,11 +28,12 @@ files). Open any `SKILL.md` to read the full protocol.
 ## Using them
 
 These are examples to read, adapt, and borrow from. To try one in your own environment, copy the
-skill's directory into your Claude Code skills location and invoke it by its name — see the
-[Claude Code skills documentation](https://docs.claude.com/en/docs/claude-code) for how skills are
-discovered and run. The rebar-specific steps inside a skill (for example, how changes are reviewed
-and landed) are written to defer to a project's own documentation, so they can be retargeted to
-another project's workflow.
+skill's directory into your harness's skills location and invoke it by its name. Where a harness
+looks for skills — and how it names the invocation — differs per tool, so consult your harness's
+own skills documentation for the exact path and trigger. The rebar-specific steps inside a skill
+(for example, how changes are reviewed and landed) are written to defer to a project's own
+documentation, so they can be retargeted to another project's workflow.
+
 ## The shared test-design standard (`shared/test-design.md`)
 
 `shared/test-design.md` is the canonical copy of the test-design standard the skills
@@ -41,7 +47,7 @@ Edit the **canonical** file, then sync the copies:
 
 ```sh
 for s in rebar-debug rebar-implement rebar-brainstorm; do
-  cp examples/claude-skills/shared/test-design.md examples/claude-skills/$s/test-design.md
+  cp examples/agent-skills/shared/test-design.md examples/agent-skills/$s/test-design.md
 done
 ```
 

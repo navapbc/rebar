@@ -62,7 +62,8 @@ but never skip the RED-before-code ordering or the claim/close bookkeeping.
 This skill works across projects, so **do not assume rebar-repo specifics — discover them.**
 Read the project's own documentation and configuration and let it govern the mechanics:
 
-- **`CLAUDE.md` / `CLAUDE.local.md` / `CONTRIBUTING.md` / `docs/`** in the repo root — the
+- **`AGENTS.md` / `CONTRIBUTING.md` / `docs/`** in the repo root (plus any harness-specific
+  file such as `CLAUDE.md` that imports it) — the
   authoritative source for how *this* project reviews and lands code, its remote layout, its
   commit-message requirements (ticket trailer, DCO sign-off), and its verification commands.
 - **The rebar config and gates** — whether the plan-review claim gate and the
