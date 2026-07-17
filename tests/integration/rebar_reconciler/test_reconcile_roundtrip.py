@@ -513,13 +513,14 @@ def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbo
         for lm in blocker_om.links
     ), f"outbound did not emit the Blocks link to DIG-8: {blocker_om.links}"
 
-    # Apply the link to the Jira snapshot (what the next fetch returns). The
-    # applier issues set_relationship(--out DIG-7 --in DIG-8, Blocks), so from
-    # DIG-7's perspective DIG-8 is on the INWARD side ("DIG-7 blocks DIG-8" —
-    # X blocks Y, the outward/blocker side is DIG-7). Inbound reverse-maps an
-    # inwardIssue Blocks back to the 'blocks' relation (matching the local dep).
+    # Apply the link to the Jira snapshot (what the next fetch returns). LIVE-JIRA
+    # direction (bug 4b59): "DIG-7 blocks DIG-8" places DIG-8 on DIG-7's OUTWARD side
+    # (type.outward == "blocks"). Inbound maps an outwardIssue Blocks back to the
+    # 'blocks' relation (matching the local dep). (This fixture previously used the
+    # inwardIssue side — the reversed convention that let the inbound inversion ship;
+    # the absolute mapping is now pinned by test_link_direction_absolute.py.)
     post_blocker = dict(pre_blocker)
-    post_blocker["issuelinks"] = [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-8"}}]
+    post_blocker["issuelinks"] = [{"type": {"name": "Blocks"}, "outwardIssue": {"key": "DIG-8"}}]
 
     # Outbound is now stable: the link is already present → no re-ADD (no churn).
     out2, _ = outbound.compute_outbound_mutations(
