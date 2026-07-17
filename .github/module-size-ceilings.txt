@@ -30,11 +30,16 @@
 # hygiene backstop — det_finding_has_subject + the two emission-point filters) and passes.py
 # 852->861 (d4cf's G7 parent-realign coach move) grew for the calibration epic; ceilings raised to
 # the landed size (remedy rows in architecture.md).
+#
+# NOTE (epic 6982 — 2026-07-16 plan-review calibration): passes.py 871->930 (R6 /
+# carmine-jute-starfish added the deterministic advisory-triage stage `triage_advisories`
+# co-located with the Pass-4 coach machinery; a <100 LOC extraction is forbidden by the
+# module-size policy, so the ceiling is raised to the landed size).
 src/rebar/_engine/rebar_reconciler/inbound_differ.py 806
 src/rebar/_engine/rebar_reconciler/reconcile.py 1093
 src/rebar/config.py 869
 src/rebar/llm/plan_review/det_floor.py 975
-src/rebar/llm/plan_review/passes.py 871
+src/rebar/llm/plan_review/passes.py 930
 src/rebar/llm/workflow/lint_refs.py 870
 src/rebar/llm/workflow/gate_dispatch.py 910
 src/rebar/llm/runner.py 850

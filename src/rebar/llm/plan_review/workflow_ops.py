@@ -537,6 +537,10 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     verdict = orchestrator.finalize_verdict(
         pctx, parts, coaching=coaching, coverage=coverage, runner_name=cfg.runner, model=cfg.model
     )
+    # R6 (epic 6982): deterministic advisory triage — bucket the surviving advisories into
+    # apply-now/defer from recorded fields (no LLM), attached as a top-level verdict key. The
+    # `plan_review_verdict` schema allows additional properties, so no schema change is needed.
+    verdict["triage"] = passes.triage_advisories(surviving)
     return _findings.validate_structured(verdict, _OUTPUT_SCHEMA)
 
 
