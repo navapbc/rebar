@@ -112,6 +112,25 @@ def test_terraform_invoke_policy_is_the_sole_grantee() -> None:
     assert assume is not None and "var.opcert_admin_principal_arns" in assume
 
 
+def test_terraform_opcert_admin_role_ignores_assume_role_policy_drift() -> None:
+    """Regression (bug 7c91-0488): the rebar-opcert-admin role's trust principals are
+    operator-supplied at DEPLOY (`var.opcert_admin_principal_arns`, default []). The
+    terraform-drift check runs `terraform plan` with NO -var, so it renders an empty
+    principal and reports a permanent phantom `1 to change` against the live account-root
+    principal — reddening the daily sweep forever and masking real drift. The role must carry
+    `lifecycle { ignore_changes = [assume_role_policy] }` (mirroring the operator-seeded key
+    param's ignore_changes = [value]) so plan/apply never diff on the operator-owned trust
+    list. Same class as the key-param guard asserted in
+    test_terraform_both_securestring_params_present."""
+    tf = _TF.read_text()
+    role = _resource_block(tf, "aws_iam_role", "opcert_admin")
+    assert role is not None, "missing aws_iam_role.opcert_admin"
+    assert re.search(r"ignore_changes\s*=\s*\[\s*assume_role_policy\s*\]", role), (
+        "opcert_admin role must declare lifecycle { ignore_changes = [assume_role_policy] } "
+        "so the operator-owned trust policy does not register as terraform-drift"
+    )
+
+
 def test_terraform_no_fixed_cost_resources() -> None:
     """The zero-fixed-cost posture: no Fargate/ECS/LB/Secrets-Manager/KMS-CMK/kms:Sign."""
     tf = _strip_hcl_comments(_TF.read_text())
