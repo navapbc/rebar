@@ -172,6 +172,18 @@ rebar session-log start --summary "Dark-mode implementation"   # rotate to a fre
 rebar session-logs --limit 5                                    # newest first
 ```
 
+The first `append` creates a log and records it as the **current** one via a local,
+git-ignored pointer (`.rebar/current_session_log`); later appends go to that same log.
+You rarely need `start`, because logs **auto-rotate per session**: the pointer stores a
+session fingerprint alongside the log id — taken from the session-id resolver
+(`REBAR_SESSION_ID`, then `CLAUDE_CODE_SESSION_ID`, then `SESSION_ID`) — so when a *new*
+session's first `append` sees a pointer whose fingerprint differs, it rotates to a fresh
+log automatically. Distinct agent sessions therefore get distinct logs with no manual
+`start`. It degrades safely: when no session id is set at all (fingerprint absent), it
+never rotates, so one continuous no-id session keeps appending to a single log. The
+`session_log` type's store-level semantics (gate-exempt, graph/health-excluded, never
+Jira-synced) are documented in [event-schema.md](event-schema.md).
+
 ## The quality gates as you experience them
 
 rebar has a few self-checks you can run on demand. The **per-ticket** gates take a

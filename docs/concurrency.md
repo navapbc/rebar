@@ -118,6 +118,20 @@ rollback if the parent succeeds and the child then fails: an ancestor sitting in
 `src/rebar/_commands/transition.py` (`transition_compute`), via the shared
 `_resolve_open_parent` helper.
 
+#### Gate interaction (the plan-review claim gate)
+
+The cascaded parent claim is a *full* claim — so it runs the parent's **own**
+plan-review claim gate (`verify.require_plan_review_for_claim`) when that gate is
+enabled. Epics and stories are **not** gate-exempt (only `bug` and `session_log`
+are), so claiming a leaf task can be **blocked by the parent's missing/stale
+attestation**, and the error names the **parent** as the cause. Earn the parent's
+attestation (`rebar review-plan <parent>`) — or claim the parent yourself first —
+before claiming the child, or pass `--force`, which propagates up the cascade and
+bypasses the gate at **each** level with an audit note. The same "the cascaded
+operation is the *full* operation" rule is why the cascade also stamps your
+`--assignee` onto every ancestor it claims. See
+[plan-review-gate.md](plan-review-gate.md) for the attestation model the gate reads.
+
 #### Cross-agent race ownership policy (two agents, one open parent)
 
 The cascade above is the *single-agent* contract. When **two agents concurrently
