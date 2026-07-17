@@ -272,6 +272,36 @@ them are always returned; the cap can never weaken the block decision. (Volume i
 lever that preserves an LLM's ability to act on feedback; the cap is a tunable default,
 not a validated constant.)
 
+### Advisory triage (apply-now vs defer)
+
+Report §5.2 found the dominant plan-review leak is advisory **latency**, not blindness:
+4/8 tickets with persisted reviews applied a surfaced advisory only *after* claim
+(CAUGHT-BUT-IGNORED). Nothing told the author *which* surviving advisories were worth
+applying now. So Pass-4 also runs a **deterministic advisory triage** over the surviving
+advisory findings (`passes.triage_advisories`), attached to the verdict as `verdict["triage"]`
+— a structured array `[{id, criteria, priority, block_threshold, bucket, reason}]`, one entry
+per surviving advisory. It makes **no** LLM call and emits no free prose (only fixed tokens +
+the findings' recorded numbers), so the same finding set yields byte-identical output. It is
+NOT a `MOVE_REGISTRY` entry — the registry's per-finding `{subject}` template cannot express a
+ranked bucket split — and the shared kernel coach mechanism is unchanged.
+
+**Ranking rule.** For each surviving advisory, using only its recorded `priority`
+(= `validity × impact`) and `block_threshold` (the criterion's blocking waterline; DET-tier
+advisories that don't carry it fall back to `DEFAULT_BLOCK_THRESHOLD = 0.95`):
+
+- **Bucket** — `apply-now` iff `priority >= block_threshold - APPLY_NOW_MARGIN` (default
+  `APPLY_NOW_MARGIN = 0.10`, i.e. the advisory came within the margin of blocking); otherwise
+  `defer`, with a numeric `reason` (e.g. `deferred: priority 0.32 is 0.28 below its 0.60 block
+  line`).
+- **Order** — `priority` DESC, then `criteria[0]` ASC (empty `criteria` sorts last via the
+  sentinel `"~"`), then `id` ASC — a total order, so the output is byte-identical run to run.
+- **Eligibility** — only findings with `decision == "advisory"`; blocking findings must be
+  remediated regardless and are excluded.
+
+**Dogfood loop.** This is a ship-first coaching move with no eval gate; its effect is watched
+post-ship via **R7**'s instrumentation — the per-criterion advisory-application-latency signal
+(does the CAUGHT-BUT-IGNORED rate fall as authors act on the `apply-now` bucket pre-claim?).
+
 ## Proportionate scrutiny & routing
 
 Criteria carry an `applies_at` descriptor (`registry.applies`) whose proportionate

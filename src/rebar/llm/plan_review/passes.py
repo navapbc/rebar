@@ -869,3 +869,62 @@ def pass4_coach(
     return review_kernel.coach(
         surviving, move_registry, pick=_pick, active_triggers=triggers, blocking=blocking
     )
+
+
+# ── R6 (epic 6982): deterministic advisory triage ──────────────────────────────────────────
+# Report §5.2 found the dominant plan-review leak is advisory LATENCY (4/8 tickets applied a
+# surfaced advisory only AFTER claim), not blindness. This deterministic stage triages the
+# round's surviving ADVISORY findings into `apply-now` vs `defer` buckets from recorded finding
+# fields alone (no LLM, no free prose), so the author knows which advisories are worth applying
+# now. It attaches to the returned verdict as `verdict["triage"]`; it is NOT an LLM-picked
+# MOVE_REGISTRY entry (a per-finding {subject} template cannot express a ranked bucket split).
+# See docs/plan-review-gate.md "Advisory triage" for the ranking rule + the R6 dogfood loop.
+APPLY_NOW_MARGIN = 0.10
+"""Priority margin below a finding's ``block_threshold`` within which a surviving advisory is
+bucketed ``apply-now`` (it came within ``APPLY_NOW_MARGIN`` of blocking). See
+``triage_advisories``."""
+
+
+def triage_advisories(surviving: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deterministically triage the round's surviving ADVISORY findings into ``apply-now`` vs
+    ``defer`` buckets using only recorded finding fields — ``priority`` (= ``validity × impact``,
+    always present) and ``block_threshold`` (present on LLM-decided findings; falls back to
+    ``DEFAULT_BLOCK_THRESHOLD`` for DET-tier advisories that don't carry it). No model call, no
+    free prose ⇒ the same finding set yields byte-identical output (R6, epic 6982).
+
+    Returns one entry per surviving advisory:
+    ``{"id", "criteria", "priority", "block_threshold", "bucket", "reason"}``. ``bucket`` is
+    ``apply-now`` iff ``priority >= block_threshold - APPLY_NOW_MARGIN`` (else ``defer`` with a
+    numeric ``reason``; ``reason`` is ``""`` for ``apply-now``). The list is sorted by ``priority``
+    DESC, then ``criteria[0]`` ASC (empty ``criteria`` sorts last via the sentinel ``"~"``), then
+    ``id`` ASC. Only findings with ``decision == "advisory"`` are included; blocking findings are
+    excluded (they must be remediated regardless, so R6 is advisory-only)."""
+    entries: list[dict[str, Any]] = []
+    for f in surviving:
+        if f.get("decision") != "advisory":
+            continue
+        priority = float(f.get("priority", 0.0))
+        block_threshold = float(f.get("block_threshold", DEFAULT_BLOCK_THRESHOLD))
+        criteria = list(f.get("criteria") or [])
+        if priority >= block_threshold - APPLY_NOW_MARGIN:
+            bucket, reason = "apply-now", ""
+        else:
+            bucket = "defer"
+            reason = (
+                f"deferred: priority {priority:.2f} is {block_threshold - priority:.2f} "
+                f"below its {block_threshold:.2f} block line"
+            )
+        entries.append(
+            {
+                "id": f.get("id"),
+                "criteria": criteria,
+                "priority": priority,
+                "block_threshold": block_threshold,
+                "bucket": bucket,
+                "reason": reason,
+            }
+        )
+    entries.sort(
+        key=lambda e: (-e["priority"], (e["criteria"][0] if e["criteria"] else "~"), str(e["id"]))
+    )
+    return entries
