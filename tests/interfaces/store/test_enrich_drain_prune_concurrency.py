@@ -81,7 +81,10 @@ def test_enrich_queue_prune_never_drops_concurrent_locked_writes(tmp_path: Path)
                 subprocess.Popen(
                     [sys.executable, _WORKER, "writer", store, tid, str(_BURSTS)],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
+                    # Capture writer stderr so a red run REVEALS the swallowed-write mechanism
+                    # (bug ac26 residual) instead of only its count. communicate() drains both
+                    # pipes, so no fill-deadlock.
+                    stderr=subprocess.PIPE,
                     text=True,
                 ),
             )
@@ -101,15 +104,26 @@ def test_enrich_queue_prune_never_drops_concurrent_locked_writes(tmp_path: Path)
         )
 
     swallowed_raises = 0
+    swallowed_detail: list[str] = []
     for role, p in procs:
-        out, _ = p.communicate(timeout=180)
-        if role == "writer" and out:
-            swallowed_raises += int(out.strip() or "0")
+        out, err = p.communicate(timeout=180)
+        if role == "writer":
+            if out:
+                swallowed_raises += int(out.strip() or "0")
+            if err and err.strip():
+                swallowed_detail.append(err.strip())
 
     # Oracle: readers list the worktree, so every intended event MUST be a worktree file.
     intended_per_writer = _BURSTS * 2
     disk_total = sum(_disk_events(tracker, tid) for tid in writer_tids)
     intended_total = _WRITERS * intended_per_writer
+
+    if swallowed_detail:
+        # Diagnostic (bug ac26 residual): dump the exact swallowed write exceptions so a red
+        # CI run identifies the residual write-loss mechanism (uncovered git-failure signature
+        # vs OOM-killed subprocess) rather than only counting it. pytest shows captured stdout
+        # on failure and hides it on a green run.
+        print("\n=== swallowed writer exceptions (bug ac26) ===\n" + "\n\n".join(swallowed_detail))
 
     assert swallowed_raises == 0 and disk_total == intended_total, (
         "enrich-queue prune raced locked writes: "
