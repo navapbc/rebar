@@ -25,6 +25,8 @@ def main() -> None:
 
     tracker = config.tracker_dir(store)
     if role == "writer":
+        import traceback
+
         tid, bursts = sys.argv[3], int(sys.argv[4])
         from rebar._commands._seam import append_event
 
@@ -39,8 +41,16 @@ def main() -> None:
                         tracker,
                         repo_root=store,
                     )
-                except BaseException:  # noqa: BLE001 — mirror the swallow at the review call sites
+                except BaseException as exc:  # noqa: BLE001 — mirror the swallow at the review call sites
                     raised += 1
+                    # Diagnostic (bug ac26 residual): surface WHY the write was lost — the
+                    # writer's underlying git stderr is wrapped into the raised StoreError.
+                    # stdout carries ONLY the count the test parses, so emit the full detail
+                    # to stderr with a greppable marker for the failing-CI capture.
+                    print(
+                        f"SWALLOWED_WRITE_RAISE {et} j={j}: {exc!r}\n{traceback.format_exc()}",
+                        file=sys.stderr,
+                    )
         print(raised)
     else:  # pruner
         rounds, tids = int(sys.argv[3]), sys.argv[4:]
