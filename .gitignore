@@ -22,6 +22,9 @@ bridge_state/
 !.rebar/prompts/
 .rebar/prompts/*
 !.rebar/prompts/plan-review-project-portability.md
+!.rebar/evals/
+.rebar/evals/*
+!.rebar/evals/plan-review-project-portability.eval.yaml
 .claude/
 session-logs/
 CLAUDE.local.md

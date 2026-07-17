@@ -1,0 +1,215 @@
+# Project eval corpus for the plan-review criterion `project.portability`
+# (epic jira-reb-1003, task indigoid-unmystic-serpent). Resolves as the user override
+# for logical criterion `project.portability` (prompt id plan-review-project-portability).
+#
+# Balanced semantic fixture set: four must-fire cases (a reusable-core plan that bakes in
+# an assumption breaking one supported client shape) and four must-not-fire cases
+# (silence, project-configured behavior, explicitly-scoped surface work, portable
+# alternatives). Offline shape checks live in tests/unit/test_project_portability_eval.py;
+# the live semantic run is the ticket's [operator-attested] criterion
+# (`rebar criteria eval project.portability --runs 3`). See eval_specs/README.plan-review.md.
+prompt: plan-review-project-portability
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the criterion emits a schema-valid finding set — >=1 finding on a
+  # fire case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      project.portability finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: a reusable-core plan that breaks one supported client shape ──────
+  - id: PORT-F1
+    corpus: rebar
+    criterion: project.portability
+    expect: finding
+    note: >-
+      Plan citation: the reusable core adds a `rebar landing` command that runs
+      `git push gerrit HEAD:refs/for/main` and polls the Gerrit REST API for votes.
+      Alternate shape: a Target project whose repository lands changes through GitHub
+      pull requests, with no Gerrit remote or review refs.
+      Causal mechanism: the hardcoded Gerrit refspec and vote-polling have no analog in
+      a PR-based repository, so the command cannot complete.
+      Observable breakage: `rebar landing` errors on the push against a non-Gerrit
+      remote and can never close the ticket for that client.
+    input: >
+      ## What
+
+      Add a `rebar landing` command to the reusable core so every client can finalize a
+      ticket in one step. `rebar landing <id>` runs `git push gerrit HEAD:refs/for/main`,
+      then polls the Gerrit REST API until the change has `LLM-Review +1` and
+      `Verified +1`, and finally transitions the ticket to closed.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar landing <id>` pushes to the Gerrit review ref and closes the ticket
+        once both votes are green.
+  - id: PORT-F2
+    corpus: rebar
+    criterion: project.portability
+    expect: finding
+    note: >-
+      Plan citation: the plan adds built-in plan-review criteria that grep the diff for
+      Python-only anti-patterns (bare `except:`, mutable default args, missing type hints).
+      Alternate shape: a Target project written in Java, Next.js, .NET, Ruby, or Terraform
+      inside the same monorebar-managed workflow.
+      Causal mechanism: the criteria assume Python source and syntax, which do not exist in
+      those languages, so they can never match or must be skipped.
+      Observable breakage: for a non-Python project the criteria either never fire or raise
+      on unparseable input, giving a false all-clear or a crash.
+    input: >
+      ## What
+
+      Add three built-in plan-review criteria to the core that scan the changed diff for
+      Python anti-patterns — a bare `except:`, a mutable default argument, and any `def`
+      missing type hints — and BLOCK the plan when any is present. They run for every
+      ticket in every repository that uses rebar.
+
+      ## Acceptance Criteria
+
+      - [ ] The three Python criteria are always active and block a plan on a match.
+  - id: PORT-F3
+    corpus: rebar
+    criterion: project.portability
+    expect: finding
+    note: >-
+      Plan citation: the reusable signing path shells out to the macOS `security
+      find-generic-password` binary to load the signing key before every attestation.
+      Alternate shape: a Platform and venue that is Windows, Linux, or BSD — including CI
+      runners and Linux servers.
+      Causal mechanism: the `security` binary exists only on macOS, so the subprocess is
+      absent everywhere else and the call fails before any signing work begins.
+      Observable breakage: on Windows/Linux/BSD the attestation step raises
+      FileNotFoundError for `security` and no ticket can be signed.
+    input: >
+      ## What
+
+      Load the attestation signing key in the reusable signing path by shelling out to the
+      macOS keychain: run `security find-generic-password -s rebar-signing -w` and use the
+      returned secret. This runs for every signed close, in the library, CLI, and MCP.
+
+      ## Acceptance Criteria
+
+      - [ ] Signing reads the key via `security find-generic-password` before each attestation.
+  - id: PORT-F4
+    corpus: rebar
+    criterion: project.portability
+    expect: finding
+    note: >-
+      Plan citation: the remote MCP server resolves the target repository by calling
+      `Path.cwd()` and walking the local filesystem upward to find `.rebar/`, assuming
+      unrestricted local filesystem access.
+      Alternate shape: a Project location and access where the remote MCP server runs
+      outside the checkout and reaches the store over a bounded, explicit path.
+      Causal mechanism: a server outside the checkout has no meaningful `cwd` near the
+      project and no unrestricted local filesystem, so the upward walk finds nothing.
+      Observable breakage: the MCP server returns "no rebar store found" and every tool
+      call fails for a client whose repository is not under the server's `cwd`.
+    input: >
+      ## What
+
+      In the remote MCP server, resolve which repository to operate on by calling
+      `Path.cwd()` and walking parent directories until a `.rebar/` directory is found,
+      reading the store directly off the local filesystem from there.
+
+      ## Acceptance Criteria
+
+      - [ ] The MCP server discovers the store by walking up from `Path.cwd()`.
+  # ── must-not-fire: portable or intentionally project-scoped plans ──────────────
+  - id: PORT-N1
+    corpus: rebar
+    criterion: project.portability
+    expect: pass
+    note: >-
+      Silence about portability with no incompatible mechanism: an in-memory list filter
+      that changes no I/O and no platform behavior.
+    input: >
+      ## What
+
+      Add a `--limit N` flag to `rebar list` that caps how many tickets are returned. It
+      slices the already-loaded in-memory result list; no new I/O, no platform-specific
+      code, no filesystem or shell assumptions.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar list --limit 5` returns at most five tickets.
+  - id: PORT-N2
+    corpus: rebar
+    criterion: project.portability
+    expect: pass
+    note: >-
+      Project-configured behavior behind the documented overlay: Gerrit-specific coaching
+      stays in this repo's `.rebar/plan_review_moves.json` project configuration, so
+      clients without that config are unaffected.
+    input: >
+      ## What
+
+      Keep the Gerrit-specific landing coaching in THIS repository's
+      `.rebar/plan_review_moves.json` project configuration. The core coaching engine reads
+      project moves through the documented overlay; a client that does not ship this config
+      simply sees no such move.
+
+      ## Acceptance Criteria
+
+      - [ ] The Gerrit coaching move lives only in `.rebar/plan_review_moves.json` and is
+        loaded via the existing project overlay.
+  - id: PORT-N3
+    corpus: rebar
+    criterion: project.portability
+    expect: pass
+    note: >-
+      Additive feature explicitly scoped to one surface: terminal color is limited to the
+      CLI TTY output and leaves the library and MCP behavior unchanged.
+    input: >
+      ## What
+
+      Add an additive terminal-color feature that is explicitly limited to the CLI: color
+      is emitted only when stdout is a TTY under the CLI entry point. The library and MCP
+      surfaces are unchanged and never emit color.
+
+      ## Acceptance Criteria
+
+      - [ ] Color appears only in CLI TTY output; library and MCP output is byte-identical
+        to today.
+  - id: PORT-N4
+    corpus: rebar
+    criterion: project.portability
+    expect: pass
+    note: >-
+      Portable alternative: workspace discovery accepts an explicit path and otherwise uses
+      standard-library filesystem operations, assuming no specific OS, shell, or
+      unrestricted filesystem.
+    input: >
+      ## What
+
+      Add workspace discovery that accepts an explicit `--path` argument and, when omitted,
+      uses `pathlib` standard-library operations to locate the store. It assumes no specific
+      OS, no shell, and no unrestricted local filesystem.
+
+      ## Acceptance Criteria
+
+      - [ ] Discovery honors an explicit `--path`, and otherwise uses portable
+        standard-library filesystem calls.
+
+gold_set:
+  - input: "Reusable core `rebar landing` hardcodes `git push gerrit HEAD:refs/for/main`; a client repo that lands via GitHub PRs cannot use it."
+    label: finding
+  - input: "Core adds always-on Python-only diff criteria; Java, Next.js, .NET, Ruby, and Terraform projects cannot satisfy them."
+    label: finding
+  - input: "Reusable signing shells out to the macOS `security` binary; Windows, Linux, and BSD hosts fail before signing."
+    label: finding
+  - input: "Remote MCP derives the repo from `Path.cwd()` plus unrestricted local filesystem access; a server outside the checkout finds no store."
+    label: finding
+  - input: "A `--limit` flag slices the in-memory ticket list; the plan is silent about portability and introduces no incompatible mechanism."
+    label: pass
+  - input: "Gerrit-specific coaching stays in this repo's `.rebar/plan_review_moves.json` project configuration; other clients are unaffected."
+    label: pass
+  - input: "An additive terminal-color feature is explicitly limited to the CLI and leaves the library and MCP behavior unchanged."
+    label: pass
+  - input: "Workspace discovery accepts an explicit path and otherwise uses portable standard-library filesystem operations."
+    label: pass
