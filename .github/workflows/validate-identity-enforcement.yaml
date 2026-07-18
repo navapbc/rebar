@@ -1,0 +1,47 @@
+name: validate-identity-enforcement (TEMPORARY)
+
+# TEMPORARY validation workflow — ticket f482-309a-7d61-4d78.
+#
+# Runs the whole-store authorship gate under FORCED enforcement
+# (`rebar verify-identity --require-authenticated`) in the GitHub Actions environment,
+# to collect evidence that the null-commit-ledger fix (main 6845b8326) + the snapshot
+# backfill leave ZERO enforced-not-verified events in the real CI environment where the
+# 206 `key_not_valid_at_era` failures originally appeared. It does NOT gate anything and
+# is `workflow_dispatch`-only (never runs on push/PR). DELETE this file once the data is
+# collected — it is not part of the permanent CI surface (the permanent gate is
+# `verify-identity.yaml`, which reads posture from rebar.toml).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate-identity-enforcement:
+    name: validate-identity-enforcement (temporary — remove after data)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Install rebar
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Mount tickets branch as a worktree
+        run: |
+          set -euo pipefail
+          git fetch origin '+tickets:refs/remotes/origin/tickets'
+          rm -rf .tickets-tracker
+          git worktree add -B tickets .tickets-tracker origin/tickets
+      - name: verify-identity under forced enforcement (report + gate)
+        # --require-authenticated forces enforcement regardless of rebar.toml (which is
+        # advisory while the flag is rolled back). A non-zero exit here means the store
+        # still has enforced-not-verified events; exit 0 means it is clean under strict
+        # enforcement. The grandfather boundary still comes from identity.enforce_since.
+        run: rebar verify-identity --require-authenticated
