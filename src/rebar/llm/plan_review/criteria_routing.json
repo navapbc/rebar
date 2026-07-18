@@ -1159,5 +1159,30 @@
       }
     ],
     "routing": "leaf"
+  },
+  "asserted-capability": {
+    "exec": "AGENT",
+    "facet": "codebase-grounding",
+    "applies_at": {
+      "scope": [
+        "leaf"
+      ],
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "asserts_named_module_capability",
+        "check": "GATE: a committed part of the plan RELIES on a checkable claim about a NAMED module/symbol's capability surface — either (A) that module M PROVIDES capability C, or (B) that C is ABSENT / must be built. no (no such named-module capability claim the plan relies on) -> not-applicable -> PASS."
+      },
+      {
+        "key": "asserted_capability_grounded",
+        "check": "Only when gated in: the capability claim MATCHES the code, verified with Grep/Read (and resolve_symbol for installed deps). FIRE when refuted — (A) M exists but LACKS C (dc58: completion.py has no sign helper; db7b: compaction never absorbs reducer-ignored REVIEW_RESULT), or (B) M already PROVIDES C the plan says must be built (5886: fetcher.py already emits the unmapped-status alert). ABSTAIN-with-coverage on a claim about an EXTERNAL fact the repo tools cannot settle. Distinct from E4 (broad existence, blocking): here the named module EXISTS, so E4 passes; this probes the finer capability surface. Advisory — never blocks."
+      }
+    ],
+    "routing": "leaf"
   }
 }

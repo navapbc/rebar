@@ -1,0 +1,141 @@
+# Standing eval / bounded-sanity corpus for the plan-review criterion `asserted-capability`
+# (epic 6982 / R1). This is the "bounded sanity check" gate artifact: the three E1-verified
+# asserted-capability misses (dc58 / db7b / 5886), reconstructed to their ORIGINAL
+# false-asserting plan text (the current tickets are remediated) and grounded against the
+# CURRENT modules the finder greps, plus clean must-not-fire controls. It is deliberately small
+# (<=8 live single-criterion runs) — NOT an E2/E3 batch eval (those are permanently rejected on
+# cost). Run live with `rebar criteria eval asserted-capability --output json`; the committed
+# result is docs/experiments/plan-review-gate/runs/asserted_capability_sanity.json. Offline
+# spec-shape validation is in tests/unit/test_asserted_capability_criterion.py.
+prompt: plan-review-asserted-capability
+model: anthropic:claude-sonnet-4-6
+epochs: 1
+gate: at_least(1)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the finder emits a schema-valid finding set — >=1 finding on a fire
+  # case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      asserted-capability finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: the 3 E1-verified misses (report §6 R1 pass condition: >=2 of 3 fire) ──────
+  - id: ACAP-F1-dc58
+    corpus: rebar
+    criterion: asserted-capability
+    expect: finding
+    note: >-
+      dc58 (PROVIDES-claim, direction A). Named module: src/rebar/llm/completion.py. Asserted
+      capability: a verdict-signing helper on completion.py. Refutation: completion.py has no
+      signing helper (signing lives in rebar.signing; completion.py:350 only references the
+      close gate's signing). The finder greps completion.py and finds the helper absent.
+    input: >
+      ## What
+
+      Migrate the completion verifier onto the workflow engine. The final signing step reuses
+      `completion.py`'s existing `sign_verdict()` helper to sign the completion attestation
+      before it is emitted, so no new signing code is needed.
+
+      ## Acceptance Criteria
+
+      - [ ] The workflow's sign step calls `completion.sign_verdict()` and emits a signed
+        `completion_verdict`.
+  - id: ACAP-F2-db7b
+    corpus: rebar
+    criterion: asserted-capability
+    expect: finding
+    note: >-
+      db7b (PROVIDES-claim, direction A). Named mechanism: rebar event COMPACTION. Asserted
+      capability: compaction absorbs/expires old REVIEW_RESULT events to bound growth.
+      Refutation: compaction folds ONLY KNOWN_EVENT_TYPES (_commands/compact.py:206) and
+      REVIEW_RESULT is reducer-ignored, so compaction never absorbs it (retention is the
+      dedicated sidecar.prune, sidecar.py:72).
+    input: >
+      ## What
+
+      Add a reducer-ignored `REVIEW_RESULT` sidecar event capturing per-criterion verdicts and
+      finding fingerprints. Bound its growth by relying on rebar's existing event COMPACTION to
+      absorb and expire old `REVIEW_RESULT` events over time — no dedicated cleanup is needed.
+
+      ## Acceptance Criteria
+
+      - [ ] `REVIEW_RESULT` events are emitted; event compaction folds/absorbs old
+        `REVIEW_RESULT` events so the sidecar log stays bounded.
+  - id: ACAP-F3-5886
+    corpus: rebar
+    criterion: asserted-capability
+    expect: finding
+    note: >-
+      5886 (ABSENT-claim, direction B). Named module: fetcher.py. Asserted gap: there is
+      currently no alert for unmapped inbound Jira statuses, so one must be built. Refutation:
+      fetcher.py already emits it (_flag_unmapped_statuses -> fetcher-unmapped-jira-status,
+      fetcher.py:219), so the capability the plan says is absent already exists.
+    input: >
+      ## What
+
+      When an inbound Jira status is unmapped, operators get no signal. There is currently NO
+      bridge alert for unmapped Jira statuses, so we must ADD a new
+      `unmapped-jira-status` bridge alert in `src/rebar/_engine/rebar_reconciler/fetcher.py`.
+
+      ## Acceptance Criteria
+
+      - [ ] A new `unmapped-jira-status` bridge alert is added to `fetcher.py` and fires on any
+        unmapped inbound status.
+  # ── must-not-fire: clean controls (no false-fire) ────────────────────────────────────────
+  - id: ACAP-N1-no-claim
+    corpus: rebar
+    criterion: asserted-capability
+    expect: pass
+    note: >-
+      No capability-surface claim about a named module — a plain new-flag feature. Gate
+      sub-answer asserts_named_module_capability = no -> not-applicable -> PASS.
+    input: >
+      ## What
+
+      Add a `--dry-run` flag to `rebar reconcile` that prints the planned inbound/outbound
+      changes without writing any events.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar reconcile --dry-run` prints the planned diffs and makes zero writes.
+  - id: ACAP-N2-grounded-true
+    corpus: rebar
+    criterion: asserted-capability
+    expect: pass
+    note: >-
+      A capability claim that is TRUE against the code (correct reuse): fetcher.py already emits
+      the unmapped-status alert, and the plan correctly reuses it instead of adding one. The
+      finder confirms the capability is present -> no fire.
+    input: >
+      ## What
+
+      Fix the silent-reopen bug for unmapped inbound Jira statuses in `inbound_differ.py`.
+      Observability REUSES the EXISTING alert: `fetcher.py` already emits a deduped
+      `fetcher-unmapped-jira-status` bridge alert at snapshot-build time, so no new alert is
+      added — the differ just omits the status field for unmapped statuses.
+
+      ## Acceptance Criteria
+
+      - [ ] `_map_jira_to_local_fields` omits the status field for an unmapped Jira status (no
+        silent reopen); the existing `fetcher-unmapped-jira-status` alert is relied on for
+        observability.
+  - id: ACAP-N3-external-fact
+    corpus: rebar
+    criterion: asserted-capability
+    expect: pass
+    note: >-
+      A capability claim about an EXTERNAL vendor surface the repo tools cannot settle. Fail-open:
+      abstain-with-coverage, do NOT assert an ungroundable gap -> no fire.
+    input: >
+      ## What
+
+      Publish CI status back to GitHub by calling the GitHub REST API's
+      `POST /repos/{owner}/{repo}/statuses/{sha}` endpoint, which GitHub supports for commit
+      status checks.
+
+      ## Acceptance Criteria
+
+      - [ ] A green CI run publishes a `success` commit status via the GitHub statuses endpoint.
