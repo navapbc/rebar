@@ -585,19 +585,6 @@ _VAGUE_LEXICON = (
 )
 
 
-def _ac_item_lines(text: str) -> list[str]:
-    out, found = [], False
-    for ln in text.split("\n"):
-        if ln.lower().startswith("## acceptance criteria"):
-            found = True
-            continue
-        if found and ln.startswith("## "):
-            break
-        if found and ln.startswith("- ["):
-            out.append(ln)
-    return out
-
-
 # ── Verify-command lint (G-3a, epic cite-stone-sea / WS4) ───────────────────────
 # A DETERMINISTIC, mechanically-checkable lint over the verify/proving commands a plan states,
 # catching three classes of a "present command that silently lies". PRIOR ART: shellcheck is the
@@ -687,7 +674,9 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
     and whether any verification command/section is present. Never blocks."""
-    items = _ac_item_lines(ctx.plan_text)
+    from . import det_operator_attested
+
+    items = det_operator_attested.ac_item_lines(ctx.plan_text)
     issues: list[str] = []
     compound = [
         it
