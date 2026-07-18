@@ -79,21 +79,22 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
 # flags, so its enforcement posture and grandfather boundary come from HERE.
 #
-# require_authenticated: ENFORCEMENT ON. The two defects that broke the first flip (epic dc09 /
-# story 8d39) are now FIXED IN CODE, not worked around (Gerrit change 771):
-#   1. Reducer-ignored observability sidecars (COMPLETION_VERDICT/REVIEW_RESULT/... — the event
-#      types NOT in reducer.KNOWN_EVENT_TYPES) are OUT of the gate scope: they carry no ticket
-#      state and may be emitted best-effort-unsigned, so they can no longer fail the gate.
-#   2. Compacted ledger entries with a null commit_sha are re-resolved via
-#      authorship.resolve_position_commit before the era check (and compaction no longer
-#      persists null), so validly-signed, era-valid events are no longer mis-rejected.
-# The prior rollout's real gap — verification measured producers in a window and force-closed,
-# and verify-identity only ran POST-merge — is closed: verify-identity is now a PRE-MERGE job in
-# the Gerrit Verified gate (Gerrit change 772), so THIS change's own Verified vote is a
-# whole-store measurement that reports 0 enforced-not-verified BEFORE it can merge. Rollback =
-# set back to `false` in a single Gerrit change (no data cleanup). Env override:
+# require_authenticated: ROLLED BACK TO OFF (advisory) — SECOND rollback. The re-enablement
+# (95cbc7bb4, ticket 3f42) passed its OWN pre-merge whole-store gate (0 enforced-not-verified
+# when the tickets anchor 0cf8c035 had just been pinned), but verify-identity then FAILED on
+# subsequent Gerrit changes as the tickets branch grew past the anchor. Failing run 29619412488:
+#   verify-identity: 602 verified, 4958 unsigned, 0 unknown-author, 0 bad-signature,
+#   206 key-not-valid-at-era (5766 in scope) -> exit 1
+# Both classes the first rollback (b77ef8c5d) named — and 4cc3ffbbb claimed to fix — regressed:
+#   1. `unsigned` on rec-0000/*-COMPLETION_VERDICT.json sidecars (live-file refs) — the
+#      KNOWN_EVENT_TYPES scope-drop is not covering these enforced events.
+#   2. `key_not_valid_at_era` on compacted (ledger) entries across many tickets — the null-commit
+#      re-resolution is not preventing pre-anchor events from being enforced/mis-era'd.
+# Root-cause debugging is tracked on ticket f482-309a-7d61-4d78 (discovered_from 3f42). While OFF
+# the gate is advisory (re-verifies + reports, exits 0). Re-flip to `true` only once `rebar
+# verify-identity` reports 0 enforced-not-verified whole-store. Env override:
 # REBAR_IDENTITY_REQUIRE_AUTHENTICATED.
-require_authenticated = true
+require_authenticated = false
 
 # Grandfather boundary — a git ref on the `tickets` tracker branch. Only events whose
 # introducing commit is this ref or a descendant are ENFORCED; everything at/before it is
