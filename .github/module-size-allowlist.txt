@@ -14,4 +14,3 @@
 # ceiling is a deliberate, reviewed act, and each file carries a remedy row in
 # docs/architecture.md. A file that drops back under the soft cap graduates off BOTH files.
 src/rebar/_engine/rebar_reconciler/reconcile.py
-src/rebar/config.py

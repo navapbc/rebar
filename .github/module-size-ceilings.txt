@@ -36,4 +36,3 @@
 # co-located with the Pass-4 coach machinery; a <100 LOC extraction is forbidden by the
 # module-size policy, so the ceiling is raised to the landed size).
 src/rebar/_engine/rebar_reconciler/reconcile.py 1093
-src/rebar/config.py 869

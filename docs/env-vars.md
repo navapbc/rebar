@@ -32,8 +32,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_cli/_llm_eval_commands.py` |  |
 | `REBAR_ACLI_TIMEOUT` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_JIRA_CLI_TIMEOUT` |
 | `REBAR_AUTHOR` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
-| `REBAR_CONFIG` | `src/rebar/config.py` |  |
-| `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/config.py` |  |
+| `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
+| `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
 | `REBAR_ENV_ID` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
@@ -123,11 +123,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/__main__.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/outbound_fields.py` |  |
-| `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py`, `src/rebar/config.py` |  |
+| `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py`, `src/rebar/opcert_service/jobs.py` |  |
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact.py` |  |
-| `REBAR_TRACKER_DIR` | `src/rebar/config.py` |  |
+| `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
 | `RECONCILER_ABSENT_GET_BUDGET` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_engine/rebar_reconciler/binding_store.py`, `src/rebar/_engine/rebar_reconciler/binding_walk.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
@@ -139,7 +139,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/app.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
-| `XDG_CONFIG_HOME` | `src/rebar/config.py` |  |
+| `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
 _131 variables._
 
@@ -162,10 +162,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:760` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:492` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:505` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:509` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:516` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:253` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:266` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:270` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:277` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:383` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`
