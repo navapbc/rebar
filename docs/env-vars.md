@@ -10,7 +10,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | Variable | Read in | Alias/deprecation |
 |----------|---------|-------------------|
 | `ANTHROPIC_API_KEY` | `src/rebar/llm/config.py` |  |
-| `ANTHROPIC_BASE_URL` | `src/rebar/llm/runner.py` |  |
+| `ANTHROPIC_BASE_URL` | `src/rebar/llm/anthropic_model.py` |  |
 | `BLOCKING_SEVERITIES` | `src/rebar/review_bot/config.py` |  |
 | `BOT_USER` | `src/rebar/review_bot/config.py` |  |
 | `COMPACT_THRESHOLD` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_COMPACT_THRESHOLD` |
@@ -49,7 +49,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_HLC` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
-| `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/runner.py` |  |
+| `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
