@@ -1,0 +1,60 @@
+{
+  "experiment": "E6",
+  "title": "judge reliability — self-consistency + order-shuffle",
+  "ticket": "a880-b7e1-dc3e-407c",
+  "epic": "6982-2e75-f8fa-43b9",
+  "pre_registered_on": "2026-07-17",
+  "note": "Pre-registration. These thresholds and sample frames are fixed BEFORE the LLM eval runs; the recorded verdicts (e6_selfconsistency.jsonl / e6_ordershuffle.jsonl) and the derived e6_summary.json must be judged against exactly these floors. E6 measures agreement (reliability), never accuracy against a gold label.",
+  "gate_rule": {
+    "fleiss_kappa_floor": 0.6,
+    "raw_agreement_floor": 0.8,
+    "decision": "PASS iff fleiss_kappa >= 0.6 AND raw_agreement >= 0.8",
+    "rationale": "kappa>=0.6 is Landis-Koch 'substantial'; the raw-agreement co-floor is prevalence-robust because kappa deflates under the cohort's skewed base rates (advisory-heavy)."
+  },
+  "exp_a_self_consistency": {
+    "gates": "R5",
+    "gate_signal": "self_consistency.pass -> whether R5's new Pass-2 sub-answer (asserted_capability_confirmed) is worth adding",
+    "agreement_unit": "pass3 decision in {block, advisory, dropped, indeterminate}",
+    "sample_frame": "runs/adjudication_corpus.jsonl rows with criterion in {G6, E4, T3}",
+    "cohort_size": 74,
+    "cohort_distinct_tickets": 66,
+    "cohort_decision_counts": {"advisory": 47, "dropped": 20, "block": 7},
+    "n_findings": 50,
+    "votes_per_finding": 3,
+    "sample_seed": 43136,
+    "sample_seed_hex": "0xA880",
+    "dedup_key": "(ticket_id, finding_id)",
+    "plan_snapshot": "each sampled finding's ticket plan text is snapshotted once from rebar's replay-derived description into runs/e6_selfconsistency_inputs.jsonl; a finding whose plan is unretrievable is skipped and topped up from the cohort remainder to hold N=50",
+    "expected_llm_calls": 150,
+    "llm_call_kind": "agentic Pass-2 verify (Pass-3 is deterministic/free)"
+  },
+  "exp_b_order_shuffle": {
+    "gates": "R3",
+    "gate_signal": "order_shuffle.pass -> prerequisite for trusting R3's new (order-exposed) container criterion",
+    "agreement_unit": "verdict in {PASS, BLOCK, INDETERMINATE}",
+    "sample_frame": "runs/corpus_sample.json plans with >= 3 top-level '##' sections",
+    "n_plans": 14,
+    "permutations_per_plan": 3,
+    "permutation_rule": "permutation 0 = identity; permutations 1..2 = distinct section orders from random.Random(seed).shuffle",
+    "seed_rule": "int(plan_id.split('-')[0], 16)",
+    "excluded_from_frame": "5 of 19 corpus plans have < 3 top-level sections (one =2, four =1)",
+    "container_subset": "descriptive only, NOT gated (only 5 of 19 inputs are containers -> under-powered; order-sensitivity is a general judge property, so a stable general-plan result is the prerequisite)",
+    "expected_llm_calls": 42,
+    "llm_call_kind": "full-gate review_plan runs"
+  },
+  "infra_indeterminate_exclusion": {
+    "exp_a": "a vote whose pass3 decision == 'indeterminate' (three_pass.pass3_decide returns this ONLY when Pass-2 produced no verdict) is an execution failure -> dropped and re-run",
+    "exp_b": "a verdict == 'INDETERMINATE' whose coverage carries llm_unavailable or verify_failed is an execution failure -> dropped and re-run; a genuine judge-INDETERMINATE (neither flag) is KEPT as its own agreement category",
+    "retry_cap": {
+      "vote_target": 3,
+      "max_infra_retries": 3,
+      "attempt_budget": 6,
+      "policy": "collect up to vote_target substantive votes within attempt_budget calls; a subject that cannot reach the target is recorded as an explicit excluded row (e6_*_excluded.jsonl) and NEVER silently padded"
+    }
+  },
+  "total_expected_llm_spend": {
+    "exp_a_agentic_pass2_calls": 150,
+    "exp_b_full_gate_runs": 42,
+    "note": "deliberately bounded sub-samples, not the full 400-finding adjudication corpus nor the 628-row outcome corpus; excludes re-runs for infra-INDETERMINATE draws (bounded by the retry cap)"
+  }
+}

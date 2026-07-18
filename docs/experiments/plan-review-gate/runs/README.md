@@ -154,3 +154,131 @@ Verified store-wide: **0 of ~1900 payloads** have `sum(counts) != len(findings)`
 No `tp_fp` / `rater_*` / `rationale` / gold label is shipped (see the descope note). The gate's own
 `impact`/`validity`/`priority` are retained as the gate's self-assessment — useful downstream (E6 re-judges
 these findings for self-consistency; it never needed the TP/FP labels).
+
+---
+
+## E6 — judge reliability (self-consistency + order-shuffle)
+
+**Ticket a880** (epic 6982, plan-review calibration). E6 measures whether the plan-review gate's
+LLM-as-judge is **reliable** — the same plan, re-judged, lands the same way. It measures
+**agreement (reliability), not accuracy against a gold label** (that is why E6 survived the E1
+descope: re-judging for self-consistency never needed the TP/FP labels the corpora deliberately
+omit). **No `src/rebar` behavior changes** — E6 is measurement over the *existing* gate
+(Pass-2 verify → Pass-3 decide → `orchestrator.finalize_verdict`).
+
+Two bounded experiments, each gating a downstream ticket:
+
+### Exp A — self-consistency (gates **R5**)
+Re-judges N=50 findings **3× each** and measures agreement on the Pass-3
+`decision ∈ {block, advisory, dropped, indeterminate}`. Pass-3 is deterministic given Pass-2, so
+all measured variance is the judge's Pass-2 stochasticity.
+
+- **Sample frame:** `adjudication_corpus.jsonl` rows with **criterion in {G6, E4, T3}** — the R5
+  cohort (R5 adds a Pass-2 sub-answer routed over exactly this G6/E4/T3 slice). The cohort is
+  **74 findings / 66 distinct tickets** (advisory 47 / dropped 20 / block 7), which clears the
+  N≥50 floor with 24 rows of headroom.
+- **N = 50**, sampled deterministically (seed `0xA880`) from the 74-member cohort, deduped by
+  `(ticket_id, finding_id)`. Each finding's ticket plan text is snapshotted **once** (from rebar's
+  replay-derived `description`) into `e6_selfconsistency_inputs.jsonl`, so the N-vote harness reads
+  only that committed file — **no live-store dependency at judge time**. A finding whose plan is
+  unretrievable is skipped and topped up from the cohort remainder to hold N=50.
+- **Gate signal:** `self_consistency.pass` → whether R5's new Pass-2 sub-answer
+  (`asserted_capability_confirmed`) emits stably enough to be worth adding. `asserted_capability_confirmed`
+  does **not** exist yet — E6 records only the *existing* `decision`, never any R5 field.
+
+### Exp B — order-shuffle (gates **R3**)
+Re-judges each of N=14 plans under **3 distinct section-order permutations** and measures agreement
+on the gate `verdict ∈ {PASS, BLOCK, INDETERMINATE}`. The gate already uses the recommended
+mitigation (absolute rubric scoring, never pairwise); E6 empirically confirms the **residual**
+order-sensitivity is below floor **before** R3 lands its new (order-exposed) container criterion.
+
+- **Sample frame:** `corpus_sample.json` — the only committed plan-text corpus (the outcome and
+  adjudication corpora store no plan text). Of its 19 inputs, **14 carry ≥3 top-level `##` sections**
+  (the permutable set); 5 are excluded (one =2, four =1). A plan needs ≥3 sections because a
+  2-section plan admits only `2! = 2` orderings, whereas `3! = 6` guarantees 3 distinct permutations.
+- **Permutations (deterministic):** the pure helper `permute_sections` yields exactly 3 orderings —
+  **permutation 0 = identity** (the plan's original order), permutations 1–2 drawn from
+  `random.Random(seed).shuffle` with `seed = int(plan_id.split("-")[0], 16)`, taking the next
+  ordering not already selected. Content is preserved verbatim — only the `##` block order changes.
+  The concrete `section_order` index lists are committed in `e6_ordershuffle_inputs.jsonl`, so the
+  experiment is re-runnable without re-deriving the shuffle.
+- **Why the "≥20 container plans" requirement was dropped.** Only 5 of the 19 inputs are containers
+  (`has_children=true`: 3 epics + 2 stories), and the run corpora hold exactly one container-type
+  ticket — a container-only shuffle would be under-powered and irreproducible. Order-sensitivity is
+  a **general** judge property: if the verdict is unstable under section shuffle at large, any new
+  criterion (including R3's container criterion) inherits that instability, so a stable
+  general-plan result is the **prerequisite** for trusting R3. The 5-plan container subset is
+  reported **descriptively only** (`container_subset_descriptive` in the summary), never gated.
+- **Gate signal:** `order_shuffle.pass` → prerequisite for trusting R3's container criterion.
+
+### Pre-registered threshold (both experiments)
+Fixed **before** the eval in `e6_prereg.json`: **PASS iff Fleiss' kappa ≥ 0.6 AND raw agreement ≥ 0.8.**
+kappa ≥ 0.6 is Landis–Koch "substantial"; the raw-agreement co-floor is prevalence-robust because
+Fleiss' kappa deflates under the cohort's skewed (advisory-heavy) base rates. `e6_summary.json`
+records both figures and the boolean `pass` for each experiment.
+
+### Infra-INDETERMINATE exclusion + retry cap
+An **execution failure is not a stable judge outcome**, so it is dropped-and-re-run, not counted:
+
+- **Exp A:** a vote whose Pass-3 `decision == "indeterminate"` (`three_pass.pass3_decide` returns
+  this **only** when Pass-2 produced no verdict — error or agentic-no-verdict) is infra → re-run.
+- **Exp B:** a `verdict == "INDETERMINATE"` whose `coverage` carries `llm_unavailable` or
+  `verify_failed` is infra → re-run; a **genuine judge-INDETERMINATE** (neither flag) is **kept** as
+  its own agreement category.
+- **Retry cap (never pad):** collect up to 3 substantive votes within a budget of 6 attempts; a
+  subject that cannot reach 3 is written to `e6_*_excluded.jsonl` as an explicit excluded row and is
+  **never silently padded**.
+
+### Prompts as run
+The judge is exercised through the committed harness code, unchanged from production:
+
+- **Exp A** re-uses `harnesses/three_pass.py` — `pass2_verify(..., agentic=True, repo_root=<checkout>)`
+  inside a `gate_source.gate_read_root` session, then the deterministic `pass3_decide`. The Pass-2
+  system prompt + `PASS2_TOOL`/`GRADED` binary sub-answer schema are those in `three_pass.py`.
+- **Exp B** drives the **public** entrypoint `rebar.llm.plan_review.review_plan(ticket_id,
+  source="local", repo_root=<checkout>, sign=False, emit_sidecar=False, force=True)` against a
+  throwaway `REBAR_TRACKER_DIR` store clone (ticket-store root and code-grounding root are
+  separable), so the real tickets store is never written.
+
+### Bounded LLM spend
+Deliberately small sub-samples (not the 400-finding adjudication corpus nor the 628-row outcome
+corpus): **Exp A = 50 findings × 3 votes = 150 agentic Pass-2 calls** (Pass-3 is deterministic/free);
+**Exp B = 14 plans × 3 permutations = 42 full-gate `review_plan` runs**. Infra re-runs add at most
+the retry-cap budget on top.
+
+### Files
+| file | what |
+|---|---|
+| `e6_prereg.json` | pre-registration: thresholds + sample frames (written before the eval) |
+| `e6_selfconsistency_inputs.jsonl` | Exp A frozen inputs (N=50 findings + snapshotted plan text) |
+| `e6_ordershuffle_inputs.jsonl` | Exp B frozen inputs (14 plans × 3 permutation specs) |
+| `e6_selfconsistency.jsonl` | Exp A recorded votes (3 substantive Pass-3 `decision`s / finding) |
+| `e6_ordershuffle.jsonl` | Exp B recorded verdicts (1 kept `verdict` / plan × permutation) |
+| `e6_*_excluded.jsonl` | explicitly excluded subjects (infra-cap or vanished ticket) — never padded |
+| `e6_*_agreement.csv` | per-subject agreement tables |
+| `e6_summary.json` | the two gate-input verdicts: `self_consistency.pass` → R5, `order_shuffle.pass` → R3 |
+| `harnesses/e6_judge_reliability.py` | the driver (build-inputs / run-a / run-b / analyze) |
+| `harnesses/e6_metrics.py` | the LLM-free agreement/permutation/exclusion helpers |
+| `tests/unit/test_e6_agreement.py` | CI-collectable golden tests for the helpers |
+
+### Results (from `e6_summary.json`)
+| experiment | effective N | Fleiss' kappa | raw agreement | pass (κ≥0.6 AND raw≥0.8) |
+|---|---|---|---|---|
+| Exp A — self-consistency (R5) | 50/50 findings (0 excluded) | **0.874** | **0.96** | ✅ **PASS** |
+| Exp B — order-shuffle (R3) | **10/14 plans** (4 excluded) | 0.55 | 0.70 | ❌ **FAIL** (below floor) |
+
+- **Exp A clears both floors decisively** — the Pass-2/Pass-3 judge re-lands the same `decision`
+  on 48/50 findings (κ = 0.874, "almost perfect" on Landis–Koch). R5's new Pass-2 sub-answer is
+  worth adding: the judge is self-consistent enough to build on.
+- **Exp B lands below floor** (κ = 0.55, raw = 0.70) — a real reliability finding, **not** a
+  harness error: the gate `verdict` is order-sensitive enough that R3 must **not** rely on it until
+  the residual instability is addressed. `order_shuffle.pass = false` blocks R3 as designed. The
+  `mean_fired_criteria_jaccard = 0.671` shows the fired-criteria set also drifts under shuffle.
+- **Effective N = 10/14 (honest).** Four plans — **`8722-f153-bd26-46d8`, `8bda-cd4b-3459-46da`,
+  `d015-8af0-b627-4c18`, `e46e-f886-033d-490b`** — were permutable when the inputs were frozen
+  (their plan text is still in `e6_ordershuffle_inputs.jsonl`), but their tickets have since been
+  archived/removed from the `tickets` branch, so they are absent from the run-time
+  `git clone --branch tickets` store clone (`rebar edit`/`show` → `ticket not found`). The harness
+  records each as an explicit `ticket_not_found` row in `e6_ordershuffle_excluded.jsonl` (3
+  permutations × 4 plans = 12 excluded rows) and **continues** — it never crashes and never pads a
+  missing verdict. The below-floor result is computed over the 10 plans that survived.

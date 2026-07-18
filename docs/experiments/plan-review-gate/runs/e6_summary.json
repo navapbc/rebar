@@ -1,0 +1,69 @@
+{
+  "experiment": "E6",
+  "ticket": "a880-b7e1-dc3e-407c",
+  "epic": "6982-2e75-f8fa-43b9",
+  "self_consistency": {
+    "n_findings": 50,
+    "fleiss_kappa": 0.8737,
+    "raw_agreement": 0.96,
+    "pass": true,
+    "kappa_floor": 0.6,
+    "raw_floor": 0.8,
+    "n_subjects": 50,
+    "n_raters": 3,
+    "category_counts": {
+      "advisory": 18,
+      "dropped": 132
+    },
+    "gates": "R5",
+    "n_excluded": 0,
+    "agreement_unit": "pass3 decision in {block,advisory,dropped,indeterminate}"
+  },
+  "order_shuffle": {
+    "n_plans": 10,
+    "n_plans_total": 14,
+    "n_plans_excluded": 4,
+    "excluded_plans": [
+      {
+        "plan_id": "8722-f153-bd26-46d8",
+        "reason": "ticket_not_found",
+        "n_perms_excluded": 3
+      },
+      {
+        "plan_id": "8bda-cd4b-3459-46da",
+        "reason": "ticket_not_found",
+        "n_perms_excluded": 3
+      },
+      {
+        "plan_id": "d015-8af0-b627-4c18",
+        "reason": "ticket_not_found",
+        "n_perms_excluded": 3
+      },
+      {
+        "plan_id": "e46e-f886-033d-490b",
+        "reason": "ticket_not_found",
+        "n_perms_excluded": 3
+      }
+    ],
+    "fleiss_kappa": 0.55,
+    "raw_agreement": 0.7,
+    "pass": false,
+    "kappa_floor": 0.6,
+    "raw_floor": 0.8,
+    "n_subjects": 10,
+    "n_raters": 3,
+    "category_counts": {
+      "BLOCK": 20,
+      "PASS": 10
+    },
+    "gates": "R3",
+    "mean_fired_criteria_jaccard": 0.6712,
+    "agreement_unit": "verdict in {PASS,BLOCK,INDETERMINATE}",
+    "container_subset_descriptive": {
+      "n_plans": 3,
+      "raw_agreement": 0.3333,
+      "note": "descriptive only, NOT gated (under-powered: see ticket a880 Exp B)"
+    },
+    "blocker": "R3 PREREQUISITE FAILURE: order-shuffle below floor (kappa=0.55, raw=0.7; need kappa>=0.6 AND raw>=0.8)"
+  }
+}
