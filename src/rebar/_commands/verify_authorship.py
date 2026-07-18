@@ -137,6 +137,22 @@ def _is_gate_exempt_ticket(ticket_dir: str) -> bool:
     return isinstance(state, dict) and state.get("ticket_type") in _GATE_EXEMPT_TYPES
 
 
+def _is_archived_ticket(ticket_dir: str) -> bool:
+    """True iff the ticket at ``ticket_dir`` is net-ARCHIVED (retired work, out of gate scope).
+
+    An ARCHIVED ticket's events are retired, so — like the gate-exempt types — they are OUT of
+    the authorship gate's scope. Delegates to the canonical
+    :func:`rebar.reducer._api._is_net_archived` (which already nets ARCHIVED against REVERT).
+    Fail-safe like :func:`_is_gate_exempt_ticket`: any lookup error yields False so the scan
+    continues (the ticket is scanned normally)."""
+    try:
+        from rebar.reducer._api import _is_net_archived
+
+        return _is_net_archived(ticket_dir)
+    except Exception:  # noqa: BLE001 — an unreadable ticket is scanned normally
+        return False
+
+
 def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root) -> str:
     """Classify an event that carries an ``author_sig``: VERIFIED / KEY_NOT_VALID_AT_ERA /
     BAD_SIGNATURE (with an UNKNOWN_AUTHOR short-circuit when the author is not an identity).
@@ -213,12 +229,22 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root) -> str:
         )
         if v.verified:
             return VERIFIED
-    # Era verify failed (or the commit was unresolvable) — distinguish a real-but-wrong-era
-    # key from a forgery.
+
+    # Era verify failed OR the commit was unresolvable. An any-key verify (against EVERY key the
+    # identity has ever held) decides authenticity: a signature by no such key is a forgery.
     any_v = authorship.verify_authorship_any_key(envelope, str(author_id), repo_root=repo_root)
-    if any_v.verified:
-        return KEY_NOT_VALID_AT_ERA
-    return BAD_SIGNATURE
+    if not any_v.verified:
+        return BAD_SIGNATURE
+    # Authentic identity signature. If we HAD a commit, the key was simply wrong-era → the real
+    # KEY_NOT_VALID_AT_ERA classification. But if the commit is UNRESOLVABLE for a LEDGER entry (a
+    # compacted event whose raw file is retired and whose introducing commit is genuinely
+    # unrecoverable) we cannot era-scope at all — and an authentic signature by the identity is NOT
+    # a forgery, so it must not fail a gate whose purpose is to reject forged/unsigned/wrong-key
+    # events: classify it VERIFIED. A LIVE event keeps the historical era-fail-closed behavior (its
+    # raw file is present at HEAD, so an unresolvable commit there is anomalous, not compaction).
+    if commit_sha is None and not is_live:
+        return VERIFIED
+    return KEY_NOT_VALID_AT_ERA
 
 
 def _classify(ev: _ScopedEvent, tracker: str, repo_root) -> str:
@@ -381,8 +407,10 @@ def _collect_all(tracker: str) -> list[_ScopedEvent]:
         return events
     for ticket_id in ticket_ids:
         ticket_dir = os.path.join(tracker, ticket_id)
-        if _is_gate_exempt_ticket(ticket_dir):
-            continue  # identity/session_log/code_review are bootstrap/verbose, not authored work
+        if _is_gate_exempt_ticket(ticket_dir) or _is_archived_ticket(ticket_dir):
+            # identity/session_log/code_review are bootstrap/verbose, and a net-ARCHIVED ticket
+            # is retired work — neither is authored work the gate enforces.
+            continue
         for filename in _active_event_files(ticket_dir):
             events.extend(_event_from_file(ticket_id, filename, os.path.join(ticket_dir, filename)))
     return events
@@ -497,6 +525,11 @@ def cli(argv: list[str]) -> int:
     from rebar.attest import authorship
 
     commit_map = authorship.build_introducing_commit_map(repo_root=args.root)
+    # Position→commit map for re-resolving a compacted LEDGER entry's null commit_sha in ONE
+    # git-log pass (same --full-history robustness as build_introducing_commit_map). This both
+    # fixes the topology fragility of a per-entry `git log` AND removes its ~O(entries × 2 s)
+    # cost on the whole-store gate; a map miss falls back to the per-entry resolver below.
+    position_map = authorship.build_position_commit_map(repo_root=args.root)
 
     counts = {
         VERIFIED: 0,
@@ -515,10 +548,14 @@ def cli(argv: list[str]) -> int:
         # era classification (_verify_signed's ledger branch reads ``ev.commit_sha``) and the
         # enforcement decision (_resolve_commit returns ``ev.commit_sha``) use the real
         # commit — otherwise a validly-signed event fail-closes to ``key_not_valid_at_era``.
+        # Use the batched --full-history position map first (O(1)); only fall back to the
+        # per-entry resolver for a position the map misses (fail-closed).
         if ev.event is None and ev.commit_sha is None and ev.position:
-            ev.commit_sha = authorship.resolve_position_commit(
-                ev.position, tracker, repo_root=args.root
-            )
+            ev.commit_sha = position_map.get(ev.position)
+            if ev.commit_sha is None:
+                ev.commit_sha = authorship.resolve_position_commit(
+                    ev.position, tracker, repo_root=args.root
+                )
         cls = _classify(ev, tracker, args.root)
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
