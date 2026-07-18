@@ -15,6 +15,5 @@
 # docs/architecture.md. A file that drops back under the soft cap graduates off BOTH files.
 src/rebar/_engine/rebar_reconciler/reconcile.py
 src/rebar/config.py
-src/rebar/llm/workflow/gate_dispatch.py
 src/rebar/_commands/fsck.py
 src/rebar/reducer/_processors.py
