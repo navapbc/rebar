@@ -68,3 +68,38 @@ default 200; findings deduplicated per ticket, joined to the outcome row by `tic
 post-claim edit; `sample_counts` = the denominators. The pure `classify` / `compute_metrics` are
 CI-tested in `tests/unit/test_gate_eval_classifier.py`. The alarm/demotion playbook (trailing
 `blocking_fp_proxy > 10% -> demote to advisory`) lives in `docs/plan-review-gate.md`.
+
+## Standing per-criterion effectiveness recorder (epic 6982, extends R7)
+
+`harnesses/criterion_effectiveness.py` is a **complementary** standing dogfood recorder whose signal
+source is the sidecar **re-review history alone** — no outcome corpus, no git-object walk — so it
+accumulates at **zero marginal LLM cost** and computes a *detection* proxy R7 does not, plus a
+*within-review de-escalation* blocking-FP proxy distinct from R7's force-close one.
+
+```
+python docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py --record --backfill   # seed runs/criterion_firings.jsonl from all sidecars
+python docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py --record              # incremental append (past the ledger watermark; idempotent)
+python docs/experiments/plan-review-gate/harnesses/criterion_effectiveness.py --report --no-refresh  # writes runs/criterion_effectiveness.json (reads the committed ledger; never auto-records)
+```
+
+`--record` reads each ticket's `REVIEW_RESULT` sidecars (mirroring `all_review_results`'s
+file-enumeration + v1/v2 schema guard, but reading the review `ts_ns` + `round_uuid` from the
+sidecar **filename**, since `all_review_results` returns only the payload body) and appends one lean
+firing row per (review-round, finding) into the append-only, prune-immune ledger
+`runs/criterion_firings.jsonl`. **Ledger row schema** (short keys, v1): `t`=ticket_id, `ts`=review_ts
+(ns int), `r`=round_uuid, `v`=verdict, `c`=criteria[], `n`=norm_id, `u`=fix_unit_key, `d`=decision,
+`s`=severity, `p`=priority, `x`=drop_reason (`indeterminate` abstains are not recorded). It is a
+single-writer standing job (like `mine_outcome_corpus.py`); run it on a cron / `session-log` cadence.
+The ledger is a local, growing artifact (~8 MB over the current corpus) and is **git-ignored** (over
+the 500 KB large-file gate) — regenerate it with `--record --backfill`; only the small computed
+metrics artifact `runs/criterion_effectiveness.json` is committed as the CI-visible baseline.
+
+**Metrics** (`runs/criterion_effectiveness.json`, per criterion, over a trailing `--window` of the
+N most-recently-reviewed tickets, default 400 — **auto-including every criterion id in the ledger**,
+so R1/R3/R4's new advisory criteria are monitored with no per-criterion wiring): `detection_proxy` =
+fraction of C's blocking fix-units the ticket remediated to a PASS (blocked, then absent from a later
+PASS round); `blocking_fp_proxy` = fraction the gate later de-escalated (found again but `dropped`,
+not surfaced as blocking) without remediation; `sample_counts` = every numerator + denominator
+(self-verifying). The pure `firings_from_review` / `compute_effectiveness` are CI-tested in
+`tests/unit/test_criterion_effectiveness.py`; the advisory→blocking **promotion-gate** protocol (and
+why this metric's base rate differs from R7's 10% cliff) lives in `docs/plan-review-gate.md`.
