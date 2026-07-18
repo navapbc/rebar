@@ -67,11 +67,11 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
     sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
         from rebar._store.event_append import delete_events
 
         tracker = str(_config.tracker_dir(repo_root))
-        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
         ticket_dir = os.path.join(tracker, rid)
         files = sorted(
             f
@@ -102,10 +102,10 @@ def latest_fail_verdict(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
     missing/garbled record degrades gracefully to ``None``."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
 
         tracker = str(_config.tracker_dir(repo_root))
-        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
         ticket_dir = os.path.join(tracker, rid)
         files = sorted(
             f
@@ -146,10 +146,10 @@ def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | No
     degrades gracefully to ``None``."""
     try:
         from rebar import config as _config
-        from rebar._engine_support.resolver import resolve_ticket_id
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
 
         tracker = str(_config.tracker_dir(repo_root))
-        rid = resolve_ticket_id(ticket_id, tracker) or ticket_id
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
         ticket_dir = os.path.join(tracker, rid)
         files = sorted(
             f

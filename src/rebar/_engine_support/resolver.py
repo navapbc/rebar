@@ -28,11 +28,15 @@ from rebar._ids import (
     _scan_alias as _scan_alias,
 )
 from rebar._ids import (
+    resolve_ticket_dir_name as resolve_ticket_dir_name,
+)
+from rebar._ids import (
     resolve_ticket_id as resolve_ticket_id,
 )
 
 __all__ = [
     "resolve_ticket_id",
+    "resolve_ticket_dir_name",
     "_resolve_via_binding_store",
     "_scan_alias",
     "_FULL_ID_RE",

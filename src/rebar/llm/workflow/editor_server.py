@@ -154,8 +154,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         from rebar.llm.prompting.prompts import _catalog_dir, _packaged_prompt_files
 
         if self.session.repo_root:
-            user = Path(self.session.repo_root) / ".rebar" / "prompts" / f"{pid}.md"
-            if user.is_file():
+            prompts_dir = (Path(self.session.repo_root) / ".rebar" / "prompts").resolve()
+            user = (prompts_dir / f"{pid}.md").resolve()
+            # Containment barrier: a traversing prompt id (e.g. "../../secret")
+            # resolves outside prompts_dir and is refused, so only files INSIDE the
+            # project prompt dir can be read (the packaged branch below is already
+            # allowlist-guarded by `pid in packaged`).
+            if user.is_relative_to(prompts_dir) and user.is_file():
                 return user.read_text(encoding="utf-8")
         packaged = _packaged_prompt_files()
         if pid in packaged:

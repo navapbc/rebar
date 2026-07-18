@@ -263,7 +263,10 @@ async def rerun(request: Request) -> JSONResponse:
     try:
         event = await asyncio.to_thread(GerritClient(cfg).get_change_event, str(change))
     except GerritError as exc:
-        return JSONResponse(status_code=502, content={"status": "gerrit error", "detail": str(exc)})
+        # Log the Gerrit error detail server-side; keep it OUT of the client
+        # response body (py/stack-trace-exposure) — a generic status is enough.
+        logger.warning("review-bot rerun: gerrit lookup failed for change %s: %s", change, exc)
+        return JSONResponse(status_code=502, content={"status": "gerrit error"})
     if event is None:
         return JSONResponse(status_code=404, content={"status": "change not found"})
 
