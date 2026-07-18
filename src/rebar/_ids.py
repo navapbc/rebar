@@ -84,7 +84,14 @@ def _existing_ticket_dir_name(tracker_dir: str, name: str) -> str | None:
         return None
     tracker_norm = os.path.normpath(tracker_dir)
     candidate = os.path.normpath(os.path.join(tracker_norm, name))
-    if candidate != tracker_norm and not candidate.startswith(tracker_norm + os.sep):
+    # Containment barrier: only a normalized candidate that is a CHILD of the
+    # tracker directory is accepted. A traversing/absolute ``name`` normalizes
+    # outside and fails ``startswith``, yielding None. The plain normpath +
+    # ``startswith`` form (no extra disjunct) is exactly CodeQL's recognized
+    # path-injection sanitizer (PathNormalization + SafeAccessCheck), so every
+    # sink fed by this function's return value is seen as sanitized. A real ticket
+    # id is always a child of the tracker, so this never rejects a valid id.
+    if not candidate.startswith(tracker_norm + os.sep):
         return None
     if os.path.isdir(candidate):
         return os.path.basename(candidate)
