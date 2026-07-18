@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -43,12 +44,28 @@ def _tracker(repo: Path) -> str:
 
 
 def _commit_count(repo: Path) -> int:
-    r = subprocess.run(
-        ["git", "-C", _tracker(repo), "rev-list", "--count", "HEAD"],
-        capture_output=True,
-        text=True,
+    # `git rev-list --count HEAD` can transiently fail under CI load (rc!=0, empty stdout) —
+    # bug efb7-09de: the old `int(r.stdout.strip())` turned that into an opaque
+    # `ValueError: invalid literal for int()` that masked git's real error and flaked the test.
+    # Retry the transient; on a persistent failure raise a clear diagnostic carrying git's stderr.
+    tracker = _tracker(repo)
+    last = None
+    for attempt in range(5):
+        r = subprocess.run(
+            ["git", "-C", tracker, "rev-list", "--count", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        out = r.stdout.strip()
+        if r.returncode == 0 and out:
+            return int(out)
+        last = r
+        if attempt < 4:
+            time.sleep(0.05)
+    raise RuntimeError(
+        f"git rev-list --count HEAD failed after retries in {tracker}: "
+        f"rc={last.returncode} stdout={last.stdout.strip()!r} stderr={last.stderr.strip()!r}"
     )
-    return int(r.stdout.strip())
 
 
 def _records(n: int, *, with_comment: bool) -> list[dict]:
@@ -78,6 +95,55 @@ def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path) -> None:
     assert delta == expected, f"expected {expected} batched commits, got {delta}"
     # A >=10x reduction vs the ~2n per-event baseline.
     assert delta * 10 <= 2 * n
+
+
+def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression (bug efb7-09de): _commit_count must NOT crash with the opaque
+    `ValueError: invalid literal for int() with base 10: ''` when `git rev-list --count HEAD`
+    transiently returns empty stdout (the observed CI flake, run 29620766631). It must:
+      (a) retry past a TRANSIENT failure and return the real commit count, and
+      (b) on a PERSISTENT failure, raise a CLEAR diagnostic carrying git's stderr — never int('').
+    Both simulated by patching subprocess.run the same way the crash-resume test injects a git
+    failure (fake CompletedProcess with rc!=0 + empty stdout)."""
+    dst = _fresh_repo(tmp_path, "cc")
+    real_run = subprocess.run
+    expected = int(
+        real_run(
+            ["git", "-C", _tracker(dst), "rev-list", "--count", "HEAD"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+
+    # (a) TRANSIENT: fail only the FIRST rev-list, then defer to real git -> retry recovers.
+    calls = {"revlist": 0}
+
+    def flaky_run(cmd, *a, **kw):
+        if isinstance(cmd, list) and "rev-list" in cmd:
+            calls["revlist"] += 1
+            if calls["revlist"] == 1:
+                return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: transient")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", flaky_run)
+    assert _commit_count(dst) == expected  # retried past the injected transient
+    assert calls["revlist"] >= 2, "expected a retry after the transient failure"
+    monkeypatch.undo()
+
+    # (b) PERSISTENT: every rev-list empties -> a CLEAR error, not the opaque int('') crash.
+    def dead_run(cmd, *a, **kw):
+        if isinstance(cmd, list) and "rev-list" in cmd:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: boom-42")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", dead_run)
+    with pytest.raises(Exception) as ei:  # noqa: B017 — asserting the message shape, any type
+        _commit_count(dst)
+    msg = str(ei.value)
+    assert "invalid literal for int" not in msg, f"still the opaque int('') crash: {msg!r}"
+    assert "boom-42" in msg, f"clear error must surface git's stderr, got {msg!r}"
 
 
 def test_malformed_event_mid_chunk_rolls_back_whole_chunk(tmp_path: Path) -> None:
