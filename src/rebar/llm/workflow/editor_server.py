@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -154,14 +155,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         from rebar.llm.prompting.prompts import _catalog_dir, _packaged_prompt_files
 
         if self.session.repo_root:
-            prompts_dir = (Path(self.session.repo_root) / ".rebar" / "prompts").resolve()
-            user = (prompts_dir / f"{pid}.md").resolve()
-            # Containment barrier: a traversing prompt id (e.g. "../../secret")
-            # resolves outside prompts_dir and is refused, so only files INSIDE the
-            # project prompt dir can be read (the packaged branch below is already
-            # allowlist-guarded by `pid in packaged`).
-            if user.is_relative_to(prompts_dir) and user.is_file():
-                return user.read_text(encoding="utf-8")
+            prompts_dir = os.path.normpath(
+                os.path.join(self.session.repo_root, ".rebar", "prompts")
+            )
+            user = os.path.normpath(os.path.join(prompts_dir, f"{pid}.md"))
+            # Containment barrier (normpath + startswith): a traversing prompt id
+            # ("../../secret") normalizes outside prompts_dir and is refused, so only
+            # files INSIDE the project prompt dir can be read (the packaged branch
+            # below is already allowlist-guarded by `pid in packaged`). This exact
+            # form is CodeQL's recognized path-injection sanitizer.
+            if user.startswith(prompts_dir + os.sep) and os.path.isfile(user):
+                with open(user, encoding="utf-8") as fh:
+                    return fh.read()
         packaged = _packaged_prompt_files()
         if pid in packaged:
             return Path(str(_catalog_dir())).joinpath(packaged[pid]).read_text(encoding="utf-8")
