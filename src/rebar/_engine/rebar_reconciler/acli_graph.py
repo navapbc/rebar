@@ -46,14 +46,9 @@ _RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
     "relates_to": ("Relates", False),
 }
 
-# Reverse map: Jira link-type name -> rebar relation. Only the canonical
-# (non-swapped) entries are reversed here; the inbound differ uses link
-# directionality (outwardIssue vs inwardIssue) plus this map to recover the
-# rebar relation. ``Blocks`` reverses to ``blocks`` (the outward direction).
-_JIRA_LINK_TO_RELATION: dict[str, str] = {
-    "Blocks": "blocks",
-    "Relates": "relates_to",
-}
+# (The Jira-link-type -> rebar-relation direction map now lives once in the
+# link_direction module; this dead re-declaration was removed in the bug-4b59
+# unification. Nothing in acli_graph referenced it.)
 
 
 class AcliGraphMixin:

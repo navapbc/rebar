@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+# Single source of truth for the Jira-issuelink -> rebar-relation DIRECTION logic,
+# shared with the inbound ADD path (inbound_differ). outbound_links is only ever
+# loaded as the ``rebar_reconciler.outbound_links`` package submodule (never
+# spec-loaded standalone), so a plain package import is safe here — and it removes
+# the copy-paste that let a prior inversion hide on an untouched mirror (bug 4b59).
+from rebar_reconciler.link_direction import resolve_inbound_link
+
 # ---------------------------------------------------------------------------
 # Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
 # ---------------------------------------------------------------------------
@@ -38,23 +45,10 @@ _RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
     "relates_to": ("Relates", False),
 }
 
-# Reverse of the above for the REMOVE pass (wake-inn-parse): a Jira link type maps
-# to a base rebar relation; the inward/outward direction disambiguates Blocks into
-# blocks vs depends_on (mirrors inbound_differ._JIRA_LINK_TO_RELATION). Re-declared
-# locally for the same standalone-load reason as _RELATION_TO_JIRA_LINK above.
-_JIRA_LINK_TO_RELATION: dict[str, str] = {
-    "Blocks": "blocks",
-    "Relates": "relates_to",
-}
-
-# Inverse of a directional rebar relation (blocks<->depends_on; symmetric relations
-# invert to themselves via ``.get(rel, rel)``). MIRRORS
-# inbound_differ._INVERSE_RELATION — both the inbound ADD path and this REMOVE path
-# must disambiguate a Jira Blocks link by direction the SAME way, or a managed
-# unlink computes the wrong relation and silently fails the managed_refs gate. The
-# two copies are pinned together by the live-ground-truth
-# test_link_direction_absolute.py (bug 4b59 / epic 58b0).
-_INVERSE_RELATION: dict[str, str] = {"blocks": "depends_on", "depends_on": "blocks"}
+# The REMOVE pass disambiguates a Jira Blocks link into blocks/depends_on the SAME
+# way as the inbound ADD path — via link_direction.resolve_inbound_link (imported
+# above), the single source of truth. (Previously re-declared locally, which is the
+# copy-paste the bug-4b59 unification removes.)
 
 
 def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:
@@ -195,24 +189,14 @@ def _diff_link_removals(
             continue
         link_type = link.get("type") or {}
         type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue  # no link-type name — never managed by us
-        base_relation = _JIRA_LINK_TO_RELATION.get(type_name)
-        if base_relation is None:
-            continue  # link type with no rebar relation mapping — never managed by us
-        inward = link.get("inwardIssue")
-        outward = link.get("outwardIssue")
-        inward_key = inward.get("key") if isinstance(inward, dict) else None
-        outward_key = outward.get("key") if isinstance(outward, dict) else None
-        # LIVE-JIRA direction (bug 4b59, mirrors inbound_differ._resolve_inbound_link):
-        # outwardIssue "blocks" -> base relation; inwardIssue "is blocked by" -> inverse.
-        if outward_key:
-            other_key = outward_key
-            relation = base_relation
-        elif inward_key:
-            other_key = inward_key
-            relation = _INVERSE_RELATION.get(base_relation, base_relation)
-        else:
+        # Direction via the shared resolver (single source of truth, bug 4b59):
+        # outwardIssue Blocks -> blocks; inwardIssue Blocks -> depends_on. Returns
+        # (None, None) for a missing type-name / unmapped link type — never managed by us.
+        other_key, relation = resolve_inbound_link(link)
+        # type_name is None exactly when resolve_inbound_link returns (None, None), so
+        # this guard is behavior-preserving; it also narrows type_name to str for the
+        # dedup key + remove mutation below.
+        if other_key is None or relation is None or type_name is None:
             continue
         local_target = get_local_id(other_key)
         if not local_target:
