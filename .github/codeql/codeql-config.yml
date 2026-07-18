@@ -1,0 +1,14 @@
+# CodeQL analysis config for the advanced-setup workflow (.github/workflows/codeql.yml).
+#
+# Scope: exclude docs/ from analysis. Everything under docs/ is prose or hand-run
+# proof-of-concept scripts (e.g. docs/experiments/**), none of which ships — the wheel
+# and sdist package only src/rebar (pyproject.toml). Scanning it produces false-positive
+# noise (e.g. py/clear-text-logging in a POC that only logs public provider names) without
+# any production relevance. Excluding the tree here is durable: future docs/experiments
+# additions are ignored automatically, rather than needing a per-alert dismissal each time.
+#
+# The default query suite is unchanged — this file only scopes analyzed paths.
+name: "rebar CodeQL config"
+
+paths-ignore:
+  - "docs/**"
