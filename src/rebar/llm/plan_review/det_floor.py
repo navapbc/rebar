@@ -707,11 +707,18 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
             lint_abstained += 1
         elif defect:
             issues.append(defect)
+    # Operator-attested evidence-kind lint (R2, ADR-0043): AC items whose "done" evidence lives
+    # OUTSIDE the codebase but are not tagged [operator-attested]. ADVISORY coaching only (p6
+    # never blocks); each gap's fix is inline. Detector extracted to det_operator_attested and
+    # self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
+    oa_issues = det_operator_attested.operator_evidence_issues(items)
+    issues.extend(oa_issues)
     cov = {
         "ran": True,
         "ac_items": len(items),
         "verify_commands_linted": len(linted),
         "verify_lint_abstained": lint_abstained,
+        "operator_attested_gaps": len(oa_issues),
     }
     if not issues:
         return DetResult("P6", "ac-quality", "pass", coverage=cov)
