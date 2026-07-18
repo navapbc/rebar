@@ -18,7 +18,6 @@ src/rebar/config.py
 src/rebar/llm/plan_review/det_floor.py
 src/rebar/llm/plan_review/passes.py
 src/rebar/llm/workflow/lint_refs.py
-src/rebar/llm/workflow/gate_dispatch.py
 src/rebar/llm/runner.py
 src/rebar/_engine/rebar_reconciler/outbound_differ.py
 src/rebar/_engine/rebar_reconciler/dispatch_one.py
