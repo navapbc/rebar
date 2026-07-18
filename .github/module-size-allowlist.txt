@@ -16,4 +16,3 @@
 src/rebar/_engine/rebar_reconciler/reconcile.py
 src/rebar/config.py
 src/rebar/_commands/fsck.py
-src/rebar/reducer/_processors.py
