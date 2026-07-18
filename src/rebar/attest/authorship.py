@@ -134,10 +134,14 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
 
     ``position`` is an event's ``{timestamp}-{uuid}`` filename prefix; the event TYPE is
     NOT an input, so we glob the prefix (``<position>-*.json``) under ``ticket_dir`` and ask
-    ``git log --diff-filter=A`` for the commit that added it. The LAST line of the log (the
-    oldest = the add commit) is returned. Any failure — git non-zero, no match, git missing,
-    a timeout, or any exception — yields ``None``; this function NEVER raises (fail-closed,
-    mirroring :func:`resolve_trust_root`)."""
+    ``git log --diff-filter=A --full-history`` for the commit that added it. ``--full-history``
+    disables history simplification so the glob sees EVERY add — including a compacted event
+    whose original add commit is off the first-parent chain (without it the query is
+    topology-dependent and can miss the real introducing commit, matching
+    :func:`build_introducing_commit_map`'s walk). The LAST line of the log (the oldest = the
+    add commit) is returned. Any failure — git non-zero, no match, git missing, a timeout, or
+    any exception — yields ``None``; this function NEVER raises (fail-closed, mirroring
+    :func:`resolve_trust_root`)."""
     if not position or not ticket_dir:
         return None
     try:
@@ -147,7 +151,17 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
         rel = os.path.relpath(ticket_dir, tracker)
         pathspec = f"{rel}/{position}-*.json"
         proc = subprocess.run(
-            ["git", "-C", tracker, "log", "--diff-filter=A", "--format=%H", "--", pathspec],
+            [
+                "git",
+                "-C",
+                tracker,
+                "log",
+                "--diff-filter=A",
+                "--full-history",
+                "--format=%H",
+                "--",
+                pathspec,
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -168,15 +182,27 @@ def resolve_position_commit(position: str, tracker: str, *, repo_root=None) -> s
 
     ``position`` is an event's ``{timestamp}-{uuid}`` prefix; positions are GLOBALLY unique, so a
     ``*{position}-*.json`` pathspec matches exactly the one introducing file wherever it lives. As
-    with :func:`resolve_event_commit`, the LAST line of ``git log --diff-filter=A`` (the oldest =
-    the add commit) is returned; ANY failure — git non-zero, no match, git missing, a timeout, or
-    any exception — yields ``None`` (this function NEVER raises, fail-closed)."""
+    with :func:`resolve_event_commit`, the query uses ``--full-history`` so the broad pathspec sees
+    every add regardless of topology (a compacted event's add commit is often off the first-parent
+    chain), and the LAST line of ``git log --diff-filter=A --full-history`` (the oldest = the add
+    commit) is returned; ANY failure — git non-zero, no match, git missing, a timeout, or any
+    exception — yields ``None`` (this function NEVER raises, fail-closed)."""
     if not position or not tracker:
         return None
     try:
         pathspec = f"*{position}-*.json"
         proc = subprocess.run(
-            ["git", "-C", tracker, "log", "--diff-filter=A", "--format=%H", "--", pathspec],
+            [
+                "git",
+                "-C",
+                tracker,
+                "log",
+                "--diff-filter=A",
+                "--full-history",
+                "--format=%H",
+                "--",
+                pathspec,
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -321,6 +347,82 @@ def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
                     # resolve_event_commit's lines[-1]).
                     commit_map[path] = sha
         return commit_map
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → empty map, never raise (fail-closed)
+        return {}
+
+
+def build_position_commit_map(*, repo_root=None) -> dict[str, str]:
+    """Map every event POSITION (``{timestamp}-{uuid}`` prefix) to the OLDEST commit that ADDED
+    its ``*.json`` file, resolved in a SINGLE ``git log`` pass — the position-keyed sibling of
+    :func:`build_introducing_commit_map`.
+
+    The merge-gate re-resolves a compacted LEDGER entry's null ``commit_sha`` from its recorded
+    ``position``; doing that per-entry via :func:`resolve_position_commit` is one full-history
+    ``git log`` per entry (O(entries × history) — the whole-store gate's dominant cost, ~2 s
+    each). This walks history ONCE (exactly like :func:`build_introducing_commit_map`) and
+    returns a position→commit lookup, so the gate resolves every ledger entry with an O(1) map
+    hit and only falls back to :func:`resolve_position_commit` for a position the map misses
+    (fail-closed).
+
+    Keying: an event file is named ``{timestamp}-{uuid}-{TYPE}.json`` and its position is the
+    ``{timestamp}-{uuid}`` prefix; since an event TYPE is always a dash-free ``UPPER_SNAKE`` name,
+    the position is the basename with ``.json`` stripped and the trailing ``-{TYPE}`` removed
+    (``rsplit('-', 1)[0]``) — the exact inverse of :func:`resolve_position_commit`'s
+    ``*{position}-*.json`` pathspec. The same ``--full-history --no-merges --no-renames`` flags
+    as :func:`build_introducing_commit_map` are used so a broad pathspec sees EVERY add (including
+    a compacted event whose add commit is off the first-parent chain). Git emits newest→oldest, so
+    overwriting each position's entry as we stream leaves the OLDEST add winning — matching
+    :func:`resolve_position_commit`'s ``lines[-1]``. Never raises: any git failure yields ``{}``
+    and the caller falls back to the per-entry resolver (fail-closed).
+    """
+    try:
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
+        proc = subprocess.run(
+            [
+                "git",
+                "-c",
+                "log.showSignature=false",
+                "-C",
+                tracker,
+                "log",
+                "--diff-filter=A",
+                "--full-history",
+                "--no-merges",
+                "--no-renames",
+                "--format=%x1e%H",
+                "--name-only",
+                "--",
+                "*.json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if proc.returncode != 0:
+            return {}
+        position_map: dict[str, str] = {}
+        for record in proc.stdout.split("\x1e"):
+            if not record.strip():
+                continue
+            lines = record.split("\n")
+            sha = lines[0].strip()
+            if len(sha) != 40:
+                continue
+            for path in lines[1:]:
+                path = path.strip()
+                if not path or not path.endswith(".json"):
+                    continue
+                # basename is ``{position}-{TYPE}.json``; TYPE is dash-free, so stripping ``.json``
+                # and the trailing ``-{TYPE}`` recovers the ``{timestamp}-{uuid}`` position.
+                base = os.path.basename(path)[: -len(".json")]
+                position = base.rsplit("-", 1)[0] if "-" in base else base
+                if position:
+                    # newest→oldest walk; overwrite so the OLDEST add wins (matches
+                    # resolve_position_commit's lines[-1]).
+                    position_map[position] = sha
+        return position_map
     except Exception:  # noqa: BLE001 — ANY git/lookup failure → empty map, never raise (fail-closed)
         return {}
 
