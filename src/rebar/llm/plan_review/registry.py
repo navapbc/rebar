@@ -63,14 +63,29 @@ RegistryError = _criteria.CriteriaError
 # prompt's ``execution_mode``, not per criterion-id, so EVERY AGENT-tier criterion can
 # read code. (Story 2's progressive drift-refresh therefore does NOT reuse a
 # "code-blind" subset of findings; it gates whole-verdict reuse on a fresh probe.)
-CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6"})
+CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6", "asserted-capability"})
 
 # AGENT-tier criteria (one tool-using agent loop each; ~85× a single-turn call) —
 # gated by proportionate scrutiny. Container criteria G3/G4 read the LIVE ticket
 # graph (one child at a time). T-overlays that depend on what the code actually
 # does are agent-tier too.
 AGENT_TIER = frozenset(
-    {"G1G2", "E4", "A1", "G6", "G3", "G4", "G7", "T1", "T3", "T5c", "T8", "T10", "T11"}
+    {
+        "G1G2",
+        "E4",
+        "A1",
+        "G6",
+        "G3",
+        "G4",
+        "G7",
+        "T1",
+        "T3",
+        "T5c",
+        "T8",
+        "T10",
+        "T11",
+        "asserted-capability",
+    }
 )
 
 # The canonical v4 §5 registry — the completeness guard's authority. The DET floor
@@ -125,6 +140,13 @@ CANONICAL_LLM = frozenset(
         # code-grounded gate that fires when a plan removes/weakens an observable behavior, a guard,
         # or an intent-marked artifact, and asks for a grounded triggering scenario.
         "removal-rationale",
+        # Asserted-capability grounding probe (epic 6982 / R1) — an advisory, code-grounded
+        # AGENT-tier dual of E4 for the finer capability-SURFACE mismatch E4's existence check
+        # misses: a plan asserts a named module PROVIDES (or LACKS) a capability it relies on,
+        # and the code refutes it (the dc58/db7b/5886 miss class). Ships advisory; promotion to
+        # blocking is a future dogfood-gated criteria_routing.json change (see the promotion gate
+        # in docs/plan-review-gate.md).
+        "asserted-capability",
         # Cross-cutting
         "COH",
     }

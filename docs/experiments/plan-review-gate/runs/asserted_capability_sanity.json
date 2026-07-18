@@ -1,0 +1,63 @@
+{
+  "_provenance": {
+    "ticket": "59b7-69b6-e763-4a83 (R1)",
+    "epic": "6982",
+    "criterion": "asserted-capability",
+    "command": "REBAR_GATE_ALLOW_UNGATED=1 rebar criteria eval asserted-capability --output json",
+    "runs_per_fixture": 1,
+    "total_live_single_criterion_runs": 6,
+    "note": "Bounded sanity check (NOT an E2/E3 batch eval). Must-fire cases reconstruct the ORIGINAL false-asserting plan text of the 3 E1-verified asserted-capability misses (the current tickets are remediated), grounded against current modules. Fixtures + shape checks: src/rebar/llm/eval_specs/plan-review-asserted-capability.eval.yaml + tests/unit/test_asserted_capability_criterion.py.",
+    "gate_report_section6_R1": "pass condition >=2 of 3 misses surface a finding; observed 3/3."
+  },
+  "recall_over_misses": 1.0,
+  "false_accept_over_clean": 0.3333333333333333,
+  "agreement": 0.8333333333333334,
+  "kappa": 0.6666666666666667,
+  "n_fire": 3,
+  "n_nofire": 3,
+  "cases": [
+    {
+      "id": "ACAP-F1-dc58",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "ACAP-F2-db7b",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "ACAP-F3-5886",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "ACAP-N1-no-claim",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "ACAP-N2-grounded-true",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "ACAP-N3-external-fact",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    }
+  ],
+  "interpretation": "FIRES on 3/3 E1-verified misses (dc58/db7b/5886), stability 1.0 \u2014 exceeds the >=2/3 gate. Clean controls: 2/3 correct no-fire (N2 grounded-true, N3 external-fact-abstain); N1 (a plain --dry-run feature with no capability-surface claim) produced ONE ADVISORY false-fire. Posture is ADVISORY (never blocks), so this false-fire is a non-blocking coaching nudge and is recorded here as the first datapoint for the advisory->blocking promotion gate (docs/plan-review-gate.md): the criterion must NOT be promoted to blocking until its dogfood blocking-FP proxy is acceptably low."
+}
