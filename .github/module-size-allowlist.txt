@@ -17,7 +17,6 @@ src/rebar/_engine/rebar_reconciler/reconcile.py
 src/rebar/config.py
 src/rebar/llm/plan_review/det_floor.py
 src/rebar/llm/plan_review/passes.py
-src/rebar/llm/workflow/lint_refs.py
 src/rebar/llm/workflow/gate_dispatch.py
 src/rebar/_commands/fsck.py
 src/rebar/reducer/_processors.py
