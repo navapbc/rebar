@@ -434,6 +434,7 @@ def verify_authorship_at_commit(
     event_position: str | None,
     *,
     repo_root=None,
+    position_resolver=None,
 ) -> registry.Verdict:
     """Verify ``envelope`` against ONLY the keys valid for the event at ``event_commit``
     (epic gnu-whale-ichor — the git-commit-ancestry validity model).
@@ -441,9 +442,18 @@ def verify_authorship_at_commit(
     Unlike :func:`verify_authorship` (which trusts the identity's CURRENTLY-valid keys), the
     trust root here is built from exactly the keyring records that were live as of
     ``event_commit``. For each record the ``added_at`` / ``revoked_at`` POSITIONS are
-    resolved to commits via :func:`resolve_event_commit`; a key is VALID iff its add-commit
-    is an ANCESTOR of ``event_commit`` AND (its revoke-commit is ``None`` OR is NOT an
-    ancestor of ``event_commit``). Ancestry is decided by ``git merge-base --is-ancestor``.
+    resolved to commits; a key is VALID iff its add-commit is an ANCESTOR of ``event_commit``
+    AND (its revoke-commit is ``None`` OR is NOT an ancestor of ``event_commit``). Ancestry is
+    decided by ``git merge-base --is-ancestor``.
+
+    ``position_resolver`` (``position -> commit | None``), when given, resolves those keyring
+    positions instead of a per-record :func:`resolve_event_commit`. The whole-store merge-gate
+    passes the batched ``build_position_commit_map`` (built ONCE for the run) so each event's
+    era-verify is an O(1) map hit rather than a full-history ``git log`` per keyring record —
+    the O(events × keyring × history) cost that dominated the gate (ticket a2c7). It is
+    behavior-preserving: the batched map resolves each position to the SAME oldest-add commit as
+    :func:`resolve_event_commit` (positions are globally unique; validated 0-mismatch), and a
+    ``None`` resolver preserves the exact per-record behavior for every other caller.
 
     Intra-commit refinement: ``merge-base --is-ancestor(C, C)`` is true, so when a key's
     add/revoke commit EQUALS ``event_commit`` and ``event_position`` is given, the two are
@@ -470,6 +480,8 @@ def verify_authorship_at_commit(
             return proc.returncode == 0
 
         def _resolve(position: str) -> str | None:
+            if position_resolver is not None:
+                return position_resolver(position)
             return resolve_event_commit(position, ticket_dir, repo_root=repo_root)
 
         # The keyring records already carry ``added_at`` / ``revoked_at`` position strings, which

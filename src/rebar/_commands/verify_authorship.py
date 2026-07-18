@@ -153,7 +153,7 @@ def _is_archived_ticket(ticket_dir: str) -> bool:
         return False
 
 
-def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root) -> str:
+def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None) -> str:
     """Classify an event that carries an ``author_sig``: VERIFIED / KEY_NOT_VALID_AT_ERA /
     BAD_SIGNATURE (with an UNKNOWN_AUTHOR short-circuit when the author is not an identity).
 
@@ -217,15 +217,25 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root) -> str:
     # file's position; LEDGER carries the pre-resolved commit. An unresolvable commit
     # (None) makes the era verify below fail closed (non-verified).
     if ev.event is not None:
-        commit_sha = authorship.resolve_event_commit(
-            ev.position or "", ev.ticket_dir or "", repo_root=repo_root
-        )
+        # A batched position→commit resolver (the whole-store gate's per-run map) turns this into
+        # an O(1) lookup; without one, fall back to the per-event git log (ticket a2c7).
+        if position_resolver is not None:
+            commit_sha = position_resolver(ev.position or "")
+        else:
+            commit_sha = authorship.resolve_event_commit(
+                ev.position or "", ev.ticket_dir or "", repo_root=repo_root
+            )
     else:
         commit_sha = ev.commit_sha
 
     if commit_sha is not None:
         v = authorship.verify_authorship_at_commit(
-            envelope, str(author_id), commit_sha, ev.position, repo_root=repo_root
+            envelope,
+            str(author_id),
+            commit_sha,
+            ev.position,
+            repo_root=repo_root,
+            position_resolver=position_resolver,
         )
         if v.verified:
             return VERIFIED
@@ -247,12 +257,12 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root) -> str:
     return KEY_NOT_VALID_AT_ERA
 
 
-def _classify(ev: _ScopedEvent, tracker: str, repo_root) -> str:
+def _classify(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None) -> str:
     """Classify one in-scope event. Order matters: a missing signature is ``unsigned``
     (even when the author is also unknown), matching the gate's user-facing vocabulary."""
     if not ev.author_sig:
         return UNSIGNED
-    return _verify_signed(ev, tracker, repo_root)
+    return _verify_signed(ev, tracker, repo_root, position_resolver=position_resolver)
 
 
 def _display_group(verdict: str) -> str:
@@ -519,6 +529,27 @@ def cli(argv: list[str]) -> int:
     else:
         events = _collect_all(tracker)
 
+    if not required:
+        # Advisory mode is REPORT-ONLY: the exit code is unconditionally 0 and no event can fail
+        # the gate, so the per-event git era-verify — whose SOLE consumer is the enforced verdict
+        # (and the informational counts / --format json, used only by tests) — is skipped
+        # ENTIRELY (ticket a2c7). Report only the signed/unsigned split, the one classification
+        # that needs no git, keeping advisory O(collect) rather than O(events × git). This also
+        # skips building the commit maps below, which are pointless without a verdict to reach.
+        signed = sum(1 for ev in events if ev.author_sig)
+        out = sys.stderr if as_json else sys.stdout
+        if as_json:
+            # The report array holds one entry per NON-verified ENFORCED event; advisory enforces
+            # none, so it is empty (and no per-event verdicts are computed in advisory mode).
+            print(json.dumps([]))
+        print(
+            "verify-identity: advisory — enforcement is off "
+            f"({signed} signed (not era-verified in advisory mode), "
+            f"{len(events) - signed} unsigned; {len(events)} event(s) in scope).",
+            file=out,
+        )
+        return 0
+
     # Resolve every event's introducing commit in ONE git-log pass instead of one subprocess
     # per event (bug 1cc0). _resolve_commit looks each event up here and only falls back to the
     # per-event resolver for a path the map lacks (fail-closed).
@@ -530,6 +561,19 @@ def cli(argv: list[str]) -> int:
     # fixes the topology fragility of a per-entry `git log` AND removes its ~O(entries × 2 s)
     # cost on the whole-store gate; a map miss falls back to the per-entry resolver below.
     position_map = authorship.build_position_commit_map(repo_root=args.root)
+
+    def _resolve_position(position: str) -> str | None:
+        """position → introducing commit via the batched map (O(1)); a per-position ``git log``
+        fallback runs only for a position the map misses (fail-closed). Threaded into the
+        era-verify so each event's key-validity check is a map hit, not a full-history git log
+        per keyring record — the O(events × keyring × history) cost that dominated the gate
+        (ticket a2c7)."""
+        if not position:
+            return None
+        hit = position_map.get(position)
+        if hit is not None:
+            return hit
+        return authorship.resolve_position_commit(position, tracker, repo_root=args.root)
 
     counts = {
         VERIFIED: 0,
@@ -551,12 +595,8 @@ def cli(argv: list[str]) -> int:
         # Use the batched --full-history position map first (O(1)); only fall back to the
         # per-entry resolver for a position the map misses (fail-closed).
         if ev.event is None and ev.commit_sha is None and ev.position:
-            ev.commit_sha = position_map.get(ev.position)
-            if ev.commit_sha is None:
-                ev.commit_sha = authorship.resolve_position_commit(
-                    ev.position, tracker, repo_root=args.root
-                )
-        cls = _classify(ev, tracker, args.root)
+            ev.commit_sha = _resolve_position(ev.position)
+        cls = _classify(ev, tracker, args.root, position_resolver=_resolve_position)
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
             continue
@@ -597,15 +637,9 @@ def cli(argv: list[str]) -> int:
             print(f"  {cls}{' [grandfathered]' if gf else ''}: {ref}")
         print(summary)
 
+    # Enforcement is ON here (the advisory/report-only path returned early, above, without
+    # running any per-event era-verify — ticket a2c7).
     out = sys.stderr if as_json else sys.stdout
-    if not required:
-        not_verified = len(events) - counts[VERIFIED]
-        print(
-            "verify-identity: advisory — enforcement is off "
-            f"({not_verified} event(s) not verified, not enforced).",
-            file=out,
-        )
-        return 0
     if enforced_not_verified:
         print(
             f"verify-identity: FAIL — {enforced_not_verified} enforced in-scope event(s) "
