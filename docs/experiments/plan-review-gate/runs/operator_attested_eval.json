@@ -1,0 +1,629 @@
+{
+  "eval_id": "R2-operator-attested-evidence-lint",
+  "ticket": "b080-fa0b-b1ce-4fad",
+  "description": "Deterministic lexicon precision/recall self-gate for the operator-attested-evidence-kind advisory DET lint (extends p6_ac_quality). NO LLM anywhere — the lint and this eval are pure regex over AC text.",
+  "detector": "rebar.llm.plan_review.det_floor._operator_evidence_ac_gaps",
+  "corpus": {
+    "source": "docs/experiments/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
+    "provenance": "AC checklist items of the 556 E1 outcome-corpus tickets (runs/outcome_corpus.jsonl) that resolve in the store, extracted from ticket descriptions; tag stripped before flagging to simulate the historical untagged plan.",
+    "ac_items": 3091,
+    "tickets": 556,
+    "already_tagged": 31
+  },
+  "flag_rate_pct": 2.07,
+  "recall": {
+    "tagged_total": 31,
+    "tagged_flagged": 19,
+    "recall_pct": 61.3,
+    "note": "recall vs the 31 human-tagged ground-truth positives (imperfect: untagged items may be unlabeled positives). A precision-first advisory lint deliberately trades recall for precision."
+  },
+  "known_cases": {
+    "115b": "FIRES",
+    "8c4f": "FIRES"
+  },
+  "precision": {
+    "method": "full census of the flagged set (>= the required 50-item sample), frozen per-item TP/FP adjudication",
+    "sample_size": 64,
+    "tp": 59,
+    "fp": 5,
+    "precision_pct": 92.2
+  },
+  "gate": {
+    "precision_ge_70": true,
+    "sample_ge_50": true,
+    "flag_rate_le_5": true,
+    "known_cases_fire": true,
+    "verdict": "PASS"
+  },
+  "adjudications": [
+    {
+      "ticket_id": "03c6-44ef-e420-4e31",
+      "ac_text": "- [ ] apply refs/meta/config via the admin key (JoeOakhartNava) in a quiet window, announced; DRY_RUN diff first; confirm live submit type = REBASE_IF_NECESSARY and the Autosubmit label is gone.",
+      "markers": [
+        "iac",
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "075f-9222-05f2-4aae",
+      "ac_text": "- [ ] A direct `git push` / PR-merge to `main` by a non-bypass identity is REJECTED; force-push",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "0da5-162a-b41f-413c",
+      "ac_text": "- [ ] The WS6-a voter is deployed + activated for the rebar Gerrit project (`gerrit_voter.enabled=true`, project allow-listed).",
+      "markers": [
+        "deploy"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "0da5-162a-b41f-413c",
+      "ac_text": "- [ ] At least one real rebar change is reviewed + gated end-to-end on the live AWS/Gerrit environment: `patchset-created` → four-pass gate → `LLM-Review` vote → submit (or veto).",
+      "markers": [
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "115b-ceea-09f8-4a93",
+      "ac_text": "- [ ] Per-orphan disposition applied: retire each of the 13 orphan EDIT files (`.json` ->",
+      "markers": [
+        "store_op"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "115b-ceea-09f8-4a93",
+      "ac_text": "- [ ] MISSING_CREATE disposition applied: delete the 4 local phantom dirs (110e resolved as a",
+      "markers": [
+        "store_op"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "1787-bbec-7527-4419",
+      "ac_text": "- [ ] A canary run (post-deploy; triggered via `workflow_dispatch` on `reconcile-bridge-canary.yml`) creates a bug/comment/transition whose event is signed as Rebar Bot: capture the created ticket id from the run log and confirm `rebar verify-authorship` (or `rebar verify-identity`) reports it `verified` and attributed to identity `594c-9dcf-5ad6-4e6d`.",
+      "markers": [
+        "deploy",
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "1bd2-1401-3a18-4031",
+      "ac_text": "- [ ] Proof recorded on this ticket: a direct GitHub push / PR-merge to `main` is REJECTED, and a change submitted in Gerrit replicates to GitHub `main`.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "2297-2cbf-960e-4560",
+      "ac_text": "- [ ] Live E2E on the Gerrit host: a red CI blocks submit; `recheck` re-runs; a green change with",
+      "markers": [
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "2610-9557-c3c1-460c",
+      "ac_text": "- [ ] Each child story's change has landed on `main` through the Gerrit",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "29a6-59d1-a3ba-40ee",
+      "ac_text": "- [ ] make lint && make test green; live smoke: a merge change on the running Gerrit receives a vote with the merge-change tag",
+      "markers": [
+        "prod",
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "2e8a-1a3b-66bf-4cd1",
+      "ac_text": "- [ ] replication.config replicates feature/* (committed) AND deployed live via autoReload (no restart); a newly-created feature branch auto-replicates to the GitHub mirror (proven)",
+      "markers": [
+        "deploy"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "349f-ba15-3043-40b0",
+      "ac_text": "- [ ] The change passes CI on Gerrit (Verified +1) and lands on main",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "3cf7-56db-cbf2-4ba4",
+      "ac_text": "- [ ] The change lands on main through Gerrit (LLM-Review + Verified green).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "4e82-6034-6d5a-4d39",
+      "ac_text": "- [ ] A change submitted in Gerrit replicates `main` to `navapbc/rebar` (non-force, fast-forward)",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "5f30-b276-923e-4cf2",
+      "ac_text": "- [ ] The ADR lands on main via Gerrit (Verified +1 and LLM-Review +1).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "5f39-cb52-9355-492f",
+      "ac_text": "- [ ] The operator configures the `JIRA_URL`/`JIRA_USER` repo VARIABLES,",
+      "markers": [
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "6982-2e75-f8fa-43b9",
+      "ac_text": "- [ ] Each recommendation child (R1-R7) is either landed through Gerrit with its own AC gate terms demonstrably passed (R6's terms are ship-first: deterministic rendering + validator compliance), or closed/deferred with the failing result recorded - no detection-bearing recommendation implemented without its eval gate.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "7246-bd9e-58a3-41fd",
+      "ac_text": "- [ ] All 18 resources imported into rebar state; `terraform plan` shows no destroy/replace and no secret-value change (evidence: plan output as a comment).",
+      "markers": [
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "7246-bd9e-58a3-41fd",
+      "ac_text": "- [ ] `terraform apply` completed (retag); resources removed from snap's shared state; `https://auth.solutions.navateam.com/authorize` still returns a 302 to Google post-migration (evidence: outputs as a comment).",
+      "markers": [
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "73cb-2716-bde1-4655",
+      "ac_text": "- [ ] Change is pushed to Gerrit `refs/for/main` with a `rebar-ticket:` trailer.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "73f5-4df7-4fac-4738",
+      "ac_text": "- [ ] Command lives in PROJECT tooling (repo CLI/script), NOT `rebar` core; may `import rebar` only for ticket ops (e.g. close the ticket on merge). No Gerrit-specific landing logic in `src/rebar`. **Gerrit REST access reuses this repo's proven STDLIB-ONLY Gerrit-client approach** — the `src/rebar/review_bot/gerrit_client.py` pattern (`urllib` + HTTP Basic auth + XSSI stripping, *\"deliberately NO new httpx dependency\"*): NOT a new third-party client (not `pygerrit2`) and NOT a from-scratch reimplementation. Packaged as a **thin stdlib helper in `infra/autolander`** (mirrors the proven `urllib`+Basic-auth+XSSI pattern; no new dependency; honors the project-tooling/core boundary; unification behind the platform provider-seam is deferred to idea `1701-8bc1-e3b7-4984`). Auth is the **agent's OWN ambient Gerrit HTTP credential** read from the standard place (`.netrc` / the git credential helper the agent already uses to push to Gerrit) and passed as a stdlib `urllib` Basic-auth header — no separate credential-injection mechanism to invent.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "FP",
+      "reason": "code-structure/placement AC (where the helper lives, stdlib pattern) — verifiable in-repo"
+    },
+    {
+      "ticket_id": "76d2-00c3-88e8-4654",
+      "ac_text": "- [ ] The service is deployed from `infra/` via the authenticated AWS CLI",
+      "markers": [
+        "deploy"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "786b-190d-5e3a-4194",
+      "ac_text": "- [ ] certbot renewal is automated: the timer/cron is installed + enabled, the nginx `/.well-known/acme-challenge/` location serves the HTTP-01 challenge, and `certbot renew --dry-run` succeeds and reloads nginx via the deploy-hook.",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "7e0c-e76a-75c5-420d",
+      "ac_text": "- [ ] `pyproject.toml` and `server.json` both read version 0.7.0 and the bump is merged to main via Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "7e0c-e76a-75c5-420d",
+      "ac_text": "- [ ] The GitHub Release for v0.7.0 was created **automatically** by the workflow (not by hand) and is marked Latest.",
+      "markers": [
+        "cloud",
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "843b-801f-9ef9-442d",
+      "ac_text": "- [ ] `config-check` passes; live cutover applied to `refs/meta/config` and verified via `GET /a/projects/rebar/labels/Autosubmit`; a post-cutover `GET /a/projects/rebar/access` diffs cleanly against `infra/gerrit/access-snapshot-pre-autolander.json` showing ONLY the added `label-Autosubmit` vote grants (no other ACL drift).",
+      "markers": [
+        "live_run",
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "88ab-7052-8850-46d4",
+      "ac_text": "- [ ] **S1 — Gate + ACL config** (`infra/gerrit/project.config`, `infra/gerrit/setup-project.sh`, declarative): LLM-Review `copyCondition = changekind:NO_CODE_CHANGE OR changekind:MERGE_FIRST_PARENT_UPDATE` (push accepted by the running 3.14.1); Verified copyCondition UNCHANGED (re-run posture) with the rationale recorded; record the current effective inherited submit type (Gerrit REST/ssh query, noted on the ticket) THEN pin `[submit] action = merge if necessary` + `mergeContent = true` in a quiet window; ACLs: `Create Reference`/`Delete Reference` on `refs/heads/feature/*` + `Push Merge Commit` on `refs/for/refs/heads/main` and `refs/for/refs/heads/feature/*`, ALL bound to the named `feature-branch-drivers` group — including extending `setup-project.sh`'s managed-groups `want` dict (~line 57, currently only Administrators + Service Users) so the group is created/resolved declaratively; ADR amending ADR-0013 (+ 1fa8's Verified ADR) recording the merge-change gate, label-divergence rationale, and the group membership policy; `docs/gerrit-aws-setup.md` gate/ACL sections updated. Verified live on the running Gerrit.",
+      "markers": [
+        "prod",
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "88ab-7052-8850-46d4",
+      "ac_text": "- [ ] **S5 — Live multi-agent E2E validation** on the running Gerrit (scripted alongside `infra/gerrit/reviewbot-e2e.sh`; every scenario's change URLs + votes recorded on this ticket): (1) **parallel siblings** — two agents in separate worktrees push independent story changes to `feature/e2e-<date>`; both earn LLM-Review + Verified and submit WITHOUT either rebasing (second submit succeeds via MERGE_IF_NECESSARY with no manual rebase; this also live-proves webhook + g2p branch-agnostic dispatch); (2) **stacking** — a third agent pulls the branch (both stories in history) and pushes a change on top; the reviewed diff covers ONLY its delta; (3) **merge-back** — `--no-ff` merge change to main: bot reviews the auto-merge delta only (assert NOT the whole-feature diff), CI green on the merge tree, both votes present, submit lands atomically, replication advances GitHub main with all commits, branch deleted; (4) **vote-carry on re-merge** — land an unrelated change on main mid-flight, push a re-merge (MERGE_FIRST_PARENT_UPDATE): LLM-Review +1 CARRIES, Verified RE-RUNS; then change the feature tip: BOTH wiped (REWORK); (5) **textual conflict** — overlapping feature-vs-main edits resolved in the merge commit; bot reviews the non-empty auto-merge delta; (6) **semantic conflict** — textually-clean but semantically broken combination (e.g. rename on main + new call-site on feature): auto-merge diff empty, LLM-Review passes, CI red → Verified=-1 BLOCKS submit (proves two-vote complementarity); (7) **races + negatives** — concurrent submits into the branch behave (MERGE_IF_NECESSARY or clear conflict signal); a merge push WITHOUT pushMerge is refused; branch creation outside `feature-branch-drivers` is refused; the reconciler backfills a dropped webhook for a feature-branch change (including a merge change, exercising the transparent merge detection).",
+      "markers": [
+        "prod"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8903-efb2-b73f-4e22",
+      "ac_text": "- [ ] A post-gate `main` change auto-reflects on the box (no manual action) ≤ 5 min; latency",
+      "markers": [
+        "prod"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "89f9-b381-60e2-4802",
+      "ac_text": "- [ ] **Gerrit helper** reuses this repo's STDLIB-ONLY pattern (not `pygerrit2`, not a `src/rebar` import); the bot authenticates as `RebarBotNava` via its SSM-backed HTTP password (provisioned by S5).",
+      "markers": [
+        "cloud"
+      ],
+      "label": "FP",
+      "reason": "code-structure AC (helper reuses stdlib pattern) — verifiable in-repo; 'provisioned' is incidental"
+    },
+    {
+      "ticket_id": "89f9-b381-60e2-4802",
+      "ac_text": "- [ ] a live check exercises `rebase_on_behalf_of_uploader` (uploader unchanged + `Signed-off-by`/`rebar-ticket` trailers preserved on the rebased patchset) against the live Gerrit 3.14.1 instance. The multi-member `rebase:chain` variant is the same on_behalf REST mechanism (unit-tested); a live multi-member `rebase:chain` E2E is a bounded follow-up (idea).",
+      "markers": [
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8a37-7eda-d5ac-44d9",
+      "ac_text": "- [ ] systemd unit shows active(exited)/success after a timer run on the box post-deploy.",
+      "markers": [
+        "deploy",
+        "prod",
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8c4f-b81c-98ca-45b9",
+      "ac_text": "- [ ] Re-run `rebar fsck` with the ENQUEUE_ENRICH-era binary against the live store and record",
+      "markers": [
+        "live_run",
+        "store_op"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8ccf-f4e4-ad2d-480d",
+      "ac_text": "- [ ] Live reconcile: terraform import of the live ruleset (rebar:18402431) into main_lock, then",
+      "markers": [
+        "live_run",
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8d1d-941c-9589-4004",
+      "ac_text": "- [ ] The \"Release 0.7.1\" bump commit is merged to main via Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8d1d-941c-9589-4004",
+      "ac_text": "- [ ] The v0.7.1 GitHub Release was created by the github_release workflow job (not manually).",
+      "markers": [
+        "cloud",
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8d1d-941c-9589-4004",
+      "ac_text": "- [ ] The v0.7.1 GitHub Release is marked Latest.",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8d1d-941c-9589-4004",
+      "ac_text": "- [ ] The MCP Registry 0.7.1 entry was published by the mcp_registry OIDC job (no interactive login).",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "8d36-a15a-fcbd-4ebd",
+      "ac_text": "- [ ] Change passes CI (`Verified +1`) and lands via Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "9ad9-1d0b-8c01-4b63",
+      "ac_text": "- [ ] Change passes CI (`Verified +1`) and lands via Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "a29a-c52a-5ec0-45d5",
+      "ac_text": "- [ ] The workflow YAML parses (validated with a YAML loader) and the commit lands on main through Gerrit (LLM-Review + Verified green).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "ade2-8c73-e010-491d",
+      "ac_text": "- [ ] Change lands on `main` through Gerrit (LLM-Review +1 and Verified +1).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "b306-d68c-8ded-4bff",
+      "ac_text": "- [ ] Reducer replay + `fsck` on a store with a `*.retired` file exit clean (no `SNAPSHOT_INCONSISTENT`); fresh replay equals the pre-compaction snapshot.",
+      "markers": [
+        "store_op"
+      ],
+      "label": "FP",
+      "reason": "a reducer/fsck unit-test scenario — codebase-verifiable"
+    },
+    {
+      "ticket_id": "b744-4fb9-2d05-4b49",
+      "ac_text": "- [ ] **WS6-b** (0da5-162a-b41f-413c / van-withe-folly) — LIVE dogfood: at least one real rebar change reviewed + gated end-to-end on the deployed AWS/Gerrit env (gated on env access).",
+      "markers": [
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "bad4-7e97-deb4-4eb4",
+      "ac_text": "- [ ] Change passes CI (`Verified +1`) and lands via Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "bcf0-6bdf-09e0-4ded",
+      "ac_text": "- [ ] no autolander container/volumes/alarm/SSM-param remain in AWS; the host stack comes up clean without them.",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "bcf0-6bdf-09e0-4ded",
+      "ac_text": "- [ ] terraform plan is empty after apply; make lint/typecheck/test green.",
+      "markers": [
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "bffe-10c2-1231-41d4",
+      "ac_text": "- [ ] Git-email resolution verified (runtime resolution, attested by recorded command output): with the store repo's `git config user.email = joeoakhart+bot@navapbc.com` and no overriding `.rebar/current_identity` pointer, `python3 -c \"from rebar._commands.identity import resolve_current_identity; print(resolve_current_identity())\"` returns the Rebar Bot identity ticket id (the resolver does a case-insensitive git-email match against identity tickets).",
+      "markers": [
+        "attested"
+      ],
+      "label": "FP",
+      "reason": "ships an in-session python one-liner that proves it — codebase/in-session-verifiable"
+    },
+    {
+      "ticket_id": "bffe-10c2-1231-41d4",
+      "ac_text": "- [ ] The PRIVATE key is provisioned (out-of-band infra state, attested by recorded aws/gh output) as an SSM SecureString `/rebar/prod/rebar-bot-signing-key` AND a GitHub Actions secret `REBAR_BOT_SIGNING_KEY` (both verifiable: `aws ssm get-parameter --name /rebar/prod/rebar-bot-signing-key --with-decryption` succeeds; `gh secret list --repo navapbc/rebar` shows `REBAR_BOT_SIGNING_KEY`). Nothing secret is committed to the repo; the private-key file used for provisioning lives only outside the repo tree and is discarded after.",
+      "markers": [
+        "cloud",
+        "attested"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "c7d4-c020-748f-4951",
+      "ac_text": "- [ ] AC1 — SNS subscription delivers. The rebar-gerrit-alerts email",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "ce0e-f618-a2a4-4ee4",
+      "ac_text": "- [ ] The changes are landed on `main` through Gerrit.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "d0e5-82ce-ad83-4cc6",
+      "ac_text": "- [ ] Close bugs dc33, 15a1, 0d3e as obsolete — record the close-event IDs/timestamps as attestation on this ticket when this change lands (deleting the auto-lander code IS their resolution).",
+      "markers": [
+        "attested"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "d195-aeb8-2400-484b",
+      "ac_text": "- [ ] Every child's change landed on main via Gerrit with both gate votes at +1 (visible in the change's vote history at rebar.solutions.navateam.com).",
+      "markers": [
+        "merge_gate",
+        "attested"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "d251-05e1-eb55-43b2",
+      "ac_text": "- [ ] AWS instance (~8 GB; e.g. t4g.large) provisioned; Gerrit + rebar MCP each containerized; Gerrit heap pinned (~2 GB); reverse proxy on 443; Gerrit HTTP 8080 + SSH 29418.",
+      "markers": [
+        "cloud"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "d58f-7581-1f72-4372",
+      "ac_text": "- [ ] Live `terraform apply` completed and `terraform plan` reports no changes for the adopted resources (evidence: apply/plan output recorded as a comment).",
+      "markers": [
+        "iac"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "d8e9-2e21-1daf-4c7b",
+      "ac_text": "- [ ] Change lands on `main` via Gerrit (LLM-Review +1 and Verified +1).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "e229-6fae-bd13-47bd",
+      "ac_text": "- [ ] Change lands on `main` via Gerrit with `LLM-Review +1` and `Verified +1`.",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "e991-e347-3444-427c",
+      "ac_text": "- [ ] Idempotent: safe re-run on the live box (volume already exists).",
+      "markers": [
+        "live_run"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "f112-6222-e236-4b09",
+      "ac_text": "- [ ] `.github/workflows/release.yml` creates a GitHub Release automatically on a `v*` tag push (with `contents: write` on that job and auto-generated notes).",
+      "markers": [
+        "cloud"
+      ],
+      "label": "FP",
+      "reason": "deliverable is the workflow FILE (in repo); its GitHub-Release effect is incidental"
+    },
+    {
+      "ticket_id": "f112-6222-e236-4b09",
+      "ac_text": "- [ ] Change lands on main through Gerrit (both LLM-Review and Verified votes green).",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "f1fa-57d8-07cb-44af",
+      "ac_text": "- [ ] Serial auto-lander service (project infra; deploys like the review-bot —",
+      "markers": [
+        "deploy"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "fcaf-2c03-10a1-4d92",
+      "ac_text": "- [ ] Current inherited submit type recorded on this ticket BEFORE the [submit] pin lands; pin applied in a quiet window",
+      "markers": [
+        "human"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    },
+    {
+      "ticket_id": "fd84-ba00-ba00-4f73",
+      "ac_text": "- [ ] The change lands on `main` through the Gerrit two-vote gate",
+      "markers": [
+        "merge_gate"
+      ],
+      "label": "TP",
+      "reason": "operational-evidence AC (out-of-codebase: deploy/prod/live-run/infra/merge-gate/attestation) missing [operator-attested]"
+    }
+  ]
+}

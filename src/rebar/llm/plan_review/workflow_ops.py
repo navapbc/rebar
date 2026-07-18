@@ -31,9 +31,11 @@ registration decorators (import-light, no heavy LLM deps, no import cycle).
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
+from rebar.llm.plan_review.det_floor import (
+    _OPERATOR_ATTESTED_TAG_RE as _OPERATOR_ATTESTED_AC_RE,
+)
 from rebar.llm.workflow.executor import StepContext, register_step
 
 logger = logging.getLogger(__name__)
@@ -58,10 +60,9 @@ def _ticket_id(ctx: StepContext) -> str:
 # in-session unverifiability is by design. We DET-detect the tag and, for a finding that
 # references such an AC, clear ac_unverifiable BEFORE impact_plan reads it — leaving the kernel
 # impact_plan/pass3 math byte-unchanged (the fact is injected upstream, not taught to the kernel).
-_OPERATOR_ATTESTED_AC_RE = re.compile(
-    r"^\s*-\s*\[[ xX]?\]\s*\[operator-attested\]\s*(.+?)\s*$",
-    re.IGNORECASE | re.MULTILINE,
-)
+# The tag matcher ``_OPERATOR_ATTESTED_AC_RE`` is a re-export of det_floor's canonical
+# ``_OPERATOR_ATTESTED_TAG_RE`` (single source, ticket b080) so this enrichment path and the
+# plan-time operator-attested lint (det_floor._operator_evidence_ac_gaps) agree on "tagged".
 
 
 def operator_attested_ac_texts(description: str) -> list[str]:
