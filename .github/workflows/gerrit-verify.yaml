@@ -182,7 +182,10 @@ jobs:
             fi
           done < "$ceilings"
           # 2) No unlisted file over the soft cap (membership = the bare-path allowlist).
-          listed=$(grep -vE '^[[:space:]]*(#|$)' "$allowlist" | awk '{print $1}' | sort -u)
+          # `|| true`: a fully-drained allowlist (zero non-comment lines) makes grep exit 1;
+          # under `set -e`/`pipefail` that would abort the step before the over-cap check. An
+          # empty allowlist is a valid end state (every over-cap module graduated), so tolerate it.
+          listed=$({ grep -vE '^[[:space:]]*(#|$)' "$allowlist" || true; } | awk '{print $1}' | sort -u)
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
             | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
