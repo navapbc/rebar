@@ -851,11 +851,25 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
             lint_abstained += 1
         elif defect:
             issues.append(defect)
+    # Operator-attested evidence-kind lint (R2, ADR-0043): AC items whose "done" evidence lives
+    # OUTSIDE the codebase (deploy/prod/live-run/infra/merge-gate/human/attestation) but which are
+    # NOT tagged [operator-attested]. ADVISORY coaching only (p6 never blocks); each gap's fix is
+    # inline. Self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
+    oa_gaps = _operator_evidence_ac_gaps(ctx.plan_text)
+    for line, markers in oa_gaps:
+        subject = re.sub(r"^\s*-\s*\[[ xX]?\]\s*", "", line).strip()[:80]
+        issues.append(
+            f"AC item {subject!r} cites operational evidence ({', '.join(markers)}) that lives "
+            "outside the codebase but is not tagged [operator-attested]; prefix the checkbox text "
+            "with [operator-attested] so the completion verifier accepts a recorded attestation "
+            "instead of failing to find code proof (ADR-0043)."
+        )
     cov = {
         "ran": True,
         "ac_items": len(items),
         "verify_commands_linted": len(linted),
         "verify_lint_abstained": lint_abstained,
+        "operator_attested_gaps": len(oa_gaps),
     }
     if not issues:
         return DetResult("P6", "ac-quality", "pass", coverage=cov)

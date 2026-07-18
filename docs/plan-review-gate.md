@@ -68,6 +68,31 @@ The gate has **two layers**:
   P2/P3 (file/package resolution via the grounding oracle) are coverage-only;
   P4/P6/P7 (oversize / AC-quality / destructive-op sniff) are advisory.
 
+  **Operator-attested evidence-kind lint (P6 family; ticket b080, ADR-0043 ×
+  ADR-0016).** `p6_ac_quality` additionally runs an ADVISORY, prompt-less lexicon
+  lint (`det_floor._operator_evidence_ac_gaps`) that flags AC checklist items whose
+  "done" evidence inherently lives OUTSIDE the codebase — a deploy, a prod/live-run
+  outcome, an IaC apply, a cloud-resource state, a merge-gate (Gerrit vote) result,
+  a human/operator action, an operator drill, live-store surgery, or a recorded
+  out-of-band attestation — but which are NOT tagged `[operator-attested]`. Such an
+  AC makes the completion verifier hunt for code proof that cannot exist and burn a
+  close-gate cycle (the motivating cases were tickets 115b and 8c4f); surfacing it
+  at PLAN time is the cheap fix. It NEVER blocks (it rides P6, which is advisory),
+  it is prompt-less (a DET criterion per ADR-0016 — it deliberately does *not* add a
+  `criteria_routing.json` entry: DET floor checks are hardcoded in `DET_CHECKS` and
+  are not routed through that index, which the packaged-routing CI gate enforces),
+  and it is precision-first (a codebase-verifiable suppression co-signal drops items
+  that name an in-repo proving command / test / doc / config file, plus a negation
+  guard). The `[operator-attested]` tag matcher is single-sourced in `det_floor`
+  (`_OPERATOR_ATTESTED_TAG_RE`, re-exported by `workflow_ops`) so the lint and the
+  completion-verifier enrichment agree on "tagged" by construction. It is self-gated
+  by a DETERMINISTIC lexicon precision/recall eval over the historical AC corpus
+  (`docs/experiments/plan-review-gate/harnesses/operator_attested_eval.py` over
+  `runs/operator_attested_ac_corpus.jsonl`; committed result
+  `runs/operator_attested_eval.json`): precision 92.2% on a 64-item flagged census
+  (gate ≥70%), flag rate 2.07% (gate ≤5%), recall 61.3% (reported), both known
+  cases fire — NO LLM runs in the lint or the eval.
+
 * **Layer 2 — the advisory coaching review (the four passes)** — never blocks by
   default. Each of the 32 criteria (the F/E/G/A judgment criteria, the T1–T12
   triggered overlays, COH, and ISF) ships as a **contract-bearing prompt in the
