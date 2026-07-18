@@ -111,11 +111,19 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     if result is not None and result.get("status") != "dedup-create-skipped":
         ctx.rest_calls += 1
     outcome["result"] = result
-    # Surface swallowed comment failures. NON-fatal — the issue create above
-    # genuinely succeeded — so we record them in a dedicated field rather than
+    # Surface swallowed comment failures. NON-fatal by default — the issue create
+    # above genuinely succeeded — so we record them in a dedicated field rather than
     # overwriting outcome["error"], mirroring the update-path soft-fail style.
     if comment_errors:
         outcome["comment_errors"] = list(comment_errors)
+        # Observability (48c8-5375-f883-462d): a swallowed comment failure is a
+        # silent sub-op no-op. Behind the SAME fail-loud flag as the silent-no-op
+        # canary in handle_update, promote it to a per-mutation error so it counts
+        # toward mutation_failures (reconcile.py) and drives a non-zero pass exit.
+        # Default off ⇒ landing is behavior-neutral; promotion/reversion are a pure
+        # flag flip.
+        if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+            outcome["error"] = f"comment-errors: {'; '.join(comment_errors)}"
     return HandlerResult(outcome)
 
 
@@ -194,6 +202,14 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     # soft-fail style of the stale-binding-404 / assignee-unresolved handlers.
     if _comment_errors:
         outcome["comment_errors"] = list(_comment_errors)
+        # Observability (48c8-5375-f883-462d): behind the SAME fail-loud flag as the
+        # silent-no-op canary below, promote a swallowed comment failure to a
+        # per-mutation error so it counts toward mutation_failures (reconcile.py) and
+        # drives a non-zero pass exit. Default off ⇒ behavior-neutral. If the
+        # silent-no-op canary below ALSO fires, it augments (does not silently
+        # replace) this reason.
+        if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+            outcome["error"] = f"comment-errors: {'; '.join(_comment_errors)}"
     # Story E (2359): sub-op telemetry — surface per-kind APPLIED counts on the
     # structured outcome (parity with apply_inbound's links_applied), so a
     # link/comment/label that silently no-ops is queryable, not only logged.
@@ -227,9 +243,14 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         )
         # Warn-first rollout: hard-fail (record a per-mutation failure) ONLY
         # behind the flag — promotion to hard-fail and reversion to warn are a
-        # flag flip with no other code change.
+        # flag flip with no other code change. Augment (never silently replace) a
+        # comment-errors reason already recorded above (48c8) so both sub-op
+        # failures survive on the same outcome.
         if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
-            outcome["error"] = f"silent-noop: {_detail}"
+            _prior = outcome.get("error")
+            outcome["error"] = (
+                f"{_prior}; silent-noop: {_detail}" if _prior else f"silent-noop: {_detail}"
+            )
     # Persist provenance for set-valued fields after update
     jira_key = mutation.get("key", "")
     if jira_key:
