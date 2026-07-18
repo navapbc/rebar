@@ -1,0 +1,522 @@
+{
+  "A1": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 547,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 884,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 193
+    }
+  },
+  "COH": {
+    "blocking_fp_proxy": 0.07446808510638298,
+    "detection_proxy": 0.8617021276595744,
+    "sample_counts": {
+      "advisory_firings": 399,
+      "blocking_fix_units": 94,
+      "deescalated": 7,
+      "firings": 705,
+      "remediated": 81,
+      "resolvable_fix_units": 94,
+      "tickets": 213
+    }
+  },
+  "E1": {
+    "blocking_fp_proxy": 0.07462686567164178,
+    "detection_proxy": 0.8656716417910447,
+    "sample_counts": {
+      "advisory_firings": 1224,
+      "blocking_fix_units": 67,
+      "deescalated": 5,
+      "firings": 1841,
+      "remediated": 58,
+      "resolvable_fix_units": 67,
+      "tickets": 330
+    }
+  },
+  "E2": {
+    "blocking_fp_proxy": 0.11320754716981132,
+    "detection_proxy": 0.8325123152709359,
+    "sample_counts": {
+      "advisory_firings": 931,
+      "blocking_fix_units": 212,
+      "deescalated": 24,
+      "firings": 1853,
+      "remediated": 169,
+      "resolvable_fix_units": 203,
+      "tickets": 327
+    }
+  },
+  "E3": {
+    "blocking_fp_proxy": 0.0,
+    "detection_proxy": 1.0,
+    "sample_counts": {
+      "advisory_firings": 327,
+      "blocking_fix_units": 1,
+      "deescalated": 0,
+      "firings": 561,
+      "remediated": 1,
+      "resolvable_fix_units": 1,
+      "tickets": 219
+    }
+  },
+  "E4": {
+    "blocking_fp_proxy": 0.14423076923076922,
+    "detection_proxy": 0.7625418060200669,
+    "sample_counts": {
+      "advisory_firings": 1293,
+      "blocking_fix_units": 312,
+      "deescalated": 45,
+      "firings": 2222,
+      "remediated": 228,
+      "resolvable_fix_units": 299,
+      "tickets": 310
+    }
+  },
+  "E5": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 745,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 856,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 176
+    }
+  },
+  "E6": {
+    "blocking_fp_proxy": 0.137546468401487,
+    "detection_proxy": 0.7944664031620553,
+    "sample_counts": {
+      "advisory_firings": 1113,
+      "blocking_fix_units": 269,
+      "deescalated": 37,
+      "firings": 2115,
+      "remediated": 201,
+      "resolvable_fix_units": 253,
+      "tickets": 335
+    }
+  },
+  "F1": {
+    "blocking_fp_proxy": 0.11285266457680251,
+    "detection_proxy": 0.8151815181518152,
+    "sample_counts": {
+      "advisory_firings": 446,
+      "blocking_fix_units": 319,
+      "deescalated": 36,
+      "firings": 1262,
+      "remediated": 247,
+      "resolvable_fix_units": 303,
+      "tickets": 294
+    }
+  },
+  "F4": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 38,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 98,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 51
+    }
+  },
+  "G1G2": {
+    "blocking_fp_proxy": 0.1523545706371191,
+    "detection_proxy": 0.7806267806267806,
+    "sample_counts": {
+      "advisory_firings": 1770,
+      "blocking_fix_units": 361,
+      "deescalated": 55,
+      "firings": 2948,
+      "remediated": 274,
+      "resolvable_fix_units": 351,
+      "tickets": 330
+    }
+  },
+  "G3": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 243,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 304,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 40
+    }
+  },
+  "G4": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 423,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 577,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 43
+    }
+  },
+  "G5": {
+    "blocking_fp_proxy": 0.0,
+    "detection_proxy": 1.0,
+    "sample_counts": {
+      "advisory_firings": 63,
+      "blocking_fix_units": 7,
+      "deescalated": 0,
+      "firings": 134,
+      "remediated": 6,
+      "resolvable_fix_units": 6,
+      "tickets": 58
+    }
+  },
+  "G6": {
+    "blocking_fp_proxy": 0.14391143911439114,
+    "detection_proxy": 0.7950664136622391,
+    "sample_counts": {
+      "advisory_firings": 1279,
+      "blocking_fix_units": 542,
+      "deescalated": 78,
+      "firings": 2719,
+      "remediated": 419,
+      "resolvable_fix_units": 527,
+      "tickets": 365
+    }
+  },
+  "G7": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 81,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 131,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 38
+    }
+  },
+  "ISF": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 4,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 28,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 9
+    }
+  },
+  "P1": {
+    "blocking_fp_proxy": 0.875,
+    "detection_proxy": 0.125,
+    "sample_counts": {
+      "advisory_firings": 0,
+      "blocking_fix_units": 8,
+      "deescalated": 7,
+      "firings": 19,
+      "remediated": 1,
+      "resolvable_fix_units": 8,
+      "tickets": 8
+    }
+  },
+  "P4": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 11,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 11,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 3
+    }
+  },
+  "P5": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 86,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 86,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 25
+    }
+  },
+  "P6": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 1043,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 1043,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 283
+    }
+  },
+  "P7": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 16,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 16,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 8
+    }
+  },
+  "P9": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 211,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 211,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 120
+    }
+  },
+  "T1": {
+    "blocking_fp_proxy": 0.14193548387096774,
+    "detection_proxy": 0.7432432432432432,
+    "sample_counts": {
+      "advisory_firings": 906,
+      "blocking_fix_units": 155,
+      "deescalated": 22,
+      "firings": 1662,
+      "remediated": 110,
+      "resolvable_fix_units": 148,
+      "tickets": 259
+    }
+  },
+  "T10": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 225,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 354,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 36
+    }
+  },
+  "T11": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 310,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 440,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 86
+    }
+  },
+  "T12": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 94,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 162,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 45
+    }
+  },
+  "T2": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 110,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 151,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 54
+    }
+  },
+  "T3": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 1084,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 1415,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 208
+    }
+  },
+  "T4": {
+    "blocking_fp_proxy": 0.0,
+    "detection_proxy": 1.0,
+    "sample_counts": {
+      "advisory_firings": 289,
+      "blocking_fix_units": 14,
+      "deescalated": 0,
+      "firings": 635,
+      "remediated": 13,
+      "resolvable_fix_units": 13,
+      "tickets": 207
+    }
+  },
+  "T5a": {
+    "blocking_fp_proxy": 0.0,
+    "detection_proxy": 1.0,
+    "sample_counts": {
+      "advisory_firings": 64,
+      "blocking_fix_units": 1,
+      "deescalated": 0,
+      "firings": 106,
+      "remediated": 1,
+      "resolvable_fix_units": 1,
+      "tickets": 26
+    }
+  },
+  "T5b": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 733,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 1200,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 187
+    }
+  },
+  "T5c": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 347,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 534,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 72
+    }
+  },
+  "T5d": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 7,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 14,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 2
+    }
+  },
+  "T5e": {
+    "blocking_fp_proxy": 0.1,
+    "detection_proxy": 0.9,
+    "sample_counts": {
+      "advisory_firings": 486,
+      "blocking_fix_units": 10,
+      "deescalated": 1,
+      "firings": 1205,
+      "remediated": 9,
+      "resolvable_fix_units": 10,
+      "tickets": 266
+    }
+  },
+  "T6": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 170,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 258,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 71
+    }
+  },
+  "T7": {
+    "blocking_fp_proxy": 0.0,
+    "detection_proxy": 1.0,
+    "sample_counts": {
+      "advisory_firings": 285,
+      "blocking_fix_units": 2,
+      "deescalated": 0,
+      "firings": 692,
+      "remediated": 2,
+      "resolvable_fix_units": 2,
+      "tickets": 187
+    }
+  },
+  "T8": {
+    "blocking_fp_proxy": 0.13646532438478748,
+    "detection_proxy": 0.8009259259259259,
+    "sample_counts": {
+      "advisory_firings": 2162,
+      "blocking_fix_units": 447,
+      "deescalated": 61,
+      "firings": 3628,
+      "remediated": 346,
+      "resolvable_fix_units": 432,
+      "tickets": 272
+    }
+  },
+  "T9": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 522,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 858,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 184
+    }
+  },
+  "project.portability": {
+    "blocking_fp_proxy": null,
+    "detection_proxy": null,
+    "sample_counts": {
+      "advisory_firings": 3,
+      "blocking_fix_units": 0,
+      "deescalated": 0,
+      "firings": 17,
+      "remediated": 0,
+      "resolvable_fix_units": 0,
+      "tickets": 7
+    }
+  }
+}
