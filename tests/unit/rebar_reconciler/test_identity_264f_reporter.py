@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+import rebar_reconciler.dispatch_apply_phases as phases
 import rebar_reconciler.dispatch_one as dispatch
 
 
@@ -62,8 +63,11 @@ def test_reporter_set_by_account_id_on_success(store: Path) -> None:
 
 def test_reporter_http_4xx_degrades_softly(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[str] = []
+    # ``_record_reporter_alert`` moved to the dispatch_apply_phases leaf (module-size
+    # split, ticket 744a); patch it there so the bare-name call inside the re-exported
+    # ``_update_one_apply_reporter`` resolves to the stub.
     monkeypatch.setattr(
-        dispatch,
+        phases,
         "_record_reporter_alert",
         lambda kind, jira_key, reason: captured.append(kind),
     )
@@ -80,8 +84,11 @@ def test_reporter_http_4xx_degrades_softly(store: Path, monkeypatch: pytest.Monk
 
 def test_reporter_unresolved_degrades_softly(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[str] = []
+    # ``_record_reporter_alert`` moved to the dispatch_apply_phases leaf (module-size
+    # split, ticket 744a); patch it there so the bare-name call inside the re-exported
+    # ``_update_one_apply_reporter`` resolves to the stub.
     monkeypatch.setattr(
-        dispatch,
+        phases,
         "_record_reporter_alert",
         lambda kind, jira_key, reason: captured.append(kind),
     )
