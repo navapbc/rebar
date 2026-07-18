@@ -10,11 +10,6 @@
 # row. Membership (which files are soft-cap-exempt) is the sibling bare-path allowlist; the
 # two are kept in sync by tests/unit/test_module_size_contract.py.
 #
-# NOTE (transient): reconcile.py is pinned to 1093 (was 1083; +10 for story 21dd's
-# store-compat outbound-push gate in _apply_mutations) = its largest size across the
-# in-flight janitor stack (it ratchets down as the reconciler decomposition lands); the
-# slack lets the ratchet stay green if the stack lands piecemeal rather than atomically.
-#
 # NOTE (epic foliaged-merry-collie — review-gate impact redesign): det_floor.py 849->946 (the G5
 # store-derived decomposition signal, child spangly-beggarly-blackrhino) and passes.py 839->852
 # (the Pass-1 finding-memory recall, child disused-unpoliced-solenodon) grew for the impact-redesign
@@ -35,7 +30,6 @@
 # carmine-jute-starfish added the deterministic advisory-triage stage `triage_advisories`
 # co-located with the Pass-4 coach machinery; a <100 LOC extraction is forbidden by the
 # module-size policy, so the ceiling is raised to the landed size).
-src/rebar/_engine/rebar_reconciler/reconcile.py 1093
 src/rebar/config.py 869
 src/rebar/llm/plan_review/det_floor.py 975
 src/rebar/llm/plan_review/passes.py 930
