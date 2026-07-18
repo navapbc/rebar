@@ -262,7 +262,6 @@ requires a row here.
 
 | File | Remedy |
 |------|--------|
-| `rebar_reconciler/reconcile.py` | The differ-running phase extraction has **shipped** (`run_differs.py`, ~640 LOC), but `reconcile.py` is still over cap (~1070 LOC). Next seam: extract the `_PassContext`-driven pass-phase helpers that cluster around `reconcile_once` — `_load_snapshots`, `_handle_corrupt_snapshot`, `_apply_mutations`, `_persist_and_log` — into a sibling `reconcile_passes.py`, leaving `reconcile_once` as the thin sequencer |
 | `llm/plan_review/attest.py` | the fastest-growing file in the tree (kind-keyed attestations, epic dark-acme-lumen, + the completion-aware `delivered_now` predicate). Two candidate split seams: the completion-delivery cluster (`_attested_delivered` / `_supersedes_child`) into `attest_delivered.py`, and the validity-computation cluster (`compute_validity` + the reopen/code-drift/material-edit invalidation checks) into `attest_validity.py`. Note the kind-generic validity/signing surface is gate-neutral (the completion gate imports it too), so a gate-neutral home is preferable to keeping it under `plan_review/`. Ceiling nudged (+6, to 861) for the surfaced-only audit annotation (bug old-frilly-plankton) |
 
 
