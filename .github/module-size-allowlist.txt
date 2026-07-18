@@ -20,7 +20,6 @@ src/rebar/llm/plan_review/passes.py
 src/rebar/llm/workflow/lint_refs.py
 src/rebar/llm/workflow/gate_dispatch.py
 src/rebar/llm/runner.py
-src/rebar/_engine/rebar_reconciler/outbound_differ.py
 src/rebar/_engine/rebar_reconciler/dispatch_one.py
 src/rebar/_commands/fsck.py
 src/rebar/reducer/_processors.py
