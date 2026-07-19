@@ -23,9 +23,14 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clean_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Point XDG at an EMPTY per-test dir (not delenv): deleting it makes
+    # user_config_path() fall back to ~/.config/rebar/config.toml — the developer's
+    # real config — defeating conftest's hermetic isolation (d716).
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    xdg_empty = tmp_path / "xdg-empty"
+    xdg_empty.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_empty))
     for sect, keys in cfg._SECTIONS.items():
         for key in keys:
             monkeypatch.delenv(f"REBAR_{sect.upper()}_{key.upper()}", raising=False)
