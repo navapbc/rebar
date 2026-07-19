@@ -77,9 +77,9 @@ Two consequences of the hierarchy that you will hit in practice:
 - **The open-children guard on close.** A parent cannot be closed while it has open
   children (this holds even for `idea → closed`). Close subtrees bottom-up.
 
-## Linking (the six relations + hierarchy promotion)
+## Linking (the seven relations + hierarchy promotion)
 
-`link <id1> <id2> <relation>` **requires** a relation. There are six:
+`link <id1> <id2> <relation>` **requires** a relation. There are seven:
 
 | Relation | Meaning | Directional? | Can create a cycle? |
 |----------|---------|--------------|---------------------|
@@ -89,6 +89,7 @@ Two consequences of the hierarchy that you will hit in practice:
 | `duplicates` | id1 duplicates id2 | yes | no |
 | `supersedes` | id1 supersedes id2 | yes | no |
 | `discovered_from` | id1 was discovered while working id2 | yes | no |
+| `caused_by` | id1 (a bug) was caused by the change/ticket id2 | yes | no |
 
 Use `discovered_from` to record **provenance**: when working one ticket surfaces new work,
 `create` the new ticket and `link <new> <parent> discovered_from` so the emergent-work
@@ -103,7 +104,7 @@ the link endpoints up the parent hierarchy so the dependency lands between ticke
 comparable level (epic ↔ epic, story ↔ story, task/bug ↔ task/bug), emitting a
 `REDIRECT: A→B promoted to …` note when it does. This is why a blocking link you point at a
 child ticket can land on its epic. The non-blocking relations
-(`relates_to` / `duplicates` / `supersedes` / `discovered_from`) are recorded exactly as
+(`relates_to` / `duplicates` / `supersedes` / `discovered_from` / `caused_by`) are recorded exactly as
 given, with **no** promotion. One consequence: because a blocking link may be promoted to an
 ancestor, `unlink` must target the **promoted (ancestor)** endpoint to remove it. The
 promotion rule and the underlying `LINK` / `UNLINK` events are described in
