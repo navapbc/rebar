@@ -149,6 +149,14 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   Rebase-If-Necessary: Gerrit rebases + submits server-side, so you do **not** pre-rebase
   except on a textual conflict it cannot resolve. Do **not** close a ticket until its change
   is `Verified +1` — a passing completion-verifier is **not** a substitute for green CI.
+- **After the change MERGES, fast-forward YOUR worktree before you close.** The close's
+  completion precheck reads your worktree's git history and requires the merged
+  `rebar-ticket: <id>` commit reachable from HEAD (else it fails with "cannot confirm the work
+  landed"). So from inside the worktree, before `rebar transition <id> in_progress closed`, run
+  `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`). **NEVER**
+  fast-forward, reset, or stash the shared main checkout to satisfy a close — it may hold
+  uncommitted operator WIP. Advance your own worktree (or a throwaway worktree at `origin/main`)
+  instead.
 - **Multi-story features → a server-side feature branch** (not one giant change or a fragile
   chain) — see [CONTRIBUTING.md](CONTRIBUTING.md) §4.
 
