@@ -1,14 +1,18 @@
 """CI parity: every gate that runs against `main` post-merge must also gate pre-merge.
 
-The Gerrit `Verified` vote is cast by ``.github/workflows/gerrit-verify.yaml`` BEFORE a
-change can land; ``.github/workflows/test.yml`` runs the same gates AFTER the fact on the
-pushed `main`. The two step lists are hand-maintained, so they drift silently — and a gate
-present only in ``test.yml`` can *only* fail post-merge, letting a red change land with a
+The Gerrit `Verified` vote is cast by ``.github/workflows/gerrit-verify.yaml`` BEFORE a change
+can land; ``.github/workflows/test.yml`` runs the same gates AFTER the fact on the pushed `main`.
+A gate present only in ``test.yml`` can *only* fail post-merge, letting a red change land with a
 green Verified vote (this is exactly how a stale ``docs/env-vars.md`` reached `main`).
 
-These tests fail the build the moment the two workflows diverge, so drift is caught at
-review time instead of on `main`. When you add a gate, add it to BOTH workflows (or, for a
-deliberate asymmetry, record it in the allowlist below with a reason).
+The two lanes used to hand-copy the gate+suite step list, and these tests grepped both files to
+catch drift. That copy is now factored into ONE reusable workflow, ``_build-and-test.yml``, which
+BOTH callers invoke (the branch-head lane via ``test.yml``, the patchset/Verified lane via
+``gerrit-verify.yaml``) — so drift is impossible by construction, the same way ``_optionality.yml``
+is shared. These tests therefore assert the new invariant: (1) both callers delegate to the shared
+reusable, (2) every gate/script lives in that reusable so it gates both lanes, and (3) the
+independent safety properties the old file also enforced — the pre-commit SKIP set and the
+optionality wiring — are preserved, now checked against the reusable that owns those steps.
 """
 
 from __future__ import annotations
@@ -19,33 +23,34 @@ _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 _OPTIONALITY_YML = _ROOT / ".github" / "workflows" / "optionality.yml"
+_BAT_YML = _ROOT / ".github" / "workflows" / "_build-and-test.yml"
 _PRECOMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
 _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
+# The reusable gate+suite workflow both CI lanes now delegate to (this refactor). Its presence
+# in BOTH caller files is what makes the two lanes share one definition — no drift by construction.
+_REUSABLE_BAT = "./.github/workflows/_build-and-test.yml"
 
 # Pre-commit hooks whose PASS/FAIL depends on the current git branch / HEAD state rather
 # than on file content. `pre-commit run --all-files` therefore behaves DIFFERENTLY between
 # the two CI runners even when they run the identical command: gerrit-verify.yaml checks the
 # change out at a `refs/changes/*` ref (detached HEAD, hook silent) while test.yml runs on the
-# pushed `main` branch (hook fires). That *context* drift is invisible to the command-signature
-# parity above, so a branch-sensitive hook reddens post-merge branch CI while the pre-merge
-# Verified gate stays green — exactly bug `pillared-doddering-fawn`. Each such hook, when
-# present in .pre-commit-config.yaml, MUST be listed in the `SKIP` of BOTH workflows'
-# `pre-commit run --all-files` step (its "don't commit to main" intent is enforced server-side
-# by the GitHub ruleset + Gerrit votes, not by this CI hook).
+# pushed `main` branch (hook fires). Because both lanes now run the SINGLE pre-commit step in
+# the reusable, each such hook MUST be listed in that step's `SKIP` — otherwise the identical
+# command reddens post-merge branch CI on `main` while the pre-merge Verified gate stays green
+# (bug `pillared-doddering-fawn`). The "don't commit to main" intent is enforced server-side by
+# the GitHub ruleset + Gerrit votes, not by this CI hook.
 _BRANCH_SENSITIVE_HOOKS = {"no-commit-to-branch"}
 
 # Pre-commit hooks that are REDUNDANT in CI because they only re-invoke a check that already
-# runs as its own named CI step. The local `lint`/`typecheck` hooks shell out to `make lint` /
-# `make typecheck`, which both workflows run directly; letting `pre-commit run --all-files`
-# run them again would execute each linter TWICE per job. They must therefore be listed in the
-# CI `SKIP` of BOTH workflows' pre-commit step so each linter runs exactly once (the direct
-# steps). Distinct from _BRANCH_SENSITIVE_HOOKS: these are deterministic content checkers, not
-# branch-context-dependent — the reason to skip is de-duplication, not a main-branch false fail.
+# runs as its own named step in the reusable. The local `lint`/`typecheck` hooks shell out to
+# `make lint` / `make typecheck`, which the reusable runs directly; letting `pre-commit run
+# --all-files` run them again would execute each linter TWICE per job. They must therefore be
+# listed in the reusable's pre-commit `SKIP` so each linter runs exactly once (the direct steps).
 _CI_REDUNDANT_HOOKS = {"lint", "typecheck"}
 
 # Each gating check keyed by a STABLE command signature (not the step name — names differ
-# in wording between the two files, e.g. the pip-audit step). Every signature here must
-# appear in BOTH workflows: the pre-merge Verified gate and the post-merge branch CI.
+# in wording, e.g. the pip-audit step). Every signature here must appear in the reusable
+# `_build-and-test.yml`, which both the pre-merge Verified gate and the post-merge branch CI run.
 _SHARED_GATE_SIGNATURES = {
     "module-size gate": ".github/module-size-limit.txt",
     "prompt-index drift gate": "regenerate-index",
@@ -63,9 +68,9 @@ _SHARED_GATE_SIGNATURES = {
     "integration tier": "pytest -m integration",
 }
 
-# Scripts referenced by a gate in test.yml that are DELIBERATELY not run in the Verified
-# gate. Empty by design: a derive-and-diff drift gate (scripts/gen_*.py / check_*.py) that
-# gates `main` must also gate pre-merge, or a broken artifact lands green. Add an entry
+# Scripts referenced by a gate in the branch-CI lane that are DELIBERATELY not run in the
+# Verified lane. Empty by design: a derive-and-diff drift gate (scripts/gen_*.py / check_*.py)
+# that gates `main` must also gate pre-merge, or a broken artifact lands green. Add an entry
 # only with a written reason.
 _INTENTIONAL_SCRIPT_ASYMMETRIES: set[str] = set()
 
@@ -75,36 +80,51 @@ def _read(path: Path) -> str:
     return path.read_text()
 
 
-def test_verified_gate_runs_every_shared_gate() -> None:
-    """Each known gate signature is present in BOTH the Verified gate and branch CI."""
+def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
+    """The anti-drift invariant: both the branch-head lane (test.yml) and the Verified lane
+    (gerrit-verify.yaml) run the gate+suite by invoking the SAME reusable workflow, so their
+    checks cannot diverge. This replaces the old "grep both files for identical step text"."""
     test_yml = _read(_TEST_YML)
     gerrit_yml = _read(_GERRIT_YML)
+    assert _REUSABLE_BAT in test_yml, (
+        f"test.yml no longer delegates to the shared gate workflow ({_REUSABLE_BAT}) — the "
+        "post-merge branch CI would drift from the Verified gate. Call the reusable, don't inline."
+    )
+    assert _REUSABLE_BAT in gerrit_yml, (
+        f"gerrit-verify.yaml no longer delegates to the shared gate workflow ({_REUSABLE_BAT}) — "
+        "the Verified gate would drift from branch CI. Call the reusable, don't inline the gates."
+    )
+
+
+def test_shared_gate_signatures_live_in_the_reusable() -> None:
+    """Every known gate signature is present in the reusable both lanes run — so the gate exists
+    AND (via the delegation test above) runs pre-merge and post-merge from one definition."""
+    bat = _read(_BAT_YML)
     for label, sig in _SHARED_GATE_SIGNATURES.items():
-        assert sig in test_yml, (
-            f"gate {label!r} signature {sig!r} not found in test.yml — the signature is "
-            "stale; update _SHARED_GATE_SIGNATURES to match the renamed/removed gate."
-        )
-        assert sig in gerrit_yml, (
-            f"gate {label!r} ({sig!r}) runs in test.yml (post-merge branch CI) but is "
-            "MISSING from gerrit-verify.yaml (the pre-merge Verified gate) — so it can "
-            "only fail AFTER a change lands on main. Add it to gerrit-verify.yaml."
+        assert sig in bat, (
+            f"gate {label!r} signature {sig!r} not found in _build-and-test.yml — either the "
+            "gate was dropped from the shared workflow (it would stop gating BOTH lanes) or its "
+            "signature is stale; update _SHARED_GATE_SIGNATURES to match the renamed/removed gate."
         )
 
 
 def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
-    """Auto-catch the drift class: any scripts/*.py a gate runs in test.yml must also be
-    invoked in gerrit-verify.yaml (this is how the env-vars.md gate slipped through)."""
+    """Auto-catch the drift class: any scripts/*.py a gate runs in the branch-CI lane (test.yml
+    plus the reusable it calls) must also run in the Verified lane (gerrit-verify.yaml plus the
+    reusable). Shared-reusable scripts satisfy this on both sides; the check still catches a
+    script gate hiding in a caller-only job (this is how the env-vars.md gate slipped through)."""
     import re
 
-    test_yml = _read(_TEST_YML)
-    gerrit_yml = _read(_GERRIT_YML)
-    scripts_in_test = set(re.findall(r"scripts/[A-Za-z0-9_]+\.py", test_yml))
-    scripts_in_gerrit = set(re.findall(r"scripts/[A-Za-z0-9_]+\.py", gerrit_yml))
-    missing = scripts_in_test - scripts_in_gerrit - _INTENTIONAL_SCRIPT_ASYMMETRIES
+    bat = _read(_BAT_YML)
+    branch = _read(_TEST_YML) + bat
+    verified = _read(_GERRIT_YML) + bat
+    scripts_in_branch = set(re.findall(r"scripts/[A-Za-z0-9_]+\.py", branch))
+    scripts_in_verified = set(re.findall(r"scripts/[A-Za-z0-9_]+\.py", verified))
+    missing = scripts_in_branch - scripts_in_verified - _INTENTIONAL_SCRIPT_ASYMMETRIES
     assert not missing, (
-        "script-driven gate(s) run in test.yml (post-merge) but not in the Verified gate "
-        f"(gerrit-verify.yaml): {sorted(missing)}. Add them to gerrit-verify.yaml so they "
-        "gate pre-merge, or record a reasoned exception in _INTENTIONAL_SCRIPT_ASYMMETRIES."
+        "script-driven gate(s) run in the branch-CI lane (post-merge) but not in the Verified "
+        f"lane (gerrit-verify.yaml): {sorted(missing)}. Move them into the shared reusable, add "
+        "them to the Verified lane, or record a reason in _INTENTIONAL_SCRIPT_ASYMMETRIES."
     )
 
 
@@ -189,60 +209,56 @@ def _hook_is_skipped(hook: str, step: dict) -> bool:
 
 
 def test_branch_sensitive_precommit_hooks_skipped_in_ci() -> None:
-    """A branch-sensitive pre-commit hook must be SKIPped in BOTH CI runners' `pre-commit
-    run --all-files` step. Otherwise the identical command passes pre-merge on the detached
-    Gerrit change ref (Verified +1 → the change lands) but fails post-merge on the `main`
-    branch, reddening branch CI with no way for the pre-merge gate to catch it. This closes
-    the *context/behavioral* drift gap that the command-signature parity above cannot see
+    """A branch-sensitive pre-commit hook must be SKIPped in the reusable's single `pre-commit
+    run --all-files` step (both lanes run it). Otherwise the identical command passes pre-merge
+    on the detached Gerrit change ref (Verified +1 → the change lands) but fails post-merge on
+    the `main` branch, reddening branch CI with no way for the pre-merge gate to catch it. This
+    closes the *context/behavioral* drift gap that the command-signature checks cannot see
     (bug `pillared-doddering-fawn`)."""
     active = _BRANCH_SENSITIVE_HOOKS & _precommit_config_hook_ids()
-    for label, path in (("test.yml", _TEST_YML), ("gerrit-verify.yaml", _GERRIT_YML)):
-        steps = _precommit_all_files_steps(_read(path))
-        assert steps, (
-            f"{label}: no `pre-commit run --all-files` step found — the parity signature is "
-            "stale (the step was renamed/removed). Update this guard to match."
-        )
-        for hook in sorted(active):
-            for step in steps:
-                assert _hook_is_skipped(hook, step), (
-                    f"{label}: the `pre-commit run --all-files` step does not SKIP the "
-                    f"branch-sensitive hook {hook!r}. That hook passes on a detached Gerrit "
-                    f"change ref (Verified gate) but FAILS on the `main` branch (post-merge "
-                    f"branch CI), so it reddens `main` while the pre-merge Verified vote stays "
-                    f"green — the drift that caused bug `pillared-doddering-fawn`. Add "
-                    f"`env:\\n  SKIP: {hook}` to the step (in BOTH workflows)."
-                )
+    steps = _precommit_all_files_steps(_read(_BAT_YML))
+    assert steps, (
+        "_build-and-test.yml: no `pre-commit run --all-files` step found — the parity signature "
+        "is stale (the step was renamed/removed/moved out of the reusable). Update this guard."
+    )
+    for hook in sorted(active):
+        for step in steps:
+            assert _hook_is_skipped(hook, step), (
+                f"_build-and-test.yml: the `pre-commit run --all-files` step does not SKIP the "
+                f"branch-sensitive hook {hook!r}. That hook passes on a detached Gerrit change "
+                f"ref (Verified gate) but FAILS on the `main` branch (post-merge branch CI), so "
+                f"it reddens `main` while the pre-merge Verified vote stays green — the drift "
+                f"that caused bug `pillared-doddering-fawn`. Add `SKIP: {hook}` to the step env."
+            )
 
 
 def test_ci_redundant_hooks_skipped_in_precommit() -> None:
     """The `lint`/`typecheck` pre-commit hooks (which just re-invoke `make lint` / `make
-    typecheck`) must be SKIPped in BOTH workflows' `pre-commit run --all-files` step, because
-    each of those `make` targets already runs as its own named CI step. Without the skip, every
-    CI job runs each linter TWICE (once directly, once via the hook) — pure duplicate work
-    (ticket `ecumenical-equal-sidewinder`). This guard fails the build if the double-run is
+    typecheck`) must be SKIPped in the reusable's `pre-commit run --all-files` step, because
+    each of those `make` targets already runs as its own named step in the reusable. Without the
+    skip, every CI job runs each linter TWICE (once directly, once via the hook) — pure duplicate
+    work (ticket `ecumenical-equal-sidewinder`). This guard fails the build if the double-run is
     reintroduced. It also asserts the direct step still exists, so a linter runs exactly once —
     never zero times."""
     active = _CI_REDUNDANT_HOOKS & _precommit_config_hook_ids()
     # Each redundant hook's stand-alone step is what keeps it running once after the skip.
     _direct_step_sig = {"lint": "make lint", "typecheck": "make typecheck"}
-    for label, path in (("test.yml", _TEST_YML), ("gerrit-verify.yaml", _GERRIT_YML)):
-        text = _read(path)
-        steps = _precommit_all_files_steps(text)
-        assert steps, (
-            f"{label}: no `pre-commit run --all-files` step found — the parity signature is "
-            "stale (the step was renamed/removed). Update this guard to match."
-        )
-        for hook in sorted(active):
-            for step in steps:
-                assert _hook_is_skipped(hook, step), (
-                    f"{label}: the `pre-commit run --all-files` step does not SKIP the "
-                    f"redundant hook {hook!r}. It only re-invokes "
-                    f"`{_direct_step_sig[hook]}`, which already runs as its own named step — "
-                    f"so CI runs the linter TWICE per job. Add {hook!r} to the step's `SKIP` "
-                    f"env (in BOTH workflows), per ticket `ecumenical-equal-sidewinder`."
-                )
-            assert _direct_step_sig[hook] in text, (
-                f"{label}: `{_direct_step_sig[hook]}` no longer runs as its own step, yet the "
-                f"{hook!r} hook is skipped in the pre-commit run — the linter would run ZERO "
-                f"times in CI. Keep the direct `{_direct_step_sig[hook]}` step."
+    text = _read(_BAT_YML)
+    steps = _precommit_all_files_steps(text)
+    assert steps, (
+        "_build-and-test.yml: no `pre-commit run --all-files` step found — the parity signature "
+        "is stale (the step was renamed/removed/moved out of the reusable). Update this guard."
+    )
+    for hook in sorted(active):
+        for step in steps:
+            assert _hook_is_skipped(hook, step), (
+                f"_build-and-test.yml: the `pre-commit run --all-files` step does not SKIP the "
+                f"redundant hook {hook!r}. It only re-invokes `{_direct_step_sig[hook]}`, which "
+                f"already runs as its own named step — so CI runs the linter TWICE per job. Add "
+                f"{hook!r} to the step's `SKIP` env, per ticket `ecumenical-equal-sidewinder`."
             )
+        assert _direct_step_sig[hook] in text, (
+            f"_build-and-test.yml: `{_direct_step_sig[hook]}` no longer runs as its own step, yet "
+            f"the {hook!r} hook is skipped in the pre-commit run — the linter would run ZERO times "
+            f"in CI. Keep the direct `{_direct_step_sig[hook]}` step in the reusable."
+        )

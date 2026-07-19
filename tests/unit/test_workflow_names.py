@@ -30,6 +30,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "release.yml": "Release",
     "_optionality.yml": "Optional-Dependency Isolation (reusable)",
     "optionality.yml": "Optional-Dependency Isolation (mirror)",
+    "_build-and-test.yml": "Build and Test (reusable)",
     "test.yml": "Test Suite (mirror)",
     "verify-identity.yml": "Verify Authorship Identity",
     "prompt-eval.yml": "Prompt Eval",
