@@ -240,6 +240,13 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
           REBAR_ENV_ID: ${{ vars.REBAR_ENV_ID || 'reconciler' }}
+          # Observability (48c8-5375-f883-462d): fail-loud on silent sub-op no-ops +
+          # swallowed comment failures. Activated AFTER the Jira comment cleanup (bd80)
+          # brought the 13 cap-inflated tickets back below the 5000-comment cap — before
+          # that, capped tickets produced comment_errors every pass and this flag would
+          # have failed the job continuously. The machinery landed default-off in
+          # df0ac80be (change 785); this flip turns it on for the live reconciler.
+          REBAR_RECONCILER_FAIL_SILENT_NOOP: "1"
         run: |
           set -uo pipefail
           echo "Reconciling in mode: $MODE"
