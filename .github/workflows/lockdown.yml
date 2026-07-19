@@ -1,4 +1,4 @@
-name: PR lockdown (warm redirect to Gerrit)
+name: PR Lockdown
 
 # GitHub is a read-only mirror; PRs cannot merge here (a repository ruleset
 # rejects PR merges). Rather than let PRs rot unanswered, this bot replies with a

@@ -1,4 +1,4 @@
-name: mirror-guard
+name: Mirror Guard
 
 # Ticket a774 (epic b744) — continuous guardian for the Gerrit->GitHub mirror lock.
 #

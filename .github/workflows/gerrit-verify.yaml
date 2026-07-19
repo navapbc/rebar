@@ -1,4 +1,4 @@
-name: gerrit-verify
+name: Gerrit Verified Gate
 
 # CI second gate vote (`Verified`) for Gerrit changes — epic 1fa8 (ADR-0020).
 #

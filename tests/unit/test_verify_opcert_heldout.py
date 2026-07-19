@@ -4,7 +4,7 @@
 * enforced + foreign (non-pinned) cert → exit 1;
 * no required environment → advisory (exit 0) even with a missing cert;
 * grandfathered ticket (closed before the `--since` boundary) → exit 0 despite a missing cert;
-* the shipped `verify-identity.yaml` gains a `rebar verify-opcert` step;
+* the shipped `verify-identity.yml` gains a `rebar verify-opcert` step;
 * the workflow carries a CI-trigger audit comment enumerating every `on:` trigger.
 
 Real ssh-keygen + a real rebar store + the real `rebar verify-opcert` subprocess.
@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required 
 ENV_ID = "trusted-ci@rebar.test"
 MATERIAL = "0123456789abcdef"
 KIND = "completion-verifier"
-_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "verify-identity.yaml"
+_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "verify-identity.yml"
 
 
 def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
