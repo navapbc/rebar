@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import math
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
+from _git_counts import commit_count
 
 import rebar
 from rebar import config
@@ -47,25 +47,8 @@ def _commit_count(repo: Path) -> int:
     # `git rev-list --count HEAD` can transiently fail under CI load (rc!=0, empty stdout) —
     # bug efb7-09de: the old `int(r.stdout.strip())` turned that into an opaque
     # `ValueError: invalid literal for int()` that masked git's real error and flaked the test.
-    # Retry the transient; on a persistent failure raise a clear diagnostic carrying git's stderr.
-    tracker = _tracker(repo)
-    last = None
-    for attempt in range(5):
-        r = subprocess.run(
-            ["git", "-C", tracker, "rev-list", "--count", "HEAD"],
-            capture_output=True,
-            text=True,
-        )
-        out = r.stdout.strip()
-        if r.returncode == 0 and out:
-            return int(out)
-        last = r
-        if attempt < 4:
-            time.sleep(0.05)
-    raise RuntimeError(
-        f"git rev-list --count HEAD failed after retries in {tracker}: "
-        f"rc={last.returncode} stdout={last.stdout.strip()!r} stderr={last.stderr.strip()!r}"
-    )
+    # The shared helper retries the transient and raises a diagnostic carrying git's stderr.
+    return commit_count(_tracker(repo))
 
 
 def _records(n: int, *, with_comment: bool) -> list[dict]:

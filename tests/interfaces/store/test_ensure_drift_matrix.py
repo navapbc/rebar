@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _git_counts import commit_count
 
 import rebar
 from rebar._commands import fsck as fsck_mod
@@ -58,7 +59,9 @@ def _git(tracker: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _commit_count(tracker: Path) -> int:
-    return int(_git(tracker, "rev-list", "--count", "tickets").stdout.strip())
+    # Crash-safe: retries a transient rev-list failure and raises a diagnostic
+    # rather than the opaque int('') ValueError (bug cf3a / efb7-09de).
+    return commit_count(tracker, "tickets")
 
 
 def _commit_tracker_file(tracker: Path, name: str, content: str, msg: str) -> None:
