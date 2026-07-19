@@ -354,6 +354,47 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None) -> dic
     )
 
 
+def _apply_caused_by(
+    ticket_id: str, caused_by: str, tracker: str, repo_root_str: str, repo_root
+) -> None:
+    """Best-effort ``caused_by`` link on a BUG close (ticket 555e).
+
+    Only bugs carry the blame-hunt semantics. An explicit ``caused_by`` id wins; otherwise
+    :func:`rebar.metrics.blame.derive_caused_by` auto-derives a single dominant culprit from
+    git blame. If a culprit is resolved, the edge is written via the lower-level
+    :func:`rebar.graph._links._write_link_event` (which bypasses the closed-source + cycle
+    guards ``add_dependency`` enforces — the source bug is already ``closed`` here). EVERYTHING
+    is wrapped so a resolve/write failure NEVER blocks or fails the close."""
+    try:
+        from rebar.reducer import reduce_ticket as _reduce
+
+        state = _reduce(os.path.join(tracker, ticket_id)) or {}
+        if state.get("ticket_type") != "bug":
+            return
+
+        culprit = caused_by.strip() if caused_by else None
+        if culprit:
+            from rebar._engine_support.resolver import resolve_ticket_id
+
+            culprit = resolve_ticket_id(culprit, tracker) or culprit
+        else:
+            from rebar.metrics import blame
+
+            culprit = blame.derive_caused_by(ticket_id, repo_root_str, tracker)
+        if not culprit or culprit == ticket_id:
+            return
+
+        from rebar.graph._links import _write_link_event
+
+        _write_link_event(ticket_id, culprit, "caused_by", str(config.tracker_dir(repo_root)))
+    except Exception:  # noqa: BLE001 — caused_by is best-effort; a failure must NEVER block the close
+        logger.warning(
+            "best-effort caused_by link on close of %s failed; close stands",
+            ticket_id,
+            exc_info=True,
+        )
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -365,6 +406,7 @@ def close_ticket(
     reason: str,
     force_close: str,
     close_class: str = "",
+    caused_by: str = "",
 ) -> dict:
     """Perform the locked write and its post-processing tail; return the transition
     result ``{ticket_id, from, to, newly_unblocked, noop}``.
@@ -485,6 +527,16 @@ def close_ticket(
                     f"Warning: closed {ticket_id} WITHOUT a completion signature — {exc.message} "
                     "Re-close once signing is available to certify against the current tree.\n"
                 )
+
+    # Blame-Hunt Advisory (ticket 555e): on a BUG close, draw a best-effort caused_by link
+    # from the (now-closed) bug to the culprit change/ticket. An explicit --caused-by <id>
+    # override wins; otherwise git-blame auto-derives a single dominant culprit. Runs AFTER the
+    # close committed, so the link SOURCE (the bug) is `closed` — add_dependency REJECTS a closed
+    # source, so we write the edge via the lower-level _write_link_event, which bypasses the
+    # closed-source + cycle guards (a non-blocking, non-cycle relation on a closed source needs
+    # neither). Best-effort: any resolve/write failure is swallowed and NEVER blocks the close.
+    if target_status == "closed":
+        _apply_caused_by(ticket_id, caused_by, tracker, repo_root_str, repo_root)
 
     # Reopen invalidation is NO LONGER a write-time mutation (epic dark-acme-lumen): attestation
     # records are immutable, and a reopen is detected on READ via state["last_reopened_at"] +

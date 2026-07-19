@@ -335,6 +335,7 @@ def transition(
     reason: str = "",
     force_close: str | None = None,
     close_class: str = "",
+    caused_by: str = "",
     repo_root=None,
 ) -> TransitionResult:
     """Transition a ticket's status with optimistic concurrency.
@@ -358,7 +359,10 @@ def transition(
     forced close" (the verifier runs normally). ``close_class`` is the library
     counterpart of the CLI ``--class``: the REQUIRED bounded classification enum when
     closing a ``bug`` (one of the ``close_class`` vocabulary), folded into reduced state;
-    ignored for non-bug transitions.
+    ignored for non-bug transitions. ``caused_by`` is the library counterpart of the CLI
+    ``--caused-by``: on a bug close it draws a best-effort ``caused_by`` link from the
+    (now-closed) bug to the given culprit change/ticket, overriding git-blame
+    auto-derivation; ignored for non-bug transitions.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -385,6 +389,7 @@ def transition(
             reason=reason,
             force_close=force_close or "",
             close_class=close_class,
+            caused_by=caused_by,
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:
