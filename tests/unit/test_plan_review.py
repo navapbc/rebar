@@ -282,7 +282,11 @@ def test_pass3_blocks_only_when_opted_in_and_over_threshold() -> None:
 
 
 def test_pass3_drops_low_validity() -> None:
-    v = _verif(binary={q: "no" for q in list(passes.GRADED_BINARY)[:5]})
+    # A strict MAJORITY of the graded set is "no" (count-robust as GRADED_BINARY grows, e.g.
+    # R5's na-default addition; _verif fills the remainder with "yes"), so the graded fraction
+    # stays below the 0.5 bar and the finding drops.
+    n_no = len(passes.GRADED_BINARY) // 2 + 1
+    v = _verif(binary={q: "no" for q in list(passes.GRADED_BINARY)[:n_no]})
     assert passes.pass3_decide(v)["decision"] == "dropped"
 
 

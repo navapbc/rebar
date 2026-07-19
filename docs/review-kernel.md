@@ -18,9 +18,22 @@ verification contract **cannot fork**.
 
 | Pass | Module | Public surface |
 |------|--------|----------------|
-| **Pass-2 — verify** | `review_kernel.verify` | `verify_findings(findings, *, context, run_chunk, window_tokens, est_tokens, headroom)` → `{verifications: {index: {severity_attributes, binary}}, omitted: [...]}`; the registered **`verification` contract** (`verification_model` / `register_verification_contract`) — the single source of the binary sub-question vocabulary + the severity-attribute enums; the verify orchestration: `verify_request_chunks` (token-budget chunking, GLOBAL indices preserved), `merge_verifications_by_index`, `finding_listing` / `verify_instructions`, and `resolve_verifier_model` (the non-frontier verifier default); the `VERIFIER_RULES` / `VERIFIER_RULES_SCAFFOLD` (the soft prompt rules, below). |
+| **Pass-2 — verify** | `review_kernel.verify` | `verify_findings(findings, *, context, run_chunk, window_tokens, est_tokens, headroom)` → `{verifications: {index: {severity_attributes, binary}}, omitted: [...]}`; the registered **`verification` contract** (`verification_model` / `register_verification_contract`, defined in `review_kernel.verify_models` and re-exported from `verify` — split out only to hold the module-size cap) — the single source of the binary sub-question vocabulary + the severity-attribute enums; the verify orchestration: `verify_request_chunks` (token-budget chunking, GLOBAL indices preserved), `merge_verifications_by_index`, `finding_listing` / `verify_instructions`, and `resolve_verifier_model` (the non-frontier verifier default); the `VERIFIER_RULES` / `VERIFIER_RULES_SCAFFOLD` (the soft prompt rules, below). |
 | **Pass-3 — decide** | `review_kernel.decide` | `pass3_decide(verification, *, block_threshold, blocking_enabled)` and `pass3_over_findings(findings, verifs, *, threshold_for)` — the deterministic decision core (validity = graded fraction of the binary sub-answers; impact = mean of the ordinal-mapped severity attributes; priority = validity×impact; the conditional cited-reference veto; per-criterion thresholds **parameterized**). |
 | **Pass-4 — coach** | `review_kernel.coach` | `coach(surviving, registry, *, pick, active_triggers)` — gate-on-surviving>0 → the deterministic **applicability filter** (`applicable_moves` / `move_applies`) → the LLM `pick` among ONLY the applicable moves → deterministic render; the move-registry **schema** (`MOVE_REGISTRY_SCHEMA` / `validate_move_registry`, with the `applies_when` field) + the subject validator (`validate_subject`) + `render_coach_notes`. |
+
+**na-default graded sub-answers.** Most graded binary sub-answers default to `insufficient`
+(a neutral 0.5), but a few apply only to a specific finding SHAPE and default to `na` — they
+ABSTAIN (are excluded from the validity mean) unless the verifier engages them, so adding one is
+byte-identical for every finding that does not answer it and for every older sidecar. The set
+(`verify_models._BINARY_NA_DEFAULT`) is `committed_work_relies_on_unbacked_claim`,
+`respects_artifact_altitude`, and — R5 (story `empty-microbial-antlion`) — `asserted_capability_confirmed`,
+the code-review/plan-review counterpart to R1's asserted-capability probe: the verifier answers it
+only for the G6/E4/T3 asserted-capability cohort (`na` everywhere else). Because it is a *validity*
+axis (it touches neither `impact_code`/`impact_plan` nor any veto), R5 deliberately does **not** bump
+`IMPACT_MODEL_VERSION`; the cross-gate non-regression replay (E5, story `pisciform-spineless-wobbegong`,
+`docs/experiments/plan-review-gate/harnesses/e5_cross_gate_nonregression.py`) proves it byte-identical
+over the 161-finding code-review corpus.
 
 Pass-1 (the finder's criteria→batch orchestration) is **not** re-abstracted: the
 `ProductionBatchRunner` + the workflow `batch` step already provide it. The workflow

@@ -78,8 +78,11 @@ def test_decision_labels_by_construction() -> None:
     assert review_kernel.pass3_decide(_verif(), blocking_enabled=True)["decision"] == "block"
     # same finding, blocking NOT opted in ⇒ advisory (the v1 default posture)
     assert review_kernel.pass3_decide(_verif(), blocking_enabled=False)["decision"] == "advisory"
-    # validity < 0.5 ⇒ dropped (low validity)
-    low = _verif(binary={q: "no" for q in list(review_kernel.GRADED_BINARY)[:5]})
+    # validity < 0.5 ⇒ dropped (low validity). A strict MAJORITY of the graded set is "no"
+    # (count-robust: holds as GRADED_BINARY grows — e.g. R5's na-default addition — since
+    # _verif fills the rest with "yes"), keeping the graded fraction below the 0.5 bar.
+    n_no = len(review_kernel.GRADED_BINARY) // 2 + 1
+    low = _verif(binary={q: "no" for q in list(review_kernel.GRADED_BINARY)[:n_no]})
     assert review_kernel.pass3_decide(low)["decision"] == "dropped"
     # the cited-reference veto drops even a high-validity finding
     vetoed = _verif(binary={"cited_reference_accurate": "no"})
