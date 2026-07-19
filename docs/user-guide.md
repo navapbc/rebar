@@ -128,6 +128,20 @@ or `undetermined` (the escape hatch). The value is folded into reduced state so
 rebar transition <id> in_progress closed --class=regression
 ```
 
+### Blame-Hunt Advisory (bug close → `caused_by`)
+
+On a **bug** close, rebar best-effort draws a `caused_by` link from the bug to the
+change/ticket that most likely introduced it. It finds the fixing commit (the one whose
+message references this bug), blames the *pre-fix* state of the bug's recorded
+`file_impact` files, and — if a strict majority of the blamed lines belong to one commit
+that itself resolves to a ticket — links the bug to that culprit. It is purely advisory:
+an ambiguous or absent culprit is silently skipped and never blocks the close. Set it
+explicitly with `--caused-by <id>` (which overrides the git-blame auto-derivation):
+
+```sh
+rebar transition <bug> in_progress closed --class=regression --caused-by=<culprit-id>
+```
+
 **Reopen** moves a closed ticket back to open:
 
 ```sh
