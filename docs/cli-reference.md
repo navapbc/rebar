@@ -379,7 +379,7 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<
        rebar transition <ticket_id> <target_status>   (auto-detects current status)
   status: idea | open | in_progress | closed | blocked
   idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
-  bug close requires --reason (prefix 'Fixed:' or 'Escalated to user:').
+  bug close requires --class <value>: regression | plan_defect | env_integration | flaky | preexisting | not_a_bug | duplicate | escalated | undetermined.
 ```
 
 ### `unlink`

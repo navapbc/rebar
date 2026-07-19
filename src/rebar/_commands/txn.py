@@ -156,6 +156,31 @@ def bug_close_reason_ok(reason: str) -> bool:
     return reason.startswith("Fixed") or reason.lower().startswith("escalat")
 
 
+# The closed bug-close classification vocabulary (ticket ed13): a bug close records a
+# REQUIRED, bounded ``--class <value>`` (replacing the old free-text ``--reason``), folded
+# into reduced state as ``close_class``. Single-sourced here so the CLI parser, the close
+# guard, and the completion-gate pre-check all validate against the SAME list — kept in the
+# same order as common.schema.json#/$defs/close_class.
+CLOSE_CLASSES: tuple[str, ...] = (
+    "regression",
+    "plan_defect",
+    "env_integration",
+    "flaky",
+    "preexisting",
+    "not_a_bug",
+    "duplicate",
+    "escalated",
+    "undetermined",
+)
+
+
+def bug_close_class_ok(close_class: str) -> bool:
+    """True if a bug-close ``--class`` value is one of the bounded vocabulary
+    (:data:`CLOSE_CLASSES`). Shared by :func:`transition_core`'s close guard and the
+    completion gate's pre-check so the two cannot drift. Empty / unknown → False."""
+    return close_class in CLOSE_CLASSES
+
+
 def transition_core(
     tracker_dir: str,
     ticket_id: str,
@@ -165,6 +190,7 @@ def transition_core(
     env_id: str,
     author: str,
     close_reason: str = "",
+    close_class: str = "",
     force_close_reason: str = "",
     repo_root=None,
 ) -> None:
@@ -217,17 +243,18 @@ def transition_core(
         # The open-children structural guard is enforced elsewhere and is NOT relaxed for idea.
         from_idea = current_status == "idea"
 
-        # Bug-close-reason guard (predicate shared with the completion gate's pre-check).
+        # Bug-close CLASS guard (ticket ed13): a bug closing from a non-idea status now
+        # REQUIRES a bounded ``--class <value>`` from the closed vocabulary — REPLACING the
+        # old free-text ``--reason`` (which was validated then discarded). A missing OR
+        # out-of-vocabulary value is refused with a message that NAMES the allowed values.
+        # The predicate (:func:`bug_close_class_ok`) is shared with the completion gate's
+        # pre-check so the two cannot drift. On success ``close_class`` is folded onto the
+        # ``*->closed`` STATUS edge below (present-only, mirroring ``_stamp_session``).
         if target_status == "closed" and ticket_type == "bug" and not from_idea:
-            if not close_reason:
+            if not bug_close_class_ok(close_class):
+                allowed = ", ".join(CLOSE_CLASSES)
                 raise CommandError(
-                    "Error: closing a bug ticket requires --reason with prefix "
-                    '"Fixed:" or "Escalated to user:"',
-                    returncode=1,
-                )
-            if not bug_close_reason_ok(close_reason):
-                raise CommandError(
-                    'Error: --reason must start with "Fixed:" or "Escalated to user:"',
+                    f"Error: closing a bug ticket requires --class <value> — one of: {allowed}",
                     returncode=1,
                 )
 
@@ -246,6 +273,12 @@ def transition_core(
         # crust-fetch-stump, story 68ef). Absent -> key omitted -> byte-identical.
         if current_status == "open" and target_status == "in_progress":
             _stamp_session(status_data)
+        # Bug-close classification (ticket ed13): record the validated ``--class`` on the
+        # ``*->closed`` STATUS edge so the reducer can fold it into ``state["close_class"]``.
+        # Present-only (mirrors ``_stamp_session``): absent -> key omitted -> byte-identical
+        # to the pre-feature close event for the (non-bug / no-class) paths.
+        if target_status == "closed" and close_class:
+            status_data["close_class"] = close_class
         event = {
             "timestamp": timestamp,
             "uuid": event_uuid,
