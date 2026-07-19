@@ -282,3 +282,77 @@ the retry-cap budget on top.
   records each as an explicit `ticket_not_found` row in `e6_ordershuffle_excluded.jsonl` (3
   permutations × 4 plans = 12 excluded rows) and **continues** — it never crashes and never pads a
   missing verdict. The below-floor result is computed over the 10 plans that survived.
+
+---
+
+## E5 — cross-gate non-regression replay (story `pisciform-spineless-wobbegong` / `5342`)
+
+**Gates R5** (`empty-microbial-antlion` / `ea39`). R5 adds one na-default sub-answer,
+`asserted_capability_confirmed`, to the SHARED review-kernel `GRADED_BINARY` vocabulary
+(`src/rebar/llm/review_kernel/decide.py`). Because that vocabulary is shared with the
+CODE-REVIEW gate, the epic's gate row demands proof that code-review decisions are untouched
+before the kernel change lands — a silent cross-gate regression is this epic's worst failure
+mode. E5 is that proof: a **deterministic** replay (no live LLM for the decision comparison).
+
+### Method
+For every finding in the committed corpus `docs/experiments/code_review_adjudication.jsonl`
+(**161 rows**, each recording the pre-R5 kernel's `validity`/`impact`/`priority`), the driver
+`harnesses/e5_cross_gate_nonregression.py` runs the real Pass-3 decision math
+(`review_kernel.decide.pass3_decide`) under two kernels over the SAME reconstructed binary:
+
+- **PRE** — the pre-R5 vocabulary (`GRADED_BINARY` minus `asserted_capability_confirmed`); the
+  new field is simply ABSENT (a pre-R5 sidecar).
+- **POST** — the amended vocabulary WITH the field, plus `asserted_capability_confirmed="na"` —
+  exactly what the R5 verifier emits for any finding outside the G6/E4/T3 cohort.
+
+The recorded impact is fed straight through (an `impact_fn` closure) so the comparison isolates
+the only axis R5 could perturb — `validity`. `decide.validity` counts only `yes|no|insufficient`
+(both `na` and absent abstain), and the new field is a *validity* axis that touches neither
+`impact_code`/`impact_plan` nor any veto, so PRE and POST must be byte-identical.
+
+### Result (`runs/e5_nonregression_diff.json`)
+| metric | value |
+|---|---|
+| corpus rows | **161** |
+| decision diffs | **0** |
+| priority diffs | **0** |
+| validity diffs | **0** |
+| **byte-identical (decision, priority, validity)** | **✅ true** (diff array EMPTY) |
+| findings in the G6/E4/T3 cohort | **0** |
+| `asserted_capability_confirmed == "na"` for all rows | **✅ true** |
+
+The diff is EMPTY: byte-identical for every code-review finding, and the new sub-answer is `na`
+for every finding outside the G6/E4/T3 cohort (all 161). AC2 and AC3 satisfied.
+
+### Deterministic sanity (no live LLM)
+The amended contract is exercised structurally by `tests/unit/test_r5_asserted_capability.py`:
+the field is registered in `GRADED_BINARY`, defaults to `na` in all three built Binary models
+(base / plan-review / code-review), is byte-identical whether absent or `na` over a parametrized
+binary set (the invariance property), and STILL lowers validity when answered `no` (proving it is
+not a dead field). A ~20-finding *live* slice was deemed unnecessary: the decision comparison is
+deterministic pass-2/3 math and the contract-parse is covered deterministically; the live probe
+that the asserted-capability signal fires on the 3 known misses already exists at
+`runs/asserted_capability_sanity.json` (R1/E6 grounding, 3/3 must-fire).
+
+### IMPACT_MODEL_VERSION — deliberately NOT bumped
+`IMPACT_MODEL_VERSION` versions the impact-model SHAPE (`code_review/sidecar.py:34` — "bump on
+any `impact_code` SHAPE change"). R5 adds a *validity* sub-answer and changes neither impact
+model, and the whole point of the na-default design is that sidecars stay byte-comparable (E5).
+Bumping would falsely segment the calibration corpus and contradict the byte-identical proof, so
+R5 leaves `IMPACT_MODEL_VERSION` at `code-v3`/`plan-v3`. This corrects R5's stub AC (which
+assumed a bump) with the grounded finding.
+
+### Module-size note
+Adding the sub-answer's description + na-default entry would push `verify.py` past the LOCKED
+800-LOC hard cap (it sat at exactly 800). The Pass-2 structured-output MODELS were therefore
+extracted to `src/rebar/llm/review_kernel/verify_models.py` along the existing call-graph seam
+(the model builders depend only on `decide.GRADED_BINARY` + the contract registry); the public
+names are re-exported from `verify`, so no import site changed. `verify.py` → 442 LOC,
+`verify_models.py` → ~410 LOC.
+
+### Files
+| file | what |
+|---|---|
+| `harnesses/e5_cross_gate_nonregression.py` | the deterministic replay driver |
+| `runs/e5_nonregression_diff.json` | the committed gate artifact (empty diff + summary) |
+| `tests/unit/test_r5_asserted_capability.py` | CI-collectable invariance + registration tests |

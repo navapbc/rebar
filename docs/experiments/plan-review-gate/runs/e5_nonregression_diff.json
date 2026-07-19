@@ -1,0 +1,19 @@
+{
+  "experiment": "E5 cross-gate non-regression replay",
+  "ticket": "5342-568c-b881-4b2a (pisciform-spineless-wobbegong)",
+  "gates": "R5 (ea39-c2d1-e26a-4ee6, empty-microbial-antlion)",
+  "corpus": "docs/experiments/code_review_adjudication.jsonl",
+  "corpus_rows": 161,
+  "pre_graded_len": 9,
+  "post_graded_len": 10,
+  "r5_field": "asserted_capability_confirmed",
+  "decision_diffs": 0,
+  "priority_diffs": 0,
+  "validity_diffs": 0,
+  "byte_identical": true,
+  "cohort_members": 0,
+  "asserted_capability_confirmed_na_for_all": true,
+  "non_na_rows": 0,
+  "max_validity_reconstruction_error": 0.0556,
+  "diffs": []
+}
