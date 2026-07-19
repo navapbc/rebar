@@ -73,6 +73,8 @@ steps:
           when: '${{ steps.assemble.outputs.include_F1 }}'
         - prompt: plan-review-F4
           when: '${{ steps.assemble.outputs.include_F4 }}'
+        - prompt: plan-review-necessity
+          when: '${{ steps.assemble.outputs.include_necessity }}'
         - prompt: plan-review-G1G2
           when: '${{ steps.assemble.outputs.include_G1G2 }}'
         - prompt: plan-review-G3

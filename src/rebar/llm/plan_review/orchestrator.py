@@ -340,11 +340,23 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
     plan = ctx.plan_text
     triggers = registry.overlay_triggers(plan)
     single, agent = [], []
+    # BUG REVIEW TIER (epic 6982 / R4): a bug gets a LIGHT ADVISORY tier — the DET floor plus a
+    # restricted, advisory criteria set (registry.BUG_TIER_CRITERIA), never the full suite and
+    # never a blocking criterion. Centralised HERE (the single routing seam) so BOTH the
+    # assemble step and the batch-runner's project-criteria fan-in (both call route_criteria)
+    # inherit it — otherwise an activated project criterion (e.g. a blocking `project.*`) would
+    # be fanned into a bug review and could block it. Bugs did not flow through route_criteria
+    # before (they short-circuited to exempt in plan_review_precheck), so this narrows nothing
+    # that previously ran.
+    bug_tier = ctx.ticket_type == "bug"
     # Load the EFFECTIVE criteria (built-ins ∪ activated project criteria from the
     # `.rebar/criteria_routing.json` overlay). repo_root may be None here (the lightweight
     # context builder); registry resolves it to config.repo_root() so the overlay is honored.
     for c in registry.load_criteria(repo_root=ctx.repo_root):
         cid = c["id"]
+        # Bug tier: only the restricted bug-tier criteria (the necessity probe) run on a bug.
+        if bug_tier and cid not in registry.BUG_TIER_CRITERIA:
+            continue
         # ISF is special: it is fed the linked SESSION LOG (not the rubric chunk) and
         # fires only when a session log is linked — handled separately by the Pass-1
         # finder (run_pass1), so it never enters the normal single/agent routing.
