@@ -91,6 +91,9 @@ restated here:
   optional `[agents]` framework) → `docs/llm-framework.md`.
 - **Library / reuse surface** — the full library API and reusable subsystems →
   `docs/reuse-surface.md`.
+- **Metrics** — the `rebar metrics` command (agent-process / code-health / delivery /
+  gate-economics lenses, the `unavailable` state, source/confidence labels) →
+  `docs/user-guide.md`; the `rebar.metrics` registry/reuse surface → `docs/reuse-surface.md`.
 
 ## Module-size policy (when editing rebar itself)
 

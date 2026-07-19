@@ -38,6 +38,13 @@ and **not to rate severity or confidence** (Phase 2 does that independently).
    steps. Verify docs against code — flag drift, not just absence.
 6. **Size & growth** — files/functions/classes over reasonable thresholds, directories with too many
    files, modules with too many responsibilities. Quantify with `cloc`/`tokei`/`ast-grep`.
+   **When the repo is a rebar store, also run `rebar metrics --since <date> --until <date>
+   --output json`** and cite its `code_health`-lens values as durable, historical evidence —
+   module-size distribution, oversized-module count and the module-size trend vs the locked
+   cap, short-term churn, the refactor-to-addition ratio, and cap-change events — the trend
+   complement to the one-shot `cloc`/`tokei`/`ast-grep` pass, not a replacement. A metric that
+   reports `unavailable` has no accrued data yet: **treat it as "no data", never as zero**, and
+   fall back to the one-shot tools for that dimension.
 7. **AI-generated-code & security smells** (see `references/patterns.md` for sources): **phantom /
    hallucinated dependencies** (imports unresolvable in lockfile/registry — slopsquatting); **security
    CWEs** (weak randomness, injection, XSS, insecure deserialization, hardcoded secrets), weighted

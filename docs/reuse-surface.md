@@ -430,3 +430,27 @@ when its cited code region is unchanged. The novelty PROMPTS are gate-specific t
 (`reviewers/plan_review_novelty.md` vs `reviewers/code_review_novelty.md`). See
 **[ADR 0037](adr/0037-code-review-novelty-convergence.md)** and [review-kernel.md](review-kernel.md)
 (§ Code-review novelty convergence).
+
+## 5. The metrics registry — `rebar.metrics`
+
+`rebar.metrics.registry` is a declarative registry that the `rebar metrics` command renders
+once and never has to be modified as new signals accrue:
+
+- `MetricSpec(id, lens, source, confidence, compute, accruing_since)` — one spec per metric;
+  `compute` is a `Callable[[context], value | None]` (the context carries `repo_root`, `since`,
+  `until`). Returning `None` yields an `Unavailable`.
+- `REGISTRY` — the list of specs. It is hydrated by importing the `rebar.metrics` **package**
+  (its `__init__` imports the reader modules `event_metrics` / `git_metrics` / `sidecar_metrics`,
+  each registering its specs). Import the package, not just `rebar.metrics.registry`, to get a
+  populated `REGISTRY`.
+- `evaluate(spec, context) -> MetricValue | Unavailable` — runs a spec's `compute` and dispatches
+  to a `MetricValue` (carrying `.value` + the spec's `source`/`confidence` labels) or an
+  `Unavailable(reason, accruing_since)`.
+- `is_authoritative(source) -> bool` — the segregation helper: True for the authoritative
+  structural sources (`structural`/`git`/`sidecar`/`snapshot`), False for `backfill_classified`
+  and any unknown source, so classified backfills never leak into an authoritative rollup.
+
+The optional harness-specific adapters (`rebar.metrics.adapters.*` — GitHub-Actions, Claude
+transcripts) are quarantined behind their backfill scripts and are **never** imported by the
+core command or the registry, keeping the command harness-agnostic. See
+[user-guide.md](user-guide.md) (§ Metrics) for the CLI view.

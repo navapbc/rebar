@@ -240,6 +240,27 @@ rebar validate
 rebar validate --output json
 ```
 
+## Metrics — how the agent-driven loop is trending
+
+`rebar metrics --since <date> --until <date> [--output json|text]` renders every metric
+in the built-in registry over a date range, so you can ask "how is the agent-driven dev
+loop trending?" without hand-rolling queries. It is read-only and derives everything from
+the durable event store, git, and the gate sidecars.
+
+Each metric is tagged with a **lens** — one of `agent_process` (attempts/rework/recovery
+per ticket), `code_health` (module-size distribution and trend vs the locked cap, churn,
+refactor-to-addition ratio, cap-change events), `delivery` (commit cadence), and
+`gate_economics` (LLM cost-per-accepted-change, first-pass verification, env-diagnosis
+intervals) — plus a `source` and a `confidence` label. A metric whose signal has not
+accrued yet reports a structured `{"unavailable": {"reason", "accruing_since"}}` rather
+than a zero, and lights up automatically as data arrives — so **treat `unavailable` as
+"no data", never as zero**. Backfilled/classified values (`source=backfill_classified`,
+`confidence=classified`) are kept segregated from the authoritative structural series
+(`is_authoritative()` is False for them), so a fuzzy backfill never contaminates a
+high-confidence trend. The library/registry side of this surface is documented in
+[reuse-surface.md](reuse-surface.md); the exact CLI syntax is in
+[cli-reference.md](cli-reference.md).
+
 ## Concurrency, in one line
 
 rebar is meant to be used by many people/clones at once. Status-changing operations
