@@ -19,6 +19,7 @@ docs/experiments/plan-review-gate/runs/criterion_firings.jsonl
 # (Gerrit-gated + CODEOWNERS-protected), NEVER the auto-pushed tickets branch.
 .rebar/*
 !.rebar/metrics-snapshots.ndjson
+!.rebar/backfill-close-class.ndjson
 !.rebar/trusted_environments.yaml
 # Project plan-review criteria overlay (epic jira-reb-1003): these live on the code
 # branch (Gerrit-gated), like trusted_environments.yaml — NOT the auto-pushed tickets
