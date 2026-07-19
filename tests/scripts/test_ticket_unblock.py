@@ -48,10 +48,6 @@ def unblock() -> ModuleType:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_UUID_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
-_UUID_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
-_UUID_C = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
-
 
 def _write_ticket(
     tracker_dir: Path,

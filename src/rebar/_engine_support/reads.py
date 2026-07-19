@@ -37,7 +37,6 @@ import sys
 import time
 from typing import Any, cast
 
-from rebar._engine import engine_dir as _engine_dir
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._engine_support.ticket_query import TicketQuery
 from rebar.graph._graph import build_dep_graph
@@ -49,12 +48,6 @@ from rebar.reducer import (
     search_states,
 )
 from rebar.reducer._present import public_state
-
-# The bundled engine dir holds the read packages' supporting assets. This is the
-# in-process read implementation, so ``rebar`` is always importable here and the
-# read packages import as real ``rebar.*`` subpackages.
-_SCRIPTS_DIR = _engine_dir()
-
 
 # ───────────────────────────── result sorting (P1.1) ─────────────────────────
 # Caller-facing sort key -> reduced/public-state field. Default (no --sort) keeps

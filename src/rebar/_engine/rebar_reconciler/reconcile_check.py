@@ -107,7 +107,6 @@ _PRIORITY_LOCAL_TO_JIRA: dict[int, str] = {
     3: "Low",
     4: "Lowest",
 }
-_PRIORITY_JIRA_TO_LOCAL: dict[str, int] = {v: k for k, v in _PRIORITY_LOCAL_TO_JIRA.items()}
 
 # Issue type mapping: local type ↔ Jira issuetype
 _TYPE_LOCAL_TO_JIRA: dict[str, str] = {
@@ -116,7 +115,6 @@ _TYPE_LOCAL_TO_JIRA: dict[str, str] = {
     "task": "Task",
     "bug": "Bug",
 }
-_TYPE_JIRA_TO_LOCAL: dict[str, str] = {v: k for k, v in _TYPE_LOCAL_TO_JIRA.items()}
 
 
 def _is_rebar_internal_label(label: str) -> bool:

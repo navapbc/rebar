@@ -231,11 +231,11 @@ def test_contract_view_exposes_checked_flag() -> None:
 # ── agent-step runtime input validation (review T1) ─────────────────────────────
 
 
-def _agent_prompt(tmp_path, pid, inputs_schema):
+def _agent_prompt(tmp_path, pid, inputs_schema, category="review"):
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / f"{pid}.md").write_text(
-        f"---\ncategory: review\ninputs: {inputs_schema}\n---\nBody.\n", encoding="utf-8"
+        f"---\ncategory: {category}\ninputs: {inputs_schema}\n---\nBody.\n", encoding="utf-8"
     )
     return str(tmp_path)
 
@@ -246,6 +246,20 @@ def test_agent_step_input_violation_fails(tmp_path) -> None:
     from rebar.llm.workflow.interpreter import validate_consumer_input
 
     repo = _agent_prompt(tmp_path, "checker", "gate_input")
+    err, errored = validate_consumer_input(
+        "agent", {"prompt": "checker"}, {"policy": "bogus"}, repo
+    )
+    assert err is not None
+    assert "input contract violation" in err
+    assert errored is False
+
+
+def test_agent_step_input_violation_fails_non_review_category(tmp_path) -> None:
+    # Input-contract validation is category-AGNOSTIC: a non-review category (transform)
+    # with a violating `with` fails the step identically to the review category above.
+    from rebar.llm.workflow.interpreter import validate_consumer_input
+
+    repo = _agent_prompt(tmp_path, "checker", "gate_input", category="transform")
     err, errored = validate_consumer_input(
         "agent", {"prompt": "checker"}, {"policy": "bogus"}, repo
     )

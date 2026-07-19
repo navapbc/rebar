@@ -24,32 +24,6 @@ from rebar_reconciler.adapters.jira.jira_fields import _sanitize_label
 if TYPE_CHECKING:
     import subprocess
 
-# ---------------------------------------------------------------------------
-# Relation <-> Jira link-type mapping (story 25ae-92e6-2927-49b6, Cycle 1)
-# ---------------------------------------------------------------------------
-#
-# Shared by BOTH differs (outbound_differ / inbound_differ import from here) so
-# the relation<->link-type vocabulary lives in exactly one place — mirrors the
-# ``_LOCAL_TO_JIRA_*`` constant pattern in outbound_differ.py.
-#
-# Each entry maps a rebar relation to a tuple ``(jira_link_type, swap_endpoints)``
-# where ``swap_endpoints`` records that the rebar direction (A relation B) maps
-# to the Jira link with the endpoints reversed (B link A). For ``depends_on``,
-# "A depends_on B" is equivalent to the Jira "B blocks A".
-#
-# Relations with no reliable Jira link type (``duplicates`` / ``supersedes`` /
-# ``discovered_from``) are intentionally ABSENT: callers SKIP them (no-op, log a
-# single line), never fail on them.
-_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
-    "blocks": ("Blocks", False),
-    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
-    "relates_to": ("Relates", False),
-}
-
-# (The Jira-link-type -> rebar-relation direction map now lives once in the
-# link_direction module; this dead re-declaration was removed in the bug-4b59
-# unification. Nothing in acli_graph referenced it.)
-
 
 class AcliGraphMixin:
     """Labels, links, parent/comment maps, and field-edit ops for AcliClient."""

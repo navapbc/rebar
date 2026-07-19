@@ -41,10 +41,8 @@ pytestmark = pytest.mark.unit
 # Validate tool IDENTITY, not just PATH presence (CI runners ship impostors):
 #  * macOS preinstalls BSD `ctags` (answers `which ctags`) — not Universal Ctags, whose
 #    JSON index the resolve lane needs; gate on the version probe that matches "Universal".
-#  * Linux preinstalls shadow-utils `sg` (run-as-group) — not ast-grep; gate on identity.
 _HAVE_CTAGS = r.ctags_version() is not None
 _HAVE_SEMGREP = bool(shutil.which("opengrep") or shutil.which("semgrep"))
-_HAVE_ASTGREP = engine_b.astgrep_binary() is not None
 
 _BOGUS = "this-binary-does-not-exist-xyzzy-9000"
 

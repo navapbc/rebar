@@ -33,7 +33,6 @@ def reducer() -> ModuleType:
 _UUID_CREATE = "aaaaaaaa-0001-4000-8000-000000000001"
 _UUID_A = "bbbbbbbb-0002-4000-8000-000000000002"
 _UUID_B = "cccccccc-0003-4000-8000-000000000003"
-_UUID_C = "dddddddd-0004-4000-8000-000000000004"
 
 
 def _write_event(ticket_dir: Path, timestamp: int, uuid: str, event_type: str, data: dict) -> Path:

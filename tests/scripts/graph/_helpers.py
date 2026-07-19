@@ -15,11 +15,6 @@ from types import ModuleType
 # graph/_helpers.py -> graph -> scripts -> tests -> <repo>
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_UUID_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
-_UUID_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
-_UUID_C = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
-_UUID_D = "dddddddd-dddd-4ddd-dddd-dddddddddddd"
-
 
 def _load_module() -> ModuleType:
     """Return the canonical graph package (Tier E E7d: was the hyphenated
