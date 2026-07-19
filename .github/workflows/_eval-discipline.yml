@@ -1,0 +1,72 @@
+name: Prompt-Eval Discipline (reusable)
+
+# Reusable (workflow_call) form of the OFFLINE eval-discipline gate (epic a88f / WS-G) — the
+# single source of truth for the job that BOTH CI lanes run:
+#   * prompt-eval.yml    — push / pull_request (branch-head checkout), post-merge branch CI.
+#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so an
+#     eval-discipline regression BLOCKS the Verified vote pre-merge instead of only reddening
+#     main (jira-reb-1163 — eval-discipline previously ran on the mirror lane ONLY).
+#
+# Enforces the eval discipline with NO model/credentials: spec validity (strict per-spec
+# validation), grader discipline, at_least(k) over epochs, coverage, kappa/JUnit, the scorer
+# registry, and the eval solver aggregation — all via the unit tests. Costs nothing.
+#
+# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
+# set => checkout-gerrit-change-action (the patchset). Takes NO secrets.
+
+on:
+  workflow_call:
+    inputs:
+      gerrit-refspec:
+        description: "Gerrit refspec (refs/changes/NN/NNNN/P). Empty => branch-head checkout."
+        required: false
+        type: string
+        default: ""
+      gerrit-project:
+        description: "Gerrit project (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+      gerrit-url:
+        description: "Gerrit base URL (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  eval-discipline:
+    name: eval discipline (offline — no model)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@v7
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Install (dev)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Enforce eval discipline (offline)
+        # The strict per-spec validation also lives in the default suite (via
+        # _build-and-test.yml), so it already blocks Verified; this job runs the eval
+        # test subset directly so the discipline is a named gate on BOTH lanes.
+        run: |
+          python -m pytest -q \
+            tests/unit/test_eval.py \
+            tests/unit/test_eval_scorers.py \
+            tests/unit/test_new_eval_specs.py \
+            tests/unit/test_eval_solver.py

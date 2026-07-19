@@ -1,0 +1,89 @@
+name: Artifact Provenance Probe (reusable)
+
+# Reusable (workflow_call) form of the artifact-provenance probe (story 6168) — the single
+# source of truth for the job that BOTH CI lanes run:
+#   * test.yml           — push / pull_request (branch-head checkout), post-merge branch CI.
+#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so a
+#     packaging regression BLOCKS the Verified vote pre-merge instead of only reddening main
+#     (jira-reb-1163 — artifact-probe previously ran on the mirror lane ONLY).
+#
+# Builds the wheel + sdist the way `python -m build` does (sdist first, then wheel FROM the
+# extracted sdist — a tree with no .git), runs the same import/CLI/schema probes the release
+# wheel-test/sdist-test jobs run, and asserts a non-null baked `_build_info.COMMIT`. This
+# catches the "wheel bakes COMMIT = None" packaging defect in ordinary CI, not only in release.
+#
+# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
+# set => checkout-gerrit-change-action (the patchset). Takes NO secrets (Gerrit inputs are
+# non-secret; the Verified vote key stays confined to gerrit-verify.yaml).
+
+on:
+  workflow_call:
+    inputs:
+      gerrit-refspec:
+        description: "Gerrit refspec (refs/changes/NN/NNNN/P). Empty => branch-head checkout."
+        required: false
+        type: string
+        default: ""
+      gerrit-project:
+        description: "Gerrit project (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+      gerrit-url:
+        description: "Gerrit base URL (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-probe:
+    name: artifact provenance (wheel/sdist probe)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@v7
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Build wheel + sdist (REBAR_BUILD_COMMIT baked)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python -m pip install --upgrade pip build
+          REBAR_BUILD_COMMIT="${GITHUB_SHA::7}" python -m build
+      - name: Probe the built wheel (no source tree on the path)
+        run: |
+          python -m venv /tmp/wheel-probe
+          # shellcheck disable=SC1091
+          . /tmp/wheel-probe/bin/activate
+          pip install dist/*.whl
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'wheel baked COMMIT is empty/None'"
+      - name: Probe install-from-sdist (REBAR_BUILD_COMMIT unset, preserve-existing)
+        run: |
+          python -m venv /tmp/sdist-probe
+          # shellcheck disable=SC1091
+          . /tmp/sdist-probe/bin/activate
+          unset REBAR_BUILD_COMMIT
+          pip install --upgrade pip
+          pip install dist/*.tar.gz
+          python -c "import rebar"
+          rebar --help
+          rebar-mcp --help
+          python -c "from rebar import _build_info; assert _build_info.COMMIT, 'sdist install lost the baked COMMIT'"

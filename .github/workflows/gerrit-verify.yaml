@@ -146,6 +146,32 @@ jobs:
       gerrit-project: ${{ inputs.GERRIT_PROJECT }}
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
+  artifact-probe:
+    # Artifact-provenance probe (story 6168) ON THE PATCHSET: build wheel+sdist and assert a
+    # non-null baked _build_info.COMMIT + a clean import/CLI/schema probe, so a packaging
+    # regression BLOCKS Verified pre-merge. Reuses the SAME job the push/PR lane runs (no
+    # drift) — the reusable checks out the exact patchset via the Gerrit coordinates below and
+    # inherits NO secrets. Its conclusion reaches the vote because `vote` needs it
+    # (jira-reb-1163: this job gated main but was absent from vote.needs → green-verify/red-main).
+    name: artifact-probe (wheel/sdist provenance on the patchset)
+    uses: ./.github/workflows/_artifact-probe.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
+  eval-discipline:
+    # Offline eval-discipline gate ON THE PATCHSET: enforce eval spec/grader discipline with
+    # no model/credentials, so an eval regression BLOCKS Verified pre-merge. Reuses the SAME
+    # job the push/PR lane runs (no drift). Its conclusion reaches the vote because `vote`
+    # needs it (jira-reb-1163: this job gated main but was absent from vote.needs).
+    name: eval-discipline (offline eval gate on the patchset)
+    uses: ./.github/workflows/_eval-discipline.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
   # Golden-path on a CLEAN (non-editable) install ON THE PATCHSET (ticket 0435): the README
   # quickstart (scripts/check_readme_quickstart.py) runs against a WHEEL-installed rebar
   # (`pip install .`), so packaging/entry-point regressions the editable install in
@@ -251,7 +277,7 @@ jobs:
     # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
     # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, build-and-test, optionality, golden-path, verify-identity]
+    needs: [clear-vote, require-ticket, build-and-test, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
