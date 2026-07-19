@@ -205,16 +205,13 @@ def test_trash_straggler_redrained(store, repo):
 def test_eviction_rename_to_trash_open_reader_survives(store, repo):
     now = time.time()
     sha, entry = _populate(repo, store, "f.txt", "content\n", mtime=now - 5000)
-    fh = open(entry / "f.txt", "rb")
-    try:
+    with open(entry / "f.txt", "rb") as fh:
         cfg = janitor.JanitorConfig(
             free_watermark_bytes=2 * 1024**3, grace_seconds=10, max_age_seconds=10**9
         )
         janitor.run_gc(store, config=cfg, now=now, free_bytes=0)
         assert not entry.exists()  # gone from the canonical path
         assert fh.read() == b"content\n"  # but the held fd still reads it
-    finally:
-        fh.close()
 
 
 # --------------------------------------------------------------------------------------

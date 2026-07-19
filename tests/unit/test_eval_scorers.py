@@ -18,7 +18,8 @@ def test_every_packaged_deterministic_scorer_is_registered() -> None:
     known = sc.known_scorer_names()
     used: set[str] = set()
     for p in glob.glob("src/rebar/llm/eval_specs/*.eval.yaml"):
-        spec = yaml.safe_load(open(p).read())
+        with open(p) as fh:
+            spec = yaml.safe_load(fh.read())
         for s in spec.get("scorers", []):
             if s.get("type") == "deterministic":
                 used.add(s["name"])
@@ -226,7 +227,8 @@ def test_strict_catches_missing_payload_and_dupe_id() -> None:
 
 def test_three_plan_review_specs_pass_strict() -> None:
     for name in ("plan-review-finder", "plan-review-verifier", "plan-review-isf-finder"):
-        spec = yaml.safe_load(open(f"src/rebar/llm/eval_specs/{name}.eval.yaml").read())
+        with open(f"src/rebar/llm/eval_specs/{name}.eval.yaml") as fh:
+            spec = yaml.safe_load(fh.read())
         assert ev.validate_eval_spec(spec, strict=True) == [], name
 
 

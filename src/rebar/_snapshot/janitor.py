@@ -338,7 +338,7 @@ def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None)
     # Re-drain any straggler trash from an interrupted prior pass first (AC5).
     drain_trash(root)
 
-    entries = sorted(_entries(root), key=lambda p: _cache.entry_mtime(p))  # LRU first
+    entries = sorted(_entries(root), key=_cache.entry_mtime)  # LRU first
     grace_floor = now - cfg.grace_seconds
     max_age_floor = now - cfg.max_age_seconds
 

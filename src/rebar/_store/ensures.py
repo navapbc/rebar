@@ -103,7 +103,8 @@ def applied_ids(tracker: str | os.PathLike) -> set[str]:
     non-list JSON degrades to the EMPTY set (never raises) — a pre-feature or
     corrupt marker simply reads as 'everything pending'."""
     try:
-        raw = open(_applied_path(canonical_tracker(tracker)), encoding="utf-8").read()
+        with open(_applied_path(canonical_tracker(tracker)), encoding="utf-8") as fh:
+            raw = fh.read()
         data = json.loads(raw)
     except (OSError, ValueError):
         return set()
@@ -213,7 +214,8 @@ def _read_hinted(tracker: str) -> float | None:
     """Parse ``.ensure-hinted`` → last-hinted unix timestamp, or ``None`` when the
     marker is absent/unparseable ("never hinted", symmetric with applied_ids)."""
     try:
-        return float(open(os.path.join(tracker, HINTED_MARKER), encoding="utf-8").read().strip())
+        with open(os.path.join(tracker, HINTED_MARKER), encoding="utf-8") as fh:
+            return float(fh.read().strip())
     except (OSError, ValueError):
         return None
 

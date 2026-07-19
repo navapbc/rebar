@@ -60,9 +60,8 @@ def _csv_set(value: Any) -> set[str] | None:
 def _source_env(tracker: str) -> str | None:
     """This store's environment id (``.env-id``), best-effort."""
     try:
-        return (
-            (open(os.path.join(tracker, ".env-id"), encoding="utf-8").read().strip()) or None  # noqa: SIM115
-        )
+        with open(os.path.join(tracker, ".env-id"), encoding="utf-8") as fh:
+            return fh.read().strip() or None
     except OSError:
         return None
 

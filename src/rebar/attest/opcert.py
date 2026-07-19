@@ -214,8 +214,6 @@ def verify_opcert(
     Any parse/shape problem, or any git/subprocess/lookup failure, yields a non-verified
     ``Verdict`` — this function never raises (fail-closed).
     """
-    import json
-
     # ── Phase 0: subject binding check (recompute from CALLER-provided fields). ──
     # A replay onto a different ticket, or a mutated material fingerprint, changes the
     # expected digest and is caught here before any signature work.
