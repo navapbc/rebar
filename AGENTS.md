@@ -91,13 +91,15 @@ restated here:
 ## Module-size policy (when editing rebar itself)
 
 rebar is built to be edited by agents that load a unit whole. **Target 200–500 LOC per file;
-soft cap 800.** When a unit grows past the cap, split it **only along call-graph seams that
+hard cap 800.** When a unit grows past the cap, split it **only along call-graph seams that
 already exist** (extract a cluster of functions that already call each other) — never
 mechanically to hit a number, and **never create files < 100 LOC** by splitting. Prefer
 **deleting** oversized bash via the bash→Python strangler-fig migration over carving it into
-more bash. Over-cap offenders and their remedies are tabulated in `docs/architecture.md`, and
-a CI **module-size gate** fails the build when a *new* file exceeds the soft cap and is not in
-`.github/module-size-allowlist.txt`, so the over-cap set cannot silently grow.
+more bash. The 800 cap is **absolute** — a CI **module-size gate** fails the build when ANY
+`src/rebar` file exceeds it; there is no allowlist escape hatch (epic 716f drained and removed
+it). The limit is single-sourced in `.github/module-size-limit.txt` and **locked**: changing
+it requires an administrator to override the gate (a normal contributor change to the limit
+fails CI).
 
 ## Navigating the codebase (when editing rebar itself)
 

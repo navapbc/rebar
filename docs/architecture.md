@@ -240,29 +240,27 @@ between *editability* (a file an agent can load and reason about in one pass) an
 The policy:
 
 - **Target 200–500 LOC** per unit; a unit is one cohesive responsibility.
-- **Soft cap 800 LOC.** Over 800 is a smell to address — but only by a *real*
-  split, never a mechanical one.
+- **Hard cap 800 LOC — absolute.** Over 800 is a smell to address — and only by a
+  *real* split, never a mechanical one. There is **no allowlist escape hatch**: epic
+  716f split the last grandfathered over-cap module and removed the allowlist +
+  ceilings ratchet, so the cap now admits no exemptions.
 - **Split only along call-graph seams that already exist** — extract a cluster of
   functions that already call each other and little else. Do not split a unit just
   to hit a line count.
 - **Never create files < 100 LOC by splitting.** Two 60-line files that always
   change together are worse than one 120-line file.
 
-### Current offenders (> 800 LOC) and planned remedy
+### Enforcement
 
-Tracked so the over-cap set is visible, not silently growing. A CI **module-size
-gate** (`.github/workflows/test.yml`) **fails the build** when a file exceeds 800
-LOC and is not in `.github/module-size-allowlist.txt` — so a *new* offender cannot
-land silently. **`.github/module-size-allowlist.txt` is the source of truth for the
-over-cap set** (and the live LOC: `wc -l` the file, or read the CI gate output);
-exact line counts are deliberately **not** duplicated here — they drift every commit
-and a stale number is worse than none. This table mirrors the allowlist's membership
-and records the **planned remedy seam** per file; adding a file to the allowlist
-requires a row here.
-
-| File | Remedy |
-|------|--------|
-| `llm/plan_review/attest.py` | the fastest-growing file in the tree (kind-keyed attestations, epic dark-acme-lumen, + the completion-aware `delivered_now` predicate). Two candidate split seams: the completion-delivery cluster (`_attested_delivered` / `_supersedes_child`) into `attest_delivered.py`, and the validity-computation cluster (`compute_validity` + the reopen/code-drift/material-edit invalidation checks) into `attest_validity.py`. Note the kind-generic validity/signing surface is gate-neutral (the completion gate imports it too), so a gate-neutral home is preferable to keeping it under `plan_review/`. Ceiling nudged (+6, to 861) for the surfaced-only audit annotation (bug old-frilly-plankton) |
+A CI **module-size gate** — in both `.github/workflows/gerrit-verify.yaml` (gating the
+`Verified` vote) and `.github/workflows/test.yml` (the post-merge mirror) — **fails the
+build** when ANY `src/rebar/**/*.py` file exceeds the cap. No allowlist, no exemptions;
+a new over-cap file must be split. The limit is single-sourced in
+**`.github/module-size-limit.txt`** (read by the gate and by
+`tests/unit/test_module_size_contract.py`, so they never disagree) and is **locked**: the
+gate compares the change's limit against `main`'s and fails any change to it, so raising
+or lowering the 800 value requires an **administrator** to override the gate
+(force-submit) — a normal contributor cannot change the limit through the review process.
 
 
 `src/rebar/__init__.py` was **split** along its concern seams (ticket S3 / 4532),

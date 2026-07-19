@@ -13,7 +13,8 @@ siblings (``mutation.py`` / ``inbound_probe.py``) by file path via the local
 ``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves both
 under the real package and when a single module is loaded standalone in tests. It
 holds NO back-edge to reconcile.py: the probe router (``route_inbound_probe``,
-which reconcile.py keeps because it is a separately-tested public surface) is passed
+which now lives in ``reconcile_helpers.py`` and is re-exported by reconcile.py as a
+separately-tested public surface) is passed
 in as a parameter, and ``ctx`` is typed loosely to avoid importing ``_PassContext``.
 """
 

@@ -174,7 +174,8 @@ def reconcile_once(
     # Diff phase lives in the sibling run_differs.py (loaded lazily by file path,
     # matching the sibling-loader convention). route_inbound_probe is passed in
     # (rather than imported) so run_differs.py holds no back-edge to reconcile.py —
-    # route_inbound_probe stays here because it is a separately-tested public surface.
+    # route_inbound_probe now lives in the sibling reconcile_helpers.py and is re-exported
+    # here (a separately-tested public surface).
     run_differs_mod = _load("reconcile_run_differs", "run_differs.py")
     run_differs_mod.run_differs(ctx, route_inbound_probe)
     _apply_mutations(ctx)

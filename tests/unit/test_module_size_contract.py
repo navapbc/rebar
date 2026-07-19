@@ -70,3 +70,18 @@ def test_compute_over_cap_is_deterministic() -> None:
     assert compute_over_cap_modules(SRC_ROOT, cap=cap) == compute_over_cap_modules(
         SRC_ROOT, cap=cap
     )
+
+
+def test_allowlist_mechanism_removed() -> None:
+    """The grandfathering escape hatch is gone for good (epic 716f): neither the bare-path
+    allowlist nor the per-file ceilings file exists any more. The cap is absolute; a re-added
+    allowlist would be dead (the CI gate no longer reads it), so this guards against quietly
+    resurrecting the escape hatch."""
+    allowlist = REPO_ROOT / ".github" / "module-size-allowlist.txt"
+    ceilings = REPO_ROOT / ".github" / "module-size-ceilings.txt"
+    assert not allowlist.exists(), (
+        f"{allowlist} should not exist — the allowlist escape hatch was removed (epic 716f)"
+    )
+    assert not ceilings.exists(), (
+        f"{ceilings} should not exist — the ceilings ratchet was removed (epic 716f)"
+    )

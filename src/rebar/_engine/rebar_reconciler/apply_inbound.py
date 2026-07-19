@@ -276,7 +276,8 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
 
 
 def _apply_inbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResult:
-    """Inbound probe leaf: probe execution lives in reconcile.route_inbound_probe.
+    """Inbound probe leaf: probe execution lives in reconcile_helpers.route_inbound_probe
+    (re-exported as reconcile.route_inbound_probe).
 
     The leaf itself is a marker — the probe classification and follow-on
     generation happen upstream of applier dispatch. We still write an audit
