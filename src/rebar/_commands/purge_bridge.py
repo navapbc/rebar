@@ -32,6 +32,7 @@ import subprocess
 import sys
 
 from rebar import config
+from rebar._store import lock as _lock
 
 _USAGE = "Usage: ticket-purge-bridge.sh --keep=<PROJECT_KEY> [--dry-run]"
 
@@ -110,17 +111,28 @@ def purge_bridge_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stdout.write(f"  Deleted {deleted} / {delete_count}...\n")
     sys.stdout.write(f"Deleted {deleted} ticket directories.\n")
 
-    _commit_deletion(tracker, deleted, keep_project)
+    _commit_deletion(tracker, delete_list, deleted, keep_project)
     sys.stdout.write("Done.\n")
     return 0
 
 
-def _commit_deletion(tracker: str, deleted: int, keep_project: str) -> None:
-    """Commit the removal on the tickets branch (best-effort, parity with bash).
+def _commit_deletion(tracker: str, delete_list: list[str], deleted: int, keep_project: str) -> None:
+    """Commit the removal on the tickets branch under the store write lock (I5).
 
-    Mirrors ``git add -A && git commit --no-verify || echo 'Nothing to commit'``:
-    a failed commit (nothing staged) prints ``Nothing to commit`` rather than
-    erroring, since the deleted dirs may have been untracked.
+    Purge is a store mutation and — like every other write — MUST serialize through the
+    unified write lock rather than racing it with a raw, unlocked, whole-index
+    ``git add -A`` + ``git commit`` (a side-channel write, invariant I5,
+    docs/concurrency.md). Without the lock, a concurrent locked writer's staged-but-
+    uncommitted event blob was swept into the purge commit (sweep-and-strand data loss).
+
+    So this acquires :func:`rebar._store.lock.write_lock` and, mirroring
+    :func:`rebar._store.event_append.delete_events`, stages + commits ONLY the deleted
+    ticket-dir pathspecs — never a whole-index commit that could pick up a concurrent
+    writer's staged event under the ``purge:`` message.
+
+    Best-effort, parity with bash: a failed commit (nothing staged) prints
+    ``Nothing to commit`` rather than erroring, since the deleted dirs may have been
+    untracked.
     """
     in_worktree = (
         subprocess.run(
@@ -132,20 +144,31 @@ def _commit_deletion(tracker: str, deleted: int, keep_project: str) -> None:
     )
     if not in_worktree:
         return
+    # Pathspecs (relative to the tracker) for the ticket directories we removed. Scoping the
+    # stage + commit to these — instead of ``add -A`` over the whole index — is what keeps the
+    # purge commit from sweeping an unrelated staged blob (belt to the write lock's braces).
+    relpaths = [os.path.relpath(d, tracker) for d in delete_list]
     sys.stdout.write("Committing deletion on tickets branch...\n")
-    subprocess.run(["git", "-C", tracker, "add", "-A"], capture_output=True, text=True)
-    cp = subprocess.run(
-        [
-            "git",
-            "-C",
-            tracker,
-            "commit",
-            "--no-verify",
-            "-m",
-            f"purge: remove {deleted} non-{keep_project} Jira-sourced (jira-*) tickets",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    with _lock.write_lock(tracker, dual_window=True):
+        subprocess.run(
+            ["git", "-C", tracker, "add", "-A", "--", *relpaths],
+            capture_output=True,
+            text=True,
+        )
+        cp = subprocess.run(
+            [
+                "git",
+                "-C",
+                tracker,
+                "commit",
+                "--no-verify",
+                "-m",
+                f"purge: remove {deleted} non-{keep_project} Jira-sourced (jira-*) tickets",
+                "--",
+                *relpaths,
+            ],
+            capture_output=True,
+            text=True,
+        )
     if cp.returncode != 0:
         sys.stdout.write("Nothing to commit\n")
