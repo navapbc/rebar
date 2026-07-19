@@ -1,0 +1,107 @@
+# Standing eval / bounded-sanity corpus for the plan-review criterion `necessity` (epic 6982 /
+# R4). This is the "bounded sanity check" gate artifact: HAND-AUTHORED over-action positives (a
+# plan that adds a mechanism it never motivates — the FixedBench over-action gap) that must FIRE,
+# plus well-motivated / justified-no-op negatives that must NOT fire. It is deliberately small
+# (<=8 live single-criterion runs) — NOT an E2/E3 batch eval (those are permanently rejected on
+# cost). Run live with `rebar criteria eval necessity --output json`; the committed result is
+# docs/experiments/plan-review-gate/runs/necessity_sanity.json. Offline spec-shape validation is
+# in tests/unit/test_necessity_criterion.py.
+prompt: plan-review-necessity
+model: anthropic:claude-sonnet-4-6
+epochs: 1
+gate: at_least(1)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the finder emits a schema-valid finding set — >=1 finding on a fire
+  # case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      necessity finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: over-action plans that add a mechanism WITHOUT demonstrating necessity ──────
+  - id: NEC-F1-unmotivated-cache
+    corpus: rebar
+    criterion: necessity
+    expect: finding
+    note: >-
+      Over-action positive: adds a caching mechanism with NO reproduction and NO motivation —
+      no evidence the current fetch is slow or costly. The plan asserts a change is wanted but
+      never shows the current behavior is wrong or insufficient (the FixedBench over-action gap).
+    input: >
+      ## What
+
+      Add an in-memory LRU cache in front of `fetcher.fetch_snapshot()` so reconcile passes
+      reuse recently-fetched Jira snapshots. Introduce a `SnapshotCache` class with a 128-entry
+      bound and wire it into the reconcile loop.
+
+      ## Acceptance Criteria
+
+      - [ ] `SnapshotCache` is added and `fetch_snapshot()` reads through it.
+      - [ ] The reconcile loop uses the cache.
+  - id: NEC-F2-unmotivated-fix
+    corpus: rebar
+    criterion: necessity
+    expect: finding
+    note: >-
+      Over-action positive: proposes a "fix" for date parsing with NO reproduction, NO
+      Expected/Actual, and no named defect — it never demonstrates that the current parser is
+      actually wrong. Adds a mechanism (a normalization pass) with the need un-demonstrated.
+    input: >
+      ## What
+
+      Harden the inbound date handling: add a `normalize_timestamp()` pass over every inbound
+      Jira field so timestamps are consistent. This makes date handling more robust.
+
+      ## Acceptance Criteria
+
+      - [ ] `normalize_timestamp()` is added and applied to inbound fields.
+      - [ ] Inbound date handling is more robust.
+
+  # ── must-not-fire: well-motivated / justified-no-op plans (no false-fire) ─────────────────
+  - id: NEC-N1-reproduced-bug
+    corpus: rebar
+    criterion: necessity
+    expect: pass
+    note: >-
+      Well-motivated negative: the plan REPRODUCES the current behavior with concrete steps and
+      an Expected/Actual, demonstrating the current behavior is wrong. Necessity is demonstrated
+      → PASS (must not fire). (This is the 5886-shape: a real defect with reproduction.)
+    input: >
+      ## Reproduction Steps
+
+      1. Configure a Jira project with a status absent from `_JIRA_TO_LOCAL_STATUS`.
+      2. Move a Jira issue bound to a CLOSED local ticket into that unmapped status.
+      3. Run a reconcile pass with inbound sync enabled.
+
+      **Expected:** the unmapped status is skipped (local status untouched).
+      **Actual:** the inbound differ defaults the unmapped status to `open`, silently REOPENING
+      the closed ticket.
+
+      ## What
+
+      Make `_map_jira_to_local_fields` OMIT the status field when the inbound Jira status is
+      unmapped, so a closed ticket is not silently reopened.
+
+      ## Acceptance Criteria
+
+      - [ ] An unmapped inbound status leaves the local status unchanged (no silent reopen),
+        covered by a test that reproduces the steps above.
+  - id: NEC-N2-docs-only
+    corpus: rebar
+    criterion: necessity
+    expect: pass
+    note: >-
+      Justified not-applicable negative: a docs-only plan proposes no change to behavior/code,
+      so the GATE does not open → PASS (must not fire). Guards against firing on non-change work.
+    input: >
+      ## What
+
+      Document the reconcile loop's inbound/outbound ordering in `docs/architecture.md` and add a
+      diagram. No behavior changes — documentation only.
+
+      ## Acceptance Criteria
+
+      - [ ] `docs/architecture.md` gains an "inbound/outbound ordering" section with a diagram.

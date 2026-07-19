@@ -463,9 +463,30 @@ def test_p1_det_block_still_runs_llm_and_blocks(monkeypatch):
     assert any("P1" in (f.get("criteria") or []) for f in verdict["blocking"])
 
 
-# ── exempt type short-circuits to PASS (no LLM) ──────────────────────────────
-def test_bug_is_exempt_short_circuit(monkeypatch):
-    state = _state(ttype="bug", description="A bug, gate-exempt.")
+# ── bug review tier: a light ADVISORY review, not the bare exempt short-circuit (R4) ──────────
+def test_bug_runs_light_advisory_tier_not_exempt(monkeypatch):
+    """R4 piece (b): a bug no longer short-circuits to a bare exempt-PASS — the gate runs a
+    light advisory tier (DET floor + the necessity probe) and never blocks the bug."""
+    state = _state(ttype="bug", description="A bug, reviewed under the light tier.")
+    # The finder fires the sole bug-tier criterion (necessity) — proving the LLM tier ran.
+    finder = _CountingFinder(
+        structured={"analysis": "", "findings": [{"finding": "nit", "criteria": ["necessity"]}]}
+    )
+    canned = _CannedAgent()
+    rec, res = _run(monkeypatch, state, finder=finder, agent=canned)
+    assert res.status == "succeeded", res.error
+    # The LLM tier RAN (contrast the pre-R4 exempt short-circuit where finder.calls == 0) ...
+    assert finder.calls > 0
+    verdict = _terminal_verdict(rec)
+    assert verdict and verdict["verdict"] == "PASS"
+    # ... a substantive review, not the bare exempt short-circuit, and never blocking.
+    assert verdict["runner"] != "exempt"
+    assert verdict["blocking"] == []
+
+
+@pytest.mark.parametrize("ttype", ["session_log", "code_review", "identity"])
+def test_non_bug_exempt_types_still_short_circuit(monkeypatch, ttype):
+    state = _state(ttype=ttype, description="A gate-exempt entity.")
     finder = _CountingFinder(structured={"analysis": "", "findings": []})
     canned = _CannedAgent()
     rec, res = _run(monkeypatch, state, finder=finder, agent=canned)

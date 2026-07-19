@@ -157,10 +157,30 @@ CANONICAL_LLM = frozenset(
         # future change DOUBLE-gated on dogfood effectiveness AND E6 judge order-stability
         # clearing floor (see the promotion gate in docs/plan-review-gate.md).
         "decomp-shape",
+        # Necessity / no-op probe (epic 6982 / R4) — an advisory, single-turn (1-TURN) pass-1
+        # criterion that flags a plan which does NOT demonstrate the change is needed: current
+        # behavior neither reproduced nor motivated (the FixedBench over-action gap — 35-65% of
+        # changes acted without establishing necessity). Distinct from R1 asserted-capability
+        # (which greps whether a named module already provides the capability) — this probes
+        # whether the plan MOTIVATES the change at all. Also the sole criterion of the light BUG
+        # REVIEW TIER (see BUG_TIER_CRITERIA + workflow_ops): bugs run the DET floor + necessity
+        # instead of a bare exempt-PASS. Ships advisory; promotion to blocking is a future
+        # dogfood-gated criteria_routing.json change (see the promotion gate in
+        # docs/plan-review-gate.md).
+        "necessity",
         # Cross-cutting
         "COH",
     }
 )
+
+# The light BUG REVIEW TIER (epic 6982 / R4). Bugs are exempt from the full plan-review gate
+# (workflow_ops.plan_review_precheck short-circuited every bug to a bare exempt-PASS), so a bug
+# got no substantive review. The bug tier instead runs the DET floor + this restricted, ADVISORY
+# criteria set — never blocking a bug. Kept to the necessity probe (the over-action gap most
+# relevant to a bug-fix plan); `necessity` deliberately does NOT `suppress_types:["bug"]` so it
+# applies to bugs. workflow_ops.plan_review_assemble_criteria restricts a bug's included LLM
+# criteria to this set.
+BUG_TIER_CRITERIA = ("necessity",)
 
 # Each criterion's RUBRIC is a contract-bearing PROMPT FILE in the workflow-engine
 # prompt library (src/rebar/llm/reviewers/plan_review_<id>.md), loaded via the da27

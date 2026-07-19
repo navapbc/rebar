@@ -1210,5 +1210,27 @@
     ],
     "routing": "container",
     "context_needs": "live ticket dependency graph + children + linked artifacts (via rebar tools + filesystem) — read live, NOT fed as a snapshot"
+  },
+  "necessity": {
+    "exec": "1-TURN",
+    "facet": "scope-intent",
+    "applies_at": {
+      "scope": [
+        "leaf"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "proposes_a_change",
+        "check": "GATE: the plan PROPOSES A CHANGE to existing behavior/code (adds a mechanism, alters a code path, fixes a defect). no (a pure investigation/spike/doc-only/test-only plan, or a plan whose deliverable is explicitly a justified no-op) -> not-applicable -> PASS."
+      },
+      {
+        "key": "demonstrates_necessity",
+        "check": "Only when gated in: the plan DEMONSTRATES the change is needed — it reproduces or concretely motivates the CURRENT behavior the change targets (a reproduction, an Expected/Actual, a named defect/gap, or a stated user/system problem the current behavior causes). FIRE when the plan adds a mechanism WITHOUT establishing the need — no reproduction, no motivation, no evidence the current behavior is wrong/insufficient (the FixedBench over-action gap: 35-65% of changes acted without demonstrating necessity). ACCEPT a well-motivated plan (reproduction/motivation present) and a justified no-op/docs-only/test-only outcome. This probes MOTIVATION of the change, DISTINCT from R1 asserted-capability (which greps whether a named module already provides the capability) and from E4 (broad assertion/existence). Advisory — never blocks."
+      }
+    ],
+    "routing": "leaf"
   }
 }

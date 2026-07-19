@@ -146,17 +146,35 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "det_coverage": {},
     }
 
-    # Exempt types short-circuit to a PASS (no review runs) — mirrors run_review.
-    if pctx.ticket_type in ("bug", "session_log", "code_review", "identity"):
-        reason = (
-            "bug tickets are exempt from the plan-review gate"
-            if pctx.ticket_type == "bug"
-            else f"{pctx.ticket_type} tickets are gate-exempt"
-        )
+    # session_log / code_review / identity short-circuit to a bare exempt PASS (no review runs).
+    if pctx.ticket_type in ("session_log", "code_review", "identity"):
         return {
             **base,
             "run_llm": False,
-            "verdict": orchestrator._exempt_verdict(pctx, reason=reason),
+            "verdict": orchestrator._exempt_verdict(
+                pctx, reason=f"{pctx.ticket_type} tickets are gate-exempt"
+            ),
+        }
+
+    # BUG REVIEW TIER (epic 6982 / R4): a bug no longer short-circuits to a bare exempt-PASS.
+    # It gets a LIGHT ADVISORY review — the DET floor + the necessity probe (see
+    # registry.BUG_TIER_CRITERIA; the assemble step restricts a bug's included LLM criteria to
+    # it) — but is NEVER BLOCKED: every DET finding is downgraded to advisory (det_blocking=[])
+    # so the bug always PASSes. run_llm=True so the (restricted) LLM tier runs. The CLI claim-time
+    # bug exemption (rebar._commands.gates) is unchanged — a bug still needs no signed attestation
+    # to be claimed; this only makes an explicit review / gate run substantive instead of exempt.
+    if pctx.ticket_type == "bug":
+        det_results = det_floor.run_det_floor(pctx)
+        det_blocks = det_floor.det_blocking_findings(det_results)
+        det_advisories = det_floor.det_advisory_findings(det_results)
+        det_cov = det_floor.det_coverage(det_results)
+        return {
+            **base,
+            "det_blocking": [],  # a bug is never blocked (light advisory tier)
+            "det_advisory": [*det_blocks, *det_advisories],
+            "det_coverage": {**det_cov, "bug_tier": True},
+            "run_llm": True,
+            "verdict": None,
         }
 
     det_results = det_floor.run_det_floor(pctx)
