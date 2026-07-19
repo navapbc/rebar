@@ -24,7 +24,6 @@ const LOW_PRIORITY = 900;
 // "service" (agent `prompt:`); `name` is the op id / prompt id (the action).
 export function createTypedStep(modeler, kind, name) {
   const elementFactory = modeler.get("elementFactory");
-  const create = modeler.get("create");
   const bpmnType = kind === "service" ? "bpmn:ServiceTask" : "bpmn:ScriptTask";
   const shape = elementFactory.createShape({ type: bpmnType });
   // Set the action NAME up front so the round-trip emits the right uses:/prompt:.

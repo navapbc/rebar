@@ -77,8 +77,6 @@ def schema_directive(model_cls) -> str:
     (NativeOutput / PromptedOutput-as-output_type inject this automatically; the manual
     json-repair path must do it explicitly — the gap that left plan-review verifications all
     ``no-verification``.)"""
-    import json
-
     schema = json.dumps(model_cls.model_json_schema(), separators=(",", ":"))
     return (
         "Respond with ONLY a single JSON object conforming to this JSON Schema "

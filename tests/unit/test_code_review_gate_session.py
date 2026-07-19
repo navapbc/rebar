@@ -374,8 +374,6 @@ def test_review_code_cli_mints_uuid_when_no_session(monkeypatch):
         captured.update(kw)
         return {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}, "coaching": []}
 
-    import rebar
-
     monkeypatch.setattr(rebar.llm, "review_code", _fake_review_code)
     # bare: no session var → uuid4 fallback
     monkeypatch.setattr("rebar._commands.session_id.resolve_session_id", lambda: None)

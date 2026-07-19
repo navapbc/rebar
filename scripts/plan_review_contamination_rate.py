@@ -62,7 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     file or stdin, and print the contamination rate. (A thin CLI over ``contamination_rate``;
     the sidecar corpus itself is produced by the plan-review gate.)"""
     args = list(sys.argv[1:] if argv is None else argv)
-    raw = open(args[0]).read() if args else sys.stdin.read()
+    if args:
+        with open(args[0]) as fh:
+            raw = fh.read()
+    else:
+        raw = sys.stdin.read()
     data = json.loads(raw)
     sidecars = data if isinstance(data, list) else [data]
     result = contamination_rate(_findings_from_sidecars(sidecars))

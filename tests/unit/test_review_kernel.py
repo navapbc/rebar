@@ -259,7 +259,7 @@ def test_chunks_omit_a_finding_too_big_to_verify_alone() -> None:
     chunks, omitted = kverify.verify_request_chunks(
         [huge, small],
         window_tokens=window,
-        est_tokens=lambda s: len(s),
+        est_tokens=len,
         headroom=1.0,
     )
     assert omitted == [0], "the too-big finding is omitted by its GLOBAL index"

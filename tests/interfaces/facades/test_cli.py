@@ -187,8 +187,6 @@ def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
     # CLI: no-id invocation produces a real JSON report, not an "Unknown option".
     cp = _cli("validate", "--output", "json", cwd=str(rebar_repo))
     assert "unknown option" not in (cp.stdout + cp.stderr).lower()
-    import json
-
     report = json.loads(cp.stdout)
     assert "score" in report
 

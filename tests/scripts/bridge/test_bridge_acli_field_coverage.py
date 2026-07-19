@@ -367,8 +367,6 @@ class TestAcliClientUpdateFieldExtraction:
         self, acli_mod: Any, acli_capture: Any
     ) -> None:
         """AcliClient.update_issue() description must be sent as ADF JSON, not plain text."""
-        import json
-
         client, captured_cmds, fake_run_acli = acli_capture
 
         with patch.object(acli_mod.acli_subprocess, "_run_acli", side_effect=fake_run_acli):

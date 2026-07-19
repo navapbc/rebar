@@ -95,9 +95,7 @@ def test_served_assets_are_allow_listed():
     # Only the two known bundle files are served; an arbitrary name (path traversal etc.)
     # returns nothing. Skips if the bundle has not been built in this checkout.
     if not editor.assets_available():
-        import pytest as _pytest
-
-        _pytest.skip("editor bundle not built (run editor_assets npm build)")
+        pytest.skip("editor bundle not built (run editor_assets npm build)")
     assert editor.read_asset("editor.js") is not None
     assert editor.read_asset("editor.css") is not None
     assert editor.read_asset("../editor.py") is None  # no traversal
@@ -112,9 +110,7 @@ def test_built_bundle_carries_structured_field_paths():
     # removed raw-JSON editor — so a build that dropped the structured paths (or reintroduced
     # the raw textarea) can't pass silently. Skips if not built.
     if not editor.assets_available():
-        import pytest as _pytest
-
-        _pytest.skip("editor bundle not built (run editor_assets npm build)")
+        pytest.skip("editor bundle not built (run editor_assets npm build)")
     js = editor.read_asset("editor.js") or b""
     text = js.decode("utf-8", "replace")
     # Structured fields (per-kind labels + entry ids surfaced into the DOM).
