@@ -147,3 +147,22 @@ def test_export_then_import_is_schema_round_trippable(tmp_path: Path) -> None:
     src_titles = {t["title"] for t in rebar.list_tickets(repo_root=str(src))}
     dst_titles = {t["title"] for t in rebar.list_tickets(repo_root=str(dst))}
     assert src_titles == dst_titles
+
+
+def test_import_rematerializes_closed_bug_with_class(tmp_path: Path) -> None:
+    """A CLOSED bug in an NDJSON dump must re-materialize as CLOSED on import.
+
+    transition_core requires a bounded --class on every bug *->closed write
+    (ticket ed13); the import replay close must thread the source close_class so
+    the bug is not left open by the per-row fail-open (ticket 376d)."""
+    src = _fresh_repo(tmp_path, "src")
+    bug = rebar.create_ticket("bug", "Closed bug", description="b" * 60, repo_root=str(src))
+    rebar.transition(bug, "open", "closed", close_class="regression", repo_root=str(src))
+
+    ndjson = _export_str(src)
+    tgt = _fresh_repo(tmp_path, "tgt")
+    rebar.import_tickets(ndjson.splitlines(), repo_root=str(tgt))
+
+    imported = _by_title(tgt)["Closed bug"]
+    assert imported["status"] == "closed"
+    assert imported.get("close_class") == "regression"
