@@ -376,14 +376,56 @@ def _issue_exists(client: Any, key: str) -> bool:
     return any(h.get("key") == key for h in hits or [])
 
 
-def _poll_until_visible(client: Any, key: str, summary: str, *, timeout_s: float = 30.0) -> bool:
+# Under full-live-group load Jira's index-convergence lag can exceed a flat 30s budget, so
+# the visibility poll defaults to a longer budget that is env-tunable (a slow live index can
+# raise it with no code edit) and backs off exponentially instead of hammering a flat 2s.
+INDEX_VISIBILITY_TIMEOUT_ENV = "RECONCILER_E2E_INDEX_VISIBILITY_TIMEOUT_S"
+_DEFAULT_INDEX_VISIBILITY_TIMEOUT_S = 120.0
+_MAX_INDEX_POLL_INTERVAL_S = 8.0
+
+
+def _default_index_visibility_timeout() -> float:
+    """Resolve the index-visibility budget, honoring ``RECONCILER_E2E_INDEX_VISIBILITY_TIMEOUT_S``.
+
+    A malformed or non-positive override falls back to the built-in default rather than
+    degrading the poll to a zero/negative budget.
+    """
+    raw = os.environ.get(INDEX_VISIBILITY_TIMEOUT_ENV)
+    if raw:
+        try:
+            override = float(raw)
+        except ValueError:
+            return _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
+        if override > 0:
+            return override
+    return _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
+
+
+def _poll_until_visible(
+    client: Any,
+    key: str,
+    summary: str,
+    *,
+    timeout_s: float | None = None,
+    time_fn: Callable[[], float] = time.monotonic,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> bool:
     """Poll for index-visibility of a just-created issue (Jira eventual consistency).
 
     Tries a key search first, then a summary fallback (the ``labels``/``key`` index can
     lag the ``summary`` index after create). Returns True as soon as either sees it.
+
+    ``timeout_s`` defaults to the env-tunable budget (see ``_default_index_visibility_timeout``)
+    because convergence lag under load can exceed the old flat 30s. The poll interval grows
+    exponentially (1, 2, 4, 8s, capped) — the same backoff shape as ``_retry`` — so a slow
+    index is waited out patiently rather than polled at a fixed 2s. ``time_fn``/``sleep_fn``
+    are injectable purely for deterministic testing; the live call site keeps real time.
     """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    if timeout_s is None:
+        timeout_s = _default_index_visibility_timeout()
+    deadline = time_fn() + timeout_s
+    attempt = 0
+    while time_fn() < deadline:
         if _issue_exists(client, key):
             return True
         try:
@@ -392,8 +434,84 @@ def _poll_until_visible(client: Any, key: str, summary: str, *, timeout_s: float
                 return True
         except Exception:  # noqa: BLE001 — search lag is expected mid-poll; keep polling until the deadline
             pass
-        time.sleep(2.0)
+        sleep_fn(min(float(2**attempt), _MAX_INDEX_POLL_INTERVAL_S))
+        attempt += 1
     return _issue_exists(client, key)
+
+
+class _FakeClock:
+    """A stubbed monotonic clock: ``monotonic()`` reads simulated time, ``sleep()`` advances it."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds
+
+
+class _EventuallyVisibleClient:
+    """A fake Jira client whose issue only becomes index-visible at/after ``visible_at``."""
+
+    def __init__(self, key: str, clock: _FakeClock, *, visible_at: float) -> None:
+        self._key = key
+        self._clock = clock
+        self._visible_at = visible_at
+
+    def search_issues(self, _jql: str) -> list[dict[str, str]]:
+        if self._clock.monotonic() >= self._visible_at:
+            return [{"key": self._key}]
+        return []
+
+
+def test_poll_until_visible_waits_out_slow_index_convergence():
+    """A just-created issue that only converges in Jira's index AFTER the old fixed 30s
+    budget (here at a simulated t=60s) must still be found within the hardened budget.
+
+    Drives the helper with an injected monotonic clock + fake client so it runs
+    deterministically in simulated time (no wall-clock, no Jira creds). Asserts the
+    observable outcome (found) — not sleep counts or private names.
+    """
+    clock = _FakeClock()
+    client = _EventuallyVisibleClient("REB-9999", clock, visible_at=60.0)
+    found = _poll_until_visible(
+        client,
+        "REB-9999",
+        "synthetic summary",
+        time_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+    )
+    assert found is True, "index-visibility poll gave up before eventual convergence at t=60s"
+
+
+def test_poll_until_visible_gives_up_after_budget():
+    """When the index never converges, the poll returns False once its budget is spent —
+    the deliberate no-assert-on-post-delete-convergence contract still relies on a bounded
+    negative answer. Asserts the observable outcome, not internal timing.
+    """
+    clock = _FakeClock()
+    client = _EventuallyVisibleClient("REB-9999", clock, visible_at=10_000.0)
+    found = _poll_until_visible(
+        client,
+        "REB-9999",
+        "synthetic summary",
+        timeout_s=5.0,
+        time_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+    )
+    assert found is False
+
+
+def test_index_visibility_timeout_env_override(monkeypatch):
+    """A slow live index can raise the budget via env, and a bad value falls back safely."""
+    monkeypatch.delenv(INDEX_VISIBILITY_TIMEOUT_ENV, raising=False)
+    assert _default_index_visibility_timeout() == _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
+    monkeypatch.setenv(INDEX_VISIBILITY_TIMEOUT_ENV, "300")
+    assert _default_index_visibility_timeout() == 300.0
+    monkeypatch.setenv(INDEX_VISIBILITY_TIMEOUT_ENV, "not-a-number")
+    assert _default_index_visibility_timeout() == _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
 
 
 def test_c1_conflict_signal(tmp_path):
