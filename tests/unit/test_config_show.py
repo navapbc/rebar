@@ -18,14 +18,20 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clean_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip ambient config so each test sees only what it sets up. Clears the
     CANONICAL env name for every key (which for jira.*/some reconciler.* keys is an
     ergonomic name like JIRA_URL, not the auto-derived REBAR_<SECTION>_<KEY>) plus
     every deprecated alias — otherwise an exported JIRA_URL etc. leaks into the
-    'sources' provenance."""
+    'sources' provenance.
+
+    Point XDG_CONFIG_HOME at an EMPTY per-test dir (not delenv). Deleting it would
+    make ``user_config_path()`` fall back to ``~/.config/rebar/config.toml`` — the
+    developer's real config — defeating conftest's hermetic isolation (d716)."""
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    xdg_empty = tmp_path / "xdg-empty"
+    xdg_empty.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_empty))
     for sect, keys in cfg._SECTIONS.items():
         for key in keys:
             monkeypatch.delenv(cfg._canonical_env_name(sect, key), raising=False)
@@ -38,6 +44,33 @@ def _proj(tmp: Path) -> Path:
     p.mkdir()
     (p / ".git").mkdir()  # repo boundary marker
     return p
+
+
+# ── regression: the module fixtures must not leak the developer's real user config
+def test_module_fixtures_do_not_leak_real_user_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guards the d716 defect: the module-local ``_clean_config_env`` autouse fixture
+    must NOT undo conftest's hermetic user-config isolation. It previously did a
+    ``monkeypatch.delenv("XDG_CONFIG_HOME")`` which, once XDG was gone, made
+    ``user_config_path()`` fall back to ``~/.config/rebar/config.toml`` — the real
+    developer config — leaking a host-dependent layer into resolution.
+
+    We simulate that host config by planting a NON-default user config under a fake
+    ``$HOME`` (``os.path.expanduser("~")`` honors ``$HOME`` on POSIX). Under correct
+    isolation ``load_config`` must never read it; the planted value must not appear."""
+    fake_home = tmp_path / "home"
+    user_cfg_dir = fake_home / ".config" / "rebar"
+    user_cfg_dir.mkdir(parents=True)
+    # non-default value: real default for sync.push is "always" ("off" is valid)
+    (user_cfg_dir / "config.toml").write_text('[sync]\npush = "off"\n', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(fake_home))
+    cfg.reset_config_cache()  # defeat per-process memoization from earlier tests
+
+    resolved = cfg.load_config(root=_proj(tmp_path))
+    assert resolved.sync.push == "always", (
+        "planted user config leaked into resolution — hermetic XDG isolation defeated"
+    )
 
 
 # ── resolve_with_sources: provenance per layer ────────────────────────────────
