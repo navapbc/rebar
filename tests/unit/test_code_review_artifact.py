@@ -358,8 +358,6 @@ def test_reviewed_file_hashes_absent_sentinel(store: Path) -> None:
 
 
 def _emit_session_artifact(root: str, session_id: str, verdict: dict) -> str:
-    import rebar
-
     title = f"code-review: session:{session_id}"
     art = rebar.create_ticket("code_review", title, return_alias=True, repo_root=root)
     aid = str(art["id"] if isinstance(art, dict) else art)
@@ -392,8 +390,6 @@ def test_latest_code_review_result_session_key_surfaced_only(store: Path) -> Non
 def test_latest_code_review_result_change_key_and_misses(store: Path) -> None:
     """`change:<id>` strips the tag and matches the `code-review: {id} @` title prefix (spanning
     revisions); an unknown key kind and an absent key both degrade to None (⇒ no drops)."""
-    import rebar
-
     root = str(store)
     title = "code-review: Ichg @ rev2"
     art = rebar.create_ticket("code_review", title, return_alias=True, repo_root=root)

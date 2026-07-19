@@ -62,7 +62,8 @@ def _iter_internal_references(root: str) -> list[dict]:
             path = os.path.join(dirpath, fn)
             rel = os.path.relpath(path, root)
             try:
-                tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+                with open(path, encoding="utf-8") as fh:
+                    tree = ast.parse(fh.read(), filename=path)
             except (OSError, SyntaxError):
                 continue
             for node in ast.walk(tree):

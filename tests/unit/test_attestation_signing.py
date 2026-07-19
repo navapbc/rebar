@@ -204,7 +204,6 @@ def test_built_wheel_bakes_build_info(tmp_path: Path) -> None:
     src/rebar/_build_info.py with a baked commit SHA — not just the unit-level hook helper.
     Mirrors tests/unit/test_engine_dir.py::test_wheel_contains_no_compiled_bytecode."""
     import re
-    import zipfile
 
     hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
 

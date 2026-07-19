@@ -117,7 +117,7 @@ def _group_and_sort(views_by_series: dict[str, list[dict]]) -> list[dict]:
     groups: list[dict] = []
     for s in SERIES:
         items = views_by_series.get(s, [])
-        items = sorted(items, key=lambda v: _sort_key(v), reverse=True)
+        items = sorted(items, key=_sort_key, reverse=True)
         groups.append(
             {
                 "series": s,

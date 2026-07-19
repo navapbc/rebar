@@ -731,8 +731,6 @@ def test_get_patch_decodes_captured_base64(tmp_path, monkeypatch):
 def test_get_patch_decodes_xssi_json_string(tmp_path, monkeypatch):
     """The /patch Accept: application/json form is an XSSI-guarded JSON string of the
     raw patch (the live shape). get_patch must strip XSSI + JSON-decode to the diff."""
-    import json as _json
-
     body = ")]}'\n" + _json.dumps(_SAMPLE_DIFF)
     gc = _client(tmp_path)
     monkeypatch.setattr(gc, "_request", lambda *a, **k: (200, body))

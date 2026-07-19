@@ -129,7 +129,8 @@ def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: P
     ticket_dir = os.path.join(tracker, rid)
     files = sorted(f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json"))
     path = os.path.join(ticket_dir, files[-1])
-    event = json.load(open(path, encoding="utf-8"))
+    with open(path, encoding="utf-8") as fh:
+        event = json.load(fh)
     event["data"]["schema"] = "plan_review_result_v2_future"
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(event, fh)

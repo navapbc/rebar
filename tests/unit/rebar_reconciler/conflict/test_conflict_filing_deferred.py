@@ -187,7 +187,7 @@ def test_apply_files_pending_bug_tickets_after_apply_batch_returns(
 
     monkeypatch.setattr(applier, "_file_conflict_bug_ticket", _capture_filing)
     monkeypatch.setattr(applier, "_apply_batch", lambda *a, **kw: None)
-    monkeypatch.setattr(applier, "_load_acli", lambda: _make_fake_acli_mod())
+    monkeypatch.setattr(applier, "_load_acli", _make_fake_acli_mod)
 
     mutation = _make_mutation(
         mut_mod,
@@ -239,7 +239,7 @@ def test_apply_files_pending_bug_tickets_when_apply_batch_raises(
 
     monkeypatch.setattr(applier, "_file_conflict_bug_ticket", _capture_filing)
     monkeypatch.setattr(applier, "_apply_batch", _raising_apply_batch)
-    monkeypatch.setattr(applier, "_load_acli", lambda: _make_fake_acli_mod())
+    monkeypatch.setattr(applier, "_load_acli", _make_fake_acli_mod)
 
     # Pair an inbound conflict (produces pending_bug_ticket) with an
     # outbound mutation (forces _apply_batch into the call path).

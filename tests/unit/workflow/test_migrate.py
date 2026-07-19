@@ -154,6 +154,6 @@ def test_shim_that_forgets_version_is_corrected(monkeypatch) -> None:
     monkeypatch.setattr(mig, "CURRENT_SCHEMA_VERSION", "2")
     monkeypatch.setattr(wf, "SUPPORTED_SCHEMA_VERSIONS", ("1", "2"))
     monkeypatch.setattr(mig, "SUPPORTED_SCHEMA_VERSIONS", ("1", "2"))
-    monkeypatch.setattr(mig, "_SHIMS", {"1": lambda doc: dict(doc)})  # no version bump
+    monkeypatch.setattr(mig, "_SHIMS", {"1": dict})  # no version bump
     out = mig.migrate_to_current({"schema_version": "1", "name": "x", "steps": []})
     assert out["schema_version"] == "2"

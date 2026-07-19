@@ -104,16 +104,12 @@ def test_shallow_ok_when_field_missing_type() -> None:
 
 
 def _run(doc, inputs, tid, repo):
-    import rebar
-
     return rebar.run_workflow(doc, inputs, ticket_id=tid, repo_root=str(repo))
 
 
 def test_runtime_input_violation_fails_step(rebar_repo) -> None:
     # The `tag` step's input contract (tag_input) requires `tag: string`. A resolved
     # `with` that supplies an integer VIOLATES the contract — the step must FAIL loud.
-    import rebar
-
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
     doc = {
         "schema_version": "2",
@@ -136,8 +132,6 @@ def test_runtime_input_violation_fails_step(rebar_repo) -> None:
 
 
 def test_runtime_missing_required_input_fails_step(rebar_repo) -> None:
-    import rebar
-
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
     doc = {
         "schema_version": "2",
@@ -255,7 +249,9 @@ def test_agent_step_input_violation_fails(tmp_path) -> None:
     err, errored = validate_consumer_input(
         "agent", {"prompt": "checker"}, {"policy": "bogus"}, repo
     )
-    assert err is not None and "input contract violation" in err and errored is False
+    assert err is not None
+    assert "input contract violation" in err
+    assert errored is False
 
 
 def test_agent_step_validator_failure_is_distinct(tmp_path) -> None:
@@ -265,7 +261,9 @@ def test_agent_step_validator_failure_is_distinct(tmp_path) -> None:
 
     repo = _agent_prompt(tmp_path, "checker2", "no_such_schema_xyz")
     err, errored = validate_consumer_input("agent", {"prompt": "checker2"}, {"a": 1}, repo)
-    assert err is not None and errored is True and "UNAVAILABLE" in err
+    assert err is not None
+    assert errored is True
+    assert "UNAVAILABLE" in err
 
 
 def test_agent_step_without_inputs_contract_is_skipped(tmp_path) -> None:
