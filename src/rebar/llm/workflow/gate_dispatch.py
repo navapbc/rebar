@@ -34,6 +34,7 @@ from typing import Any, NamedTuple
 # moved to the code_review/finalize.py strict leaf; this keeps the attribute resolving here.
 from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: F401
 from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.gate_error_sidecar import emit_gate_error
 
 
 def _gate_doc(name: str, repo_root) -> dict[str, Any]:
@@ -138,6 +139,9 @@ def produce_plan_review_verdict(
     try:
         runner_sel.preflight()
     except LLMUnavailableError as exc:
+        # Write-then-degrade (ticket 8bc5): capture the env/integration-diagnosis interval as a
+        # dedicated gate_error_v1 sidecar, THEN preserve the existing soft-degrade outcome.
+        emit_gate_error(ctx.ticket_id, "plan_review", cause=str(exc), repo_root=repo_root)
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
@@ -175,6 +179,9 @@ def produce_plan_review_verdict(
                 recorder=rec,
             )
     except LLMUnavailableError as exc:
+        # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
+        # infra outage, before preserving the soft-degrade.
+        emit_gate_error(ctx.ticket_id, "plan_review", cause=str(exc), repo_root=repo_root)
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
@@ -534,6 +541,12 @@ def _code_review_preflight(request: CodeReviewRequest) -> dict[str, Any] | None:
     try:
         runner_sel.preflight()
     except LLMUnavailableError as exc:
+        # Write-then-degrade (ticket 8bc5): additively capture the gate_error interval when a
+        # ticket-addressed code review is running (the sidecar streams key on a ticket).
+        if request.target_ticket:
+            emit_gate_error(
+                request.target_ticket, "code_review", cause=str(exc), repo_root=request.repo_root
+            )
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
     return None
 
@@ -607,6 +620,12 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 recorder=prep.rec,
             )
     except LLMUnavailableError as exc:
+        # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
+        # infra outage, before preserving the soft-degrade.
+        if request.target_ticket:
+            emit_gate_error(
+                request.target_ticket, "code_review", cause=str(exc), repo_root=request.repo_root
+            )
         return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
     total_ms = round((time.monotonic() - prep.t_total) * 1000, 1)
     verdict = res.terminal_output
@@ -649,7 +668,14 @@ def produce_completion_verdict(
     from .runs import RunnerAgentStep
 
     runner_sel = get_runner(cfg, override=runner)
-    runner_sel.preflight()  # raises LLMUnavailableError → close gate fail-closes (faithful)
+    try:
+        runner_sel.preflight()  # raises LLMUnavailableError → close gate fail-closes (faithful)
+    except LLMUnavailableError as exc:
+        # Write-then-reraise (ticket 8bc5): capture the env/integration-diagnosis interval as a
+        # dedicated gate_error_v1 sidecar, THEN re-raise so the close gate STILL fail-closes
+        # (the propagation is preserved — we never swallow it).
+        emit_gate_error(ticket_id, "completion", cause=str(exc), repo_root=repo_root)
+        raise
 
     # The completion gate is self-contained: `completion_precheck` runs the deterministic
     # child-closure gate, then assembles the verifier's fenced ticket context — HONORING the
