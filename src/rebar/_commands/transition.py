@@ -45,6 +45,8 @@ _USAGE = (
     "unresolved-children close guard (a structural invariant — close/detach children first).\n"
     "  --force-close=<reason>   Bypass the signature requirement for story/epic "
     "(requires user approval via hook).\n"
+    "  --caused-by=<id>         On a bug close, draw a caused_by link to the culprit "
+    "change/ticket (overrides git-blame auto-derivation).\n"
     "  Examples:\n"
     "    ticket transition abc1 open closed --class=regression  # close a bug with its class\n"
     "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  "
@@ -90,14 +92,19 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
-    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] from the args AFTER
-    <current> <target>. Returns (reason, force, force_close_reason, close_class). Mirrors
-    ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str]:
+    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] [--caused-by[=]] from the
+    args AFTER <current> <target>. Returns (reason, force, force_close_reason, close_class,
+    caused_by). Mirrors ticket-transition.sh's flag loop (unknown tokens are silently skipped).
 
     ``--class <value>`` / ``--class=<value>`` (ticket ed13) is the REQUIRED bounded
     classification for a bug close (the vocabulary lives in ``txn.CLOSE_CLASSES``); it is
     parsed here and threaded to ``transition_core``, which validates it.
+
+    ``--caused-by <id>`` / ``--caused-by=<id>`` (ticket 555e) is the OPTIONAL explicit culprit
+    override for a bug close: it threads through to :func:`close_ticket`, which draws a
+    best-effort ``caused_by`` link from the (now-closed) bug to that change/ticket. Absent an
+    explicit value, the close auto-derives the culprit via git-blame.
 
     (The ``--verdict-hash`` flag was removed pre-1.0 — DE7; the story/epic close gate
     requires a certified signature via ``rebar sign``. It is now just an unknown
@@ -106,6 +113,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
     force = False
     force_close = ""
     close_class = ""
+    caused_by = ""
     i = 0
     while i < len(args):
         a = args[i]
@@ -136,9 +144,17 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
                 raise CommandError("Error: --force-close requires a reason", returncode=1)
             force_close = args[i + 1]
             i += 2
+        elif a.startswith("--caused-by="):
+            caused_by = a[len("--caused-by=") :]
+            i += 1
+        elif a == "--caused-by":
+            if i + 1 >= len(args):
+                raise CommandError("Error: --caused-by requires a value", returncode=1)
+            caused_by = args[i + 1]
+            i += 2
         else:
             i += 1
-    return reason, force, force_close, close_class
+    return reason, force, force_close, close_class, caused_by
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -168,6 +184,7 @@ def transition_compute(
     force: bool = False,
     force_close: str = "",
     close_class: str = "",
+    caused_by: str = "",
     repo_root=None,
     cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
@@ -287,6 +304,7 @@ def transition_compute(
         reason=reason,
         force_close=force_close,
         close_class=close_class,
+        caused_by=caused_by,
     )
 
 
@@ -465,7 +483,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, force_close, close_class = _parse_flags(flag_args)
+        reason, force, force_close, close_class, caused_by = _parse_flags(flag_args)
         result = transition_compute(
             ticket_id,
             current_status,
@@ -474,6 +492,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
             force=force,
             force_close=force_close,
             close_class=close_class,
+            caused_by=caused_by,
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:
