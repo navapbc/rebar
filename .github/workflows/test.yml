@@ -191,58 +191,53 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
-      # Module-size gate (policy: target 200-500 LOC, soft cap 800; docs/architecture.md).
-      # A GROWTH RATCHET (story S1). Two sibling files, so the gate stays green across the
-      # ratchet rollout in BOTH directions (a change adding the ratchet is verified by
-      # `main`'s bare-path gate; see the allowlist header):
-      #   * .github/module-size-allowlist.txt — soft-cap-exempt MEMBERSHIP (bare paths).
-      #   * .github/module-size-ceilings.txt  — per-file pinned CEILING ("<path> <max>").
-      # The gate FAILS when an allow-listed file EXCEEDS its ceiling (a grandfathered file
-      # cannot creep upward) — shrinking is free — and when a NEW file over the 800 soft cap
-      # is NOT listed. Raising a ceiling / adding a row is a deliberate, reviewed act (with a
-      # docs/architecture.md remedy row). Runs on every OS (pure wc/shell). Mirrored by
-      # tests/unit/test_module_size_contract.py.
+      # Module-size gate: an ABSOLUTE hard cap on every src/rebar/**/*.py file. There is no
+      # allowlist escape hatch any more (epic 716f drained it to zero). The limit is
+      # single-sourced in .github/module-size-limit.txt and LOCKED: changing it requires an
+      # administrator to override this gate (force-submit) — a normal contributor change to
+      # the limit fails Verified. Mirrored by tests/unit/test_module_size_contract.py.
       - name: Module-size gate
         shell: bash
         run: |
-          allowlist=.github/module-size-allowlist.txt
-          ceilings=.github/module-size-ceilings.txt
-          fail=0
-          # 1) Ratchet: every file with a pinned ceiling must be within it.
-          echo "Allow-listed files (ceiling ratchet):"
-          while read -r path ceiling _rest; do
-            case "$path" in ''|\#*) continue;; esac
-            if [ ! -f "$path" ]; then
-              echo "::error::ceilings path does not exist: $path (remove or fix the row)"; fail=1; continue
+          limitfile=.github/module-size-limit.txt
+          if [ ! -f "$limitfile" ]; then
+            echo "::error::$limitfile is missing — the module-size limit lock file must not be removed."
+            exit 1
+          fi
+          LIMIT=$(tr -d '[:space:]' < "$limitfile")
+          if ! printf '%s' "$LIMIT" | grep -qE '^[0-9]+$'; then
+            echo "::error::$limitfile must contain a single positive integer (got '$LIMIT')."
+            exit 1
+          fi
+          # Limit lock: the limit may only change when an administrator overrides this gate.
+          # Fetch main's tip by EXPLICIT URL from the canonical GitHub repo — the same pattern
+          # the tickets-branch fetch in this workflow uses — so the lock does NOT depend on an
+          # `origin` remote being configured by the checkout action (checkout-gerrit-change-action
+          # does not guarantee one). `git cat-file -e` distinguishes "main has the limit file ->
+          # compare" from "main lacks it -> bootstrap (allow)". If the fetch fails we WARN (not
+          # silently skip) — the absolute cap below still runs regardless.
+          if git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main' 2>/dev/null; then
+            if git cat-file -e refs/remotes/gh-main:"$limitfile" 2>/dev/null; then
+              BASE=$(git show refs/remotes/gh-main:"$limitfile" | tr -d '[:space:]')
+              if [ "$BASE" != "$LIMIT" ]; then
+                echo "::error::module-size limit changed ($BASE -> $LIMIT). This limit is LOCKED: an administrator must override this gate (force-submit) to land a limit change."
+                exit 1
+              fi
             fi
-            if ! printf '%s' "$ceiling" | grep -qE '^[0-9]+$'; then
-              echo "::error::ceilings row for $path has no integer ceiling: '$ceiling'"; fail=1; continue
-            fi
-            loc=$(wc -l < "$path")
-            printf "  %5d / %-5s  %s\n" "$loc" "$ceiling" "$path"
-            if [ "$loc" -gt "$ceiling" ]; then
-              echo "::error::$path is $loc LOC, over its pinned ceiling of $ceiling — shrink it (ratchet)."
-              fail=1
-            fi
-          done < "$ceilings"
-          # 2) No unlisted file over the soft cap (membership = the bare-path allowlist).
-          # `|| true`: a fully-drained allowlist (zero non-comment lines) makes grep exit 1;
-          # under `set -e`/`pipefail` that would abort the step before the over-cap check. An
-          # empty allowlist is a valid end state (every over-cap module graduated), so tolerate it.
-          listed=$({ grep -vE '^[[:space:]]*(#|$)' "$allowlist" || true; } | awk '{print $1}' | sort -u)
+          else
+            echo "::warning::could not fetch main to verify the module-size limit lock; the absolute cap below still applies."
+          fi
+          # Absolute cap: no src/rebar/**/*.py file may exceed the limit. No allowlist, no exemptions.
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
             | xargs wc -l 2>/dev/null \
-            | awk '$2 != "total" && $1 > 800 { print $2 }' | sort)
-          new_offenders=$(comm -23 <(printf '%s\n' "$over") <(printf '%s\n' "$listed") | grep -v '^$' || true)
-          if [ -n "$new_offenders" ]; then
-            echo "::error::New file(s) over the 800-LOC soft cap and NOT in $allowlist:"
-            printf '%s\n' "$new_offenders" | while read -r f; do [ -n "$f" ] && printf "  %5d  %s\n" "$(wc -l < "$f")" "$f"; done
-            echo "Split it along an existing call-graph seam, or (if genuinely cohesive) add it to"
-            echo "$allowlist AND $ceilings with a ceiling AND a docs/architecture.md remedy row."
-            fail=1
+            | awk -v lim="$LIMIT" '$2 != "total" && $1 > lim { print $1 " " $2 }' | sort -k2)
+          if [ -n "$over" ]; then
+            echo "::error::src/rebar file(s) over the ${LIMIT}-LOC hard cap (split them — there is no allowlist):"
+            printf '%s\n' "$over"
+            exit 1
           fi
-          [ "$fail" = 1 ] && exit 1
-          echo "Module-size gate: OK (all allow-listed files within ceilings; no new over-cap files)."
+          echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
 
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree

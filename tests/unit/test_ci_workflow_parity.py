@@ -47,7 +47,7 @@ _CI_REDUNDANT_HOOKS = {"lint", "typecheck"}
 # in wording between the two files, e.g. the pip-audit step). Every signature here must
 # appear in BOTH workflows: the pre-merge Verified gate and the post-merge branch CI.
 _SHARED_GATE_SIGNATURES = {
-    "module-size ratchet": "module-size-ceilings.txt",
+    "module-size gate": ".github/module-size-limit.txt",
     "prompt-index drift gate": "regenerate-index",
     "env-var registry drift gate": "scripts/gen_env_registry.py",
     "security-rules freshness gate": "security_pin",
