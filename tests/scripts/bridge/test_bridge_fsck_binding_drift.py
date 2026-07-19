@@ -104,18 +104,75 @@ def test_no_snapshot_skips_jira_requiring_cells(fsck, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_dangling_binding_flagged_with_snapshot(fsck, tmp_path):
-    # AC1(a)/AC4 — a confirmed binding whose Jira side is gone (absent from the
-    # snapshot) is flagged as dangling, even with an ACTIVE local ticket. RED
-    # before the snapshot arm: the audit returned clean for this exact case.
+def test_absent_from_snapshot_without_confirmed_404_is_not_dangling(fsck, tmp_path):
+    # ADR 0028 §1 (bug f436) — a confirmed binding merely absent from the windowed
+    # snapshot is NOT a deletion candidate: the offline audit never probed it.
+    # (Historically this exact case was wrongly reported as ``dangling``.) With no
+    # persisted confirmed-404 state it is surfaced only informationally.
     tracker = tmp_path / ".tickets-tracker"
     _write_bindings(tracker, bindings={"f8b5": _confirmed("REB-530")}, reverse={"REB-530": "f8b5"})
     drift = fsck.audit_binding_drift(
         tracker,
         local_states=[{"ticket_id": "f8b5", "status": "in_progress", "archived": False}],
-        jira_snapshot={},  # REB-530 absent from the snapshot → dangling candidate
+        jira_snapshot={},  # REB-530 absent from the window — un-probed, not gone
     )
-    assert drift["dangling"] == [{"local_id": "f8b5", "jira_key": "REB-530"}]
+    assert drift["dangling"] == []
+    assert drift["absent_in_window_unprobed"] == [{"local_id": "f8b5", "jira_key": "REB-530"}]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_alive_out_of_window_binding_is_not_dangling(fsck, tmp_path):
+    # ADR 0028 §1/§2 regression (bug f436): the reconciler snapshot is
+    # DELIBERATELY windowed — a Done binding aged out beyond the Done-recent cap
+    # is ALIVE in Jira but intentionally absent from prev_snapshot.json. The
+    # OFFLINE audit has no Jira client and never probes, so it must NOT report
+    # snapshot-window absence as a deletion candidate (``dangling``) — else an
+    # alive aged-out binding is reported dangling every pass forever (unhealable).
+    #
+    # Synthetic store: TWO confirmed bindings; the windowed snapshot contains
+    # only ONE (the other aged out of the Done-recent window while still alive).
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(
+        tracker,
+        bindings={"loc-in": _confirmed("REB-100"), "loc-out": _confirmed("REB-200")},
+        reverse={"REB-100": "loc-in", "REB-200": "loc-out"},
+    )
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[
+            {"ticket_id": "loc-in", "status": "in_progress", "archived": False},
+            {"ticket_id": "loc-out", "status": "in_progress", "archived": False},
+        ],
+        # Windowed snapshot: only REB-100 is inside the window; REB-200 aged out.
+        jira_snapshot={"REB-100": {"status": "In Progress"}},
+    )
+    # The alive out-of-window binding must NOT be dangling (un-probed absence is
+    # not a deletion signal); it is surfaced only informationally.
+    assert {e["jira_key"] for e in drift["dangling"]} == set(), drift
+    assert {e["jira_key"] for e in drift["absent_in_window_unprobed"]} == {"REB-200"}, drift
+    # The in-window binding is unaffected — present + bound + active → no drift.
+    assert "REB-100" not in {e["jira_key"] for e in drift["absent_in_window_unprobed"]}
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_confirmed_404_state_sources_dangling(fsck, tmp_path):
+    # Option 1 (ADR 0028 §2): ``dangling`` is sourced ONLY from persisted
+    # confirmed-404 state that binding_store records on the binding entry
+    # (``absent_404_count`` via note_absent). An out-of-window binding the live
+    # pass HAS confirmed absent (count > 0) IS a real deletion candidate.
+    tracker = tmp_path / ".tickets-tracker"
+    entry = _confirmed("REB-300")
+    entry["absent_404_count"] = 1
+    _write_bindings(tracker, bindings={"loc-x": entry}, reverse={"REB-300": "loc-x"})
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "loc-x", "status": "in_progress", "archived": False}],
+        jira_snapshot={},  # REB-300 absent AND confirmed-404 → dangling
+    )
+    assert [e["jira_key"] for e in drift["dangling"]] == ["REB-300"], drift
+    assert drift["absent_in_window_unprobed"] == [], drift
 
 
 @pytest.mark.unit
