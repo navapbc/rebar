@@ -293,7 +293,11 @@ jobs:
           # completion-verifier cannot and should not run here. Without it the close
           # fails closed and the alert ticket sticks open while the canary goes red on
           # every recovery (bug 0dc5 / nitpicking-unbecoming-wisent).
+          # --class is REQUIRED to close a bug ticket (ticket ed13), even with
+          # --force-close: env_integration is the right class for a bot-filed
+          # operational alert auto-closing when the monitored condition recovers.
           rebar transition "${TICKET_ID}" open closed \
+            --class env_integration \
             --reason "Fixed: reconciler recovered at ${RECOVERED_AT}. ${STATUS_MSG}" \
             --force-close="Fixed: reconciler recovered at ${RECOVERED_AT} (bot alert auto-close; heartbeat tickets have no completion criteria to verify)."
 
@@ -402,7 +406,11 @@ jobs:
           # --force-close bypasses the completion-verification close gate — same reason
           # as the heartbeat close above (bot-authored alert ticket, plain-rebar install
           # with no [agents] extra, nothing for the LLM verifier to check). Bug 0dc5.
+          # --class is REQUIRED to close a bug ticket (ticket ed13), even with
+          # --force-close — same as the heartbeat close above. env_integration is
+          # the right class for a bot-filed operational alert that self-closes.
           rebar transition "${TICKET_ID}" open closed \
+            --class env_integration \
             --reason "Fixed: bridge-fsck reports zero binding drift at ${RECOVERED_AT}." \
             --force-close="Fixed: zero binding drift at ${RECOVERED_AT} (bot alert auto-close)."
 
