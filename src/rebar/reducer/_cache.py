@@ -48,16 +48,92 @@ def is_active_event(name: str) -> bool:
 _REDUCER_CACHE_VERSION = 6
 
 
-def read_cache(cache_path: str, dir_hash: str) -> dict | None:
-    """Return the cached state if dir_hash matches, else None (cache miss)."""
+def _load_json(path: str) -> dict | None:
+    """Load a single JSON object from ``path``; None on any read/parse error or non-dict."""
     try:
-        with open(cache_path, encoding="utf-8") as cf:
-            cached = json.load(cf)
-        if isinstance(cached, dict) and cached.get("dir_hash") == dir_hash:
-            return cached["state"]
-    except (OSError, json.JSONDecodeError, KeyError):
-        pass
-    return None
+        with open(path, encoding="utf-8") as fh:
+            obj = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _ondisk_attestation_kinds(ticket_dir: str, event_filenames: list[str]) -> set[str]:
+    """The set of attestation kinds the reducer would project from the events ON DISK.
+
+    Attestation kinds are purely ADDITIVE in the projection — ``process_signature``
+    only ever files a kind into ``state['attestations']`` and nothing removes one — so
+    the net projected key-set equals the union of the kinds derivable from every active
+    SIGNATURE event PLUS the kinds a compacted SNAPSHOT already folded in. Deriving this
+    straight from the log (independent of any cached state) is what lets
+    :func:`read_cache` reject a ``.cache.json`` whose encoded ``attestations`` disagree
+    with the bytes on disk (validity-on-read; see ``docs/concurrency.md`` §Read-freshness
+    policy and the ``process_signature`` docstring).
+
+    Only SIGNATURE / SNAPSHOT files are opened — both rare. A ticket with neither pays a
+    string check per name and NO extra I/O, so ordinary cache reads are unaffected.
+    """
+    from ._processors_identity import attestation_kind
+
+    kinds: set[str] = set()
+    for name in event_filenames:
+        if name.endswith("-SIGNATURE.json"):
+            ev = _load_json(os.path.join(ticket_dir, name))
+            data = ev.get("data") if ev else None
+            if not isinstance(data, dict):
+                continue
+            kind = attestation_kind(data.get("manifest"), data)
+            if kind is not None:
+                kinds.add(kind)
+        elif name.endswith("-SNAPSHOT.json") and not name.endswith("-PRECONDITIONS-SNAPSHOT.json"):
+            snap = _load_json(os.path.join(ticket_dir, name))
+            data = snap.get("data") if snap else None
+            compiled = data.get("compiled_state") if isinstance(data, dict) else None
+            if not isinstance(compiled, dict):
+                continue
+            atts = compiled.get("attestations")
+            if isinstance(atts, dict):
+                kinds.update(atts.keys())
+            else:
+                # Legacy snapshot: a single kind-keyable ``signature`` folds into the map.
+                sig = compiled.get("signature")
+                if isinstance(sig, dict):
+                    k = attestation_kind(sig.get("manifest"), {})
+                    if k is not None:
+                        kinds.add(k)
+    return kinds
+
+
+def read_cache(
+    cache_path: str, dir_hash: str, ticket_dir: str, event_filenames: list[str]
+) -> dict | None:
+    """Return the cached state on a valid hit, else None (cache miss).
+
+    A hit requires BOTH the ``dir_hash`` match AND that the cached state's kind-keyed
+    ``attestations`` map agrees with the attestation evidence ACTUALLY on disk
+    (validity-on-read; ``docs/concurrency.md`` §Read-freshness policy). ``dir_hash``
+    keys the cache on event-file stats (name/size/mtime) plus a manually-bumped reducer
+    version — neither of which moves when the reducer's attestation PROJECTION changes
+    without a version bump, nor when a ``.cache.json`` was written by a
+    differently-projecting build. Such an entry serves a stale ``attestations`` map
+    (e.g. empty) while the signed SIGNATURE event is physically present, so ``show``
+    (served the stale cache) and ``verify-signature`` (re-derived) disagree — a SIGNED
+    attestation is hidden and a ``claim``/close gate wrongly blocks (the incident the
+    v4 cache-version comment records). Cross-checking the cached ``attestations`` keys
+    against the on-disk kind-set makes any such divergence a MISS that re-derives, so
+    the cache can NEVER serve attestations that contradict the log.
+    """
+    cached = _load_json(cache_path)
+    if not (cached and cached.get("dir_hash") == dir_hash):
+        return None
+    state = cached.get("state")
+    if not isinstance(state, dict):
+        return None
+    cached_kinds = set((state.get("attestations") or {}).keys())
+    if cached_kinds != _ondisk_attestation_kinds(ticket_dir, event_filenames):
+        # Stale / old-projection attestation map: force a re-derive from the log.
+        return None
+    return state
 
 
 def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) -> None:
@@ -148,7 +224,9 @@ def prepare_event_files(
 
     # The rebuild path reads the full file set directly; never key it to (or serve it
     # from) the active-only reducer cache.
-    cached = None if include_retired else read_cache(cache_path, dir_hash)
+    cached = (
+        None if include_retired else read_cache(cache_path, dir_hash, ticket_dir, event_filenames)
+    )
 
     event_files = sorted(
         (os.path.join(ticket_dir, f) for f in event_filenames),
