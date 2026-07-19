@@ -201,7 +201,7 @@ def check_would_create_cycle(
     redundant transitive edge A→C→B plus proposed A→B is mis-reported as a
     cycle because A happens to be "blocked by" B in the reverse sense.
     """
-    if relation in ("relates_to", "duplicates", "supersedes", "discovered_from"):
+    if relation in ("relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"):
         return False
 
     if relation == "depends_on":

@@ -19,7 +19,17 @@ logger = logging.getLogger(__name__)
 CANONICAL_RELATIONS: frozenset[str] = frozenset(
     # discovered_from: emergent-work provenance (B discovered_from A). Directional
     # (no reciprocal LINK), non-blocking, never cycle-inducing — see _graph.py.
-    {"blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"}
+    # caused_by: bug → the change/ticket that caused it. Directional, non-blocking,
+    # never cycle-inducing (same semantics as discovered_from).
+    {
+        "blocks",
+        "depends_on",
+        "relates_to",
+        "duplicates",
+        "supersedes",
+        "discovered_from",
+        "caused_by",
+    }
 )
 
 
