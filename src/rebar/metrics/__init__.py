@@ -13,6 +13,9 @@ The package is additive/standalone — importing it changes no existing behavior
 
 from __future__ import annotations
 
+# Importing registers the agent-process event-derivation specs (ticket 18e6)
+# into REGISTRY as a side effect (event_metrics imports the registry itself).
+from rebar.metrics import event_metrics  # noqa: E402,F401
 from rebar.metrics.registry import (
     REGISTRY,
     MetricSpec,
