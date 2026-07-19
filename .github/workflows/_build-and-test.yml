@@ -1,0 +1,442 @@
+name: Build and Test (reusable)
+
+# Reusable (workflow_call) form of the lint + pip-audit + test gate/suite — the single
+# source of truth for the gates that BOTH CI lanes run. Invoked from TWO callers:
+#   * test.yml           — push / pull_request (branch-head checkout), post-merge branch CI.
+#   * gerrit-verify.yaml — the Verified gate (checks out the EXACT Gerrit patchset), so a
+#     gate/suite regression BLOCKS the Verified vote pre-merge instead of only reddening main.
+#
+# Before this extraction the two lanes hand-copied the same gate+suite command list and a
+# parity test (tests/unit/test_ci_workflow_parity.py) policed the copies against drift; sharing
+# ONE definition makes that drift impossible by construction (the pattern _optionality.yml uses).
+#
+# Checkout is parameterized by `gerrit-refspec`: empty => actions/checkout (branch head);
+# set => checkout-gerrit-change-action (the patchset). A LOCAL composite action cannot do this
+# (a `./.github/actions/...` reference needs the repo already checked out), so the conditional
+# checkout is inlined per job. This workflow takes NO secrets: the Gerrit values are non-secret
+# inputs (checkout-gerrit-change-action is mirror-first), and the Verified vote key stays
+# confined to gerrit-verify.yaml (never inherited here — test.yml's pull_request trigger
+# includes fork PRs).
+
+on:
+  workflow_call:
+    inputs:
+      gerrit-refspec:
+        description: "Gerrit refspec (refs/changes/NN/NNNN/P). Empty => branch-head checkout."
+        required: false
+        type: string
+        default: ""
+      gerrit-project:
+        description: "Gerrit project (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+      gerrit-url:
+        description: "Gerrit base URL (required when gerrit-refspec is set)."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@v7
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Install rebar (editable) + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      # GATING: the flake8 "real-bug" smoke set (configured in pyproject
+      # [tool.ruff.lint]) — syntax errors + undefined names — plus formatting
+      # consistency (ruff format --check). Routed through `make lint` (the single
+      # source of truth shared by local + the pre-commit hook), running the EXACT
+      # ruff pinned in pyproject's [dev] extra so CI and local never drift. CHECK-ONLY
+      # (never mutates) — a failure means "run `make format`". This is the gate that
+      # catches NameError-on-error-path bugs + format drift.
+      - name: lint (ruff check + format --check, gating)
+        run: make lint
+
+      # GATING: parity between the local pre-commit gate and CI. Runs the hygiene hooks
+      # in .pre-commit-config.yaml across all files (check-yaml/toml/merge-conflict/
+      # added-large-files), so the hook set a contributor commits through is also
+      # enforced server-side. This is the belt-and-suspenders for those hooks.
+      #
+      # SKIP three hooks in CI (env below):
+      #  - `no-commit-to-branch`: a LOCAL commit-time guardrail (fails a `git commit` made
+      #    while HEAD is on main/master). The branch-head lane runs on `main` (post-merge
+      #    branch CI), so it would fire and fail every main push; the real "land through
+      #    Gerrit" boundary is server-side (GitHub ruleset + the two Gerrit votes), not this
+      #    hook. (On the Gerrit lane HEAD is a detached refs/changes/* ref, so it is silent
+      #    anyway — skipping keeps both lanes identical.)
+      #  - `lint` and `typecheck`: these local hooks just re-invoke `make lint` / `make
+      #    typecheck`, which already run as their own named steps in this job — running them
+      #    again here is pure duplicate work. They stay in .pre-commit-config.yaml so a local
+      #    `git commit` still runs them; CI runs each linter exactly once (the direct steps).
+      - name: pre-commit (all hooks, all files, gating)
+        run: pre-commit run --all-files --show-diff-on-failure
+        env:
+          SKIP: no-commit-to-branch,lint,typecheck
+
+      # GATING: mypy over the WHOLE library. Previously core-only (reducer/graph/
+      # _store) with the rest tracked as an advisory "full tree" ratchet — that debt
+      # was driven to zero (story urge-abbey-goal), so `make typecheck` now covers all
+      # of src/rebar and gates. Same command local + the pre-commit hook run.
+      - name: mypy — full library (gating)
+        run: make typecheck
+
+      # Validate every infra config so a MALFORMED config can never reach `main` (epic 88ab
+      # story 8903). Runs in BOTH lanes via this reusable, so it fails the two-vote gate, not
+      # just branch CI.
+      - name: config-check (infra configs parse; gating)
+        run: make config-check
+
+  pip-audit:
+    # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
+    # installed dependency closure against the PyPI advisory / OSV database and
+    # FAILS on any known vulnerability. We scan the base runtime install (no
+    # extras) — that is what a plain `pip install nava-rebar` consumer gets —
+    # plus the [dev] extra so build/test tooling is covered too.
+    #
+    # Failure policy (plan-review advisory #3):
+    #   - ANY vulnerability with a known fix version fails the job (→ Verified -1
+    #     on the Gerrit lane). Remediate by bumping the pin.
+    #   - An advisory that is a false positive / unfixable / accepted risk is
+    #     silenced with `--ignore-vuln <GHSA/PYSEC-ID>` below and a one-line
+    #     justification — deliberate, reviewed, and greppable (never a blanket
+    #     skip). No ignores are needed today; the list is intentionally empty.
+    #   - Network flake: the OSV/PyPI advisory DB fetch is retried (3× with
+    #     backoff). If every attempt fails to REACH the DB it is an INFRA error,
+    #     not a vuln — comment `recheck` (Gerrit) / re-run the job (branch CI).
+    name: pip-audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@v7
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+      - name: Install rebar (runtime + dev) and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install pip-audit
+      - name: pip-audit (scan installed environment; gating, network-retried)
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Retry only the network-bound advisory-DB fetch so a transient OSV/PyPI
+          # blip casts no spurious -1; a real vuln fails on the first try and the
+          # exit code is preserved. `--desc` prints advisory detail on a hit.
+          attempt=0
+          until [ "$attempt" -ge 3 ]; do
+            attempt=$((attempt + 1))
+            echo "pip-audit attempt ${attempt}/3"
+            if out=$(pip-audit --desc 2>&1); then
+              echo "$out"
+              echo "pip-audit: OK (no known vulnerabilities)."
+              exit 0
+            fi
+            echo "$out"
+            # Distinguish a real finding from a DB-unreachable infra flake: only
+            # retry when the failure looks network-related.
+            if printf '%s' "$out" | grep -qiE 'temporarily|timed out|timeout|connection|resolve|network|503|502|504'; then
+              echo "pip-audit: transient DB error — backing off before retry." >&2
+              sleep $((attempt * 5))
+              continue
+            fi
+            echo "::error::pip-audit found dependency vulnerabilities (see output). Bump the pinned version, or add --ignore-vuln <ID> with justification if accepted." >&2
+            exit 1
+          done
+          echo "::error::pip-audit could not reach the advisory DB after 3 attempts — INFRASTRUCTURE issue, not a vulnerability. Re-run the job / comment 'recheck'." >&2
+          exit 1
+
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >= 3.11 (the reconciler uses enum.StrEnum, new in
+        # 3.11), so test the full supported range on Linux. macOS runs only the
+        # primary interpreter (runner cost) — its value is the platform-compat
+        # coverage (flock/mkdir lock, gtimeout), not the Python rev.
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        exclude:
+          # macOS runs only the newest interpreter (runner cost); its value is
+          # platform-compat coverage (flock/mkdir lock, gtimeout), not the rev.
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - name: Checkout branch head (push/PR lane)
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@v7
+      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Install rebar (editable) + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      # Git identity is required by the suites that build throwaway commit stores.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      # Module-size gate: an ABSOLUTE hard cap on every src/rebar/**/*.py file. There is no
+      # allowlist escape hatch any more (epic 716f drained it to zero). The limit is
+      # single-sourced in .github/module-size-limit.txt and LOCKED: changing it requires an
+      # administrator to override this gate (force-submit) — a normal contributor change to
+      # the limit fails Verified. Mirrored by tests/unit/test_module_size_contract.py.
+      - name: Module-size gate
+        shell: bash
+        run: |
+          limitfile=.github/module-size-limit.txt
+          if [ ! -f "$limitfile" ]; then
+            echo "::error::$limitfile is missing — the module-size limit lock file must not be removed."
+            exit 1
+          fi
+          LIMIT=$(tr -d '[:space:]' < "$limitfile")
+          if ! printf '%s' "$LIMIT" | grep -qE '^[0-9]+$'; then
+            echo "::error::$limitfile must contain a single positive integer (got '$LIMIT')."
+            exit 1
+          fi
+          # Limit lock: the limit may only change when an administrator overrides this gate.
+          # Fetch main's tip by EXPLICIT URL from the canonical GitHub repo — the same pattern
+          # the tickets-branch fetch in gerrit-verify.yaml uses — so the lock does NOT depend on
+          # an `origin` remote being configured by the checkout action (checkout-gerrit-change-action
+          # does not guarantee one). `git cat-file -e` distinguishes "main has the limit file ->
+          # compare" from "main lacks it -> bootstrap (allow)". If the fetch fails we WARN (not
+          # silently skip) — the absolute cap below still runs regardless.
+          if git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main' 2>/dev/null; then
+            if git cat-file -e refs/remotes/gh-main:"$limitfile" 2>/dev/null; then
+              BASE=$(git show refs/remotes/gh-main:"$limitfile" | tr -d '[:space:]')
+              if [ "$BASE" != "$LIMIT" ]; then
+                echo "::error::module-size limit changed ($BASE -> $LIMIT). This limit is LOCKED: an administrator must override this gate (force-submit) to land a limit change."
+                exit 1
+              fi
+            fi
+          else
+            echo "::warning::could not fetch main to verify the module-size limit lock; the absolute cap below still applies."
+          fi
+          # Absolute cap: no src/rebar/**/*.py file may exceed the limit. No allowlist, no exemptions.
+          over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk -v lim="$LIMIT" '$2 != "total" && $1 > lim { print $1 " " $2 }' | sort -k2)
+          if [ -n "$over" ]; then
+            echo "::error::src/rebar file(s) over the ${LIMIT}-LOC hard cap (split them — there is no allowlist):"
+            printf '%s\n' "$over"
+            exit 1
+          fi
+          echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
+
+      # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
+      # prompt front-matter and committed. Regenerate it and fail if the working tree
+      # now differs — a stale index means a prompt's front-matter changed without the
+      # committed index being regenerated. Style mirrors the Module-size gate above.
+      - name: Prompt-index drift gate
+        shell: bash
+        run: |
+          # The prompt library is moving rebar.llm.prompts -> rebar.llm.prompting.prompts
+          # (ticket toll-clock-tier); invoke whichever module path this checkout provides so
+          # the gate stays green across the move.
+          python -m rebar.llm.prompting.prompts regenerate-index 2>/dev/null \
+            || python -m rebar.llm.prompts regenerate-index
+          if ! git diff --exit-code -- src/rebar/llm/reviewers/index.json; then
+            echo "::error::reviewers/index.json is stale — regenerate it with"
+            echo "  python -m rebar.llm.prompting.prompts regenerate-index"
+            echo "and commit the result (it is derived from the prompt front-matter)."
+            exit 1
+          fi
+          echo "Prompt-index drift gate: OK (index.json is up to date)."
+
+      # Env-var registry drift gate (story 0f21): docs/env-vars.md is DERIVED by scanning
+      # env-var reads under src/rebar and committed. Regenerate and fail if the working tree
+      # now differs — a stale registry means a new REBAR_* read shipped without regenerating.
+      # Style mirrors the Prompt-index drift gate above.
+      - name: Env-var registry drift gate
+        shell: bash
+        run: |
+          python scripts/gen_env_registry.py
+          if ! git diff --exit-code -- docs/env-vars.md; then
+            echo "::error::docs/env-vars.md is stale — regenerate it with"
+            echo "  python scripts/gen_env_registry.py"
+            echo "and commit the result (it is derived from env-var reads under src/rebar)."
+            exit 1
+          fi
+          echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
+
+      # Docs-index completeness / dead-link gate (ticket f088): every living top-level
+      # docs/*.md must be linked from docs/README.md (allowlist: *.local.md), and every
+      # relative markdown link that resolves inside docs/ must point at an existing file.
+      # Fails the build on an unindexed living doc or a broken docs-internal link.
+      - name: Docs-index completeness gate
+        shell: bash
+        run: |
+          python scripts/check_docs_index.py --check
+          echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
+
+      # README golden-path gate (ticket 0435): extract the bash block under the README
+      # '## Quickstart' heading and RUN those exact lines end-to-end in a throwaway git
+      # repo. A wrong command *printed* in the README (e.g. a bad subcommand or a stale
+      # hard-coded id) then fails the build — command TEXT rot, not just executability.
+      - name: README quickstart golden-path gate
+        shell: bash
+        run: |
+          python scripts/check_readme_quickstart.py
+
+      # CLI-reference drift gate (ticket e866): docs/cli-reference.md is DERIVED from the
+      # CLI's own help data (known_subcommands() + the curated intercept table). Regenerate
+      # and fail on any diff, so a new/renamed command cannot ship undocumented.
+      - name: CLI-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_cli_reference.py
+          if ! git diff --exit-code -- docs/cli-reference.md; then
+            echo "::error::docs/cli-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_cli_reference.py"
+            exit 1
+          fi
+          echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
+
+      # MCP-reference drift gate (ticket 235a): docs/mcp-reference.md is DERIVED from the
+      # MCP server's own registrars (read/llm/write), classified by gate tier. Regenerate
+      # and fail on any diff, so a newly-registered MCP tool cannot ship undocumented.
+      - name: MCP-reference drift gate
+        shell: bash
+        run: |
+          python scripts/gen_mcp_reference.py
+          if ! git diff --exit-code -- docs/mcp-reference.md; then
+            echo "::error::docs/mcp-reference.md is stale — regenerate it with"
+            echo "  python scripts/gen_mcp_reference.py"
+            exit 1
+          fi
+          echo "MCP-reference drift gate: OK (docs/mcp-reference.md is up to date)."
+
+      # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
+      # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
+      # `vendored_at` is older than the quarterly cadence, prompting a deliberate
+      # `make vendor-security-rules` refresh PR. Time-based + network-free (an upstream-version
+      # diff is the documented follow-on). Warn-only so a lapsed cadence never blocks unrelated PRs.
+      - name: Security-rules freshness gate (warn-only)
+        shell: bash
+        run: python -m rebar.grounding.detectors.security_pin
+
+      # Criteria-routing parity gate (epic 3156): criteria_routing.json is hand-authored
+      # (thresholds/applies_at are judgement, no derivation source), so this is a PARITY gate
+      # (not a regenerate-and-diff): it fails when the committed routing drifts out of sync
+      # with the canonical vocabulary (missing/orphan entry) or carries a malformed entry.
+      - name: Criteria-routing parity gate
+        shell: bash
+        run: |
+          if ! python -m rebar.llm.plan_review.registry validate-routing; then
+            echo "::error::src/rebar/llm/plan_review/criteria_routing.json is out of parity"
+            echo "with CANONICAL_LLM (a missing/orphan/malformed criterion routing entry)."
+            exit 1
+          fi
+
+      # server.json env-contract drift gate (epic sail-shoe-smear): server.json is the
+      # MCP front-door manifest; rebar.mcp_server.MCP_ENV_VARS is the single source of
+      # truth for the env gates. This fails when the manifest's advertised env-var set
+      # diverges from that canonical list (missing/extra var). Style mirrors the
+      # prompt-index / criteria-routing drift gates above.
+      - name: server.json env-contract drift gate
+        shell: bash
+        run: python scripts/check_server_manifest.py
+
+      # Public-types drift gate (story 3a10): src/rebar/types.py is DERIVED from the
+      # canonical JSON Schemas (the schema-backed rebar.* return shapes). Regenerate
+      # it and fail if the working tree now differs — a stale types.py means a
+      # schema changed without the committed TypedDicts being regenerated. Style
+      # mirrors the prompt-index drift gate above.
+      - name: Public-types drift gate
+        shell: bash
+        run: |
+          python -m rebar.schemas.gen_types
+          if ! git diff --exit-code -- src/rebar/types.py; then
+            echo "::error::src/rebar/types.py is stale — regenerate it with"
+            echo "  python -m rebar.schemas.gen_types"
+            echo "and commit the result (it is derived from the canonical JSON Schemas)."
+            exit 1
+          fi
+          echo "Public-types drift gate: OK (types.py is up to date)."
+
+      - name: Run the default suite (Python tiers; excludes integration + external)
+        # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
+        # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
+        # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
+        # keeps a stale cache from leaking across runs.
+        #
+        # Coverage is reported (term-missing) and carries a conservative floor
+        # (fail_under in [tool.coverage.report], pyproject.toml): the floor sits well
+        # below the measured in-process total because several tests run rebar as a
+        # subprocess and so don't count toward in-process coverage. It guards against
+        # a large regression without pinning the exact number; see docs/coverage.md.
+        # Parallelized with pytest-xdist (story 8d36). `-n` is PINNED to the runner's
+        # real vCPU count (ubuntu-latest = 4, macos arm = 3), NOT `-n auto` (which
+        # over-subscribes on larger local hosts). Coverage combines correctly only
+        # because `parallel = true` is set in [tool.coverage.run] (pyproject.toml).
+        run: >-
+          pytest -m "not integration and not external"
+          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
+          -q -p no:cacheprovider --durations=25
+          --basetemp="${{ runner.temp }}/rebar-basetemp"
+          --cov=rebar --cov-report=term-missing:skip-covered
+
+      - name: Run the integration tier (concurrency + reconciler; network-guarded)
+        # These need no live services (mocked acli / local git), so they run in CI
+        # for cross-process concurrency + reconciler coverage. Live-Jira validation
+        # stays a manual probe (bridge-probe / reconcile dry-run).
+        # Parallelized (story 8d36) with `--dist loadgroup` so xdist_group-marked
+        # tests (the live reconciler E2E) co-locate on one worker and stay serial.
+        run: >-
+          pytest -m integration
+          -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
+          -q -p no:cacheprovider --durations=25
+          --basetemp="${{ runner.temp }}/rebar-basetemp-int"
