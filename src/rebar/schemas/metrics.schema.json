@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/metrics.schema.json",
+  "title": "Metrics",
+  "description": "Result of `rebar metrics --since <date> --until <date> --output json`: the date range plus one entry per registered metric id. Each entry is either a value (carrying the spec's `lens` and the value's `source`/`confidence`) or an `unavailable` object (`reason` + `accruing_since`) when the metric's data has not accrued.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["since", "until", "metrics"],
+  "properties": {
+    "since": { "type": "string" },
+    "until": { "type": "string" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "lens": { "type": "string" },
+          "source": { "type": "string" },
+          "confidence": { "type": "string" },
+          "unavailable": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["reason"],
+            "properties": {
+              "reason": { "type": "string" },
+              "accruing_since": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
