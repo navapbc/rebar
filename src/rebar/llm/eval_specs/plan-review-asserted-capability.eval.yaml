@@ -139,3 +139,20 @@ dataset:
       ## Acceptance Criteria
 
       - [ ] A green CI run publishes a `success` commit status via the GitHub statuses endpoint.
+
+# Frozen human-gold labels (judge kappa alignment, WS-G3). One condensed statement per
+# dataset scenario — balanced fire (finding) / no-fire (pass) — so a candidate judge can be
+# scored for agreement against the same misses/controls the live corpus exercises.
+gold_set:
+  - input: "dc58: plan reuses a `sign_verdict()` helper on completion.py, but completion.py has no signing helper (signing lives in rebar.signing)."
+    label: finding
+  - input: "db7b: plan relies on event compaction to expire reducer-ignored `REVIEW_RESULT` sidecar events, but compaction folds only known reduced types and never absorbs them."
+    label: finding
+  - input: "5886: plan asserts fetcher.py has no unmapped-Jira-status alert and must add one, but fetcher.py already emits `fetcher-unmapped-jira-status`."
+    label: finding
+  - input: "Plain new `--dry-run` flag on `rebar reconcile` with no capability claim about a named module."
+    label: pass
+  - input: "Plan correctly reuses fetcher.py's existing `fetcher-unmapped-jira-status` alert instead of adding one — the capability claim is true against the code."
+    label: pass
+  - input: "Capability claim about an external GitHub REST statuses endpoint the repo tools cannot settle — abstain, do not assert an ungroundable gap."
+    label: pass

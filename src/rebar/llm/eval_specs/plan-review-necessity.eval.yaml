@@ -105,3 +105,16 @@ dataset:
       ## Acceptance Criteria
 
       - [ ] `docs/architecture.md` gains an "inbound/outbound ordering" section with a diagram.
+
+# Frozen human-gold labels (judge kappa alignment, WS-G3). One condensed statement per
+# dataset scenario — balanced over-action (finding) / well-motivated (pass) — so a candidate
+# judge can be scored for agreement against the same positives/controls the live corpus exercises.
+gold_set:
+  - input: "Adds an in-memory LRU SnapshotCache in front of fetch_snapshot() with no reproduction and no evidence the current fetch is slow or costly — need un-demonstrated."
+    label: finding
+  - input: "Adds a normalize_timestamp() pass over inbound Jira fields with no reproduction, no Expected/Actual, and no named defect — never shows the current parser is wrong."
+    label: finding
+  - input: "Reproduces the silent-reopen bug with concrete steps and Expected/Actual before fixing it — necessity is demonstrated."
+    label: pass
+  - input: "Docs-only plan documents the reconcile ordering with no behavior/code change, so the necessity gate never opens."
+    label: pass

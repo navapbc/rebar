@@ -140,3 +140,16 @@ dataset:
         description: >
           Emit audit events conforming to the `audit_event` schema. depends_on dsn2-a (ordering:
           the schema must land first) — this child is explicitly scheduled after dsn2-a.
+
+# Frozen human-gold labels (judge kappa alignment, WS-G3). One condensed statement per
+# container dataset scenario — balanced smell (finding) / sound-decomposition (pass) — so a
+# candidate judge can be scored for agreement against the same fixtures the live corpus exercises.
+gold_set:
+  - input: "Saved-search feature cut horizontally into schema/data-access, service/API, and UI children — layer-cake split, no independently shippable slice."
+    label: finding
+  - input: "Reporter child reads the normalized-manifest.json that the normalizer child produces, but neither declares an ordering edge — consumed artifact without ordering."
+    label: finding
+  - input: "Two ticket-list filters each delivered as an independent end-to-end vertical slice (store + API + UI), no cross-child artifact."
+    label: pass
+  - input: "Audit-event producer/consumer children with an explicit depends_on ordering edge so the schema lands before the emitter."
+    label: pass
