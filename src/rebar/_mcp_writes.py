@@ -105,7 +105,12 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def transition_ticket(ticket_id: str, current_status: str, target_status: str) -> dict:
+    def transition_ticket(
+        ticket_id: str,
+        current_status: str,
+        target_status: str,
+        close_class: str = "",
+    ) -> dict:
         """Transition a ticket's status (optimistic concurrency). Returns the
         engine result {ticket_id, from, to, newly_unblocked}.
 
@@ -113,8 +118,19 @@ def register_write_tools(mcp, ctx) -> None:
         (``verify.require_plan_review_for_claim``) exactly like ``claim_ticket``.
         As with ``claim_ticket``, there is intentionally NO ``force`` bypass over
         MCP — an agent that hits the gate must earn an attestation
-        (``review_plan``); the audited ``--force`` override is CLI/library-only."""
-        return cast("dict[str, Any]", rebar.transition(ticket_id, current_status, target_status))
+        (``review_plan``); the audited ``--force`` override is CLI/library-only.
+
+        ``close_class`` is REQUIRED to close a ``bug`` ticket (any ``*->closed``
+        from a non-``idea`` status): pass one of the bounded classification values
+        (``regression``, ``plan_defect``, ``env_integration``, ``flaky``,
+        ``preexisting``, ``not_a_bug``, ``duplicate``, ``escalated``,
+        ``undetermined``). It is IGNORED for non-bug closes and for non-closing
+        transitions. There is deliberately NO ``force`` bypass — the no-force MCP
+        policy stays; a bug close without a valid ``close_class`` is refused."""
+        return cast(
+            "dict[str, Any]",
+            rebar.transition(ticket_id, current_status, target_status, close_class=close_class),
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def claim_ticket(ticket_id: str, assignee: str | None = None) -> ClaimResultOut:

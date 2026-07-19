@@ -456,3 +456,31 @@ def test_absent_mcp_extra_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(SystemExit) as exc:
         m.build_server()
     assert "mcp" in str(exc.value).lower()
+
+
+# ── bug-close over MCP requires a bounded close_class (ticket 376d) ──────────
+# transition_core enforces a bounded --class on every *->closed write for a bug
+# (ticket ed13). The MCP transition_ticket tool must expose an optional
+# ``close_class`` and thread it to rebar.transition, else agents over MCP cannot
+# close bug tickets at all.
+def test_mcp_transition_closes_bug_with_close_class(rebar_repo) -> None:
+    """transition_ticket must close a BUG when handed a valid close_class, and
+    the classification must be recorded on the ticket (observable outcome)."""
+    srv = build_server()
+    tid = rebar.create_ticket(
+        "bug", "MCP bug close", description="x" * 60, repo_root=str(rebar_repo)
+    )
+    asyncio.run(
+        srv.call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": tid,
+                "current_status": "open",
+                "target_status": "closed",
+                "close_class": "regression",
+            },
+        )
+    )
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["status"] == "closed"
+    assert state.get("close_class") == "regression"

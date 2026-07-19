@@ -323,7 +323,7 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
         _flush(_buf)
 
         # ── Pass 2e: statuses last (children before parents; archived via archive)
-        closes: list[tuple[str, str]] = []  # (local_id, source_id)
+        closes: list[tuple[str, str, str]] = []  # (local_id, source_id, close_class)
         for rec in created_records:
             local = id_map.get(_rec_sid(rec))
             if local is None:
@@ -344,16 +344,27 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
                 except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad archive never aborts the import run; collected via warn()
                     warn(f"could not archive {local}: {exc}")
             elif status == "closed":
-                closes.append((local, _rec_sid(rec)))
+                # transition_core requires a bounded --class on every bug *->closed
+                # write (ticket ed13). Carry the source close_class from the exported
+                # line (a top-level state key survives public_state); default a bug
+                # that lacks one to the safe bounded "undetermined" so the replay close
+                # is not rejected and the bug left open by the fail-open below (376d).
+                # Non-bug closes ignore close_class, so leave it empty for them.
+                cc = str(rec.get("close_class") or "")
+                if not cc and rec.get("ticket_type") == "bug":
+                    cc = "undetermined"
+                closes.append((local, _rec_sid(rec), cc))
 
         # Close children before parents so the open-children guard is satisfied;
         # force=True is a safety net for a genuinely-non-closed child in the source.
-        closes.sort(key=lambda pair: _local_depth(pair[0], parent_local), reverse=True)
-        for local, _sid in closes:
+        closes.sort(key=lambda triple: _local_depth(triple[0], parent_local), reverse=True)
+        for local, _sid, close_class in closes:
             # Every closeable ticket is still 'open' here (only in_progress/blocked/
             # archived were set above); force is a safety net for non-closed children.
             try:
-                transition_compute(local, "open", "closed", force=True, repo_root=rr)
+                transition_compute(
+                    local, "open", "closed", force=True, close_class=close_class, repo_root=rr
+                )
             except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad close never aborts the import run; collected via warn()
                 warn(f"could not close {local}: {exc}")
     finally:
