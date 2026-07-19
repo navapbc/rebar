@@ -83,6 +83,7 @@ def _completion_precheck(
     *,
     reason: str,
     force_close: str,
+    close_class: str = "",
 ):
     """The completion-verification close gate's PRE-close half (runs outside the write lock).
 
@@ -116,12 +117,15 @@ def _completion_precheck(
     if force_close:
         return None  # close, but withhold the signed confirmation (no verify, no sign)
 
-    # Cheap precondition BEFORE the billable LLM call: a bug close needs a valid --reason
-    # (transition_core would reject it anyway). Shared predicate, so it can't drift.
-    if ticket_type == "bug" and not txn.bug_close_reason_ok(reason):
+    # Cheap precondition BEFORE the billable LLM call: a bug close needs a valid --class
+    # (ticket ed13 — transition_core would reject it anyway). Shared predicate, so it can't
+    # drift. The old free-text --reason requirement is REMOVED; a valid --class satisfies the
+    # precheck.
+    if ticket_type == "bug" and not txn.bug_close_class_ok(close_class):
+        allowed = ", ".join(txn.CLOSE_CLASSES)
         raise CommandError(
-            'Error: closing a bug requires --reason starting with "Fixed:" or '
-            '"Escalated to user:" (checked before running completion verification).',
+            "Error: closing a bug requires --class <value> — one of: "
+            f"{allowed} (checked before running completion verification).",
             returncode=1,
         )
 
@@ -360,6 +364,7 @@ def close_ticket(
     *,
     reason: str,
     force_close: str,
+    close_class: str = "",
 ) -> dict:
     """Perform the locked write and its post-processing tail; return the transition
     result ``{ticket_id, from, to, newly_unblocked, noop}``.
@@ -413,7 +418,13 @@ def close_ticket(
 
         ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
         verified_result = _completion_precheck(
-            ticket_id, ticket_type, repo_root_str, repo_root, reason=reason, force_close=force_close
+            ticket_id,
+            ticket_type,
+            repo_root_str,
+            repo_root,
+            reason=reason,
+            force_close=force_close,
+            close_class=close_class,
         )
 
     from rebar._commands import _seam
@@ -430,6 +441,7 @@ def close_ticket(
         env_id=env_id,
         author=author,
         close_reason=reason,
+        close_class=close_class,
         force_close_reason=force_close,
         repo_root=repo_root,
     )

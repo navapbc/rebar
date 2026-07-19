@@ -405,11 +405,11 @@ def test_gate_runs_for_story_and_epic(rebar_repo: Path, monkeypatch, ttype: str)
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
 
 
-def test_gate_runs_for_bug_with_valid_reason(rebar_repo: Path, monkeypatch) -> None:
-    """With a VALID ``--reason``, a bug close reaches the verifier; a FAIL still blocks it
-    (the bug-reason precheck is a gate IN FRONT of the verifier, not a bypass of it).
-    Driven through ``transition_compute`` (the library ``transition`` has no ``reason`` arg),
-    so the raw :class:`CommandError` surfaces here rather than the wrapped RebarError."""
+def test_gate_runs_for_bug_with_valid_class(rebar_repo: Path, monkeypatch) -> None:
+    """With a VALID ``--class``, a bug close reaches the verifier; a FAIL still blocks it
+    (the bug-class precheck is a gate IN FRONT of the verifier, not a bypass of it).
+    Driven through ``transition_compute`` so the raw :class:`CommandError` surfaces here
+    rather than the wrapped RebarError. (ed13 replaced the old required --reason with --class.)"""
     from rebar._commands._seam import CommandError
 
     _enable(rebar_repo)
@@ -418,7 +418,7 @@ def test_gate_runs_for_bug_with_valid_reason(rebar_repo: Path, monkeypatch) -> N
     rid = _rid(tid, rebar_repo)
     with pytest.raises(CommandError) as ei:
         _t.transition_compute(
-            rid, "in_progress", "closed", reason="Fixed: patched it", repo_root=str(rebar_repo)
+            rid, "in_progress", "closed", close_class="regression", repo_root=str(rebar_repo)
         )
     assert ei.value.returncode == 1
     assert "AC1" in ei.value.message  # the verifier DID run (its finding is surfaced)

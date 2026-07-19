@@ -334,6 +334,7 @@ def transition(
     force: bool = False,
     reason: str = "",
     force_close: str | None = None,
+    close_class: str = "",
     repo_root=None,
 ) -> TransitionResult:
     """Transition a ticket's status with optimistic concurrency.
@@ -354,7 +355,10 @@ def transition(
     WITHOUT running the verifier or signing, leaving the ticket
     closed-without-signature (the durable "validation did not pass" signal). It is
     threaded to the same command-layer seam the CLI uses; ``None`` means "not a
-    forced close" (the verifier runs normally).
+    forced close" (the verifier runs normally). ``close_class`` is the library
+    counterpart of the CLI ``--class``: the REQUIRED bounded classification enum when
+    closing a ``bug`` (one of the ``close_class`` vocabulary), folded into reduced state;
+    ignored for non-bug transitions.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -380,6 +384,7 @@ def transition(
             force=force,
             reason=reason,
             force_close=force_close or "",
+            close_class=close_class,
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:

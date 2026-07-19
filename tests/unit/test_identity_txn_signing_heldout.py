@@ -96,7 +96,9 @@ def test_close_status_event_is_signed(signed_repo: Path) -> None:
     """Closing a ticket writes a SIGNED STATUS(closed) event."""
     b = rebar.create_ticket("bug", "b", repo_root=str(signed_repo))
     rebar.claim(b, assignee="ada", repo_root=str(signed_repo))
-    rebar.transition(b, "in_progress", "closed", reason="Fixed: done", repo_root=str(signed_repo))
+    rebar.transition(
+        b, "in_progress", "closed", close_class="regression", repo_root=str(signed_repo)
+    )
     closed = [
         e for e in _events(signed_repo, b, "STATUS") if e.get("data", {}).get("status") == "closed"
     ]

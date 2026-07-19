@@ -48,14 +48,21 @@ def test_idea_bug_closes_without_reason(rebar_repo: Path) -> None:
     assert out["to"] == "closed"
 
 
-def test_non_idea_bug_still_requires_reason(rebar_repo: Path) -> None:
-    """Regression: a normal bug close still requires a --reason (guard intact)."""
+def test_non_idea_bug_still_requires_class(rebar_repo: Path) -> None:
+    """Regression: a normal bug close now requires a --class enum (ticket ed13 replaced the
+    old required free-text --reason). The guard is intact — closing without a class is
+    rejected — and supplying a valid class closes it."""
     tid = rebar.create_ticket("bug", "Real bug", repo_root=str(rebar_repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))
 
-    with pytest.raises(rebar.RebarError, match="reason"):
+    with pytest.raises(rebar.RebarError, match="class"):
         rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) != "closed"
+
+    out = rebar.transition(
+        tid, "in_progress", "closed", close_class="regression", repo_root=str(rebar_repo)
+    )
+    assert out["to"] == "closed"
 
 
 @pytest.mark.parametrize("ttype", ("story", "epic"))
