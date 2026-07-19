@@ -257,6 +257,37 @@ jobs:
       - name: Aggregate the run conclusion
         uses: im-open/workflow-conclusion@8eac7f17381a6917bc04fec3e2c92e70ebc37526  # v3.0.0
 
+      # Check out ONLY the normalization script, from the TRUSTED default branch (not the
+      # patchset). `workflow_dispatch` runs this workflow's definition from main, so main is
+      # also where the trusted script lives — the vote decision must never run patchset-
+      # controlled code (the vote SSH key is scoped to the cast step's `with:`; keeping the
+      # decision logic trusted also stops a change from voting itself Verified). persist-
+      # credentials:false: nothing here pushes.
+      - name: Fetch the trusted conclusion-normalization script
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/normalize_ci_conclusion.sh
+          sparse-checkout-cone-mode: false
+
+      # im-open/workflow-conclusion can set WORKFLOW_CONCLUSION to `skipped` (its fallback
+      # when none of success/failure/cancelled is observed) or leave it empty — neither is in
+      # gerrit-review-action's vote-type domain {clear,success,failure,cancelled}. Piping it
+      # verbatim made the action hit `::error::Unknown vote-type ...; exit 1` BEFORE posting
+      # any label, so a green-CI change got NO Verified vote and was un-landable. Normalize
+      # into the domain, using the trusted needs.*.result as the fail-closed failure signal.
+      - name: Normalize the conclusion into the vote-type domain
+        id: normalize
+        shell: bash
+        env:
+          CONCLUSION: ${{ env.WORKFLOW_CONCLUSION }}
+          FAILURE_OBSERVED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          set -euo pipefail
+          vote="$(scripts/normalize_ci_conclusion.sh)"
+          echo "WORKFLOW_CONCLUSION='${CONCLUSION}' failure_observed='${FAILURE_OBSERVED}' -> vote-type='${vote}'"
+          echo "vote-type=${vote}" >> "$GITHUB_OUTPUT"
+
       - name: Cast Verified from the CI conclusion
         uses: lfreleng-actions/gerrit-review-action@a1c036a59b94c8ab89de26d378f6a28cc7378b13  # v1.1.2
         with:
@@ -267,8 +298,10 @@ jobs:
           gerrit-change-number: ${{ inputs.GERRIT_CHANGE_NUMBER }}
           gerrit-patchset-number: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
           # success -> Verified+1, failure|cancelled -> Verified-1 (fail-closed).
+          # Fed the NORMALIZED conclusion (see the normalize step): `skipped`/empty is coerced
+          # into the action's vote-type domain so it can never crash the cast pre-vote.
           # The action's vote message embeds THIS run's URL — its cast is
           # `review --message "<STATUS>: <server>/<repo>/actions/runs/<run_id>"` — so the
           # Gerrit vote always links back to the CI run's log surface (the "run URL in the
           # vote message" requirement; no custom `comment` input exists nor is needed).
-          vote-type: ${{ env.WORKFLOW_CONCLUSION }}
+          vote-type: ${{ steps.normalize.outputs.vote-type }}
