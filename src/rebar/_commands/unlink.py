@@ -25,9 +25,10 @@ _USAGE = (
     "       ticket unlink <source> <target>   (pair-scoped, NO relation arg;\n"
     "                                          removes the most-recent link between the pair)\n"
     "\n"
-    "  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from\n"
+    "  relation: blocks | depends_on | relates_to | duplicates | supersedes | "
+    "discovered_from | caused_by\n"
     "  relates_to creates bidirectional LINK events in both ticket dirs\n"
-    "  duplicates, supersedes, discovered_from are directional (no reciprocal link)"
+    "  duplicates, supersedes, discovered_from, caused_by are directional (no reciprocal link)"
 )
 
 _EVENT_ORDER = {"LINK": 0, "UNLINK": 1}

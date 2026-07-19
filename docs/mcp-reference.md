@@ -61,7 +61,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `create_identity` | Create an identity entity: a gate-/graph-exempt ticket recording a |
 | `create_ticket` | Create a ticket; returns {id, alias} (agents get the alias without |
 | `edit_ticket` | Edit ticket fields (title/priority/assignee/description/ticket_type). |
-| `link_tickets` | Link two tickets (one of the six canonical relations: blocks | |
+| `link_tickets` | Link two tickets (one of the seven canonical relations: blocks | |
 | `log_session` | Append a verbose entry to the current session_log, creating one on |
 | `reopen_ticket` | Reopen a closed ticket (closed -> open). Optimistic-concurrency: |
 | `run_workflow` | Start a workflow run; returns {run_id, ticket_id, status:'running'} _(live workflows whose steps make LLM calls additionally require `REBAR_MCP_ALLOW_LLM`)_ |
