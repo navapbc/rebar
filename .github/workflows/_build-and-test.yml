@@ -109,6 +109,14 @@ jobs:
       - name: config-check (infra configs parse; gating)
         run: make config-check
 
+      # Verified-gate parity drift-guard (jira-reb-1163): the Gerrit `Verified` vote
+      # (gerrit-verify.yaml's `vote` job) must depend on EVERY job that gates main on the
+      # push/PR mirror lanes. A job that gates main but is missing from vote.needs would earn
+      # Verified +1 pre-merge yet redden main post-merge (green-verify/red-main). This fails
+      # the build on any such drift. Style mirrors the server.json / criteria-routing gates.
+      - name: Verified-gate parity gate
+        run: python scripts/check_verify_gate_parity.py
+
   pip-audit:
     # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
     # installed dependency closure against the PyPI advisory / OSV database and

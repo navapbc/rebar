@@ -35,36 +35,15 @@ concurrency:
 
 jobs:
   eval-discipline:
-    name: eval discipline (offline — no model)
+    # The job body now lives in the reusable _eval-discipline.yml (workflow_call), shared
+    # verbatim with gerrit-verify.yaml (the Verified gate) so the eval-discipline gate runs
+    # on BOTH lanes and cannot drift (jira-reb-1163 — it previously ran on THIS mirror lane
+    # only, so a breaking change earned Verified +1 yet reddened main). No inputs => the
+    # reusable checks out the branch head; gerrit-verify passes the Gerrit patchset refspec.
     # Skip the redundant push run for PR branches (pull_request already covers them);
     # schedule has nothing to add to the offline tier.
     if: ${{ github.event_name != 'schedule' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install (dev)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
-      - name: Enforce eval discipline (offline)
-        # The strict per-spec validation (every packaged spec lenient-clean; every
-        # dataset-bearing spec strict-clean — registered scorers + balanced dataset +
-        # non-empty gold_set) is NOT a bespoke step here: it lives in
-        # tests/unit/test_eval_scorers.py::test_every_packaged_spec_passes_strict_validation,
-        # so it runs in the DEFAULT suite too and therefore BLOCKS the Gerrit `Verified`
-        # vote pre-merge (via _build-and-test.yml), which this non-voting workflow cannot
-        # do. Single source of truth; no inline CI copy to drift (ticket 1a5f).
-        run: |
-          python -m pytest -q \
-            tests/unit/test_eval.py \
-            tests/unit/test_eval_scorers.py \
-            tests/unit/test_new_eval_specs.py \
-            tests/unit/test_eval_solver.py
+    uses: ./.github/workflows/_eval-discipline.yml
 
   eval-live:
     name: eval live (gated — needs [agents,eval] + credentials)
