@@ -42,7 +42,7 @@ from rebar._commands.fsck_repair import (  # noqa: F401
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store import compat
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import _reclaim_if_stale_index_lock, run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
@@ -135,10 +135,14 @@ def _scan(
                         "— not removed (read-only)"
                     )
                 else:
-                    try:
-                        os.remove(lock_file)
-                    except OSError:
-                        pass
+                    # Reclaim through the hardened write-path helper (bug 4c6c): it
+                    # re-stats the lock immediately before unlinking and aborts unless
+                    # device+inode AND age still prove it the same stale file. A raw
+                    # os.remove here had NO such re-validation — a peer that replaced
+                    # the stale lock with a fresh LIVE one in the check->use window got
+                    # its live lock clobbered (the exact TOCTOU df83 fixed on the write
+                    # path). Messaging + no_mutate gating are unchanged.
+                    _reclaim_if_stale_index_lock(tracker)
                     lines.append("FIXED: removed stale .git/index.lock (older than 5 minutes)")
             else:
                 lines.append("WARN: .git/index.lock exists (younger than 5 minutes) — not removed")
