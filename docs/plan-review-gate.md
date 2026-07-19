@@ -663,6 +663,23 @@ that **triggers a human review**, not an automatic posture flip; the flip itself
 add nothing to be monitored — their advisory criteria accrue `detection_proxy`/`blocking_fp_proxy`
 from real reviews automatically, and this section is the gate they cite for eventual promotion.
 
+**R3 (`decomp-shape`) — a SECOND, independent gate on top of dogfood effectiveness.** The R3
+decomposition-shape container criterion ships **advisory as its permanent posture**, so it never
+blocks; but even as a *candidate* for a future blocking flip it is gated not only on the recorder
+evidence above (high `detection_proxy` / low `blocking_fp_proxy` / sufficient sample) but ALSO on
+**E6 judge order-stability clearing floor**. E6's order-shuffle experiment (ticket a880,
+`runs/e6_summary.json`) FAILED — `fleiss_kappa = 0.55` (< the 0.6 floor) and `raw_agreement = 0.7`
+(< the 0.8 floor) — a declared *R3 prerequisite failure*
+(`harnesses/e6_judge_reliability.py`). Order-sensitivity is a *general* judge property (the E6
+write-up: any new criterion, including R3's container criterion, inherits it), so while the same
+plan re-judged after a section shuffle can land differently, a **blocking** container verdict from
+`decomp-shape` would be untrustworthy. Advisory shipping is unaffected — a non-blocking coaching
+nudge is safe under judge instability — but **blocking-promotion of `decomp-shape` is deferred
+until BOTH (1) its dogfood effectiveness earns its blocks AND (2) E6 order-stability improves above
+floor.** (This is why R3's stub "E2+E6 batch eval" gate was re-planned: E2/E3 batch evals are
+permanently rejected on cost, and E6's order-stability result correctly defers *promotion* while
+leaving R3 free to ship advisory + be dogfood-monitored now.)
+
 **Cadence + cost.** Run `--record` on a standing cadence (a cron / `session-log`-style invocation)
 as reviews accumulate, then `--report`; both are deterministic and make **no LLM call**. The firing
 ledger `runs/criterion_firings.jsonl` is a local, growing artifact (~8 MB over the current corpus,

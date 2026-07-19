@@ -1184,5 +1184,31 @@
       }
     ],
     "routing": "leaf"
+  },
+  "decomp-shape": {
+    "exec": "AGENT",
+    "facet": "container",
+    "applies_at": {
+      "scope": [
+        "container"
+      ],
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "has_container_decomposition",
+        "check": "GATE: the parent is decomposed into >=2 children forming a decomposition of the parent's work. no (no children, or a single child) -> not-applicable -> PASS."
+      },
+      {
+        "key": "decomposition_shape_sound",
+        "check": "Only when gated in: the (parent, children) decomposition is free of both SHAPE smells. FIRE when either is present — (A) LAYER-CAKE: the children are partitioned by ARCHITECTURAL LAYER (e.g. a DB/schema child, a service/API child, a UI/frontend child) instead of vertical, independently-shippable slices, so no child is demoable alone and integration risk is deferred; or (B) CONSUMED-ARTIFACT-WITHOUT-ORDERING-EDGE: a child NAMES/CONSUMES an artifact (file, schema, event, symbol, endpoint) that a SIBLING produces, yet there is NO ordering dependency (depends_on/blocks) between them, so a scheduler may start the consumer before the producer exists. Cite the specific children and the layer axis or the producer->consumer pair. Distinct from G3 (child-coverage of parent ACs) and G4 (7 broad cross-child interaction modes): this probes the decomposition SHAPE itself. Advisory — never blocks."
+      }
+    ],
+    "routing": "container",
+    "context_needs": "live ticket dependency graph + children + linked artifacts (via rebar tools + filesystem) — read live, NOT fed as a snapshot"
   }
 }

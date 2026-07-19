@@ -363,16 +363,18 @@ def pass1_container(
     criteria: list[dict[str, Any]],
     sibling_roster: str,
 ) -> list[dict[str, Any]]:
-    """Run ALL container criteria (G3+G4) for a parent + a BIN of one-or-more WHOLE
-    children in a SINGLE agentic call (stories 98c6 merge + 1762 bin-packing). The
-    container prompt describes both audits over the shared (parent, children, roster)
-    context; presenting both rubrics + every child in one turn halves calls (merge) and
+    """Run ALL container criteria (G3/G4/decomp-shape — the ``CONTAINER_CRITERIA`` set) for a
+    parent + a BIN of one-or-more WHOLE children in a SINGLE agentic call (stories 98c6 merge +
+    1762 bin-packing). The container prompt describes the audits over the shared
+    (parent, children, roster) context; presenting the rubrics + every child in one turn halves
+    calls (merge) and
     packs small children together (bin-pack) while keeping per-criterion AND per-child
     attribution. The complete sibling roster lets an absence finding be cross-checked
     against ALL siblings before it stands.
 
     Criterion attribution is MODEL-SELF-REPORTED then VALIDATED against the container id
-    set ({G3,G4}) — out-of-set tags DROPPED, a finding mapping to no in-set criterion
+    set (the ``criteria`` passed in — G3/G4/decomp-shape) — out-of-set tags DROPPED, a finding
+    mapping to no in-set criterion
     dropped (mirrors ``pass1_chunk``; never fabricate an attribution). CHILD attribution
     is parsed from the model's ``location`` ('child <id>') and validated against the bin's
     children: a single-child bin falls back to its sole child; a multi-child finding the
