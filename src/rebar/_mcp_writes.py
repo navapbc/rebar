@@ -191,8 +191,9 @@ def register_write_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def link_tickets(id1: str, id2: str, relation: str) -> str:
-        """Link two tickets (one of the six canonical relations: blocks |
-        depends_on | relates_to | duplicates | supersedes | discovered_from)."""
+        """Link two tickets (one of the seven canonical relations: blocks |
+        depends_on | relates_to | duplicates | supersedes | discovered_from |
+        caused_by)."""
         rebar.link(id1, id2, relation)
         return "ok"
 

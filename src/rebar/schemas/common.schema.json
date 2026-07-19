@@ -14,7 +14,7 @@
     },
     "relation": {
       "type": "string",
-      "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"]
+      "enum": ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"]
     },
     "creation_channel": {
       "type": "string",

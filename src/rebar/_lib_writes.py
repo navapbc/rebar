@@ -589,8 +589,8 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
 def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
     """Link two tickets.
 
-    ``relation`` must be one of the six canonical relations: blocks, depends_on,
-    relates_to, duplicates, supersedes, discovered_from.
+    ``relation`` must be one of the seven canonical relations: blocks, depends_on,
+    relates_to, duplicates, supersedes, discovered_from, caused_by.
     """
     from rebar._commands import composer
 

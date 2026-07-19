@@ -15,7 +15,7 @@ Subcommands:
   reopen      Reopen a closed ticket (closed -> open; exit 10 if not currently closed)
   comment     Add a comment to a ticket
   session-log Capture helper: append "<entry>" to the current session_log (start rotates to a fresh log)
-  link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from)
+  link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by)
   unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)
   deps        Show dependency graph for a ticket (<ticket_id>)
   edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --parent; tags via --add-tag/--remove-tag/--set-tags)
