@@ -584,7 +584,20 @@ def compute_validity(
                     ),
                     "verdict": "stale-code",
                 }
-        else:
+        elif _authoritative_material(attestation) is None:
+            # UNSCOPED plan (no per-file dep map) with NO bound material fingerprint:
+            # nothing else anchors freshness, so fall back to the conservative whole-HEAD
+            # check (fail-closed for legacy material-less records).
+            #
+            # Bug 5e40: when a material fingerprint IS bound (the normal case) we do NOT
+            # gate on a bare whole-HEAD SHA equality here — that flipped a valid certified
+            # attestation to stale-head the instant HEAD advanced by ANY commit, even one
+            # wholly unrelated to the plan (plan text + material unchanged, only the head
+            # SHA moved), escalating the claim gate to a non-deterministic full re-review.
+            # Instead we let the material-invariance check below govern: an unscoped plan's
+            # freshness is anchored on its material fingerprint, so unrelated head drift no
+            # longer forces stale-head, while a genuine material change still invalidates
+            # (stale-material) and criteria-registry drift still invalidates (stale-regver).
             head = signing.head_sha(_config.repo_root(repo_root))
             # SECURITY (finding B): compare against the AUTHENTICATED anchor (op-cert: the SIGNED
             # merged_log_commit; HMAC: the head_sha mirror), never a mutable plaintext mirror.

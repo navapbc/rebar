@@ -76,12 +76,51 @@ def test_plan_review_valid_when_head_and_material_match(monkeypatch) -> None:
     assert compute_validity(att, state, "plan-review")["valid"] is True
 
 
-def test_plan_review_invalid_on_head_drift(monkeypatch) -> None:
-    _fp(monkeypatch, "pm")
+def test_plan_review_unscoped_unrelated_head_drift_stays_valid(monkeypatch) -> None:
+    """Bug 5e40: an UNSCOPED (no dep map), previously-certified plan whose MATERIAL
+    fingerprint is unchanged must NOT be invalidated when HEAD advances by an unrelated
+    commit. Freshness for an unscoped plan is anchored on the bound material fingerprint,
+    not a bare whole-HEAD SHA equality — so unrelated head drift no longer forces a
+    stale-head escalation to a non-deterministic full re-review."""
+    _fp(monkeypatch, "pm")  # current material == signed "pm" (unchanged)
+    rv = _regver(monkeypatch)
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headB")  # drifted
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "head_sha": "headA",  # signed at headA; HEAD moved to headB (unrelated)
+        "signed_at": 100,
+    }
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is True and res["verdict"] == "certified"
+
+
+def test_plan_review_unscoped_material_change_still_invalidates(monkeypatch) -> None:
+    """Guard against over-loosening: when the plan's MATERIAL actually changed, an
+    unscoped attestation MUST still invalidate (stale-material). Head is held MATCHING
+    here so the material change is the sole trigger — this guard is independent of the
+    fix and must stay GREEN both ways (before and after)."""
+    _fp(monkeypatch, "pm-NEW")  # current material != signed "pm"
+    rv = _regver(monkeypatch)
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")  # matches
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is False and res["verdict"] == "stale-material"
+
+
+def test_plan_review_unscoped_head_drift_stale_when_no_material_bound(monkeypatch) -> None:
+    """Fail-closed fallback: a material-LESS unscoped attestation has nothing to anchor
+    freshness on, so the conservative whole-HEAD check still fires on head drift."""
+    _fp(monkeypatch, None)
     rv = _regver(monkeypatch)
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headB")
     att = {
-        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "manifest": ["plan-review: PASS", rv],  # no material line bound
         "head_sha": "headA",
         "signed_at": 100,
     }
