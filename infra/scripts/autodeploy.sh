@@ -64,6 +64,26 @@ OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh
 # context; only install-certbot-timer.sh writes them, and infra/scripts/ is in no
 # trigger above, so a certbot-source change would otherwise never refresh the host.
 CERTBOT_PATHS='infra/scripts/install-certbot-timer.sh'
+# autodeploy's OWN installer/self-update (install-autodeploy.sh + the
+# rebar-autodeploy.{service,timer} unit files it writes) is DELIBERATELY EXCLUDED from
+# in-run re-materialization — there is intentionally NO AUTODEPLOY_PATHS block mirroring
+# OBS_PATHS/CERTBOT_PATHS above. WHY (do not "fix" this by adding one):
+#   1. Re-exec / self-modification race. This script runs AS rebar-autodeploy.service
+#      (ExecStart=$DEPLOY_REPO/infra/scripts/autodeploy.sh). install-autodeploy.sh rewrites
+#      /etc/systemd/system/rebar-autodeploy.{service,timer} + `systemctl daemon-reload` —
+#      i.e. re-materializing it in-run means the running unit rewrites and reloads its OWN
+#      service/timer definition mid-execution. The unattended path guarding a LIVE,
+#      FAIL-CLOSED submission gate must not mutate the mechanism that is currently running it.
+#   2. Staged-rollout / operator gate. install-autodeploy.sh deliberately installs the timer
+#      DISABLED; an operator dry-runs (`systemctl start rebar-autodeploy.service`) and only
+#      then `enable --now`s it (ADR 0026 "Back-out"; installer header differences 1 & 2). An
+#      in-run auto-re-materialize would silently re-assert those units behind that human gate,
+#      defeating the deliberate staged rollout.
+# Autodeploy's lifecycle (its units + installer) is therefore owned by the PROVISIONING/
+# operator layer (the one-time install-autodeploy.sh run + operator enable), not by this
+# unattended in-run re-materializer — the same v1 boundary as CONFIG_PATHS being DETECT-ONLY.
+# (The script BODY, autodeploy.sh, still updates in place via the BOT_PATHS rsync like any
+# other source; this exclusion is specifically about the installer/unit-file self-update.)
 # rsync excludes: protect the SSM secrets .env, the deploy marker, and dev/state dirs.
 RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' --exclude '/.deployed_ref' \
   --exclude '/.venv' --exclude '/.terraform' --exclude '/.serena' --exclude '/.claude' --exclude '/.tickets-tracker')
