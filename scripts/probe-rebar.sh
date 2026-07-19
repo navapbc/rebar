@@ -82,6 +82,10 @@ else
     mkdir -p "$REBAR_ROOT"
     ( cd "$REBAR_ROOT" && git init -q && git config user.email probe@example.com \
         && git config user.name probe && git commit -q --allow-empty -m init )
+    # Explicit init: auto-init is TTY-gated by design, so under `</dev/null`
+    # (non-interactive) the first `create` would otherwise fail. `rebar init`
+    # bypasses the interactivity check (see src/rebar/_cli/_init.py).
+    ( cd "$REBAR_ROOT" && "$RB" init --silent )
     TRACKER="$REBAR_ROOT/.tickets-tracker"
     _PRE_IDS=""
 fi
@@ -192,11 +196,14 @@ run_rb transition "$TASK" open closed; assert_rc 0 "task close (no reason needed
 run_rb reopen "$TASK"; assert_rc 0 "reopen closed -> open"
 assert_eq open "$("$RB" show "$TASK" | jq -r .status)" "reopen status"
 
-section "close guards — bug reason prefix, story/epic verdict-hash"
+section "close guards — bug --class vocabulary, story/epic verdict-hash"
 mk RBUG bug "PROBE: reason-guard bug"; assert_rc 0 "create fresh bug"
-run_rb transition "$RBUG" open closed; assert_rc_ne 0 "bug close requires --reason"
-run_rb transition "$RBUG" open closed --reason="patched"; assert_rc_ne 0 "bug reason prefix enforced"
-run_rb transition "$RBUG" open closed --reason="Fixed: probe"; assert_rc 0 "bug close with Fixed: reason"
+# Bug close now requires a bounded --class <value> (ticket ed13), REPLACING the
+# old free-text `--reason` prefix requirement: no class -> reject; invalid class
+# -> reject; a value from the closed vocabulary -> close.
+run_rb transition "$RBUG" open closed; assert_rc_ne 0 "bug close requires --class"
+run_rb transition "$RBUG" open closed --class=bogus; assert_rc_ne 0 "bug close rejects invalid --class"
+run_rb transition "$RBUG" open closed --class=regression; assert_rc 0 "bug close with valid --class"
 # Verdict-hash close gate is OPT-IN (default off, since 0.2.0): story/epic close
 # succeeds without --verdict-hash. Enforcement when enabled
 # (verify.require_verdict_for_close=true) is covered by the GAP-9 bash test.
@@ -258,7 +265,12 @@ run_rb fsck --output json; assert_contains '"issue_count"' "fsck json shape"
 run_rb bridge-fsck -o json; assert_contains '"orphaned"' "bridge-fsck json shape"
 
 section "lifecycle --output json — create/claim/transition/reopen/delete result shapes"
-run_rb create task "PROBE: lifecycle json" --output json; assert_rc 0 "create --output json"
+# Capture STDOUT ONLY: `create` prints an advisory `Warning: no file_impact
+# recorded ...` to STDERR, and run_rb folds stderr into $OUT (2>&1), which would
+# make $OUT invalid JSON and leave LCID empty. Parse the clean stdout stream for
+# both the shape asserts and the id extraction.
+OUT="$("$RB" create task "PROBE: lifecycle json" --output json 2>/dev/null)"; RC=$?
+assert_rc 0 "create --output json"
 assert_contains '"id"' "create json has id"; assert_contains '"alias"' "create json has alias"
 # `create --output json` can't go through mk() (which scrapes a bare-id line), so
 # track the id for cleanup explicitly — otherwise the soft-deleted tombstone dir
@@ -273,15 +285,18 @@ run_rb delete "$LCID" --user-approved --output json; assert_rc 0 "delete --outpu
 section "single-reducer parity — show == list == search shape (bug f026)"
 SK="$("$RB" show "$TASK" | jq -S 'keys')"
 LK="$("$RB" list | jq -S --arg t "$TASK" '.[]|select(.ticket_id==$t)|keys')"
-# `list` is lean BY DESIGN: it drops the bulky `comments`+`description` bodies that
-# `show` carries (opt back in with `list --full`). So the key sets are deliberately
-# NOT identical — assert the structural contract instead: `list`'s keys are a strict
-# subset of `show`'s, and the ONLY keys `show` adds are exactly comments+description.
-assert_eq '[]' "$(jq -nc --argjson s "$SK" --argjson l "$LK" '$l - $s')" \
-    "list keys are a subset of show keys"
-assert_eq '["comments","description"]' \
+# `list` and `show` are deliberately NOT identical key sets — each carries fields the
+# other omits, BY DESIGN:
+#   - `show` adds the bulky bodies (`comments`, `description`) that lean `list` drops
+#     (opt back in with `list --full`), plus the per-ticket `digest_freshness`.
+#   - `list` surfaces `managed_refs`, which `show` omits.
+# Assert the exact symmetric difference in BOTH directions so any drift is caught.
+assert_eq '["managed_refs"]' \
+    "$(jq -nc --argjson s "$SK" --argjson l "$LK" '($l - $s) | sort')" \
+    "list adds exactly managed_refs over show"
+assert_eq '["comments","description","digest_freshness"]' \
     "$(jq -nc --argjson s "$SK" --argjson l "$LK" '($s - $l) | sort')" \
-    "show adds exactly comments+description over lean list"
+    "show adds exactly comments+description+digest_freshness over lean list"
 run_rb show "$TASK"; assert_not_contains '"parent_status_uuid"' "internal key not leaked in show"
 assert_eq '[{"command":"echo","dd_id":"D1","dd_text":"t"}]' \
     "$("$RB" list | jq -c --arg t "$TASK" '.[]|select(.ticket_id==$t)|.verify_commands')" \
