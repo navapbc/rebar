@@ -59,6 +59,11 @@ CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/
 # Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
 # change reaches no trigger above and would otherwise never be refreshed on the box.
 OBS_PATHS='infra/scripts/observability.sh infra/scripts/install-observability.sh'
+# host certbot renew timer: same drift class as the probe above. The installed units
+# /etc/systemd/system/certbot-renew.{service,timer} live OUTSIDE the compose build
+# context; only install-certbot-timer.sh writes them, and infra/scripts/ is in no
+# trigger above, so a certbot-source change would otherwise never refresh the host.
+CERTBOT_PATHS='infra/scripts/install-certbot-timer.sh'
 # rsync excludes: protect the SSM secrets .env, the deploy marker, and dev/state dirs.
 RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' --exclude '/.deployed_ref' \
   --exclude '/.venv' --exclude '/.terraform' --exclude '/.serena' --exclude '/.claude' --exclude '/.tickets-tracker')
@@ -208,6 +213,29 @@ if changed "$OBS_PATHS"; then
     err obs-materialize-failed "install-observability.sh failed; /usr/local/bin probe may be stale"
   else
     log "host observability probe re-materialized on the box"
+  fi
+fi
+
+# ── host certbot renew timer: re-materialize on an installer-source change ─────
+# The systemd timer runs `certbot renew` from unit files that ONLY
+# install-certbot-timer.sh writes; nothing else refreshes them. infra/scripts/ is
+# in no trigger above (not a BOT_PATH, so a certbot-only change syncs nothing at
+# all), so the installed units would silently go stale — the same drift class the
+# OBS block above fixed (sibling parity, commit ffcf2c662 / ticket 1d63).
+# install-certbot-timer.sh is idempotent + runs as root (rewrites the unit files,
+# daemon-reload; certbot no-ops when the cert is current), so re-running it from
+# the TARGET source reconverges the host timer. DOMAIN/EMAIL flow through from the
+# /etc/rebar/autodeploy.env sourced above, exactly as the installer's defaults expect.
+# Non-fatal: a timer-refresh failure must not roll back the review-bot, but it emits
+# an AUTODEPLOY err marker so the staleness is alarmed instead of silent.
+if changed "$CERTBOT_PATHS"; then
+  log "host certbot renew timer sources changed; re-materializing from $TARGET"
+  if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
+    err certbot-materialize-failed "git checkout $TARGET in $MIRROR_DIR failed; host certbot timer left stale"
+  elif ! bash "$MIRROR_DIR/infra/scripts/install-certbot-timer.sh"; then
+    err certbot-materialize-failed "install-certbot-timer.sh failed; /etc/systemd/system certbot-renew units may be stale"
+  else
+    log "host certbot renew timer re-materialized on the box"
   fi
 fi
 
