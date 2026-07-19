@@ -680,6 +680,52 @@ floor.** (This is why R3's stub "E2+E6 batch eval" gate was re-planned: E2/E3 ba
 permanently rejected on cost, and E6's order-stability result correctly defers *promotion* while
 leaving R3 free to ship advisory + be dogfood-monitored now.)
 
+## R4 — the necessity probe + the lightweight bug review tier
+
+R4 (ticket 03a9, `clerkish-cloggy-cod`) ships two coupled ADVISORY pieces that close two gaps in
+the gate.
+
+**(a) The necessity / no-op probe (`necessity`).** A single-turn (1-TURN), advisory pass-1
+criterion (facet `scope-intent`) that flags a plan which does **not demonstrate the change is
+needed** — the current behavior is neither reproduced nor concretely motivated, so a mechanism is
+added without establishing that the status quo is wrong. This is the gate counterpart to
+**FixedBench's over-action result** (35–65% of agent changes taken without demonstrating
+necessity — the prior-art T1 finding this probe closes). It ACCEPTS a well-motivated plan (a
+reproduction, an Expected/Actual, a named defect/gap) and a justified no-op / docs-only /
+test-only outcome. It is DISTINCT from R1's `asserted-capability` (which greps whether a named
+module already provides the capability — a code-grounded surface check): `necessity` judges,
+from the plan text, whether the change is motivated *at all*. It is a real pass-1 finder — wired
+into the production `plan-review-finder` batch (`gates/plan-review.yaml`, `when:
+include_necessity`) so it runs on leaf plan reviews — registered in `CANONICAL_LLM` and routed
+advisory in `criteria_routing.json`.
+
+**(b) The lightweight bug review tier.** Before R4 the gate short-circuited **every** bug to a
+bare exempt-PASS (`workflow_ops.plan_review_precheck` → `orchestrator._exempt_verdict`,
+`llm_calls:0`), so a bug got no substantive review — verified on bug 5886, whose persisted
+`REVIEW_RESULT` was `{"runner":"exempt","verdict":"PASS","llm_calls":0}`. The bug tier instead
+runs a **light advisory review**: the DET floor + the `necessity` probe
+(`registry.BUG_TIER_CRITERIA = ("necessity",)`), and **never blocks a bug** — precheck downgrades
+every DET finding to advisory (`det_blocking:[]`) and the sole LLM criterion is advisory. The
+restriction is centralised in the single routing seam (`orchestrator.route_criteria` returns only
+`BUG_TIER_CRITERIA` for a `bug`), so BOTH the assemble step and the batch-runner's project-criteria
+fan-in honor it — an activated blocking `project.*` criterion can never be fanned into a bug review
+and block it. `necessity` deliberately does **not** `suppress_types:["bug"]` (contrast F1/F4/A1/G7)
+so it applies to bugs. The CLI claim-time bug exemption (`rebar._commands.gates`) is unchanged — a
+bug still needs no signed attestation to be claimed; the tier only makes an explicit
+`rebar review-plan <bug>` (and any gate run) produce a substantive advisory review instead of
+exempt-PASS. `session_log` / `code_review` / `identity` stay fully exempt.
+
+**Advisory-first + promotion.** Both pieces ship advisory (never block) and are validated by
+HAND-AUTHORED bounded sanity fixtures (`src/rebar/llm/eval_specs/plan-review-necessity.eval.yaml`,
+`rebar criteria eval necessity`; committed `runs/necessity_sanity.json` +
+`runs/bug_tier_sanity.json`) — **not** an E2/E3 batch eval (those are permanently rejected on
+cost, which is why R4's stub "retrospective eval on E2's class-4 corpus" gate was re-planned; E2's
+corpus does not exist on main). Both criteria are auto-monitored by the standing per-criterion
+effectiveness recorder (d8a5) with zero wiring, and their **advisory→blocking promotion is gated on
+that recorder's trailing metrics** (high `detection_proxy`, low `blocking_fp_proxy`, sufficient
+sample) exactly per the [promotion gate above](#standing-per-criterion-effectiveness-recorder--advisoryblocking-promotion-gate)
+— a dogfood-triggered human review, not an automatic flip.
+
 **Cadence + cost.** Run `--record` on a standing cadence (a cron / `session-log`-style invocation)
 as reviews accumulate, then `--report`; both are deterministic and make **no LLM call**. The firing
 ledger `runs/criterion_firings.jsonl` is a local, growing artifact (~8 MB over the current corpus,

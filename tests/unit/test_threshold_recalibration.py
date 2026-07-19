@@ -70,6 +70,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "removal-rationale": (0.95, "advisory"),
     "asserted-capability": (0.95, "advisory"),
     "decomp-shape": (0.95, "advisory"),
+    "necessity": (0.95, "advisory"),
 }
 
 

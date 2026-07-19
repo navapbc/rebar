@@ -664,6 +664,64 @@ Checklist:
 - Judge substance, not word-presence: a hedge on already-verified prose, an explicitly-flagged assumption, or a non-load-bearing aside is not a finding.
 - AC-clause dedup (rubric-level): a hedge inside an AC proving-command clause is E6.no_hedges territory — mark not-applicable; E6 owns it. This targets hedged requirements/premises outside the AC surface.
 
+## necessity
+**Necessity / no-op probe** — exec:1-TURN, advisory, facet:scope-intent
+
+GATE — apply only when the plan PROPOSES A CHANGE to existing behavior or code: it adds a
+mechanism, alters a code path, or fixes a defect. If the plan is a pure investigation / spike /
+doc-only / test-only plan, or its deliverable is an EXPLICITLY justified no-op, this is
+not-applicable → PASS.
+
+THE DEFECT — over-action without demonstrated necessity. FixedBench found that 35-65% of agent
+changes were taken WITHOUT demonstrating that the change was needed: a mechanism is added, a code
+path altered, a "fix" applied, but the plan never establishes that the CURRENT behavior is wrong,
+insufficient, or reproduces the problem. The productive review move is to ask the planner to
+DEMONSTRATE the need before building — reproduce or concretely motivate the current behavior the
+change targets.
+
+FIRE A FINDING when the plan proposes a change but does NOT demonstrate its necessity — there is:
+- no REPRODUCTION of the current behavior (no steps / Expected-vs-Actual / failing case), AND
+- no concrete MOTIVATION (no named defect, gap, or user/system problem the current behavior
+  causes) — the plan asserts a change is wanted but never shows the status quo is wrong.
+
+ACCEPT (PASS) when EITHER:
+- the plan MOTIVATES the change — it reproduces the current behavior (repro steps, an
+  Expected/Actual, a failing test), OR names a concrete defect/gap/user-problem the current
+  behavior causes; OR
+- the deliverable is a justified no-op / docs-only / test-only outcome the plan states as such.
+
+DISTINCT FROM neighbouring criteria (do NOT double-report their concerns here):
+- R1 `asserted-capability` greps whether a NAMED MODULE already provides (or lacks) the
+  capability the plan relies on — a code-grounded surface check. `necessity` instead judges,
+  from the plan text, whether the change is MOTIVATED at all. A plan can name a real module and
+  still fail to motivate why the current behavior needs changing (that is this criterion's miss).
+- E4 is the broad assertion/existence probe (blocking). `necessity` is the over-action /
+  no-demonstrated-need probe (advisory).
+- F4 asks WHO benefits; `necessity` asks whether the CURRENT behavior is shown to be wrong.
+
+This is a SINGLE-TURN plan-text judgment — reason over the plan's own Why / Reproduction /
+Motivation / context sections; you are not grounding against the codebase here.
+
+CHECKLIST SUB-ANSWERS (criterion-local):
+- proposes_a_change {yes|no|insufficient} — the GATE: does the plan propose a change to existing
+  behavior/code (not a pure investigation/doc/test-only plan, nor a stated justified no-op)?
+  `no` → not-applicable → PASS.
+- demonstrates_necessity {yes|no|insufficient} — only meaningful when gated in: does the plan
+  demonstrate the change is needed (reproduces OR concretely motivates the current behavior)?
+  A change proposed with NO reproduction and NO motivation is `no` (the over-action miss — a
+  finding); a well-motivated plan is `yes` (PASS); an ambiguous case is `insufficient` (coach,
+  do not assert).
+
+ADVISORY: this criterion errs toward surfacing and coaches ("demonstrate the current behavior /
+motivate the need before adding the mechanism"); it does NOT block a plan. Promotion to a
+blocking posture is a future dogfood-gated `criteria_routing.json` change per the
+advisory→blocking promotion gate in docs/plan-review-gate.md (the standing recorder
+`criterion_effectiveness.py` auto-monitors this criterion with zero per-criterion wiring).
+
+Checklist:
+- GATE: the plan PROPOSES A CHANGE to existing behavior/code (adds a mechanism, alters a code path, fixes a defect). no (a pure investigation/spike/doc-only/test-only plan, or a plan whose deliverable is explicitly a justified no-op) -> not-applicable -> PASS.
+- Only when gated in: the plan DEMONSTRATES the change is needed — it reproduces or concretely motivates the CURRENT behavior the change targets (a reproduction, an Expected/Actual, a named defect/gap, or a stated user/system problem the current behavior causes). FIRE when the plan adds a mechanism WITHOUT establishing the need — no reproduction, no motivation, no evidence the current behavior is wrong/insufficient (the FixedBench over-action gap: 35-65% of changes acted without demonstrating necessity). ACCEPT a well-motivated plan (reproduction/motivation present) and a justified no-op/docs-only/test-only outcome. This probes MOTIVATION of the change, DISTINCT from R1 asserted-capability (which greps whether a named module already provides the capability) and from E4 (broad assertion/existence). Advisory — never blocks.
+
 ## removal-rationale
 **Removal rationale (Chesterton's Fence)** — exec:AGENT, advisory, facet:codebase-grounding
 
