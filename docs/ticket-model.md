@@ -36,7 +36,7 @@ with no genesis window in which it is momentarily `open`.
 - **Fully listable/searchable.** `list --status=idea` returns them and `search` matches
   them, so ideas can always be found and later promoted (`idea → open`).
 - **`idea → closed` skips the completion gates.** Rejecting/dropping an idea closes with
-  **no** completion-verifier / signature / bug-close-reason gate (an undesigned idea has
+  **no** completion-verifier / signature / bug-close-class gate (an undesigned idea has
   nothing to verify) — but the **structural open-children guard still holds** (you cannot
   close a parent that has open children).
 - **Exempt from noisy `validate` findings.** `idea` tickets do not contribute
@@ -53,6 +53,28 @@ with no genesis window in which it is momentarily `open`.
   genesis event — never momentarily `open`/claimable. This is the one command that emits a
   non-`open` genesis `status` on the `CREATE` event (see
   [event-schema.md](event-schema.md), the `CREATE` row).
+
+## Closing a bug — the required `--class` classification
+
+Closing a **bug** (from any non-`idea` status) requires a bounded `--class <value>` that
+records **why** it closed. The value is folded onto the `*->closed` edge into reduced state,
+so `rebar show <bug> --output json` surfaces `close_class`. The closed vocabulary is exactly:
+
+| class | meaning |
+| --- | --- |
+| `regression` | a change reintroduced a previously-fixed defect |
+| `plan_defect` | the design/plan itself was wrong |
+| `env_integration` | an environment or integration issue |
+| `flaky` | a nondeterministic/intermittent failure |
+| `preexisting` | a latent defect that predated the work |
+| `not_a_bug` | behaved as intended |
+| `duplicate` | already tracked elsewhere |
+| `escalated` | handed off to the user/another owner |
+| `undetermined` | the escape hatch when no class fits |
+
+A missing or out-of-vocabulary `--class` is refused (the error names the allowed values).
+`--class` **replaces** the former free-text `--reason` requirement for bug closes.
+(`idea → closed` is a reject/drop and skips this gate.)
 
 ## Hierarchy and containment (`parent_id`, not a link)
 

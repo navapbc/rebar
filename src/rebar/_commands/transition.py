@@ -30,22 +30,23 @@ _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
 
 _USAGE = (
     "Usage: ticket transition <ticket_id> <current_status> <target_status> "
-    "[--reason=<text>] [--force] [--force-close=<reason>]\n"
-    "       ticket transition <ticket_id> <target_status> [--reason=<text>] [--force] "
-    "[--force-close=<reason>]  (auto-detects current status)\n"
+    "[--class=<value>] [--reason=<text>] [--force] [--force-close=<reason>]\n"
+    "       ticket transition <ticket_id> <target_status> [--class=<value>] [--reason=<text>] "
+    "[--force] [--force-close=<reason>]  (auto-detects current status)\n"
     "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
-    "  --reason=<text>          Required when closing bug tickets. Must start with "
-    "'Fixed:' or 'Escalated to user:'.\n"
+    "  --class=<value>          Required when closing bug tickets. One of: regression, "
+    "plan_defect, env_integration, flaky, preexisting, not_a_bug, duplicate, escalated, "
+    "undetermined.\n"
     "  --force                  Bypass the plan-review gate when starting work "
     "(open->in_progress); the --reason text becomes the audit note. Does NOT bypass the "
     "unresolved-children close guard (a structural invariant — close/detach children first).\n"
     "  --force-close=<reason>   Bypass the signature requirement for story/epic "
     "(requires user approval via hook).\n"
     "  Examples:\n"
-    '    ticket transition abc1 open closed --reason="Fixed: patched null check in foo.sh"\n'
+    "    ticket transition abc1 open closed --class=regression  # close a bug with its class\n"
     "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  "
     "# close story with a certified signature\n"
     '    ticket transition abc1 closed --force-close="verifier timed out"  # bypass with reason\n'
@@ -89,10 +90,14 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
-    """Parse [--reason[=]] [--force] [--force-close[=]] from the args AFTER
-    <current> <target>. Returns (reason, force, force_close_reason). Mirrors
+def _parse_flags(args: list[str]) -> tuple[str, bool, str, str]:
+    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] from the args AFTER
+    <current> <target>. Returns (reason, force, force_close_reason, close_class). Mirrors
     ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+
+    ``--class <value>`` / ``--class=<value>`` (ticket ed13) is the REQUIRED bounded
+    classification for a bug close (the vocabulary lives in ``txn.CLOSE_CLASSES``); it is
+    parsed here and threaded to ``transition_core``, which validates it.
 
     (The ``--verdict-hash`` flag was removed pre-1.0 — DE7; the story/epic close gate
     requires a certified signature via ``rebar sign``. It is now just an unknown
@@ -100,6 +105,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
     reason = ""
     force = False
     force_close = ""
+    close_class = ""
     i = 0
     while i < len(args):
         a = args[i]
@@ -110,6 +116,14 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
             if i + 1 >= len(args):
                 raise CommandError("Error: --reason requires a value", returncode=1)
             reason = args[i + 1]
+            i += 2
+        elif a.startswith("--class="):
+            close_class = a[len("--class=") :]
+            i += 1
+        elif a == "--class":
+            if i + 1 >= len(args):
+                raise CommandError("Error: --class requires a value", returncode=1)
+            close_class = args[i + 1]
             i += 2
         elif a == "--force":
             force = True
@@ -124,7 +138,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str]:
             i += 2
         else:
             i += 1
-    return reason, force, force_close
+    return reason, force, force_close, close_class
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -153,6 +167,7 @@ def transition_compute(
     reason: str = "",
     force: bool = False,
     force_close: str = "",
+    close_class: str = "",
     repo_root=None,
     cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
@@ -271,6 +286,7 @@ def transition_compute(
         repo_root,
         reason=reason,
         force_close=force_close,
+        close_class=close_class,
     )
 
 
@@ -449,7 +465,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, force_close = _parse_flags(flag_args)
+        reason, force, force_close, close_class = _parse_flags(flag_args)
         result = transition_compute(
             ticket_id,
             current_status,
@@ -457,6 +473,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
             reason=reason,
             force=force,
             force_close=force_close,
+            close_class=close_class,
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:

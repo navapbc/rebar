@@ -119,10 +119,13 @@ rebar transition <id> closed               # auto-detect current
 ```
 
 Statuses are `idea | open | in_progress | closed | blocked`. Closing a **bug**
-requires a `--reason` prefixed with `Fixed:` or `Escalated to user:`:
+requires a bounded `--class <value>` — one of `regression`, `plan_defect`,
+`env_integration`, `flaky`, `preexisting`, `not_a_bug`, `duplicate`, `escalated`,
+or `undetermined` (the escape hatch). The value is folded into reduced state so
+`rebar show <bug> --output json` surfaces `close_class`:
 
 ```sh
-rebar transition <id> in_progress closed --reason "Fixed: guard empty query"
+rebar transition <id> in_progress closed --class=regression
 ```
 
 **Reopen** moves a closed ticket back to open:

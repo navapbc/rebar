@@ -24,6 +24,17 @@ Relation = Literal[
     "blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"
 ]
 CreationChannel = Literal["cli", "mcp", "python", "jira", "import", "unknown"]
+CloseClass = Literal[
+    "regression",
+    "plan_defect",
+    "env_integration",
+    "flaky",
+    "preexisting",
+    "not_a_bug",
+    "duplicate",
+    "escalated",
+    "undetermined",
+]
 
 
 # --- shared objects (common.schema.json) ---
@@ -116,6 +127,7 @@ class TicketState(TypedDict):
     source_env: NotRequired[str | None]
     creation_channel: NotRequired[CreationChannel]
     creation_channel_inferred: NotRequired[Literal[True]]
+    close_class: NotRequired[CloseClass]
 
 
 class TicketStateLLM(TypedDict):
