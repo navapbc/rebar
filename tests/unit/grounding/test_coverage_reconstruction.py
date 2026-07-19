@@ -30,7 +30,6 @@ from rebar.grounding import evidence as ev
 pytestmark = pytest.mark.unit
 
 _HAVE_SEMGREP = bool(shutil.which("opengrep") or shutil.which("semgrep"))
-_HAVE_ASTGREP = bool(shutil.which("ast-grep") or shutil.which("sg"))
 
 
 @pytest.fixture

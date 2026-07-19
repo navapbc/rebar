@@ -70,9 +70,6 @@ _CTAGS_BIN = os.environ.get("REBAR_CTAGS_BIN", "ctags")
 #: (a dotted ``recv.attr``) is T1-abstain (T2 territory).
 REFERENCE_KINDS: frozenset[str] = frozenset({"symbol", "import", "dependency", "file", "member"})
 
-#: Kinds resolved (refute-eligible) by this T1 lane.
-_REFUTE_ELIGIBLE_KINDS: frozenset[str] = frozenset({"symbol", "import", "file"})
-
 #: A bare (single-segment) identifier — no dots, no path separators.
 _BARE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

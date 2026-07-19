@@ -156,7 +156,14 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
     cli = Path(in_process_cli())
     if not cli.exists():
         return None
-    _env = dict(_os.environ, REBAR_SYNC_PULL="off") if no_sync else None
+    # Build an explicit env so the live path (no_sync=False) does NOT inherit an
+    # ambient REBAR_SYNC_PULL=off from the caller — that would silently suppress
+    # the tickets-branch sync pull even though a syncing read was requested.
+    _env = dict(_os.environ)
+    if no_sync:
+        _env["REBAR_SYNC_PULL"] = "off"
+    else:
+        _env.pop("REBAR_SYNC_PULL", None)
     try:
         result = _sp.run(
             # ``--include-provenance`` keeps ``managed_refs`` (the monotonic

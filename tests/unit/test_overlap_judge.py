@@ -186,9 +186,6 @@ def test_surface_cap() -> None:
 
 def test_llm_error_abstain(monkeypatch: pytest.MonkeyPatch) -> None:
     # A judge_one that raises internally is treated as abstain (no raise, no surface).
-    def _boom(req):
-        raise RuntimeError("llm down")
-
     class _BoomRunner(Runner):
         name = "boom"
 

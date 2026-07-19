@@ -21,7 +21,6 @@ from _events import _UUID, REPO_ROOT, _write_event
 
 _LINK_UUID = "11112222-3333-4444-5555-666677778888"
 _LINK_UUID2 = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
-_LINK_UUID3 = "deadd00d-1234-5678-9abc-def012345678"
 
 
 @pytest.mark.unit
@@ -469,8 +468,6 @@ def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path)
 # ---------------------------------------------------------------------------
 
 _ALIAS_TARGET_UUID = "abcd-1234-5678-abcd"
-_ALIAS_LINK_UUID = "bbbb-cccc-dddd-eeee-ffff-0000-1111-2222"
-_ALIAS_SOURCE_UUID = "1111-2222-3333-4444-5555-6666-7777-8888"
 
 
 @pytest.mark.unit

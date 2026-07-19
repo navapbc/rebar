@@ -26,7 +26,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
-_ENGINE_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 
 
 @pytest.fixture(scope="module")

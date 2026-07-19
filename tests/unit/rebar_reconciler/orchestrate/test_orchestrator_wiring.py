@@ -462,3 +462,67 @@ class TestBindingStoreSaved:
 
         binding_store = stubs["_binding_store"]
         assert binding_store.save.called
+
+
+def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeypatch):
+    """AI-1 regression: the live (no_sync=False) read must NOT inherit an ambient
+    REBAR_SYNC_PULL=off — that would silently suppress the tickets-branch sync pull.
+    A no_sync=True read must still set REBAR_SYNC_PULL=off."""
+    import subprocess
+
+    rh = _load("reconcile_wiring_helpers", "reconcile_helpers.py")
+
+    fake_cli = tmp_path / "rebar-cli"
+    fake_cli.write_text("#!/bin/sh\n")  # must exist so the CLI branch runs
+    monkeypatch.setattr("rebar._engine.in_process_cli", lambda: str(fake_cli), raising=False)
+
+    captured: dict = {}
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        # Only intercept OUR ticket-CLI invocation; delegate everything else (e.g. the
+        # repo-isolation guard's own `git rev-parse HEAD`) to the real subprocess.run.
+        if cmd and str(cmd[0]) == str(fake_cli):
+            captured["env"] = kwargs.get("env")
+            return SimpleNamespace(returncode=0, stdout="[]")
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")  # ambient off in the parent env
+
+    rh._read_local_tickets(tmp_path, no_sync=False)
+    assert "REBAR_SYNC_PULL" not in captured["env"]  # live path strips it
+
+    rh._read_local_tickets(tmp_path, no_sync=True)
+    assert captured["env"]["REBAR_SYNC_PULL"] == "off"  # explicit-off path preserved
+
+
+def test_read_local_ticket_full_live_path_strips_ambient_sync_pull(tmp_path, monkeypatch):
+    """AI-1 regression (sibling site): run_differs._read_local_ticket_full has the same
+    env-inheritance contract as reconcile_helpers._read_local_tickets — the live
+    (no_sync=False) read must strip an ambient REBAR_SYNC_PULL=off."""
+    import subprocess
+
+    rd = _load("run_differs_wiring", "run_differs.py")
+
+    fake_cli = tmp_path / "rebar-cli"
+    fake_cli.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("rebar._engine.in_process_cli", lambda: str(fake_cli), raising=False)
+
+    captured: dict = {}
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd and str(cmd[0]) == str(fake_cli):
+            captured["env"] = kwargs.get("env")
+            return SimpleNamespace(returncode=0, stdout="{}")
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("REBAR_SYNC_PULL", "off")
+
+    rd._read_local_ticket_full(tmp_path, "T-1", no_sync=False)
+    assert "REBAR_SYNC_PULL" not in captured["env"]  # live path strips it
+
+    rd._read_local_ticket_full(tmp_path, "T-1", no_sync=True)
+    assert captured["env"]["REBAR_SYNC_PULL"] == "off"  # explicit-off path preserved

@@ -36,7 +36,7 @@ class CodeReviewBatchRunner(BatchRunner):
         # ticket scope>} ONLY when the commit's rebar-ticket trailers resolve >=1 ticket.
         self._context_overrides = context_overrides or {}
 
-    def run(self, req: BatchRunRequest, agent_runner: Any) -> BatchRunResult:
+    def run(self, req: BatchRunRequest, agent_runner: Any = None) -> BatchRunResult:
         from rebar.llm.workflow.executor import StepContext
 
         model = req.model_ladder[0] if req.model_ladder else None

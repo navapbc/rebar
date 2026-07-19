@@ -91,7 +91,7 @@ class BatchRunner:
     in here; epic A ships the reference :class:`DefaultBatchRunner`."""
 
     def run(
-        self, req: BatchRunRequest, agent_runner: AgentStepRunner
+        self, req: BatchRunRequest, agent_runner: AgentStepRunner | None = None
     ) -> BatchRunResult:  # pragma: no cover - interface
         raise NotImplementedError
 
@@ -110,7 +110,9 @@ class DefaultBatchRunner(BatchRunner):
     def __init__(self, max_batch_size: int = 4) -> None:
         self.max_batch_size = max_batch_size
 
-    def run(self, req: BatchRunRequest, agent_runner: AgentStepRunner) -> BatchRunResult:
+    def run(
+        self, req: BatchRunRequest, agent_runner: AgentStepRunner | None = None
+    ) -> BatchRunResult:
         model = req.model_ladder[0] if req.model_ladder else None
         plan: dict[str, Any] = {
             "finder": req.finder,
