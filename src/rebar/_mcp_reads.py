@@ -52,12 +52,17 @@ def register_read_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def explain_criterion(criterion_id: str) -> dict:
         """Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea /
-        WS10). A pure registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the
-        SAME shared lookup as the `rebar explain` CLI. On failure returns a structured error
-        ``{error, kind}`` (kind ∈ unknown-id / malformed-registry / missing-file)."""
+        WS10) — OR print an author-facing prose guide when ``criterion_id`` is a guide name
+        (``plan`` = how to write a passing plan; ``review`` = how to pass code review). A pure
+        registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared
+        lookup as the `rebar explain` CLI. On failure returns a structured error ``{error, kind}``
+        (kind ∈ unknown-id / malformed-registry / missing-file)."""
         from rebar.llm.plan_review import registry
 
         try:
+            if criterion_id in registry.AUTHOR_GUIDES:
+                guide = registry.explain_guide(criterion_id)
+                return {"criterion_id": criterion_id, "section": guide}
             section = registry.explain_criterion(criterion_id)
             return {"criterion_id": criterion_id, "section": section}
         except registry.ExplainError as exc:

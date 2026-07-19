@@ -622,6 +622,33 @@ def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -
     return section
 
 
+# ── Author-facing prose guides (the on-ramp, distinct from the generated criterion registry) ──
+# Hand-written, whole-file guides an author reads BEFORE writing a plan / pushing a change. Unlike
+# the criterion sections above (derived from the registry), these are prose and are NOT parity-
+# checked — `rebar explain plan` / `rebar explain review` and the MCP tool print them verbatim.
+AUTHOR_GUIDES: dict[str, tuple[str, ...]] = {
+    "plan": ("docs", "writing-a-passing-plan.md"),
+    "review": ("docs", "passing-code-review.md"),
+}
+
+
+def explain_guide(name: str, *, repo_root_path: str | None = None) -> str:
+    """Return an author-facing prose guide by short name (see :data:`AUTHOR_GUIDES`). Shares the
+    :class:`ExplainError` contract with :func:`explain_criterion` — ``unknown-id`` for a name not in
+    the map, ``missing-file`` when the doc is absent."""
+    from rebar import config
+
+    relpath = AUTHOR_GUIDES.get(name)
+    if relpath is None:
+        raise ExplainError(
+            "unknown-id", f"unknown guide {name!r}; known: {', '.join(sorted(AUTHOR_GUIDES))}"
+        )
+    path = config.repo_root(repo_root_path).joinpath(*relpath)
+    if not path.exists():
+        raise ExplainError("missing-file", f"author guide not found at {path}")
+    return path.read_text(encoding="utf-8")
+
+
 def _main(argv: list[str] | None = None) -> int:
     """``python -m rebar.llm.plan_review.registry validate-routing`` — the CI parity gate."""
     import sys

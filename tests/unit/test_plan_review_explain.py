@@ -118,6 +118,41 @@ def test_explain_mcp_success_and_error_states(monkeypatch, tmp_path) -> None:
     assert _mcp_explain_tool()("F1")["kind"] == "malformed-registry"
 
 
+# ── author-facing prose guides (`explain plan` / `explain review`) ───────────────
+def test_explain_guide_success_all_guides() -> None:
+    # every registered author guide resolves to real, non-empty prose in the committed tree
+    for name in registry.AUTHOR_GUIDES:
+        text = registry.explain_guide(name)
+        assert text.strip() and text.lstrip().startswith("#")
+
+
+def test_explain_guide_unknown_name() -> None:
+    with pytest.raises(registry.ExplainError) as ei:
+        registry.explain_guide("nonesuch")
+    assert ei.value.kind == "unknown-id"
+
+
+def test_explain_guide_missing_file(tmp_path) -> None:
+    with pytest.raises(registry.ExplainError) as ei:
+        registry.explain_guide("plan", repo_root_path=str(tmp_path))
+    assert ei.value.kind == "missing-file"
+
+
+def test_explain_cli_prints_guide(capsys) -> None:
+    from rebar._cli import main
+
+    assert main(["explain", "plan"]) == 0
+    assert "plan-review gate" in capsys.readouterr().out
+    assert main(["explain", "review"]) == 0
+    assert "code review" in capsys.readouterr().out.lower()
+
+
+def test_explain_mcp_routes_guide() -> None:
+    tool = _mcp_explain_tool()
+    out = tool("plan")
+    assert out["criterion_id"] == "plan" and out["section"].lstrip().startswith("#")
+
+
 # ── guide parity ────────────────────────────────────────────────────────────────
 def test_criteria_guide_parity_fails_on_removed_section(tmp_path) -> None:
     guide = tmp_path / "docs" / "plan-review-criteria-guide.md"
