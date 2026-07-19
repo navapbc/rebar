@@ -198,6 +198,13 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import scratch
 
         return scratch.scratch_cli(rest)
+    if sub == "metrics":
+        # Read command over the declarative metric registry. Init-only like the
+        # other reads: it resolves the store root but composes no writes.
+        ensure_initialized(init_only=True)
+        from rebar._commands import metrics as _metrics
+
+        return _metrics.metrics_cli(rest)
     if sub in _READS_INIT_ONLY:
         ensure_initialized(init_only=True)
         from rebar._engine_support import reads

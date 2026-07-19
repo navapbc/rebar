@@ -51,6 +51,7 @@ def _routable_subcommands() -> frozenset[str]:
         {
             "init",
             "scratch",
+            "metrics",
             "delete",
             "fsck",
             "fsck-recover",

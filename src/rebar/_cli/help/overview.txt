@@ -54,3 +54,4 @@ Subcommands:
   import        Import tickets from export NDJSON (clean rebar->rebar migration) [FILE] [--dry-run]
   grounding-info  Print the code-grounding oracle contract (dimensions/kinds/reasons/backends) [--output json]
   audit         Show a ticket audit trail (plan-review history + completion + code reviews) (audit show <id> [--output json|text])
+  metrics       Render the full metric registry over a date range [--since <date>] [--until <date>] [--output json|text]

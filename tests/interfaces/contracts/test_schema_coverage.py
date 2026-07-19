@@ -120,6 +120,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     # Driving it would require standing up the Jira bridge, so it is documented
     # EXEMPT here (mirrors the env-dependent exemptions in the MCP guard).
     "audit": lambda s: ["audit", "show", s["task"]],
+    "metrics": lambda s: ["metrics", "--since", "2026-01-01", "--until", "2026-07-01"],
     "bridge-status": EXEMPT_BRIDGE,
 }
 

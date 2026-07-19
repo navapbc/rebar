@@ -6,7 +6,7 @@ The `rebar` CLI has two command families. **Help-backed subcommands** are the di
 
 ## Help-backed subcommands
 
-The 51 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 52 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
@@ -258,6 +258,15 @@ Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [
 
 ```
 Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)
+```
+
+### `metrics`
+
+```
+Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]   (render the full metric registry over a date range)
+       --since <date>   lower bound of the reporting window (ISO-8601)
+       --until <date>   upper bound of the reporting window (ISO-8601)
+       --output         json (default) emits {since,until,metrics{<id>:...}}; text emits one line per metric in registry order
 ```
 
 ### `next-batch`
