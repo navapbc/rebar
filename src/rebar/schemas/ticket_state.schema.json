@@ -87,6 +87,10 @@
     "creation_channel_inferred": {
       "const": true,
       "description": "Marks a `creation_channel` that was INFERRED for a legacy CREATE (a later story's concern) rather than recorded at genesis. Present (always `true`) only when inference ran; absent on tickets whose channel was stamped at CREATE."
+    },
+    "close_class": {
+      "$ref": "common.schema.json#/$defs/close_class",
+      "description": "The bounded classification recorded when a `bug` ticket is closed (the required `--class` enum on `transition <bug> ... closed`). Folded onto the `*->closed` edge into reduced state so `rebar show <bug>` surfaces WHY the bug closed. Present only on closed bugs."
     }
   }
 }

@@ -21,6 +21,11 @@
       "enum": ["cli", "mcp", "python", "jira", "import", "unknown"],
       "description": "The public ingress that produced a ticket's genesis CREATE event: `cli` (the rebar CLI), `mcp` (the MCP server), `python` (the direct library facade), `jira` (Jira-inbound), `import` (NDJSON import), or `unknown` (a legacy CREATE that carried no channel; projection-only, never a valid live-write value)."
     },
+    "close_class": {
+      "type": "string",
+      "enum": ["regression", "plan_defect", "env_integration", "flaky", "preexisting", "not_a_bug", "duplicate", "escalated", "undetermined"],
+      "description": "The bounded classification recorded when a `bug` ticket is closed (via `transition <bug> ... closed --class <value>`), folded into reduced state as `close_class`. One of: `regression` (a change reintroduced a previously-fixed defect), `plan_defect` (the design/plan was wrong), `env_integration` (an environment/integration issue), `flaky` (a nondeterministic/intermittent failure), `preexisting` (a latent defect that predated the work), `not_a_bug` (behaved as intended), `duplicate` (already tracked elsewhere), `escalated` (handed off to the user/another owner), or `undetermined` (the escape hatch when no class fits)."
+    },
     "priority": {
       "type": "integer",
       "minimum": 0,

@@ -192,6 +192,23 @@ def _fold_claimed_session(state: dict, data: dict) -> None:
         state["claim_remote_session"] = data.get("remote_session")
 
 
+def _fold_close_class(state: dict, data: dict) -> None:
+    """Record the bug-close classification on a winning ``*->closed`` STATUS fold (ticket ed13).
+
+    ``close_class`` records WHY a bug closed — the bounded ``--class`` enum the close write
+    stamped onto the ``*->closed`` STATUS event's ``data`` (see
+    ``rebar._commands.txn.transition_core``). On that edge we set it ONLY when the write side
+    actually stamped a value — a non-bug close or an ``idea->closed`` drop carries none, and we
+    leave the key ABSENT rather than storing ``None`` (present-only, so the optional
+    string-enum ``close_class`` schema is never handed a null). Mirrors
+    :func:`_fold_claimed_session`: applied ONLY when THIS event's status is being applied (the
+    caller invokes it in the normal-update and fork-WINNER branches, NEVER where the existing
+    chain wins), so a losing concurrent close never overwrites the winner's class. Older clones
+    ignore the additive ``data["close_class"]`` key (forward-compatible)."""
+    if data.get("status") == "closed" and data.get("close_class"):
+        state["close_class"] = data["close_class"]
+
+
 def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
     """Apply a STATUS event with fork detection and lexical UUID tie-break.
 
@@ -245,6 +262,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
             state["status"] = data.get("status", state["status"])
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
             _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
+            _fold_close_class(state, data)  # bug-close class on the *->closed winning edge
         else:
             # Existing chain wins; keep state as-is.
             winner_uuid = existing_uuid
@@ -270,6 +288,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
     else:
         state["status"] = data.get("status", state["status"])
         _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
+        _fold_close_class(state, data)  # bug-close class on the *->closed edge
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
         # subsequent concurrent sibling forks against this event's identity and
         # resolves by the lexical-UUID rule above — deterministically and
