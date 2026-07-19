@@ -205,6 +205,8 @@ jobs:
           git config --global init.defaultBranch main
       - name: README quickstart golden-path (against the installed rebar)
         run: python scripts/check_readme_quickstart.py
+      - name: End-to-end CLI probe (against the installed rebar)
+        run: bash scripts/probe-rebar.sh </dev/null
 
   verify-identity:
     # PRE-MERGE whole-store authenticated-authorship gate. Mitigates the gap that let the
