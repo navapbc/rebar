@@ -123,6 +123,8 @@ jobs:
           git config --global init.defaultBranch main
       - name: README quickstart golden-path (against the installed rebar)
         run: python scripts/check_readme_quickstart.py
+      - name: End-to-end CLI probe (against the installed rebar)
+        run: bash scripts/probe-rebar.sh </dev/null
 
   # Artifact-provenance probe (story 6168). The job body now lives in the reusable
   # _artifact-probe.yml (workflow_call), shared verbatim with gerrit-verify.yaml (the
