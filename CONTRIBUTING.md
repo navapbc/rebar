@@ -178,6 +178,19 @@ label — you run Submit yourself.
 > natively by the Submit ACL in `infra/gerrit/project.config` (managed by
 > `infra/gerrit/setup-project.sh` via `CONTRIBUTOR_MEMBERS`).
 
+### 2f. After merge — fast-forward your worktree, THEN close the ticket
+
+Once the change **merges**, and **before** `rebar transition <id> in_progress closed`,
+**fast-forward your own worktree** so the merged commit is reachable from its HEAD — from inside
+the worktree run `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`).
+The close runs a completion precheck that reads **your worktree's** git history and requires the
+merged `rebar-ticket: <id>` commit to be reachable from HEAD; without the fast-forward it fails
+with "cannot confirm the work landed."
+
+> **NEVER** fast-forward, reset, or stash the shared main checkout to satisfy a close — it may
+> hold uncommitted operator WIP that a fast-forward would clobber. Advance **your worktree**, or
+> spin up a throwaway worktree at `origin/main`, instead.
+
 ---
 
 ## Sign your work (DCO)
