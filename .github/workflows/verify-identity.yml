@@ -1,4 +1,4 @@
-name: verify-identity
+name: Verify Authorship Identity
 
 # Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). Re-verifies every
 # in-scope mutating event's signature against its author identity's commit-ancestry-scoped

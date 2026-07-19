@@ -1,4 +1,4 @@
-name: release
+name: Release
 
 # Build and publish nava-rebar to PyPI via Trusted Publishing (OIDC) — no stored token.
 #

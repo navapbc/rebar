@@ -1,4 +1,4 @@
-name: optionality
+name: Optional-Dependency Isolation (mirror)
 
 # Enforce that rebar's runtime stays LEAN (epic a88f / WS-J3). Extras can only ADD
 # dependencies, so without CI the base silently grows heavy. The checks themselves live

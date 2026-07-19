@@ -1,4 +1,4 @@
-name: external-integration
+name: Live External Integration
 
 # Manually-triggered EXTERNAL-integration suite (tests/external/): tests that hit
 # third-party services and make REAL, billable LLM calls, so they are deliberately

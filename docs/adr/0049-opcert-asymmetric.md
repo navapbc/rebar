@@ -90,7 +90,7 @@ model wholesale).
 ### 5. Merge gate + authoritative era anchor
 
 `rebar verify-opcert` verifies the required-environment completion-verifier certificate over the
-**merged log**, extending the shipped `verify-identity.yaml` merge gate. Verification is **against
+**merged log**, extending the shipped `verify-identity.yml` merge gate. Verification is **against
 the out-of-band-pinned public key**, not the certificate's self-claimed (unauthenticated) DSSE
 `keyid` hint. Certificates bind `{ticket id, material fingerprint, merged-log position}` so a cert
 cannot be replayed onto another ticket or stale state.

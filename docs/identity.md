@@ -195,9 +195,9 @@ verify-authorship` emits a `verified` verdict for it. (Note: this is the SSH-aut
 distinct from `rebar verify-signature`, which certifies HMAC *manifest* attestations from the
 `rebar sign` command, not event authorship.)
 
-## The CI merge-gate: `verify-identity.yaml` (story cc0b)
+## The CI merge-gate: `verify-identity.yml` (story cc0b)
 
-The authenticated-authorship control runs in CI as `.github/workflows/verify-identity.yaml`:
+The authenticated-authorship control runs in CI as `.github/workflows/verify-identity.yml`:
 
 - **It mounts the tickets store.** The store lives on the `tickets` orphan branch, which a
   plain code checkout does not contain (a bare `rebar verify-identity` would exit 2, "store

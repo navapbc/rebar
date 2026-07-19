@@ -1,4 +1,4 @@
-name: CodeQL
+name: CodeQL SAST
 
 # Static analysis (SAST) on the GitHub mirror. CodeQL is free for public repos and
 # runs fine on this read-only mirror: it only needs push/schedule triggers and writes

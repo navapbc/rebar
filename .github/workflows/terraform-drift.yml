@@ -7,7 +7,7 @@
 # Auth: GitHub OIDC -> the rebar-terraform-plan IAM role (infra/terraform/iam.tf), which is
 # ReadOnlyAccess + kms:Decrypt-via-SSM. `-lock=false` keeps the plan strictly read-only (no
 # S3 state-lock write needed). No AWS static keys are stored in the repo.
-name: terraform-drift
+name: Terraform Drift
 
 on:
   pull_request:

@@ -1,4 +1,4 @@
-name: _optionality
+name: Optional-Dependency Isolation (reusable)
 
 # Reusable (workflow_call) form of the optionality contract — the lean-runtime,
 # clean-core-wheel, per-extra, and union checks. Invoked from TWO callers:

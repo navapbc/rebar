@@ -1,4 +1,4 @@
-name: test
+name: Test Suite (mirror)
 
 # Run the full test suite on every push and PR. rebar's safety story leans on
 # "the suite catches it", so this is the gate that makes that automatic (ticket

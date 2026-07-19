@@ -76,7 +76,7 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 [identity]
 
 # Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). The CI workflow
-# `.github/workflows/verify-identity.yaml` runs `rebar verify-identity` with NO forced
+# `.github/workflows/verify-identity.yml` runs `rebar verify-identity` with NO forced
 # flags, so its enforcement posture and grandfather boundary come from HERE.
 #
 # require_authenticated: ROLLED BACK TO OFF (advisory) — SECOND rollback. The re-enablement

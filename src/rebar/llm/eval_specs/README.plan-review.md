@@ -37,17 +37,15 @@ mirrored in the spec's `tolerance:` block, and pinned identical by
 ### CI posture (cautious — evals are non-deterministic + cost live $)
 
 - **Offline discipline (every PR, REQUIRED).** The container spec joins the existing
-  offline check unchanged: `eval.yml`'s `eval-discipline` job validates *every* packaged
+  offline check unchanged: `prompt-eval.yml`'s `eval-discipline` job validates *every* packaged
   `eval_specs/*.eval.yaml` (`validate_eval_spec`), and the parity gate logic is unit-tested
   with synthetic records. Deterministic, no model, no credentials — cheap and safe to block.
-- **Live semantic eval (OPT-IN, path-scoped, NON-BLOCKING).** The billable, non-deterministic
-  model run lives in `.github/workflows/eval-plan-review-container.yml`: triggered by
-  `workflow_dispatch` (opt-in) and a `pull_request` **path filter** scoped to
-  `src/rebar/llm/reviewers/**` + `src/rebar/llm/eval_specs/**` + the plan-review code
-  (`src/rebar/llm/plan_review/**`), so it **never runs on unrelated PRs** (no live $). It is a
-  separate workflow and **not a required status check** — a flaky run can't block the build.
-  For S4/S5 it is a **human-reviewed development gate**: dispatch it, review the
-  recall / attribution-accuracy report, and require a pass before merging the candidate.
+- **Live semantic eval (OPT-IN, on-demand).** The billable, non-deterministic model run is
+  executed **manually / locally** on demand (see [Run](#run) below) against the candidate
+  container path. It was previously wired to a dedicated `eval-plan-review-container.yml`
+  workflow as a human-reviewed development gate for story da34's S4/S5 work; that workflow was
+  **retired once da34 closed** (it was never a required status check). Re-run the semantic eval
+  by hand — or re-introduce a path-scoped opt-in workflow — if the container path changes again.
 
 ## Run
 
