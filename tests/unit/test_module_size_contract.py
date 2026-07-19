@@ -1,154 +1,72 @@
-"""Structural contract test for the module-size allowlist (epic drag-gripe-brake, Phase 4).
+"""Structural contract for the module-size hard cap (epic 716f, Phase 2).
 
-The module-size policy (docs/architecture.md) is enforced in CI by a shell gate in
-``.github/workflows/gerrit-verify.yaml`` (the gating ``Verified`` vote) and mirrored in
-``.github/workflows/test.yml``. That shell check is BRITTLE in two ways the story set out to
-kill:
+The module-size policy (docs/architecture.md) used to be a *growth ratchet* with a
+grandfathering escape hatch — a bare-path allowlist plus a per-file ceilings file. Epic 716f
+split every over-cap module and drained that allowlist to zero, then removed the escape hatch
+entirely: the cap is now ABSOLUTE. No ``src/rebar`` module may exceed the limit, and there is
+no allowlist to exempt one.
 
-* it is text/stream plumbing (``awk``/``comm``/``grep``) with NO Python function a unit test can
-  exercise, so a drift between the files' format and the parser is invisible until CI; and
-* ``comm -23`` only flags over-cap files MISSING from the allowlist — it never notices a STALE
-  entry (a path that is no longer over cap, or is not a path at all). A literal ``</content>``
-  paste-artifact line sat in the allowlist undetected precisely because of this.
+The limit itself is single-sourced in ``.github/module-size-limit.txt`` — the SAME file the CI
+``Module-size gate`` reads — so the gate and this test can never disagree on the number. That
+file is LOCKED by the CI gate: changing the value requires an administrator to override the
+gate (force-submit); a normal contributor change to it fails ``Verified``.
 
-The policy is expressed in TWO sibling files (story S1 growth ratchet):
-
-* ``.github/module-size-allowlist.txt`` — soft-cap-exempt MEMBERSHIP, one bare path per line.
-  Kept in the legacy bare-path format so the CI gate stays green in both directions across the
-  ratchet rollout (a change adding the ratchet is verified by ``main``'s bare-path gate).
-* ``.github/module-size-ceilings.txt`` — the per-file growth CEILING (``"<path> <max-lines>"``).
-
-This test replaces the brittle, one-directional shell check with STRUCTURAL assertions: it
-computes the over-cap set from a function and asserts SET EQUALITY against the membership file
-(both directions), asserts the two files list the same paths, and asserts every file is within
-its pinned ceiling — no grep/glob/substring heuristics.
+This test mirrors the gate in-process: it reads the limit from the single source and asserts
+no ``src/rebar`` ``*.py`` file exceeds it. Line counting uses ``text.count("\\n")`` to match the
+gate's ``wc -l`` semantics exactly (``wc -l`` counts newlines).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src" / "rebar"
-ALLOWLIST = REPO_ROOT / ".github" / "module-size-allowlist.txt"
-CEILINGS = REPO_ROOT / ".github" / "module-size-ceilings.txt"
-SOFT_CAP = 800  # docs/architecture.md "Module-size policy" — must match the CI gate's threshold.
+LIMIT_FILE = REPO_ROOT / ".github" / "module-size-limit.txt"
 
 
-def compute_over_cap_modules(src_root: Path, *, cap: int = SOFT_CAP) -> set[str]:
-    """The repo-relative POSIX paths of ``src_root`` ``*.py`` files OVER ``cap`` lines.
+def read_limit() -> int:
+    """The module-size limit, read from the single source the CI gate also reads."""
+    return int(LIMIT_FILE.read_text(encoding="utf-8").strip())
 
-    Line counting uses ``text.count("\\n")`` to match the CI gate's ``wc -l`` semantics exactly
-    (``wc -l`` counts newlines), so this function and the shell gate can never disagree on which
-    files are over cap. ``__pycache__`` is skipped, mirroring the gate's ``grep -v __pycache__``."""
-    over: set[str] = set()
+
+def compute_over_cap_modules(src_root: Path, *, cap: int) -> dict[str, int]:
+    """Repo-relative POSIX path -> LOC for every ``src_root`` ``*.py`` file OVER ``cap`` lines.
+
+    Line counting uses ``text.count("\\n")`` to match the CI gate's ``wc -l`` semantics exactly.
+    ``__pycache__`` is skipped, mirroring the gate's ``grep -v __pycache__``."""
+    over: dict[str, int] = {}
     for path in src_root.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
-        line_count = path.read_text(encoding="utf-8", errors="surrogateescape").count("\n")
-        if line_count > cap:
-            over.add(path.relative_to(REPO_ROOT).as_posix())
+        loc = path.read_text(encoding="utf-8", errors="surrogateescape").count("\n")
+        if loc > cap:
+            over[path.relative_to(REPO_ROOT).as_posix()] = loc
     return over
 
 
-def read_membership(path: Path) -> set[str]:
-    """The soft-cap-exempt membership file as a set of repo-relative paths (bare-path format,
-    first whitespace-delimited field of each non-blank, non-comment line)."""
-    out: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        out.add(stripped.split()[0])
-    return out
+def test_limit_file_is_a_single_positive_int() -> None:
+    """The limit is single-sourced in ``.github/module-size-limit.txt`` as one positive int —
+    the same file the CI ``Module-size gate`` reads (and locks)."""
+    assert LIMIT_FILE.is_file(), f"{LIMIT_FILE} (the single-source module-size limit) is missing"
+    limit = read_limit()
+    assert limit > 0, f"module-size limit must be a positive integer, got {limit}"
 
 
-def read_ceilings(path: Path) -> dict[str, int]:
-    """The ceilings file as ``{path: ceiling}`` (story S1 growth ratchet). Each non-blank,
-    non-comment line is ``"<path> <max-lines>"``; a bare-path line (no integer ceiling) parses
-    to a ceiling of :data:`SOFT_CAP`. A dict, so the tests assert membership + the per-file
-    ceiling structurally (not line order / text)."""
-    out: dict[str, int] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        parts = stripped.split()
-        out[parts[0]] = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else SOFT_CAP
-    return out
-
-
-def test_allowlist_equals_computed_over_cap_set() -> None:
-    """The membership allowlist PATHS == the computed over-cap set (a STRUCTURAL contract,
-    both directions). Catches a new over-cap offender (must be split or allowlisted) AND a
-    stale or garbage allowlist entry (must be removed) — neither of which the one-directional
-    shell ``comm -23`` gate detects."""
-    over_cap = compute_over_cap_modules(SRC_ROOT)
-    allowed = read_membership(ALLOWLIST)
-
-    new_offenders = over_cap - allowed
-    stale_entries = allowed - over_cap
-    assert over_cap == allowed, (
-        "module-size allowlist drifted from the computed over-cap set "
-        f"(cap={SOFT_CAP} lines).\n"
-        f"  NEW over-cap files NOT allow-listed (split them, or add to "
-        f"{ALLOWLIST.name} + {CEILINGS.name} + a docs/architecture.md remedy row): "
-        f"{sorted(new_offenders)}\n"
-        f"  STALE allowlist entries no longer over cap / not a real over-cap path "
-        f"(remove them, or lower/graduate the ceiling): {sorted(stale_entries)}"
+def test_no_src_module_over_the_hard_cap() -> None:
+    """The cap is ABSOLUTE: no ``src/rebar`` ``*.py`` file may exceed the limit. There is no
+    allowlist escape hatch (epic 716f removed it) — a new over-cap file must be split."""
+    cap = read_limit()
+    over = compute_over_cap_modules(SRC_ROOT, cap=cap)
+    assert over == {}, (
+        f"src/rebar file(s) over the {cap}-LOC hard cap (split them along a real call-graph "
+        f"seam — there is no allowlist to exempt them): {dict(sorted(over.items()))}"
     )
 
 
-def test_membership_and_ceilings_list_the_same_paths() -> None:
-    """The two sibling files are kept in sync: every membership path has a ceiling row and
-    vice versa. A file exempt from the soft cap must carry a pinned ceiling, and a pinned
-    ceiling must correspond to an exempt file — otherwise one of the two CI gate steps would
-    silently disagree with the other."""
-    membership = read_membership(ALLOWLIST)
-    ceilings = set(read_ceilings(CEILINGS))
-    missing_ceiling = membership - ceilings
-    orphan_ceiling = ceilings - membership
-    assert membership == ceilings, (
-        "module-size membership and ceilings files are out of sync.\n"
-        f"  MEMBERSHIP paths with no ceiling row in {CEILINGS.name}: {sorted(missing_ceiling)}\n"
-        f"  CEILING rows with no membership line in {ALLOWLIST.name}: {sorted(orphan_ceiling)}"
-    )
-
-
-def test_allowlisted_files_within_pinned_ceilings() -> None:
-    """The growth ratchet (story S1): every allow-listed file is AT OR UNDER its pinned
-    ceiling. A grandfathered over-cap file can shrink freely but never grow past the number
-    recorded in the ceilings file — mirrors the CI ``Module-size gate`` shell step so a breach
-    is caught locally too. (Growing a file requires deliberately raising its ceiling row.)"""
-    breaches: list[str] = []
-    for entry, ceiling in read_ceilings(CEILINGS).items():
-        f = REPO_ROOT / entry
-        if not f.is_file():
-            continue  # covered by test_every_allowlist_entry_is_a_real_file
-        loc = f.read_text(encoding="utf-8", errors="surrogateescape").count("\n")
-        if loc > ceiling:
-            breaches.append(f"{entry}: {loc} LOC > ceiling {ceiling}")
-    assert not breaches, (
-        "allow-listed file(s) exceeding their pinned ceiling (shrink them):\n  "
-        + "\n  ".join(breaches)
-    )
-
-
-def test_every_allowlist_entry_is_a_real_file() -> None:
-    """Every entry in BOTH files resolves to an existing repo file — a structural guard against
-    a paste artifact or a renamed/deleted path lingering (e.g. the ``</content>`` line this test
-    was written to catch)."""
-    entries = read_membership(ALLOWLIST) | set(read_ceilings(CEILINGS))
-    missing = sorted(entry for entry in entries if not (REPO_ROOT / entry).is_file())
-    assert not missing, f"allowlist entries that are not real repo files: {missing}"
-
-
-@pytest.mark.parametrize("cap", [SOFT_CAP])
-def test_compute_over_cap_is_deterministic(cap: int) -> None:
-    """The computation is a pure function of the tree (no ordering/IO nondeterminism): two calls
-    return the same set."""
+def test_compute_over_cap_is_deterministic() -> None:
+    """The computation is a pure function of the tree (no ordering/IO nondeterminism)."""
+    cap = read_limit()
     assert compute_over_cap_modules(SRC_ROOT, cap=cap) == compute_over_cap_modules(
         SRC_ROOT, cap=cap
     )
