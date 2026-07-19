@@ -19,6 +19,8 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
+from _git_counts import commit_count
+
 import rebar
 from rebar import config
 from rebar._commands import _seam
@@ -35,11 +37,9 @@ def _fresh_repo(tmp_path: Path, name: str) -> Path:
 
 
 def _commit_count(repo: Path) -> int:
-    tracker = str(config.tracker_dir(str(repo)))
-    r = subprocess.run(
-        ["git", "-C", tracker, "rev-list", "--count", "HEAD"], capture_output=True, text=True
-    )
-    return int(r.stdout.strip())
+    # Crash-safe: retries a transient rev-list failure and raises a diagnostic
+    # rather than the opaque int('') ValueError (bug cf3a / efb7-09de).
+    return commit_count(config.tracker_dir(str(repo)))
 
 
 def _seed_many(repo: Path, n: int) -> None:

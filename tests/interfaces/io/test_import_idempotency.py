@@ -12,17 +12,18 @@ import os
 import subprocess
 from pathlib import Path
 
+from _git_counts import commit_count
+
 import rebar
 from rebar import config
 
 
 def _commit_count(repo: Path) -> int:
-    """Number of commits on the tracker's tickets branch (git-level, not event count)."""
-    tracker = str(config.tracker_dir(str(repo)))
-    r = subprocess.run(
-        ["git", "-C", tracker, "rev-list", "--count", "HEAD"], capture_output=True, text=True
-    )
-    return int(r.stdout.strip())
+    """Number of commits on the tracker's tickets branch (git-level, not event count).
+
+    Crash-safe: retries a transient rev-list failure and raises a diagnostic rather
+    than the opaque int('') ValueError (bug cf3a / efb7-09de)."""
+    return commit_count(config.tracker_dir(str(repo)))
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> Path:
