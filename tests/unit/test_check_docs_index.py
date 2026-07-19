@@ -190,3 +190,30 @@ def test_main_clean_synthetic_tree_exit_zero(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(chk, "DEFAULT_DOCS_DIR", docs, raising=False)
     assert chk.main(["--check"]) == 0
+
+
+def test_all_docs_relative_links_resolve():
+    """Every relative markdown link in docs/ must resolve — including links that
+    reach OUTSIDE docs/ (``../foo``), which check_docs_index deliberately excludes
+    from its within-docs remit. Regression guard for the dead
+    ``../session-logs/2026-06-09-architecture-review.md`` link (ticket 218b):
+    rebar session logs are ``session_log`` tickets, not files under a
+    ``session-logs/`` directory, so that target never existed.
+    """
+    import re
+
+    docs_dir = REPO_ROOT / "docs"
+    link_re = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+    dead: list[tuple[str, str]] = []
+    for md in sorted(docs_dir.rglob("*.md")):
+        for m in link_re.finditer(md.read_text(encoding="utf-8")):
+            target = m.group(1).strip()
+            if target.startswith(("#", "http://", "https://", "mailto:")):
+                continue
+            path_part = target.split("#", 1)[0]
+            if not path_part:
+                continue
+            resolved = (md.parent / path_part).resolve()
+            if not resolved.exists():
+                dead.append((str(md.relative_to(REPO_ROOT)), target))
+    assert not dead, f"dead relative links in docs/: {dead}"

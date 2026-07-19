@@ -430,7 +430,7 @@ a minute.
 Previously this fetch lived only in the bash dispatcher's `_ensure_initialized`,
 so CLI reads synced but library/MCP reads did **not** — making MCP (the primary
 agent surface) the *stalest* interface. Collapsing the dual read path
-([story 23d2-e0f3](../session-logs/2026-06-09-architecture-review.md) Rec 2) moved
+(story 23d2-e0f3 Rec 2) moved
 freshness into the native read path so all three interfaces agree.
 
 **Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
