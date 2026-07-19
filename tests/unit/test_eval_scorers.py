@@ -225,11 +225,26 @@ def test_strict_catches_missing_payload_and_dupe_id() -> None:
     assert any("duplicate" in e for e in errs), errs
 
 
-def test_three_plan_review_specs_pass_strict() -> None:
-    for name in ("plan-review-finder", "plan-review-verifier", "plan-review-isf-finder"):
-        with open(f"src/rebar/llm/eval_specs/{name}.eval.yaml") as fh:
+def test_every_packaged_spec_passes_strict_validation() -> None:
+    """The eval-discipline gate, as a UNIT test so it runs in the DEFAULT suite and thus
+    BLOCKS the Gerrit `Verified` vote pre-merge (via `_build-and-test.yml`) — not only the
+    standalone `Prompt Eval` workflow, which casts no vote and never gated a landing. This
+    is the exact check `prompt-eval.yml` used to run as an inline CI script; hosting it here
+    (ticket 1a5f) closes that gap. Globbing EVERY packaged spec — rather than a hardcoded
+    tuple (this superseded `test_three_plan_review_specs_pass_strict`) — means a NEWLY added
+    spec is covered automatically, the gap that let plan-review-{asserted-capability,
+    decomp-shape,necessity} ship a dataset with no gold_set and merge green (bug d37b).
+
+    Every packaged spec must be lenient-clean; every dataset-bearing spec must ALSO be
+    strict-clean (registered scorers + balanced dataset + non-empty gold_set)."""
+    specs = glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")
+    assert specs, "no packaged eval specs found"
+    for p in specs:
+        with open(p) as fh:
             spec = yaml.safe_load(fh.read())
-        assert ev.validate_eval_spec(spec, strict=True) == [], name
+        assert ev.validate_eval_spec(spec) == [], p
+        if spec.get("dataset"):
+            assert ev.validate_eval_spec(spec, strict=True) == [], p
 
 
 # ── 74d9: completion-verifier enumerates ALL unmet criteria (happy path) ────────
