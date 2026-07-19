@@ -159,8 +159,13 @@ The LLM-agent operations and the gate / workflow machinery behind them.
   to add more).
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
+- **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the
+  description template + blocking checklist for writing a plan that passes the gate
+  (`rebar explain plan` prints it).
 - **[review-policy.md](review-policy.md)** — *policy:* what the `LLM-Review` and
   `Verified` Gerrit gates mean and the two `+1` votes every change to `main` must earn.
+- **[passing-code-review.md](passing-code-review.md)** — *author on-ramp:* the commit
+  checklist and what the `LLM-Review` reviewer scores (`rebar explain review` prints it).
 - **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)** — the
   registry-generated reference of every plan-review criterion (one section per
   criterion; `rebar explain <id>` prints one).

@@ -382,24 +382,33 @@ def _verify_completion(argv: list[str]) -> int:
 
 
 def _explain(argv: list[str]) -> int:
-    """``rebar explain <criterion-id>`` → the plan-review criteria authoring-guide section for a
-    criterion (WS10). A pure registry/guide READ (no LLM); owns its --help like review-plan. Exit
-    0 on success, 1 on a clear error (unknown id / malformed registry / missing guide file)."""
+    """``rebar explain <criterion-id|guide>`` → a plan-review criterion's authoring-guide section
+    (WS10), OR an author-facing prose guide (``plan`` / ``review``). A pure registry/guide READ (no
+    LLM); owns its --help like review-plan. Exit 0 on success, 1 on a clear error (unknown
+    id/guide / malformed registry / missing guide file)."""
     import sys
 
     from rebar.llm.plan_review import registry
 
+    guides = ", ".join(sorted(registry.AUTHOR_GUIDES))
     parser = argparse.ArgumentParser(
         prog="rebar explain",
-        description="Print the plan-review criteria authoring-guide section for a criterion id "
-        "(e.g. `rebar explain F1`). One shared lookup with the MCP explain_criterion tool.",
+        description="Print a plan-review criterion's authoring-guide section (e.g. `rebar explain "
+        f"F1`), or an author-facing prose guide ({guides}) — e.g. `rebar explain plan` for how to "
+        "write a plan that passes the plan-review gate. One shared lookup with the MCP "
+        "explain_criterion tool.",
     )
-    parser.add_argument("criterion_id", nargs="?", help="a plan-review criterion id (e.g. F1, G3)")
+    parser.add_argument(
+        "topic", nargs="?", help=f"a plan-review criterion id (e.g. F1, G3) or a guide ({guides})"
+    )
     args = parser.parse_args(argv)
-    if not args.criterion_id:
-        parser.error("a criterion id is required (e.g. `rebar explain F1`)")
+    if not args.topic:
+        parser.error(f"a criterion id (e.g. F1) or a guide ({guides}) is required")
     try:
-        sys.stdout.write(registry.explain_criterion(args.criterion_id) + "\n")
+        if args.topic in registry.AUTHOR_GUIDES:
+            sys.stdout.write(registry.explain_guide(args.topic))
+        else:
+            sys.stdout.write(registry.explain_criterion(args.topic) + "\n")
         return 0
     except registry.ExplainError as exc:
         sys.stderr.write(f"rebar explain: {exc} [{exc.kind}]\n")

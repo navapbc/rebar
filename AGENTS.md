@@ -70,12 +70,16 @@ restated here:
 
 - **Ticket model** — the `idea` status, parent/child hierarchy, the six link relations +
   blocking-link promotion, and tags (incl. `--set-tags` add-wins) → `docs/ticket-model.md`.
+- **Writing a plan that PASSES the plan-review gate** — the author-facing on-ramp: the
+  description template, the blocking checklist ("your plan must…"), and the revise→review→claim
+  loop → `docs/writing-a-passing-plan.md` (start here; `rebar explain plan` prints it).
 - **Gate protocols** — the plan-review claim gate and the completion-verifier close gate
   (both **on** for this project), their attestation model, and how to remediate →
   `docs/plan-review-gate.md`.
-- **Quality gates + ticket template + project-supplied criteria** — the per-ticket structural
-  gates, the per-type description template, and the `.rebar/criteria_routing.json` overlay →
-  `docs/plan-review-criteria-guide.md` (and `rebar explain <criterion-id>`).
+- **Plan-review criteria reference** — the generated per-criterion registry (one section per
+  criterion, the reviewer's detection detail), the per-ticket structural quality gates, and
+  the `.rebar/criteria_routing.json` overlay → `docs/plan-review-criteria-guide.md` (and
+  `rebar explain <criterion-id>`).
 - **MCP tool set** — the read/write tool inventory and their `outputSchema`s →
   `docs/mcp-reference.md`.
 - **Concurrency** — optimistic concurrency, the parent-first claim/transition cascade, and
@@ -117,9 +121,11 @@ unavailable or for non-symbol (text/comment/string) searches.
 **Every change to `main` must pass two independent Gerrit gates before it can land — the
 `LLM-Review` vote (the rebar review-bot's LLM code review) AND the `Verified` vote (CI:
 build/test/lint/typecheck on GitHub Actions).** `main` flows through Gerrit; GitHub is a
-read-only mirror that rejects direct pushes and PR merges. The full recipe — Gerrit access
-setup, feature branches for multi-story work, conflict handling — is in
-[CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rules:
+read-only mirror that rejects direct pushes and PR merges. **For an author-facing on-ramp — the
+commit checklist, what the `LLM-Review` reviewer scores (blocking vs advisory), and how to
+respond to each vote — read `docs/passing-code-review.md` (`rebar explain review` prints it).**
+The full recipe — Gerrit access setup, feature branches for multi-story work, conflict
+handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rules:
 
 - **Work in a fresh worktree branched from current `origin/main`**, not the main checkout
   (`git fetch origin && git worktree add ../<name> -b <branch> origin/main`; or
