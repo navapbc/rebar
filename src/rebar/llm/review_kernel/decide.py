@@ -43,6 +43,17 @@ GRADED_BINARY = (
     # dragging validity, and old sidecars that predate them stay comparable.
     "committed_work_relies_on_unbacked_claim",
     "respects_artifact_altitude",
+    # R5 (story empty-microbial-antlion, epic pastoral-aquatic-viper). The code-review
+    # counterpart to R1's plan-review asserted-capability probe: R1 flags "the plan claims a
+    # capability an existing module lacks"; this VERIFIES, at code-review time, a finding that
+    # asserts a claimed capability is NOT delivered — same yes=finding-holds polarity as the rest
+    # of the graded set (yes = the gap is confirmed, finding stands; no = the capability IS
+    # delivered, so the false non-delivery claim is refuted and drops). CONSERVATIVE scope — its
+    # Binary default is "na" (see verify_models._BINARY_NA_DEFAULT) AND it is answered non-na ONLY
+    # for findings in the asserted-capability cohort (G6/E4/T3); everywhere else it stays "na" and
+    # abstains from validity() (excluded from the mean), so adding it is byte-identical for every
+    # finding outside the cohort and every pre-R5 sidecar (proven by E5's non-regression replay).
+    "asserted_capability_confirmed",
 )
 _GRADE = {"yes": 1.0, "insufficient": 0.5, "no": 0.0}
 _SEV01: dict[str | None, float] = {"none": 0.0, "low": 0.33, "medium": 0.67, "high": 1.0}
