@@ -85,6 +85,7 @@ AGENT_TIER = frozenset(
         "T10",
         "T11",
         "asserted-capability",
+        "decomp-shape",
     }
 )
 
@@ -147,6 +148,15 @@ CANONICAL_LLM = frozenset(
         # blocking is a future dogfood-gated criteria_routing.json change (see the promotion gate
         # in docs/plan-review-gate.md).
         "asserted-capability",
+        # Decomposition-shape container criterion (epic 6982 / R3) — an advisory, AGENT-tier
+        # CONTAINER criterion (facet `container`, like G3/G4; runs on the pass1_container fan-out)
+        # that flags two decomposition-SHAPE smells G3/G4 don't target: a layer-cake split
+        # (children partitioned by architectural layer instead of vertical slices) and a
+        # consumed-artifact-without-ordering-edge (a child consumes a sibling's artifact with no
+        # ordering dependency). Advisory is its PERMANENT posture; promotion to blocking is a
+        # future change DOUBLE-gated on dogfood effectiveness AND E6 judge order-stability
+        # clearing floor (see the promotion gate in docs/plan-review-gate.md).
+        "decomp-shape",
         # Cross-cutting
         "COH",
     }

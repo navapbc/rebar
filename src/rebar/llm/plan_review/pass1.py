@@ -40,7 +40,7 @@ _shed_to_budget = sizing.shed_to_budget
 
 # Container criteria (parent + one child at a time); handled by the dedicated
 # per-child loop, never the normal agent path.
-CONTAINER_CRITERIA = ("G3", "G4")
+CONTAINER_CRITERIA = ("G3", "G4", "decomp-shape")
 
 # The minimum prompt-prefix the anthropic cache will write/read (Opus 4.8 floor).
 # Below this the parent-plan system prefix never caches, so WARMING would just add a

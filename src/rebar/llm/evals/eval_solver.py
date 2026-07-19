@@ -100,15 +100,40 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
     desc = registry.by_id(repo_root).get(cid)
     if desc is None:  # pragma: no cover — guarded by _criterion_id
         raise ValueError(f"unknown criterion {cid!r}")
-    # Container (G3/G4) + ISF finders need a parent/child graph or a session log, not inline
-    # text — out of scope for the inline-fixture eval; fail with a clear message, never silently.
-    if cid in CONTAINER_CRITERIA or cid == "ISF":
+    cfg = resolve_gate_config(repo_root)
+    # Container criteria (G3/G4/decomp-shape) run over a (parent, children, sibling-roster)
+    # decomposition, not inline text. A container eval fixture supplies the parent plan as
+    # ``input`` and the children as a ``children`` list ([{ticket_id, title, description}, ...]);
+    # we drive the SAME ``pass1_container`` fan-out the real gate uses, evaluating this one
+    # criterion. This keeps a container calibration bounded to ONE live call per fixture. A
+    # container criterion with no ``children`` payload is a fixture error, not a silent pass.
+    if cid in CONTAINER_CRITERIA:
+        children = case.get("children")
+        if not isinstance(children, list) or not children:
+            raise ValueError(
+                f"container criterion {cid!r} needs a non-empty `children` list in the eval "
+                "fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
+            )
+        roster = case.get("sibling_roster") or "\n".join(
+            f"- {c.get('ticket_id', '?')}: {c.get('title', '')}" for c in children
+        )
+        findings = passes.pass1_container(
+            runner,
+            cfg,
+            parent_plan=case.get("input") or "",
+            children=children,
+            criteria=[desc],
+            sibling_roster=roster,
+        )
+        return {"findings": list(findings)}
+    # ISF finders need a session log, not inline text — out of scope for the inline-fixture
+    # eval; fail with a clear message, never silently.
+    if cid == "ISF":
         raise ValueError(
-            f"criterion {cid!r} is a container/ISF finder (needs a ticket graph / session log), "
+            f"criterion {cid!r} is an ISF finder (needs a session log), "
             "not runnable over an inline eval fixture"
         )
     plan = case.get("input") or ""
-    cfg = resolve_gate_config(repo_root)
     findings = passes.pass1_chunk(
         runner, cfg, plan=plan, chunk=[desc], agentic=registry.exec_tier(desc) == "AGENT"
     )

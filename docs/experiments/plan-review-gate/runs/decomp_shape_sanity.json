@@ -1,0 +1,51 @@
+{
+  "_provenance": {
+    "ticket": "3a27-f8fa-c417-43db (R3)",
+    "epic": "6982",
+    "criterion": "decomp-shape",
+    "command": "REBAR_GATE_ALLOW_UNGATED=1 rebar criteria eval decomp-shape --output json",
+    "runs_per_fixture": 1,
+    "total_live_single_criterion_container_runs": 4,
+    "note": "Bounded sanity check (NOT an E2/E3 batch eval, which are permanently rejected on cost; E2 mutant corpus is not on main). HAND-AUTHORED container fixtures: one known layer-cake container plan (F1) + one known consumed-artifact-without-ordering-edge plan (F2) as must-fire positives, plus a vertical-slice container (N1) and a well-ordered producer/consumer container (N2) as must-not-fire negatives. Container criteria run over a (parent, children) decomposition, so each fixture carries the parent plan as input + a children: list; the eval_solver container arm drives pass1_container for this one criterion. Fixtures + shape checks: src/rebar/llm/eval_specs/plan-review-decomp-shape.eval.yaml + tests/unit/test_decomp_shape_criterion.py.",
+    "pass_condition": "FIRES on both positives (layer-cake + consumed-artifact) AND CLEAN on both negatives (vertical-slice + ordered producer/consumer)."
+  },
+  "recall_over_positives": 1.0,
+  "false_accept_over_negatives": 0.0,
+  "agreement": 1.0,
+  "kappa": 1.0,
+  "stability_min": 1.0,
+  "stability_mean": 1.0,
+  "n_fire": 2,
+  "n_nofire": 2,
+  "cases": [
+    {
+      "id": "DSHAPE-F1-layer-cake",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "DSHAPE-F2-consumed-artifact-no-order",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "DSHAPE-N1-vertical-slices",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "DSHAPE-N2-ordered-producer-consumer",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    }
+  ],
+  "interpretation": "FIRES on BOTH decomposition-shape positives (F1 layer-cake, F2 consumed-artifact-without-ordering-edge) and is CLEAN on BOTH sound-decomposition negatives (N1 vertical slices, N2 producer/consumer with a declared ordering edge). recall 1.0, false-accept 0.0, stability 1.0 across all 4 cases. Posture is ADVISORY (never blocks), and advisory is its PERMANENT posture. Effectiveness is monitored going forward by the standing recorder criterion_effectiveness.py (auto-includes this criterion id, zero per-criterion wiring). Blocking-promotion is DOUBLE-gated per docs/plan-review-gate.md: it requires BOTH dogfood effectiveness evidence AND E6 judge order-stability clearing floor (E6 order-shuffle failed: fleiss_kappa=0.55 < 0.6), so it is deferred."
+}

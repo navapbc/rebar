@@ -1,0 +1,142 @@
+# Standing eval / bounded-sanity corpus for the plan-review CONTAINER criterion `decomp-shape`
+# (epic 6982 / R3). This is the "bounded sanity check" gate artifact: HAND-AUTHORED container
+# fixtures (NOT the E2/E3 mutant corpus — those batch evals are permanently rejected on cost and
+# E2's corpus is not on main) — one known layer-cake container plan + one known
+# consumed-artifact-without-ordering-edge plan (must-fire), plus a vertical-slice container and a
+# well-ordered producer/consumer container (must-not-fire). It is deliberately small (<=8 live
+# single-criterion container runs). Container criteria run over a (parent, children) decomposition,
+# so each case carries the parent plan as `input` and the children as a `children:` list; the
+# eval_solver container arm drives `pass1_container` for exactly this criterion. Run live with
+# `rebar criteria eval decomp-shape --output json`; the committed result is
+# docs/experiments/plan-review-gate/runs/decomp_shape_sanity.json. Offline spec-shape validation
+# is in tests/unit/test_decomp_shape_criterion.py.
+prompt: plan-review-decomp-shape
+model: anthropic:claude-sonnet-4-6
+epochs: 1
+gate: at_least(1)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the finder emits a schema-valid finding set — >=1 finding on a fire
+  # case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      decomp-shape finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: the two decomposition-shape smells ────────────────────────────────────────
+  - id: DSHAPE-F1-layer-cake
+    corpus: rebar
+    criterion: decomp-shape
+    expect: finding
+    note: >-
+      Layer-cake split (smell A). One feature cut horizontally into a schema child, a
+      service/API child, and a UI child — no child is independently shippable and integration
+      risk is deferred to the last. The finder should flag the layer partition axis.
+    input: >
+      ## What
+
+      Add a saved-search feature to rebar: users can name and persist a query and re-run it.
+
+      ## Acceptance Criteria
+
+      - [ ] A user can save, name, list, and re-run a saved search end-to-end.
+    children:
+      - ticket_id: dsf1-a
+        title: "Saved-search: database layer"
+        description: >
+          Add the `saved_search` table/migration and the data-access layer (create/read/list/
+          delete rows). This child covers ONLY the persistence layer; no API and no UI.
+      - ticket_id: dsf1-b
+        title: "Saved-search: service/API layer"
+        description: >
+          Add the service and REST endpoints (POST/GET/DELETE /saved-searches) on top of the
+          data-access layer. This child covers ONLY the business-logic/API layer; no UI.
+      - ticket_id: dsf1-c
+        title: "Saved-search: frontend/UI layer"
+        description: >
+          Add the UI: a save-search dialog, a saved-searches list panel, and a re-run button
+          calling the API. This child covers ONLY the frontend layer.
+  - id: DSHAPE-F2-consumed-artifact-no-order
+    corpus: rebar
+    criterion: decomp-shape
+    expect: finding
+    note: >-
+      Consumed-artifact-without-ordering-edge (smell B). Child B reads the normalized manifest
+      file that child A produces, but neither declares an ordering dependency, so a scheduler can
+      start B before A. The finder should flag the producer->consumer pair with no ordering edge.
+    input: >
+      ## What
+
+      Build an import pipeline: normalize an external export into a manifest, then render a report
+      from that manifest.
+
+      ## Acceptance Criteria
+
+      - [ ] The export is normalized to a manifest and a report is rendered from it.
+    children:
+      - ticket_id: dsf2-a
+        title: "Normalizer: emit normalized-manifest.json"
+        description: >
+          Read the raw external export and write `build/normalized-manifest.json` with the
+          canonical record shape. Produces the manifest artifact.
+      - ticket_id: dsf2-b
+        title: "Reporter: render report from normalized-manifest.json"
+        description: >
+          Read `build/normalized-manifest.json` and render the HTML report from it. Consumes the
+          manifest artifact. (No dependency on any sibling is declared.)
+  # ── must-not-fire: sound decompositions (no false-fire) ──────────────────────────────────
+  - id: DSHAPE-N1-vertical-slices
+    corpus: rebar
+    criterion: decomp-shape
+    expect: pass
+    note: >-
+      Vertical slices — each child delivers a thin end-to-end capability (persist + API + UI for
+      its own filter), independently shippable, with no cross-child artifact. Not a layer-cake and
+      no consumed-artifact-without-ordering; decomposition_shape_sound = yes -> PASS.
+    input: >
+      ## What
+
+      Add two independent filters to the ticket list: a tag filter and a date-range filter.
+
+      ## Acceptance Criteria
+
+      - [ ] Each filter works end-to-end (store query + API param + UI control).
+    children:
+      - ticket_id: dsn1-a
+        title: "Tag filter (end-to-end vertical slice)"
+        description: >
+          Add the tag filter end to end: the store query support, the `?tag=` API param, and the
+          tag-filter UI control. Independently shippable and demoable on its own.
+      - ticket_id: dsn1-b
+        title: "Date-range filter (end-to-end vertical slice)"
+        description: >
+          Add the date-range filter end to end: the store query support, the `?from=&to=` API
+          params, and the date-range UI control. Independently shippable and demoable on its own.
+  - id: DSHAPE-N2-ordered-producer-consumer
+    corpus: rebar
+    criterion: decomp-shape
+    expect: pass
+    note: >-
+      Producer/consumer with a DECLARED ordering edge — child B consumes child A's schema but
+      explicitly depends_on A (ordering satisfied), so a scheduler runs A before B. Not a smell;
+      decomposition_shape_sound = yes -> PASS.
+    input: >
+      ## What
+
+      Add an audit-event schema and a consumer that emits audit events against it.
+
+      ## Acceptance Criteria
+
+      - [ ] An audit-event schema exists and a consumer emits valid audit events.
+    children:
+      - ticket_id: dsn2-a
+        title: "Define the audit-event schema"
+        description: >
+          Add the `audit_event` schema/type. Produces the schema artifact other work builds on.
+      - ticket_id: dsn2-b
+        title: "Emit audit events against the schema"
+        description: >
+          Emit audit events conforming to the `audit_event` schema. depends_on dsn2-a (ordering:
+          the schema must land first) — this child is explicitly scheduled after dsn2-a.
