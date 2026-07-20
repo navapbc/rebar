@@ -583,6 +583,22 @@ def _run_plan_review(
         ticket_id, verdict, drift, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
+    # VALIDATION-ASSESSMENT cross-checks (bug 5e40) — two per-verdict CONSISTENCY drops that the
+    # floors above (code/completion axes) do not cover: an intra-verdict CONTRADICTION (a false
+    # BLOCK refuted by a true advisory in the SAME verdict) and a finding that re-litigates a point
+    # the ticket's recorded COMMENT TRAIL already resolved. Applied after the floors and before the
+    # sidecar emit so dropped findings land in the sidecar (drop_reason="contradiction" /
+    # "comment_trail"). Each is gated inert (verdict byte-identical) behind an evidence-gate config
+    # flag by default, like the completion floor; fail-safe to no-drops.
+    from . import xcheck
+
+    xcheck.maybe_apply_contradiction(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+    xcheck.maybe_apply_comment_trail(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
     # Blocking fix-unit grouping (story 5e64) — stamp-only, after the floors and before the
     # sidecar emit so the group stamps land in the persisted payload.
     _group_blocking_fix_units(verdict)

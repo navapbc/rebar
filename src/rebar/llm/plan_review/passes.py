@@ -237,6 +237,8 @@ PASS_COMPLETION = "plan-review-completion"  # Pass-2 SEPARATE completion sub-cal
 PASS_COACH = "plan-review-coach"  # Pass-4
 PASS_ISF = "plan-review-isf-finder"  # ISF finder
 PASS_CONTAINER = "plan-review-container"  # G3/G4 container finder
+PASS_CONTRADICTION = "plan-review-contradiction"  # validation: intra-verdict contradiction (5e40)
+PASS_COMMENT_TRAIL = "plan-review-comment-trail"  # validation: comment-trail consultation (5e40)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────

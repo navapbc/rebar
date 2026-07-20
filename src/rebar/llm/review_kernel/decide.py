@@ -151,6 +151,51 @@ def drift_floor_drop(
     return not (set(cited_paths) & set(drifted_files))
 
 
+def contradiction_drop_index(pair: Any, priorities: list[float]) -> int | None:
+    """The intra-verdict CONTRADICTION drop predicate (bug 5e40, validation assessment),
+    deterministic — no LLM holistic re-judgement. Given ONE pairwise contradiction judgment
+    ``{a, b, contradiction, drop}`` (produced by the detection sub-call) and the verdict's
+    per-finding ``priorities`` (validity × impact, combined-index-aligned), return the combined
+    index to DROP, or ``None`` when nothing should be dropped.
+
+    A drop happens ONLY when ``contradiction is True`` and ``a``/``b`` are two distinct in-range
+    indices (any other shape → ``None``, the fail-safe KEEP). WHICH member is dropped is:
+
+    - the model-identified contradicted member ``drop`` when it names one of the pair — this is the
+      5e40 A1 case: a FALSE blocking finding (higher priority) contradicted by a TRUE advisory
+      (lower priority); dropping "the weaker/contradicted one" must follow the contradiction, not
+      the priority, so the false BLOCK is the one removed;
+    - otherwise a deterministic TIEBREAK: drop the LOWER-priority member (the "weaker" one); on a
+      priority tie, the higher index.
+
+    Pure; the caller supplies the (injected) judgment and priorities. Never raises."""
+    if not isinstance(pair, dict) or pair.get("contradiction") is not True:
+        return None
+    a, b = pair.get("a"), pair.get("b")
+    n = len(priorities)
+    if not (isinstance(a, int) and isinstance(b, int) and 0 <= a < n and 0 <= b < n and a != b):
+        return None
+    drop = pair.get("drop")
+    if isinstance(drop, int) and drop in (a, b):
+        return drop
+    if priorities[a] < priorities[b]:
+        return a
+    if priorities[b] < priorities[a]:
+        return b
+    return max(a, b)  # priority tie → deterministic: the higher index
+
+
+def comment_trail_drop(answer: Any) -> bool:
+    """The COMMENT-TRAIL consultation drop predicate (bug 5e40, validation assessment),
+    deterministic. Drop a finding IFF its per-finding sub-answer says the point it raises is
+    ALREADY RESOLVED in the ticket's recorded comment trail (``resolved_in_trail == "yes"`` — the
+    5e40 B3 case where a review round already CONCEDED the point). Every other value —
+    ``"no"``/``"insufficient"``, a missing key, a malformed answer — KEEPS the finding (fail-safe:
+    a broken signal can only make the gate stricter, never suppress). Pure; the sub-answer is
+    injected. Never raises."""
+    return isinstance(answer, dict) and answer.get("resolved_in_trail") == "yes"
+
+
 def impact(attrs: dict[str, Any]) -> float:
     """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
     max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""
