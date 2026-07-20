@@ -119,6 +119,38 @@ def rising_floor_drop(priority: float, novelty: float, *, t_novel: float, floor:
     return novelty >= t_novel and priority < floor
 
 
+def drift_floor_drop(
+    novelty: float,
+    *,
+    cited_paths: Any,
+    drifted_files: Any,
+    t_novel: float,
+) -> bool:
+    """The Pass-3 DRIFT-FLOOR drop predicate (bug 5e40), the code-drift-axis analogue of
+    :func:`rising_floor_drop`. It converges a re-review that fired ONLY because HEAD/code drifted
+    under an already-signed, plan-UNCHANGED attestation (the whole-HEAD-invalidation "stale-head"
+    re-review). A finding is dropped IFF it is NOVEL (``novelty >= t_novel``) AND its citations do
+    NOT intersect the ``drifted_files`` set. The quadrants:
+
+    - novel + cites NO drifted file → DROP (a non-determinism artifact: the plan text is
+      byte-identical to what was already signed PASS and this finding does not touch the code that
+      changed, so it cannot be a genuine NEW defect — dropping it converges the re-review to its
+      prior PASS);
+    - novel + cites a drifted file → KEEP (a genuine code-drift signal — this per-finding drift
+      guard is exactly what preserves the code-drift detection the whole-HEAD invalidation exists
+      for, which the abandoned "stop invalidating on drift" fix destroyed);
+    - carryover (``novelty < t_novel``) → KEEP (it was flagged before and must still be resolved).
+
+    Unlike :func:`rising_floor_drop` there is deliberately NO priority floor on this axis: because
+    the plan is byte-identical to the signed-PASS baseline, the SOUND per-finding guard is drift
+    intersection, not priority — a novel HIGH-priority finding that does not touch drifted code is
+    precisely the false-positive block 5e40 is about. Pure; the caller supplies the per-finding
+    ``novelty`` + ``cited_paths``, the ``drifted_files`` set, and the configured ``t_novel``."""
+    if novelty < t_novel:
+        return False
+    return not (set(cited_paths) & set(drifted_files))
+
+
 def impact(attrs: dict[str, Any]) -> float:
     """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
     max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""

@@ -28,7 +28,7 @@ from typing import Any
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
-from . import attest, orchestrator, sidecar
+from . import attest, drift_floor, orchestrator, sidecar
 from .attest import claim_gate_check
 from .resign import resign_plan_review
 
@@ -526,6 +526,13 @@ def _run_plan_review(
     # so the Pass-3 rising floor (child cc5b) can consume it. Off/absent key ⇒ None ⇒ a
     # byte-identical full review (the back-out).
     remediation = _remediation_decision(ticket_id, repo_root) if sign else None
+    # Drift-floor eligibility (bug 5e40) — decided here, PARALLEL to the drift-refresh + remediation
+    # checks on the OPPOSITE code axis (plan UNCHANGED + code DRIFTED). Like remediation it does NOT
+    # early-return: the full criteria set still runs and the DECISION is recorded so the Pass-3
+    # floor can consume it. It fires only when drift-refresh did NOT already converge the re-review
+    # (chiefly unscoped plans, whose whole-HEAD invalidation escalated to a full, non-deterministic
+    # re-review). remediation and drift are mutually exclusive (code_unchanged vs code_drifted).
+    drift = drift_floor.decision(ticket_id, repo_root) if sign else None
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
     # Verdict PRODUCTION runs through the v3 engine workflow (gates/plan-review.yaml); the
     # signing/sidecar wrapper below is unchanged, so the signed attestation is stable. The
@@ -546,6 +553,11 @@ def _run_plan_review(
     if remediation is not None:
         verdict.setdefault("coverage", {})["remediation"] = remediation
 
+    # Record the drift-floor decision on coverage (observability + the seam the Pass-3 drift floor
+    # reads). JSON-safe (bools + a sorted path list). Off/absent → coverage untouched.
+    if drift is not None:
+        verdict.setdefault("coverage", {})["drift"] = drift
+
     # Pass-3 RISING FLOOR (child cc5b) — applied BEFORE the sidecar emit so the dropped findings
     # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Always active
     # (off switch retired in story 4cdf); still gated on a remediation re-review + per-review
@@ -560,6 +572,15 @@ def _run_plan_review(
     # verify.completion_floor_active; inert (and the verdict byte-identical) by default.
     _maybe_apply_completion_floor(
         ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
+    # Pass-3 DRIFT FLOOR (bug 5e40) — the code-drift-axis analogue of the rising floor, applied
+    # AFTER the others and BEFORE the sidecar emit so drift-dropped findings land in the sidecar
+    # (with drop_reason="drift"). Gated on a plan-UNCHANGED + code-DRIFTED re-review of an
+    # already-signed PASS (the stale-head regime); inert (verdict byte-identical) otherwise. Reuses
+    # the novelty machinery; the drift-intersection predicate keeps findings citing drifted code.
+    drift_floor.maybe_apply(
+        ticket_id, verdict, drift, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
     # Blocking fix-unit grouping (story 5e64) — stamp-only, after the floors and before the

@@ -7,6 +7,14 @@
 # drop real new findings. Distinct from the verifier spec — the novelty sub-call uses its OWN
 # prompt + contract, so its cases live here, not in plan-review-verifier.eval.yaml.
 # Validate offline: `rebar prompt eval plan-review-novelty`.
+#
+# The SAME novelty sub-call also backs the Pass-3 DRIFT floor (bug 5e40 — the plan-UNCHANGED +
+# code-DRIFTED re-review axis): the drift floor drops a finding iff it is NOVEL here AND its
+# citations do not intersect the drifted file set (that drift-intersection predicate is pure and
+# unit-tested in tests/unit/test_plan_review_drift_floor.py). So this discrimination is ALSO the
+# evidence gate the drift floor's novelty half rests on; the N4 pair below adds a code-drift-themed
+# case so the corpus exercises that regime. NOTE: a full run needs the paid model above — this
+# change only EXTENDS the fixture corpus (it does not weaken or remove any existing case).
 prompt: plan-review-novelty
 model: anthropic:claude-opus-4-8
 epochs: 3
@@ -72,6 +80,27 @@ dataset:
     prior_finding: "A scope bullet uses the word 'improve' without a metric, so the success target is ambiguous."
     finding: "The plan adds a new public config key but specifies no default and no back-out path if it is set wrong."
     note: "Novel: a different defect (config key with no default/back-out) — matches no prior finding."
+
+  # N4 — the code-DRIFT re-review regime (bug 5e40). The plan is byte-identical to the signed PASS;
+  # only HEAD drifted. The carryover restates the prior concern (must match → low novelty); the
+  # novel case is a genuinely new concern about the DRIFTED code (must NOT match → high novelty).
+  # This is the exact discrimination the Pass-3 drift floor needs: it drops novel findings only when
+  # they do not cite drifted code, so a novelty signal that mislabels a real drift finding as
+  # carryover (or vice-versa) would break the drift floor's convergence/safety.
+  - id: N4-carryover
+    pair: drift-access-snapshot
+    kind: carryover
+    expect: low_novelty
+    prior_finding: "The security-invariants AC requires a pre-cutover access snapshot but the plan never tasks anyone to capture or store it."
+    finding: "No step in the plan captures the pre-cutover access baseline, so the required diff-vs-snapshot AC has nothing to compare against."
+    note: "Carryover: same defect (uncaptured pre-cutover snapshot), reworded — should match the prior finding."
+  - id: N4-novel
+    pair: drift-access-snapshot
+    kind: novel
+    expect: high_novelty
+    prior_finding: "The security-invariants AC requires a pre-cutover access snapshot but the plan never tasks anyone to capture or store it."
+    finding: "The auto-lander loop the plan cites now calls a rebase endpoint that HEAD renamed since the plan was signed, so the cited call no longer resolves."
+    note: "Novel: a genuinely new defect about the DRIFTED code (a renamed endpoint), matching no prior finding — the drift floor must KEEP this because it cites drifted code."
 
 gold_set:
   - input: "A reworded missing-idempotency finding that restates a prior finding (N1-carryover)."
