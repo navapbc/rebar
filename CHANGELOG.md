@@ -8,7 +8,104 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
-## [Unreleased]
+## [0.9.0] - 2026-07-20
+
+A feature release: passive delivery / agent-process metrics behind a new
+`rebar metrics` command, a `caused_by` link relation and structured bug-close
+classification, an absolute module-size cap, broader plan-review / code-review
+gate coverage, and a batch of reconciler and CI durability fixes.
+
+### Added
+
+- `rebar metrics` — a passive analytics command spanning the agent-process,
+  code-health, delivery, and gate-economics lenses, with a metric registry,
+  per-figure source/confidence labels, and an explicit `unavailable` state
+  (the metrics-instrumentation epic). Snapshots persist to a going-forward
+  NDJSON store, and readers derive figures from events, git history, gate
+  sidecars, GitHub-Actions coverage/CI-health, and mined Claude transcripts.
+  The command is discoverable and janitor-aware.
+- Backfill historical metrics for the new lenses: complexity/clone snapshots at
+  sampled commits, and bug `close_class` / `caused_by` over already-closed bugs.
+- `caused_by` as a 7th link relation, including blame-derived `caused_by`
+  inference on bug close and an explicit `--caused-by` flag.
+- Persist a structured bug-close `--class` enum (`close_class`), backfilled from
+  structural signals and threaded through the CLI, MCP tools, NDJSON import, and
+  the canary's close-on-recovery steps.
+- Extract the shared CI gate + test suite into a reusable GitHub Actions
+  workflow.
+- Provenance & identity: record an immutable genesis channel for the CLI/MCP/
+  Python entry points, attribute Jira/import-created tickets (inferring legacy
+  Jira authorship), and preserve provenance through SNAPSHOT compaction.
+- Plan-review gate — new advisory criteria and grounding probes: an
+  asserted-capability grounding probe (R1), a decomposition-shape container
+  criterion (R3), a necessity/no-op probe plus a lightweight bug-review tier
+  (R4), an `asserted_capability_confirmed` kernel sub-answer (R5), and an
+  operator-attested-evidence DET lint. Plan-review portability checks (finder,
+  scoped coaching move, eval corpus) added.
+- A standing per-criterion gate-effectiveness recorder (sidecar-native,
+  zero-LLM).
+
+### Changed
+
+- Module-size policy: replace the allowlist with an absolute, admin-locked cap
+  and delete the drained allowlist mechanism entirely.
+- Adopt the cross-vendor `AGENTS.md` standard: add a canonical `AGENTS.md`,
+  reduce `CLAUDE.md` to a one-line `@AGENTS.md` pointer, re-home ticket-model
+  guidance into `docs/`, ship a client `AGENTS.md` template with a drift-guard
+  test, and rename the example-skills namespace `claude-skills` -> `agent-skills`.
+- Centralize event signing in a shared `finalize_event` seam with `enforce_since`
+  grandfathering, and run `verify-identity` as a pre-merge whole-store gate.
+- Unify Jira link-direction handling behind a single source of truth.
+- Extend plan-review's rising-floor convergence to the code-drift re-review axis
+  so re-reviews hold the same quality floor as first-pass reviews.
+- Harden the durable write path against concurrent-git faults; make reconciler
+  infra exceptions fail-silent no-ops via `REBAR_RECONCILER_FAIL_SILENT_NOOP`
+  and gate an ERROR sidecar on the infra-exception path.
+
+### Fixed
+
+- Fix inverted/reversed Jira link directions on both inbound and outbound sync
+  (honor `swap_endpoints`), with inverse-aware dedup.
+- Paginate `get_comments` so comment sync stops re-posting existing comments.
+- Fail loud on swallowed comment drops, with comments/labels canary coverage.
+- Fix a reconcile-bridge startup failure by dropping an illegal runner context
+  from the job-level env.
+- Route the enrich-queue prune through the locked `delete_events` path.
+- Stop false-rejecting sidecars and null-commit ledger entries; make ledger
+  resolution robust and skip archived entries rather than fail-closing authentic
+  events.
+- Retry transient "could not parse HEAD" errors on store git commits, and run
+  git maintenance in the foreground on the tickets worktree.
+- Harden ticket-id / prompt-id path handling and drop the stack trace from a
+  `/rerun` 502.
+- Repair `probe-rebar.sh` drift from the current CLI contract and wire it into
+  golden-path CI so future drift is caught automatically.
+- Harden the live-E2E index-visibility poll against Jira propagation lag with
+  backoff, removing a source of flaky runs.
+- Re-materialize the host certbot renewal timer on autodeploy so certificate
+  renewal survives redeploys.
+- Harden fsck Check 3's stale `index.lock` reclaim against a TOCTOU race, and
+  stop bridge-fsck flagging a legitimate window-absence as a dangling reference.
+- Normalize the CI run conclusion before casting the `Verified` vote (so a
+  neutral/skipped conclusion is no longer misread as a failure), and close the
+  `Verified`-gate required-check-drift hole with a parity guard.
+- Lock and pathspec-scope the purge-bridge deletion commit, and add a prune
+  concurrency regression test.
+- Cross-check reducer cache validity against on-disk attestations so a stale
+  cache can no longer mask an attestation change.
+- Isolate config tests under a temporary XDG home so fixtures no longer leak the
+  developer's real user config.
+- Guard `int(git rev-list --count …)` parsing in test helpers against empty
+  output.
+- Set `ignore_changes` on the assume-role policy to end phantom Terraform drift.
+
+### Documentation
+
+- Add author-facing plan-review and code-review on-ramp docs.
+- Document post-merge close discipline — fast-forward your worktree, not the
+  shared checkout.
+- Document the autodeploy self-update coverage decision.
+- Remove a dead `../session-logs` relative link in `docs/concurrency.md`.
 
 ## [0.8.0] - 2026-07-16
 
