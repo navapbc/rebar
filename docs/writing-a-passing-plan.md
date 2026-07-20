@@ -102,6 +102,28 @@ never block on their own (they're scored and coached, capped at the top ~20 per 
 - **Don't hedge (`hedge`).** "Should probably" / "might want to" in a requirement reads as an
   undecided choice — commit or drop it.
 
+## Citing a prerequisite's symbol (`[rebar:<id>]`)
+
+If your plan relies on a file, module, class, function, or config key that a **prerequisite
+ticket** will create — something that does not yet exist on `origin/main` — the grounding
+finders (`G1G2`/`E4`/`E6`) will otherwise flag it as missing. Cite it inline as
+`<subject> [rebar:<id>]`, where `<subject>` names the relied-upon element and the trailing
+`[rebar:<id>]` token names the prerequisite ticket (its id or alias). For example:
+
+```markdown
+- [ ] register the new adapter via `plugin_registry.register()` [rebar:1a2b-3c4d]
+```
+
+For the citation to be honored, there must be a **verified upstream edge** between the tickets:
+either this ticket declares `depends_on -> <id>`, **or** the cited ticket declares
+`blocks -> <this ticket>`. A `blocks` edge pointing *from* this ticket is downstream and does
+**not** count. When the edge is verified, the finder retrieves the cited ticket via
+`show_ticket` and credits the symbol **only** if that ticket's plan/file_impact actually
+establishes the specific functionality — an uncited, edge-unbacked, or coverage-unconfirmed
+citation still grounds as normal (fails closed). So: add the `depends_on` edge (or ensure the
+prerequisite `blocks` this ticket), and make sure the prerequisite's plan really delivers what
+you cite.
+
 ## A minimum-viable passing plan (leaf task)
 
 ```markdown

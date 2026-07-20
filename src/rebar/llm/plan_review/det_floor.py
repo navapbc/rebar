@@ -449,7 +449,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
     and whether any verification command/section is present. Never blocks."""
-    from . import det_operator_attested
+    from . import det_citation, det_operator_attested
 
     items = det_operator_attested.ac_item_lines(ctx.plan_text)
     issues: list[str] = []
@@ -488,12 +488,30 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     # self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
     oa_issues = det_operator_attested.operator_evidence_issues(items)
     issues.extend(oa_issues)
+    # Cross-ticket citation edge-verify lint (story 266e): a `[rebar:<id>]` citation whose
+    # cited id is not a VERIFIED upstream prerequisite of P (P.depends_on(C) or C.blocks(P)).
+    # ADVISORY coaching only (p6 never blocks); Layer-2 (the LLM finders) owns crediting.
+    # Reverse lookup is fail-closed inside det_citation. Logic lives in det_citation (det_floor
+    # is size-ceilinged); this is just the call + extend.
+    from rebar import _reads
+
+    def _resolve_deps(cid: str) -> list[dict[str, Any]]:
+        return _reads.show_ticket(cid, repo_root=ctx.tickets_root).get("deps", []) or []
+
+    cit_issues = det_citation.unbacked_citations(
+        det_citation.parse_citations(ctx.plan_text),
+        ctx.state.get("deps", []) or [],
+        _resolve_deps,
+        ctx.ticket_id,
+    )
+    issues.extend(cit_issues)
     cov = {
         "ran": True,
         "ac_items": len(items),
         "verify_commands_linted": len(linted),
         "verify_lint_abstained": lint_abstained,
         "operator_attested_gaps": len(oa_issues),
+        "citation_gaps": len(cit_issues),
     }
     if not issues:
         return DetResult("P6", "ac-quality", "pass", coverage=cov)
