@@ -307,7 +307,26 @@ curl -s https://pypi.org/pypi/nava-rebar/json | python3 -c "import json,sys;prin
 ```
 (Full install + probe of the published artifact is step 5 below.)
 
-### 3. Update the Homebrew tap (after PyPI has the new sdist)
+### 3. Update the Homebrew tap — automated (scheduled self-bump)
+**No manual step in the normal path.** The tap repo `navapbc/homebrew-rebar`
+carries a self-bump workflow (`.github/workflows/autobump.yml`) that runs on a
+schedule (every 6h) plus `workflow_dispatch`. It polls PyPI for the latest
+`nava-rebar` and, if newer than the formula, updates `Formula/rebar.rb`'s `url` +
+`sha256` and commits with the tap's **own** `GITHUB_TOKEN` — there is **no stored
+cross-repo token**, matching the OIDC/no-stored-token posture of the PyPI and MCP
+registry steps. Because it polls on a schedule, it **self-heals a missed release**:
+if a release goes out and nothing triggers the bump, the next scheduled run picks
+it up automatically.
+
+A maintainer can trigger it immediately after a release instead of waiting for the
+schedule: `gh workflow run autobump.yml --repo navapbc/homebrew-rebar`.
+
+The formula installs the base package (zero pip deps → no `resource` blocks). The
+MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via
+`pipx install 'nava-rebar[mcp]'` or `uvx --from nava-rebar[mcp] rebar-mcp`.
+
+**Manual fallback** (only if the autobump workflow is unavailable, or to bump out
+of band):
 ```bash
 # fetch the new sdist url + sha256
 curl -s https://pypi.org/pypi/nava-rebar/X.Y.Z/json | python3 -c "
@@ -321,9 +340,6 @@ Edit `Formula/rebar.rb` in `navapbc/homebrew-rebar`: update `url` + `sha256`
 brew style navapbc/rebar/rebar         # after re-tapping / pulling
 git commit -am "rebar X.Y.Z" && git push     # in the tap repo
 ```
-The formula installs the base package (zero pip deps → no `resource` blocks). The
-MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via
-`pipx install 'nava-rebar[mcp]'` or `uvx --from nava-rebar[mcp] rebar-mcp`.
 
 ### 4. Update the MCP Registry — automated (OIDC in CI)
 **No manual step in the normal path.** The `mcp_registry` job in

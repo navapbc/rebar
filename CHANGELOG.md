@@ -8,6 +8,18 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [0.9.1] - 2026-07-19
+
+### Added
+
+- Homebrew tap now auto-bumps its formula from PyPI (scheduled self-bump
+  workflow; no stored token).
+
+### Fixed
+
+- Plan-review finding discovery now de-duplicates findings and drops
+  contentless ones (empty body / no checklist item).
+
 ## [0.9.0] - 2026-07-20
 
 A feature release: passive delivery / agent-process metrics behind a new
