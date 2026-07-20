@@ -296,6 +296,17 @@ class VerifyConfig:
     # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
     # default (the total back-out).
     completion_floor_active: bool = False
+    # Validation-assessment cross-checks (bug 5e40) — two per-verdict consistency drops that
+    # converge a non-deterministic re-review. Each stays inert (the gate runs un-cross-checked, the
+    # verdict byte-identical) until flipped true, mirroring completion_floor_active's evidence gate:
+    # the mechanism ships off, an operator enables it only after calibration confirms it never
+    # suppresses a real finding.
+    #   - contradiction_xcheck_active: cross-check the verdict's findings for a MUTUAL contradiction
+    #     and drop the contradicted/weaker one (5e40 A1: a false BLOCK refuted by a true advisory).
+    #   - comment_trail_xcheck_active: consult the ticket's recorded comment trail and drop a
+    #     finding that re-litigates a point the trail already RESOLVED (5e40 B3: rebase:chain).
+    contradiction_xcheck_active: bool = False
+    comment_trail_xcheck_active: bool = False
     # Opt-in per-gate required-signing-environment (story 42d1). When set to an env_id, a gate's
     # operation certificate must come from that pinned trusted environment
     # (`.rebar/trusted_environments.yaml`), verified against its out-of-band-pinned key. Default
@@ -570,6 +581,8 @@ _SECTIONS: dict[str, dict] = {
         "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),
+        "contradiction_xcheck_active": lambda v, k: _as_bool(v, k),
+        "comment_trail_xcheck_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
         "opcert_enforce_since": lambda v, k: _as_str(v, k),
         "opcert_remote_url": lambda v, k: _as_str(v, k),
