@@ -8,6 +8,49 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [0.9.0] - 2026-07-20
+
+A maintenance and hardening release: reconciler/CI durability fixes, tighter
+gate parity, and completion of the `close_class` rollout across the remaining
+surfaces.
+
+### Changed
+
+- Extend the `close_class` bug-close enum to the remaining surfaces: it is now
+  threaded through the MCP tools and the NDJSON import path, and the canary's
+  close-on-recovery steps accept `--class`.
+- Extend plan-review's rising-floor convergence to the code-drift re-review axis
+  so re-reviews hold the same quality floor as first-pass reviews.
+
+### Fixed
+
+- Repair `probe-rebar.sh` drift from the current CLI contract and wire the probe
+  into golden-path CI so future drift is caught automatically.
+- Normalize the CI run conclusion before casting the `Verified` vote, so a
+  neutral/skipped conclusion is no longer misread as a failure.
+- Close the `Verified`-gate check-drift hole with a parity guard, so the set of
+  required checks cannot silently diverge from what the gate enforces.
+- Harden fsck Check 3's stale `index.lock` reclaim against a TOCTOU race.
+- Stop bridge-fsck from flagging a legitimate window-absence as a dangling
+  reference.
+- Lock and pathspec-scope the purge-bridge deletion commit, and add a prune
+  concurrency regression test.
+- Cross-check reducer cache validity against on-disk attestations so a stale
+  cache can no longer mask an attestation change.
+- Harden the live-E2E index-visibility poll against Jira propagation lag with
+  backoff, removing a source of flaky runs.
+- Re-materialize the host certbot renewal timer on autodeploy so certificate
+  renewal survives redeploys.
+- Isolate config tests under a temporary XDG home so fixtures no longer leak the
+  developer's real user config.
+- Guard `int(git rev-list --count …)` parsing in test helpers against empty
+  output.
+
+### Documentation
+
+- Remove a dead `../session-logs` relative link in `docs/concurrency.md`.
+- Document the autodeploy self-update coverage decision.
+
 ## [Unreleased]
 
 ## [0.8.0] - 2026-07-16
