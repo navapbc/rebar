@@ -45,12 +45,16 @@ from .coach import (
 from .decide import (
     DEFAULT_BLOCK_THRESHOLD,
     GRADED_BINARY,
+    dedup_key,
+    finding_body,
     impact,
     impact_code,
     impact_plan,
+    is_contentless_finding,
     pass3_decide,
     pass3_over_findings,
     severity_label,
+    suppress_and_dedup,
     validity,
 )
 from .verify import (
@@ -75,12 +79,16 @@ __all__ = [
     # Pass-3 — deterministic decision
     "DEFAULT_BLOCK_THRESHOLD",
     "GRADED_BINARY",
+    "dedup_key",
+    "finding_body",
     "impact",
     "impact_code",
     "impact_plan",
+    "is_contentless_finding",
     "pass3_decide",
     "pass3_over_findings",
     "severity_label",
+    "suppress_and_dedup",
     "validity",
     # Pass-2 — finding verifier + the verification contract
     "DEFAULT_VERIFY_WINDOW_HEADROOM",

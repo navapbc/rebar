@@ -408,8 +408,13 @@ def partition_findings(
     dropped: list[dict[str, Any]] = []
     indeterminate: list[dict[str, Any]] = []
 
+    # The discovered findings in stable order (DET blocks, DET advisories, then decided LLM),
+    # each id-minted. This ordered list is the DISCOVERY surface the deterministic B2/B4 narrowing
+    # runs over; a naturally-dropped LLM finding (low-validity/veto) is routed straight to
+    # ``dropped`` and NOT re-narrowed, so its recorded reason is preserved.
+    discovered: list[dict[str, Any]] = []
     for f in det_blocks:
-        blocking.append(
+        discovered.append(
             {
                 **f,
                 "id": mint_finding_id(f),
@@ -422,7 +427,7 @@ def partition_findings(
             }
         )
     for f in det_advisories:
-        advisory.append(
+        discovered.append(
             {
                 **f,
                 "id": mint_finding_id(f),
@@ -436,15 +441,28 @@ def partition_findings(
         )
     for f in llm_findings:
         f = {**f, "id": mint_finding_id(f)}
+        if f.get("decision") in ("block", "advisory", "indeterminate"):
+            discovered.append(f)
+        else:
+            dropped.append(f)
+
+    # DISCOVERY-STAGE deterministic narrowing (bug 5e40 B2/B4): suppress contentless findings and
+    # collapse exact duplicates BEFORE bucketing — so a contentless / duplicate BLOCK never reaches
+    # the ``blocking`` bucket (nor the verdict string derived from it). Dropped findings keep their
+    # id and carry a ``drop_reason`` ("contentless"/"duplicate"), landing in the sidecar's
+    # ``dropped`` bucket like the Pass-3 floors. Default-on: no model call, no config gate — it
+    # removes only non-actionable/redundant findings, a strict improvement. A no-match run is a
+    # no-op (the buckets stay byte-identical to the pre-narrowing partition).
+    kept, discovery_dropped = review_kernel.suppress_and_dedup(discovered)
+    dropped.extend(discovery_dropped)
+    for f in kept:
         d = f.get("decision")
         if d == "block":
             blocking.append(f)
         elif d == "advisory":
             advisory.append(f)
-        elif d == "indeterminate":
+        else:  # indeterminate (the only remaining surfaced decision)
             indeterminate.append(f)
-        else:
-            dropped.append(f)
 
     # Guard the load-bearing invariant: the cap must NEVER see a blocking finding
     # (all blocking findings are returned regardless of N). A refactor that leaked

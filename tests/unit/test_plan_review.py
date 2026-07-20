@@ -876,6 +876,100 @@ def test_advisory_cap_assertion_guards_blocking_leak() -> None:
     assert all(f.get("decision") != "block" for f in parts["surfaced"] + parts["overflow"])
 
 
+# ── Discovery-stage deterministic narrowing (bug 5e40 B2/B4) ──────────────────────────
+
+
+def test_suppress_and_dedup_is_identity_when_nothing_matches() -> None:
+    # No contentless / duplicate members → the kept list is the input unchanged and nothing
+    # is dropped (the byte-identical no-op the pipeline relies on).
+    from rebar.llm import review_kernel
+
+    findings = [
+        {"finding": "missing an AC", "criteria": ["P1"], "location": "plan §1"},
+        {"finding": "test gap", "criteria": ["E2"], "location": "plan §2"},
+    ]
+    kept, dropped = review_kernel.suppress_and_dedup(findings)
+    assert kept == findings
+    assert dropped == []
+
+
+def test_suppress_and_dedup_keeps_actionable_without_checklist() -> None:
+    # A finding with a real body but no checklist_item is STILL actionable → kept (dropping it
+    # would remove real content, not a strict improvement).
+    from rebar.llm import review_kernel
+
+    findings = [{"finding": "the plan omits rollback", "criteria": ["P3"], "location": "§4"}]
+    kept, dropped = review_kernel.suppress_and_dedup(findings)
+    assert len(kept) == 1 and dropped == []
+
+
+def test_discovery_fixture_reproduces_5e40_b2_b4() -> None:
+    # The B2/B4 fixture: one CONTENTLESS finding (empty body AND no checklist_item) and a
+    # DUPLICATE pair (same criterion + location + body). After discovery-stage narrowing the
+    # contentless one is suppressed and the duplicate collapses to a single surfaced finding.
+    llm_findings = [
+        # (a) B4 — contentless: empty body, bare/absent checklist item, no actionable content.
+        {
+            "finding": "   ",
+            "checklist_item": "- [ ]",
+            "criteria": ["E2"],
+            "location": "plan §3",
+            "decision": "advisory",
+            "priority": 0.4,
+        },
+        # (b) B2 — a duplicate pair on the same criterion + location + equivalent body.
+        {
+            "finding": "The plan does not test the error path.",
+            "checklist_item": "- [ ] add an error-path test",
+            "criteria": ["E2"],
+            "location": "plan §2",
+            "decision": "advisory",
+            "priority": 0.5,
+        },
+        {
+            # Same finding re-surfaced by a second finder: equivalent body (differs only by
+            # casing + collapsed whitespace), same criterion + location.
+            "finding": "The plan  does not test the ERROR path.",
+            "checklist_item": "- [ ] add an error-path test",
+            "criteria": ["E2"],
+            "location": "plan §2",
+            "decision": "advisory",
+            "priority": 0.5,
+        },
+    ]
+    parts = orchestrator.partition_findings([], [], llm_findings, advisory_cap=10)
+
+    surfaced = parts["surfaced"] + parts["overflow"]
+    dropped = parts["dropped"]
+
+    # The duplicate pair collapsed to exactly one surfaced finding; the contentless one is gone.
+    assert len(surfaced) == 1
+    assert surfaced[0]["finding"] == "The plan does not test the error path."
+
+    reasons = sorted(f.get("drop_reason") for f in dropped)
+    assert reasons == ["contentless", "duplicate"]
+    # The dropped findings retain a minted id so the sidecar can persist them.
+    assert all(f.get("id") for f in dropped)
+
+
+def test_discovery_suppresses_contentless_block() -> None:
+    # B4 escalation: a CONTENTLESS finding decided as a BLOCK must NOT reach the blocking bucket
+    # (an empty block is non-actionable). It is dropped with drop_reason="contentless".
+    llm_findings = [
+        {
+            "finding": "",
+            "checklist_item": "",
+            "criteria": ["P1"],
+            "location": "plan §1",
+            "decision": "block",
+            "priority": 1.0,
+        }
+    ]
+    parts = orchestrator.partition_findings([], [], llm_findings, advisory_cap=10)
+    assert parts["blocking"] == []
+    assert [f.get("drop_reason") for f in parts["dropped"]] == ["contentless"]
+
+
 def test_route_criteria_splits_agent_and_single() -> None:
     single, agent = orchestrator.route_criteria(_ctx(_GOOD_AC, ttype="story"))
     assert single and agent

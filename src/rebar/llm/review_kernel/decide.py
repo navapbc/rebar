@@ -196,6 +196,94 @@ def comment_trail_drop(answer: Any) -> bool:
     return isinstance(answer, dict) and answer.get("resolved_in_trail") == "yes"
 
 
+# ── Discovery-stage deterministic narrowing (bug 5e40 B2/B4) ──────────────────────────
+# Two PURE, LLM-free filters applied when the discovered findings are first bucketed
+# (``orchestrator.partition_findings``): suppress findings that carry no actionable content
+# (B4) and collapse exact duplicates (B2). Fully deterministic — an empty body / missing
+# checklist_item and an identical (criterion + location + body) pair are decidable without a
+# model — so they run by default (dropping only non-actionable / redundant findings is a
+# strict improvement), unlike the LLM-detected floors above.
+
+_BODY_KEYS = ("finding", "detail", "body", "description")
+
+
+def _norm_text(value: Any) -> str:
+    """Whitespace-collapsed, case-folded text — the normal form both filters compare on.
+    Non-strings normalize to ``""``. Pure; never raises."""
+    return " ".join(str(value or "").split()).strip().lower()
+
+
+def finding_body(f: dict[str, Any]) -> str:
+    """The finding's human-readable body, tolerant of the two live finding shapes: plan-review
+    findings key it ``finding``; the ``ReviewResult`` finding schema keys it ``detail`` (with
+    ``body``/``description`` accepted as further fallbacks). Returns the first non-blank value,
+    else ``""``. Pure; never raises."""
+    for k in _BODY_KEYS:
+        v = f.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    return ""
+
+
+def _checklist_text(f: dict[str, Any]) -> str:
+    """The actionable text of a finding's ``checklist_item``, with a leading markdown
+    checkbox/list marker (``- [ ]``, ``* [x]``, ``- ``) stripped — a bare unchecked box carries
+    no action. Returns ``""`` when nothing actionable remains. Pure; never raises."""
+    raw = f.get("checklist_item")
+    if not isinstance(raw, str):
+        return ""
+    text = raw.strip()
+    # Drop a leading bullet marker then an optional checkbox, whatever remains is the action.
+    if text[:1] in "-*+":
+        text = text[1:].strip()
+    if text[:3].lower() in ("[ ]", "[x]"):
+        text = text[3:].strip()
+    return text
+
+
+def is_contentless_finding(f: dict[str, Any]) -> bool:
+    """B4: True iff the finding carries NO actionable content — an empty/whitespace-only body
+    AND no actionable ``checklist_item``. A finding with a real body OR a real checklist item is
+    kept (either is actionable), so this drops only genuinely empty findings — a strict
+    improvement. Pure; never raises."""
+    return not _norm_text(finding_body(f)) and not _norm_text(_checklist_text(f))
+
+
+def dedup_key(f: dict[str, Any]) -> tuple[tuple[str, ...], str, str]:
+    """B2: the equivalence key two findings are duplicates under — same criterion set, same
+    location, equivalent (normalized) body. Criteria are order-insensitive; location and body are
+    whitespace/case normalized. Pure; never raises."""
+    criteria = tuple(sorted(_norm_text(c) for c in (f.get("criteria") or []) if _norm_text(c)))
+    return (criteria, _norm_text(f.get("location")), _norm_text(finding_body(f)))
+
+
+def suppress_and_dedup(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Discovery-stage narrowing (bug 5e40 B2/B4): partition ``findings`` into ``(kept, dropped)``
+    in stable input order. A finding is dropped when it is contentless (B4, stamped
+    ``drop_reason="contentless"``) or a later duplicate of an already-kept finding (B2, stamped
+    ``drop_reason="duplicate"``); the FIRST occurrence of a duplicate group is kept. Contentless
+    is checked first, so an empty duplicate is recorded as contentless. Findings already carrying
+    a ``drop_reason`` are left untouched (a prior stage owns them). Pure and deterministic — no
+    LLM, no I/O; a findings list with no contentless/duplicate members returns ``(findings, [])``
+    unchanged. Never raises."""
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, ...], str, str]] = set()
+    for f in findings:
+        if is_contentless_finding(f):
+            dropped.append({**f, "drop_reason": "contentless"})
+            continue
+        key = dedup_key(f)
+        if key in seen:
+            dropped.append({**f, "drop_reason": "duplicate"})
+            continue
+        seen.add(key)
+        kept.append(f)
+    return kept, dropped
+
+
 def impact(attrs: dict[str, Any]) -> float:
     """IMPACT ∈ [0,1] = mean of the ordinal-mapped severity attributes:
     max(prod_impact, debt_impact), blast_radius, likelihood, reversibility."""
