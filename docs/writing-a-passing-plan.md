@@ -117,7 +117,9 @@ finders (`G1G2`/`E4`/`E6`) will otherwise flag it as missing. Cite it inline as
 For the citation to be honored, there must be a **verified upstream edge** between the tickets:
 either this ticket declares `depends_on -> <id>`, **or** the cited ticket declares
 `blocks -> <this ticket>`. A `blocks` edge pointing *from* this ticket is downstream and does
-**not** count. When the edge is verified, the finder retrieves the cited ticket via
+**not** count. The edge must be **direct**: a *transitive*/indirect dependency — reaching the
+prerequisite only through another ticket — does **not** satisfy it, so declare `depends_on` on
+this ticket itself (or have the prerequisite `blocks` it) directly. When the edge is verified, the finder retrieves the cited ticket via
 `show_ticket` and credits the symbol **only** if that ticket's plan/file_impact actually
 establishes the specific functionality — an uncited, edge-unbacked, or coverage-unconfirmed
 citation still grounds as normal (fails closed). So: add the `depends_on` edge (or ensure the
