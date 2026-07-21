@@ -22,6 +22,17 @@ itself — running the gates/LLM ops or testing config — run the **repo checko
 a stale global install (which silently ignores newer config keys and may lack the `[agents]`
 extra): see `docs/local-dev-env.md`.
 
+**Codex environment rule:** use the current worktree's virtualenv for every development
+command. A prior `source .venv/bin/activate` does not persist across separate Codex shell-tool
+calls, so prepend it explicitly, for example
+`env PATH="$PWD/.venv/bin:$PATH" make lint` and
+`env PATH="$PWD/.venv/bin:$PATH" make typecheck`. If `.venv` is absent, run the canonical
+bootstrap from `docs/local-dev-env.md` (`python3 -m venv .venv`, activate it, then
+`make install`), or create the worktree with `make worktree name=<branch>`, which provisions it.
+Before reporting a lint/typecheck failure, rerun with the worktree `.venv/bin` first on `PATH`;
+ambient Ruff or a missing ambient mypy is an environment error, not repository evidence. This
+is the non-interactive Codex equivalent of the activated repo-venv shell used by Claude Code.
+
 ## Record your work in rebar, not in scratch notes
 
 Before starting, `search`/`list` for an existing ticket; if none fits, `create` one and
