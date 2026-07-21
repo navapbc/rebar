@@ -376,6 +376,12 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
             plan=plan,
         ):
             continue
+        # T8's generic structural-gap finder is intentionally broad after routing, so its
+        # applicability must be decided first at this deterministic seam.  This prevents plain
+        # dataclasses/enums and deterministic adapters from entering the stochastic LLM probe
+        # while preserving explicit prompt/model/agent and structured-tool contracts.
+        if cid == "T8" and not registry.t8_llm_surface_applies(plan):
+            continue
         # Deterministic overlays only run when triggered; LLM-routed overlays
         # (those absent from the deterministic trigger map) always enter the finder,
         # which decides applicability (PASS not-applicable is cheap).

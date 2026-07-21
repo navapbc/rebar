@@ -436,6 +436,37 @@ _DET_OVERLAY_RULES = {
     "T12": r"\b(deploy|rollout|canary|feature flag|production traffic|rollback|blue.green)\b",
 }
 
+# T8's finder is deliberately broad once it runs: its job is to discover subtle structural
+# gaps in an LLM/agent contract.  Applicability itself therefore cannot safely be delegated to
+# that same stochastic call.  Keep this boundary deterministic and limited to language that
+# explicitly names an LLM/agent surface.  Generic type-shape words (``schema``, ``enum``,
+# ``dataclass``) are intentionally absent: they are common in ordinary deterministic software
+# and are covered by the non-overlay criteria.
+_T8_LLM_SURFACE_RE = re.compile(
+    r"\b(?:"
+    r"llms?|large language models?|language models?|generative ai|"
+    r"openai|anthropic|claude|chatgpt|gpt(?:[- ]?\d[\w.-]*)?|gemini|mcp tools?|"
+    r"(?:system|developer|reviewer|agent|model) prompts?|"
+    r"prompt templates?|prompt librar(?:y|ies)|prompt engineering|"
+    r"sub[- ]?agents?|agentic|ai agents?|"
+    r"agents? (?:system|workflow|runner|reviewer|instruction|behavior|behaviour)|"
+    r"tool[- ]calling|function[- ]calling|"
+    r"tools? (?:input|output|request|response) schemas?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def t8_llm_surface_applies(plan: str) -> bool:
+    """Return whether ``plan`` explicitly defines an LLM/agent surface for T8.
+
+    T8 is a structural-completeness probe for prompts, model/agent behaviour, and schemas
+    consumed or emitted through an LLM/tool structured-output contract.  Ordinary typed data,
+    deterministic adapters, and CLI readers do not become T8-applicable merely because they
+    mention schemas, enums, or value objects.
+    """
+    return bool(_T8_LLM_SURFACE_RE.search(plan or ""))
+
 
 def overlay_triggers(plan: str) -> dict[str, bool]:
     """Deterministic overlay triggers (low-FP set only). Returns ``{overlay_id:

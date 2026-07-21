@@ -562,6 +562,34 @@ def test_overlay_triggers_are_low_fp_set() -> None:
     assert fired.get("T5a") is True
 
 
+@pytest.mark.parametrize(
+    "plan",
+    [
+        "Define a Result dataclass and a Status enum, then print them from the CLI adapter.",
+        "Read metrics into a value object; document every enum value and JSON output schema.",
+        "Add a deterministic structured-output formatter for the report reader.",
+    ],
+)
+def test_t8_routing_excludes_plain_typed_data_plans(plan: str) -> None:
+    _single, agent = orchestrator.route_criteria(_ctx(plan, ttype="story"))
+    assert "T8" not in {c["id"] for c in agent}
+
+
+@pytest.mark.parametrize(
+    "plan",
+    [
+        (
+            "Define an LLM reviewer with a structured-output verdict schema and enumerate every "
+            "value that the model may emit."
+        ),
+        "Revise the reviewer prompt and specify its fallback when the sub-agent fails.",
+    ],
+)
+def test_t8_routing_keeps_llm_structured_output_plans(plan: str) -> None:
+    _single, agent = orchestrator.route_criteria(_ctx(plan, ttype="story"))
+    assert "T8" in {c["id"] for c in agent}
+
+
 # ── Pass-4 subject validator (C1 enforcement) ─────────────────────────────────
 def test_pass4_coach_maps_findings_and_renders_deterministically() -> None:
     from rebar.llm.runner import FakeRunner
