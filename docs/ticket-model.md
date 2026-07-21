@@ -76,6 +76,12 @@ A missing or out-of-vocabulary `--class` is refused (the error names the allowed
 `--class` **replaces** the former free-text `--reason` requirement for bug closes.
 (`idea → closed` is a reject/drop and skips this gate.)
 
+When the completion-verification close gate is enabled, `duplicate`, `not_a_bug`, and
+`escalated` describe non-completion dispositions. They skip completion verification only
+when the bug has a net-active `bug -duplicates-> canonical` link to a live ticket, or a live
+replacement has a net-active `replacement -supersedes-> bug` link. A missing, reversed,
+unlinked, unresolved, archived, or deleted replacement does not bypass verification.
+
 ## Hierarchy and containment (`parent_id`, not a link)
 
 Containment (epic → story → task/bug) is the **`parent_id`** hierarchy, **not** a `link`
