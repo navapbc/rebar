@@ -53,6 +53,13 @@ BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap 
 
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml'
+# secrets sources: the .env is SSM-sourced (fetch-secrets.sh) and rsync-EXCLUDED, so a
+# new/rotated SSM-backed env key would never reach the box on deploy (f600). A new key
+# requires editing fetch-secrets.sh (to emit the leaf) and/or ssm.tf (to declare the param)
+# — NEITHER is in BOT_PATHS, so we trigger the review-bot redeploy (and a pre-`up`
+# fetch-secrets refresh, below) on these paths too. (A pure SSM VALUE rotation with no git
+# change does not advance main, so autodeploy no-ops on it — that path is operator-driven.)
+SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
 CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh'
 # host observability probe: re-materialized (idempotent installer) on a source change.
@@ -177,8 +184,8 @@ if changed "$CONFIG_PATHS"; then
 fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
-if changed "$BOT_PATHS"; then
-  log "review-bot sources changed; sync + rebuild + restart (blast radius = $BOT_SERVICE only)"
+if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+  log "review-bot sources or secrets changed; sync + refresh .env + rebuild + restart (blast radius = $BOT_SERVICE only)"
   # sync the target source into the copy-based build context (git checkout in the MIRROR).
   if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
     err mirror-checkout-failed "git checkout $TARGET in $MIRROR_DIR failed"; record_backoff_failure; exit 1
@@ -189,6 +196,20 @@ if changed "$BOT_PATHS"; then
   # keep the copy owned by the deploy user; the excluded secrets .env keeps its own owner/perms.
   env_owner="$(stat -c '%U:%G' "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true)"
   chown -R 502:502 "$DEPLOY_REPO" 2>/dev/null || true
+  [ -n "$env_owner" ] && chown "$env_owner" "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true
+
+  # Refresh the SSM-sourced .env BEFORE `compose up` so new/rotated keys reach the container
+  # without a manual boot (f600 AC2). .env is rsync-EXCLUDED + SSM-sourced, so it is otherwise
+  # never regenerated on deploy. fetch-secrets is fail-fast: on ANY SSM error it exits non-zero
+  # WITHOUT touching .env — so we abort the deploy here, BEFORE tagging :prev or building, which
+  # keeps autodeploy's fail-safe/never-half-updated guarantee: the running bot stays on its
+  # current image (:latest untouched → nothing to roll back). Runs only on an actual bot/secrets
+  # redeploy (not every tick), so no SSM-quota regression. Uses the just-rsynced TARGET copy.
+  if ! ENV_FILE="$DEPLOY_REPO/infra/compose/.env" bash "$DEPLOY_REPO/infra/scripts/fetch-secrets.sh" >/dev/null 2>&1; then
+    err secrets-fetch-failed "fetch-secrets.sh failed (SSM unreachable / param missing); .env left intact; deploy aborted (bot stays on current image)"
+    record_backoff_failure; exit 1
+  fi
+  # fetch-secrets rewrites .env as the deploy user (0600); re-assert the preserved owner.
   [ -n "$env_owner" ] && chown "$env_owner" "$DEPLOY_REPO/infra/compose/.env" 2>/dev/null || true
 
   gerrit_before="$(docker inspect -f '{{.Id}}' "$GERRIT_CONTAINER" 2>/dev/null || true)"
