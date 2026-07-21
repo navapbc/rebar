@@ -9,6 +9,8 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
@@ -573,6 +575,30 @@ def test_overlay_triggers_are_low_fp_set() -> None:
 def test_t8_routing_excludes_plain_typed_data_plans(plan: str) -> None:
     _single, agent = orchestrator.route_criteria(_ctx(plan, ttype="story"))
     assert "T8" not in {c["id"] for c in agent}
+
+
+def test_t8_metric_adapter_regression_routes_real_gap_to_e2() -> None:
+    # Regression fixture derived from the 3ba0 jscpd adapter and 0734 git-metrics
+    # migration that exposed ticket 1a05.  The typed vocabulary must not engage T8,
+    # while the intentionally unstated accruing_since provenance and trend algorithm
+    # remain reviewable as ordinary E2 plan ambiguities.
+    plan = """
+    Add a deterministic jscpd CLI adapter returning an AnalyzerResult dataclass with
+    loc, complexity, and duplication fields.  When the executable is unavailable,
+    return Unavailable(reason, accruing_since).  Migrate the git metric readers and
+    expose module_size_trend from commit history.  Serialize the result through the
+    report CLI with a stdlib Status enum.
+    """
+
+    single, agent = orchestrator.route_criteria(_ctx(plan, ttype="story"))
+    assert "T8" not in {c["id"] for c in agent}
+    assert "E2" in {c["id"] for c in single}
+
+    e2_path = Path(__file__).parents[2] / "src/rebar/llm/reviewers/plan_review_E2.md"
+    e2_rubric = e2_path.read_text()
+    assert "source/provenance" in e2_rubric
+    assert "computation or aggregation protocol" in e2_rubric
+    assert "route them here, not through an LLM overlay" in e2_rubric
 
 
 @pytest.mark.parametrize(
