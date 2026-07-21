@@ -7,6 +7,39 @@ unsubmittable (a `-1`), never silently submittable.
 
 ---
 
+## The box (where prod runs)
+
+Everything below runs on the single prod EC2 host. **You need its instance id and
+region for every SSM / AWS-CLI operation** in this runbook — they are:
+
+| | |
+|---|---|
+| **Instance** | `i-00880b2c7f13527c5` |
+| **Region** | `us-east-1` (single-sourced as `var.aws_region` default in `infra/terraform/variables.tf`; the Terraform backend is also pinned to `us-east-1` in `infra/terraform/versions.tf`) |
+| **Account** | `896586841071` |
+
+The host is **SSM-managed** (no public SSH); connect with Session Manager:
+
+```bash
+aws ssm start-session --region us-east-1 --target i-00880b2c7f13527c5
+# non-interactive (scripted) equivalent — run a command and read its output:
+aws ssm send-command --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
+  --document-name AWS-RunShellScript --parameters 'commands=["<cmd>"]'
+```
+
+`/opt/rebar` is a *copy* of `main` (not a git checkout) that `autodeploy.sh` keeps in
+sync (ADR-0026). The `autodeploy.sh` **body** auto-updates in place via that same
+`BOT_PATHS` rsync, like any other source — but a commit touching *only* `autodeploy.sh`
+(no `BOT_PATHS` path) triggers no deploy, so it will not rsync itself until the next
+bot-path deploy; to make such a script-only change live now, hand-deploy it (update the
+mirror at `/var/lib/rebar/mirror`, then install the new `infra/scripts/autodeploy.sh`
+into `/opt/rebar`, preserving `502:502`). Separately, the **installer**
+(`install-autodeploy.sh`) and the `rebar-autodeploy.{service,timer}` unit files *are*
+deliberately excluded from in-run re-materialization (self-modification race), so those
+always require a hand-deploy.
+
+---
+
 ## Manually re-run a review (`/rerun`)
 
 > **This is the operator escape hatch for a change stuck at a fail-closed `-1`.**
