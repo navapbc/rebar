@@ -200,7 +200,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
 def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
-        "[--type=<type>] [--status=<status>] [--priority=<n>] [--parent=<id>] "
+        "[--type=<type>[,<type>...]] [--status=<status>] [--priority=<n>] [--parent=<id>] "
         "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
         "[--unblocked|--blocked] [--with-children-count] [--full] "
         "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending)"

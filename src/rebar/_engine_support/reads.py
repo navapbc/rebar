@@ -355,18 +355,19 @@ def list_states(tracker: str, query: TicketQuery | None = None) -> list[dict]:
     parent_filter = parent
     if parent_filter:
         parent_filter = resolve_ticket_id(parent_filter, tracker) or parent_filter
-    # session_log / code_review artifacts are hidden from default `list` (searchable
-    # via `search`/`show` only) — surface them ONLY when the type filter explicitly
-    # selects one (`list --type=session_log` / `list --type=code_review`). `validate`
-    # reaches list_states with no type filter, so it inherits the exclusion (artifacts
-    # are never health-flagged).
+    # Non-graph artifacts are hidden from default `list` (searchable via
+    # `search`/`show` only) — surface them ONLY when the type filter explicitly
+    # selects one, including within a comma-separated OR list. `validate` reaches
+    # list_states with no type filter, so it inherits the exclusion (artifacts are
+    # never health-flagged).
     from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
 
+    requested_types = {value.strip() for value in ticket_type.split(",") if value.strip()}
     results = reduce_all_tickets(
         tracker,
         exclude_archived=not include_archived,
         exclude_deleted=exclude_deleted,
-        exclude_session_logs=(ticket_type not in _NON_GRAPH_ARTIFACT_TYPES),
+        exclude_session_logs=requested_types.isdisjoint(_NON_GRAPH_ARTIFACT_TYPES),
     )
     # children_count: direct non-deleted children per ticket, counted over the
     # reduced set BEFORE the narrowing filters (a closed child still counts).

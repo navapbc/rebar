@@ -110,7 +110,8 @@ def apply_ticket_filters(
     if status_filter not in ("error", "fsck_needed"):
         results = [t for t in results if t.get("status") not in ("error", "fsck_needed")]
     if type_filter:
-        results = [t for t in results if match_predicate(t, "type", "eq", type_filter)]
+        type_values = {t.strip() for t in type_filter.split(",") if t.strip()}
+        results = [t for t in results if match_predicate(t, "type", "in", type_values)]
     if status_filter:
         status_values = {s.strip() for s in status_filter.split(",")}
         results = [t for t in results if match_predicate(t, "status", "in", status_values)]

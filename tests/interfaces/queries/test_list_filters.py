@@ -132,6 +132,17 @@ def test_cli_with_children_count_flag(scenario):
     assert all("children_count" in t for t in json.loads(cp.stdout))
 
 
+def test_cli_type_filter_comma_is_or(scenario):
+    task_ids = _cli_list_ids(scenario["repo"], "--type=task")
+    epic_ids = _cli_list_ids(scenario["repo"], "--type=epic")
+
+    combined = _cli_list_ids(scenario["repo"], "--type=task,epic")
+
+    assert task_ids
+    assert epic_ids
+    assert combined == task_ids | epic_ids
+
+
 # ── --min-children ───────────────────────────────────────────────────────────
 @pytest.mark.parametrize(
     "n,present,absent",

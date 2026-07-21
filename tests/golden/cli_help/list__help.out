@@ -1,5 +1,5 @@
 Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--sort=<key>] [--include-archived] [--exclude-deleted] [--no-pull] [--output llm]
-  --type=<type>      Filter by ticket type (bug, epic, story, task)
+  --type=<type>      Filter by ticket type (bug, epic, story, task; comma-separated for OR)
   --status=<status>  Filter by status: idea|open|in_progress|closed|blocked|archived|deleted
                      (comma-separated for OR; error|fsck_needed also valid). An
                      unrecognized status is a hard error, not an empty result.
