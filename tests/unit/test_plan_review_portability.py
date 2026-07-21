@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from rebar.llm.findings import resolve_citations
 from rebar.llm.plan_review.det_operator_attested import operator_evidence_issues
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,3 +33,33 @@ def test_plan_review_prompts_do_not_expose_internal_adr_0043() -> None:
         if INTERNAL_ADR.search(path.read_text())
     ]
     assert leaked == []
+
+
+def test_client_adr_present_in_target_repo_remains_grounded(tmp_path: Path) -> None:
+    client_adr = tmp_path / "docs/adr/0043-client-authored-decision.md"
+    client_adr.parent.mkdir(parents=True)
+    client_adr.write_text("# Client decision\n\nUse ticket-recorded deployment evidence.\n")
+    result = {
+        "findings": [
+            {
+                "citations": [
+                    {
+                        "kind": "file",
+                        "path": "docs/adr/0043-client-authored-decision.md",
+                        "line_start": 1,
+                        "line_end": 3,
+                    }
+                ]
+            }
+        ]
+    }
+
+    resolve_citations(result, str(tmp_path))
+
+    citation = result["findings"][0]["citations"][0]
+    assert citation == {
+        "kind": "file",
+        "path": "docs/adr/0043-client-authored-decision.md",
+        "line_start": 1,
+        "line_end": 3,
+    }
