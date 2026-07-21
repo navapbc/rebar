@@ -29,6 +29,74 @@ from rebar.graph._unblock import batch_close_operations
 logger = logging.getLogger(__name__)
 
 
+_NON_COMPLETION_BUG_CLASSES = frozenset({"duplicate", "not_a_bug", "escalated"})
+
+
+def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
+    """Whether ``ticket_id`` resolves to a usable, non-retired ticket."""
+    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar.reducer import reduce_ticket
+
+    resolved = resolve_ticket_id(ticket_id, tracker)
+    if resolved is None:
+        return False
+    try:
+        state = reduce_ticket(os.path.join(tracker, resolved))
+    except Exception:  # noqa: BLE001 -- malformed/unreadable targets never earn a gate bypass
+        return False
+    return bool(
+        isinstance(state, dict)
+        and not state.get("error")
+        and not state.get("archived")
+        and state.get("status") not in {"archived", "deleted"}
+    )
+
+
+def _has_live_replacement_link(
+    ticket_id: str,
+    ticket_type: str,
+    close_class: str,
+    tracker: str,
+) -> bool:
+    """True when a non-completion bug close names a live replacement.
+
+    Replacement relationships are directional: either this bug duplicates a
+    canonical ticket, or another ticket supersedes this bug. Reduced state and
+    the inbound reader both expose only net-active links, including links baked
+    into snapshots.
+    """
+    if ticket_type != "bug" or close_class not in _NON_COMPLETION_BUG_CLASSES:
+        return False
+
+    from rebar.reducer import reduce_ticket
+
+    try:
+        state = reduce_ticket(os.path.join(tracker, ticket_id))
+    except Exception:  # noqa: BLE001 -- an unreadable source must retain fail-closed verification
+        return False
+    if not isinstance(state, dict):
+        return False
+
+    for dep in state.get("deps") or []:
+        if dep.get("relation") != "duplicates":
+            continue
+        target = dep.get("target_id", dep.get("target", ""))
+        if target and _is_live_ticket(str(target), tracker):
+            return True
+
+    from rebar.reducer._inbound import find_inbound_relationships
+
+    try:
+        inbound = find_inbound_relationships(ticket_id, tracker)
+    except Exception:  # noqa: BLE001 -- a failed graph read must retain fail-closed verification
+        return False
+    return any(
+        link.get("relation") == "supersedes"
+        and _is_live_ticket(str(link.get("from_id") or ""), tracker)
+        for link in inbound.get("inbound_links") or []
+    )
+
+
 def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
     """True if any commit reachable from the code repo's history references ANY of
     ``accepted_ids`` via a ``rebar-ticket:`` trailer (or a leading ``<id>:`` subject token).
@@ -129,6 +197,15 @@ def _completion_precheck(
             returncode=1,
         )
 
+    # A duplicate / not-a-bug / escalated bug with a durable replacement relation is a
+    # disposition, not a claim that this ticket's acceptance criteria were implemented.
+    # Skip the completion-only checks (including file-impact and the billable verifier), but
+    # only when the directional link is net-active and its counterpart is a live ticket.
+    # The bug-class guard above and all structural/write-time close guards still apply.
+    tracker = str(config.tracker_dir(repo_root))
+    if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
+        return None
+
     # Deterministic precheck BEFORE the billable LLM call (alongside the open-children guard):
     # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
@@ -137,7 +214,6 @@ def _completion_precheck(
     from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
-    tracker = str(config.tracker_dir(repo_root))
     # Derive the code repo root from the (always-resolved) tracker rather than the raw
     # ``repo_root`` param — the CLI passes ``repo_root=None``, which would make ``git -C None``
     # fail and the check spuriously report "no referencing commit". ``os.path.dirname(tracker)``
