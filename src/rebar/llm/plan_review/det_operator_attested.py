@@ -171,6 +171,6 @@ def operator_evidence_issues(ac_lines: list[str]) -> list[str]:
             f"AC item {subject!r} cites operational evidence ({', '.join(markers)}) that lives "
             "outside the codebase but is not tagged [operator-attested]; prefix the checkbox text "
             "with [operator-attested] so the completion verifier accepts a recorded attestation "
-            "instead of failing to find code proof (ADR-0043)."
+            "instead of failing to find code proof."
         )
     return issues
