@@ -242,10 +242,12 @@ rebar validate --output json
 
 ## Metrics — how the agent-driven loop is trending
 
-`rebar metrics --since <date> --until <date> [--output json|text]` renders every metric
+`rebar metrics [--since <date>] [--until <date>] [--output json|text]` renders every metric
 in the built-in registry over a date range, so you can ask "how is the agent-driven dev
-loop trending?" without hand-rolling queries. It is read-only and derives everything from
-the durable event store, git, and the gate sidecars.
+loop trending?" without hand-rolling queries. With no date flags it reports the last 30
+days (through today); either explicit ISO-8601 bound overrides its corresponding default.
+It is read-only and derives everything from the durable event store, git, and the gate
+sidecars.
 
 Each metric is tagged with a **lens** — one of `agent_process` (attempts/rework/recovery
 per ticket), `code_health` (module-size distribution and trend vs the locked cap, churn,

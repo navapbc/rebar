@@ -22,12 +22,27 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from rebar import config
 from rebar._engine_support.output import OutputFormatError, parse_output
 
 _USAGE = "Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]\n"
+_DEFAULT_WINDOW_DAYS = 30
+
+
+def _default_date_range(*, today: date | None = None) -> tuple[str, str]:
+    """Return the default inclusive reporting dates for the last 30 days.
+
+    ``today`` is an explicit clock seam for deterministic callers and tests. The
+    real CLI uses the current UTC date so its output is stable across host time
+    zones.
+    """
+
+    until = today or datetime.now(timezone.utc).date()
+    since = until - timedelta(days=_DEFAULT_WINDOW_DAYS)
+    return since.isoformat(), until.isoformat()
 
 
 def _parse_dated_flag(argv: list[str], flag: str) -> tuple[str | None, list[str] | None]:
@@ -116,8 +131,9 @@ def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
         sys.stderr.write(_USAGE)
         return 2
 
-    since = since or ""
-    until = until or ""
+    default_since, default_until = _default_date_range()
+    since = since if since and since.strip() else default_since
+    until = until if until and until.strip() else default_until
 
     root = str(config.repo_root(repo_root) if repo_root is not None else config.repo_root())
     ctx = SimpleNamespace(repo_root=root, since=since, until=until)

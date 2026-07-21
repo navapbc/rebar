@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import date
 
 import pytest
 
@@ -53,3 +54,14 @@ def test_metrics_json_covers_every_registered_id(rebar_repo):
             assert entry.get("unavailable", {}).get("reason"), (
                 f"{mid} unavailable needs reason: {entry}"
             )
+
+
+def test_metrics_without_dates_uses_a_real_default_window(rebar_repo):
+    p = _cli("metrics", "--output", "json", cwd=str(rebar_repo))
+    assert p.returncode == 0, p.stderr
+
+    doc = json.loads(p.stdout)
+    since = date.fromisoformat(doc["since"])
+    until = date.fromisoformat(doc["until"])
+    assert (until - since).days == 30
+    assert all("Invalid isoformat" not in str(entry) for entry in doc["metrics"].values())
