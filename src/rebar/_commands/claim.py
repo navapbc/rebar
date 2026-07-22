@@ -27,7 +27,8 @@ _CLAIM_USAGE = (
     "  Parent-first: if the ticket has an OPEN parent, the parent is claimed first\n"
     "  (recursively, same assignee); a parent failure aborts the child and the\n"
     "  error names the parent.\n"
-    "  --force bypasses the plan-review start-work gate (when enabled) with an audit note.\n"
+    "  --force bypasses any enabled start-work gate (e.g. plan-review today, and any gate "
+    "added in the future) with an audit note.\n"
 )
 
 
