@@ -110,7 +110,7 @@ def test_404_fast_fails_raw_no_retry(dispatch):
 def test_acli_rest_raw_httperror_raise_unchanged():
     """No boundary translation: acli_rest's _rest_urlopen_with_retry still re-raises
     the RAW urllib.error.HTTPError (the 8+ raw-HTTPError catchers rely on it)."""
-    from rebar_reconciler import acli_rest
+    from rebar_reconciler.adapters.jira import acli_rest
 
     err = _http_error(404)
     # The retry helper is a mixin method needing no instance state — it re-raises

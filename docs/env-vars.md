@@ -19,10 +19,10 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `JIRA_API_TOKEN` | `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/acli_subprocess.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/acli_subprocess.py` |  |
-| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/acli_subprocess.py` |  |
-| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/acli_subprocess.py` |  |
+| `JIRA_API_TOKEN` | `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
@@ -122,7 +122,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/__main__.py` |  |
-| `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/outbound_fields.py` |  |
+| `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py`, `src/rebar/opcert_service/jobs.py` |  |
@@ -150,13 +150,13 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_cli/_jira_onboard.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/_cli/_jira_onboard.py:185` — `os.environ.get(<non-literal>)`
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_handlers.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_inbound.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/binding_store.py:92` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/inbound_translate.py:49` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:82` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:107` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/outbound_fields.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:411` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`

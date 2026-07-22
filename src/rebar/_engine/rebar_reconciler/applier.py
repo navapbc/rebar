@@ -600,7 +600,7 @@ def _apply_batch(
     # factory) for the downstream cross-project safety guard (bug 626d). Read via the
     # stable acli_subprocess floor rather than the transport so a test fake without a
     # jira_project attribute still works.
-    from rebar_reconciler import acli_subprocess
+    from rebar_reconciler.adapters.jira import acli_subprocess
 
     _s = acli_subprocess.resolve_jira_settings(project_default="DIG")
 

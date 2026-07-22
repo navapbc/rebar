@@ -23,7 +23,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "acli.py"
+ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
 
 # Bootstrap the rebar_reconciler package namespace + the submodules acli.py imports
 # at load time, so the importlib loader chain resolves under any cwd (mirrors the
@@ -37,10 +37,10 @@ if "rebar_reconciler" not in sys.modules:
     _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
     sys.modules["rebar_reconciler"] = _dr
 for _sub in ("adf", "comment_limits"):
-    _key = f"rebar_reconciler.{_sub}"
+    _key = f"rebar_reconciler.adapters.jira.{_sub}"
     if _key not in sys.modules:
         _spec = importlib.util.spec_from_file_location(
-            _key, SCRIPTS_DIR / "rebar_reconciler" / f"{_sub}.py"
+            _key, SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / f"{_sub}.py"
         )
         _mod = importlib.util.module_from_spec(_spec)
         sys.modules[_key] = _mod

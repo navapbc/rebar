@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rebar_reconciler.acli_subprocess import AssigneeNotFoundError
+from rebar_reconciler.adapters.jira.acli_subprocess import AssigneeNotFoundError
 from rebar_reconciler.batch_dispatch import create_one, delete_one, update_one
 from rebar_reconciler.pass_io import (
     _load_alert_store,

@@ -92,7 +92,7 @@ def _patch_apply_deps(applier, monkeypatch):
 
     apply() calls ``_load_acli()`` unconditionally to construct the Jira client
     (applier.py ~2716). The real rebar_reconciler/acli.py does
-    ``from rebar_reconciler.adf import text_to_adf`` at import time, which is
+    ``from rebar_reconciler.adapters.jira.adf import text_to_adf`` at import time, which is
     unresolvable under this file's spec_from_file_location loading scheme
     (modules live under the ``rebar_reconciler`` package, not a
     bare ``rebar_reconciler`` package) — so the real load raises ModuleNotFoundError

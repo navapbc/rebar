@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import logging
 
-from rebar_reconciler.adf import fit_text_to_adf_limit as _fit_description_to_adf_limit
-from rebar_reconciler.comment_limits import (  # shared send/diff truncation
+from rebar_reconciler.adapters.jira.adf import (
+    fit_text_to_adf_limit as _fit_description_to_adf_limit,
+)
+from rebar_reconciler.adapters.jira.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
 )
-from rebar_reconciler.comment_limits import (
+from rebar_reconciler.adapters.jira.comment_limits import (
     truncate_comment_body as _truncate_comment_body,
 )
 

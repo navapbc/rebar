@@ -282,7 +282,7 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
     monkeypatch.setenv("JIRA_API_TOKEN", "tok-abc-123")
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
 
-    from rebar_reconciler import acli
+    from rebar_reconciler.adapters.jira import acli
 
     mock_client, _ = _make_mock_acli_module()
     constructor = MagicMock(return_value=mock_client)
@@ -326,7 +326,7 @@ def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, app
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
     monkeypatch.delenv("JIRA_PROJECT", raising=False)
 
-    from rebar_reconciler import acli
+    from rebar_reconciler.adapters.jira import acli
 
     mock_client, _ = _make_mock_acli_module()
     constructor = MagicMock(return_value=mock_client)

@@ -62,9 +62,10 @@ def _seed_dotted_namespace() -> None:
     import rebar_reconciler  # the test-dir package under pytest; engine pkg in prod
 
     # The test-dir package shadows the engine package, so dotted submodule
-    # imports against the ENGINE (e.g. rebar_reconciler/acli.py's module-level
-    # ``from rebar_reconciler.adf import ...`` / ``from rebar_reconciler.comment_limits
-    # import ...``, executed when reconcile_once loads acli via
+    # imports against the ENGINE (e.g. rebar_reconciler/adapters/jira/acli.py's
+    # module-level ``from rebar_reconciler.adapters.jira.adf import ...`` /
+    # ``from rebar_reconciler.adapters.jira.comment_limits import ...``, executed
+    # when reconcile_once loads acli via
     # _load) would fail to resolve — and _load registers the half-loaded module
     # in sys.modules before exec, poisoning the cache for sibling tests. Extend
     # this package's __path__ to include the engine's rebar_reconciler dir so ANY

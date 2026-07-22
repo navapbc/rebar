@@ -62,7 +62,7 @@ def _make_request(jira_url: str, issue_key: str, user: str, token: str) -> urlli
 def _resolve_env() -> tuple[str, str, str]:
     # url/user resolve through the typed config (JIRA_URL/JIRA_USER env override the
     # [tool.rebar.jira] file); the secret token is env-only. All three stay required.
-    from rebar_reconciler import acli_subprocess
+    from rebar_reconciler.adapters.jira import acli_subprocess
 
     settings = acli_subprocess.resolve_jira_settings()
     jira_url, user, token = settings.url, settings.user, settings.api_token

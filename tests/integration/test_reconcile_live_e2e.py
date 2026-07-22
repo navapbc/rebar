@@ -86,14 +86,31 @@ if str(RECON_DIR.parent) not in sys.path:
 # OWN references isolated.)
 _MOD_CACHE: dict[str, ModuleType] = {}
 
+# The Jira vendor modules were relocated into ``adapters/jira/`` (ADR 0035 §(c), epic
+# bbf1 / story dfb9); resolve them from that sub-package instead of the package root.
+_JIRA_ADAPTER_MODULES = frozenset(
+    {
+        "acli",
+        "acli_cli_ops",
+        "acli_graph",
+        "acli_rest",
+        "acli_subprocess",
+        "adf",
+        "outbound_fields",
+        "comment_limits",
+    }
+)
+
 
 def _recon(modname: str) -> ModuleType:
-    """Load ``rebar_reconciler/<modname>.py`` under a unique, pollution-proof key."""
+    """Load ``rebar_reconciler/<modname>.py`` (or ``adapters/jira/<modname>.py`` for a
+    relocated vendor module) under a unique, pollution-proof key."""
     key = f"d01e_{modname}"
     cached = _MOD_CACHE.get(key)
     if cached is not None:
         return cached
-    spec = importlib.util.spec_from_file_location(key, RECON_DIR / f"{modname}.py")
+    base = RECON_DIR / "adapters" / "jira" if modname in _JIRA_ADAPTER_MODULES else RECON_DIR
+    spec = importlib.util.spec_from_file_location(key, base / f"{modname}.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[key] = mod

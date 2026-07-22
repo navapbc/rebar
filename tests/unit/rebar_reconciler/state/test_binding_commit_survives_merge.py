@@ -73,8 +73,8 @@ def binding_store_mod():
 def outbound_differ_mod():
     # Install a stub ADF module under a unique key that only _this_ module's
     # outbound_differ copy will see.  We must NOT clobber the canonical
-    # "rebar_reconciler.adf" key that other test modules rely on.
-    _ADF_KEY = "rebar_reconciler.adf"
+    # "rebar_reconciler.adapters.jira.adf" key that other test modules rely on.
+    _ADF_KEY = "rebar_reconciler.adapters.jira.adf"
     _prev_adf = sys.modules.get(_ADF_KEY)
     adf_stub = types.ModuleType(_ADF_KEY)
     adf_stub.adf_to_text = lambda x: str(x) if isinstance(x, str) else ""

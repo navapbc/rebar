@@ -14,7 +14,8 @@ puts ``src/rebar/_engine`` on ``sys.path``.
 
 from __future__ import annotations
 
-from rebar_reconciler import inbound_translate, outbound_fields, reconcile
+from rebar_reconciler import inbound_translate, reconcile
+from rebar_reconciler.adapters.jira import outbound_fields
 
 
 def test_outbound_idea_ticket_yields_jira_idea():

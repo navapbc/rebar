@@ -53,7 +53,7 @@ _skip = pytest.mark.skipif(not _live_jira_ready(), reason="no live Jira creds / 
 def _build_client():
     if str(ENGINE_DIR) not in sys.path:
         sys.path.insert(0, str(ENGINE_DIR))
-    from rebar_reconciler import acli
+    from rebar_reconciler.adapters.jira import acli
 
     return acli.AcliClient(
         jira_url=os.environ["JIRA_URL"],

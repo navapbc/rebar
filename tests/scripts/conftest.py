@@ -34,7 +34,9 @@ if _SCRIPTS_DIR not in sys.path:
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ACLI_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "acli.py"
+ACLI_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
+)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

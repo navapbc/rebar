@@ -29,7 +29,7 @@ from rebar_reconciler.link_direction import resolve_inbound_link
 # Relation <-> Jira link-type mapping. The canonical definition lives in
 # acli_graph._RELATION_TO_JIRA_LINK (Cycle 1), but the differ is loaded
 # standalone via spec_from_file_location in tests (no package context, so
-# ``from rebar_reconciler.acli_graph import ...`` is not reliably importable
+# ``from rebar_reconciler.adapters.jira.acli_graph import ...`` is not reliably importable
 # and would pull the whole ACLI client import chain). We re-declare a local
 # copy here — the same single-source-of-vocabulary pattern as the local
 # _LOCAL_TO_JIRA_* constants above. Keep in sync with acli_graph.

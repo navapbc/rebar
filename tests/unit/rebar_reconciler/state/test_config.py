@@ -190,4 +190,4 @@ def test_idea_maps_to_jira_idea_across_all_status_maps(config: ModuleType) -> No
     assert config.jira_to_local_status["IDEA"] == "idea"
     assert _load_attr("inbound_differ.py", "_JIRA_TO_LOCAL_STATUS")["IDEA"] == "idea"
     assert _load_attr("adapters/jira/jira_fields.py", "_LOCAL_STATUS_TO_JIRA")["idea"] == "IDEA"
-    assert _load_attr("outbound_fields.py", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"
+    assert _load_attr("adapters/jira/outbound_fields.py", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"

@@ -41,36 +41,40 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "acli.py"
+ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
 ALERT_STORE_PATH = SCRIPTS_DIR / "rebar_reconciler" / "alert_store.py"
 
-# acli.py imports ``from rebar_reconciler.adf import text_to_adf``,
+# acli.py imports ``from rebar_reconciler.adapters.jira.adf import text_to_adf``,
 # which requires the rebar_reconciler package to be importable. Mirror the
 # bootstrap pattern from test_assignee_validation.py so the loader chain
 # resolves the same way under any cwd.
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
-_ADF_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adf.py"
+_ADF_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
 if "rebar_reconciler" not in sys.modules:
     import types as _types
 
     _dr = _types.ModuleType("rebar_reconciler")
     _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
     sys.modules["rebar_reconciler"] = _dr
-if "rebar_reconciler.adf" not in sys.modules:
-    _adf_spec = importlib.util.spec_from_file_location("rebar_reconciler.adf", _ADF_PATH)
+if "rebar_reconciler.adapters.jira.adf" not in sys.modules:
+    _adf_spec = importlib.util.spec_from_file_location(
+        "rebar_reconciler.adapters.jira.adf", _ADF_PATH
+    )
     _adf_mod = importlib.util.module_from_spec(_adf_spec)
-    sys.modules["rebar_reconciler.adf"] = _adf_mod
+    sys.modules["rebar_reconciler.adapters.jira.adf"] = _adf_mod
     _adf_spec.loader.exec_module(_adf_mod)  # type: ignore[union-attr]
-# acli.py also imports ``from rebar_reconciler.comment_limits import ...``
+# acli.py also imports ``from rebar_reconciler.adapters.jira.comment_limits import ...``
 # (bug 6afc-20ee-84e5-4dd5). Bootstrap it explicitly alongside adf so the loader
 # chain resolves regardless of which sibling test first registered the
 # ``rebar_reconciler`` namespace stub.
-_CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "comment_limits.py"
-if "rebar_reconciler.comment_limits" not in sys.modules:
-    _cl_spec = importlib.util.spec_from_file_location("rebar_reconciler.comment_limits", _CL_PATH)
+_CL_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "comment_limits.py"
+if "rebar_reconciler.adapters.jira.comment_limits" not in sys.modules:
+    _cl_spec = importlib.util.spec_from_file_location(
+        "rebar_reconciler.adapters.jira.comment_limits", _CL_PATH
+    )
     _cl_mod = importlib.util.module_from_spec(_cl_spec)
-    sys.modules["rebar_reconciler.comment_limits"] = _cl_mod
+    sys.modules["rebar_reconciler.adapters.jira.comment_limits"] = _cl_mod
     _cl_spec.loader.exec_module(_cl_mod)  # type: ignore[union-attr]
 
 
@@ -162,7 +166,7 @@ def test_assignee_not_found_soft_fails_batch_continues(
 
     fake_client.update_issue.side_effect = _update_issue_side_effect
     # S4: _load_acli returns the transport DIRECTLY. apply_handlers catches
-    # AssigneeNotFoundError via a direct import from rebar_reconciler.acli_subprocess,
+    # AssigneeNotFoundError via a direct import from rebar_reconciler.adapters.jira.acli_subprocess,
     # which — because the shadow ``rebar_reconciler`` package __path__'s to the real
     # source dir — is the SAME class object our side_effect raises.
     with patch.object(applier_mod, "_load_acli", return_value=fake_client):

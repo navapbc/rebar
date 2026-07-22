@@ -13,7 +13,7 @@ is already an accountId (and does not leak the flag to the ACLI subprocess); and
 
 from __future__ import annotations
 
-import rebar_reconciler.acli as acli
+import rebar_reconciler.adapters.jira.acli as acli
 import rebar_reconciler.outbound_differ as differ
 
 
