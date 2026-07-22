@@ -337,6 +337,16 @@ class PydanticAIRunner:
         # knob is never lowered below it; an explicit operator value is honored verbatim.
         if cfg.timeout_s:
             model_settings["timeout"] = float(cfg.timeout_s)
+        # Sampling temperature (upstream review-code report §2): a per-request override on
+        # ``req.config`` wins over the runner's own cfg, mirroring the max_tokens seam above; both
+        # are None by default so the provider default is used (byte-unchanged). The Pass-2 verify
+        # steps carry temperature=0 (greedy) so re-running the same finding does not resample its
+        # narrow verification and flip a block/advisory decision.
+        temperature = getattr(req.config, "temperature", None)
+        if temperature is None:
+            temperature = cfg.temperature
+        if temperature is not None:
+            model_settings["temperature"] = float(temperature)
         if model_settings:
             kwargs["model_settings"] = model_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).

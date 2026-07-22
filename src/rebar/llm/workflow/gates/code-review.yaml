@@ -150,6 +150,9 @@ steps:
       instructions: ${{ steps.verify_inputs.outputs.instructions }}
       findings: ${{ steps.merge.outputs.findings }}
       step_budget_per_item: 25
+      # Greedy Pass-2 verification: re-running the same finding must not resample its narrow
+      # yes/no verification and drift impact/validity (upstream review-code report §2).
+      temperature: 0
 
   # ── Pass 3: deterministic decide (kernel pass3_over_findings + code-review threshold_for). ──
   - id: decide

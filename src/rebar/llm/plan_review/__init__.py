@@ -143,8 +143,13 @@ def _score_floor_novelty(
     from . import passes
 
     try:
+        from dataclasses import replace
+
         runner_sel = runner or get_runner(cfg)
-        vcfg = _verifier_cfg(cfg)
+        # Greedy sampling for this SEPARATE Pass-2 novelty sub-call (hand-built RunRequest, so it
+        # bypasses the workflow `with: temperature` seam): a re-run must not resample the
+        # carryover-vs-novel judgement (upstream review-code report §2).
+        vcfg = replace(_verifier_cfg(cfg), temperature=0.0)
         system = passes._resolve_system(passes.PASS_NOVELTY, ctx.plan_text, vcfg)
 
         def run_chunk(instructions: str, context: str) -> list[dict[str, Any]]:

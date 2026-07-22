@@ -438,7 +438,7 @@ def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int)
     return default
 
 
-def _llm_float(table: dict, cli: dict, env_name: str, file_key: str, default: float):
+def _llm_float(table: dict, cli: dict, env_name: str, file_key: str, default: float | None):
     """Resolve a float setting: CLI > env > file > default. An unparseable higher
     layer falls through to the next (mirrors :func:`_llm_int`)."""
     candidates: list = []
@@ -504,6 +504,13 @@ class LLMConfig:
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     timeout_s: int = DEFAULT_TIMEOUT_S
+    # Sampling temperature. ``None`` (the default) sends NO temperature, so the provider default
+    # is used — byte-unchanged for every existing caller. When set it rides into the model call's
+    # ModelSettings (see runner). The Pass-2 verifier pins this to 0 (greedy) so a re-run of the
+    # same finding does not resample its narrow yes/no verification and flip a block/advisory
+    # decision (run-to-run non-determinism, upstream review-code report §2). It is a REPRODUCIBILITY
+    # floor, not a correctness fix — determinate answers come from the question design.
+    temperature: float | None = None
     # Transport-layer retry (story arcticduck): the httpx AsyncTenacityTransport wrapping
     # every Anthropic call retries a transient {429,529,5xx}/timeout/network blip below the
     # SDK (SDK max_retries=0). ``llm_retry_max_attempts`` is stop_after_attempt(N); N<=1
@@ -614,6 +621,9 @@ class LLMConfig:
                 DEFAULT_MAX_ITERATIONS,
             ),
             timeout_s=_llm_int(table, cli, "REBAR_LLM_TIMEOUT", "timeout", DEFAULT_TIMEOUT_S),
+            # Default None → provider default (unchanged); an operator may pin a global
+            # temperature, and the Pass-2 verify steps pin 0 via a `with:` input (see runs.py).
+            temperature=_llm_float(table, cli, "REBAR_LLM_TEMPERATURE", "temperature", None),
             llm_retry_max_attempts=_llm_int(
                 table,
                 cli,
