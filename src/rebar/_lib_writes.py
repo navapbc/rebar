@@ -347,8 +347,11 @@ def transition(
     ``open -> in_progress`` is a start-work transition gated by the plan-review
     gate (``verify.require_plan_review_for_claim``) exactly like :func:`claim`;
     pass ``force=True`` (optionally with a ``reason`` recorded in the audit
-    comment) to bypass it. ``force`` also waives the unresolved-children guard
-    when closing.
+    comment) to bypass it. ``force`` bypasses GATES generally — including any
+    gate added in the future — but it does **not** waive the unresolved-children
+    close prohibition: that is a ticket-system invariant, not a gate, and no
+    ``force``/``force_close`` combination can close a ticket while any child
+    remains non-closed.
 
     ``force_close="<reason>"`` is the library counterpart of the CLI
     ``--force-close``: when closing a work ticket under the completion-verification

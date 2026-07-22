@@ -23,6 +23,7 @@ import pytest
 
 import rebar
 from rebar import _cli
+from rebar._errors import RebarError
 
 
 def _status(tid: str, repo: Path) -> str:
@@ -60,6 +61,21 @@ def test_force_does_NOT_close_parent_with_open_child(
     assert rc == 1
     assert "unresolved" in out and child in out
     assert "cannot be bypassed" in out  # the guard explicitly refuses --force
+    assert _status(parent, rebar_repo) == "open"  # still not closed
+
+
+def test_library_transition_force_does_NOT_close_parent_with_open_child(
+    rebar_repo: Path,
+) -> None:
+    # Regression for the public rebar.transition() docstring, which previously (wrongly)
+    # claimed force="also waives the unresolved-children guard when closing" — force bypasses
+    # GATES (e.g. plan-review), never the open-children close invariant, via the library API
+    # directly (not just the CLI wrapper).
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+
+    with pytest.raises(RebarError, match="unresolved"):
+        rebar.transition(parent, "open", "closed", force=True, repo_root=str(rebar_repo))
     assert _status(parent, rebar_repo) == "open"  # still not closed
 
 
