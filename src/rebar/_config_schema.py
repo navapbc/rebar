@@ -209,6 +209,9 @@ def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = F
 
 @dataclass
 class VerifyConfig:
+    # Opt-in enforcement for related-ticket material pinned into plan-review attestations.
+    # Disabled by default so pre-feature projects and attestations remain compatible.
+    enforce_plan_material_pins: bool = False
     # Opt-in completion-verification close gate: when true, closing a work ticket runs the
     # LLM completion-verifier (rebar.llm.verify_completion) and blocks on FAIL / unavailable
     # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
@@ -569,6 +572,7 @@ _SECTION_CLASSES: dict[str, type] = {
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
     "verify": {
+        "enforce_plan_material_pins": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "overlap_enabled": lambda v, k: _as_bool(v, k),

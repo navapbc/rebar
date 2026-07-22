@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .pin_health import DerivedPlanReviewHealth
+    from .relation_snapshot import PlanMaterialPin
 
 # Re-export manifest helpers so historical ``attest.<name>`` imports remain stable.
 from .manifest import (
@@ -36,6 +41,33 @@ from .manifest import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class PlanValidityProfile(Enum):
+    DEFAULT = "default"
+    CLOSE = "close"
+    DRIFT_REFRESH = "drift_refresh"
+
+
+def _read_enforce_plan_material_pins(repo_root=None) -> bool:
+    from .pin_health import read_enforcement
+
+    return read_enforcement(repo_root)
+
+
+def derive_plan_material_pin_health(
+    pin_records: Sequence[PlanMaterialPin] | None, *, repo_root, enforced: bool
+) -> DerivedPlanReviewHealth:
+    """Return additive related-material health using the public fingerprint seam."""
+    from .pin_health import derive_health
+
+    return derive_health(
+        pin_records,
+        repo_root=repo_root,
+        enforced=enforced,
+        fingerprint=current_material_fingerprint,
+    )
+
 
 __all__ = [
     "_ABSENT_HASH",
@@ -105,10 +137,7 @@ def sign_plan_review(
     sig = signing.sign_manifest(
         verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
     )
-    # Enrichment queue (epic only-crave-art / e1f4): a certification is the trigger to enqueue
-    # this ticket for a store-wide overlap enrichment after a soak (a re-cert bumps the soak
-    # deadline forward — latest-wins). Best-effort and fully isolated: a queue failure must
-    # NEVER fail signing, and this stays a no-op when the [agents] extra is absent.
+    # Certification triggers the best-effort overlap-enrichment soak queue.
     try:
         from rebar.llm.config import LLMConfig
         from rebar.llm.overlap import queue as _enqueue_queue
@@ -133,32 +162,24 @@ def _rehash(paths, *, repo_root=None, pinned_sha: str | None = None) -> dict[str
 
 
 def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
-    """Decide whether ``ticket_id`` is a REFRESHABLE drift-only-stale attestation: a
-    certified plan-review PASS whose material fingerprint and registry stamp still match,
-    but whose signed dependency files have drifted. Returns
-    ``{"manifest", "deps", "key_id"}`` for the progressive path, or None (→ full review)
-    when there is nothing safely reusable (no signature, wrong manifest, material edited,
-    registry skew, no scoped deps, or no actual drift)."""
-    from rebar import signing
+    """Return a validity-approved, dependency-drifted progressive-refresh candidate."""
+    from rebar import _reads, signing
 
     try:
-        result = signing.verify_signature(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — signing unavailable → no refresh, fall back to full review
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+        result = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — unavailable state/signature → full review
         return None
-    if not result.get("verified"):
+    validity = compute_validity(
+        result,
+        state,
+        _MANIFEST_PREFIX,
+        repo_root=repo_root,
+        profile=PlanValidityProfile.DRIFT_REFRESH,
+    )
+    if not validity.get("valid"):
         return None
-    manifest = result.get("manifest")
-    if not is_plan_review_manifest(manifest):
-        return None
-    # Registry skew → the probe's meaning may have changed → full review (overlay-aware).
-    if manifest_regver(manifest) != registry_version(repo_root):
-        return None
-    # Material edit is a separate invalidation (handled by the material-fingerprint gate).
-    signed_material = manifest_material(manifest)
-    if signed_material is None or signed_material != current_material_fingerprint(
-        ticket_id, repo_root=repo_root
-    ):
-        return None
+    manifest = _authoritative_manifest(result)
     deps = manifest_deps(manifest)
     if not deps:  # unscoped attestation — nothing to probe against; full review
         return None
@@ -171,32 +192,12 @@ def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any]
 def remediation_mode_candidate(
     ticket_id: str, *, window_minutes: int, now_ns: int | None = None, repo_root=None
 ) -> dict[str, Any]:
-    """Decide whether a re-review of ``ticket_id`` is eligible for REMEDIATION MODE (epic 7d43,
-    child ec89): the freshness-window + precondition check that gates the Pass-3 rising floor
-    (the drop math itself is child cc5b — this only decides eligibility). The complement of
-    :func:`drift_refresh_candidate` on the material axis: drift-refresh wants the plan UNCHANGED +
-    code drifted; remediation wants the plan CHANGED + code UNCHANGED.
+    """Return fail-safe remediation-floor eligibility and per-precondition reasons.
 
-    Returns a DECISION dict — ``{"eligible": bool, "reasons": {precondition: bool, ...}}`` — never
-    raises (any read error → that precondition False → ``eligible=False`` → full review). The
-    preconditions (ALL required):
-
-    - ``signed`` — a certified prior plan-review signature exists (the baseline the SHA/regver/
-      material are read from). With NO usable plan-review signature (a BLOCK loop — a BLOCK
-      never signs) the decision falls through to :func:`_sidecar_branch_decision`, whose
-      baseline is the prior ``REVIEW_RESULT`` payload; the decision dict carries
-      ``baseline: "signature" | "sidecar"``.
-    - ``plan_changed`` — the current plan material fingerprint differs from the prior signed one
-      (an edited plan — else there is nothing to re-review under the floor).
-    - ``code_unchanged`` — the current run's ``verified_at_sha`` equals the prior signed one
-      (the reviewed code did not drift; reuses the already-signed snapshot ref).
-    - ``registry_unchanged`` — the criteria-routing registry version equals the prior signed one.
-    - ``prior_sidecar`` — a prior ``REVIEW_RESULT`` sidecar WITH finding text exists (child e344).
-    - ``within_window`` — the last review of ANY kind (the newest sidecar) is within
-      ``window_minutes``, measured from that last review (RESET on each review).
-
-    Code-changed / both-drifted → not eligible → the caller runs a normal full review (the
-    ``drift_refresh`` path is untouched)."""
+    Signature baselines are preferred; unsigned BLOCK loops fall back to the latest sidecar.
+    Eligibility requires changed plan material, unchanged code/registry, prior finding text,
+    and a review inside the configured freshness window. Read failures simply deny the mode.
+    """
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
@@ -210,11 +211,7 @@ def remediation_mode_candidate(
         "prior_sidecar": False,
         "within_window": False,
     }
-    # NEVER raises (the docstring contract): the WHOLE body is guarded — a read error in ANY
-    # precondition (signing, the manifest parsers, current_code_sha / registry_version, or the
-    # sidecar reads) leaves that precondition False and yields eligible=False → a full review.
-    # The gate is fail-safe: a broken signal can only DENY remediation mode, never crash the
-    # plan review it gates.
+    # A broken precondition signal can only deny remediation mode.
     try:
         # Baseline resolution (story a850): the SIGNATURE branch is authoritative when a valid
         # certified plan-review manifest exists. BOTH no-usable-signature paths (verification
@@ -473,23 +470,11 @@ def compute_validity(
     kind: str,
     *,
     repo_root=None,
+    profile: PlanValidityProfile = PlanValidityProfile.DEFAULT,
 ) -> dict[str, Any]:
-    """Per-kind lifecycle/freshness validity for an ALREADY-CERTIFIED attestation record.
+    """Compute lifecycle/freshness validity without mutating the certified record.
 
-    The caller runs the HMAC verify first (``verify_signature``); this layers the gate
-    semantics on top and returns ``{"valid": bool, "reason": str}``. The attestation record is
-    NEVER mutated — reopen invalidation is COMPUTED here from ``ticket_state['last_reopened_at']``
-    (epic dark-acme-lumen), replacing the old write-time ``retire_attested_pin``. "Computed on
-    read" still permits I/O: the plan-review branch re-hashes the signed dependency files.
-
-    Per kind:
-      * BOTH — an attestation whose ``signed_at`` is at/before the most recent ``closed→open``
-        reopen no longer reflects the reactivated ticket (stale).
-      * ``completion-verifier`` — additionally requires the ticket to be ``closed`` and the
-        material fingerprint (recorded in the manifest) to match the current ticket.
-      * ``plan-review`` — the existing claim-gate freshness: scoped code-drift (the signed
-        per-path hashes still match, re-hashed at the signed pinned-SHA basis) or, when
-        unscoped, whole-HEAD freshness; plus material-fingerprint invariance.
+    Plan-review profiles differ only on code freshness; completion ignores the profile.
     """
     from rebar import config as _config
     from rebar import signing
@@ -498,22 +483,53 @@ def compute_validity(
         return {"valid": False, "reason": f"no certified {kind} attestation", "verdict": "unsigned"}
     signed_at = attestation.get("signed_at")
 
-    # Reopen invalidation (BOTH kinds): an attestation signed at/before the latest reopen is
-    # stale — the ticket was reactivated (and possibly changed) since it was signed. A missing
-    # signed_at fails closed when a reopen is on record (we cannot prove it post-dates it).
-    # CLOCK NOTE: signed_at is wall-clock (signing.sign_manifest → time.time_ns()) while
-    # last_reopened_at is the reopen STATUS event's HLC tick. They are different clocks, but a
-    # legitimate re-close/re-review happens only AFTER real agent work (seconds+) elapses since
-    # the reopen, so signed_at comfortably exceeds the reopen tick; the HLC's "+1" floor bounds
-    # any skew to the ns scale and self-corrects as wall-clock advances. The `<=` therefore
-    # fails closed on the (practically unreachable) same-instant tie without false positives.
+    plan_health = None
+    auth_manifest = None
+    if kind == _MANIFEST_PREFIX:
+        if attestation.get("verified") is False:
+            return {
+                "valid": False,
+                "reason": "no certified plan-review attestation",
+                "verdict": "unsigned",
+            }
+        auth_manifest = _authoritative_manifest(attestation)
+        if not is_plan_review_manifest(auth_manifest):
+            return {
+                "valid": False,
+                "reason": "the certified attestation is not a plan review",
+                "verdict": "wrong-kind",
+            }
+        enforced = _read_enforce_plan_material_pins(repo_root)
+        try:
+            pins = manifest_pins(auth_manifest)
+            plan_health = derive_plan_material_pin_health(
+                pins, repo_root=repo_root, enforced=enforced
+            )
+        except ManifestFormatError:
+            plan_health = {"pin_status": "malformed-pin", "enforced": enforced, "targets": []}
+
+        if plan_health["pin_status"] == "malformed-pin" and enforced:
+            return {
+                "valid": False,
+                "reason": "the plan-review attestation has malformed related-material pins",
+                "verdict": "malformed-pin",
+                "health": plan_health,
+            }
+
+    def _result(valid: bool, reason: str, verdict: str) -> dict[str, Any]:
+        result = {"valid": valid, "reason": reason, "verdict": verdict}
+        if plan_health is not None:
+            result["health"] = plan_health
+        return result
+
+    # A signature at/before the latest reopen no longer describes the reactivated ticket.
     last_reopened = ticket_state.get("last_reopened_at")
     if last_reopened is not None and (signed_at is None or signed_at <= last_reopened):
-        return {
-            "valid": False,
-            "reason": f"the {kind} attestation predates the latest reopen (stale)",
-            "verdict": "stale-reopened",
-        }
+        return _result(
+            False,
+            f"the {kind} attestation predates the latest reopen (stale)",
+            "stale-reopened",
+        )
 
     if kind == "completion-verifier":
         if ticket_state.get("status") != "closed":
@@ -540,62 +556,44 @@ def compute_validity(
         }
 
     if kind == _MANIFEST_PREFIX:  # plan-review
-        # SECURITY (stale-code / stale-regver findings): read every manifest-derived freshness
-        # input (regver stamp, per-path dep hashes, pinned re-hash basis) from the AUTHENTICATED
-        # manifest — the SIGNED DSSE payload for an op-cert, the HMAC-covered record manifest for a
-        # legacy record — NEVER the attacker-writable plaintext record mirror. An attacker with
-        # tickets-branch write access can no longer edit the plaintext dep-hash / regver lines to
-        # make a stale attestation read as fresh (the signature does not cover the plaintext).
-        auth_manifest = _authoritative_manifest(attestation)
-        # Criteria-registry drift (story 08af): the overlay-aware stamp changes when a project
-        # criterion is activated / re-tuned / disabled, so a signed regver that no longer matches
-        # the current one means the criteria the plan was reviewed against changed. A MISSING
-        # regver line is treated as stale too (expand-contract: every production plan-review
-        # manifest carries one; an overlay-absent repo re-hashes to the SAME packaged stamp the
-        # manifest was signed with, so a real unchanged attestation stays valid).
+        assert auth_manifest is not None
+        # Every freshness input comes from the authenticated manifest, never its plaintext mirror.
         signed_regver = manifest_regver(auth_manifest)
         if signed_regver is None or signed_regver != registry_version(repo_root):
-            return {
-                "valid": False,
-                "reason": (
+            return _result(
+                False,
+                (
                     "the criteria registry changed since the plan review "
                     "(overlay activated/edited/disabled)"
                 ),
-                "verdict": "stale-regver",
-            }
-        # Code-drift freshness (ADR 0002): re-hash the SIGNED per-path map at the SAME
-        # pinned-SHA basis the attestation signed against (so the gate and plan-review can't
-        # diverge); when unscoped, fall back to conservative whole-HEAD freshness.
-        deps = manifest_deps(auth_manifest)
-        if deps:
-            pinned = signing.verified_at_sha_from_manifest(auth_manifest)
-            base = _hash_basis(repo_root, pinned_sha=pinned)
-            drifted = [
-                p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
-            ]
-            if drifted:
-                shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")
-                return {
-                    "valid": False,
-                    "reason": (
+                "stale-regver",
+            )
+        # DEFAULT re-hashes scoped dependencies; unscoped records use whole-HEAD freshness.
+        if profile is PlanValidityProfile.DEFAULT:
+            deps = manifest_deps(auth_manifest)
+            if deps:
+                pinned = signing.verified_at_sha_from_manifest(auth_manifest)
+                base = _hash_basis(repo_root, pinned_sha=pinned)
+                drifted = [
+                    p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
+                ]
+                if drifted:
+                    shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")
+                    return _result(
+                        False,
                         f"the code the plan was reviewed against drifted: "
-                        f"{len(drifted)} dependency file(s) changed ({shown})"
-                    ),
-                    "verdict": "stale-code",
-                }
-        else:
-            head = signing.head_sha(_config.repo_root(repo_root))
-            # SECURITY (finding B): compare against the AUTHENTICATED anchor (op-cert: the SIGNED
-            # merged_log_commit; HMAC: the head_sha mirror), never a mutable plaintext mirror.
-            signed_head = _authoritative_head(attestation)
-            if head == "unknown" or signed_head != head:
-                return {
-                    "valid": False,
-                    "reason": (
-                        f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
-                    ),
-                    "verdict": "stale-head",
-                }
+                        f"{len(drifted)} dependency file(s) changed ({shown})",
+                        "stale-code",
+                    )
+            else:
+                head = signing.head_sha(_config.repo_root(repo_root))
+                signed_head = _authoritative_head(attestation)
+                if head == "unknown" or signed_head != head:
+                    return _result(
+                        False,
+                        f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})",
+                        "stale-head",
+                    )
         # Material-edit invalidation (fail closed if the fingerprint can't be recomputed).
         signed = _authoritative_material(attestation)
         if signed is not None:
@@ -603,25 +601,28 @@ def compute_validity(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root
             )
             if current is None:
-                return {
-                    "valid": False,
-                    "reason": "could not recompute the plan's material fingerprint",
-                    "verdict": "unverifiable-material",
-                }
+                return _result(
+                    False,
+                    "could not recompute the plan's material fingerprint",
+                    "unverifiable-material",
+                )
             if signed != current:
-                return {
-                    "valid": False,
-                    "reason": (
+                return _result(
+                    False,
+                    (
                         "the plan was materially edited since review "
                         "(description/AC/file_impact/children changed)"
                     ),
-                    "verdict": "stale-material",
-                }
-        return {
-            "valid": True,
-            "reason": "certified plan-review attestation",
-            "verdict": "certified",
-        }
+                    "stale-material",
+                )
+        assert plan_health is not None
+        if plan_health["enforced"] and plan_health["pin_status"] not in (
+            "current",
+            "legacy-unpinned",
+        ):
+            pin_status = plan_health["pin_status"]
+            return _result(False, "reviewed related-ticket material is stale", pin_status)
+        return _result(True, "certified plan-review attestation", "certified")
 
     return {"valid": True, "reason": f"certified {kind} attestation", "verdict": "certified"}
 
@@ -755,7 +756,13 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         state = _reads.show_ticket(ticket_id, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — unreadable state → fail closed below via compute_validity's material/None paths
         state = {}
-    validity = compute_validity(result, state, _MANIFEST_PREFIX, repo_root=repo_root)
+    validity = compute_validity(
+        result,
+        state,
+        _MANIFEST_PREFIX,
+        repo_root=repo_root,
+        profile=PlanValidityProfile.DEFAULT,
+    )
     if not validity["valid"]:
         return {
             "ok": False,
