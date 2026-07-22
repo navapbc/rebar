@@ -60,7 +60,10 @@ never leave active work under a ticket still marked `open`. Claim at the level y
 (the story/task/bug you implement), and when you begin executing an **epic**, move the epic
 itself to `in_progress` too. If you cannot claim (a `ConcurrencyError`/exit 10 means someone
 else holds it, or a gate blocks the claim), resolve that FIRST — pick another ticket, or earn
-the required attestation — rather than working unclaimed.
+the required attestation — rather than working unclaimed. `--force[=<reason>]` bypasses any
+enabled start-work gate (plan-review or whatever gate is configured, present or future) — treat
+it as an escape hatch for a human operator's judgment call, not a routine agent move; it is
+CLI-only and not exposed over MCP.
 
 ## The parallel-agent workflow
 

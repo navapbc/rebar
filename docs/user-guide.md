@@ -231,6 +231,11 @@ rebar verify-completion <id>    # check the ticket's completion criteria are met
 Depending on project configuration these can gate claiming and closing — see
 [plan-review-gate.md](plan-review-gate.md) for the full model.
 
+`rebar claim <id> --force[=<reason>]` bypasses any enabled start-work gate (e.g.
+plan-review) — not just plan-review specifically, but whatever gate is configured to run
+on claim, now or in the future. `--force` is CLI-only: it is not exposed over MCP (an MCP
+client always goes through the configured gate).
+
 Finally, **validate** is a repo-wide health check. It takes **no ticket id** — it
 scans the whole store and returns a 1–5 health score with findings (orphans, cycles,
 empty epics, and the like):
