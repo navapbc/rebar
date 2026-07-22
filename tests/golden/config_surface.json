@@ -41,6 +41,7 @@
     "verify.remediation_window_minutes",
     "verify.require_completion_verification_for_close",
     "verify.require_environment",
+    "verify.require_plan_review_for_close",
     "verify.require_plan_review_for_claim",
     "verify.require_ticket_for_commit",
     "verify.verify_window_headroom"
@@ -86,6 +87,7 @@
     "REBAR_VERIFY_REMEDIATION_WINDOW_MINUTES",
     "REBAR_VERIFY_REQUIRE_COMPLETION_VERIFICATION_FOR_CLOSE",
     "REBAR_VERIFY_REQUIRE_ENVIRONMENT",
+    "REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLOSE",
     "REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLAIM",
     "REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT",
     "REBAR_VERIFY_VERIFY_WINDOW_HEADROOM"

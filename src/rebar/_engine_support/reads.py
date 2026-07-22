@@ -35,6 +35,9 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, cast
 
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -159,6 +162,17 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
 # its consistent local snapshot over stalling ~15s while a concurrent background
 # push holds the lock. Writers reconverge with the longer default.
 _RECONVERGE_LOCK_TIMEOUT = 2
+_LOCAL_READ_CONTEXT = ContextVar("rebar_local_read_context", default=False)
+
+
+@contextmanager
+def local_read_context() -> Iterator[None]:
+    """Suppress freshness sync for a bounded, explicitly local read operation."""
+    token = _LOCAL_READ_CONTEXT.set(True)
+    try:
+        yield
+    finally:
+        _LOCAL_READ_CONTEXT.reset(token)
 
 
 def _sync_disabled(root: str | None = None) -> bool:
@@ -187,7 +201,11 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
     there is ONE sync implementation, not a reinvented one. Every failure path is
     swallowed: a read must never fail because a fetch could not run.
     """
-    if no_sync or _sync_disabled(os.path.dirname(os.path.realpath(tracker))):
+    if (
+        _LOCAL_READ_CONTEXT.get()
+        or no_sync
+        or _sync_disabled(os.path.dirname(os.path.realpath(tracker)))
+    ):
         return
     try:
         from rebar.config import tickets_branch

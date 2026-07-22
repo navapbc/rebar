@@ -605,6 +605,45 @@ require_plan_review_for_claim = true
 Default **off** ⇒ `claim` keeps today's behavior exactly. An unreadable config
 fails this opt-in gate *off* with a warning (it never auto-enables across a repo).
 
+## Close-time attestation gate
+
+`verify.require_plan_review_for_close = false` is the default. When enabled, a normal
+close of a `task`, `story`, or `epic` must have a separately certified plan-review
+attestation. Close only performs local signature and attestation-validity reads; it never
+starts `review-plan`, invokes an LLM, or contacts the network. Bugs and lifecycle artifacts
+keep their existing exemptions.
+
+The close check uses `PlanValidityProfile.CLOSE`. It requires a valid signature, current
+registry, current ticket material, compatible review phase, and (when
+`verify.enforce_plan_material_pins = true`) healthy related-material pins. Unlike the claim
+profile, CLOSE deliberately does **not** reject ordinary implementation HEAD or reviewed-file
+drift: those changes are expected while the approved plan is being executed. Pin enforcement
+remains independently opt-in; a disabled pin policy leaves pin health advisory, but malformed
+phase metadata, signature failures, reopen, registry drift, and own-material drift still block.
+
+The close path first enforces the unresolved-child structural invariant, then runs this local
+check before completion verification. It supplies the same check through the generic
+`txn.transition_core(..., pre_status_check=...)` callback. That callback runs under the existing
+write lock after the ticket is freshly reduced and transition guards have passed, immediately
+before the STATUS append. A changed signature, plan, phase, material, or enforced pin between
+the precheck and append therefore aborts the transaction without writing STATUS.
+
+Failures are deliberately remediated out of band and use this stable form:
+
+```
+plan-review close gate: <verdict>: <reason>. Run rebar review-plan <canonical-id> separately, then retry close.
+```
+
+Typical verdicts include `unsigned`, `stale-reopened`, `stale-regver`, `stale-material`,
+`unverifiable-material`, `stale-pin-drift`, `stale-pin-missing`, `malformed-pin`,
+`incompatible-phase`, `malformed-phase`, and `unavailable`. An unexpected local read, parser,
+or signature failure is fail-closed as `unavailable` and emits the structured warning event
+`plan_review_close_gate_unavailable`.
+
+A non-empty `--force-close` reason bypasses this and completion verification while retaining its
+audit comment. Closing `idea → closed` also bypasses the plan gate because it is a rejection,
+not delivery. Neither bypass relaxes the structural child-closure invariant.
+
 ## Fail-open behavior
 
 * **Unsupported stack / missing tool / parse error / timeout** in any DET check →
