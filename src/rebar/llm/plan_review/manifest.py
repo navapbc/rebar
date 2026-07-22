@@ -17,7 +17,12 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any
+import re
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from .relation_snapshot import PlanMaterialPin
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,12 @@ _REGVER_PREFIX = "regver:"  # criteria-registry version stamp (progressive drift
 _REFRESHED_PREFIX = "refreshed-from:"  # provenance on a drift-refreshed attestation
 _DISABLED_PREFIX = "disabled_builtins:"  # built-in ids the project overlay disabled (story 08af)
 _ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
+_PIN_PREFIX = "plan-material-pin:"
+_PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+class ManifestFormatError(ValueError):
+    """A signed plan-review manifest contains a malformed material-pin line."""
 
 
 def registry_version(repo_root=None) -> str:
@@ -176,6 +187,7 @@ def build_manifest(
     regver: str | None = None,
     refreshed_from: str | None = None,
     verified_at_sha: str | None = None,
+    pins: Sequence[PlanMaterialPin] = (),
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
@@ -216,12 +228,49 @@ def build_manifest(
         from rebar import signing as _signing
 
         lines.append(_signing.verified_at_sha_step(verified_at_sha))
+    for pin in sorted(pins, key=lambda item: (item.role, item.canonical_id)):
+        lines.append(f"{_PIN_PREFIX} {pin.role} {pin.canonical_id} {pin.material_fingerprint}")
+    if pins:
+        # Never mint a manifest the strict reader would later reject (including
+        # duplicate role+id records supplied by a non-snapshot caller).
+        manifest_pins(lines)
     # Per-path dependency hashes (sorted), one line each: ``dep <sha256> <path>``.
     # The hash is fixed-width so the path (which may contain spaces) is an unambiguous
     # remainder. A per-path map (not a rolled-up root) is the contract Story 2 builds on.
     for path, digest in sorted((deps or {}).items()):
         lines.append(f"{_DEP_PREFIX} {digest} {path}")
     return lines
+
+
+def manifest_pins(manifest: list[str] | None) -> list[PlanMaterialPin]:
+    """Parse and strictly validate additive plan-material-pin manifest records."""
+
+    from .relation_snapshot import PlanMaterialPin, PlanMaterialRole, is_canonical_ticket_id
+
+    pins: list[PlanMaterialPin] = []
+    seen: set[tuple[str, str]] = set()
+    for line in manifest or []:
+        text = str(line)
+        if not text.startswith(_PIN_PREFIX):
+            if text.strip().startswith("plan-material-pin"):
+                raise ManifestFormatError(f"malformed plan material pin: {text!r}")
+            continue
+        parts = text.split()
+        if len(parts) != 4 or parts[0] != _PIN_PREFIX:
+            raise ManifestFormatError(f"malformed plan material pin: {text!r}")
+        _, role, canonical_id, fingerprint = parts
+        if role not in ("child", "prerequisite"):
+            raise ManifestFormatError(f"unknown plan material pin role: {role!r}")
+        if not is_canonical_ticket_id(canonical_id):
+            raise ManifestFormatError(f"invalid plan material pin ticket id: {canonical_id!r}")
+        if not _PIN_FINGERPRINT_RE.fullmatch(fingerprint):
+            raise ManifestFormatError(f"invalid plan material pin fingerprint: {fingerprint!r}")
+        key = (role, canonical_id)
+        if key in seen:
+            raise ManifestFormatError(f"duplicate plan material pin: {role} {canonical_id}")
+        seen.add(key)
+        pins.append(PlanMaterialPin(cast(PlanMaterialRole, role), canonical_id, fingerprint))
+    return sorted(pins, key=lambda item: (item.role, item.canonical_id))
 
 
 def manifest_deps(manifest: list[str] | None) -> dict[str, str]:

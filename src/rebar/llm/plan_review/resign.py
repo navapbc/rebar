@@ -124,7 +124,31 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     }
     try:
         sig = attest.sign_plan_review(verdict, material=current_material, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — surface the sign failure as a refusal, don't crash
+    except Exception as exc:  # noqa: BLE001 — public recovery path returns structured refusal
+        # Relation failures are an unsigned, retry-after-repair gate outcome, not
+        # an opaque signing failure.  Keep the public no-throw recovery contract
+        # while preserving the stable reason/reference fields used by CLI/MCP.
+        from .relation_snapshot import PlanRelationSnapshotError
+
+        if isinstance(exc, PlanRelationSnapshotError):
+            record = {
+                "event": "plan_relation_snapshot_error",
+                "reason": exc.reason,
+                "canonical_id": exc.canonical_id,
+                "reference": exc.reference,
+            }
+            logger.error("plan relation snapshot failed: %s", record, extra=record)
+            return {
+                "ok": False,
+                "signed": False,
+                "ticket_id": ticket_id,
+                "verdict": "INDETERMINATE",
+                "reason": (
+                    "repair or remove the unreadable plan relationship, then rerun "
+                    "`rebar review-plan`; no attestation was signed"
+                ),
+                "plan_relation_snapshot_error": record,
+            }
         logger.warning("cheap re-sign failed to persist the attestation", exc_info=True)
         return {
             "ok": False,

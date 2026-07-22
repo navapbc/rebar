@@ -1,19 +1,7 @@
-"""Plan-review attestation + the fast claim-gate check (children 4bb7, 092b).
+"""Plan-review signing and the fast local claim-gate validity check.
 
-The attestation reuses the close-gate signing machinery verbatim (HMAC-SHA256 under
-the environment key; the ``SIGNATURE`` event; ``head_sha`` git-state binding) — no
-new key custody. A plan-review signature is distinguished from a completion
-signature by its MANIFEST (the first line is ``plan-review: …``), and it additionally
-binds the ticket's MATERIAL fingerprint so a material edit
-(description / AC / file_impact / decomposition) invalidates it — exactly the
-invalidation-on-material-edit the epic requires, layered on top of the code-HEAD
-freshness binding.
-
-The claim path is a FAST, LOCAL check only — no LLM, no network beyond a couple of
-local reads — so it stays well within the ~50ms target. The heavy four-pass review
-runs OUT-OF-BAND via ``rebar review-plan`` (which signs on a non-blocking result);
-``claim`` only verifies a fresh, non-stale, material-matching plan-review signature
-exists. ``--force`` (with a justification) bypasses it and is audit-logged.
+Attestations bind the signed manifest, plan material, and code state. The billable
+review runs out of band; claim only verifies the existing attestation locally.
 """
 
 from __future__ import annotations
@@ -23,9 +11,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-# Manifest construction + dependency-hashing live in the sibling ``manifest`` module
-# (a pure, dependency-light seam). Re-exported here so the historical import paths
-# ``rebar.llm.plan_review.attest.<name>`` keep working unchanged for callers/tests.
+# Re-export manifest helpers so historical ``attest.<name>`` imports remain stable.
 from .manifest import (
     _ABSENT_HASH,
     _DEP_PREFIX,
@@ -33,6 +19,7 @@ from .manifest import (
     _MANIFEST_PREFIX,
     _REFRESHED_PREFIX,
     _REGVER_PREFIX,
+    ManifestFormatError,
     _cited_paths,
     _hash_basis,
     _hash_file,
@@ -42,6 +29,7 @@ from .manifest import (
     manifest_deps,
     manifest_disabled_builtins,
     manifest_material,
+    manifest_pins,
     manifest_rebar_version,
     manifest_regver,
     registry_version,
@@ -65,21 +53,21 @@ __all__ = [
     "manifest_deps",
     "manifest_disabled_builtins",
     "manifest_material",
+    "manifest_pins",
     "manifest_rebar_version",
     "manifest_regver",
     "registry_version",
+    "ManifestFormatError",
 ]
 
 
-def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) -> dict[str, Any]:
+def sign_plan_review(
+    verdict: dict[str, Any], *, material: str, repo_root=None, relation_snapshot=None
+) -> dict[str, Any]:
     """Sign a passing plan-review verdict (append a ``SIGNATURE`` event). Returns the
     signature record. Raises if signing fails (the caller decides how to surface it).
 
-    Never-sign structural guard (story blackbear, epic jira-reb-687): a degraded / INDETERMINATE
-    verdict — or any verdict carrying a systemic-degrade ``coverage.resolution_class`` — is by
-    definition NOT a certifiable result and must never be attested. The caller only reaches here
-    on a clean PASS, so this is defense-in-depth: it makes the "degraded ⇒ unsigned" invariant
-    STRUCTURAL rather than incidental, failing closed if a future caller mistakenly signs one."""
+    Defense-in-depth: non-PASS or systemically degraded verdicts are never certifiable."""
     from rebar.signing import SigningError
 
     _cov = verdict.get("coverage") or {}
@@ -94,24 +82,25 @@ def sign_plan_review(verdict: dict[str, Any], *, material: str, repo_root=None) 
     from rebar.llm.config import current_code_sha
 
     from . import registry
+    from . import relation_snapshot as relation_snapshot_module
+
+    snapshot = relation_snapshot or relation_snapshot_module.collect_plan_relation_snapshot(
+        verdict["ticket_id"], repo_root=repo_root
+    )
 
     deps = dependency_hashes(verdict, repo_root=repo_root)
-    # Record the overlay's disabled built-ins on the verdict coverage so build_manifest emits
-    # the `disabled_builtins:` line (story 08af). Populated here (the sign path) so the stamp is
-    # authoritative even when the verdict the orchestrator produced did not carry it.
+    # Stamp disabled built-ins authoritatively at the sign boundary.
     disabled = registry.disabled_builtins(repo_root)
     if disabled:
         verdict.setdefault("coverage", {})["disabled_builtins"] = disabled
-    # Pin the snapshot SHA the deps were hashed at (attested review only — current_code_sha
-    # is None in local mode), so the claim gate re-hashes the SAME basis (shared boundary).
-    # regver is overlay-aware (repo_root) so the stamp reflects an activated/edited/disabled
-    # criterion — a change the claim gate reads as stale-regver.
+    # Bind the dependency snapshot SHA and overlay-aware registry version.
     manifest = build_manifest(
         verdict,
         material=material,
         deps=deps,
         regver=registry_version(repo_root),
         verified_at_sha=current_code_sha(),
+        pins=snapshot.related_material,
     )
     sig = signing.sign_manifest(
         verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
@@ -348,7 +337,12 @@ def _sidecar_branch_decision(
 
 
 def refresh_attestation(
-    ticket_id: str, prior_manifest: list[str], *, probe: str, repo_root=None
+    ticket_id: str,
+    prior_manifest: list[str],
+    *,
+    probe: str,
+    repo_root=None,
+    relation_snapshot_value=None,
 ) -> dict[str, Any]:
     """Re-sign a drift-refreshed attestation: the PRIOR verdict (verdict/material/
     model/runner/counts) re-bound to the CURRENT hashes of the SAME dependency paths,
@@ -356,7 +350,11 @@ def refresh_attestation(
     prior signed paths (authoritative) rather than re-deriving the set."""
     from rebar import signing
 
-    from . import registry
+    from . import registry, relation_snapshot
+
+    snapshot = relation_snapshot_value or relation_snapshot.collect_plan_relation_snapshot(
+        ticket_id, repo_root=repo_root
+    )
 
     fields: dict[str, Any] = {
         "verdict": "PASS",
@@ -381,6 +379,7 @@ def refresh_attestation(
         deps=new_deps,
         regver=registry_version(repo_root),
         refreshed_from=f"{prior_digest} probe={probe}",
+        pins=snapshot.related_material,
     )
     return signing.sign_manifest(ticket_id, manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root)
 

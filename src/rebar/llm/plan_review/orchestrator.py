@@ -585,7 +585,12 @@ _PROBE_CRITERIA = ("E4", "G1G2")  # "is the plan accurate vs the codebase" — b
 
 
 def drift_refresh(
-    ctx: PlanContext, cfg: LLMConfig, *, runner: Runner | None = None, repo_root=None
+    ctx: PlanContext,
+    cfg: LLMConfig,
+    *,
+    runner: Runner | None = None,
+    repo_root=None,
+    relation_snapshot=None,
 ) -> dict[str, Any] | None:
     """The progressive (tripwire) drift re-review. If the ticket's attestation is stale
     ONLY because reviewed code drifted (ticket material + criteria-registry unchanged),
@@ -649,7 +654,11 @@ def drift_refresh(
 
     # Clean probe → the drift was immaterial → refresh the attestation wholesale.
     sig = attest.refresh_attestation(
-        ctx.ticket_id, cand["manifest"], probe="PASS", repo_root=repo_root
+        ctx.ticket_id,
+        cand["manifest"],
+        probe="PASS",
+        repo_root=repo_root,
+        relation_snapshot_value=relation_snapshot,
     )
     return {
         "verdict": "PASS",

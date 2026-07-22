@@ -497,6 +497,64 @@ def _run_plan_review(
     repo_root,
     force: bool = False,
 ) -> dict[str, Any]:
+    # Snapshot all plan-material relations before any path can reach an LLM
+    # preflight/probe.  The same value is threaded into signing so one review does
+    # exactly one store-wide reduction.
+    from . import relation_snapshot
+
+    try:
+        relation_state = relation_snapshot.collect_plan_relation_snapshot(
+            ticket_id, repo_root=repo_root
+        )
+    except relation_snapshot.PlanRelationSnapshotError as exc:
+        record = {
+            "event": "plan_relation_snapshot_error",
+            "reason": exc.reason,
+            "canonical_id": exc.canonical_id,
+            "reference": exc.reference,
+        }
+        logger.error("plan relation snapshot failed: %s", record, extra=record)
+        error_remediation = (
+            "Repair or remove the unreadable plan relationship, then rerun "
+            "`rebar review-plan`; no plan-review attestation was signed."
+        )
+        return {
+            "verdict": "INDETERMINATE",
+            "ticket_id": exc.canonical_id or ticket_id,
+            "ticket_type": "",
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+            "overflow": [],
+            "indeterminate": [
+                {
+                    "id": "plan-relation-snapshot-error",
+                    "reason": exc.reason,
+                    "canonical_id": exc.canonical_id,
+                    "reference": exc.reference,
+                    "remediation": error_remediation,
+                }
+            ],
+            "dropped": [],
+            "coverage": {
+                "llm_ran": False,
+                "plan_relation_snapshot_error": record,
+                "counts": {
+                    "blocking": 0,
+                    "advisory_surfaced": 0,
+                    "advisory_overflow": 0,
+                    "dropped": 0,
+                    "indeterminate": 1,
+                },
+            },
+            "signature": {"signed": False, "reason": exc.reason},
+            "sidecar_emitted": False,
+            "runner": cfg.runner,
+            "model": cfg.model,
+            "material_fingerprint": None,
+            "remediation": error_remediation,
+        }
+
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
     # Idempotence short-circuit (feature b3e5): when the ticket is UNCHANGED and already
     # carries a still-VALID plan-review attestation — the SAME validity the claim gate
@@ -515,7 +573,13 @@ def _run_plan_review(
     # Always on (operator-authorized 2026-07-12; off switch retired in story 4cdf); still
     # self-gated by ``if sign`` (a --no-sign / readonly review has no attestation to refresh).
     if sign:
-        refreshed = orchestrator.drift_refresh(ctx, cfg, runner=runner, repo_root=repo_root)
+        refreshed = orchestrator.drift_refresh(
+            ctx,
+            cfg,
+            runner=runner,
+            repo_root=repo_root,
+            relation_snapshot=relation_state,
+        )
         if refreshed is not None:
             from rebar.llm import findings
 
@@ -621,7 +685,12 @@ def _run_plan_review(
         and verdict.get("coverage", {}).get("llm_ran") is not False
     ):
         try:
-            sig = attest.sign_plan_review(verdict, material=material, repo_root=repo_root)
+            sig = attest.sign_plan_review(
+                verdict,
+                material=material,
+                repo_root=repo_root,
+                relation_snapshot=relation_state,
+            )
             verdict["signature"] = {
                 "signed": True,
                 "key_id": sig.get("key_id"),
