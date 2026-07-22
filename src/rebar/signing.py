@@ -1,22 +1,9 @@
 """Environment-bound manifest signing for tickets.
 
-This is the cryptographic-attestation surface: a ticket carries a **manifest of verified steps**
-plus a signature that ``verify-signature`` later *certifies* was produced *here*, not transplanted
-from another clone. The signature is persisted as an append-only ``SIGNATURE`` event, so it flows
-through the same locked write path, auto-push, and compaction as every other event.
-
-**Expand phase (story 8d8e): write-new, read-both.** The producer seam (:func:`sign_manifest`)
-now MINTS a ``rebar.opcert.v1`` DSSE op-cert with the environment's auto-generated Ed25519 key —
-see :mod:`rebar._opcert_signing` for the env-key custody + mint/verify machinery. The read seam
-(:func:`verify_attestation_record`) dispatches on record SHAPE: envelope-bearing records → the
-op-cert verifier; legacy ``signature``-bearing (HMAC) records → the UNCHANGED :func:`verify_record`
-+ HMAC secret below, so pre-existing HMAC attestations still verify alongside new envelopes.
-
-Legacy HMAC design (still the read path for pre-8d8e records): the key is ``REBAR_SIGNING_KEY``
-(injected out-of-band) else the per-environment ``<tracker>/.signing-key`` (a UUID4, gitignored);
-the signed payload is a canonical ``{v, algorithm, ticket_id, manifest}`` (binding ticket_id +
-whole manifest); ``key_id`` is a domain-separated fingerprint distinguishing "tampered" from
-"foreign key".
+New writes mint ``rebar.opcert.v1`` DSSE op-certs with an environment Ed25519 key; reads dispatch
+by record shape so legacy HMAC attestations remain verifiable. Signatures persist as append-only
+``SIGNATURE`` events through the shared locked write path. Legacy HMAC keys come from
+``REBAR_SIGNING_KEY`` or ``<tracker>/.signing-key`` and bind the ticket id and whole manifest.
 """
 
 from __future__ import annotations
@@ -522,12 +509,9 @@ def verify_attestation_record(
 
 # ── git audit metadata ────────────────────────────────────────────────────────
 def head_sha(repo_root) -> str:
-    """Current HEAD sha of ``repo_root``, or ``'unknown'`` when unresolvable.
-
-    Recorded on every signature (audit metadata) and recomputed by the close gate
-    for its freshness binding — a public helper so that load-bearing integration
-    point isn't reaching into a private name. ``'unknown'`` is a sentinel callers
-    must treat as "no resolvable HEAD", never as a matchable value."""
+    """Current HEAD sha of ``repo_root``, or ``'unknown'`` when unresolvable. It is audit
+    metadata and a public freshness-binding helper. Callers must treat
+    ``'unknown'`` as "no resolvable HEAD", never as a matchable value."""
     try:
         out = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
@@ -541,22 +525,22 @@ def head_sha(repo_root) -> str:
     return sha if out.returncode == 0 and sha else "unknown"
 
 
-# ── Library-facing operations ─────────────────────────────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_root=None) -> dict:
+def _sign_manifest_under_lock(
+    ticket_id: str,
+    manifest,
+    *,
+    kind: str | None = None,
+    repo_root=None,
+    under_lock_check=None,
+) -> dict:
     """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
-
-    **Producer-signing seam (story 8d8e, fork A).** This is a thin delegator over
-    :func:`rebar._opcert_signing.mint_opcert_record`: it mints a ``rebar.opcert.v1`` DSSE op-cert
-    with the ambient environment's auto-generated Ed25519 key (``<tracker>/.opcert-key``) — one
-    signature per verdict, no HMAC — and persists it through the single locked write path.
-    Returns the record (with the resolved ``ticket_id``). Raises :class:`SigningError` on a
-    validation/resolve failure, and — on the DEGRADE path (``ssh-keygen`` < 8.9 or an unwritable
-    tracker) — a :class:`SigningError` naming OpenSSH >= 8.9, which callers record as an in-band
-    ``{signed: false}`` outcome (no local op wedges; the gate that needs it blocks).
-
+    Delegates to :func:`rebar._opcert_signing.mint_opcert_record`, minting one Ed25519 DSSE
+    op-cert per verdict and persisting it through the locked write path. Validation and degraded
+    signing (OpenSSH < 8.9 or unwritable tracker) raise :class:`SigningError`; callers record it
+    as an in-band ``{signed: false}`` outcome.
     ``kind`` (``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED as a routing hint
-    for the reducer's kind-keyed attestations map; the reducer derives the authoritative kind from
-    the signed ``manifest[0]``. Omitted callers (e.g. `rebar sign`) sign a generic op-cert.
+    only; the authoritative kind comes from signed ``manifest[0]``. Omission signs a generic
+    op-cert.
     """
     from rebar._commands._seam import (
         CommandError,
@@ -587,17 +571,31 @@ def sign_manifest(ticket_id: str, manifest, *, kind: str | None = None, repo_roo
         ) from None
     record["signed_at"] = time.time_ns()
     try:
-        append_event(resolved, "SIGNATURE", record, tracker, repo_root=repo_root)
+        append_event(
+            resolved,
+            "SIGNATURE",
+            record,
+            tracker,
+            repo_root=repo_root,
+            under_lock_check=under_lock_check,
+        )
     except CommandError as exc:
         raise SigningError(exc.message, exc.returncode) from None
     return {**record, "ticket_id": resolved}
 
 
-# NOTE: ``retire_attested_pin`` (a write-time clear of the signature on reopen) was REMOVED
-# in epic dark-acme-lumen. Attestation records are now immutable and reopen invalidation is
-# computed on READ via ``state['last_reopened_at']`` + ``plan_review.attest.compute_validity``
-# — which, unlike the old clear, does not destroy the kind-keyed attestations a reopened ticket
-# still legitimately carries. See docs/adr/0009-reopen-invalidation-validity-on-read.md.
+def sign_manifest(
+    ticket_id: str,
+    manifest,
+    *,
+    kind: str | None = None,
+    repo_root=None,
+) -> dict:
+    """Sign and persist a manifest through the stable public signing API."""
+    return _sign_manifest_under_lock(ticket_id, manifest, kind=kind, repo_root=repo_root)
+
+
+# ``retire_attested_pin`` was removed; reopen invalidation is computed on read. See ADR 0009.
 
 
 def _resolve_and_reduce(ticket_id: str, repo_root):

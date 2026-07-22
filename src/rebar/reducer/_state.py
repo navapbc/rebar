@@ -10,6 +10,8 @@ def make_initial_state() -> dict:
         "ticket_type": None,
         "title": None,
         "status": "open",
+        # Derived lifecycle posture for plan reviews. STATUS and SNAPSHOT folding own updates.
+        "plan_review_phase": "planning",
         "author": None,
         "created_at": None,
         "env_id": None,

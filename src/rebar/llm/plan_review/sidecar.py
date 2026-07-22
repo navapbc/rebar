@@ -24,6 +24,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .manifest import ManifestFormatError, ReviewPhaseMetadata, validate_review_phase_metadata
 from .relation_snapshot import PlanMaterialPin, is_canonical_ticket_id
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ def emit(
     *,
     material: str | None = None,
     reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
+    review_phase: object = "planning",
+    priority_floor: object = None,
     repo_root=None,
 ) -> bool:
     """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict, then prune
@@ -70,6 +73,8 @@ def emit(
             verdict,
             material=material,
             reviewed_related_material=reviewed_related_material,
+            review_phase=review_phase,
+            priority_floor=priority_floor,
             repo_root=repo_root,
         )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
@@ -409,6 +414,29 @@ class ReviewedRelatedMaterialError(ValueError):
     """A present sidecar related-material field is not the exact v2 extension shape."""
 
 
+class SidecarReviewPhaseError(ValueError):
+    """A present v2 sidecar phase field violates the shared phase policy."""
+
+
+def parse_review_phase_metadata(payload: object) -> ReviewPhaseMetadata:
+    if not isinstance(payload, Mapping):
+        raise SidecarReviewPhaseError("review sidecar must be an object")
+    phase_present = "review_phase" in payload
+    floor_present = "priority_floor" in payload
+    if not phase_present and not floor_present:
+        return {"phase": "planning", "priority_floor": None}
+    phase = payload.get("review_phase")
+    floor = payload.get("priority_floor")
+    if phase is None or (
+        floor_present and (isinstance(floor, bool) or not isinstance(floor, (int, float)))
+    ):
+        raise SidecarReviewPhaseError("invalid sidecar review phase metadata")
+    try:
+        return validate_review_phase_metadata(phase, floor, legacy_absent=False)
+    except ManifestFormatError as exc:
+        raise SidecarReviewPhaseError(str(exc)) from None
+
+
 _PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
 _PIN_KEYS = frozenset({"role", "canonical_id", "material_fingerprint"})
 
@@ -455,6 +483,8 @@ def build_payload(
     *,
     material: str | None = None,
     reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
+    review_phase: object = "planning",
+    priority_floor: object = None,
     repo_root=None,
 ) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
@@ -539,6 +569,12 @@ def build_payload(
         + verdict.get("indeterminate", [])
         + verdict.get("dropped", [])
     )
+    try:
+        phase_metadata = validate_review_phase_metadata(
+            review_phase, priority_floor, legacy_absent=False
+        )
+    except ManifestFormatError as exc:
+        raise SidecarReviewPhaseError(str(exc)) from None
     payload = {
         "schema": "plan_review_result_v2",
         "impact_model_version": IMPACT_MODEL_VERSION,
@@ -546,6 +582,7 @@ def build_payload(
         "ticket_id": verdict.get("ticket_id"),
         "ticket_type": verdict.get("ticket_type"),
         "material_fingerprint": material,
+        "review_phase": phase_metadata["phase"],
         # Remediation-eligibility baseline (story a850): the review-time code SHA + registry
         # version, stamped on EVERY verdict (PASS and BLOCK alike, always self-sourced at emit)
         # so a BLOCK loop leaves a usable baseline even though a BLOCK never signs. Sourcing
@@ -586,4 +623,6 @@ def build_payload(
             }
             for pin in reviewed_related_material
         ]
+    if phase_metadata["priority_floor"] is not None:
+        payload["priority_floor"] = phase_metadata["priority_floor"]
     return payload

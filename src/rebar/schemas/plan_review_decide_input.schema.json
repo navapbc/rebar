@@ -9,7 +9,8 @@
     "verifications": { "type": "array", "description": "Pass-2 verifier verifications: [{index, severity_attributes, binary}]." },
     "det_blocking": { "type": "array", "description": "DET-floor blocking findings to merge (from the precheck)." },
     "det_advisory": { "type": "array", "description": "DET-floor advisory findings to merge (from the precheck)." }
+    ,"review_phase": { "type": "string", "enum": ["planning", "execution"], "description": "Lifecycle phase selecting the fixed execution floor." }
   },
-  "required": ["findings"],
+  "required": ["findings", "review_phase"],
   "additionalProperties": true
 }

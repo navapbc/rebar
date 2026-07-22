@@ -141,6 +141,7 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     base: dict[str, Any] = {
         "canonical_id": pctx.ticket_id,
         "ticket_type": pctx.ticket_type,
+        "review_phase": pctx.state.get("plan_review_phase", "planning"),
         "det_blocking": [],
         "det_advisory": [],
         "det_coverage": {},
@@ -433,6 +434,8 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     raw_verifs = list(ctx.inputs.get("verifications") or [])
     det_blocks = list(ctx.inputs.get("det_blocking") or [])
     det_advisories = list(ctx.inputs.get("det_advisory") or [])
+    # The workflow schema requires this; direct legacy/unit callers model planning by omission.
+    review_phase = ctx.inputs.get("review_phase", "planning")
 
     # The Pass-2 verifier (the workflow's `verify` prompt step) emits a flat list of
     # `{index, severity_attributes, binary}`; reshape it to the `{index: {...}}` map Pass-3
@@ -488,7 +491,13 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
         if verif is not None:  # absent == None to the consumer's verifs.get(i)
             rest_verifs[len(rest)] = verif
         rest.append(f)
-    decided = [*too_big, *shed, *orchestrator.pass3_over_findings(rest, rest_verifs)]
+    decided = [
+        *too_big,
+        *shed,
+        *orchestrator.pass3_over_findings(
+            rest, rest_verifs, execution_review=review_phase == "execution"
+        ),
+    ]
 
     parts = orchestrator.partition_findings(
         det_blocks, det_advisories, decided, advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP

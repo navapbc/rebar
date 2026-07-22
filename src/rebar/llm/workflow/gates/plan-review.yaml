@@ -173,6 +173,7 @@ steps:
             verifications: ${{ steps.verify.outputs.verifications }}
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
+            review_phase: ${{ steps.precheck.outputs.review_phase }}
         - id: coach_inputs
           needs:
           - decide
@@ -257,6 +258,7 @@ steps:
             verifications: ${{ steps.verify.outputs.verifications }}
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
+            review_phase: ${{ steps.precheck.outputs.review_phase }}
         - id: coach_inputs
           needs:
           - decide

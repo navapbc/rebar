@@ -83,10 +83,23 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             ),
         }
 
+    try:
+        from . import generation
+
+        initial_generation = generation.collect(ticket_id, repo_root=repo_root)
+    except Exception as exc:  # noqa: BLE001 - recovery remains a structured no-throw API
+        return {
+            "ok": False,
+            "signed": False,
+            "ticket_id": ticket_id,
+            "verdict": recorded_verdict,
+            "reason": f"plan review generation could not be collected: {exc}",
+        }
+
     # STALENESS GUARD: the plan/material must not have changed since the review. Recompute the
     # current material fingerprint (NO LLM) and require it to equal the sidecar's recorded one.
     recorded_material = payload.get("material_fingerprint")
-    current_material = attest.current_material_fingerprint(ticket_id, repo_root=repo_root)
+    current_material = initial_generation.own_material
     if recorded_material is None or current_material is None:
         return {
             "ok": False,
@@ -108,6 +121,31 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
                 "the plan changed since the review (description/AC/file_impact/children edited), "
                 "so the recorded PASS is stale — run `rebar review-plan` to re-review and sign"
             ),
+        }
+
+    try:
+        phase_metadata = sidecar.parse_review_phase_metadata(payload)
+        from .pin_health import review_phase_status
+
+        phase_status = review_phase_status(
+            initial_generation.phase,
+            phase_metadata["phase"],
+            phase_metadata["priority_floor"],
+        )
+    except sidecar.SidecarReviewPhaseError:
+        phase_metadata = {"phase": "planning", "priority_floor": None}
+        phase_status = "malformed"
+    except Exception:  # noqa: BLE001 - unreadable current state cannot authorize recovery
+        phase_metadata = {"phase": "planning", "priority_floor": None}
+        phase_status = "malformed"
+    if phase_status != "compatible":
+        return {
+            "ok": False,
+            "signed": False,
+            "ticket_id": ticket_id,
+            "verdict": recorded_verdict,
+            "reason": f"review phase metadata is {phase_status}; run `rebar review-plan`",
+            "health": {"phase_status": phase_status},
         }
 
     enforced = attest._read_enforce_plan_material_pins(repo_root)
@@ -144,7 +182,14 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         "coverage": coverage,
     }
     try:
-        sig = attest.sign_plan_review(verdict, material=current_material, repo_root=repo_root)
+        sig = attest.sign_plan_review(
+            verdict,
+            material=current_material,
+            review_phase=phase_metadata["phase"],
+            priority_floor=phase_metadata["priority_floor"],
+            initial_generation=initial_generation,
+            repo_root=repo_root,
+        )
     except Exception as exc:  # noqa: BLE001 — public recovery path returns structured refusal
         # Relation failures are an unsigned, retry-after-repair gate outcome, not
         # an opaque signing failure.  Keep the public no-throw recovery contract

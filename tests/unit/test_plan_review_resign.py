@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -98,16 +99,16 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
         "coverage": {},
     }
     monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
-    monkeypatch.setattr(
-        attest, "current_material_fingerprint", lambda *a, **k: payload["material_fingerprint"]
-    )
+    generation = SimpleNamespace(own_material=payload["material_fingerprint"], phase="planning")
+    monkeypatch.setattr("rebar.llm.plan_review.generation.collect", lambda *a, **k: generation)
     seen = {}
 
-    def fake_sign(verdict, *, material, repo_root=None):
+    def fake_sign(verdict, **kwargs):
         seen["ticket_id"] = verdict["ticket_id"]
+        seen["generation"] = kwargs["initial_generation"]
         return {"key_id": "key", "head_sha": "head"}
 
     monkeypatch.setattr(attest, "sign_plan_review", fake_sign)
     result = resign.resign_plan_review(ticket_id)
     assert result["ok"] is True
-    assert seen == {"ticket_id": ticket_id}
+    assert seen == {"ticket_id": ticket_id, "generation": generation}

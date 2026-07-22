@@ -1,8 +1,4 @@
-"""Plan-review signing and the fast local claim-gate validity check.
-
-Attestations bind the signed manifest, plan material, and code state. The billable
-review runs out of band; claim only verifies the existing attestation locally.
-"""
+"""Plan-review signing and fast local claim-gate validity checks."""
 
 from __future__ import annotations
 
@@ -30,11 +26,14 @@ from .manifest import (
     manifest_disabled_builtins,
     manifest_material,
     manifest_pins,
+    manifest_priority_floor,
     manifest_rebar_version,
     manifest_regver,
+    manifest_review_phase,
     registry_version,
+    validate_review_phase_metadata,
 )
-from .pin_health import DerivedPlanReviewHealth, PlanValidityProfile
+from .pin_health import DerivedPlanMaterialPinHealth, PlanValidityProfile
 from .relation_snapshot import PlanMaterialPin
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ def _read_enforce_plan_material_pins(repo_root=None) -> bool:
 
 def derive_plan_material_pin_health(
     pin_records: Sequence[PlanMaterialPin] | None, *, repo_root, enforced: bool
-) -> DerivedPlanReviewHealth:
+) -> DerivedPlanMaterialPinHealth:
     """Return additive related-material health using the public fingerprint seam."""
     from .pin_health import derive_health
 
@@ -79,18 +78,25 @@ __all__ = [
     "manifest_pins",
     "manifest_rebar_version",
     "manifest_regver",
+    "manifest_review_phase",
+    "manifest_priority_floor",
     "registry_version",
+    "validate_review_phase_metadata",
     "ManifestFormatError",
 ]
 
 
 def sign_plan_review(
-    verdict: dict[str, Any], *, material: str, repo_root=None, relation_snapshot=None
+    verdict: dict[str, Any],
+    *,
+    material: str,
+    review_phase: object = "planning",
+    priority_floor: object = None,
+    repo_root=None,
+    relation_snapshot=None,
+    initial_generation=None,
 ) -> dict[str, Any]:
-    """Sign a passing plan-review verdict (append a ``SIGNATURE`` event). Returns the
-    signature record. Raises if signing fails (the caller decides how to surface it).
-
-    Defense-in-depth: non-PASS or systemically degraded verdicts are never certifiable."""
+    """Sign a non-degraded PASS; refuse every non-certifiable verdict."""
     from rebar.signing import SigningError
 
     _cov = verdict.get("coverage") or {}
@@ -107,8 +113,13 @@ def sign_plan_review(
     from . import registry
     from . import relation_snapshot as relation_snapshot_module
 
-    snapshot = relation_snapshot or relation_snapshot_module.collect_plan_relation_snapshot(
-        verdict["ticket_id"], repo_root=repo_root
+    snapshot = (
+        initial_generation.relation_snapshot
+        if initial_generation is not None
+        else relation_snapshot
+        or relation_snapshot_module.collect_plan_relation_snapshot(
+            verdict["ticket_id"], repo_root=repo_root
+        )
     )
 
     deps = dependency_hashes(verdict, repo_root=repo_root)
@@ -124,10 +135,21 @@ def sign_plan_review(
         regver=registry_version(repo_root),
         verified_at_sha=current_code_sha(),
         pins=snapshot.related_material,
+        review_phase=review_phase,
+        priority_floor=priority_floor,
     )
-    sig = signing.sign_manifest(
-        verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
-    )
+    if initial_generation is not None:
+        from . import generation
+
+        if material != initial_generation.own_material:
+            raise generation.PlanReviewGenerationChanged("review material changed before signing")
+        sig = generation.sign_manifest(
+            verdict["ticket_id"], manifest, initial_generation, repo_root=repo_root
+        )
+    else:
+        sig = signing.sign_manifest(
+            verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
+        )
     # Certification triggers the best-effort overlap-enrichment soak queue.
     try:
         from rebar.llm.config import LLMConfig
@@ -331,6 +353,7 @@ def refresh_attestation(
     probe: str,
     repo_root=None,
     relation_snapshot_value=None,
+    initial_generation=None,
 ) -> dict[str, Any]:
     """Re-sign a drift-refreshed attestation: the PRIOR verdict (verdict/material/
     model/runner/counts) re-bound to the CURRENT hashes of the SAME dependency paths,
@@ -340,8 +363,11 @@ def refresh_attestation(
 
     from . import registry, relation_snapshot
 
-    snapshot = relation_snapshot_value or relation_snapshot.collect_plan_relation_snapshot(
-        ticket_id, repo_root=repo_root
+    snapshot = (
+        initial_generation.relation_snapshot
+        if initial_generation is not None
+        else relation_snapshot_value
+        or relation_snapshot.collect_plan_relation_snapshot(ticket_id, repo_root=repo_root)
     )
 
     fields: dict[str, Any] = {
@@ -368,7 +394,19 @@ def refresh_attestation(
         regver=registry_version(repo_root),
         refreshed_from=f"{prior_digest} probe={probe}",
         pins=snapshot.related_material,
+        review_phase=manifest_review_phase(prior_manifest),
+        priority_floor=manifest_priority_floor(prior_manifest),
     )
+    if initial_generation is not None:
+        from . import generation
+
+        if manifest_material(prior_manifest) != initial_generation.own_material:
+            raise generation.PlanReviewGenerationChanged(
+                "review material changed before drift refresh signing"
+            )
+        return generation.sign_manifest(
+            ticket_id, manifest, initial_generation, repo_root=repo_root
+        )
     return signing.sign_manifest(ticket_id, manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root)
 
 
@@ -395,45 +433,14 @@ def _is_opcert(attestation: Mapping[str, Any]) -> bool:
 
 
 def _authoritative_material(attestation: Mapping[str, Any]) -> str | None:
-    """The AUTHENTICATED material fingerprint to gate material-edit invalidation against.
-
-    SECURITY (finding B): for an op-cert (envelope) record the material fingerprint is sourced from
-    the SIGNED payload (surfaced by ``verify_opcert_record`` as ``material_fingerprint``) — NEVER
-    the plaintext ``manifest``'s ``material:`` line, which is not covered by the DSSE signature and
-    lives on the attacker-writable tickets branch. A legacy HMAC record's manifest IS covered by the
-    HMAC signature, so ``manifest_material`` remains authentic there (behavior unchanged).
-
-    An op-cert minted from a manifest with no ``material:`` line binds an EMPTY material fingerprint
-    (``mint_opcert_record`` uses ``_manifest_material_fingerprint(steps) or ""``), which the signed
-    payload surfaces here as ``""``. That is "no bound material", so we normalise it to ``None`` —
-    the "no fingerprint → drift check skipped" contract (matching ``manifest_material``'s ``None``
-    for a material-less manifest). A genuine bound fingerprint is a non-empty hash, so this only
-    maps the empty sentinel through; a real post-signing material edit still fails the check as
-    ``stale-material``."""
+    """Read material from the signed op-cert payload or HMAC-covered legacy manifest."""
     if _is_opcert(attestation):
         return attestation.get("material_fingerprint") or None
     return manifest_material(attestation.get("manifest") or [])
 
 
 def _authoritative_manifest(attestation: Mapping[str, Any]) -> list:
-    """The AUTHENTICATED manifest to read plan-review freshness inputs from — the per-path
-    dependency-hash map (``manifest_deps`` → the ``stale-code`` check), the criteria-registry
-    version stamp (``manifest_regver`` → the ``stale-regver`` check), and the pinned-SHA re-hash
-    basis (``verified_at_sha_from_manifest``).
-
-    SECURITY (stale-code / stale-regver findings): for an op-cert (envelope) record the manifest is
-    sourced from the SIGNED DSSE payload (surfaced by ``verify_opcert_record`` as
-    ``signed_manifest`` from the in-toto predicate) — NEVER the record's plaintext ``manifest``
-    mirror, which is not
-    covered by the DSSE signature and lives on the auto-pushed, attacker-writable tickets branch.
-    Mirrors ``_authoritative_material`` (which reads the signed ``material_fingerprint`` rather than
-    the plaintext ``material:`` line). A legacy HMAC record's manifest IS covered by the HMAC
-    signature, so its plaintext ``manifest`` remains authentic (behavior unchanged).
-
-    A legacy op-cert minted BEFORE the manifest was bound into the payload has no
-    ``signed_manifest``; there is nothing authenticated to read, so we fall back to the record's
-    plaintext ``manifest`` — no worse than today's behavior for those already-deployed records, and
-    new op-certs carry the signed manifest."""
+    """Read the signed DSSE manifest, with plaintext fallback for legacy op-certs/HMAC."""
     if _is_opcert(attestation):
         signed = attestation.get("signed_manifest")
         if isinstance(signed, list):
@@ -474,7 +481,7 @@ def compute_validity(
         return {"valid": False, "reason": f"no certified {kind} attestation", "verdict": "unsigned"}
     signed_at = attestation.get("signed_at")
 
-    plan_health = None
+    plan_health: Any = None
     auth_manifest = None
     if kind == _MANIFEST_PREFIX:
         if attestation.get("verified") is False:
@@ -499,11 +506,34 @@ def compute_validity(
         except ManifestFormatError:
             plan_health = {"pin_status": "malformed-pin", "enforced": enforced, "targets": []}
 
+        try:
+            signed_phase = manifest_review_phase(auth_manifest)
+            signed_floor = manifest_priority_floor(auth_manifest)
+            current_phase = ticket_state.get("plan_review_phase")
+            if current_phase is None:
+                current_phase = (
+                    "planning" if ticket_state.get("status") in ("open", "idea") else "execution"
+                )
+            from .pin_health import review_phase_status
+
+            plan_health["phase_status"] = review_phase_status(
+                current_phase, signed_phase, signed_floor
+            )
+        except ManifestFormatError:
+            plan_health["phase_status"] = "malformed"
+
         if plan_health["pin_status"] == "malformed-pin" and enforced:
             return {
                 "valid": False,
                 "reason": "the plan-review attestation has malformed related-material pins",
                 "verdict": "malformed-pin",
+                "health": plan_health,
+            }
+        if plan_health["phase_status"] == "malformed":
+            return {
+                "valid": False,
+                "reason": "malformed plan-review phase metadata",
+                "verdict": "malformed-phase",
                 "health": plan_health,
             }
 
@@ -607,6 +637,8 @@ def compute_validity(
                     "stale-material",
                 )
         assert plan_health is not None
+        if plan_health["phase_status"] != "compatible":
+            return _result(False, "plan-review phase is incompatible", "incompatible-phase")
         if plan_health["enforced"] and plan_health["pin_status"] not in (
             "current",
             "legacy-unpinned",
@@ -620,15 +652,7 @@ def compute_validity(
 
 # ── completion-awareness: is a container's child "delivered" right now? ───────────
 def _attested_delivered(ticket: dict[str, Any], *, repo_root=None) -> bool:
-    """Branch (A) of :func:`delivered_now` for a SINGLE ticket: it is ``closed`` AND holds a
-    ``completion-verifier`` attestation that is VALID ON READ.
-
-    Reuses the EXACT per-child validity read that
-    :func:`rebar.llm.completion.child_closure_findings` performs — get the ticket's
-    ``completion-verifier`` signature via :func:`rebar.verify_signature` and, when it is
-    ``certified``, run :func:`compute_validity` (kind ``"completion-verifier"``) against the
-    ticket's OWN state. A force-closed / unsigned / drift-stale (compute_validity ``valid=False``)
-    / not-closed ticket fails. Fail-closed: any read error → not delivered."""
+    """Require closed status plus a completion attestation valid on this ticket's state."""
     import rebar
 
     if ticket.get("status") != "closed":
@@ -664,32 +688,11 @@ def _supersedes_child(candidate: dict[str, Any], child_id: str) -> bool:
 
 
 def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo_root=None) -> bool:
-    """Is a container's CHILD ticket ``child`` DELIVERED right now, for plan-review
-    completion-awareness? Keys on VERIFIED delivery, NEVER bare ``closed`` status.
+    """Return verified delivery, directly or through a live in-container superseder.
 
-    Returns ``True`` IFF either:
-
-    (A) DELIVERED-AND-ATTESTED — ``child`` is ``closed`` AND holds a ``completion-verifier``
-        attestation that is valid on read (see :func:`_attested_delivered`, which reuses the
-        SAME ``verify_signature`` + :func:`compute_validity` read as
-        ``completion.child_closure_findings``). A force-closed / unsigned / drift-stale /
-        reopened-after-signing child fails.
-
-    (B) SUPERSEDED-BY-LIVE-IN-EPIC-SIBLING — there is a ticket ``A`` in ``siblings`` that
-        SUPERSEDES ``child`` (an ``A -supersedes-> child`` link), shares ``child``'s
-        ``parent_id`` (an in-epic sibling), and is a LIVE vehicle: ``A`` is ``open`` /
-        ``in_progress``, OR ``A`` is itself delivered-and-attested (branch (A) applied to ``A``).
-        The supersede branch does NOT recurse (only ``A``'s own status/attestation is consulted),
-        so a superseded-by-non-sibling / superseded-by-force-closed(dead)-sibling ``child`` is
-        NOT delivered here.
-
-    PURE / recomputed each call — no persisted state, no caching. Reopen semantics fall out of
-    :func:`compute_validity` keying on each ticket's OWN ``last_reopened_at``: a PARENT reopen
-    does NOT un-deliver a child (the child's state is unchanged), only a CHILD's own reopen does.
-
-    ``siblings`` is supplied by the caller — the container's children, e.g.
-    ``rebar.list_tickets(parent=<container>, repo_root=…)`` — mirroring how
-    ``completion.child_closure_findings`` enumerates a parent's children."""
+    Bare closed status never suffices; completion attestations are checked on read. The
+    superseder branch is deliberately non-recursive and only considers supplied siblings.
+    """
     if _attested_delivered(child, repo_root=repo_root):
         return True
 

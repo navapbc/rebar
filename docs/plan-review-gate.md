@@ -391,6 +391,59 @@ coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live i
 sidecar; a project composes any hard CI gate by checking the signed result + its
 coverage.
 
+### Phase/floor manifest contract
+
+Compiled tickets carry `plan_review_phase: planning|execution`. A winning transition into
+`in_progress` selects execution, a winning transition into `open` selects planning, and other
+statuses preserve the projection. A signed manifest records the phase the review actually used,
+not a later re-read: immediately after `advisory:` it contains `review-phase: planning`, or
+`review-phase: execution` followed by `priority-floor: 0.80`. Legacy manifests with neither line
+mean planning. Duplicate, partial, non-finite, out-of-range, or policy-inconsistent metadata is
+malformed rather than normalized.
+
+### `phase_status` compatibility
+
+| Current compiled phase | Signed review phase | Result |
+|---|---|---|
+| planning | planning or legacy planning | compatible |
+| planning | execution | incompatible |
+| execution | planning or legacy planning | compatible |
+| execution | execution with floor >= 0.80 | compatible |
+| execution | execution with floor < 0.80 | incompatible |
+| either | malformed phase/floor grammar | malformed |
+
+`compute_validity` returns this as `health.phase_status` for every parsed plan-review result.
+Completion-verifier validity does not parse plan-review phase, floor, or material pins.
+
+### Why the execution floor is fixed at 0.80
+
+Execution edits happen after implementation has begun, when accepting an under-specified change is
+costlier than asking for another planning pass. Pass 3 therefore raises blocking-enabled criterion
+thresholds to at least `0.80` for execution reviews. Advisory-only criteria remain advisory and
+all findings remain visible. This protocol value is deliberately not configurable: raising it
+later invalidates lower-floor execution attestations, while lowering it accepts higher-floor ones
+without rewriting stored records.
+
+### `PlanReviewGeneration` signing transaction
+
+An immutable generation binds phase, priority floor, own material, the exact relation snapshot,
+and its clean ticket-store revision. Full review captures it before the LLM; drift refresh and
+re-sign capture it before their probe. Before signing, a stable fresh generation must equal that
+initial value. Store-HEAD instability and under-lock mismatches retry at most three times; a stable
+field change is terminal stale. The canonical event writer repeats the exact generation check
+under its global write lock before renaming, staging, and committing the `SIGNATURE`, so failures,
+lock timeouts, and model/provider errors leave no partial signature event.
+
+### Phase rollback and precision loss
+
+Disable claim/close enforcement first, then pause every `rebar compact` invocation during the
+downgrade window. Existing phase-bearing snapshots are lossless because old reducers
+preserve unknown snapshot fields. If old code instead fully re-reduces raw events after its own
+cache bump, it drops the derived phase; a later forward upgrade bootstraps planning for `open` or
+`idea` and execution for every other known status. Operators explicitly accept that historical
+phase precision loss when compaction/re-signing was not paused. No stored signature is rewritten
+merely because policy changes.
+
 ### What the `signature` field guarantees (read this before trusting it)
 
 A signature (a real `SIGNATURE` event + a manifest whose first line is `plan-review:

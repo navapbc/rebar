@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from rebar.llm.plan_review import attest, resign
@@ -23,10 +25,18 @@ def _payload() -> dict:
     }
 
 
+def _generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "rebar.llm.plan_review.generation.collect",
+        lambda *a, **k: SimpleNamespace(own_material="a" * 16, phase="planning"),
+    )
+
+
 def test_enforced_stale_sidecar_pins_refuse_resign_without_compute_validity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert hasattr(attest, "_read_enforce_plan_material_pins")
+    _generation(monkeypatch)
     monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: _payload())
     monkeypatch.setattr(
         attest,
@@ -54,6 +64,7 @@ def test_enforced_stale_sidecar_pins_refuse_resign_without_compute_validity(
 
 def test_legacy_sidecar_remains_resignable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert callable(getattr(resign.sidecar, "parse_reviewed_related_material", None))
+    _generation(monkeypatch)
     payload = _payload()
     payload.pop("reviewed_related_material")
     monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
