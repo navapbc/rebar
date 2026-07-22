@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
 from rebar_reconciler.apply_base import (
     ApplyResult,
     _direction_guard,
@@ -46,7 +47,6 @@ from rebar_reconciler.inbound_translate import (
     _resolve_tracker_dir,
     _write_event_file,
 )
-from rebar_reconciler.outbound_fields import _map_local_to_jira_fields
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)

@@ -28,7 +28,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 OUTBOUND_DIFFER_PATH = ENGINE / "outbound_differ.py"
-ADF_PATH = ENGINE / "adf.py"
+ADF_PATH = ENGINE / "adapters" / "jira" / "adf.py"
 
 # The budget the fit targets (must match adf._ADF_DESCRIPTION_LIMIT).
 _ADF_DESCRIPTION_LIMIT = 32000

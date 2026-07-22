@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_ADF_KEY_INBOUND = "rebar_reconciler.adf"
+_ADF_KEY_INBOUND = "rebar_reconciler.adapters.jira.adf"
 _AdfModule_Inbound = None
 
 
@@ -33,7 +33,7 @@ def _load_adf():
     if _ADF_KEY_INBOUND in sys.modules:
         _AdfModule_Inbound = sys.modules[_ADF_KEY_INBOUND]
         return _AdfModule_Inbound
-    adf_path = Path(__file__).parent / "adf.py"
+    adf_path = Path(__file__).parent / "adapters" / "jira" / "adf.py"
     spec = importlib.util.spec_from_file_location(_ADF_KEY_INBOUND, adf_path)
     if spec is None or spec.loader is None:
         raise FileNotFoundError(f"adf.py not found at {adf_path}")

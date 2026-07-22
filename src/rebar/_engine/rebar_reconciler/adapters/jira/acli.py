@@ -21,12 +21,12 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from rebar_reconciler import acli_cli_ops, acli_subprocess
+from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
 # Module-level ACLI issue ops live in acli_cli_ops; the AcliClient methods
 # delegate to them via ``acli_cli_ops.<name>``. Only the private helpers below
 # are pulled in by name for internal use.
-from rebar_reconciler.acli_cli_ops import (
+from rebar_reconciler.adapters.jira.acli_cli_ops import (
     _attach_parent_guarded,
     _create_from_json_payload,
     _create_issue_from_json,
@@ -35,14 +35,14 @@ from rebar_reconciler.acli_cli_ops import (
     _parse_paginated_comments,
     _verify_created_issue,
 )
-from rebar_reconciler.acli_graph import AcliGraphMixin
-from rebar_reconciler.acli_rest import AcliRestMixin
+from rebar_reconciler.adapters.jira.acli_graph import AcliGraphMixin
+from rebar_reconciler.adapters.jira.acli_rest import AcliRestMixin
 
 # Subprocess transport floor (process exec + retry + typed mutation errors) lives
 # in acli_subprocess; re-exported here so acli.<name> keeps resolving. The seam
 # is reached MODULE-QUALIFIED (acli_subprocess._run_acli) at the call sites below
 # so one patch point covers AcliClient._run + the acli_cli_ops free functions.
-from rebar_reconciler.acli_subprocess import (
+from rebar_reconciler.adapters.jira.acli_subprocess import (
     _ASSIGNEE_NOT_FOUND_ERROR,
     _ASSIGNEE_PERMISSION_ERROR,
     _AUTH_FAILURE_CODE,
@@ -57,6 +57,7 @@ from rebar_reconciler.acli_subprocess import (
     _run_acli,
     resolve_jira_settings,
 )
+from rebar_reconciler.adapters.jira.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Field sanitization + local↔Jira value maps live in the Jira vendor adapter
 # (``adapters/jira/jira_fields.py``, relocated by ticket 44be); re-exported here
@@ -73,7 +74,6 @@ from rebar_reconciler.adapters.jira.jira_fields import (
     _sanitize_label,
     _sanitize_summary,
 )
-from rebar_reconciler.adf import text_to_adf as _text_to_adf  # canonical location
 
 # Re-export facade. These names are imported from the sibling acli_* modules and
 # the Jira vendor adapter (adapters/jira/jira_fields) solely so ``acli.<name>``
@@ -111,7 +111,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-# _text_to_adf is imported from rebar_reconciler.adf (canonical location)
+# _text_to_adf is imported from rebar_reconciler.adapters.jira.adf (canonical location)
 
 
 # ---------------------------------------------------------------------------

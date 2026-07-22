@@ -106,7 +106,7 @@ def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -
 
     Launches the genuine python probe (``jira-capability-probe.py``) under
     ``sys.executable`` with ``engine_env`` (so the engine's
-    ``rebar_reconciler.acli`` transport resolves) — replacing the bash-dispatcher
+    ``rebar_reconciler.adapters.jira.acli`` transport resolves) — replacing the bash-dispatcher
     passthrough (Tier E E6.5a). Talks only to Jira (creates + deletes a throwaway
     issue); needs no local tracker, so NO auto-init (matches the dispatcher arm).
     Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.

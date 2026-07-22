@@ -56,7 +56,9 @@ def _load_module(name: str, path: Path) -> ModuleType:
 
 @pytest.fixture(scope="module")
 def adf() -> ModuleType:
-    return _load_module("rebar_reconciler.adf", RECONCILER_DIR / "adf.py")
+    return _load_module(
+        "rebar_reconciler.adapters.jira.adf", RECONCILER_DIR / "adapters" / "jira" / "adf.py"
+    )
 
 
 @pytest.fixture(scope="module")

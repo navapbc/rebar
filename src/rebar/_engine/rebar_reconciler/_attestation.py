@@ -61,8 +61,8 @@ def build_acli_client_from_env() -> Any:
         RuntimeError: If any required JIRA_* env var is missing or empty.
     """
     from rebar.config import load_config
-    from rebar_reconciler import acli_subprocess
     from rebar_reconciler._backend_registry import select_backend
+    from rebar_reconciler.adapters.jira import acli_subprocess
 
     # url/user/project resolve through the typed config (JIRA_URL/JIRA_USER/
     # JIRA_PROJECT env override the [tool.rebar.jira] file) via the stable

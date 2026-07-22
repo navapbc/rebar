@@ -51,7 +51,7 @@ def inbound_differ() -> ModuleType:
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
     # Stub ADF to avoid heavy dependency in this contract test
-    _ADF_KEY = "rebar_reconciler.adf"
+    _ADF_KEY = "rebar_reconciler.adapters.jira.adf"
     import types
 
     adf_stub = types.ModuleType(_ADF_KEY)
