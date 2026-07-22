@@ -2,8 +2,10 @@
 guide + parity, and coach deep-links.
 
 `explain_criterion` is the ONE shared lookup behind the CLI, the MCP read tool, and the library;
-the three error states (unknown-id / malformed-registry / missing-file) are asserted across the
-CLI and MCP surfaces. The guide parity check fails when a criterion's section is removed, and the
+its error states (unknown-id / malformed-registry) are asserted across the CLI and MCP surfaces.
+Both `explain_criterion` (rendered from the packaged registry) and `explain_guide` (read from the
+packaged `rebar._guides`) are repo-root independent, so an installed rebar serves them from any
+working directory. The guide parity check fails when a criterion's section is removed, and the
 Pass-4 coaching notes carry an additive `guide_url` deep-link anchored to `#<criterion-id>`.
 """
 
@@ -59,11 +61,10 @@ def test_explain_criterion_unknown_id() -> None:
     assert ei.value.kind == "unknown-id"
 
 
-def test_explain_criterion_missing_file(tmp_path) -> None:
-    # a repo root with no generated guide -> missing-file
-    with pytest.raises(registry.ExplainError) as ei:
-        registry.explain_criterion("F1", repo_root_path=str(tmp_path))
-    assert ei.value.kind == "missing-file"
+def test_explain_criterion_repo_root_independent(tmp_path) -> None:
+    # rendered from the PACKAGED registry, not docs/ — a repo root with no docs still resolves
+    section = registry.explain_criterion("F1", repo_root_path=str(tmp_path))
+    assert section.startswith("## F1")
 
 
 def test_explain_criterion_malformed_registry(monkeypatch) -> None:
@@ -86,11 +87,13 @@ def test_explain_cli_success_and_unknown(capsys) -> None:
     assert "unknown criterion" in capsys.readouterr().err
 
 
-def test_explain_cli_missing_and_malformed(monkeypatch, tmp_path) -> None:
+def test_explain_cli_repo_root_independent_and_malformed(monkeypatch, tmp_path, capsys) -> None:
     from rebar._cli import main
 
-    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))  # no guide under this root -> missing-file
-    assert main(["explain", "F1"]) == 1
+    # a repo root with no docs/ still resolves (criterion rendered from the packaged registry)
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    assert main(["explain", "F1"]) == 0
+    assert "## F1" in capsys.readouterr().out
 
     def _boom(**_kw):
         raise ValueError("corrupt")
@@ -108,8 +111,9 @@ def test_explain_mcp_success_and_error_states(monkeypatch, tmp_path) -> None:
     unknown = tool("BOGUS")
     assert unknown["kind"] == "unknown-id" and "error" in unknown
 
+    # a repo root with no docs/ still resolves (criterion rendered from the packaged registry)
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    assert _mcp_explain_tool()("F1")["kind"] == "missing-file"
+    assert _mcp_explain_tool()("F1")["section"].startswith("## F1")
 
     def _boom(**_kw):
         raise ValueError("corrupt")
@@ -132,10 +136,34 @@ def test_explain_guide_unknown_name() -> None:
     assert ei.value.kind == "unknown-id"
 
 
-def test_explain_guide_missing_file(tmp_path) -> None:
+def test_explain_guide_repo_root_independent(monkeypatch, tmp_path) -> None:
+    # read from the packaged `rebar._guides` resources, not repo-root docs/: a working
+    # directory with no docs/ (an installed rebar) still serves the guide.
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert registry.explain_guide("plan").lstrip().startswith("#")
+
+
+def test_explain_guide_missing_resource(monkeypatch) -> None:
+    # a broken install where the packaged resource cannot be read -> missing-file
+    class _Boom:
+        def __truediv__(self, _other):
+            return self
+
+        def read_text(self, *_a, **_k):
+            raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(registry.resources, "files", lambda _pkg: _Boom())
     with pytest.raises(registry.ExplainError) as ei:
-        registry.explain_guide("plan", repo_root_path=str(tmp_path))
+        registry.explain_guide("plan")
     assert ei.value.kind == "missing-file"
+
+
+def test_author_guides_are_packaged() -> None:
+    # both guides ship as resources under the rebar._guides package (wheel-installable)
+    base = registry.resources.files(registry._GUIDE_PACKAGE)
+    for filename in registry.AUTHOR_GUIDES.values():
+        assert (base / filename).is_file()
 
 
 def test_explain_cli_prints_guide(capsys) -> None:

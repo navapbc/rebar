@@ -95,7 +95,7 @@ restated here:
   blocking-link promotion, and tags (incl. `--set-tags` add-wins) → `docs/ticket-model.md`.
 - **Writing a plan that PASSES the plan-review gate** — the author-facing on-ramp: the
   description template, the blocking checklist ("your plan must…"), and the revise→review→claim
-  loop → `docs/writing-a-passing-plan.md` (start here; `rebar explain plan` prints it).
+  loop → start here: `rebar explain plan` (packaged; source `src/rebar/_guides/writing-a-passing-plan.md`).
 - **Gate protocols** — the plan-review claim gate and the completion-verifier close gate
   (both **on** for this project), their attestation model, and how to remediate →
   `docs/plan-review-gate.md`.
@@ -153,8 +153,8 @@ build/test/lint/typecheck on GitHub Actions).** `main` flows through Gerrit; Git
 read-only mirror that rejects direct pushes and PR merges. **For an author-facing on-ramp — the
 commit checklist, what the `LLM-Review` reviewer scores (blocking vs advisory), how to
 respond to each vote, and how to preview the review locally with `rebar review-code` before you
-push (the code-review analog of `rebar review-plan`) — read `docs/passing-code-review.md`
-(`rebar explain review` prints it).**
+push (the code-review analog of `rebar review-plan`) — read the packaged code-review guide via
+`rebar explain review` (source `src/rebar/_guides/passing-code-review.md`).**
 The full recipe — Gerrit access setup, feature branches for multi-story work, conflict
 handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rules:
 
@@ -171,7 +171,7 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   git identity** (not a placeholder), then add the sign-off with `git commit -s` — it stamps
   `Signed-off-by: <that name> <that email>`. A machine/operator that runs commits under a
   dedicated automation identity (e.g. a bot account) scopes that identity to its own
-  machine-local config, never to this canonical guidance (see `docs/passing-code-review.md` /
+  machine-local config, never to this canonical guidance (see `rebar explain review` /
   `CONTRIBUTING.md` §"Sign your work (DCO)" for the full policy). A fresh
   worktree lacks the `commit-msg` hook that stamps the `Change-Id` — install it:
   `curl -sLo "$(git rev-parse --git-path hooks/commit-msg)" https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x "$(git rev-parse --git-path hooks/commit-msg)"`.

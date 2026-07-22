@@ -113,3 +113,29 @@ def test_wheel_contains_no_compiled_bytecode(tmp_path):
     with zipfile.ZipFile(wheels[0]) as zf:
         bad = [n for n in zf.namelist() if n.endswith((".pyc", ".pyo")) or "__pycache__" in n]
     assert not bad, f"wheel shipped compiled bytecode: {bad[:20]}"
+
+
+def test_wheel_ships_author_guides(tmp_path):
+    """The packaged author guides (`rebar explain plan` / `review`) must ride in the wheel.
+
+    They are the canonical source (moved out of repo-root ``docs/``) precisely so an installed
+    rebar can serve them; if the wheel dropped them, ``explain_guide`` would 500 on real installs.
+    Builds the wheel in-process (same pattern as the bytecode guard) and asserts both ``.md`` files
+    ship under ``rebar/_guides/``.
+    """
+    import zipfile
+
+    hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
+
+    repo_root = Path(_engine.__file__).resolve().parents[2]
+    builder = hatchling_wheel.WheelBuilder(str(repo_root))
+    built = list(builder.build(directory=str(tmp_path)))
+    wheels = [p for p in built if str(p).endswith(".whl")]
+    assert wheels, f"no wheel produced, got: {built}"
+
+    with zipfile.ZipFile(wheels[0]) as zf:
+        names = set(zf.namelist())
+    for guide in ("writing-a-passing-plan.md", "passing-code-review.md"):
+        assert f"rebar/_guides/{guide}" in names, (
+            f"wheel is missing packaged guide rebar/_guides/{guide}"
+        )
