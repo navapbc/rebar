@@ -335,7 +335,18 @@ def _load_criteria_cached(rr: str, _overlay_sig: str) -> tuple[dict[str, Any], .
 
 
 def by_id(repo_root: str | None = None) -> dict[str, dict[str, Any]]:
-    return {c["id"]: c for c in load_criteria(repo_root)}
+    result = {c["id"]: c for c in load_criteria(repo_root)}
+    # Focused direct-prerequisite review is deliberately not part of the general
+    # routing set: it runs only when the relation preload supplies readable pins.
+    result["prerequisite-consistency"] = {
+        "id": "prerequisite-consistency",
+        "exec": "2-STEP",
+        "block_threshold": 0.60,
+        "default_posture": "blocking",
+        "applies_at": {},
+        "checklist": [],
+    }
+    return result
 
 
 # ── proportionate scrutiny (applies_at) ────────────────────────────────────────

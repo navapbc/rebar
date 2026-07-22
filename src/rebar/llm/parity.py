@@ -52,6 +52,8 @@ class ItemRecord:
     # ATTRIBUTED it to. Both None on non-container records (ignored by the parity gate).
     gold_criterion: str | None = None  # "G3" | "G4" | None
     pred_criterion: str | None = None  # the criterion the runner attributed the finding to
+    gold_prerequisite_id: str | None = None
+    pred_prerequisite_id: str | None = None
 
 
 @dataclass
@@ -218,6 +220,54 @@ def container_fidelity_report(
         )
     report.metrics["attribution_accuracy"] = {"baseline": acc_base, "candidate": acc_cand}
     return ParityReport(passed=not failures, gating_failures=failures, metrics=report.metrics)
+
+
+def prerequisite_fidelity_report(
+    baseline: Sequence[ItemRecord],
+    candidate: Sequence[ItemRecord],
+    *,
+    min_recall: float = 0.90,
+    max_false_accept: float = 0.10,
+    min_gold: int = 20,
+) -> ParityReport:
+    """Gate focused prerequisite recall, coverage and authoritative attribution."""
+    report = parity_report(baseline, candidate, min_gold=min_gold)
+    recall, false_accept = _recall_false_accept(candidate)
+    expected = [r.gold_prerequisite_id for r in candidate if r.gold_prerequisite_id]
+    predicted = [r.pred_prerequisite_id for r in candidate if r.pred_prerequisite_id]
+    expected_counts = {pid: expected.count(pid) for pid in set(expected)}
+    predicted_counts = {pid: predicted.count(pid) for pid in set(predicted)}
+    complete = sum(
+        1 for pid in expected_counts if expected_counts[pid] == 1 and predicted_counts.get(pid) == 1
+    )
+    completeness = complete / len(expected_counts) if expected_counts else 1.0
+    caught = [r for r in candidate if r.gold_prerequisite_id and r.decision == "block"]
+    attribution_errors = sum(1 for r in caught if r.pred_prerequisite_id != r.gold_prerequisite_id)
+    attribution_error_rate = attribution_errors / len(caught) if caught else 0.0
+    failures = list(report.gating_failures)
+    if recall + 1e-9 < min_recall:
+        failures.append(f"prerequisite recall {recall:.3f} below floor {min_recall:.3f}")
+    if false_accept > max_false_accept + 1e-9:
+        failures.append(
+            f"prerequisite false acceptance {false_accept:.3f} exceeds {max_false_accept:.3f}"
+        )
+    if completeness < 1.0:
+        failures.append(f"prerequisite coverage incomplete: {completeness:.3f}")
+    if attribution_errors:
+        failures.append(f"{attribution_errors} prerequisite attribution error(s)")
+    metrics = dict(report.metrics)
+    metrics.update(
+        {
+            "coverage_completeness": completeness,
+            "prerequisite_attribution_error_rate": attribution_error_rate,
+            "min_recall": min_recall,
+            "max_false_accept": max_false_accept,
+            "min_gold": min_gold,
+            "required_coverage_completeness": 1.0,
+            "max_prerequisite_attribution_error_rate": 0.0,
+        }
+    )
+    return ParityReport(passed=not failures, gating_failures=failures, metrics=metrics)
 
 
 def parallel_run_and_diff(corpus, run_v1, run_v2, *, to_record) -> ParityReport:

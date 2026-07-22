@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_prerequisite_verify_inputs_output.schema.json",
+  "title": "PlanReviewPrerequisiteVerifyInputsOutput",
+  "type": "object",
+  "properties": {
+    "plan": {"type": "string"},
+    "instructions": {"type": "array", "items": {"type": "string"}},
+    "input_too_large_ids": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["plan", "instructions", "input_too_large_ids"],
+  "additionalProperties": false
+}

@@ -371,6 +371,15 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
         c for c in all_criteria if _guard_scoped({"if": c.get("when")}, rc, prefixes, bindings)
     ]
 
+    resolved_with = _resolve_scoped(
+        dict(batch.get("with") or {}),
+        inputs=rc.inputs,
+        outputs=rc.outputs,
+        prefixes=prefixes,
+        bindings=bindings,
+        secrets=rc.secrets,
+    )
+
     req = BatchRunRequest(
         # the batch schema requires `prompt`, so it is always present on a valid document
         finder=cast(str, batch.get("prompt")),
@@ -382,6 +391,7 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
         repo_root=rc.repo_root,
         run_id=rc.run_id,
         step_id=sid,
+        with_inputs=resolved_with,
     )
     runner = rc.batch_runner if rc.batch_runner is not None else DefaultBatchRunner()
     _t_batch = time.monotonic()

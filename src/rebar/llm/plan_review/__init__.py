@@ -607,8 +607,23 @@ def _run_plan_review(
     # verify/coach steps run under the verifier cfg (non-frontier model unless overridden).
     from rebar.llm.workflow import gate_dispatch
 
+    prerequisite_blocks = [
+        {
+            "canonical_id": prerequisite_id,
+            "rendered_text": (
+                f"# {review_snapshot.ticket_states_by_id[prerequisite_id].get('title', '')}\n\n"
+                f"{review_snapshot.ticket_states_by_id[prerequisite_id].get('description', '')}"
+            ),
+        }
+        for prerequisite_id in review_snapshot.prerequisite_ids
+    ]
     verdict = gate_dispatch.produce_plan_review_verdict(
-        ctx, _verifier_cfg(cfg), runner=runner, advisory_cap=cap, repo_root=repo_root
+        ctx,
+        _verifier_cfg(cfg),
+        runner=runner,
+        advisory_cap=cap,
+        repo_root=repo_root,
+        prerequisite_blocks=prerequisite_blocks,
     )
 
     material = initial_generation.own_material

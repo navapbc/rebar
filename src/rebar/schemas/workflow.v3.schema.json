@@ -309,6 +309,10 @@
           "minItems": 1,
           "items": { "type": "string" },
           "description": "Optional model-escalation ladder (smallest-window first); the runner climbs it on a context-limit signal."
+        },
+        "with": {
+          "type": "object",
+          "description": "Optional step-level inputs resolved once and delivered to BatchRunRequest.with_inputs."
         }
       }
     }

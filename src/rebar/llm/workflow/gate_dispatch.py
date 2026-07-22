@@ -109,7 +109,14 @@ def _validate_gate_step_ids(doc: dict[str, Any], required: frozenset, *, gate_na
 
 
 def produce_plan_review_verdict(
-    ctx, cfg, *, runner=None, advisory_cap: int, repo_root=None, probe_criteria=None
+    ctx,
+    cfg,
+    *,
+    runner=None,
+    advisory_cap: int,
+    repo_root=None,
+    probe_criteria=None,
+    prerequisite_blocks=None,
 ) -> dict[str, Any]:
     """Produce a ``plan_review_verdict`` by running ``gates/plan-review.yaml`` in-memory.
 
@@ -128,6 +135,7 @@ def produce_plan_review_verdict(
         assemble_context_cache,
         collect_contract_violations,
     )
+    from rebar.llm.plan_review.prerequisites import focused_inputs
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -168,10 +176,20 @@ def produce_plan_review_verdict(
         # Resolve the caller's config ONCE for the whole run: gate_config publishes `cfg` so every
         # op (and the non-step ProductionBatchRunner) reads the SAME resolved config via
         # resolve_gate_config instead of re-deriving from env (epic veiny-trout-brink).
-        with assemble_context_cache(), collect_contract_violations(), gate_config(cfg):
+        with (
+            assemble_context_cache(),
+            collect_contract_violations(),
+            gate_config(cfg),
+            focused_inputs(list(prerequisite_blocks or [])),
+        ):
             res = _ex.run_workflow(
                 doc,
-                {"ticket_id": ctx.ticket_id, "probe_criteria": list(probe_criteria or [])},
+                {
+                    "ticket_id": ctx.ticket_id,
+                    "probe_criteria": list(probe_criteria or []),
+                    "subject_plan": ctx.plan_text,
+                    "prerequisites": list(prerequisite_blocks or []),
+                },
                 target_ticket=ctx.ticket_id,
                 repo_root=repo_root,
                 agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),

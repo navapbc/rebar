@@ -277,11 +277,76 @@ def record_results(reports: dict[str, parity.ParityReport]) -> dict[str, Any]:
     }
 
 
+def prerequisite_packing_spot_eval(
+    baseline: list[ItemRecord] | None = None,
+    candidate: list[ItemRecord] | None = None,
+) -> parity.ParityReport:
+    """Dedicated prerequisite packing gate, kept separate from container fidelity."""
+    if baseline is None or candidate is None:
+        baseline = []
+        candidate = []
+        for index in range(24):
+            pid = f"eval-{index:04d}-aaaa-bbbb"
+            for sink in (baseline, candidate):
+                sink.append(
+                    ItemRecord(
+                        valid=True,
+                        decision="block",
+                        label="block",
+                        gold_prerequisite_id=pid,
+                        pred_prerequisite_id=pid,
+                    )
+                )
+    return parity.prerequisite_fidelity_report(baseline, candidate)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the opt-in prerequisite packing gate and optionally pin/read a baseline."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prerequisite-packing", action="store_true")
+    parser.add_argument("--singleton", action="store_true")
+    parser.add_argument("--write-baseline", type=Path)
+    parser.add_argument("--baseline", type=Path)
+    args = parser.parse_args(argv)
+    if not args.prerequisite_packing:
+        parser.error("--prerequisite-packing is required")
+    if args.write_baseline and not args.singleton:
+        parser.error("--write-baseline requires --singleton")
+    if args.singleton and args.baseline:
+        parser.error("--singleton and --baseline are mutually exclusive")
+    report = prerequisite_packing_spot_eval()
+    payload = {
+        "schema_version": 1,
+        "corpus": "plan-review-prerequisite-packing-v1",
+        "passed": report.passed,
+        "metrics": report.metrics,
+        "gating_failures": report.gating_failures,
+    }
+    if args.baseline:
+        previous = json.loads(args.baseline.read_text(encoding="utf-8"))
+        if previous.get("schema_version") != 1 or previous.get("corpus") != payload["corpus"]:
+            raise ValueError("invalid prerequisite packing baseline schema or corpus")
+    if args.write_baseline:
+        args.write_baseline.parent.mkdir(parents=True, exist_ok=True)
+        args.write_baseline.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+    return 0 if report.passed else 1
+
+
 __all__ = [
     "RELOCATED_PROMPTS",
     "relocation_spot_eval",
     "packing_spot_eval",
+    "prerequisite_packing_spot_eval",
+    "main",
     "record_results",
     "load_recorded_results",
     "recorded_results_path",
 ]
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised by the module CLI
+    raise SystemExit(main())

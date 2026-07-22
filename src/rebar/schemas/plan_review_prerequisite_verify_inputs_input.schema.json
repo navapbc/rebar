@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_prerequisite_verify_inputs_input.schema.json",
+  "title": "PlanReviewPrerequisiteVerifyInputsInput",
+  "type": "object",
+  "properties": {
+    "subject_plan": {"type": "string"},
+    "findings": {"type": "array"},
+    "prerequisites": {"type": "array"}
+  },
+  "required": ["subject_plan", "findings", "prerequisites"],
+  "additionalProperties": false
+}

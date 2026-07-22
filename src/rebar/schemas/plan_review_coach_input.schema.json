@@ -16,7 +16,8 @@
     "routing": { "type": "object", "additionalProperties": true },
     "canonical_id": { "type": "string" },
     "ticket_type": { "type": "string" },
-    "ticket_id": { "type": "string" }
+    "ticket_id": { "type": "string" },
+    "prerequisite_coverage": { "type": "array" }
   },
   "required": [],
   "additionalProperties": true

@@ -10,6 +10,11 @@
     "det_blocking": { "type": "array", "description": "DET-floor blocking findings to merge (from the precheck)." },
     "det_advisory": { "type": "array", "description": "DET-floor advisory findings to merge (from the precheck)." }
     ,"review_phase": { "type": "string", "enum": ["planning", "execution"], "description": "Lifecycle phase selecting the fixed execution floor." }
+    ,"has_prerequisites": { "type": "boolean" }
+    ,"prerequisite_coverage": { "type": "array" }
+    ,"prerequisite_findings": { "type": "array" }
+    ,"prerequisite_verifications": { "type": "array" }
+    ,"prerequisite_input_too_large_ids": { "type": "array", "items": { "type": "string" } }
   },
   "required": ["findings", "review_phase"],
   "additionalProperties": true
