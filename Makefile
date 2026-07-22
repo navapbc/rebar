@@ -95,9 +95,12 @@ format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target)
 	ruff check --fix $(sources)
 	ruff format $(sources)
 
-lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml) + actionlint (all workflows). The gate CI runs.
+lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml) + actionlint (all workflows) + DCO identity consistency. The gate CI runs.
 	ruff check $(sources)
 	ruff format --check $(sources)
+	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
+	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
+	python scripts/check_dco_identity.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor stays scoped to release.yml (widening the security audit is separate work);
 	@# actionlint below validates ALL workflows. zizmor is a cross-platform pip tool (in [dev]).
