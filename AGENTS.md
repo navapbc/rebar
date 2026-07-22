@@ -151,8 +151,10 @@ unavailable or for non-symbol (text/comment/string) searches.
 `LLM-Review` vote (the rebar review-bot's LLM code review) AND the `Verified` vote (CI:
 build/test/lint/typecheck on GitHub Actions).** `main` flows through Gerrit; GitHub is a
 read-only mirror that rejects direct pushes and PR merges. **For an author-facing on-ramp — the
-commit checklist, what the `LLM-Review` reviewer scores (blocking vs advisory), and how to
-respond to each vote — read `docs/passing-code-review.md` (`rebar explain review` prints it).**
+commit checklist, what the `LLM-Review` reviewer scores (blocking vs advisory), how to
+respond to each vote, and how to preview the review locally with `rebar review-code` before you
+push (the code-review analog of `rebar review-plan`) — read `docs/passing-code-review.md`
+(`rebar explain review` prints it).**
 The full recipe — Gerrit access setup, feature branches for multi-story work, conflict
 handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rules:
 

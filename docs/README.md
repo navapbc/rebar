@@ -168,7 +168,8 @@ The LLM-agent operations and the gate / workflow machinery behind them.
 - **[review-policy.md](review-policy.md)** — *policy:* what the `LLM-Review` and
   `Verified` Gerrit gates mean and the two `+1` votes every change to `main` must earn.
 - **[passing-code-review.md](passing-code-review.md)** — *author on-ramp:* the commit
-  checklist and what the `LLM-Review` reviewer scores (`rebar explain review` prints it).
+  checklist, what the `LLM-Review` reviewer scores, and how to **preview the review locally**
+  with `rebar review-code` before you push (`rebar explain review` prints it).
 - **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)** — the
   registry-generated reference of every plan-review criterion (one section per
   criterion; `rebar explain <id>` prints one).

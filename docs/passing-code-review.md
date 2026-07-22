@@ -6,7 +6,9 @@
 (how the LLM reviewer decides), and [CONTRIBUTING.md](../CONTRIBUTING.md) §2 (the exact
 mechanics). Read those when you need depth. See also its sibling,
 [writing-a-passing-plan.md](writing-a-passing-plan.md), for the *plan*-review gate that runs
-before you claim a ticket. `rebar explain review` prints this file.
+before you claim a ticket. `rebar explain review` prints this file. Just as `rebar review-plan`
+lets you run the plan gate locally before you claim, `rebar review-code` runs **this** gate's
+reviewer locally before you push — see [Preview the review locally](#preview-the-review-locally-before-you-push).
 
 ## The loop
 
@@ -14,8 +16,11 @@ Every change to `main` needs **two independent `+1` votes and no unresolved comm
 it can submit. Only bots/admins cast the votes — you cannot self-approve.
 
 ```
-commit ──▶ git push origin HEAD:refs/for/main ──▶ LLM-Review +1  AND  Verified +1  ──▶ Submit
-   ▲                                                    │  (no unresolved comments)
+commit ──▶ [rebar review-code — optional local preview] ──▶ git push origin HEAD:refs/for/main
+   ▲                                                              │
+   │                                    ┌─────────────────────────┘
+   │                                    ▼
+   │             LLM-Review +1  AND  Verified +1  (no unresolved comments) ──▶ Submit
    └──── amend --no-edit + re-push ◀── findings / CI failure
 ```
 
@@ -66,6 +71,32 @@ config / wire formats backward-compatible or call the break out; update docs tha
 change; and never introduce a secret or an unauthenticated exposure on a security-sensitive
 path. Keep each `src/rebar` file **under 800 LOC** — the module-size gate is a `Verified`
 failure, not an advisory.
+
+## Preview the review locally before you push
+
+You don't have to wait for the bot. `rebar review-code` runs the **same** four-pass reviewer
+the bot casts `LLM-Review` with, over your diff, on your machine — the code-review analog of
+`rebar review-plan` for the plan gate. Catch and fix findings before you push, so the first
+patchset the bot sees is already clean.
+
+```bash
+rebar review-code --base origin/main --head HEAD -o text   # preview findings for your change
+rebar review-code --diff-file change.diff -o text          # or review a saved unified diff
+```
+
+Two setup notes, mirroring `review-plan`'s requirements:
+
+- **It needs the `[agents]` extra + a model API key** (`pip install 'nava-rebar[agents]'`,
+  `export ANTHROPIC_API_KEY=…`). Without them there's nothing to run the LLM passes with.
+- **The capability is off by default** — enable it for the run with
+  `REBAR_VERIFY_ENABLE_CODE_REVIEW=1` (or `verify.enable_code_review = true` in config).
+  Left off, `review-code` returns an inert empty result (zero findings, zero LLM calls) and
+  you'll see nothing — that's the disabled state, not a clean pass.
+
+The local run is a **preview, not a vote**: it never touches Gerrit and its findings are keyed
+to your session, so a local review never seeds the change's first bot review — the bot still
+reviews from scratch. Treat a local finding exactly as you would the bot's: fix `security` and
+secret/high-critical findings before you push (they block), and address the advisories.
 
 ## Responding to votes
 
