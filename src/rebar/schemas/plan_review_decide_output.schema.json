@@ -9,7 +9,8 @@
     "surfaced": { "type": "array", "description": "Surfaced advisory findings (top-N by priority) — coached by Pass-4." },
     "overflow": { "type": "array", "description": "Advisory findings beyond the cap (sidecar-only)." },
     "indeterminate": { "type": "array", "description": "Unresolved findings (budget-shed / no verification)." },
-    "dropped": { "type": "array", "description": "Pass-3 dropped findings (low validity / citation veto)." }
+    "dropped": { "type": "array", "description": "Pass-3 dropped findings (low validity / citation veto)." },
+    "outcome_counts": { "type": "object", "description": "Single-run {clean, recovered, empty_outcomes, unrecoverable} tally at the decide boundary (unrecoverable always 0)." }
   },
   "required": ["blocking", "surfaced", "overflow", "indeterminate", "dropped"],
   "additionalProperties": true

@@ -220,6 +220,106 @@ def test_verdict_steps_never_reference_the_escalation_steps():
     }
 
 
+# ── outcome_counts + contract-violation telemetry (ticket c2c5) ─────────────────────────────
+def test_decide_emits_outcome_counts_clean_on_a_conforming_verification():
+    findings = [{"id": "0", "finding": "x", "criteria": ["security"], "evidence": []}]
+    verifs = [{"index": 0, "severity_attributes": {}, "binary": {}}]
+    out = _run_op("code_review_decide", {"findings": findings, "verifications": verifs})
+    assert out["outcome_counts"] == {
+        "clean": 1,
+        "recovered": 0,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+
+
+def test_decide_records_contract_violation_and_emits_recovered_outcome_count():
+    from rebar.llm import review_kernel
+
+    findings = [{"id": "0", "finding": "x", "criteria": ["security"], "evidence": []}]
+    # a duplicate index is a structural contract violation (reshape.has_violations)
+    verifs = [
+        {"index": 0, "severity_attributes": {}, "binary": {}},
+        {"index": 0, "severity_attributes": {}, "binary": {}},
+    ]
+    with review_kernel.collect_contract_violations():
+        out = _run_op("code_review_decide", {"findings": findings, "verifications": verifs})
+        recorded = review_kernel.drain_contract_violations()
+    assert out["outcome_counts"] == {
+        "clean": 0,
+        "recovered": 1,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+    assert recorded == [{"duplicates": [0]}]
+
+
+def test_decide_records_no_violation_outside_a_collection_scope():
+    # unit-testing code_review_decide in isolation (no active sink) never raises/leaks.
+    findings = [{"id": "0", "finding": "x", "criteria": ["security"], "evidence": []}]
+    verifs = [
+        {"index": 0, "severity_attributes": {}, "binary": {}},
+        {"index": 0, "severity_attributes": {}, "binary": {}},
+    ]
+    out = _run_op("code_review_decide", {"findings": findings, "verifications": verifs})
+    assert out["outcome_counts"]["recovered"] == 1
+
+
+def test_coach_assembles_coverage_with_outcome_counts_and_drains_violations():
+    from rebar.llm import review_kernel
+
+    with review_kernel.collect_contract_violations():
+        review_kernel.record_contract_violation({"duplicates": [0]})
+        out = _run_op(
+            "code_review_coach",
+            {
+                "blocking": [],
+                "surfaced": [],
+                "notes": [],
+                "outcome_counts": {
+                    "clean": 0,
+                    "recovered": 1,
+                    "empty_outcomes": 0,
+                    "unrecoverable": 0,
+                },
+            },
+        )
+    assert out["coverage"]["outcome_counts"] == {
+        "clean": 0,
+        "recovered": 1,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+    assert out["coverage"]["verification_contract_violations"] == [{"duplicates": [0]}]
+
+
+def test_coach_coverage_omits_violations_key_on_a_clean_run():
+    out = _run_op(
+        "code_review_coach",
+        {
+            "blocking": [],
+            "surfaced": [],
+            "notes": [],
+            "outcome_counts": {
+                "clean": 1,
+                "recovered": 0,
+                "empty_outcomes": 0,
+                "unrecoverable": 0,
+            },
+        },
+    )
+    assert "verification_contract_violations" not in out["coverage"]
+    assert out["coverage"]["llm_ran"] is True
+
+
+def test_verdict_step_is_wired_to_the_decide_op_outcome_counts_output():
+    doc = yaml.safe_load(_GATE.read_text())
+    by_id = {s["id"]: s for s in doc["steps"]}
+    assert (
+        by_id["verdict"]["with"]["outcome_counts"] == "${{ steps.decide.outputs.outcome_counts }}"
+    )
+
+
 def test_overlay_union_already_run_is_wired_to_the_round_a_triggers_output():
     """AC: the Round-B `union` step reads `already_run` from an explicit `with:` input wired to
     the Round-A `triggers` step's output (the one-hop bound) — NOT reconstructed from internal

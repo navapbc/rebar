@@ -316,46 +316,15 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
 # an ERROR log + a `verification_contract_violations` entry on the verdict coverage, present ONLY
 # when non-empty (so a clean run's verdict stays byte-identical → attestation-safe). `decide` and
 # `coach` run as SEPARATE workflow steps, so the report is carried between them by a run-scoped
-# ContextVar (the same mechanism as the assemble memo above), activated once per gate run by
-# `produce_plan_review_verdict`.
-_contract_violations: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
-    "rebar_plan_review_contract_violations", default=None
-)
-
-
-@contextlib.contextmanager
-def collect_contract_violations() -> Iterator[None]:
-    """Activate a run-scoped sink for verification contract violations for the dynamic extent of
-    one plan-review gate run. Nesting reuses the active sink (idempotent); the sink is dropped on
-    exit so it never leaks across runs/tickets."""
-    if _contract_violations.get() is not None:
-        yield
-        return
-    token = _contract_violations.set([])
-    try:
-        yield
-    finally:
-        _contract_violations.reset(token)
-
-
-def record_contract_violation(summary: dict[str, Any]) -> None:
-    """Record one NON-EMPTY contract-violation summary if a sink is active; a no-op outside a
-    :func:`collect_contract_violations` scope (so unit-testing ``plan_review_decide`` in isolation
-    never raises and never leaks)."""
-    sink = _contract_violations.get()
-    if sink is not None and summary:
-        sink.append(dict(summary))
-
-
-def drain_contract_violations() -> list[dict[str, Any]]:
-    """Return + clear the violations recorded in the active sink (empty list when none recorded,
-    or when no sink is active)."""
-    sink = _contract_violations.get()
-    if not sink:
-        return []
-    drained = list(sink)
-    sink.clear()
-    return drained
+# ContextVar, activated once per gate run by `produce_plan_review_verdict`.
+#
+# The sink now lives in `review_kernel.telemetry` (ticket c2c5) — code-review shares the SAME
+# implementation instead of forking it. Re-exported here (not duplicated) so every existing
+# `orchestrator.collect_contract_violations` / `record_contract_violation` /
+# `drain_contract_violations` call site keeps working unmodified.
+collect_contract_violations = review_kernel.collect_contract_violations
+record_contract_violation = review_kernel.record_contract_violation
+drain_contract_violations = review_kernel.drain_contract_violations
 
 
 # ── finding id (content fingerprint — orchestrator is the SOLE owner) ─────────────

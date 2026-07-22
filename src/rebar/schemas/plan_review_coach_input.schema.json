@@ -10,6 +10,7 @@
     "overflow": { "type": "array" },
     "indeterminate": { "type": "array" },
     "dropped": { "type": "array" },
+    "outcome_counts": { "type": "object", "description": "The decide op's single-run {clean, recovered, empty_outcomes, unrecoverable} tally, threaded into verdict coverage." },
     "notes": { "type": "array", "description": "The Pass-4 coach prompt's raw notes: [{move_id, subject, finding_refs}]." },
     "det_coverage": { "type": "object", "additionalProperties": true },
     "routing": { "type": "object", "additionalProperties": true },

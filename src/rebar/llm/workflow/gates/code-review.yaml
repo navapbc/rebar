@@ -184,3 +184,4 @@ steps:
       dropped: ${{ steps.decide.outputs.dropped }}
       indeterminate: ${{ steps.decide.outputs.indeterminate }}
       notes: ${{ steps.coach.outputs.notes }}
+      outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
