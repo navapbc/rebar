@@ -372,7 +372,9 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
     # (decision=indeterminate, validity/impact/priority=0, severity=none, verification=None). This
     # reuses the existing decision path — the verdict stays schema-valid and NO new decision state
     # is introduced — rather than hand-stamping a partial finding shape.
-    decided = orchestrator.pass3_over_findings(pass1, {})
+    decided = orchestrator.pass3_over_findings(
+        pass1, {}, execution_review=precheck.get("review_phase", "planning") == "execution"
+    )
     parts = orchestrator.partition_findings(
         list(precheck.get("det_blocking") or []),
         list(precheck.get("det_advisory") or []),

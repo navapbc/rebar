@@ -9,10 +9,11 @@
     "verdict": { "type": ["object", "null"], "description": "The deterministic short-circuit plan_review_verdict (exempt PASS or DET BLOCK), else null." },
     "canonical_id": { "type": "string", "description": "The resolved canonical ticket id." },
     "ticket_type": { "type": "string", "description": "The reviewed ticket's type." },
+    "review_phase": { "type": "string", "enum": ["planning", "execution"], "description": "Compiled lifecycle phase used by Pass-3." },
     "det_blocking": { "type": "array", "description": "DET-floor blocking findings (P1/P5-cycle/P8)." },
     "det_advisory": { "type": "array", "description": "DET-floor advisory findings (P4/P6/P7 + P5 interference)." },
     "det_coverage": { "type": "object", "additionalProperties": true, "description": "Per-check DET coverage record." }
   },
-  "required": ["run_llm", "verdict", "canonical_id", "ticket_type", "det_blocking", "det_advisory", "det_coverage"],
+  "required": ["run_llm", "verdict", "canonical_id", "ticket_type", "review_phase", "det_blocking", "det_advisory", "det_coverage"],
   "additionalProperties": false
 }

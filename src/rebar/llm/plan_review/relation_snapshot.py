@@ -96,7 +96,7 @@ def _store_error(tracker: str | os.PathLike[str]) -> PlanRelationSnapshotError:
     return PlanRelationSnapshotError("store-read-failure", reference=str(tracker))
 
 
-def tracker_head_sha(tracker: str | os.PathLike[str]) -> str:
+def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool = False) -> str:
     """Return a clean tickets-tracker HEAD, or fail with one stable reason.
 
     Freshness is established before all three strict git reads.  Dirty worktree,
@@ -130,7 +130,15 @@ def tracker_head_sha(tracker: str | os.PathLike[str]) -> str:
             )
             return proc.stdout or ""
 
-        if run("status", "--porcelain"):
+        status_args = (
+            ("status", "--porcelain", "--untracked-files=no")
+            if ignore_untracked
+            else (
+                "status",
+                "--porcelain",
+            )
+        )
+        if run(*status_args):
             raise _store_error(tracker_text)
         if run("ls-files", "-u"):
             raise _store_error(tracker_text)
@@ -245,11 +253,17 @@ def _context_for(
     )
 
 
-def collect_plan_relation_snapshot(ticket_id: str, *, repo_root=None) -> PlanRelationSnapshot:
+def collect_plan_relation_snapshot(
+    ticket_id: str, *, repo_root=None, ignore_untracked: bool = False
+) -> PlanRelationSnapshot:
     """Collect canonical direct-child/prerequisite material in one store reduction."""
 
     tracker = Path(config.tracker_dir(repo_root))
-    revision = tracker_head_sha(tracker)
+    revision = (
+        tracker_head_sha(tracker, ignore_untracked=True)
+        if ignore_untracked
+        else tracker_head_sha(tracker)
+    )
     states, aliases = _load_states(tracker)
     subject_id = _resolve_reference(ticket_id, states, aliases)
     subject = states[subject_id]

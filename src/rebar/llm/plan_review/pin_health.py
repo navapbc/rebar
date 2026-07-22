@@ -32,10 +32,30 @@ class TargetPinDetail(TypedDict):
     pin_status: TargetPinStatus
 
 
-class DerivedPlanReviewHealth(TypedDict):
+class DerivedPlanMaterialPinHealth(TypedDict):
     pin_status: PinStatus
     enforced: bool
     targets: list[TargetPinDetail]
+
+
+class DerivedPlanReviewHealth(DerivedPlanMaterialPinHealth):
+    phase_status: Literal["compatible", "incompatible", "malformed"]
+
+
+def review_phase_status(current_phase: object, signed_phase: object, floor: object) -> str:
+    """Apply the fixed planning/execution compatibility table to parsed metadata."""
+    if current_phase not in ("planning", "execution") or signed_phase not in (
+        "planning",
+        "execution",
+    ):
+        return "malformed"
+    if signed_phase == "planning":
+        return "compatible"
+    if not isinstance(floor, (int, float)) or isinstance(floor, bool):
+        return "malformed"
+    if current_phase == "planning" or float(floor) < 0.80:
+        return "incompatible"
+    return "compatible"
 
 
 def read_enforcement(repo_root=None) -> bool:
@@ -89,7 +109,7 @@ def derive_health(
     repo_root,
     enforced: bool,
     fingerprint: Callable[..., str | None],
-) -> DerivedPlanReviewHealth:
+) -> DerivedPlanMaterialPinHealth:
     """Compare typed pins with current narrow material and aggregate fixed-severity health."""
     if not pin_records:
         return {"pin_status": "legacy-unpinned", "enforced": enforced, "targets": []}

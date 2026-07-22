@@ -93,10 +93,20 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
     monkeypatch.setattr(plan_review, "_group_blocking_fix_units", lambda *a, **k: None)
     captured = {}
 
-    def capture(verdict, *, material=None, reviewed_related_material=None, repo_root=None):
+    def capture(
+        verdict,
+        *,
+        material=None,
+        reviewed_related_material=None,
+        review_phase=None,
+        priority_floor=None,
+        repo_root=None,
+    ):
         captured.update(
             material=material,
             reviewed_related_material=reviewed_related_material,
+            review_phase=review_phase,
+            priority_floor=priority_floor,
             repo_root=repo_root,
         )
         return True
@@ -113,7 +123,9 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
     )
     assert result["sidecar_emitted"] is True
     assert captured == {
-        "material": "m" * 16,
+        "material": plan_review.generation.from_snapshot(snapshot).own_material,
         "reviewed_related_material": snapshot.related_material,
+        "review_phase": "planning",
+        "priority_floor": None,
         "repo_root": "/repo",
     }

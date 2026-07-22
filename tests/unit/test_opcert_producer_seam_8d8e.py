@@ -206,14 +206,11 @@ def test_refresh_attestation_re_signs_as_opcert(
 def test_resign_plan_review_re_signs_as_opcert(
     store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from rebar.llm.plan_review import resign, sidecar
+    from rebar.llm.plan_review import generation, resign, sidecar
 
-    monkeypatch.setattr(
-        "rebar.llm.plan_review.attest.current_material_fingerprint",
-        lambda ticket_id, repo_root=None: "fp-static",
-    )
     tid = rebar.create_ticket("task", "resign", repo_root=str(store))
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
+    reviewed_material = generation.collect(tid, repo_root=str(store)).own_material
     sidecar.emit(
         {
             "verdict": "PASS",
@@ -222,7 +219,7 @@ def test_resign_plan_review_re_signs_as_opcert(
             "runner": "r",
             "coverage": {},
         },
-        material="fp-static",
+        material=reviewed_material,
         repo_root=str(store),
     )
     out = resign.resign_plan_review(tid, repo_root=str(store))

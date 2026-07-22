@@ -45,7 +45,8 @@ def is_active_event(name: str) -> bool:
 #   v6: keyring is now POSITION-based — records are {public_key, added_at, revoked_at}
 #       and the `keyring_epoch` cursor is gone (epic gnu-whale-ichor, git-commit-ancestry
 #       validity); pre-v6 caches hold stale epoch-era records
-_REDUCER_CACHE_VERSION = 6
+#   v7: replay projects plan_review_phase and bootstraps pre-feature snapshots.
+_REDUCER_CACHE_VERSION = 7
 
 
 def _load_json(path: str) -> dict | None:

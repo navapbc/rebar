@@ -354,6 +354,7 @@ def append_event(
     *,
     repo_root=None,
     author_fallback: str = "Unknown",
+    under_lock_check=None,
 ) -> None:
     """Compose an event and append it through the single locked write path.
 
@@ -404,8 +405,15 @@ def append_event(
         sink.append((ticket_id, event))
         return
     try:
-        _store_append.write_and_push(str(tracker), ticket_id, event)
+        if under_lock_check is None:
+            _store_append.write_and_push(str(tracker), ticket_id, event)
+        else:
+            _store_append.write_and_push(
+                str(tracker), ticket_id, event, under_lock_check=under_lock_check
+            )
     except (StoreError, RebaseGuard, LockTimeout, StoreIncompatibleError) as exc:
+        if under_lock_check is not None and isinstance(exc, LockTimeout):
+            raise
         # StoreIncompatibleError (story 21dd): the write-lock gate fails closed on a
         # store this rebar cannot interpret — surface it as a non-zero CommandError.
         raise CommandError(str(exc), returncode=getattr(exc, "returncode", 1)) from None

@@ -16,10 +16,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 if TYPE_CHECKING:
     from .relation_snapshot import PlanMaterialPin
@@ -34,10 +35,78 @@ _DISABLED_PREFIX = "disabled_builtins:"  # built-in ids the project overlay disa
 _ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
 _PIN_PREFIX = "plan-material-pin:"
 _PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+_REVIEW_PHASE_PREFIX = "review-phase:"
+_PRIORITY_FLOOR_PREFIX = "priority-floor:"
 
 
 class ManifestFormatError(ValueError):
     """A signed plan-review manifest contains a malformed material-pin line."""
+
+
+class ReviewPhaseMetadata(TypedDict):
+    phase: Literal["planning", "execution"]
+    priority_floor: float | None
+
+
+def validate_review_phase_metadata(
+    phase: object, floor: object, *, legacy_absent: bool
+) -> ReviewPhaseMetadata:
+    """Validate the shared manifest/sidecar phase grammar and policy."""
+    if legacy_absent:
+        if phase is not None or floor is not None:
+            raise ManifestFormatError("legacy phase metadata must be wholly absent")
+        return {"phase": "planning", "priority_floor": None}
+    if phase not in ("planning", "execution"):
+        raise ManifestFormatError(f"unknown review phase: {phase!r}")
+    if floor is None:
+        if phase == "execution":
+            raise ManifestFormatError("execution review is missing priority floor")
+        return {"phase": "planning", "priority_floor": None}
+    if phase != "execution" or isinstance(floor, bool) or not isinstance(floor, (int, float)):
+        raise ManifestFormatError("priority floor is invalid for the review phase")
+    parsed_floor = float(floor)
+    if not math.isfinite(parsed_floor) or not 0.0 <= parsed_floor <= 1.0:
+        raise ManifestFormatError(f"priority floor outside [0.0, 1.0]: {floor!r}")
+    return {"phase": "execution", "priority_floor": parsed_floor}
+
+
+def _manifest_review_phase_metadata(manifest: list[str] | None) -> ReviewPhaseMetadata:
+    phase_tokens: list[str] = []
+    floor_tokens: list[str] = []
+    for raw in manifest or []:
+        text = str(raw)
+        if text.startswith("review-phase") or text.strip().startswith("review-phase"):
+            parts = text.split(" ")
+            if len(parts) != 2 or parts[0] != _REVIEW_PHASE_PREFIX or not parts[1]:
+                raise ManifestFormatError(f"malformed review phase: {text!r}")
+            phase_tokens.append(parts[1])
+        elif text.startswith("priority-floor") or text.strip().startswith("priority-floor"):
+            parts = text.split(" ")
+            if len(parts) != 2 or parts[0] != _PRIORITY_FLOOR_PREFIX or not parts[1]:
+                raise ManifestFormatError(f"malformed priority floor: {text!r}")
+            floor_tokens.append(parts[1])
+    if len(phase_tokens) > 1 or len(floor_tokens) > 1:
+        raise ManifestFormatError("duplicate review phase metadata")
+    absent = not phase_tokens and not floor_tokens
+    raw_floor: object = None
+    if floor_tokens:
+        try:
+            raw_floor = float(floor_tokens[0])
+        except ValueError:
+            raise ManifestFormatError(f"invalid priority floor: {floor_tokens[0]!r}") from None
+    return validate_review_phase_metadata(
+        phase_tokens[0] if phase_tokens else None,
+        raw_floor,
+        legacy_absent=absent,
+    )
+
+
+def manifest_review_phase(manifest: list[str] | None) -> Literal["planning", "execution"]:
+    return _manifest_review_phase_metadata(manifest)["phase"]
+
+
+def manifest_priority_floor(manifest: list[str] | None) -> float | None:
+    return _manifest_review_phase_metadata(manifest)["priority_floor"]
 
 
 def registry_version(repo_root=None) -> str:
@@ -188,6 +257,8 @@ def build_manifest(
     refreshed_from: str | None = None,
     verified_at_sha: str | None = None,
     pins: Sequence[PlanMaterialPin] = (),
+    review_phase: object = "planning",
+    priority_floor: object = None,
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
@@ -199,6 +270,9 @@ def build_manifest(
     from rebar import signing as _signing
 
     counts = (verdict.get("coverage", {}) or {}).get("counts", {}) or {}
+    phase_metadata = validate_review_phase_metadata(
+        review_phase, priority_floor, legacy_absent=False
+    )
     lines = [
         f"{_MANIFEST_PREFIX}: {verdict.get('verdict', 'PASS')}",
         f"ticket: {verdict.get('ticket_id', '')}",
@@ -207,10 +281,11 @@ def build_manifest(
         f"runner: {verdict.get('runner') or 'n/a'}",
         f"blocking: {counts.get('blocking', 0)}",
         f"advisory: {counts.get('advisory_surfaced', 0)}",
-        # Which rebar gate code produced this attestation (audit/provenance, epic
-        # jira-reb-596). NEVER read by compute_validity.
-        _signing.rebar_version_step(_signing.gate_code_version()),
+        f"{_REVIEW_PHASE_PREFIX} {phase_metadata['phase']}",
     ]
+    if phase_metadata["priority_floor"] is not None:
+        lines.append(f"{_PRIORITY_FLOOR_PREFIX} {phase_metadata['priority_floor']:.2f}")
+    lines.append(_signing.rebar_version_step(_signing.gate_code_version()))
     if regver:
         lines.append(f"{_REGVER_PREFIX} {regver}")
     # Record the built-in criteria the project overlay DISABLED for this review (sorted,

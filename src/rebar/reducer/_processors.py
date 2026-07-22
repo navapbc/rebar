@@ -24,6 +24,18 @@ from ._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
 
 logger = logging.getLogger(__name__)
 
+_KNOWN_TICKET_STATUSES = frozenset(
+    {"idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"}
+)
+
+
+def _fold_plan_review_phase(state: dict, target_status: object) -> None:
+    """Project only winning planning/execution lifecycle edges."""
+    if target_status == "in_progress":
+        state["plan_review_phase"] = "execution"
+    elif target_status == "open":
+        state["plan_review_phase"] = "planning"
+
 
 def process_create(
     state: dict,
@@ -260,6 +272,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
             # the losing STATUS author's env, not the ticket creator's env.
             loser_env_id = state.get("last_status_env_id") or ""
             state["status"] = data.get("status", state["status"])
+            _fold_plan_review_phase(state, state["status"])
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
             _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
             _fold_close_class(state, data)  # bug-close class on the *->closed winning edge
@@ -287,6 +300,7 @@ def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
         )
     else:
         state["status"] = data.get("status", state["status"])
+        _fold_plan_review_phase(state, state["status"])
         _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
         _fold_close_class(state, data)  # bug-close class on the *->closed edge
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
@@ -664,6 +678,20 @@ def process_snapshot(state: dict, data: dict) -> None:
     compiled_state = data.get("compiled_state", {})
     for key, value in compiled_state.items():
         state[key] = value
+
+    if "plan_review_phase" not in compiled_state:
+        status = state.get("status")
+        if status not in _KNOWN_TICKET_STATUSES:
+            raise ValueError(f"unknown ticket status in snapshot: {status!r}")
+        phase = "planning" if status in ("open", "idea") else "execution"
+        state["plan_review_phase"] = phase
+        record = {
+            "event": "plan_review_phase_bootstrap",
+            "ticket_id": state.get("ticket_id"),
+            "compiled_status": status,
+            "phase": phase,
+        }
+        logger.info("plan review phase bootstrapped: %s", record, extra=record)
 
     # claimed_session (epic crust-fetch-stump, story 199b) needs NO active snapshot guard:
     # a POST-feature snapshot carries the key and it is restored verbatim above, and a

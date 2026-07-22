@@ -607,6 +607,12 @@ def drift_refresh(
     cand = attest.drift_refresh_candidate(ctx.ticket_id, repo_root=repo_root)
     if cand is None:
         return None
+    from . import generation
+
+    try:
+        initial_generation = generation.collect(ctx.ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 - unstable generation falls back to a full review
+        return None
     current = attest._rehash(cand["deps"].keys(), repo_root=repo_root)
     drifted = {p for p, h in cand["deps"].items() if current.get(p) != h}
 
@@ -659,6 +665,7 @@ def drift_refresh(
         probe="PASS",
         repo_root=repo_root,
         relation_snapshot_value=relation_snapshot,
+        initial_generation=initial_generation,
     )
     return {
         "verdict": "PASS",
@@ -691,7 +698,10 @@ def drift_refresh(
 
 
 def pass3_over_findings(
-    findings: list[dict[str, Any]], verifs: dict[int, dict[str, Any]]
+    findings: list[dict[str, Any]],
+    verifs: dict[int, dict[str, Any]],
+    *,
+    execution_review: bool = False,
 ) -> list[dict[str, Any]]:
     """Deterministic Pass-3 over the verifiable findings for the PLAN-REVIEW gate: this
     is the thin consumer wrapper that resolves plan-review's per-criterion thresholds +
@@ -707,7 +717,12 @@ def pass3_over_findings(
     # "blocking"`. The descriptor map (`by_id()`) carries block_threshold + default_posture, so
     # the resolution is byte-identical to the pre-unification private resolver.
     def _threshold_for(criteria: Any) -> tuple[float, bool]:
-        return _criteria.threshold_for(criteria, crit_by_id, gate="plan_review")
+        block_threshold, blocking_enabled = _criteria.threshold_for(
+            criteria, crit_by_id, gate="plan_review"
+        )
+        if execution_review and blocking_enabled:
+            block_threshold = max(block_threshold, 0.80)
+        return block_threshold, blocking_enabled
 
     # Plan-review dispatches its own impact model (story fishable-apivorous-redhead):
     # severity-first MAX + hard override + detection amplifier over the 7 plan-severity axes,

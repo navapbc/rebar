@@ -500,7 +500,7 @@ def _run_plan_review(
     # Snapshot all plan-material relations before any path can reach an LLM
     # preflight/probe.  The same value is threaded into signing so one review does
     # exactly one store-wide reduction.
-    from . import relation_snapshot
+    from . import generation, relation_snapshot
 
     try:
         review_snapshot = relation_snapshot.collect_plan_relation_snapshot(
@@ -555,7 +555,11 @@ def _run_plan_review(
             "remediation": error_remediation,
         }
 
+    initial_generation = generation.from_snapshot(review_snapshot)
+
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
+    review_phase = initial_generation.phase
+    priority_floor = initial_generation.priority_floor
     # Idempotence short-circuit (feature b3e5): when the ticket is UNCHANGED and already
     # carries a still-VALID plan-review attestation — the SAME validity the claim gate
     # consumes (certified + material/registry/code-drift/reopen all current) — reuse it
@@ -607,7 +611,7 @@ def _run_plan_review(
         ctx, _verifier_cfg(cfg), runner=runner, advisory_cap=cap, repo_root=repo_root
     )
 
-    material = orchestrator.material_fingerprint(ctx)
+    material = initial_generation.own_material
     verdict["material_fingerprint"] = material
 
     # Record the remediation-mode decision on the verdict coverage (observability + the seam the
@@ -667,18 +671,6 @@ def _run_plan_review(
     # sidecar emit so the group stamps land in the persisted payload.
     _group_blocking_fix_units(verdict)
 
-    # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.
-    verdict["sidecar_emitted"] = (
-        sidecar.emit(
-            verdict,
-            material=material,
-            reviewed_related_material=review_snapshot.related_material,
-            repo_root=repo_root,
-        )
-        if emit_sidecar
-        else False
-    )
-
     # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate). The
     # attestation = "process followed, no blocking red flags + coverage", NOT
     # "perfect"; advisory findings are coaching, not blocks.
@@ -695,8 +687,11 @@ def _run_plan_review(
             sig = attest.sign_plan_review(
                 verdict,
                 material=material,
+                review_phase=review_phase,
+                priority_floor=priority_floor,
                 repo_root=repo_root,
                 relation_snapshot=review_snapshot,
+                initial_generation=initial_generation,
             )
             verdict["signature"] = {
                 "signed": True,
@@ -707,12 +702,31 @@ def _run_plan_review(
             # Don't crash the review on a signing failure, but record it in-band AND on
             # the logger (a missing/broken signing key is operator-actionable).
             logger.warning("attestation signing failed; verdict unsigned", exc_info=True)
-            verdict["signature"] = {"signed": False, "error": str(exc)}
+            signature_error = {"signed": False, "error": str(exc)}
+            if isinstance(exc, generation.PlanReviewGenerationError):
+                signature_error.update(event=exc.event, retryable=exc.retryable)
+            verdict["signature"] = signature_error
     else:
         verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})
 
+    # Persist the recovery sidecar only after the atomic sign attempt. Writing it earlier
+    # advances the ticket-store revision and invalidates this review's immutable generation.
+    # It remains best-effort and is emitted after a failed sign so cheap re-sign can recover.
+    verdict["sidecar_emitted"] = (
+        sidecar.emit(
+            verdict,
+            material=material,
+            reviewed_related_material=review_snapshot.related_material,
+            review_phase=review_phase,
+            priority_floor=priority_floor,
+            repo_root=repo_root,
+        )
+        if emit_sidecar
+        else False
+    )
+
     # Store-wide cross-ticket overlap (epic only-crave-art, story 0f70) — ADVISORY ONLY.
-    # Runs AFTER sidecar.emit + signing, so the sidecar, coverage counts, and attestation are
+    # Runs AFTER signing + sidecar.emit, so the sidecar, coverage counts, and attestation are
     # byte-identical whether overlap is on or off (the overlap results ride in a SEPARATE
     # `overlap[]` key that is never a blocking/advisory finding and never affects the verdict
     # or the claim gate). Gated OFF by default (verify.overlap_enabled); gated to real runs

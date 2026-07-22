@@ -368,7 +368,13 @@ def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_ms
     return len(paths)
 
 
-def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
+def stage_and_commit(
+    tracker: str | os.PathLike,
+    ticket_id: str,
+    event: dict[str, Any],
+    *,
+    under_lock_check: Callable[[], None] | None = None,
+) -> int:
     """Validate, canonical-stage, lock, atomic-rename, ``git add``+``commit``.
 
     Returns 0 on success; raises :class:`StoreError` (1), :class:`RebaseGuard` (75),
@@ -382,6 +388,8 @@ def stage_and_commit(tracker: str | os.PathLike, ticket_id: str, event: dict[str
     try:
         with _lock.write_lock(tracker, dual_window=True):
             _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
+            if under_lock_check is not None:
+                under_lock_check()
             try:
                 os.replace(staging, final_path)  # atomic rename
             except OSError as exc:
@@ -538,9 +546,15 @@ def batch_stage_and_commit(
     return len(prepared)
 
 
-def write_and_push(tracker: str | os.PathLike, ticket_id: str, event: dict[str, Any]) -> int:
+def write_and_push(
+    tracker: str | os.PathLike,
+    ticket_id: str,
+    event: dict[str, Any],
+    *,
+    under_lock_check: Callable[[], None] | None = None,
+) -> int:
     """Locked canonical commit, then the best-effort push (mirrors write_commit_event)."""
-    rc = stage_and_commit(tracker, ticket_id, event)
+    rc = stage_and_commit(tracker, ticket_id, event, under_lock_check=under_lock_check)
     from rebar._store import push
 
     canonical = _lock.canonical_tracker(tracker)
