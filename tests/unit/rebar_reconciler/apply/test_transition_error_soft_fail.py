@@ -132,11 +132,8 @@ def test_transition_runtime_error_soft_fails_batch_continues(
         return {"key": issue_key, "ok": True}
 
     fake_client.update_issue.side_effect = _update_issue_side_effect
-    fake_acli_mod = MagicMock()
-    fake_acli_mod.AcliClient.return_value = fake_client
-    fake_acli_mod.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-
-    with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
+    # S4: _load_acli returns the transport directly.
+    with patch.object(applier_mod, "_load_acli", return_value=fake_client):
         try:
             manifest_path = applier_mod.apply(
                 [good1, bad, good2],
@@ -182,11 +179,8 @@ def test_transition_runtime_error_alone_does_not_raise(
     fake_client.update_issue.side_effect = RuntimeError(
         "transition_issue_by_name: no transition reaches 'IDEA' on DIG-2. Available: [none]"
     )
-    fake_acli_mod = MagicMock()
-    fake_acli_mod.AcliClient.return_value = fake_client
-    fake_acli_mod.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-
-    with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
+    # S4: _load_acli returns the transport directly.
+    with patch.object(applier_mod, "_load_acli", return_value=fake_client):
         try:
             manifest_path = applier_mod.apply(
                 [bad], f"test-pass-solo-{int(time.time())}", repo_root=tmp_path

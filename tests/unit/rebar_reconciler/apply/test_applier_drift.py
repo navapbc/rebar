@@ -59,18 +59,21 @@ def applier():
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_acli_module() -> tuple[types.ModuleType, MagicMock]:
-    """Return (mock acli module, mock client instance) with tracked method calls."""
+def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
+    """Return (transport, transport) — a transport-shaped fake with tracked calls.
+
+    S4: ``_load_acli`` returns the backend transport DIRECTLY, so the seam's
+    ``return_value`` is the transport itself; both tuple slots are the same object so
+    the ``mock_acli_mod, mock_client = _make_mock_acli_module()`` call sites keep
+    working unchanged.
+    """
     mock_client = MagicMock()
     mock_client.create_issue = MagicMock(return_value={"key": "DSO-1"})
     mock_client.update_issue = MagicMock(return_value={"key": "DSO-2"})
     mock_client.transition_issue = MagicMock(return_value=None)
     mock_client.search_issues = MagicMock(return_value=[])
 
-    mock_acli_mod = types.ModuleType("acli_integration")
-    mock_acli_mod.AcliClient = MagicMock(return_value=mock_client)
-
-    return mock_acli_mod, mock_client
+    return mock_client, mock_client
 
 
 def _make_mock_concurrency_module(head_sequence: list[str]) -> types.ModuleType:

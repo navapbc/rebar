@@ -154,7 +154,7 @@ def test_manifest_contains_dedup_event_on_hit(applier, tmp_path):
 
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
-    fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
+    fake_acli = mock_client  # S4: _load_acli returns the transport directly
     fake_concurrency = _make_mock_concurrency()
     with (
         patch.object(applier, "_load_acli", return_value=fake_acli),
@@ -180,7 +180,7 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
     mock_client = _make_mock_client(search_return=[])
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
-    fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
+    fake_acli = mock_client  # S4: _load_acli returns the transport directly
     fake_concurrency = _make_mock_concurrency()
 
     with (
@@ -203,7 +203,7 @@ def test_manifest_events_populated_for_each_hit(applier, tmp_path):
     mock_client = _make_mock_client(search_return=[existing_issue])
     # Stub accepts kwargs because applier.apply() constructs the client with
     # env-derived (jira_url, user, api_token) credentials.
-    fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
+    fake_acli = mock_client  # S4: _load_acli returns the transport directly
     fake_concurrency = _make_mock_concurrency()
 
     mutations = [

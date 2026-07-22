@@ -18,9 +18,10 @@ that wraps the ``batch_dispatch`` Jira-call primitives, one handler per
 Each handler takes the per-pass :class:`BatchApplyContext` plus a single mutation
 dict and returns a :class:`HandlerResult` the sequencer appends to the manifest.
 
-Transport is *injected*: the sequencer resolves the AcliClient + acli module
-through ``applier._load_acli`` (the seam the tests patch) and hands them to the
-handlers on the context; the handlers never resolve transport themselves. This
+Transport is *injected*: the sequencer resolves the AcliClient transport through
+``applier._load_acli`` (the seam the tests patch, now returning the configured
+backend's transport directly — S4) and hands it to the handlers on the context;
+the handlers never resolve transport themselves. This
 module imports only *downward* (batch_dispatch / pass_io); it never imports
 ``applier``, so the sequencer can import the handlers back without a cycle.
 """
@@ -35,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler.acli_subprocess import AssigneeNotFoundError
 from rebar_reconciler.batch_dispatch import create_one, delete_one, update_one
 from rebar_reconciler.pass_io import (
     _load_alert_store,
@@ -60,13 +62,13 @@ class BatchApplyContext:
     """Mutable per-pass context threaded through the per-action handlers.
 
     The sequencer (``applier._apply_batch``) owns one instance per batch. Handlers
-    read the resolved transport (``client`` / ``acli``) and pass metadata, and
-    mutate the running ``rest_calls`` budget plus the ``deferred_creates`` /
-    ``events_list`` accumulators that ``create_one`` appends to.
+    read the resolved transport (``client``) and pass metadata, and mutate the
+    running ``rest_calls`` budget plus the ``deferred_creates`` / ``events_list``
+    accumulators that ``create_one`` appends to. The assignee soft-fail path catches
+    ``AssigneeNotFoundError`` via a direct import (S4), not off the transport.
     """
 
     client: Any
-    acli: Any
     repo_root: Path
     pass_id: str
     binding_store: Any = None
@@ -178,7 +180,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         outcome["result"] = None
         outcome["error"] = f"stale-binding-404: {exc!s}"
         return HandlerResult(outcome, soft_failed=True)
-    except ctx.acli.AssigneeNotFoundError as exc:
+    except AssigneeNotFoundError as exc:
         alert_store = _load_alert_store()
         alert_store.append(
             {

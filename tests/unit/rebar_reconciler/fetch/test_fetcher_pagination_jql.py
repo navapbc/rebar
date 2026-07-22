@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -110,9 +109,8 @@ def _make_paginating_acli():
             super().__init__()
             holder["client"] = self
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _Client
-    return mock_acli, holder
+    # S4: _load_acli returns the transport instance directly.
+    return _Client(), holder
 
 
 # ---------------------------------------------------------------------------

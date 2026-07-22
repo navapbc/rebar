@@ -150,8 +150,8 @@ def _make_fake_acli_mod():
     `rebar_reconciler.adf` ModuleNotFoundError under test load)."""
     import types
 
-    fake = types.ModuleType("acli_integration_stub")
-    fake.AcliClient = lambda **_: types.SimpleNamespace(
+    # S4: _load_acli returns the transport (client) directly.
+    return types.SimpleNamespace(
         update_issue=lambda *a, **kw: {},
         add_label=lambda *a, **kw: None,
         remove_label=lambda *a, **kw: None,
@@ -159,7 +159,6 @@ def _make_fake_acli_mod():
         search_issues=lambda *a, **kw: [],
         create_issue=lambda *a, **kw: {"key": "DIG-MOCK"},
     )
-    return fake
 
 
 def test_apply_files_pending_bug_tickets_after_apply_batch_returns(

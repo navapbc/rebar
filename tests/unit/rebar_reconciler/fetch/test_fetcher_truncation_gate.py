@@ -122,9 +122,8 @@ def test_fetch_at_1200_issue_ceiling_raises_silent_truncation_error(fetcher, tmp
     client = _PaginatingStubClient(total=1200, page_size=100)
 
     def _fake_load_acli():
-        mod = type(sys)("fake_acli")
-        mod.AcliClient = lambda **kwargs: client  # type: ignore[attr-defined]
-        return mod
+        # S4: _load_acli returns the transport instance directly.
+        return client
 
     with patch.object(fetcher, "_load_acli", _fake_load_acli):
         with pytest.raises(Exception) as exc_info:
@@ -149,9 +148,8 @@ def test_fetch_same_token_twice_raises_silent_truncation_error(fetcher, tmp_path
     client = _SameTokenTwiceClient(page_size=100)
 
     def _fake_load_acli():
-        mod = type(sys)("fake_acli")
-        mod.AcliClient = lambda **kwargs: client  # type: ignore[attr-defined]
-        return mod
+        # S4: _load_acli returns the transport instance directly.
+        return client
 
     with patch.object(fetcher, "_load_acli", _fake_load_acli):
         with pytest.raises(Exception) as exc_info:
@@ -176,9 +174,8 @@ def test_fetch_1150_issues_under_ceiling_succeeds_below_ceiling(fetcher, tmp_pat
     client = _PaginatingStubClient(total=1150, page_size=100)
 
     def _fake_load_acli():
-        mod = type(sys)("fake_acli")
-        mod.AcliClient = lambda **kwargs: client  # type: ignore[attr-defined]
-        return mod
+        # S4: _load_acli returns the transport instance directly.
+        return client
 
     with patch.object(fetcher, "_load_acli", _fake_load_acli):
         # Should NOT raise — 1150 is under_ceiling.

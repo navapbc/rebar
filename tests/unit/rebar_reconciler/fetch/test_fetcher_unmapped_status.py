@@ -94,9 +94,8 @@ def _make_acli_mock():
         def __init__(self, *_args, **_kwargs):
             super().__init__()
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _Client
-    return mock_acli
+    # S4: _load_acli returns the transport instance directly.
+    return _Client()
 
 
 def test_unmapped_jira_status_emits_alert(tmp_path, fetcher):
@@ -155,8 +154,8 @@ def test_all_mapped_statuses_emit_no_alert(tmp_path, fetcher):
         def __init__(self, *_args, **_kwargs):
             super().__init__()
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _Client
+    # S4: _load_acli returns the transport instance directly.
+    mock_acli = _Client()
 
     captured: list[dict] = []
     stub_alert_store = types.SimpleNamespace(

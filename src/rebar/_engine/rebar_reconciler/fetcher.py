@@ -111,10 +111,16 @@ class SilentTruncationError(Exception):
 
 
 def _load_acli():
-    """Return the in-package acli transport module (rebar_reconciler.acli)."""
-    from rebar_reconciler import acli
+    """Return the configured backend's transport (a ``TicketTransport``, i.e. an
+    ``AcliClient``) directly — routed through the Backend port (S4).
 
-    return acli
+    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
+    keep standalone by-path loading working.
+    """
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    return select_backend(load_config()).transport
 
 
 # Canonical dotted key matching the codebase convention used by __main__'s
@@ -362,13 +368,17 @@ def _build_snapshot(
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
+    # S4: _load_acli now returns the configured backend's transport directly (a
+    # TicketTransport, i.e. an AcliClient carrying its resolved connection settings).
+    client = _load_acli()
+
+    # Resolve the project key for JQL scoping via the stable acli_subprocess floor
+    # WITH NO default (bug 626d): an absent/invalid project must raise in jql_active()
+    # to fail the pass closed rather than searching all projects — so we deliberately
+    # do NOT read client.jira_project (which now defaults to "DIG").
     from rebar_reconciler import acli_subprocess
 
-    acli_mod = _load_acli()
-    # Resolve settings via the stable acli_subprocess floor (NOT acli_mod, which
-    # tests swap with a fake AcliClient-only module that lacks the resolver).
     _s = acli_subprocess.resolve_jira_settings()
-    client = acli_mod.AcliClient(jira_url=_s.url, user=_s.user, api_token=_s.api_token)
 
     # Lazy load to avoid a circular at module-load time (alert_store is leaf).
     alert_store = _load_alert_store()

@@ -77,9 +77,8 @@ def acli_mod() -> Iterator[ModuleType]:
 
 
 def _make_fake_acli(client: MagicMock) -> MagicMock:
-    fake = MagicMock()
-    fake.AcliClient.return_value = client
-    return fake
+    # S4: _load_acli returns the transport directly.
+    return client
 
 
 def _update(key: str, local_id: str = "loc") -> dict:
