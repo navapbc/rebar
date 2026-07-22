@@ -77,9 +77,15 @@ def _ctx() -> PlanContext:
     )
 
 
-def test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate() -> None:
+def test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate(monkeypatch) -> None:
     from rebar.llm.workflow import gate_dispatch
 
+    emitted: list[tuple[str, str, str, str | None]] = []
+
+    def _record_gate_error(ticket_id, gate, *, cause, repo_root=None):
+        emitted.append((ticket_id, gate, cause, repo_root))
+
+    monkeypatch.setattr(gate_dispatch, "emit_gate_error", _record_gate_error)
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
     verdict = gate_dispatch.produce_plan_review_verdict(
         _ctx(), cfg, runner=_OutageRunner(), advisory_cap=10, repo_root=None
@@ -90,6 +96,7 @@ def test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate() -> Non
     # An INDETERMINATE verdict is NEVER a PASS, so review_plan's PASS-only signing gate
     # never signs it (the fuel-posse-ball guard) — assert the verdict shape that drives that.
     assert verdict["verdict"] != "PASS"
+    assert emitted == [("T-1", "plan_review", "no agents extra / key", None)]
 
 
 # ── plan-review coach failure is NON-fatal ──────────────────────────────────────────
@@ -254,6 +261,12 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
 def test_completion_workflow_outage_raises_so_close_fails_closed(monkeypatch) -> None:
     from rebar.llm.workflow import gate_dispatch
 
+    emitted: list[tuple[str, str, str, str | None]] = []
+
+    def _record_gate_error(ticket_id, gate, *, cause, repo_root=None):
+        emitted.append((ticket_id, gate, cause, repo_root))
+
+    monkeypatch.setattr(gate_dispatch, "emit_gate_error", _record_gate_error)
     monkeypatch.setattr("rebar._reads.show_ticket", lambda tid, repo_root=None: {"ticket_id": tid})
     monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
     cfg = dataclasses.replace(LLMConfig(runner="fake"), model="claude-haiku-4-5")
@@ -261,3 +274,4 @@ def test_completion_workflow_outage_raises_so_close_fails_closed(monkeypatch) ->
         gate_dispatch.produce_completion_verdict(
             "T-1", graph=False, repo_root=None, cfg=cfg, runner=_OutageRunner()
         )
+    assert emitted == [("T-1", "completion", "no agents extra / key", None)]

@@ -537,8 +537,16 @@ def test_force_close_skips_completion_gate(monkeypatch):
         return {"verdict": "PASS", "source": "local"}
 
     import rebar.llm as _llm
+    from rebar.llm import completion_sidecar
 
     monkeypatch.setattr(_llm, "verify_completion", _spy_verify)
+    emitted: list[tuple[dict, str | None, str | None]] = []
+
+    def _record_completion_sidecar(payload, *, material, repo_root):
+        emitted.append((dict(payload), material, repo_root))
+        return True
+
+    monkeypatch.setattr(completion_sidecar, "emit", _record_completion_sidecar)
 
     # --force-close path: returns None WITHOUT ever calling verify_completion.
     assert (
@@ -546,12 +554,16 @@ def test_force_close_skips_completion_gate(monkeypatch):
         is None
     )
     assert calls == [], "verify_completion MUST NOT run on the --force-close path"
+    assert emitted == [], "--force-close MUST NOT emit a completion sidecar"
 
     # Positive control: without --force-close the same enabled gate DOES invoke the LLM verify.
     assert (
         _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="") is None
     )
     assert calls == ["rec-0000"], "verify_completion must run when --force-close is absent"
+    assert emitted == [
+        ({"verdict": "PASS", "source": "local", "ticket_id": "rec-0000"}, None, None)
+    ]
 
 
 # ── Meta-test: every parametrized id carries a CURRENT(<file>:<line>) marker ───
