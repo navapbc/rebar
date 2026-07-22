@@ -209,12 +209,8 @@ def test_fetcher_enriches_comment_field(tmp_path: Path) -> None:
         def get_comment_map(self, project, jql=None):
             return {"DIG-90": {"comments": [{"body": "enriched comment"}]}}
 
-    class _StubAcliMod:
-        @staticmethod
-        def AcliClient(**kwargs):
-            return _StubClient()
-
-    fetcher_mod._load_acli = lambda: _StubAcliMod
+    # S4: _load_acli returns the transport (client) directly.
+    fetcher_mod._load_acli = lambda: _StubClient()
     (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
@@ -248,12 +244,8 @@ def test_fetcher_comment_enrichment_failure_degrades(
         def get_comment_map(self, project, jql=None):
             raise RuntimeError("REST comment fetch failed")
 
-    class _StubAcliMod:
-        @staticmethod
-        def AcliClient(**kwargs):
-            return _FailingClient()
-
-    fetcher_mod._load_acli = lambda: _StubAcliMod
+    # S4: _load_acli returns the transport (client) directly.
+    fetcher_mod._load_acli = lambda: _FailingClient()
     (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
     with caplog.at_level(logging.WARNING):
         output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)

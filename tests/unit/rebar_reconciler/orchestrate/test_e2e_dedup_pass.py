@@ -161,11 +161,7 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
     fake_client = FakeAcliClient()
     fake_concurrency = _make_fake_concurrency()
 
-    # Build a fake acli module wrapping our fake client instance
-    fake_acli_mod = types.ModuleType("acli_integration")
-    # Stub accepts kwargs because applier.apply() constructs the client with
-    # env-derived (jira_url, user, api_token) credentials.
-    fake_acli_mod.AcliClient = lambda **_: fake_client  # type: ignore[attr-defined]
+    # S4: _load_acli returns the transport (client) directly.
 
     def _mut_action(m):
         a = getattr(m, "action", None)
@@ -200,7 +196,7 @@ def test_pre_existing_rebar_id_produces_zero_creates(tmp_path, differ, applier):
     # Step 2 — apply the (create-free) mutation set: must be a no-op on Jira
     # (no phantom create, no ghost label write-back).
     with (
-        patch.object(applier, "_load_acli", return_value=fake_acli_mod),
+        patch.object(applier, "_load_acli", return_value=fake_client),
         patch.object(applier, "_load_concurrency", return_value=fake_concurrency),
     ):
         applier.apply(mutations, "pass-001", repo_root=tmp_path)

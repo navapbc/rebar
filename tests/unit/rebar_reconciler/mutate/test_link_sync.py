@@ -193,12 +193,8 @@ def test_fetcher_enriches_issuelinks(tmp_path: Path) -> None:
         def get_issuelinks_map(self, project, jql=None):
             return {"DIG-90": [link]}
 
-    class _StubAcliMod:
-        @staticmethod
-        def AcliClient(**kwargs):
-            return _StubClient()
-
-    fetcher_mod._load_acli = lambda: _StubAcliMod
+    # S4: _load_acli returns the transport (client) directly.
+    fetcher_mod._load_acli = lambda: _StubClient()
     (tmp_path / "bridge_state" / "snapshots").mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 

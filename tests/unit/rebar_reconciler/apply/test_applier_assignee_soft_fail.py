@@ -161,14 +161,11 @@ def test_assignee_not_found_soft_fails_batch_continues(
         return {"key": issue_key, "ok": True}
 
     fake_client.update_issue.side_effect = _update_issue_side_effect
-    fake_acli_mod = MagicMock()
-    fake_acli_mod.AcliClient.return_value = fake_client
-    # Expose the real AssigneeNotFoundError on the fake module so any
-    # applier-side ``except _load_acli().AssigneeNotFoundError`` resolves
-    # to the same class instances our side_effect raises.
-    fake_acli_mod.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-
-    with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
+    # S4: _load_acli returns the transport DIRECTLY. apply_handlers catches
+    # AssigneeNotFoundError via a direct import from rebar_reconciler.acli_subprocess,
+    # which — because the shadow ``rebar_reconciler`` package __path__'s to the real
+    # source dir — is the SAME class object our side_effect raises.
+    with patch.object(applier_mod, "_load_acli", return_value=fake_client):
         try:
             applier_mod.apply(
                 [good_mutation, bad_mutation],
@@ -216,11 +213,8 @@ def test_assignee_not_found_alone_does_not_raise(
     fake_client.update_issue.side_effect = acli_mod.AssigneeNotFoundError(
         "validate_assignee_exists: no assignable user matches 'Worktree'"
     )
-    fake_acli_mod = MagicMock()
-    fake_acli_mod.AcliClient.return_value = fake_client
-    fake_acli_mod.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-
-    with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
+    # S4: _load_acli returns the transport directly.
+    with patch.object(applier_mod, "_load_acli", return_value=fake_client):
         try:
             applier_mod.apply(
                 [bad_mutation],

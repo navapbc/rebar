@@ -113,15 +113,15 @@ def acli_mod() -> Iterator[ModuleType]:
 
 
 def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
-    """Fake acli module whose AcliClient() returns ``client`` and whose
-    exception classes are the REAL ones, so the applier's
-    ``except acli.AssigneeNotFoundError`` resolves to a real BaseException
-    subclass rather than a MagicMock.
+    """Return the fake transport ``client`` directly (S4: ``_load_acli`` now returns
+    the backend transport, not a module).
+
+    apply_handlers catches ``AssigneeNotFoundError`` via a direct import from
+    ``rebar_reconciler.acli_subprocess`` — the same real class the test's client
+    raises (the shadow ``rebar_reconciler`` package __path__'s to the real source
+    dir), so the soft-fail path resolves to a real BaseException subclass.
     """
-    fake = MagicMock()
-    fake.AcliClient.return_value = client
-    fake.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-    return fake
+    return client
 
 
 def _make_404() -> urllib.error.HTTPError:

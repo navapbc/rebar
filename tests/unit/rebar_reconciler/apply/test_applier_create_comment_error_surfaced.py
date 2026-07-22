@@ -88,10 +88,8 @@ def acli_mod() -> Iterator[ModuleType]:
 
 
 def _make_fake_acli(acli_mod: ModuleType, client: MagicMock) -> MagicMock:
-    fake = MagicMock()
-    fake.AcliClient.return_value = client
-    fake.AssigneeNotFoundError = acli_mod.AssigneeNotFoundError
-    return fake
+    # S4: _load_acli returns the transport directly.
+    return client
 
 
 def _read_manifest_outcomes(repo_root: Path, pass_id: str) -> list[dict]:

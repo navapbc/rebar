@@ -86,9 +86,8 @@ def _make_mock_acli_module() -> tuple[types.ModuleType, MagicMock]:
     mock_client.transition_issue = MagicMock(return_value=None)
     mock_client.search_issues = MagicMock(return_value=[])
 
-    mock_acli_mod = types.ModuleType("acli_integration")
-    mock_acli_mod.AcliClient = MagicMock(return_value=mock_client)
-    return mock_acli_mod, mock_client
+    # S4: _load_acli returns the transport (client) directly; both slots share it.
+    return mock_client, mock_client
 
 
 def _make_exhaustion_concurrency(concurrency_mod) -> types.ModuleType:

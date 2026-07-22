@@ -222,10 +222,16 @@ from rebar_reconciler.typed_dispatch import (  # noqa: E402
 
 
 def _load_acli():
-    """Return the in-package acli transport module (rebar_reconciler.acli)."""
-    from rebar_reconciler import acli
+    """Return the configured backend's transport (a ``TicketTransport``, i.e. an
+    ``AcliClient``) directly — routed through the Backend port (S4).
 
-    return acli
+    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
+    keep standalone by-path loading working.
+    """
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    return select_backend(load_config()).transport
 
 
 class HeadDriftError(Exception):
@@ -432,21 +438,16 @@ def apply(
     # for either id AND outbound batch entries for the jira_key this pass.
     suppression = _SuppressionIndex()
 
-    # Create an AcliClient for inbound leaves that write back to Jira.
+    # Obtain the backend transport for inbound leaves that write back to Jira (S4:
+    # _load_acli now returns the configured backend's transport directly).
     if client is None and inbound_typed:
-        from rebar_reconciler import acli_subprocess
-
-        acli_mod = _load_acli()
-        # Resolve via the stable acli_subprocess floor (acli_mod may be a test fake
-        # that only provides AcliClient).
-        _s = acli_subprocess.resolve_jira_settings()
-        client = acli_mod.AcliClient(jira_url=_s.url, user=_s.user, api_token=_s.api_token)
+        client = _load_acli()
         logger.info(
             "inbound dispatch: created AcliClient for %d inbound mutations "
             "(JIRA_URL=%s, JIRA_USER=%s)",
             len(inbound_typed),
-            _s.url or "<unset>",
-            _s.user or "<unset>",
+            getattr(client, "jira_url", None) or "<unset>",
+            getattr(client, "user", None) or "<unset>",
         )
 
     # Deferred bug-filing directives from inbound conflict leaves, processed
@@ -589,25 +590,19 @@ def _apply_batch(
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
+    # S4: _load_acli now returns the configured backend's transport directly. The
+    # transport (an AcliClient) already carries the resolved connection settings
+    # (jira_url/user/api_token and jira_project, defaulting to "DIG" to satisfy ACLI
+    # on every CREATE — bug 4fa9-0846-519e-4c30), so no inline construction is needed.
+    client = _load_acli()
+
+    # Resolve the configured project (project_default="DIG", matching the backend
+    # factory) for the downstream cross-project safety guard (bug 626d). Read via the
+    # stable acli_subprocess floor rather than the transport so a test fake without a
+    # jira_project attribute still works.
     from rebar_reconciler import acli_subprocess
 
-    acli = _load_acli()
-    # Mirror fetcher.fetch_snapshot's pattern: AcliClient's real constructor
-    # requires (jira_url, user, api_token) — the no-arg form raises TypeError
-    # on every real invocation. url/user/project resolve through the typed config
-    # (JIRA_URL/JIRA_USER/JIRA_PROJECT env override the [tool.rebar.jira] file),
-    # defaulting to "" so test/CI shims that monkey-patch _load_acli still work; the
-    # secret api_token is env-only. The resolver is read from the stable
-    # acli_subprocess floor (acli may be a test fake). jira_project defaults to "DIG"
-    # (matching _attestation.py) because an empty projectKey is rejected by ACLI on
-    # every CREATE — bug 4fa9-0846-519e-4c30.
     _s = acli_subprocess.resolve_jira_settings(project_default="DIG")
-    client = acli.AcliClient(
-        jira_url=_s.url,
-        user=_s.user,
-        api_token=_s.api_token,
-        jira_project=_s.project,
-    )
 
     mutations_with_outcomes: list[dict] = []
 
@@ -653,7 +648,6 @@ def _apply_batch(
 
     ctx = BatchApplyContext(
         client=client,
-        acli=acli,
         repo_root=repo_root,
         pass_id=pass_id,
         binding_store=binding_store,

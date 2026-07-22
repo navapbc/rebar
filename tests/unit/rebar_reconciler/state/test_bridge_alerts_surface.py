@@ -148,7 +148,7 @@ def alert_store_mod():
 # ---------------------------------------------------------------------------
 
 
-def _make_acli_module(issues: list[dict]) -> types.ModuleType:
+def _make_acli_module(issues: list[dict]) -> object:
     """Stub acli_integration module whose AcliClient returns issues."""
 
     class _Client:
@@ -173,9 +173,8 @@ def _make_acli_module(issues: list[dict]) -> types.ModuleType:
         def add_label(self, key: str, label: str) -> None:
             return None
 
-    mock_mod = types.ModuleType("acli_integration")
-    mock_mod.AcliClient = _Client
-    return mock_mod
+    # S4: _load_acli returns the transport (client) instance directly.
+    return _Client()
 
 
 def _make_ok_concurrency() -> types.ModuleType:

@@ -69,7 +69,7 @@ def _make_mock_acli(update_return=None):
     mock_client.search_issues.return_value = []
     # AcliClient stub must accept (jira_url, user, api_token) kwargs because
     # applier.apply() now constructs the client with env-derived credentials.
-    fake_acli = types.SimpleNamespace(AcliClient=lambda **_: mock_client)
+    fake_acli = mock_client  # S4: _load_acli returns the transport directly
     return fake_acli, mock_client
 
 

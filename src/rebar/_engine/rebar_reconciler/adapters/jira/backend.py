@@ -98,6 +98,8 @@ def _build_jira_backend(config: Any) -> JiraBackend:
     Jira settings — mirroring the pre-story direct construction."""
     from rebar_reconciler import acli, acli_subprocess
 
-    s = acli_subprocess.resolve_jira_settings()
-    transport = acli.AcliClient(jira_url=s.url, user=s.user, api_token=s.api_token)
+    s = acli_subprocess.resolve_jira_settings(project_default="DIG")
+    transport = acli.AcliClient(
+        jira_url=s.url, user=s.user, api_token=s.api_token, jira_project=s.project
+    )
     return JiraBackend(transport=transport)
