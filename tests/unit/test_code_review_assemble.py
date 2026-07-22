@@ -106,3 +106,53 @@ def test_assemble_does_not_import_single_pass_route():
         if isinstance(node, ast.Import):
             for a in node.names:
                 assert a.name != "rebar.llm.code_review.__init__"
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def _init_repo(tmp_path: pathlib.Path) -> pathlib.Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "base.py").write_text("x = 0\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "F0 branch point")
+    return repo
+
+
+def test_diff_is_merge_base_three_dot_not_two_dot(tmp_path):
+    """Regression (upstream report §3): when `head` is BEHIND `base`, the assembled diff must
+    contain only what `head` changed since the branch point — NOT a revert of everything merged
+    into `base` afterward. A two-dot `base..head` diff would surface those later `base` commits
+    as phantom deletions; a three-dot `base...head` (merge-base) diff must not.
+    """
+    repo = _init_repo(tmp_path)
+    # Branch `feature` from F0 and add ONE file — this is `head`, now behind `main`.
+    _git(repo, "checkout", "-q", "-b", "feature")
+    (repo / "feat.py").write_text("y = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "feature change")
+    # Advance `main` past the branch point with unrelated work `head` never saw.
+    _git(repo, "checkout", "-q", "main")
+    (repo / "other.py").write_text("z = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated main work after branch point")
+
+    ctx = A.assemble_diff_context(base="main", head="feature", repo_root=str(repo))
+
+    # Only the branch's own file — never the unrelated main-side file as a phantom deletion.
+    assert ctx.changed_files == ["feat.py"]
+    assert "other.py" not in ctx.diff_text
+    assert "deleted file" not in ctx.diff_text.lower()

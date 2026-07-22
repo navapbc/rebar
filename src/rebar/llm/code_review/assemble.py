@@ -220,12 +220,18 @@ def assemble_diff_context(
         from rebar import config as _config
 
         diff_repo = str(_config.repo_root(repo_root))
-        diff_text = _git(diff_repo, ["diff", f"{base}..{head}"])
+        # THREE-dot (merge-base) diff, NOT two-dot: `base...head` is "what head changed since it
+        # diverged from base", computed against the merge-base. A two-dot `base..head` diffs head
+        # against base's CURRENT tip, so when head is behind base every commit merged into base
+        # since the branch point shows up as a spurious deletion — inflating the review with a
+        # revert of unrelated work (phantom-deletion findings). Merge-base matches git's own
+        # PR-review convention.
+        diff_text = _git(diff_repo, ["diff", f"{base}...{head}"])
         # `--name-only` is newline-delimited; splitlines (NOT split) so paths with spaces
         # survive intact. Drop blank lines.
         changed_files = [
             ln
-            for ln in _git(diff_repo, ["diff", "--name-only", f"{base}..{head}"]).splitlines()
+            for ln in _git(diff_repo, ["diff", "--name-only", f"{base}...{head}"]).splitlines()
             if ln
         ]
     elif changed_files is None:
