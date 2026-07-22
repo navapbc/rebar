@@ -165,7 +165,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.15.19",
+    "ruff==0.15.22",
     "mypy>=1.10",
     "pytest-cov>=5",
     # Parallel test execution (story 8d36). Pinned EXACTLY (not a floor) so local and
@@ -189,7 +189,7 @@ dev = [
     # over-broad/OIDC permissions). Pinned EXACTLY (not a floor) for local↔CI parity: zizmor
     # tightens/adds audits across releases, so an unpinned floor lets findings drift (green
     # here, red in CI). Bump deliberately.
-    "zizmor==1.27.0",
+    "zizmor==1.28.0",
     # Pull the full agents stack so the rebar.llm validation tests (provider
     # construction for Claude + ChatGPT, MCP/Langfuse paths) RUN in CI rather than
     # skipping. Self-referential extra — kept here, not in core, so `pip install
