@@ -766,6 +766,50 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     return {"ok": True, "reason": "certified plan-review attestation", "verdict": "certified"}
 
 
+def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
+    """Read-only currency query: is ``ticket_id``'s plan-review attestation valid RIGHT NOW?
+
+    Wraps :func:`claim_gate_check` — the EXACT local check the ``claim`` gate runs, so the answer
+    is precisely what a ``claim`` would decide — and enriches it with the attestation's bound
+    ``verified_at_sha`` and ``signed_at`` so a caller can see WHAT the plan was reviewed against
+    (the moving-base-ref question that motivates this seam). NO LLM and NO network: the same fast
+    local reads (HMAC verify + light fingerprint recompute + a few dependency-file hashes) the
+    claim gate does — never a billable review. It is the cheap answer to "should I re-gate before
+    I implement?" that avoids re-running the full review just to learn the verdict.
+
+    Returns ``{ok, verdict, reason, verified_at_sha, signed_at}`` where ``verdict`` is the
+    :func:`compute_validity` classifier — ``certified`` when current, else one of ``stale-code`` /
+    ``stale-head`` / ``stale-material`` / ``stale-regver`` / ``stale-reopened`` / ``unsigned`` /
+    ``wrong-kind`` / ``malformed-pin`` / ``unverifiable-material`` / ``error``. ``verified_at_sha``
+    is the code anchor the plan was reviewed against — the pinned verified-at-sha for a
+    scoped/attested review, else the signed HEAD for an unscoped/local one — and ``signed_at`` the
+    sign timestamp; both are ``None`` when no readable certified attestation exists.
+    """
+    from rebar import signing
+
+    gate = claim_gate_check(ticket_id, repo_root=repo_root)
+    status: dict[str, Any] = {
+        "ok": bool(gate.get("ok")),
+        "verdict": gate.get("verdict", "unsigned"),
+        "reason": gate.get("reason", ""),
+        "verified_at_sha": None,
+        "signed_at": None,
+    }
+    try:
+        sig = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
+        if sig.get("verified"):
+            # The code anchor the plan was reviewed against: the pinned verified-at-sha when the
+            # review was scoped/attested (--source attested), else the signed HEAD for an
+            # unscoped/local review (which has no pinned step but binds the head it saw).
+            status["verified_at_sha"] = signing.verified_at_sha_from_manifest(
+                _authoritative_manifest(sig)
+            ) or _authoritative_head(sig)
+            status["signed_at"] = sig.get("signed_at")
+    except Exception:  # noqa: BLE001 — enrichment only; the gate verdict already stands
+        logger.warning("plan_review_status: could not read bound sha for %s", ticket_id)
+    return status
+
+
 def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | None:
     """Recompute the ticket's material fingerprint from a LIGHT read (the ticket +
     its child ids only — no full child fetch, no LLM), matching
