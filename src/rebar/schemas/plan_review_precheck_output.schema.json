@@ -11,7 +11,9 @@
     "ticket_type": { "type": "string", "description": "The reviewed ticket's type." },
     "det_blocking": { "type": "array", "description": "DET-floor blocking findings (P1/P5-cycle/P8)." },
     "det_advisory": { "type": "array", "description": "DET-floor advisory findings (P4/P6/P7 + P5 interference)." },
-    "det_coverage": { "type": "object", "additionalProperties": true, "description": "Per-check DET coverage record." }
+    "det_coverage": { "type": "object", "additionalProperties": true, "description": "Per-check DET coverage record." },
+    "hierarchy_incomplete": { "type": "boolean", "description": "True when child enumeration or a per-child fetch exhausted its retries while assembling the ticket hierarchy — the review must never reach a clean PASS on incomplete hierarchy context." },
+    "hierarchy_incomplete_detail": { "type": "array", "items": { "type": "string" }, "description": "Which hierarchy read(s) failed: the literal \"enumeration\" for a total list_tickets failure, or the failing child's ticket id(s) for per-child show_ticket failures." }
   },
   "required": ["run_llm", "verdict", "canonical_id", "ticket_type", "det_blocking", "det_advisory", "det_coverage"],
   "additionalProperties": false

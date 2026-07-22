@@ -326,6 +326,8 @@ def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | N
         "routing": (succeeded.get(STEP_ASSEMBLE) or {}).get("routing") or {},
         "llm_ran": True,
         "coach_error": str(error) if error else "pass-4 coach failed; verdict emitted without it",
+        "hierarchy_incomplete": precheck.get("hierarchy_incomplete", False),
+        "hierarchy_incomplete_detail": precheck.get("hierarchy_incomplete_detail", []),
     }
     pctx = PlanContext(
         ticket_id=str(precheck.get("canonical_id") or ""),
@@ -386,6 +388,8 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
         "verify_error": str(error)
         if error
         else "pass-2 verify failed; findings preserved unverified",
+        "hierarchy_incomplete": precheck.get("hierarchy_incomplete", False),
+        "hierarchy_incomplete_detail": precheck.get("hierarchy_incomplete_detail", []),
     }
     pctx = PlanContext(
         ticket_id=str(precheck.get("canonical_id") or ""),
@@ -423,6 +427,8 @@ def _degraded_plan_review_verdict(
         "llm_unavailable": True,
         "llm_error": str(error),
         **_failure.resolution_fields(outcome),
+        "hierarchy_incomplete": getattr(ctx, "hierarchy_incomplete", False),
+        "hierarchy_incomplete_detail": getattr(ctx, "hierarchy_incomplete_detail", []),
     }
     _failure.log_degrade(outcome, gate="plan-review", ticket_id=getattr(ctx, "ticket_id", None))
     parts = orchestrator.partition_findings(

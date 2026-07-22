@@ -201,6 +201,10 @@ def _recompute_verdict_after_drop(verdict: dict[str, Any]) -> None:
     cov = verdict.get("coverage") or {}
     if cov.get("llm_unavailable"):
         verdict["verdict"] = "INDETERMINATE"
+    elif cov.get("hierarchy_incomplete"):
+        # Checked before verify_failed's fail-open path, mirroring finalize_verdict: a missing
+        # hierarchy must never be masked by an advisory-only verify failure falling open to PASS.
+        verdict["verdict"] = "INDETERMINATE"
     elif cov.get("verify_failed"):
         verdict["verdict"] = (
             "INDETERMINATE"
