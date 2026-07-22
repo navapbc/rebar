@@ -35,6 +35,8 @@ import json
 import os
 import subprocess
 import uuid
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from rebar._commands._seam import CommandError, finalize_event
 from rebar._store import compat, event_append, fsutil, hlc, lock
@@ -193,13 +195,16 @@ def transition_core(
     close_class: str = "",
     force_close_reason: str = "",
     repo_root=None,
+    pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> None:
     """Write the append-only STATUS(``target_status``) event under the write lock.
 
     Re-reads the ticket under the lock and rejects with :class:`ConcurrencyMismatch`
     (exit 10) if its status is not ``current_status``. Applies the bug-close-reason
-    guard. Raises :class:`CommandError` for validation / git failures. Returns
-    ``None`` on success (the wrapper computes newly_unblocked + output separately)."""
+    guard. ``pre_status_check`` is an optional local caller policy invoked with the
+    freshly reduced locked state immediately before the STATUS is appended. Raises
+    :class:`CommandError` for validation / git failures. Returns ``None`` on success
+    (the wrapper computes newly_unblocked + output separately)."""
     handle = _acquire_write_lock(tracker_dir)
     final_path = None
     try:
@@ -288,6 +293,8 @@ def transition_core(
             "parent_status_uuid": parent_status_uuid,
             "data": status_data,
         }
+        if pre_status_check is not None:
+            pre_status_check(state)
         # Attribution + write-time signing / the opt-in write-gate via the SHARED finalize seam
         # (bug 0ba4) — the SAME signing path append_event uses, so a transition/close STATUS is
         # signed identically to a CREATE/COMMENT. Placed BEFORE `final_path` is assigned so a

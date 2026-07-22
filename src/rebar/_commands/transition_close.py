@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import Mapping
+from typing import Any
 
 from rebar import config
 from rebar._commands import scratch, txn
@@ -30,6 +32,18 @@ logger = logging.getLogger(__name__)
 
 
 _NON_COMPLETION_BUG_CLASSES = frozenset({"duplicate", "not_a_bug", "escalated"})
+_PLAN_REVIEW_CLOSE_TYPES = frozenset({"task", "story", "epic"})
+
+
+def _raise_plan_review_close_gate_error(ticket_id: str, check: dict[str, object]) -> None:
+    """Raise the stable, separately-remediated plan-review close-gate error."""
+    verdict = str(check.get("verdict", "unavailable"))
+    reason = str(check.get("reason", "plan-review validity was unavailable")).rstrip(".")
+    raise CommandError(
+        f"plan-review close gate: {verdict}: {reason}. "
+        f"Run rebar review-plan {ticket_id} separately, then retry close.",
+        returncode=1,
+    )
 
 
 def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
@@ -531,10 +545,27 @@ def close_ticket(
     # ran unconditionally (integrity, not completion), so an idea parent over
     # non-closed children is still refused.
     verified_result = None
+    plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
         from rebar.reducer import reduce_ticket as _reduce
 
-        ticket_type = (_reduce(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
+        ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
+        ticket_type = ticket_state.get("ticket_type", "")
+        if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
+            from rebar._commands import gates
+
+            check = gates.close_plan_review_gate_check(ticket_id, ticket_state, repo_root=repo_root)
+            if not check.get("ok"):
+                _raise_plan_review_close_gate_error(ticket_id, check)
+            if check.get("verdict") != "disabled":
+
+                def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
+                    locked_check = gates.close_plan_review_gate_check(
+                        ticket_id, locked_state, repo_root=repo_root
+                    )
+                    if not locked_check.get("ok"):
+                        _raise_plan_review_close_gate_error(ticket_id, locked_check)
+
         verified_result = _completion_precheck(
             ticket_id,
             ticket_type,
@@ -562,6 +593,7 @@ def close_ticket(
         close_class=close_class,
         force_close_reason=force_close,
         repo_root=repo_root,
+        pre_status_check=plan_review_recheck,
     )
 
     # PASS attestation: sign the verified verdict AFTER the close is confirmed. A crash in this

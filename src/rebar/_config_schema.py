@@ -217,6 +217,9 @@ class VerifyConfig:
     # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
     # Default off.
     require_completion_verification_for_close: bool = False
+    # Opt-in local plan-review close gate. It verifies a separately attested review with the
+    # CLOSE validity profile; it never launches an LLM review. Default off.
+    require_plan_review_for_close: bool = False
     # Opt-in plan-review gate (epic 5fd2): when true, claiming a work ticket
     # (open→in_progress) requires a fresh, certified plan-review attestation (run
     # `rebar review-plan <id>` to earn one). Absent / stale (code-HEAD moved) /
@@ -574,6 +577,7 @@ _SECTIONS: dict[str, dict] = {
     "verify": {
         "enforce_plan_material_pins": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
+        "require_plan_review_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "overlap_enabled": lambda v, k: _as_bool(v, k),
         "require_ticket_for_commit": lambda v, k: _as_bool(v, k),

@@ -21,8 +21,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Mapping
+from typing import Any, cast
 
-__all__ = ["gate_enabled", "plan_review_precheck"]
+__all__ = ["close_plan_review_gate_check", "gate_enabled", "plan_review_precheck"]
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,58 @@ def gate_enabled(
             file=sys.stderr,
         )
         return False
+
+
+def close_plan_review_gate_check(
+    ticket_id: str, ticket_state: Mapping[str, Any], *, repo_root=None
+) -> dict[str, object]:
+    """Locally validate the opt-in plan-review close requirement.
+
+    This deliberately verifies an already-created attestation only: it never starts a
+    review, invokes an LLM, or contacts the network.  ``CLOSE`` keeps the plan and
+    policy freshness checks while allowing implementation code to change during work.
+    """
+    if not gate_enabled(
+        str(repo_root),
+        "require_plan_review_for_close",
+        ticket_id=ticket_id,
+        gate_label="the plan-review close gate",
+        extra=" (other close gates still apply)",
+    ):
+        return {"ok": True, "verdict": "disabled", "reason": "plan-review close gate is disabled"}
+    if ticket_state.get("ticket_type") not in ("task", "story", "epic"):
+        return {"ok": True, "verdict": "exempt", "reason": "ticket type is exempt"}
+
+    try:
+        from rebar import signing
+        from rebar._engine_support import reads as ticket_reads
+        from rebar.llm.plan_review import attest
+        from rebar.llm.plan_review.pin_health import PlanValidityProfile
+
+        with ticket_reads.local_read_context():
+            verified = signing.verify_signature(ticket_id, kind="plan-review", repo_root=repo_root)
+            validity = attest.compute_validity(
+                verified,
+                cast(dict[str, Any], ticket_state),
+                "plan-review",
+                repo_root=repo_root,
+                profile=PlanValidityProfile.CLOSE,
+            )
+        return {
+            "ok": bool(validity.get("valid")),
+            "verdict": str(validity.get("verdict", "unavailable")),
+            "reason": str(validity.get("reason", "plan-review validity was unavailable")),
+        }
+    except Exception:  # noqa: BLE001 -- local signature/plan reads must fail closed
+        record = {"event": "plan_review_close_gate_unavailable", "ticket_id": ticket_id}
+        logger.warning(
+            "plan-review close gate unavailable: %s", record, extra=record, exc_info=True
+        )
+        return {
+            "ok": False,
+            "verdict": "unavailable",
+            "reason": "could not verify the plan-review attestation locally",
+        }
 
 
 def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:
