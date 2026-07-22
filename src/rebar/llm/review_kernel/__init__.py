@@ -57,6 +57,12 @@ from .decide import (
     suppress_and_dedup,
     validity,
 )
+from .telemetry import (
+    collect_contract_violations,
+    decide_outcome_counts,
+    drain_contract_violations,
+    record_contract_violation,
+)
 from .verify import (
     DEFAULT_VERIFY_WINDOW_HEADROOM,
     VERIFIER_RULES,
@@ -90,6 +96,11 @@ __all__ = [
     "severity_label",
     "suppress_and_dedup",
     "validity",
+    # Shared run-scoped telemetry — contract-violation sink + decide-boundary outcome_counts
+    "collect_contract_violations",
+    "decide_outcome_counts",
+    "drain_contract_violations",
+    "record_contract_violation",
     # Pass-2 — finding verifier + the verification contract
     "DEFAULT_VERIFY_WINDOW_HEADROOM",
     "VERIFIER_RULES",

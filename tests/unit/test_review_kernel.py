@@ -695,3 +695,66 @@ def test_plan_review_coach_reexports_are_the_kernel_objects() -> None:
             assert kcoach.move_applies(move, active_triggers=move["applies_when"])
         else:
             assert kcoach.move_applies(move, active_triggers=[])  # always-applicable
+
+
+# ── shared run-scoped telemetry (ticket c2c5): contract-violation sink + decide_outcome_counts ──
+def test_contract_violation_sink_is_a_no_op_outside_a_collection_scope() -> None:
+    # No active sink: recording never raises, and draining returns empty (never leaks/crashes a
+    # `*_decide` op that is unit-tested in isolation, outside a gate run).
+    review_kernel.record_contract_violation({"duplicates": [0]})
+    assert review_kernel.drain_contract_violations() == []
+
+
+def test_contract_violation_sink_collects_and_drains_within_scope() -> None:
+    with review_kernel.collect_contract_violations():
+        review_kernel.record_contract_violation({"duplicates": [0]})
+        review_kernel.record_contract_violation({})  # falsy summary — not recorded
+        review_kernel.record_contract_violation({"unexpected": [5]})
+        assert review_kernel.drain_contract_violations() == [
+            {"duplicates": [0]},
+            {"unexpected": [5]},
+        ]
+        # drained — a second drain in the same scope is empty
+        assert review_kernel.drain_contract_violations() == []
+    # the sink is dropped on exit — outside the scope, draining is empty again
+    assert review_kernel.drain_contract_violations() == []
+
+
+def test_decide_outcome_counts_no_findings_is_all_zero() -> None:
+    reshape = kverify.reshape_verifications([], valid_indices=range(0))
+    assert review_kernel.decide_outcome_counts([], [], reshape) == {
+        "clean": 0,
+        "recovered": 0,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+
+
+def test_decide_outcome_counts_empty_verifications_despite_findings_is_empty_outcomes() -> None:
+    findings = [{"finding": "f0"}]
+    reshape = kverify.reshape_verifications([], valid_indices=range(1))
+    counts = review_kernel.decide_outcome_counts([], findings, reshape)
+    assert counts == {"clean": 0, "recovered": 0, "empty_outcomes": 1, "unrecoverable": 0}
+
+
+def test_decide_outcome_counts_clean_reshape_is_clean() -> None:
+    findings = [{"finding": "f0"}]
+    raw = [{"index": 0, "severity_attributes": {}, "binary": {}}]
+    reshape = kverify.reshape_verifications(raw, valid_indices=range(1))
+    assert not reshape.has_violations
+    counts = review_kernel.decide_outcome_counts(raw, findings, reshape)
+    assert counts == {"clean": 1, "recovered": 0, "empty_outcomes": 0, "unrecoverable": 0}
+
+
+def test_decide_outcome_counts_violated_reshape_is_recovered_never_unrecoverable() -> None:
+    findings = [{"finding": "f0"}, {"finding": "f1"}]
+    raw = [
+        {"index": 0, "severity_attributes": {}, "binary": {}},
+        {"index": 0, "severity_attributes": {}, "binary": {}},  # duplicate → has_violations
+    ]
+    reshape = kverify.reshape_verifications(raw, valid_indices=range(2))
+    assert reshape.has_violations
+    counts = review_kernel.decide_outcome_counts(raw, findings, reshape)
+    # `unrecoverable` is ALWAYS 0 at the decide boundary — a StructuredOutputError is a
+    # per-chunk execution signal that does not survive the merge into the flat list.
+    assert counts == {"clean": 0, "recovered": 1, "empty_outcomes": 0, "unrecoverable": 0}

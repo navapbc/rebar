@@ -405,6 +405,8 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
             "INDETERMINATE; verdict unchanged): %s",
             reshape.summary(),
         )
+        review_kernel.record_contract_violation(reshape.summary())
+    outcome_counts = review_kernel.decide_outcome_counts(raw_verifs, findings, reshape)
     # DET-enrich the verifications' severity_attributes (churn90 + hard_to_reverse_surface) so
     # decide.impact_code reads DET signals alongside the LLM binaries from the SAME dict.
     _det_enrich_verifications(
@@ -447,7 +449,7 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
             buckets["dropped"].append(f)
         else:
             buckets["indeterminate"].append(f)
-    return {"decided": decided, **buckets}
+    return {"decided": decided, "outcome_counts": outcome_counts, **buckets}
 
 
 # ── Pass-4 coach inputs (the move-pick listing for the coach prompt) ────────────────────────
@@ -499,7 +501,19 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
     triggers = {c for f in surfaced for c in f.get("criteria", []) or []}
     applicable = review_kernel.applicable_moves(mr, triggers)
     coaching = review_kernel.render_coach_notes(raw_notes, applicable)
-    coverage = ctx.inputs.get("coverage") or {"llm_ran": True}
+    coverage = dict(ctx.inputs.get("coverage") or {"llm_ran": True})
+    coverage["outcome_counts"] = ctx.inputs.get("outcome_counts") or {
+        "clean": 0,
+        "recovered": 0,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+    # Surface any Pass-2 verification contract violations `code_review_decide` recorded this run
+    # (expand-contract observability, mirroring plan-review's `plan_review_coach`). Present ONLY
+    # when non-empty, so a clean run's coverage stays byte-identical; never changes the verdict.
+    violations = review_kernel.drain_contract_violations()
+    if violations:
+        coverage["verification_contract_violations"] = violations
     return {
         "verdict": "BLOCK" if blocking else "PASS",
         "blocking": blocking,

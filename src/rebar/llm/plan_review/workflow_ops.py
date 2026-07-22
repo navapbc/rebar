@@ -502,7 +502,8 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     parts = orchestrator.partition_findings(
         det_blocks, det_advisories, decided, advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
     )
-    return dict(parts)
+    outcome_counts = review_kernel.decide_outcome_counts(raw_verifs, findings, reshape)
+    return {**parts, "outcome_counts": outcome_counts}
 
 
 @register_step(
@@ -565,6 +566,8 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
         "llm_ran": True,
         "hierarchy_incomplete": ctx.inputs.get("hierarchy_incomplete", False),
         "hierarchy_incomplete_detail": ctx.inputs.get("hierarchy_incomplete_detail", []),
+        "outcome_counts": ctx.inputs.get("outcome_counts")
+        or {"clean": 0, "recovered": 0, "empty_outcomes": 0, "unrecoverable": 0},
     }
     # Surface any Pass-2 verification contract violations recorded by `plan_review_decide` this
     # run (expand-contract observability). Present ONLY when non-empty, so a clean run's verdict

@@ -20,6 +20,10 @@
     },
     "indeterminate": {
       "type": "array"
+    },
+    "outcome_counts": {
+      "type": "object",
+      "description": "Single-run {clean, recovered, empty_outcomes, unrecoverable} tally at the decide boundary (unrecoverable always 0)."
     }
   }
 }

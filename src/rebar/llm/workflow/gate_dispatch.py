@@ -595,7 +595,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     """Run the four-pass gate (snapshot session) + finalize; outage/mid-tail -> INDETERMINATE."""
     import time
 
-    from rebar.llm import gate_source
+    from rebar.llm import gate_source, review_kernel
     from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
     from rebar.llm.runner import get_runner
 
@@ -613,7 +613,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
     runner_sel = request.runner or get_runner(cfg)
     try:
-        with gate_source.gate_read_root(handle):
+        with gate_source.gate_read_root(handle), review_kernel.collect_contract_violations():
             res = _ex.run_workflow(
                 prep.doc,
                 prep.inputs,

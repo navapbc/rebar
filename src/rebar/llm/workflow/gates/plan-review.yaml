@@ -217,6 +217,7 @@ steps:
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
+                outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -233,6 +234,7 @@ steps:
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
+                outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
         else:
         - id: verify_inputs
           uses: plan_review_verify_inputs
@@ -302,6 +304,7 @@ steps:
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
+                outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -318,6 +321,7 @@ steps:
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
+                outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
     else:
     - id: passthrough
       uses: plan_review_passthrough
