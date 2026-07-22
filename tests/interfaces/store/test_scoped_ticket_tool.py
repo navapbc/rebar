@@ -62,6 +62,19 @@ def test_show_ticket_tool_reads(rebar_repo: Path) -> None:
     assert "Scoped Read" in out and tid in out
 
 
+def test_show_ticket_tool_tolerates_rebar_scheme_prefix(rebar_repo: Path) -> None:
+    """The plan-review citation token is ``[rebar:<id>]`` and the finder passes its
+    content — INCLUDING the ``rebar:`` scheme — to the ``show_ticket`` tool. The tool
+    must resolve ``rebar:<id>`` to the same ticket as the bare ``<id>``; otherwise the
+    documented ``[rebar:<C>]`` citation-escape (E4/G1G2/E6) fails closed on a spurious
+    'ticket not found' (bug: citation resolver rejects the scheme-prefixed id)."""
+    tid = rebar.create_ticket("task", "Prefix Read", repo_root=str(rebar_repo))
+    show = _tools(str(rebar_repo), allow_comment=False)["show_ticket"]
+    out = show(f"rebar:{tid}")
+    assert not out.startswith("Error:"), f"scheme-prefixed lookup errored: {out}"
+    assert "Prefix Read" in out and tid in out
+
+
 def test_comment_ticket_tool_comments(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "Scoped Comment", repo_root=str(rebar_repo))
     tools = _tools(str(rebar_repo), allow_comment=True)

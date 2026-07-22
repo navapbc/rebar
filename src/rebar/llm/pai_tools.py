@@ -196,6 +196,21 @@ def grounding_tools(repo_path: str | None) -> list[Callable]:
     return [resolve_symbol]
 
 
+def _normalize_ticket_ref(ticket_id: str) -> str:
+    """Strip the ``rebar:`` citation SCHEME (and any wrapping ``[]``/whitespace) from an
+    agent-supplied ticket ref. The plan-review citation token is ``[rebar:<id>]`` and the
+    finder — following the E4/G1G2/E6 prompts that say "retrieve C via ``show_ticket(C)``"
+    — routinely passes the token content ``rebar:<id>`` verbatim. rebar's id resolver does
+    not recognize the ``rebar:`` scheme, so the lookup failed 'not found' and the documented
+    ``[rebar:<C>]`` citation-escape fell closed on a spurious gap. No real ticket id (hex
+    groups) or alias (hyphenated words) contains a colon, so stripping a leading ``rebar:``
+    is unambiguous. Idempotent on a bare id."""
+    ref = ticket_id.strip().strip("[]").strip()
+    if ref[:6].lower() == "rebar:":
+        ref = ref[6:].strip()
+    return ref
+
+
 def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]:
     """Least-privilege rebar ticket tools (WS-D3): ``show_ticket`` always;
     ``comment_ticket`` only when ``allow_comment``. Nothing else — no create/edit/
@@ -203,13 +218,16 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
 
     def show_ticket(ticket_id: str) -> str:
         """Read a rebar ticket's compiled state (id, title, status, description,
-        comments, deps) as JSON. Read-only."""
+        comments, deps) as JSON. Accepts either a bare id/alias or the ``rebar:<id>``
+        citation-token form. Read-only."""
         import json
 
         from rebar import _reads
 
         try:
-            return json.dumps(_reads.show_ticket(ticket_id, repo_root=repo_path))
+            return json.dumps(
+                _reads.show_ticket(_normalize_ticket_ref(ticket_id), repo_root=repo_path)
+            )
         except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
             return f"Error: {exc}"
 
@@ -223,7 +241,7 @@ def rebar_tools(repo_path: str | None, *, allow_comment: bool) -> list[Callable]
             import rebar
 
             try:
-                rebar.comment(ticket_id, body, repo_root=repo_path)
+                rebar.comment(_normalize_ticket_ref(ticket_id), body, repo_root=repo_path)
                 return f"Commented on {ticket_id}."
             except Exception as exc:  # noqa: BLE001 — agent-tool boundary: surface the error to the LLM as a tool-result string, never crash the agent loop
                 return f"Error: {exc}"
