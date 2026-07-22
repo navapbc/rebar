@@ -234,6 +234,7 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         # plan-review LIVE plumbing: the verify/coach prompt-input ops that emit the
         # {{plan}} text + the verifier/coach INSTRUCTIONS listing for the LIVE prompt steps.
         "plan_review_verify_inputs",
+        "plan_review_prerequisite_verify_inputs",
         "plan_review_coach_inputs",
     )
     for io in ("input", "output")

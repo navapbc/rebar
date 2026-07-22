@@ -71,6 +71,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "asserted-capability": (0.95, "advisory"),
     "decomp-shape": (0.95, "advisory"),
     "necessity": (0.95, "advisory"),
+    "prerequisite-consistency": (0.6, "blocking"),
 }
 
 
@@ -138,8 +139,9 @@ def test_full_routing_table_matches_pinned_expectation() -> None:
     assert actual == EXPECTED_ROUTING
 
 
-def test_only_the_eleven_approved_criteria_are_blocking() -> None:
-    # The blocking set is exactly the approved criteria; nothing else silently flipped posture.
+def test_only_the_approved_and_prerequisite_criteria_are_blocking() -> None:
+    # The blocking set is exactly the calibrated criteria plus the dedicated
+    # prerequisite criterion; nothing else silently flipped posture.
     r = _routing()
     blocking = {cid for cid, v in r.items() if v.get("default_posture") == "blocking"}
-    assert blocking == LOWERED | set(PROMOTED) | {"T4"}
+    assert blocking == LOWERED | set(PROMOTED) | {"T4", "prerequisite-consistency"}

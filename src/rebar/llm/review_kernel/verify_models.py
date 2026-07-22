@@ -88,7 +88,7 @@ _BINARY_NA_DEFAULT = frozenset(
 )
 
 
-def _build_binary(forbid: Any) -> type:
+def _build_binary(forbid: Any, *, extra_fields: dict[str, tuple[type, Any]] | None = None) -> type:
     """Build the shared ``Binary`` sub-answer model — the 7 GRADED sub-questions (whose
     graded fraction is the finding's validity) PLUS the ``cited_reference_accurate`` veto —
     from the module-level vocabulary, so the base and plan-review models never diverge."""
@@ -102,17 +102,23 @@ def _build_binary(forbid: Any) -> type:
     for q in GRADED_BINARY:
         _default = "na" if q in _BINARY_NA_DEFAULT else "insufficient"
         binary_fields[q] = (str, Field(default=_default, description=_BINARY_DESC.get(q, "")))
+    binary_fields.update(extra_fields or {})
     return create_model("Binary", __config__=forbid, **binary_fields)
 
 
-def _build_verification_output(forbid: Any, severity_cls: type) -> type:
+def _build_verification_output(
+    forbid: Any,
+    severity_cls: type,
+    *,
+    binary_extra_fields: dict[str, tuple[type, Any]] | None = None,
+) -> type:
     """Wrap a severity-attributes class + the shared ``Binary`` into the per-finding
     ``Verification`` and its ``VerificationOutput`` wrapper. Built via ``create_model`` (real
     type objects, NOT string annotations) so the parametric ``severity_cls`` resolves cleanly
     under this module's ``from __future__ import annotations``."""
     from pydantic import Field, create_model
 
-    Binary = _build_binary(forbid)
+    Binary = _build_binary(forbid, extra_fields=binary_extra_fields)
     Verification = create_model(
         "Verification",
         __config__=forbid,
@@ -258,7 +264,16 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
             "and is caught (x0.8). Leave empty when not applicable (treated as x1.0).",
         )
 
-    return _build_verification_output(forbid, PlanSeverityAttrs)
+    return _build_verification_output(
+        forbid,
+        PlanSeverityAttrs,
+        binary_extra_fields={
+            "prerequisite_attribution_valid": (
+                str,
+                Field(default="na", description="yes|no|na"),
+            )
+        },
+    )
 
 
 def code_review_verification_model(*, strict: bool = False) -> type:

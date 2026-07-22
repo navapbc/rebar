@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import hashlib
 import logging
 import time
 from collections.abc import Iterator
@@ -332,8 +331,9 @@ def mint_finding_id(finding: dict[str, Any]) -> str:
     """A stable content fingerprint for a finding (the caller-visible ``id`` the
     coach + sidecar reference, never restate). Keyed on the finding text + its
     criteria so the same defect across runs gets the same id."""
-    basis = finding.get("finding", "") + "|" + ",".join(sorted(finding.get("criteria", [])))
-    return "f" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+    from .prerequisites import mint_finding_digest
+
+    return "f" + mint_finding_digest(finding)
 
 
 # ── routing ──────────────────────────────────────────────────────────────────────
@@ -525,7 +525,9 @@ def finalize_verdict(
     # LLM-tier failure (llm_unavailable) makes the review INDETERMINATE — never a hollow
     # PASS — so it is not signed (fuel-posse-ball). A genuine unsupported-stack abstain
     # (the tier ran, a criterion couldn't ground) is NOT llm_unavailable → still PASS.
-    if blocking:
+    if coverage.get("prerequisite_indeterminate"):
+        verdict = "INDETERMINATE"
+    elif blocking:
         verdict = "BLOCK"
     elif coverage.get("llm_unavailable"):
         verdict = "INDETERMINATE"
@@ -727,6 +729,8 @@ def pass3_over_findings(
     # "blocking"`. The descriptor map (`by_id()`) carries block_threshold + default_posture, so
     # the resolution is byte-identical to the pre-unification private resolver.
     def _threshold_for(criteria: Any) -> tuple[float, bool]:
+        if "prerequisite-consistency" in set(criteria or []):
+            return 0.60, True
         block_threshold, blocking_enabled = _criteria.threshold_for(
             criteria, crit_by_id, gate="plan_review"
         )

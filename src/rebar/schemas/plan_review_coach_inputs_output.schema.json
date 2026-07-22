@@ -16,12 +16,16 @@
     "findings": {
       "type": "array",
       "description": "Blocking + surviving findings (blocking first) fed to coach_gate and the coach prompt."
+    },
+    "prerequisite_coverage": {
+      "type": "array"
     }
   },
   "required": [
     "plan",
     "instructions",
-    "findings"
+    "findings",
+    "prerequisite_coverage"
   ],
   "additionalProperties": false
 }
