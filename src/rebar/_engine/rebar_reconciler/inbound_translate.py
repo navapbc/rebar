@@ -312,7 +312,7 @@ except ImportError:  # standalone load without package context
     lazy_load = sys.modules[_loader_key].lazy_load
 
 
-_ADF_KEY_APPLIER = "rebar_reconciler.adf"
+_ADF_KEY_APPLIER = "rebar_reconciler.adapters.jira.adf"
 _AdfModule_Applier = None
 
 
@@ -320,7 +320,7 @@ def _load_adf_module():
     """Lazy-load the sibling adf module (mirrors inbound_differ._load_adf)."""
     global _AdfModule_Applier
     if _AdfModule_Applier is None:
-        _AdfModule_Applier = lazy_load(_ADF_KEY_APPLIER, "adf.py")
+        _AdfModule_Applier = lazy_load(_ADF_KEY_APPLIER, "adapters/jira/adf.py")
     return _AdfModule_Applier
 
 

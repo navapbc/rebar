@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from rebar import config as cfg
-from rebar_reconciler.acli_subprocess import resolve_jira_settings
+from rebar_reconciler.adapters.jira.acli_subprocess import resolve_jira_settings
 
 pytestmark = pytest.mark.unit
 

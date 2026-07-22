@@ -51,7 +51,7 @@ def _build_client():
     if str(engine_dir) not in sys.path:
         sys.path.insert(0, str(engine_dir))
 
-    from rebar_reconciler import acli as mod
+    from rebar_reconciler.adapters.jira import acli as mod
 
     return mod.AcliClient(
         jira_url=os.environ["JIRA_URL"],

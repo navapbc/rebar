@@ -53,7 +53,7 @@ except ImportError:  # standalone load without package context
 # reconciler module owns its own copy) because the differ may be imported via
 # ``importlib.util.spec_from_file_location`` in tests, which does not establish
 # package context, so ``from . import adf`` would fail.
-_ADF_KEY = "rebar_reconciler.adf"
+_ADF_KEY = "rebar_reconciler.adapters.jira.adf"
 _AdfModule = None
 
 
@@ -66,7 +66,7 @@ def _load_adf():
     """
     global _AdfModule
     if _AdfModule is None:
-        _AdfModule = lazy_load(_ADF_KEY, "adf.py")
+        _AdfModule = lazy_load(_ADF_KEY, "adapters/jira/adf.py")
     return _AdfModule
 
 

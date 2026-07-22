@@ -86,7 +86,7 @@ def _ensure_engine_on_path() -> None:
 
 def _build_client():
     _ensure_engine_on_path()
-    from rebar_reconciler import acli as mod
+    from rebar_reconciler.adapters.jira import acli as mod
 
     return mod.AcliClient(
         jira_url=os.environ["JIRA_URL"],

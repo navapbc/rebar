@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler import acli_subprocess, rebar_id_audit
+from rebar_reconciler import rebar_id_audit
+from rebar_reconciler.adapters.jira import acli_subprocess
 
 pytestmark = pytest.mark.unit
 

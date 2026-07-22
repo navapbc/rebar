@@ -67,12 +67,12 @@ def _load_outbound_fields() -> ModuleType:
     does shape-tolerant assignee equality — otherwise raw nested Jira shapes are
     compared against local scalars and every binding is falsely flagged.
     """
-    return _load_sibling("outbound_fields", "outbound_fields.py")
+    return _load_sibling("outbound_fields", "adapters/jira/outbound_fields.py")
 
 
 def _load_adf() -> ModuleType:
     """Load the ADF helpers (``fit_text_to_adf_limit``) for description parity."""
-    return _load_sibling("adf", "adf.py")
+    return _load_sibling("adf", "adapters/jira/adf.py")
 
 
 def _load_inbound_differ() -> ModuleType:

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from rebar_reconciler import inbound_fields, outbound_fields
+from rebar_reconciler import inbound_fields
 from rebar_reconciler._backend_registry import register
-from rebar_reconciler.adapters.jira import jira_fields
+from rebar_reconciler.adapters.jira import jira_fields, outbound_fields
 
 from .identity import JiraIdentityConvention
 
@@ -96,7 +96,7 @@ class JiraBackend:
 def _build_jira_backend(config: Any) -> JiraBackend:
     """Construct a JiraBackend whose transport is an AcliClient from the resolved
     Jira settings — mirroring the pre-story direct construction."""
-    from rebar_reconciler import acli, acli_subprocess
+    from rebar_reconciler.adapters.jira import acli, acli_subprocess
 
     s = acli_subprocess.resolve_jira_settings(project_default="DIG")
     transport = acli.AcliClient(
