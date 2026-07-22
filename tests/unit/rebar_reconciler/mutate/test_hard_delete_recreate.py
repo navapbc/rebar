@@ -107,9 +107,8 @@ def _recording_acli():
     client = MagicMock()
     client.search_issues = MagicMock(return_value=[])  # JQL miss -> proceed to create
     client.create_issue = MagicMock(return_value={"key": "REB-NEW-1"})
-    mod = types.ModuleType("acli_recording_stub")
-    mod.AcliClient = lambda **_: client  # type: ignore[attr-defined]
-    return mod, client
+    # S4: _load_acli returns the transport (client) directly.
+    return client, client
 
 
 def _patch_apply_deps(applier, monkeypatch, acli_mod):

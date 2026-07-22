@@ -657,16 +657,9 @@ class TestFetcherParentEnrichment:
                     ]
                 return []  # subsequent pages empty
 
-        class _StubAcliMod:
-            """Module stub so fetcher._load_acli() returns this."""
-
-            @staticmethod
-            def AcliClient(**kwargs):
-                return _StubClient()
-
-        # Patch _load_acli to return our stub
+        # S4: _load_acli returns the transport (client) directly.
         original_load = fetcher_mod._load_acli
-        fetcher_mod._load_acli = lambda: _StubAcliMod
+        fetcher_mod._load_acli = lambda: _StubClient()
 
         bridge_state = tmp_path / "bridge_state" / "snapshots"
         bridge_state.mkdir(parents=True)
@@ -716,12 +709,8 @@ class TestFetcherParentEnrichment:
             def get_parent_map(self, project, jql=None):
                 raise RuntimeError("REST parent fetch failed")
 
-        class _StubAcliModFail:
-            @staticmethod
-            def AcliClient(**kwargs):
-                return _FailingClient()
-
-        fetcher_mod._load_acli = lambda: _StubAcliModFail
+        # S4: _load_acli returns the transport (client) directly.
+        fetcher_mod._load_acli = lambda: _FailingClient()
         bridge_state = tmp_path / "bridge_state" / "snapshots"
         bridge_state.mkdir(parents=True)
 

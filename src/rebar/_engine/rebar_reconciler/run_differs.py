@@ -59,6 +59,21 @@ def _load(name: str, relpath: str):
     return lazy_load(name, relpath)
 
 
+def _load_outbound_diff_transport():
+    """Return the configured backend's transport for the outbound-diff live-comment
+    fetch + pending-binding recovery (S4).
+
+    This is run_differs' own transport seam (distinct from applier/fetcher's
+    ``_load_acli``): tests patch THIS function to inject a transport-shaped fake.
+    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
+    keep standalone by-path loading working.
+    """
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    return select_backend(load_config()).transport
+
+
 def _emit_outbound_field_alerts(
     conflict_sink: list[tuple[str, str]],
     dropped_field_sink: list[tuple[str, str]],
@@ -393,16 +408,11 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # was previously (mis)passed the `applier` MODULE (no search_issues), so every
     # recovery AttributeError'd into the fail-open swallow below and NEVER ran. The
     # same client is reused by the outbound differ's live-comment fetch further down.
-    # Built via the stable acli_subprocess floor (acli_mod_for_comments may be a test
-    # fake that only provides AcliClient). Deferred to runtime (not import) so the
-    # differ stays importable without JIRA_URL/JIRA_USER set.
-    from rebar_reconciler import acli as acli_mod_for_comments
-    from rebar_reconciler import acli_subprocess
-
-    _s = acli_subprocess.resolve_jira_settings()
-    outbound_diff_client = acli_mod_for_comments.AcliClient(
-        jira_url=_s.url, user=_s.user, api_token=_s.api_token
-    )
+    # S4: obtain the outbound-diff transport from the configured backend (routes
+    # through the Backend port instead of constructing an AcliClient inline).
+    # Deferred to runtime (not import) so the differ stays importable without
+    # JIRA_URL/JIRA_USER set.
+    outbound_diff_client = _load_outbound_diff_transport()
 
     # Filtered passes skip pending-binding recovery to avoid finalizing
     # bindings for non-test tickets (scope leak).

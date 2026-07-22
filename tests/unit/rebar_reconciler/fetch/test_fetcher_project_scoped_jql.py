@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -47,9 +46,9 @@ class _RecordingClient:
 
 
 def _acli_module_returning(client):
-    mod = types.ModuleType("acli_integration")
-    mod.AcliClient = lambda *a, **k: client  # type: ignore[attr-defined]
-    return mod
+    # S4: _load_acli returns the transport directly (not a module exposing
+    # .AcliClient), so hand back the client itself.
+    return client
 
 
 # --- builder unit tests ----------------------------------------------------

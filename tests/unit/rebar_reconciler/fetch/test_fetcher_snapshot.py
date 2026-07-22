@@ -21,7 +21,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,9 +103,9 @@ def _make_paginating_acli(total: int = 250, page_size: int = 100):
             super().__init__(total=total, page_size=page_size)
             client_holder["client"] = self
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _Client
-    return mock_acli, client_holder
+    # S4: _load_acli returns the backend transport DIRECTLY (not a module exposing
+    # .AcliClient), so hand back a ready _Client instance.
+    return _Client(), client_holder
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +250,7 @@ def test_fetch_snapshot_search_error_propagates(tmp_path, fetcher):
         def search_issues(self, jql: str, **kwargs):
             raise RuntimeError("ACLI connection refused")
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _ErrorClient
-
-    with patch.object(fetcher, "_load_acli", return_value=mock_acli):
+    # S4: _load_acli returns the transport instance directly.
+    with patch.object(fetcher, "_load_acli", return_value=_ErrorClient()):
         with pytest.raises(RuntimeError, match="ACLI connection refused"):
             fetcher.fetch_snapshot("2026-05-24-pass-05", repo_root=tmp_path)

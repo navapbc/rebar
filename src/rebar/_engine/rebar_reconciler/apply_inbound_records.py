@@ -50,8 +50,9 @@ _RECONCILER_MARKER_APPLIER = "<!-- rebar:reconciler-echo -->"
 def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
     """Best-effort: mint/reuse a placeholder identity for an inbound Jira assignee
     (2f13). When the assignee field carries an ``accountId``, resolve it through
-    :func:`rebar.ensure_identity_for` (provider ``"jira"``, keyed on the opaque
-    accountId) so an unmapped inbound user gets a ghost identity that a later
+    :func:`rebar.ensure_identity_for` (provider = the configured backend vendor,
+    keyed on the opaque accountId) so an unmapped inbound user gets a ghost identity
+    that a later
     outbound pass can key on.
 
     ADDITIVE + best-effort: this NEVER changes the human-readable name extraction and
@@ -65,13 +66,19 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
     display_name = _extract_name(assignee)
     try:
         import rebar
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        # S4: provider identity + creation channel come from the configured backend's
+        # vendor, not a hard-coded provider literal (routes through the Backend port).
+        vendor = select_backend(load_config()).vendor
 
         rebar.ensure_identity_for(
-            "jira",
+            vendor,
             account_id,
             display_name or account_id,
             repo_root=repo_root,
-            creation_channel="jira",
+            creation_channel=vendor,
         )
     except Exception:  # noqa: BLE001 — best-effort ghost mint; never fail the inbound apply
         logger.debug(

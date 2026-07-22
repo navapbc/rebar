@@ -44,24 +44,31 @@ def build_acli_client_from_env() -> Any:
     Reads ``JIRA_URL``, ``JIRA_USER``, ``JIRA_API_TOKEN``, and optional
     ``JIRA_PROJECT`` (defaulting to ``"DIG"``). Raises RuntimeError with
     a clear message when any required variable is missing — bands prefer
-    this fail-fast behaviour over a cryptic ``AcliClient()`` TypeError
+    this fail-fast behaviour over a cryptic no-arg-constructor TypeError
     (the no-arg constructor was the root cause of the bands' production
     crash before this helper existed).
 
+    S4: the transport is obtained from the configured backend
+    (``select_backend(load_config()).transport``) rather than constructed
+    inline, but the fail-fast missing-env guard is preserved AHEAD of backend
+    selection so an absent required var still raises the clear RuntimeError.
+
     Returns:
-        A configured ``AcliClient`` instance loaded from the sibling
-        ``rebar_reconciler/acli.py`` (under the rebar engine scripts dir) via importlib.
+        The configured backend's transport (a ``TicketTransport``, i.e. an
+        AcliClient).
 
     Raises:
         RuntimeError: If any required JIRA_* env var is missing or empty.
     """
-    from rebar_reconciler import acli as mod
+    from rebar.config import load_config
     from rebar_reconciler import acli_subprocess
+    from rebar_reconciler._backend_registry import select_backend
 
     # url/user/project resolve through the typed config (JIRA_URL/JIRA_USER/
     # JIRA_PROJECT env override the [tool.rebar.jira] file) via the stable
     # acli_subprocess floor; the secret api_token is env-only. All three connection
-    # essentials are still REQUIRED (env or config).
+    # essentials are still REQUIRED (env or config) — checked here, BEFORE backend
+    # selection, to preserve the pre-S4 fail-fast contract.
     settings = acli_subprocess.resolve_jira_settings(project_default="DIG")
     missing = [
         name
@@ -76,15 +83,10 @@ def build_acli_client_from_env() -> Any:
         raise RuntimeError(
             f"missing JIRA_* configuration: {', '.join(missing)} "
             "(set via env or [tool.rebar.jira]; JIRA_API_TOKEN is env-only) "
-            "(required to construct AcliClient for bootstrap band execution)"
+            "(required to build the backend transport for bootstrap band execution)"
         )
 
-    return mod.AcliClient(
-        jira_url=settings.url,
-        user=settings.user,
-        api_token=settings.api_token,
-        jira_project=settings.project,
-    )
+    return select_backend(load_config()).transport
 
 
 def verify_attested_commit(sha: str, allowlist: list[str], repo_root: Path | None = None) -> bool:

@@ -145,10 +145,10 @@ class _FakeClient:
         self._s.write_calls.append(f"unassign_issue({key})")
 
 
-def _make_fake_acli_module(state: _FakeJiraState) -> types.ModuleType:
-    mod = types.ModuleType("acli_integration")
-    mod.AcliClient = lambda *a, **k: _FakeClient(state)  # type: ignore[attr-defined]
-    return mod
+def _make_fake_acli_module(state: _FakeJiraState) -> _FakeClient:
+    # S4: _load_acli returns the transport (client) directly. fetcher + applier share
+    # this one instance and thus the one mutable ``state``.
+    return _FakeClient(state)
 
 
 def _make_ok_concurrency() -> types.ModuleType:

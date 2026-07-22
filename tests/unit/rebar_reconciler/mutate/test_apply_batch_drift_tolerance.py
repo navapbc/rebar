@@ -208,9 +208,8 @@ def _make_committing_acli_module(root: Path, drift_subjects: list):
     client.update_issue = MagicMock(side_effect=_update)
     client.delete_issue = MagicMock(side_effect=_delete)
 
-    mod = types.ModuleType("acli_committing")
-    mod.AcliClient = MagicMock(return_value=client)
-    return mod, client
+    # S4: _load_acli returns the transport (client) directly.
+    return client, client
 
 
 def _make_real_head_concurrency_module() -> types.ModuleType:

@@ -123,9 +123,8 @@ def _make_acli_mock():
             super().__init__()
             client_holder["client"] = self
 
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = _Client
-    return mock_acli, client_holder
+    # S4: _load_acli returns the transport instance directly.
+    return _Client(), client_holder
 
 
 def test_dedup_suppression_emits_alert(tmp_path, fetcher):

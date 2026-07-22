@@ -15,7 +15,6 @@ import importlib.util
 import json
 import subprocess
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -78,8 +77,17 @@ def applier():
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_acli_module() -> tuple[types.ModuleType, MagicMock]:
-    """Return (mock acli module, mock client instance) with tracked method calls."""
+def _make_mock_acli_module() -> tuple[MagicMock, MagicMock]:
+    """Return (transport, transport) — a transport-shaped ``TicketTransport`` fake
+    with tracked method calls.
+
+    S4: ``_load_acli`` now returns the backend transport DIRECTLY (not a module
+    exposing ``.AcliClient``), so the seam's ``return_value`` is the transport
+    itself. Both tuple slots are the same object so the existing behavioural call
+    sites (``mock_acli_mod, mock_client = _make_mock_acli_module()``) keep working:
+    ``patch.object(applier, "_load_acli", return_value=mock_acli_mod)`` now injects
+    the transport, and assertions on ``mock_client.<method>`` observe the same mock.
+    """
     mock_client = MagicMock()
     mock_client.search_issues = MagicMock(return_value=[])
     mock_client.create_issue = MagicMock(return_value={"key": "DSO-1"})
@@ -88,10 +96,7 @@ def _make_mock_acli_module() -> tuple[types.ModuleType, MagicMock]:
     mock_client.add_label = MagicMock(return_value=None)
     mock_client.set_entity_property = MagicMock(return_value=None)
 
-    mock_acli_mod = types.ModuleType("acli_integration")
-    mock_acli_mod.AcliClient = MagicMock(return_value=mock_client)
-
-    return mock_acli_mod, mock_client
+    return mock_client, mock_client
 
 
 # ---------------------------------------------------------------------------
@@ -254,14 +259,20 @@ def test_delete_one_propagates_non_404_jira_errors(applier):
 
 
 def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkeypatch):
-    """Regression: apply() must call AcliClient with all four credentials —
-    jira_url, user, api_token, AND jira_project — derived from env vars.
+    """Regression: the backend transport must be built by calling AcliClient with all
+    four credentials — jira_url, user, api_token, AND jira_project — derived from env.
 
-    Bug 4fa9-0846-519e-4c30: applier.py originally omitted the jira_project
-    kwarg, so AcliClient.__init__ defaulted self.jira_project="" and every
-    CREATE mutation sent `projectKey=""` to ACLI, which rejected with
-    "ProjectKey can't be null or blank". This test pins all four kwargs to
-    prevent silent omission of any credential field.
+    Bug 4fa9-0846-519e-4c30: the transport construction originally omitted the
+    jira_project kwarg, so AcliClient.__init__ defaulted self.jira_project="" and
+    every CREATE mutation sent `projectKey=""` to ACLI, which rejected with
+    "ProjectKey can't be null or blank". This test pins all four kwargs to prevent
+    silent omission of any credential field.
+
+    S4 relocated the AcliClient construction out of applier and into the backend
+    factory (``select_backend(...).transport``, which ``applier._load_acli`` now
+    returns). This test therefore pins the four kwargs at that relocated construction
+    seam: it patches ``acli.AcliClient`` and lets the REAL ``_load_acli`` backend path
+    run (no ``_load_acli`` patch), which is where the kwargs are now assembled.
     """
     pass_id = "2026-05-23-env-args"
     _init_git_repo(tmp_path)
@@ -271,13 +282,13 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
     monkeypatch.setenv("JIRA_API_TOKEN", "tok-abc-123")
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
 
-    mock_acli_mod, _ = _make_mock_acli_module()
-    constructor = mock_acli_mod.AcliClient  # MagicMock
+    from rebar_reconciler import acli
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch.object(
-        applier, "_load_acli", return_value=mock_acli_mod
-    ):
-        applier.apply([], pass_id, repo_root=tmp_path)
+    mock_client, _ = _make_mock_acli_module()
+    constructor = MagicMock(return_value=mock_client)
+    monkeypatch.setattr(acli, "AcliClient", constructor)
+
+    applier.apply([], pass_id, repo_root=tmp_path)
 
     # AcliClient must have been constructed exactly once with all four env-derived kwargs.
     constructor.assert_called_once()
@@ -299,11 +310,14 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
 
 
 def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, applier, monkeypatch):
-    """When credential env vars are absent, apply() must still construct
-    AcliClient with empty-string defaults (so test/CI shims that don't set
-    the env still work), EXCEPT jira_project which falls back to the
-    canonical project default "DIG" — empty projectKey is rejected by ACLI
-    (bug 4fa9-0846-519e-4c30), so a sensible default is required."""
+    """When credential env vars are absent, building the backend transport must still
+    construct AcliClient with empty-string defaults (so test/CI shims that don't set
+    the env still work), EXCEPT jira_project which falls back to the canonical project
+    default "DIG" — empty projectKey is rejected by ACLI (bug 4fa9-0846-519e-4c30), so
+    a sensible default is required.
+
+    S4: asserted at the relocated backend-factory construction seam (patch
+    ``acli.AcliClient``, let the real ``_load_acli`` backend path run)."""
     pass_id = "2026-05-23-env-unset"
     _init_git_repo(tmp_path)
 
@@ -312,13 +326,13 @@ def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, app
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
     monkeypatch.delenv("JIRA_PROJECT", raising=False)
 
-    mock_acli_mod, _ = _make_mock_acli_module()
-    constructor = mock_acli_mod.AcliClient
+    from rebar_reconciler import acli
 
-    with __import__("unittest.mock", fromlist=["patch"]).patch.object(
-        applier, "_load_acli", return_value=mock_acli_mod
-    ):
-        applier.apply([], pass_id, repo_root=tmp_path)
+    mock_client, _ = _make_mock_acli_module()
+    constructor = MagicMock(return_value=mock_client)
+    monkeypatch.setattr(acli, "AcliClient", constructor)
+
+    applier.apply([], pass_id, repo_root=tmp_path)
 
     constructor.assert_called_once()
     assert constructor.call_args.kwargs == {

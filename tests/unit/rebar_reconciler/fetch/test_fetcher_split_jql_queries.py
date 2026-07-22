@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -78,9 +77,9 @@ class _JqlRoutedClient:
 
 
 def _make_acli_module_returning(client):
-    mock_acli = types.ModuleType("acli_integration")
-    mock_acli.AcliClient = lambda *a, **k: client  # type: ignore[attr-defined]
-    return mock_acli
+    # S4: _load_acli returns the transport directly (not a module exposing
+    # .AcliClient), so hand back the client itself.
+    return client
 
 
 def test_both_split_jqls_issued_in_order_active_then_done(tmp_path, fetcher):

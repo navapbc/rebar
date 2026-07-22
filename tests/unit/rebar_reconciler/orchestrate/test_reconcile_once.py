@@ -64,7 +64,7 @@ def applier_mod():
 # ---------------------------------------------------------------------------
 
 
-def _make_acli_module(issues: list[dict]) -> types.ModuleType:
+def _make_acli_module(issues: list[dict]) -> object:
     """Return a FAITHFUL stub acli_integration module over a mutable Jira state.
 
     Ticket robe-creek-zealot: the previous stub returned the same static issue
@@ -153,10 +153,10 @@ def _make_acli_module(issues: list[dict]) -> types.ModuleType:
         def transition_issue_by_name(self, key: str, target: str) -> None:
             self.transition_issue(key, target)
 
-    mock_mod = types.ModuleType("acli_integration")
-    mock_mod.AcliClient = _Client
-    mock_mod._jira_state = state  # test-introspection seam
-    return mock_mod
+    # S4: _load_acli returns the transport (client) instance directly. All call
+    # sites (fetcher + applier) share this one instance and thus one mutable
+    # ``state`` (the closure the methods above capture), preserving write-reflection.
+    return _Client()
 
 
 def _make_ok_concurrency() -> types.ModuleType:
@@ -414,7 +414,7 @@ def mode_mod():
     return _load_module("rebar_reconciler.mode", MODE_PATH)
 
 
-def _make_jql_partitioned_acli(issues: list[dict]) -> types.ModuleType:
+def _make_jql_partitioned_acli(issues: list[dict]) -> object:
     """Faithful acli stub that partitions by the active/Done JQL split.
 
     The production fetcher issues TWO queries (active ``status != Done`` then
@@ -424,8 +424,8 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> types.ModuleType:
     This stub returns an issue only for the query whose status-band matches,
     mirroring production so the snapshot build emits no dedup alert.
     """
-    mod = _make_acli_module(issues)
-    Base = mod.AcliClient
+    base = _make_acli_module(issues)
+    Base = type(base)  # S4: _make_acli_module now returns a transport instance
 
     class _Partitioned(Base):
         def search_issues(self, jql: str, **kwargs) -> list[dict]:
@@ -446,8 +446,7 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> types.ModuleType:
                     out.append(issue)
             return out
 
-    mod.AcliClient = _Partitioned
-    return mod
+    return _Partitioned()
 
 
 def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):

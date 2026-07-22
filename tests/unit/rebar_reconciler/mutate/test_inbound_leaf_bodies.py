@@ -99,9 +99,8 @@ def _patch_apply_deps(applier, monkeypatch):
     before any inbound dispatch happens. Mirror test_e2e_dedup_pass: stub
     ``_load_acli`` (offline client) and ``_load_concurrency`` (no git in tmp_path).
     """
-    fake_acli = types.ModuleType("acli_integration_stub")
-    fake_acli.AcliClient = lambda **_: MagicMock()  # type: ignore[attr-defined]
-    monkeypatch.setattr(applier, "_load_acli", lambda: fake_acli)
+    # S4: _load_acli returns the transport (client) directly.
+    monkeypatch.setattr(applier, "_load_acli", lambda: MagicMock())
 
     fake_conc = types.ModuleType("concurrency_stub")
     fake_conc.snapshot_head = lambda _repo_root: "deadbeef" * 5  # type: ignore[attr-defined]
