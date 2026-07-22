@@ -208,8 +208,15 @@ Signed-off-by: Your Name <you@example.com>
 ```
 
 Use your **real name** (pseudonyms don't satisfy the DCO), and an email you can be
-reached at. This is **enforced at push time**: Gerrit rejects an unsigned push to
+reached at — in short, sign off with your own real, configured git identity. This is
+**enforced at push time**: Gerrit rejects an unsigned push to
 `refs/for/*`, so a commit without a `Signed-off-by:` trailer cannot even reach review.
+Contributor-facing guidance (`AGENTS.md`, `.agents/rules/*.md`, this file, `docs/`) must
+describe this same identity-neutral contract — `make lint` runs
+`scripts/check_dco_identity.py`, which fails the build if a personal sign-off identity is
+hardcoded back into that guidance. A dedicated automation identity (e.g. a bot account) is
+scoped to its own machine-local config and to automation-owned paths (`infra/`,
+`.github/workflows/`, `tests/`), which the check excludes.
 
 **Fixing a missing sign-off.** If a push is rejected (or you forgot), re-sign and
 re-push — nothing is lost:

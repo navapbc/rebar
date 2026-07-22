@@ -26,10 +26,10 @@ reference-and-summary — read **`AGENTS.md`** for the authoritative protocol.
 - **Work in a fresh worktree** branched from current `origin/main`; run every command from
   inside it.
 - **Land through Gerrit** (never GitHub PRs): `git push gerrit HEAD:refs/for/main`; every commit
-  needs a `rebar-ticket: <id>` trailer and a DCO
-  `Signed-off-by: Joe Oakhart <joeoakhart+bot@navapbc.com>` (commit under the bot identity
-  `joeoakhart+bot@navapbc.com`); Submit once `LLM-Review = +1` AND `Verified = +1` and all
-  comments are resolved.
+  needs a `rebar-ticket: <id>` trailer and a DCO sign-off under **your own configured git
+  identity** (`git config user.name`/`user.email`, `git commit -s`) — a dedicated automation identity is
+  scoped to its own machine-local config, never hardcoded here. Submit once `LLM-Review = +1`
+  AND `Verified = +1` and all comments are resolved.
 - **Conventions**: target 200–500 LOC per file (soft cap 800; don't split call-graph seams
   mechanically or create files < 100 LOC); prefer the Serena MCP server over raw grep for
   symbol navigation.
