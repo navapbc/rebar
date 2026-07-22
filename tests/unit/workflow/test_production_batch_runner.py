@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -66,7 +67,9 @@ def _cfg() -> LLMConfig:
     return dataclasses.replace(LLMConfig.from_env(repo_root=None), model="claude-opus-4-8")
 
 
-def _make_req(criteria, *, target=_TARGET, usd_budget=None, repo_root=None) -> BatchRunRequest:
+def _make_req(
+    criteria, *, target=_TARGET, usd_budget=None, repo_root=None, with_inputs=None
+) -> BatchRunRequest:
     return BatchRunRequest(
         finder="plan-review-finder",
         criteria=tuple(criteria),
@@ -77,6 +80,7 @@ def _make_req(criteria, *, target=_TARGET, usd_budget=None, repo_root=None) -> B
         repo_root=repo_root,
         run_id="run-1",
         step_id="finders",
+        with_inputs=with_inputs or {},
     )
 
 
@@ -377,3 +381,63 @@ def test_checkpoint_resume_through_runner_equals_bespoke(_stub_reads, tmp_path):
     cov_b2: dict = {}
     run_pass1(ctx_b, cfg, fake, single, agent, cov_b2)
     assert cov_b2["checkpoint"] == cp2
+
+
+def test_focused_runner_consumes_preloaded_relation_snapshot_without_store_reread(
+    monkeypatch,
+) -> None:
+    prerequisite_id = "dcba-0000-0000-0002"
+    reads: list[str] = []
+
+    def _show(ticket_id, *, repo_root=None):  # noqa: ANN001
+        reads.append(ticket_id)
+        if ticket_id != _TARGET:
+            raise AssertionError("focused runner reread a prerequisite from the store")
+        return _state()
+
+    monkeypatch.setattr("rebar._reads.show_ticket", _show)
+    monkeypatch.setattr("rebar._reads.list_tickets", lambda parent=None, repo_root=None: [])
+    captured: dict = {}
+
+    def _focused(runner, cfg, *, subject_plan, blocks, ticket_id=""):
+        captured.update(subject_plan=subject_plan, blocks=blocks, ticket_id=ticket_id)
+        return (
+            [
+                {
+                    "prerequisite_id": prerequisite_id,
+                    "disposition": "consistent",
+                    "findings": [],
+                }
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(
+        "rebar.llm.plan_review.prerequisites.run_focused_finder",
+        _focused,
+    )
+    snapshot = SimpleNamespace(
+        prerequisite_ids=(prerequisite_id,),
+        ticket_states_by_id={prerequisite_id: {"description": "authoritative prerequisite plan"}},
+    )
+    request = _make_req(
+        [{"prompt": "E2"}],
+        with_inputs={"subject_plan": "subject plan", "relation_snapshot": snapshot},
+    )
+
+    result = ProductionBatchRunner(
+        runner=FakeRunner(structured={"analysis": "", "findings": []})
+    ).run(request, None)
+
+    assert reads == [_TARGET]
+    assert captured == {
+        "subject_plan": "subject plan",
+        "blocks": [
+            {
+                "canonical_id": prerequisite_id,
+                "rendered_text": "authoritative prerequisite plan",
+            }
+        ],
+        "ticket_id": _TARGET,
+    }
+    assert result.outputs["prerequisite_coverage"][0]["prerequisite_id"] == prerequisite_id

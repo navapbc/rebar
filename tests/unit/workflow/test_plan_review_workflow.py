@@ -123,6 +123,8 @@ class _CannedAgent(AgentStepRunner):
                 for i in range(len(findings))
             ]
             return StepResult(outputs={"verifications": verifs}, status="succeeded")
+        if prompt == "plan-review-prerequisite-verifier":
+            return StepResult(outputs={"verifications": []}, status="succeeded")
         if prompt == "plan-review-coach":
             return StepResult(
                 outputs={
@@ -676,3 +678,108 @@ def test_explicit_config_reflected_in_verdict_model_runner():
     # Sanity: WITHOUT the scope it falls back to the env config (NOT the caller's identity).
     out_env = op(ctx)
     assert out_env["model"] != "caller-model-xyz"
+
+
+class _PrerequisiteIndeterminateBatchRunner(_ex.BatchRunner):
+    def run(self, req, agent_runner):
+        return _ex.BatchRunResult(
+            outputs={
+                "findings": [],
+                "prerequisite_coverage": [
+                    {
+                        "prerequisite_id": "dep-0000-0000-0001",
+                        "disposition": "indeterminate",
+                        "findings": [],
+                        "reason_code": "evaluation-error",
+                        "detail": "provider-failure",
+                    }
+                ],
+                "prerequisite_findings": [],
+                "has_prerequisites": True,
+                "criteria_count": len(req.criteria),
+                "batch_plan": {},
+            }
+        )
+
+
+def _run_prerequisite_indeterminate_signal_chain(monkeypatch, *, code_grounded: bool):
+    state = _state(description=_CLEAN_DESC)
+    _patch_reads(monkeypatch, state)
+    registry = dict(_ex.STEP_REGISTRY)
+    registry["plan_review_grounding"] = lambda ctx: {
+        "findings": list(ctx.inputs.get("findings") or []),
+        "code_grounded": code_grounded,
+    }
+    recorder = _Rec()
+    agent = _CannedAgent()
+    result = _ex.run_workflow(
+        _doc(),
+        {"ticket_id": _TARGET, "probe_criteria": []},
+        recorder=recorder,
+        target_ticket=_TARGET,
+        scripted_registry=registry,
+        agent_runner=agent,
+        batch_runner=_PrerequisiteIndeterminateBatchRunner(),
+    )
+    verdict = _terminal_verdict(recorder)
+    assert result.status == "succeeded", result.error
+    assert verdict is not None
+    assert verdict["verdict"] == "INDETERMINATE"
+    assert verdict["coverage"]["prerequisite_indeterminate"] is True
+    return recorder, verdict, agent
+
+
+def test_prerequisite_indeterminate_signal_chain_agentic(monkeypatch):
+    _, _, agent = _run_prerequisite_indeterminate_signal_chain(monkeypatch, code_grounded=True)
+    assert agent.verifier_prompts == ["plan-review-verifier-agentic"]
+
+
+def test_prerequisite_indeterminate_signal_chain_single_turn(monkeypatch):
+    _, _, agent = _run_prerequisite_indeterminate_signal_chain(monkeypatch, code_grounded=False)
+    assert agent.verifier_prompts == ["plan-review-verifier"]
+
+
+def test_prerequisite_indeterminate_retains_det_blocker(monkeypatch):
+    from rebar.llm.workflow.executor import STEP_REGISTRY, StepContext
+
+    _patch_reads(monkeypatch, _state())
+    det = {
+        "id": "det-1",
+        "finding": "A deterministic structural defect remains visible.",
+        "criteria": ["P1"],
+        "tier": "DET",
+    }
+    context = StepContext(
+        run_id="run",
+        step_id="decide",
+        kind="scripted",
+        step={},
+        inputs={
+            "findings": [],
+            "verifications": [],
+            "det_blocking": [det],
+            "det_advisory": [],
+            "review_phase": "planning",
+            "has_prerequisites": True,
+            "prerequisite_coverage": [
+                {
+                    "prerequisite_id": "dep-0000-0000-0001",
+                    "disposition": "indeterminate",
+                    "findings": [],
+                    "reason_code": "evaluation-error",
+                }
+            ],
+            "prerequisite_findings": [],
+            "prerequisite_verifications": [],
+        },
+        workflow={},
+        target_ticket=_TARGET,
+    )
+
+    output = STEP_REGISTRY["plan_review_decide"](context)
+
+    assert len(output["blocking"]) == 1
+    assert output["blocking"][0]["finding"] == det["finding"]
+    assert output["blocking"][0]["tier"] == "DET"
+    assert output["blocking"][0]["decision"] == "block"
+    assert output["prerequisite_coverage"][0]["disposition"] == "indeterminate"

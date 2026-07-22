@@ -114,7 +114,7 @@ class _Rec(_ex.RunRecorder):
         return rec if rec and rec.get("status") == "succeeded" else None
 
 
-def _run(plan_text: str, *, agent_runner=None, batch_runner=None):
+def _run(plan_text: str, *, agent_runner=None, batch_runner=None, batch_with=None):
     wf = _wf(
         {
             "prompt": "plan-review-finder",
@@ -135,6 +135,8 @@ def _run(plan_text: str, *, agent_runner=None, batch_runner=None):
             }
         ],
     )
+    if batch_with is not None:
+        wf["steps"][-1]["batch"]["with"] = batch_with
     wf["steps"][-1]["needs"] = ["t"]
     rec = _Rec()
     _ex.run_workflow(
@@ -210,3 +212,37 @@ def test_interpreter_does_not_branch_on_plan_internals():
     assert step["status"] == "succeeded"
     assert step["outputs"]["batch_plan"] == {"this": ["is", {"opaque": True}], 7: None}
     assert step["outputs"]["findings"] == [{"x": 1}]
+
+
+class _CaptureRequestRunner(_ex.BatchRunner):
+    def __init__(self):
+        self.requests = []
+
+    def run(self, req, agent_runner):
+        self.requests.append(req)
+        return _ex.BatchRunResult(outputs={"findings": [], "batch_plan": {}})
+
+
+def test_batch_with_resolves_into_request_with_inputs():
+    runner = _CaptureRequestRunner()
+
+    _run(
+        "resolved subject plan",
+        batch_runner=runner,
+        batch_with={"subject_plan": "${{ inputs.plan }}", "literal": ["kept"]},
+    )
+
+    assert len(runner.requests) == 1
+    assert runner.requests[0].with_inputs == {
+        "subject_plan": "resolved subject plan",
+        "literal": ["kept"],
+    }
+
+
+def test_batch_without_with_keeps_empty_inputs_compatibility():
+    runner = _CaptureRequestRunner()
+
+    _run("subject", batch_runner=runner)
+
+    assert len(runner.requests) == 1
+    assert runner.requests[0].with_inputs == {}
