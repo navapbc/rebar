@@ -29,12 +29,18 @@ from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
 from . import attest, drift_floor, orchestrator, sidecar
-from .attest import claim_gate_check
+from .attest import claim_gate_check, plan_review_status
 from .resign import resign_plan_review
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["review_plan", "resign_plan_review", "claim_gate_check", "registry_coverage"]
+__all__ = [
+    "review_plan",
+    "resign_plan_review",
+    "claim_gate_check",
+    "plan_review_status",
+    "registry_coverage",
+]
 
 
 def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:

@@ -83,6 +83,12 @@ __all__ = [
     "registry_version",
     "validate_review_phase_metadata",
     "ManifestFormatError",
+    # re-exported from attest_gate (kept importable as attest.<name>; see the foot of this file)
+    "_attested_delivered",
+    "_supersedes_child",
+    "claim_gate_check",
+    "delivered_now",
+    "plan_review_status",
 ]
 
 
@@ -651,121 +657,6 @@ def compute_validity(
 
 
 # ── completion-awareness: is a container's child "delivered" right now? ───────────
-def _attested_delivered(ticket: dict[str, Any], *, repo_root=None) -> bool:
-    """Require closed status plus a completion attestation valid on this ticket's state."""
-    import rebar
-
-    if ticket.get("status") != "closed":
-        return False
-    tid = ticket.get("ticket_id")
-    if not tid:
-        return False
-    try:
-        sig = rebar.verify_signature(tid, kind="completion-verifier", repo_root=repo_root)
-        if sig.get("verdict") != "certified":
-            return False
-        return bool(
-            compute_validity(sig, ticket, "completion-verifier", repo_root=repo_root).get("valid")
-        )
-    except Exception:  # noqa: BLE001 — never let a signature read crash the predicate; fail closed
-        logger.warning("delivered_now: attestation read failed for %s", tid, exc_info=True)
-        return False
-
-
-def _supersedes_child(candidate: dict[str, Any], child_id: str) -> bool:
-    """True when ``candidate`` carries a ``candidate -supersedes-> child`` link. A ``supersedes``
-    link is stored on the SOURCE ticket's ``deps`` as ``{"relation": "supersedes",
-    "target_id": <child>}`` (``add_dependency`` writes to the source dir; ``supersedes`` is never
-    hierarchy-promoted), so "A supersedes child" is A's dep whose ``target_id`` is the child."""
-    for dep in candidate.get("deps") or []:
-        if (
-            isinstance(dep, dict)
-            and dep.get("relation") == "supersedes"
-            and dep.get("target_id") == child_id
-        ):
-            return True
-    return False
-
-
-def delivered_now(child: dict[str, Any], siblings: list[dict[str, Any]], *, repo_root=None) -> bool:
-    """Return verified delivery, directly or through a live in-container superseder.
-
-    Bare closed status never suffices; completion attestations are checked on read. The
-    superseder branch is deliberately non-recursive and only considers supplied siblings.
-    """
-    if _attested_delivered(child, repo_root=repo_root):
-        return True
-
-    child_id = child.get("ticket_id")
-    if not child_id:
-        return False
-    child_parent = child.get("parent_id")
-    for a in siblings or []:
-        if not isinstance(a, dict):
-            continue
-        a_id = a.get("ticket_id")
-        if a_id is None or a_id == child_id:
-            continue
-        if a.get("parent_id") != child_parent:  # not an in-epic sibling
-            continue
-        if not _supersedes_child(a, child_id):
-            continue
-        # A is a LIVE in-epic vehicle: actively open/in_progress, OR closed-and-attested
-        # (branch (A) on A — NON-recursive: A's own supersede chain is never followed).
-        if a.get("status") in ("open", "in_progress"):
-            return True
-        if _attested_delivered(a, repo_root=repo_root):
-            return True
-    return False
-
-
-def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
-    """The fast, local claim-path check for the PLAN-REVIEW gate. Returns
-    ``{ok: bool, reason: str, verdict: str}``.
-
-    ``ok`` is True only when a CERTIFIED plan-review attestation exists (verified strictly
-    from the kind-keyed map) AND :func:`compute_validity` passes — its reviewed code has not
-    drifted, it binds the current material fingerprint, and it post-dates any reopen. NO LLM
-    and NO network — a pure local HMAC verify + a light fingerprint recompute + hashing a
-    handful of dependency files."""
-    from rebar import _reads, signing
-
-    try:
-        result = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — signing subsystem unavailable → fail-closed at the gate; broad-but-logged
-        # Fail closed (the gate denies the claim) but log: a broken signing subsystem
-        # is an operator-actionable failure, not a routine denial.
-        logger.warning("signing unavailable; failing the claim gate closed", exc_info=True)
-        return {"ok": False, "reason": f"signing-unavailable: {exc}", "verdict": "error"}
-
-    if not result.get("verified"):
-        return {
-            "ok": False,
-            "reason": f"no certified plan-review attestation (signature: {result.get('verdict')})",
-            "verdict": result.get("verdict", "unsigned"),
-        }
-    # We requested kind="plan-review" strictly, so a certified result IS a plan-review
-    # attestation (no separate wrong-manifest check needed). Layer freshness/lifecycle.
-    try:
-        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — unreadable state → fail closed below via compute_validity's material/None paths
-        state = {}
-    validity = compute_validity(
-        result,
-        state,
-        _MANIFEST_PREFIX,
-        repo_root=repo_root,
-        profile=PlanValidityProfile.DEFAULT,
-    )
-    if not validity["valid"]:
-        return {
-            "ok": False,
-            "reason": validity["reason"],
-            "verdict": validity.get("verdict", "stale"),
-        }
-    return {"ok": True, "reason": "certified plan-review attestation", "verdict": "certified"}
-
-
 def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | None:
     """Recompute the ticket's material fingerprint from a LIGHT read (the ticket +
     its child ids only — no full child fetch, no LLM), matching
@@ -798,3 +689,16 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
         # (the gate fails closed / re-review). Log so the cause is observable.
         logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)
         return None
+
+
+# ── Backward-compat re-export ────────────────────────────────────────────────────────────
+# The claim-gate/delivery surface moved to ``attest_gate`` to keep this module under the
+# 800-LOC cap; re-export here (after every helper it needs is defined, so no import cycle)
+# so historical ``attest.<name>`` imports and monkeypatch sites keep resolving unchanged.
+from .attest_gate import (  # noqa: E402
+    _attested_delivered,
+    _supersedes_child,
+    claim_gate_check,
+    delivered_now,
+    plan_review_status,
+)
