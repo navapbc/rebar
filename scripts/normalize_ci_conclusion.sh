@@ -11,7 +11,7 @@
 #   {clear, success, failure, cancelled}.
 # On `skipped` the action hit its default branch (`::error::Unknown vote-type ...;
 # exit 1`) BEFORE posting any label, so a green-CI change received NO Verified vote
-# and was un-landable (violating AGENTS.md:148,150 / docs/passing-code-review.md:17:
+# and was un-landable (violating AGENTS.md:148,150 / src/rebar/_guides/passing-code-review.md:
 # green CI must yield Verified +1, failed CI Verified -1 — posting neither is a bug).
 #
 # This script closes that domain mismatch: given the raw conclusion and a signal of

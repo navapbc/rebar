@@ -163,13 +163,16 @@ The LLM-agent operations and the gate / workflow machinery behind them.
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
 - **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the
-  description template + blocking checklist for writing a plan that passes the gate
-  (`rebar explain plan` prints it).
+  description template + blocking checklist for writing a plan that passes the gate. The
+  canonical source is packaged in-package (`src/rebar/_guides/writing-a-passing-plan.md`) so any
+  install can serve it; read it with `rebar explain plan` (this `docs/` file is a pointer).
 - **[review-policy.md](review-policy.md)** — *policy:* what the `LLM-Review` and
   `Verified` Gerrit gates mean and the two `+1` votes every change to `main` must earn.
 - **[passing-code-review.md](passing-code-review.md)** — *author on-ramp:* the commit
   checklist, what the `LLM-Review` reviewer scores, and how to **preview the review locally**
-  with `rebar review-code` before you push (`rebar explain review` prints it).
+  with `rebar review-code` before you push. The canonical source is packaged in-package
+  (`src/rebar/_guides/passing-code-review.md`) so any install can serve it; read it with
+  `rebar explain review` (this `docs/` file is a pointer).
 - **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)** — the
   registry-generated reference of every plan-review criterion (one section per
   criterion; `rebar explain <id>` prints one).

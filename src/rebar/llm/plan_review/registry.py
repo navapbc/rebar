@@ -630,54 +630,56 @@ def validate_criteria_guide(repo_root_path: str | None = None) -> list[str]:
 
 def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -> str:
     """The ONE shared lookup behind ``rebar explain``, the MCP ``explain_criterion`` tool, and the
-    library — returns a criterion's authoring-guide section. Raises :class:`ExplainError` with a
-    ``kind`` of ``malformed-registry`` / ``unknown-id`` / ``missing-file``."""
+    library — returns a criterion's authoring-guide section, RENDERED from the packaged registry
+    (via :func:`_guide_section_body`, the same content ``regenerate_criteria_guide`` writes into
+    the docs guide). Rendering from the registry rather than reading ``docs/`` makes the lookup
+    work from any installation (an installed rebar has no ``docs/`` tree). ``repo_root_path`` still
+    flows to :func:`load_criteria` so a project overlay's ``project.<name>`` criteria resolve.
+    Raises :class:`ExplainError` with a ``kind`` of ``malformed-registry`` / ``unknown-id``."""
     try:
-        ids = {c["id"] for c in load_criteria(repo_root=repo_root_path)}
+        by_id = {c["id"]: c for c in load_criteria(repo_root=repo_root_path)}
     except Exception as exc:  # noqa: BLE001 — any registry-load failure is the malformed-registry state
         raise ExplainError("malformed-registry", f"criteria registry is malformed: {exc}") from exc
-    if criterion_id not in ids:
+    criterion = by_id.get(criterion_id)
+    if criterion is None:
         raise ExplainError(
-            "unknown-id", f"unknown criterion {criterion_id!r}; known: {', '.join(sorted(ids))}"
+            "unknown-id",
+            f"unknown criterion {criterion_id!r}; known: {', '.join(sorted(by_id))}",
         )
-    path = _guide_path(repo_root_path)
-    if not path.exists():
-        raise ExplainError(
-            "missing-file",
-            f"criteria guide not found at {path}; run "
-            "`python -m rebar.llm.plan_review.registry regenerate-criteria-guide`",
-        )
-    section = _guide_sections(path.read_text(encoding="utf-8")).get(criterion_id)
-    if not section:
-        raise ExplainError("missing-file", f"criteria guide has no section for {criterion_id!r}")
-    return section
+    return _guide_section_body(criterion)
 
 
 # ── Author-facing prose guides (the on-ramp, distinct from the generated criterion registry) ──
 # Hand-written, whole-file guides an author reads BEFORE writing a plan / pushing a change. Unlike
-# the criterion sections above (derived from the registry), these are prose and are NOT parity-
-# checked — `rebar explain plan` / `rebar explain review` and the MCP tool print them verbatim.
-AUTHOR_GUIDES: dict[str, tuple[str, ...]] = {
-    "plan": ("docs", "writing-a-passing-plan.md"),
-    "review": ("docs", "passing-code-review.md"),
+# the criterion sections above (derived from the registry), these are prose. They are PACKAGED
+# under `rebar._guides` (canonical home; the `docs/` copies are thin pointers) and read via
+# `importlib.resources` so `rebar explain plan` / `rebar explain review` and the MCP tool serve
+# them verbatim from any installation. Values are the bare resource filenames under that package.
+AUTHOR_GUIDES: dict[str, str] = {
+    "plan": "writing-a-passing-plan.md",
+    "review": "passing-code-review.md",
 }
 
+_GUIDE_PACKAGE = "rebar._guides"
 
-def explain_guide(name: str, *, repo_root_path: str | None = None) -> str:
-    """Return an author-facing prose guide by short name (see :data:`AUTHOR_GUIDES`). Shares the
-    :class:`ExplainError` contract with :func:`explain_criterion` — ``unknown-id`` for a name not in
-    the map, ``missing-file`` when the doc is absent."""
-    from rebar import config
 
-    relpath = AUTHOR_GUIDES.get(name)
-    if relpath is None:
+def explain_guide(name: str) -> str:
+    """Return an author-facing prose guide by short name (see :data:`AUTHOR_GUIDES`), read from the
+    packaged ``rebar._guides`` resources — repo-root independent, so an installed rebar serves it
+    from any working directory. Shares the :class:`ExplainError` contract with
+    :func:`explain_criterion` — ``unknown-id`` for a name not in the map, ``missing-file`` if the
+    packaged resource is somehow absent (a broken install)."""
+    filename = AUTHOR_GUIDES.get(name)
+    if filename is None:
         raise ExplainError(
             "unknown-id", f"unknown guide {name!r}; known: {', '.join(sorted(AUTHOR_GUIDES))}"
         )
-    path = config.repo_root(repo_root_path).joinpath(*relpath)
-    if not path.exists():
-        raise ExplainError("missing-file", f"author guide not found at {path}")
-    return path.read_text(encoding="utf-8")
+    try:
+        return (resources.files(_GUIDE_PACKAGE) / filename).read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
+        raise ExplainError(
+            "missing-file", f"packaged author guide {filename!r} is unavailable: {exc}"
+        ) from exc
 
 
 def _main(argv: list[str] | None = None) -> int:
