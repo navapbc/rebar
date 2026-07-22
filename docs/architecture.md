@@ -166,8 +166,9 @@ The **reconciler** (`rebar_reconciler/`) stays in the engine dir: the library on
 ever reaches it as a subprocess (`python -m rebar_reconciler`) or by loading a
 single file by path (`mode.py` in `mcp_server.py`), never as an in-process package
 import — so it leaks no generic name onto the library path. ACLI integration lives
-at `rebar_reconciler/acli.py`, reached via ordinary `from rebar_reconciler import
-acli` package imports.
+in the Jira vendor-adapter sub-package (ADR 0035 §(c)) at
+`rebar_reconciler/adapters/jira/acli.py`, reached via ordinary
+`from rebar_reconciler.adapters.jira import acli` package imports.
 
 The **workflow visual editor** front-end is another piece of vendored package data:
 `rebar/llm/workflow/editor_assets/` is an npm project (bpmn-js + properties panel; the

@@ -22,7 +22,7 @@ from rebar_reconciler._errors import JiraAPIError, ReconcilerError, RetryExhaust
 
 def test_retry_exhausted_is_one_object_across_both_surfaces() -> None:
     """AC1: the acli and applier re-exports are the SAME object (the formerly-divergent bodies)."""
-    from rebar_reconciler.acli import RetryExhaustedError as FromAcli
+    from rebar_reconciler.adapters.jira.acli import RetryExhaustedError as FromAcli
     from rebar_reconciler.applier import RetryExhaustedError as FromApplier
 
     assert FromAcli is FromApplier is RetryExhaustedError

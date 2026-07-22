@@ -21,8 +21,8 @@ import time
 import pytest
 
 # The reconciler engine is on sys.path via the package conftest; import flat.
-from rebar_reconciler import acli as acli_mod
-from rebar_reconciler import acli_cli_ops, acli_subprocess
+from rebar_reconciler.adapters.jira import acli as acli_mod
+from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
 
 POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="process-group reaping is POSIX-only")
 

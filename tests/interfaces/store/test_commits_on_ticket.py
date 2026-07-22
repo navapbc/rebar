@@ -116,6 +116,8 @@ def test_commits_not_a_jira_synced_field() -> None:
         Path(rebar.__file__).resolve().parent
         / "_engine"
         / "rebar_reconciler"
+        / "adapters"
+        / "jira"
         / "outbound_fields.py"
     )
     src = fields_mod.read_text(encoding="utf-8")

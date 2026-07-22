@@ -1,7 +1,7 @@
 """Reap a timed-out child process and its whole process group (stdlib-only leaf).
 
 Shared by the grounding harness (:mod:`rebar.grounding.harness`) and the
-reconciler's ACLI transport (``rebar_reconciler.acli_subprocess``): both spawn
+reconciler's ACLI transport (``rebar_reconciler.adapters.jira.acli_subprocess``): both spawn
 children with ``start_new_session=True`` and, on a wall-clock timeout, must reap
 the whole process GROUP — SIGTERM → grace → SIGKILL → bounded drain — so a
 pipe-holding grandchild is reaped rather than orphaned (bug d843). The logic was

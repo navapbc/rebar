@@ -30,6 +30,18 @@ from typing import Any, Protocol, runtime_checkable
 
 from rebar_reconciler._loader import lazy_load
 
+# The field-diff cluster lives in outbound_fields.py (split for module size).
+# _map_local_to_jira_fields + _diff_fields are called by compute_outbound_mutations
+# below; _assignee_matches + _LOCAL_TO_JIRA_TYPE are re-exported so
+# outbound_differ.<name> keeps resolving for the field-diff test suite.
+from rebar_reconciler.adapters.jira.outbound_fields import (  # noqa: F401
+    _LOCAL_TO_JIRA_TYPE,
+    _assignee_matches,
+    _diff_fields,
+    _extract_jira_field,
+    _map_local_to_jira_fields,
+)
+
 # The identity-mapping assignee-resolution cluster (264f) lives in
 # outbound_assignee.py (split for module size; a leaf that imports rebar core
 # lazily inside its functions). All five symbols are re-exported so
@@ -54,18 +66,6 @@ from rebar_reconciler.outbound_comments import (  # noqa: F401
     _diff_comments,
     _map_comments_for_create,
     _normalize_comment_body,
-)
-
-# The field-diff cluster lives in outbound_fields.py (split for module size).
-# _map_local_to_jira_fields + _diff_fields are called by compute_outbound_mutations
-# below; _assignee_matches + _LOCAL_TO_JIRA_TYPE are re-exported so
-# outbound_differ.<name> keeps resolving for the field-diff test suite.
-from rebar_reconciler.outbound_fields import (  # noqa: F401
-    _LOCAL_TO_JIRA_TYPE,
-    _assignee_matches,
-    _diff_fields,
-    _extract_jira_field,
-    _map_local_to_jira_fields,
 )
 
 # The link-diff cluster lives in outbound_links.py (split for module size).

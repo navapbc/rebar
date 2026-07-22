@@ -376,7 +376,7 @@ def _build_snapshot(
     # WITH NO default (bug 626d): an absent/invalid project must raise in jql_active()
     # to fail the pass closed rather than searching all projects — so we deliberately
     # do NOT read client.jira_project (which now defaults to "DIG").
-    from rebar_reconciler import acli_subprocess
+    from rebar_reconciler.adapters.jira import acli_subprocess
 
     _s = acli_subprocess.resolve_jira_settings()
 
@@ -438,7 +438,7 @@ def _build_snapshot(
     try:
         # Project key: the configured jira.project (config file, overridden by the
         # JIRA_PROJECT env), else derived from the first snapshot key ("DIG-123" → "DIG").
-        from rebar_reconciler import acli_subprocess
+        from rebar_reconciler.adapters.jira import acli_subprocess
 
         project_key = acli_subprocess.resolve_jira_settings().project
         if not project_key and snapshot:

@@ -19,7 +19,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ADF_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adf.py"
+ADF_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "adapters" / "jira" / "adf.py"
+)
 
 
 def _load_adf() -> ModuleType:

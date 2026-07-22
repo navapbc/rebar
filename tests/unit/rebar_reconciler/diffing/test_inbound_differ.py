@@ -23,7 +23,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ENGINE = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 INBOUND_DIFFER_PATH = ENGINE / "inbound_differ.py"
-ADF_PATH = ENGINE / "adf.py"
+ADF_PATH = ENGINE / "adapters" / "jira" / "adf.py"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

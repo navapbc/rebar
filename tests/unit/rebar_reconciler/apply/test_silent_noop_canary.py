@@ -34,7 +34,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS_DIR = REPO_ROOT / "src" / "rebar" / "_engine"
 APPLIER_PATH = SCRIPTS_DIR / "rebar_reconciler" / "applier.py"
-ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "acli.py"
+ACLI_PATH = SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / "acli.py"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -45,10 +45,10 @@ if "rebar_reconciler" not in sys.modules:
     _dr.__path__ = [str(SCRIPTS_DIR / "rebar_reconciler")]
     sys.modules["rebar_reconciler"] = _dr
 for _sib in ("adf", "comment_limits"):
-    _key = f"rebar_reconciler.{_sib}"
+    _key = f"rebar_reconciler.adapters.jira.{_sib}"
     if _key not in sys.modules:
         _spec = importlib.util.spec_from_file_location(
-            _key, SCRIPTS_DIR / "rebar_reconciler" / f"{_sib}.py"
+            _key, SCRIPTS_DIR / "rebar_reconciler" / "adapters" / "jira" / f"{_sib}.py"
         )
         _mod = importlib.util.module_from_spec(_spec)
         sys.modules[_key] = _mod

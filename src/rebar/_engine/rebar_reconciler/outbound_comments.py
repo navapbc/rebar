@@ -65,10 +65,10 @@ except ImportError:  # standalone load without package context
 # module-local (each reconciler module owns its own copy) because the differ may
 # be imported via ``importlib.util.spec_from_file_location`` in tests, which does
 # not establish package context, so ``from . import adf`` would fail.
-_ADF_KEY = "rebar_reconciler.adf"
+_ADF_KEY = "rebar_reconciler.adapters.jira.adf"
 _AdfModule = None
 
-_COMMENT_LIMITS_KEY = "rebar_reconciler.comment_limits"
+_COMMENT_LIMITS_KEY = "rebar_reconciler.adapters.jira.comment_limits"
 _CommentLimitsModule = None
 
 
@@ -81,7 +81,7 @@ def _load_adf():
     """
     global _AdfModule
     if _AdfModule is None:
-        _AdfModule = lazy_load(_ADF_KEY, "adf.py")
+        _AdfModule = lazy_load(_ADF_KEY, "adapters/jira/adf.py")
     return _AdfModule
 
 
@@ -97,7 +97,7 @@ def _load_comment_limits():
     """
     global _CommentLimitsModule
     if _CommentLimitsModule is None:
-        _CommentLimitsModule = lazy_load(_COMMENT_LIMITS_KEY, "comment_limits.py")
+        _CommentLimitsModule = lazy_load(_COMMENT_LIMITS_KEY, "adapters/jira/comment_limits.py")
     return _CommentLimitsModule
 
 
