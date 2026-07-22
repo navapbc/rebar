@@ -178,6 +178,14 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         if tokens_per_item and isinstance(items, list) and items:
             scaled = min(int(tokens_per_item) * len(items), _MAX_OUTPUT_TOKENS_CEILING)
             cfg = _replace(cfg, max_tokens=max(cfg.max_tokens, scaled))
+        # Per-step sampling temperature (upstream review-code report §2). Carried as a `with:`
+        # input (the v3 step schema is closed; `with` is the open extension point, exactly like
+        # step_budget_per_item above). The Pass-2 verify steps set `temperature: 0` so a re-run of
+        # the same finding does not resample its narrow yes/no verification and flip a
+        # block/advisory decision. Absent ⇒ cfg.temperature (default None ⇒ provider default).
+        step_temperature = ctx.inputs.get("temperature")
+        if step_temperature is not None:
+            cfg = _replace(cfg, temperature=float(step_temperature))
         prompt_id = ctx.step.get("prompt") or ""
         prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")

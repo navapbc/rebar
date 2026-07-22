@@ -193,6 +193,9 @@ steps:
             # (raising the cap to max(floor, 2000×findings), ceiling 64000 — the value proven to
             # let a ~30-finding verify complete).
             output_tokens_per_item: 2000
+            # Greedy Pass-2 verification: a re-run of the same finding must not resample its narrow
+            # yes/no verification and flip a block/advisory decision (upstream review-code report §2).
+            temperature: 0
         - id: decide
           needs:
           - verify
@@ -289,6 +292,9 @@ steps:
             findings: ${{ steps.finders.outputs.findings }}
             plan: ${{ steps.verify_inputs.outputs.plan }}
             instructions: ${{ steps.verify_inputs.outputs.instructions }}
+            # Greedy Pass-2 verification (non-grounded arm): same rationale as the agentic arm —
+            # a re-run must not resample the verification and flip the decision (report §2).
+            temperature: 0
         - id: decide
           needs:
           - verify
