@@ -42,6 +42,24 @@ reviewable change through `git push gerrit HEAD:refs/for/main`, waiting for `LLM
 still use the server-side feature-branch flow; see ADR 0025, including its post-ADR-0047 note
 that the Rebase-If-Necessary interaction needs human review.
 
+For authenticated Gerrit `/a/` REST calls, non-interactive Codex sessions must reuse the
+checkout's configured Git credential helper rather than assume a separate curl credential
+store:
+
+```sh
+gerrit_credential=$(printf 'protocol=https\nhost=rebar.solutions.navateam.com\n\n' | git credential fill)
+gerrit_user=$(printf '%s\n' "$gerrit_credential" | sed -n 's/^username=//p')
+gerrit_password=$(printf '%s\n' "$gerrit_credential" | sed -n 's/^password=//p')
+curl --fail --silent --show-error --user "$gerrit_user:$gerrit_password" \
+  https://rebar.solutions.navateam.com/a/changes/
+unset gerrit_credential gerrit_user gerrit_password
+```
+
+Never echo or log the credential response or password, and keep shell tracing disabled while
+using them. A `curl --netrc` request returning `401` only shows that `.netrc` is absent or does
+not contain the working Gerrit credential; unless `.netrc` was explicitly configured, that
+response does not invalidate credentials already proven by Git over HTTPS.
+
 ## Record your work in rebar, not in scratch notes
 
 Before starting, `search`/`list` for an existing ticket; if none fits, `create` one and

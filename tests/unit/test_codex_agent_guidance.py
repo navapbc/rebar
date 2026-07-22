@@ -19,3 +19,9 @@ def test_codex_guidance_has_credential_aware_gerrit_fallback() -> None:
     assert "Verified +1" in guidance
     assert "ADR 0025" in guidance
     assert "not an implementation blocker" in guidance
+    assert "git credential fill" in guidance
+    assert "curl --netrc" in guidance
+    assert ".netrc" in guidance
+    assert "401" in guidance
+    assert "does not invalidate" in guidance
+    assert "never echo or log" in guidance.lower()
