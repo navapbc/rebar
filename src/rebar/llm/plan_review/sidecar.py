@@ -218,6 +218,14 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
                 "plan_review_result_v1",
                 "plan_review_result_v2",
             ):
+                # Stamp the filename's ns-epoch prefix (`<ts_ns>-<uuid>-REVIEW_RESULT.json`) so
+                # audit consumers get a per-review timestamp — the payload itself carries none,
+                # which left `audit show`'s newest-first ordering unverifiable from the data alone
+                # (report #1). Ordering is unchanged; this only annotates each entry.
+                try:
+                    payload["reviewed_at"] = int(fname.split("-", 1)[0])
+                except (ValueError, IndexError):
+                    payload["reviewed_at"] = None
                 out.append(payload)
         return out
     except FileNotFoundError:
