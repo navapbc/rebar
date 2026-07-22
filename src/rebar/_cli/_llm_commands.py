@@ -450,7 +450,17 @@ def _review_plan(argv: list[str]) -> int:
         "(bypass the idempotence short-circuit)",
     )
     parser.add_argument(
-        "--check", action="store_true", help="print backend/credential availability and exit"
+        "--check",
+        action="store_true",
+        help="print backend/credential availability and exit; does NOT inspect a ticket's "
+        "attestation status (for that, use --status)",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="read-only: report whether the ticket's plan-review attestation is CURRENT right "
+        "now (no model call, no network, no re-sign); prints the verdict + bound verified-at-sha. "
+        "Exit 0 when current, 12 when stale/absent",
     )
     _add_ref_source(parser)
     args = parser.parse_args(argv)
@@ -460,6 +470,20 @@ def _review_plan(argv: list[str]) -> int:
     if args.check:
         sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
         return 0
+    if args.status:
+        if not args.ticket_id:
+            parser.error("ticket_id is required")
+        ensure_initialized(init_only=True)
+        status = llm.plan_review_status(args.ticket_id)
+        if args.output == "json":
+            sys.stdout.write(_json.dumps(status) + "\n")
+        else:
+            sha = status.get("verified_at_sha") or "unknown"
+            sys.stdout.write(f"PLAN REVIEW STATUS: {status['verdict']} for {args.ticket_id}\n")
+            sys.stdout.write(f"  current={status['ok']} verified-at-sha={sha}\n")
+            sys.stdout.write(f"  {status['reason']}\n")
+        # Distinct from a review's PASS/BLOCK/INDETERMINATE codes: 0 current, 12 not current.
+        return 0 if status["ok"] else 12
     if not args.ticket_id:
         parser.error("ticket_id is required")
     ensure_initialized(init_only=True)
@@ -534,6 +558,14 @@ def _render_plan_review_text(result: dict) -> None:
     """Human-readable plan-review summary (verdict + blocking/advisory + coaching)."""
     v = result.get("verdict", "?")
     sys.stdout.write(f"PLAN REVIEW: {v} for {result.get('ticket_id')}\n")
+    # Idempotence short-circuit (feature b3e5): a REUSED verdict ran no LLM — the existing
+    # attestation was still current. Mark it distinctly so a fresh review is not confused with a
+    # cache hit (the JSON already carries coverage.idempotent_skip / runner="reused").
+    if (result.get("coverage", {}) or {}).get("idempotent_skip"):
+        sys.stdout.write(
+            "  reused: existing attestation is still current — no LLM re-run "
+            "(pass --force to re-review)\n"
+        )
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
     overflow = counts.get("advisory_overflow", 0)
     sys.stdout.write(

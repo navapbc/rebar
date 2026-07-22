@@ -1323,3 +1323,101 @@ def test_genuinely_absent_symbol_still_blocks_control(rebar_repo: Path) -> None:
 # The verify.progressive_drift_refresh config key (default-True + its explicit-false back-out) was
 # retired in story 4cdf: drift-refresh is now unconditional, the field is gone from VerifyConfig,
 # and its config-default test was removed.
+
+
+# ── read-only currency query: plan_review_status + `review-plan --status` (report #2) ──
+def test_plan_review_status_certified_after_review(rebar_repo: Path) -> None:
+    # The report's missing primitive: a no-LLM "is this approved right now?" read.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    st = rebar.llm.plan_review_status(tid, repo_root=str(rebar_repo))
+    assert st["ok"] is True and st["verdict"] == "certified"
+    assert st["verified_at_sha"]  # the bound base ref is surfaced, not just the verdict
+    assert st["signed_at"]
+
+
+def test_plan_review_status_absent_is_unsigned(rebar_repo: Path) -> None:
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)  # never reviewed
+    st = rebar.llm.plan_review_status(tid, repo_root=str(rebar_repo))
+    assert st["ok"] is False and st["verdict"] == "unsigned"
+    assert st["verified_at_sha"] is None and st["signed_at"] is None
+
+
+def test_plan_review_status_goes_stale_when_base_moves(rebar_repo: Path) -> None:
+    # The report's core scenario: origin/main advances after the review. A read-only status
+    # query must report the attestation as no-longer-current WITHOUT running a new review.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    _commit(rebar_repo)  # base ref moves; unscoped whole-HEAD freshness now fails
+    st = rebar.llm.plan_review_status(tid, repo_root=str(rebar_repo))
+    assert st["ok"] is False and "stale" in st["verdict"]
+
+
+def test_review_plan_status_cli_exit_codes(rebar_repo: Path, capsys) -> None:
+    import json
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    # absent → not current → distinct exit 12 (not a review's 0/1/2)
+    assert _cli.main(["review-plan", tid, "--status", "-o", "text"]) == 12
+    out = capsys.readouterr().out
+    assert "PLAN REVIEW STATUS" in out and "current=False" in out
+    # after a review → current → exit 0, and the bound sha is surfaced in json
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    assert _cli.main(["review-plan", tid, "--status", "-o", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True and payload["verdict"] == "certified"
+    assert payload["verified_at_sha"]
+
+
+# ── idempotence short-circuit is visible in text output (report #6) ─────────────
+def test_render_plan_review_text_marks_idempotent_reuse(capsys) -> None:
+    from rebar._cli._llm_commands import _render_plan_review_text
+
+    _render_plan_review_text(
+        {
+            "verdict": "PASS",
+            "ticket_id": "t",
+            "runner": "reused",
+            "coverage": {"llm_ran": False, "idempotent_skip": True, "counts": {}},
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "PASS" in out and "reused" in out
+
+
+def test_render_plan_review_text_fresh_has_no_reuse_marker(capsys) -> None:
+    from rebar._cli._llm_commands import _render_plan_review_text
+
+    _render_plan_review_text(
+        {
+            "verdict": "PASS",
+            "ticket_id": "t",
+            "coverage": {"counts": {}},
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+        }
+    )
+    assert "reused" not in capsys.readouterr().out
+
+
+def test_review_plan_cli_text_shows_reuse_on_second_run(rebar_repo: Path, capsys) -> None:
+    # End-to-end: a first review signs; a second CLI review of the UNCHANGED ticket takes the
+    # b3e5 short-circuit (no runner needed — it never reaches the LLM) and the text output says so.
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"]
+    assert _cli.main(["review-plan", tid, "-o", "text"]) == 0
+    assert "reused" in capsys.readouterr().out
