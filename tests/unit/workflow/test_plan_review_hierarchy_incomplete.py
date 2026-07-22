@@ -283,6 +283,7 @@ def test_precheck_output_schema_accepts_old_and_new_shapes() -> None:
         "verdict": None,
         "canonical_id": "T-1",
         "ticket_type": "task",
+        "review_phase": "planning",
         "det_blocking": [],
         "det_advisory": [],
         "det_coverage": {},
@@ -292,9 +293,14 @@ def test_precheck_output_schema_accepts_old_and_new_shapes() -> None:
         "hierarchy_incomplete": True,
         "hierarchy_incomplete_detail": ["enumeration"],
     }
-    # Neither call raises: the new fields are optional additions, not required.
+    # Neither call raises: the hierarchy fields are optional additions, not required.
     _findings.validate_structured(dict(old_shape), "plan_review_precheck_output")
     _findings.validate_structured(dict(new_shape), "plan_review_precheck_output")
+
+    without_required_phase = dict(old_shape)
+    without_required_phase.pop("review_phase")
+    with pytest.raises(_findings.FindingsError, match="review_phase"):
+        _findings.validate_structured(without_required_phase, "plan_review_precheck_output")
 
 
 # ── held-out: every plan-review.yaml `coach` call site forwards the two new precheck outputs ────
