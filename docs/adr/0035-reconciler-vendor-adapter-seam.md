@@ -1,6 +1,7 @@
 # ADR 0035: Reconciler vendor-adapter seam (Jira-neutral core + `adapters/<backend>/`)
 
-- **Status:** Accepted (Phase 1 landed; Phase 2 tracked as a follow-up ticket)
+- **Status:** Accepted (Phase 1 landed; Phase 2 in progress under epic `bbf1-82e1-cf9d-494a`,
+  which pins the backend interface in §(d))
 - **Context:** Story *Reconciler vendor-adapter seam: ADR + sub-packaging for
   multi-backend* (`44be-2ae1-ba73-46da`, alias `ambery-tweed-grosbeak`; O5 + S5).
   A second reconciler backend (a non-Jira ticket system) is planned. Today the
@@ -116,19 +117,65 @@ The `adapters/<backend>/` directory **is** the seam: everything under it is one
 backend's concrete implementation of the operations in (b); everything at the root is
 backend-neutral.
 
-### (d) Adding a second backend (interface sketch)
+### (d) Adding a second backend (pinned interface)
 
-To add backend **X**, create `adapters/<x>/` providing the operations in (b):
+Phase 2 (epic `bbf1-82e1-cf9d-494a`) pins the concrete backend interface that §(a)/§(b)
+left as a prose sketch. Four decisions fix the design:
 
-- a **transport/CRUD** module (create/read/update/transition/comment against X);
-- **outbound** field mapping (local fields → X's field shapes + value maps + rich text);
-- **inbound** field extraction (X's payload → local fields);
-- **sanitization/limits** for X's constraints; and
-- the **identity** convention (how X stores the `rebar-id` back-pointer).
+**1. rebar's local ticket is the canonical model — there is no separate `CanonicalTicket`.**
+The seam speaks the local-field vocabulary (summary/description/priority/status/labels/
+links/comments) directly; each adapter translates vendor⇄local with the mappers that already
+exist for Jira (`outbound_fields.py`, `inbound_fields.py`/`inbound_translate.py`). We do not
+keep a parallel schema in lock-step, and there is no redundant `rebar⇄canonical` hop — the
+mapper *is* the vendor⇄local translation.
 
-The neutral core selects the adapter by config and drives it through those operations;
-no core module should `import rebar_reconciler.adapters.jira.*` directly once Phase 2
-routes the differ/apply sites through the interface.
+**2. Core owns diff/apply; adapters only read and enact.** The differ/apply/dispatch/store/
+invariant machinery computes what must change and drives the operations in §(b); an adapter
+never diffs — it reads the remote (transport + inbound map) and enacts a decided mutation
+(outbound map + sanitize + transport). This keeps convergence logic single-sourced in the
+neutral core.
+
+**3. Role Protocols behind one `Backend` facade.** A backend is a `Backend` object exposing
+five required role Protocols, each derived from the de-facto surface the core already calls:
+
+| Role Protocol | Responsibility (from §(b)) | Today's Jira delegate |
+|---|---|---|
+| `TicketTransport` | create/read/update/transition/comment CRUD against the remote | `acli.AcliClient` |
+| `OutboundMapper` | local ticket fields → vendor field/value shapes (+ rich text) | `outbound_fields._map_local_to_jira_fields` (+ `adf.fit_text_to_adf_limit`) |
+| `InboundMapper` | vendor issue payload → local field shapes | `inbound_fields`/`inbound_translate` |
+| `FieldSanitizer` | defend vendor hard limits (label/summary/comment/description) | `adapters/jira/jira_fields.py` + `comment_limits.py` |
+| `IdentityConvention` | how the backend stores/reads the `rebar-id` back-pointer | new pure object (Jira: `rebar-id:<id>` label) |
+
+Plus three **opt-in capability Protocols** a backend advertises only when it supports the
+feature: `SupportsLinks`, `SupportsComments`, `SupportsIncremental`. Callers detect a
+capability by an `isinstance`-guarded check against the backend (a backend that does not
+implement `SupportsLinks` is never asked to sync links) — capability is observed via behavior,
+not structural introspection.
+
+**4. One new identity type `RemoteRef{vendor, instance, remote_id}`.** This identity tuple
+replaces the hardcoded `"jira"` provider literal in `apply_inbound_records.py` and the bare
+`jira_key` threaded through the apply path. `IdentityConvention` formats a `RemoteRef` to the
+backend's back-pointer label and parses it back, so provider identity is a typed value rather
+than a string literal inlined at four core call sites.
+
+**Selection.** The neutral core obtains its `Backend` from an in-tree registry keyed on
+`config.reconciler.backend` (default `"jira"`); a second backend registers itself under
+`adapters/<x>/` and is chosen by config. No core module imports `rebar_reconciler.adapters.
+jira.*` once Phase 2 routes the differ/apply sites through the `Backend` port.
+
+**Three leak-fixes fold Jira specifics back into the adapter.** As part of routing core through
+the port, Jira-specific logic that leaked into backend-neutral core is single-sourced under
+`adapters/jira/`: (i) ADF size-fitting and the lossy status/parent value rules; (ii) the
+duplicated priority/status value-maps; (iii) the `outbound_links` link-relation constant.
+
+**Proof-of-seam.** Phase 2 proves the interface with a backend-agnostic **contract test suite**
+run against both `JiraBackend` (a thin delegation wrapper over today's Jira modules, zero
+behavior change) and a test-only in-memory `FakeBackend`. The first *real* second backend (a
+GitHub adapter) is out of scope here and is tracked by epic `be74-7832-03a8-48ac`.
+
+To add backend **X**, create `adapters/<x>/` implementing the five role Protocols (and any
+capability Protocols X supports), register it under `config.reconciler.backend = "<x>"`, and
+the neutral core drives it unchanged.
 
 ## Decision
 
@@ -146,12 +193,20 @@ routes the differ/apply sites through the interface.
    binding site and **no** re-export shim at the old path.
 4. **No re-export shims.** Because tests patch module-qualified, a shim at the old path
    would create a patch-binding bug. A moved module has exactly one canonical path.
-5. **Phase 2 (follow-up ticket, linked `discovered_from`)** relocates the remaining
+5. **Phase 2 (epic `bbf1-82e1-cf9d-494a`)** pins the backend interface per §(d) — the
+   `Backend` facade, its five role Protocols + three opt-in capability Protocols, and the
+   `RemoteRef` identity type — then routes the differ/apply sites through that port,
+   single-sources the three leak-fixes under `adapters/jira/`, and relocates the remaining
    vendor modules per (c): the `acli*` cluster (~29-test surface — migrate all patch
    strings atomically), `adf.py` + `outbound_fields.py` + `comment_limits.py` (**must
-   also update the file-location loader** to discover the new sub-package dir), then
-   rewires the differ/apply sites to depend on the backend *interface* rather than on
-   `adapters/jira/` concretely.
+   also update the file-location loader** to discover the new sub-package dir). A thin
+   `JiraBackend` and a test-only `FakeBackend`, both exercised by one backend-agnostic
+   contract suite, prove the seam.
+6. **The first real second backend is out of scope for this ADR and is tracked separately
+   by epic `be74-7832-03a8-48ac`.** ADR 0035 (through Phase 2) establishes and proves the
+   seam; standing up a concrete non-Jira adapter (e.g. GitHub) against it is that epic's
+   work — enabled by a one-line `config.reconciler.backend` switch once its `adapters/<x>/`
+   package is registered.
 
 ## Consequences
 
@@ -161,6 +216,9 @@ routes the differ/apply sites through the interface.
   loading cannot regress. Phase 2 owns the coupled loader + broad-test-surface work.
 - Until Phase 2, core differ/apply modules still import `adapters/jira/` (and the
   root-level vendor modules) directly; the neutral-core boundary is *structural* now
-  and becomes *enforced-by-interface* in Phase 2.
-- A second backend is added by implementing `adapters/<x>/` against the operations in
-  (b) — no core rewrite, once Phase 2 routes the core through the interface.
+  and becomes *enforced-by-interface* in Phase 2 — enforced by the pinned `Backend` port
+  in §(d), which the core depends on instead of on `adapters/jira/` concretely.
+- A second backend is added by implementing the §(d) role Protocols under `adapters/<x>/`
+  and selecting it via `config.reconciler.backend` — no core rewrite, once Phase 2 routes
+  the core through the interface. Standing up the first such backend is scoped to epic
+  `be74-7832-03a8-48ac`, not this ADR.
