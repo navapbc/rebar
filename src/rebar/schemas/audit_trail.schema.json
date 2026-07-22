@@ -15,7 +15,7 @@
     "plan_reviews": {
       "type": "array",
       "items": { "type": "object", "additionalProperties": true },
-      "description": "Full retained plan-review sidecar history, newest-first; [] if none."
+      "description": "Retained plan-review REVIEW_RESULT sidecar HISTORY (not the current signed attestation), newest-first; [] if none. Each entry carries `reviewed_at` (ns epoch of the review) so ordering is checkable from the data. To ask whether a plan is approved right now, use `rebar review-plan <id> --status`, not this history view."
     },
     "completion": {
       "type": ["object", "null"],

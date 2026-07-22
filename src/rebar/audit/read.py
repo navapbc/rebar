@@ -11,7 +11,8 @@ returned shape is the ``AuditTrail`` TypedDict below (a documented, stable contr
 
     AuditTrail = {
         "ticket":       dict,                 # rebar.show_ticket(ticket_id)
-        "plan_reviews": list[dict],           # full retained plan-review history, newest-first
+        "plan_reviews": list[dict],           # retained review-result HISTORY (NOT the signed
+                                              # attestation); newest-first; each has reviewed_at
         "completion":   CompletionRecord|None,# None ONLY when BOTH attestation AND sidecar absent
         "code_reviews": list[dict],           # each {ticket_id, sidecars: list[dict]}
     }
