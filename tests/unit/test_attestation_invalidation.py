@@ -24,6 +24,7 @@ import pytest
 import rebar
 from rebar import signing
 from rebar.llm.plan_review import attest, registry
+from rebar.llm.plan_review.relation_snapshot import PlanMaterialPin
 from rebar.llm.prompting import prompt_library
 
 _ROUTING = {
@@ -212,3 +213,99 @@ def test_signed_manifest_with_disabled_line_still_verifies(store: Path):
     result = signing.verify_signature(tid, kind="plan-review", repo_root=str(store))
     assert result["verdict"] == "certified"
     assert attest.manifest_disabled_builtins(result["manifest"]) == ["F1"]
+
+
+def _pin_validity_setup(monkeypatch: pytest.MonkeyPatch, *, target_fingerprint: str) -> dict:
+    monkeypatch.setattr(attest, "registry_version", lambda *a, **k: "registry")
+    monkeypatch.setattr("rebar.signing.head_sha", lambda *a, **k: "head-current")
+
+    def fingerprint(ticket_id, repo_root=None):
+        if ticket_id == "aaaa-bbbb-cccc-dddd":
+            return target_fingerprint
+        return "subject-material"
+
+    monkeypatch.setattr(attest, "current_material_fingerprint", fingerprint)
+    return {
+        "manifest": [
+            "plan-review: PASS",
+            "regver: registry",
+            "plan-material-pin: child aaaa-bbbb-cccc-dddd 1111111111111111",
+        ],
+        "head_sha": "head-current",
+        "signed_at": 100,
+    }
+
+
+def test_advisory_pin_health_preserves_existing_validity_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attestation = _pin_validity_setup(monkeypatch, target_fingerprint="2222222222222222")
+    monkeypatch.setattr(attest, "_read_enforce_plan_material_pins", lambda root: False)
+    result = attest.compute_validity(
+        attestation,
+        {"ticket_id": "subject-0000-0000-0001", "status": "open"},
+        "plan-review",
+        repo_root="/repo",
+    )
+    assert {key: result[key] for key in ("valid", "reason", "verdict")} == {
+        "valid": True,
+        "reason": "certified plan-review attestation",
+        "verdict": "certified",
+    }
+    assert result["health"]["pin_status"] == "stale-pin-drift"
+
+
+def test_close_and_drift_refresh_disable_only_code_freshness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attestation = _pin_validity_setup(monkeypatch, target_fingerprint="1111111111111111")
+    attestation["head_sha"] = "old-head"
+    state = {"ticket_id": "subject-0000-0000-0001", "status": "open"}
+    monkeypatch.setattr(attest, "_read_enforce_plan_material_pins", lambda root: True)
+    default = attest.compute_validity(
+        attestation,
+        state,
+        "plan-review",
+        repo_root="/repo",
+        profile=attest.PlanValidityProfile.DEFAULT,
+    )
+    close = attest.compute_validity(
+        attestation,
+        state,
+        "plan-review",
+        repo_root="/repo",
+        profile=attest.PlanValidityProfile.CLOSE,
+    )
+    refresh = attest.compute_validity(
+        attestation,
+        state,
+        "plan-review",
+        repo_root="/repo",
+        profile=attest.PlanValidityProfile.DRIFT_REFRESH,
+    )
+    assert default["verdict"] == "stale-head"
+    assert close["valid"] is refresh["valid"] is True
+    assert close["health"] == refresh["health"]
+
+
+def test_completion_verifier_return_shape_remains_unchanged() -> None:
+    assert attest.compute_validity(
+        {"manifest": [], "signed_at": 100},
+        {"ticket_id": "t", "status": "closed"},
+        "completion-verifier",
+    ) == {
+        "valid": True,
+        "reason": "certified completion-verifier attestation",
+        "verdict": "certified",
+    }
+
+
+def test_deriving_advisory_health_writes_no_ticket_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pin = PlanMaterialPin("child", "aaaa-bbbb-cccc-dddd", "1111111111111111")
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda *a, **k: "x" * 16)
+    writes: list[tuple] = []
+    monkeypatch.setattr("rebar._commands._seam.append_event", lambda *a, **k: writes.append(a))
+    attest.derive_plan_material_pin_health((pin,), repo_root="/repo", enforced=False)
+    assert writes == []
