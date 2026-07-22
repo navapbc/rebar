@@ -29,6 +29,7 @@ import contextlib
 import contextvars
 import hashlib
 import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -170,21 +171,52 @@ def _assemble_context_uncached(
     state = _reads.show_ticket(ticket_id, repo_root=repo_root)
     canonical = state.get("ticket_id", ticket_id)
     children: list[dict[str, Any]] = []
-    try:
-        listed = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
-    except Exception:  # noqa: BLE001 — children enumeration degrades P5/P8 if it fails; broad-but-logged below, review continues
-        # Failing to enumerate children degrades P5/P8 coverage — a real signal, logged.
-        logger.warning("could not list children of %s; reviewing without", canonical, exc_info=True)
-        listed = []
+    hierarchy_incomplete = False
+    hierarchy_incomplete_detail: list[str] = []
+    # Bounded retry (2 attempts total, small fixed delay) around both the enumeration read and
+    # each per-child fetch — a transient store hiccup should not silently degrade P5/P8 coverage
+    # when a single retry would have succeeded. Same broad `except Exception` predicate as before
+    # (a store read can fail in many shapes); only the retry wrapping + failure bookkeeping is new.
+    listed: list[dict[str, Any]] = []
+    _RETRY_ATTEMPTS = 2
+    _RETRY_DELAY_S = 0.05
+    enumerated = False
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            listed = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
+            enumerated = True
+            break
+        except Exception:  # noqa: BLE001 — children enumeration degrades P5/P8 if it fails; broad-but-logged below, review continues
+            if attempt + 1 < _RETRY_ATTEMPTS:
+                time.sleep(_RETRY_DELAY_S)
+                continue
+            # Failing to enumerate children degrades P5/P8 coverage — a real signal, logged.
+            logger.warning(
+                "could not list children of %s; reviewing without", canonical, exc_info=True
+            )
+            listed = []
+    if not enumerated:
+        hierarchy_incomplete = True
+        hierarchy_incomplete_detail.append("enumeration")
     for c in listed:
         cid = c.get("ticket_id")
         if cid is None:
             children.append(c)
             continue
-        try:  # fetch full child state (deps + file_impact) for P5/P8
-            children.append(_reads.show_ticket(cid, repo_root=repo_root))
-        except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to the summary
-            children.append(c)
+        fetched = False
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:  # fetch full child state (deps + file_impact) for P5/P8
+                children.append(_reads.show_ticket(cid, repo_root=repo_root))
+                fetched = True
+                break
+            except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to the summary
+                if attempt + 1 < _RETRY_ATTEMPTS:
+                    time.sleep(_RETRY_DELAY_S)
+                    continue
+                children.append(c)
+        if not fetched:
+            hierarchy_incomplete = True
+            hierarchy_incomplete_detail.append(str(cid))
     return PlanContext(
         ticket_id=canonical,
         ticket_type=state.get("ticket_type", ""),
@@ -192,6 +224,8 @@ def _assemble_context_uncached(
         description=state.get("description", ""),
         state=state,
         children=children,
+        hierarchy_incomplete=hierarchy_incomplete,
+        hierarchy_incomplete_detail=hierarchy_incomplete_detail,
         repo_root=resolve_code_root(
             repo_root,
             cfg_repo_path=cfg.repo_path if cfg else None,
@@ -525,6 +559,13 @@ def finalize_verdict(
     if blocking:
         verdict = "BLOCK"
     elif coverage.get("llm_unavailable"):
+        verdict = "INDETERMINATE"
+    elif coverage.get("hierarchy_incomplete"):
+        # The ticket hierarchy failed to load (enumeration or a per-child fetch exhausted its
+        # retries) — the review is missing real context it needs for P5/P8, so it can never
+        # reach a clean PASS. No relevance-exception carve-out (parent epic AC #4). Checked
+        # BEFORE verify_failed's fail-open path so a missing hierarchy is never masked by an
+        # advisory-only verify failure falling open to PASS.
         verdict = "INDETERMINATE"
     elif coverage.get("verify_failed"):
         # Pass-2 verify could not run (e.g. the agentic verifier exhausted its step budget),

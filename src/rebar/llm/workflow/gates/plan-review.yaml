@@ -214,6 +214,8 @@ steps:
                 routing: ${{ steps.assemble.outputs.routing }}
                 canonical_id: ${{ steps.precheck.outputs.canonical_id }}
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+                hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
+                hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -228,6 +230,8 @@ steps:
                 routing: ${{ steps.assemble.outputs.routing }}
                 canonical_id: ${{ steps.precheck.outputs.canonical_id }}
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+                hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
+                hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
         else:
         - id: verify_inputs
           uses: plan_review_verify_inputs
@@ -294,6 +298,8 @@ steps:
                 routing: ${{ steps.assemble.outputs.routing }}
                 canonical_id: ${{ steps.precheck.outputs.canonical_id }}
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+                hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
+                hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -308,6 +314,8 @@ steps:
                 routing: ${{ steps.assemble.outputs.routing }}
                 canonical_id: ${{ steps.precheck.outputs.canonical_id }}
                 ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+                hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
+                hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
     else:
     - id: passthrough
       uses: plan_review_passthrough

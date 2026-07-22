@@ -129,6 +129,13 @@ class PlanContext:
     # graph (dependents + children) — scales review depth + the budget cap (a central,
     # high-blast-radius plan earns more scrutiny). 0 = a leaf nobody depends on.
     centrality: float = 0.0
+    # Hierarchy-load completeness (ticket b24d): True when child enumeration or a per-child
+    # fetch exhausted its retries — the review must never reach a clean PASS on a plan whose
+    # hierarchy context is known-incomplete. ``hierarchy_incomplete_detail`` records WHICH
+    # read(s) failed: the literal "enumeration" for a total list_tickets failure, or the
+    # failing child's ticket id for a per-child show_ticket failure (possibly several).
+    hierarchy_incomplete: bool = False
+    hierarchy_incomplete_detail: list[str] = field(default_factory=list)
 
     @property
     def has_children(self) -> bool:

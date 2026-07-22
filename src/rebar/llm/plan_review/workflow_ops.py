@@ -144,6 +144,8 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "det_blocking": [],
         "det_advisory": [],
         "det_coverage": {},
+        "hierarchy_incomplete": pctx.hierarchy_incomplete,
+        "hierarchy_incomplete_detail": pctx.hierarchy_incomplete_detail,
     }
 
     # session_log / code_review / identity short-circuit to a bare exempt PASS (no review runs).
@@ -210,7 +212,12 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
             pctx,
             parts,
             coaching=[],
-            coverage={"det": det_cov, "llm_ran": False},
+            coverage={
+                "det": det_cov,
+                "llm_ran": False,
+                "hierarchy_incomplete": pctx.hierarchy_incomplete,
+                "hierarchy_incomplete_detail": pctx.hierarchy_incomplete_detail,
+            },
             runner_name=cfg.runner,
             model=cfg.model,
         )
@@ -547,6 +554,8 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
         "det": ctx.inputs.get("det_coverage") or {},
         "routing": ctx.inputs.get("routing") or {},
         "llm_ran": True,
+        "hierarchy_incomplete": ctx.inputs.get("hierarchy_incomplete", False),
+        "hierarchy_incomplete_detail": ctx.inputs.get("hierarchy_incomplete_detail", []),
     }
     # Surface any Pass-2 verification contract violations recorded by `plan_review_decide` this
     # run (expand-contract observability). Present ONLY when non-empty, so a clean run's verdict
