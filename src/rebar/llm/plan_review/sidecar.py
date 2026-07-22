@@ -21,7 +21,10 @@ import json
 import logging
 import os
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any
+
+from .relation_snapshot import PlanMaterialPin, is_canonical_ticket_id
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +51,13 @@ IMPACT_MODEL_VERSION = "plan-v3"
 RETAIN_PER_TICKET = 50
 
 
-def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None) -> bool:
+def emit(
+    verdict: dict[str, Any],
+    *,
+    material: str | None = None,
+    reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
+    repo_root=None,
+) -> bool:
     """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict, then prune
     to the retention bound. Returns True on success, False on any failure (the sidecar
     is observability — a failed emit must NEVER fail the review itself). Best-effort."""
@@ -57,7 +66,12 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
 
     try:
         tracker = _config.tracker_dir(repo_root)
-        payload = build_payload(verdict, material=material, repo_root=repo_root)
+        payload = build_payload(
+            verdict,
+            material=material,
+            reviewed_related_material=reviewed_related_material,
+            repo_root=repo_root,
+        )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the review
         # Observability floor: the sidecar is best-effort observability — a failed emit
@@ -391,8 +405,57 @@ def review_code_sha(repo_root=None) -> str | None:
         return None
 
 
+class ReviewedRelatedMaterialError(ValueError):
+    """A present sidecar related-material field is not the exact v2 extension shape."""
+
+
+_PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
+_PIN_KEYS = frozenset({"role", "canonical_id", "material_fingerprint"})
+
+
+def parse_reviewed_related_material(raw: object) -> tuple[PlanMaterialPin, ...] | None:
+    """Strictly parse the additive v2 related-material field.
+
+    Only an absent field is the pre-feature legacy shape. Present data must be an
+    exactly-keyed, sorted list so recovery never normalizes attacker-controlled input.
+    """
+    if not isinstance(raw, Mapping):
+        raise ReviewedRelatedMaterialError("review sidecar must be an object")
+    if "reviewed_related_material" not in raw:
+        return None
+    value = raw["reviewed_related_material"]
+    if not isinstance(value, list):
+        raise ReviewedRelatedMaterialError("reviewed_related_material must be a list")
+    pins: list[PlanMaterialPin] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != _PIN_KEYS:
+            raise ReviewedRelatedMaterialError("related-material item has invalid keys")
+        role = item["role"]
+        canonical_id = item["canonical_id"]
+        fingerprint = item["material_fingerprint"]
+        if role not in ("child", "prerequisite"):
+            raise ReviewedRelatedMaterialError("related-material item has invalid role")
+        if not is_canonical_ticket_id(canonical_id):
+            raise ReviewedRelatedMaterialError("related-material item has invalid canonical id")
+        if not isinstance(fingerprint, str) or not _PIN_FINGERPRINT_RE.fullmatch(fingerprint):
+            raise ReviewedRelatedMaterialError("related-material item has invalid fingerprint")
+        key = (role, canonical_id)
+        if key in seen:
+            raise ReviewedRelatedMaterialError("duplicate related-material item")
+        seen.add(key)
+        pins.append(PlanMaterialPin(role, canonical_id, fingerprint))
+    if pins != sorted(pins, key=lambda pin: (pin.role, pin.canonical_id)):
+        raise ReviewedRelatedMaterialError("related-material items are not in canonical order")
+    return tuple(pins)
+
+
 def build_payload(
-    verdict: dict[str, Any], *, material: str | None = None, repo_root=None
+    verdict: dict[str, Any],
+    *,
+    material: str | None = None,
+    reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
+    repo_root=None,
 ) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates
@@ -476,7 +539,7 @@ def build_payload(
         + verdict.get("indeterminate", [])
         + verdict.get("dropped", [])
     )
-    return {
+    payload = {
         "schema": "plan_review_result_v2",
         "impact_model_version": IMPACT_MODEL_VERSION,
         "verdict": verdict.get("verdict"),
@@ -514,3 +577,13 @@ def build_payload(
             for c in verdict.get("coaching", [])
         ],
     }
+    if reviewed_related_material is not None:
+        payload["reviewed_related_material"] = [
+            {
+                "role": pin.role,
+                "canonical_id": pin.canonical_id,
+                "material_fingerprint": pin.material_fingerprint,
+            }
+            for pin in reviewed_related_material
+        ]
+    return payload

@@ -503,7 +503,7 @@ def _run_plan_review(
     from . import relation_snapshot
 
     try:
-        relation_state = relation_snapshot.collect_plan_relation_snapshot(
+        review_snapshot = relation_snapshot.collect_plan_relation_snapshot(
             ticket_id, repo_root=repo_root
         )
     except relation_snapshot.PlanRelationSnapshotError as exc:
@@ -578,7 +578,7 @@ def _run_plan_review(
             cfg,
             runner=runner,
             repo_root=repo_root,
-            relation_snapshot=relation_state,
+            relation_snapshot=review_snapshot,
         )
         if refreshed is not None:
             from rebar.llm import findings
@@ -669,7 +669,14 @@ def _run_plan_review(
 
     # Sidecar (best-effort; never fails the review). Skippable for a pure-read run.
     verdict["sidecar_emitted"] = (
-        sidecar.emit(verdict, material=material, repo_root=repo_root) if emit_sidecar else False
+        sidecar.emit(
+            verdict,
+            material=material,
+            reviewed_related_material=review_snapshot.related_material,
+            repo_root=repo_root,
+        )
+        if emit_sidecar
+        else False
     )
 
     # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate). The
@@ -689,7 +696,7 @@ def _run_plan_review(
                 verdict,
                 material=material,
                 repo_root=repo_root,
-                relation_snapshot=relation_state,
+                relation_snapshot=review_snapshot,
             )
             verdict["signature"] = {
                 "signed": True,

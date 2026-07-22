@@ -110,6 +110,27 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             ),
         }
 
+    enforced = attest._read_enforce_plan_material_pins(repo_root)
+    try:
+        reviewed_pins = sidecar.parse_reviewed_related_material(payload)
+        pin_health = attest.derive_plan_material_pin_health(
+            reviewed_pins, repo_root=repo_root, enforced=enforced
+        )
+    except sidecar.ReviewedRelatedMaterialError:
+        pin_health = {"pin_status": "malformed-pin", "enforced": enforced, "targets": []}
+    if enforced and pin_health["pin_status"] not in ("current", "legacy-unpinned"):
+        return {
+            "ok": False,
+            "signed": False,
+            "ticket_id": ticket_id,
+            "verdict": pin_health["pin_status"],
+            "reason": (
+                "reviewed related-ticket material is no longer valid "
+                f"({pin_health['pin_status']}) — run `rebar review-plan` to re-review and sign"
+            ),
+            "health": pin_health,
+        }
+
     # Reconstruct the minimal verdict the attestation binds. The sidecar slims finding CITATIONS
     # out, so dependency scoping falls to the ticket's current file_impact (dependency_hashes reads
     # it from the store) hashed at the current code — the recovery attestation binds current code,
