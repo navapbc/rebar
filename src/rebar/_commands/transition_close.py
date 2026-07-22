@@ -505,7 +505,7 @@ def close_ticket(
             count = len(open_children)
             # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
             # not complete while its children are open), NOT a quality gate — so it is enforced
-            # UNCONDITIONALLY: neither --force (which bypasses the plan-review gate) nor
+            # UNCONDITIONALLY: neither --force (which bypasses any enabled start-work gate) nor
             # --force-close (which bypasses the signature/completion-verifier requirement) can
             # close a parent over open children. Resolve/close the children first, or detach
             # (re-home) them, then close the parent.

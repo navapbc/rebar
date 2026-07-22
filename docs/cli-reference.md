@@ -48,7 +48,7 @@ Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHE
 ### `claim`
 
 ```
-Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses the plan-review gate)
+Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses any enabled start-work gate, e.g. plan-review)
 ```
 
 ### `clarity-check`
