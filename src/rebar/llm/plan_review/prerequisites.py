@@ -106,7 +106,8 @@ def normalize_coverage_records(
     """
     expected = tuple(sorted(set(expected_ids)))
     try:
-        parsed = prerequisite_coverage_model().model_validate(raw).model_dump()
+        payload = {"records": raw["records"]} if isinstance(raw, dict) and "records" in raw else raw
+        parsed = prerequisite_coverage_model().model_validate(payload).model_dump()
     except Exception:  # noqa: BLE001 - model output is an untrusted boundary
         return [_indeterminate(i, "output-invalid") for i in expected]
     records = parsed["records"]
