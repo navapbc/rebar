@@ -310,14 +310,16 @@ def verify_findings(
     sent_indices = {gi for chunk in chunks for gi, _ in chunk}
     chunk_outputs: list[list[dict[str, Any]]] = []
     shape_failures: list[int] = []
+    empty_outcome_indices: list[int] = []
+    outcome_counts = {"clean": 0, "recovered": 0, "empty_outcomes": 0, "unrecoverable": 0}
     for chunk in chunks:
+        chunk_indices = [gi for gi, _ in chunk]
         try:
-            chunk_outputs.append(list(run_chunk(verify_instructions(chunk), context) or []))
+            raw_output = list(run_chunk(verify_instructions(chunk), context) or [])
         except StructuredOutputError:
             # The verifier's turn could not be validated to the `verification` contract — a SHAPE
             # contract failure, NOT a benign "couldn't verify". Surface it LOUDLY (distinct from
             # the quiet degrade below); the chunk's findings still degrade to INDETERMINATE.
-            chunk_indices = [gi for gi, _ in chunk]
             logger.error(
                 "verify chunk failed the structured `verification` contract; findings %s "
                 "degrade to INDETERMINATE",
@@ -325,20 +327,39 @@ def verify_findings(
             )
             shape_failures.extend(chunk_indices)
             chunk_outputs.append([])
+            outcome_counts["unrecoverable"] += 1
+            continue
         except Exception:  # noqa: BLE001 — a non-contract failure (network/etc.) → honest degrade
             chunk_outputs.append([])
+            continue
+        chunk_outputs.append(raw_output)
+        if not raw_output and chunk_indices:
+            # Returned successfully but structurally EMPTY despite non-empty input — a distinct,
+            # loud signal from a legitimate "no findings sent" outcome. Purely additive: those
+            # findings still degrade to INDETERMINATE exactly as before.
+            empty_outcome_indices.extend(chunk_indices)
+            outcome_counts["empty_outcomes"] += 1
+        elif raw_output:
+            chunk_reshape = reshape_verifications(raw_output, valid_indices=set(chunk_indices))
+            if chunk_reshape.has_violations:
+                outcome_counts["recovered"] += 1
+            else:
+                outcome_counts["clean"] += 1
     reshape = reshape_verifications(
         [v for out in chunk_outputs for v in out], valid_indices=sent_indices
     )
     violations = reshape.summary()
     if shape_failures:
         violations["shape_failures"] = sorted(shape_failures)
+    if empty_outcome_indices:
+        violations["empty_outcomes"] = sorted(empty_outcome_indices)
     if violations:
         logger.error("verification contract violations detected: %s", violations)
     return {
         "verifications": reshape.verifications,
         "omitted": omitted,
         "contract_violations": violations,
+        "outcome_counts": outcome_counts,
     }
 
 

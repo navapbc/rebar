@@ -415,6 +415,154 @@ def test_verify_findings_surfaces_structured_contract_failure_loudly(caplog) -> 
     assert review_kernel.pass3_decide(result["verifications"].get(0))["decision"] == "indeterminate"
 
 
+# ── semantically-empty verifier outcomes (story columned-azure-flea) ─────────────────────────
+def test_verify_findings_clean_chunk_counts_as_clean_outcome() -> None:
+    """A conforming, non-empty verifier response for a chunk counts as a `clean` outcome in the
+    new `outcome_counts` telemetry — additive, so existing consumers reading `contract_violations`
+    are unaffected (it stays empty/falsy on a clean run)."""
+    findings = [_fnd("f0"), _fnd("f1")]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        return [
+            {"index": 0, "severity_attributes": {}, "binary": {}},
+            {"index": 1, "severity_attributes": {}, "binary": {}},
+        ]
+
+    result = kverify.verify_findings(
+        findings,
+        context="ctx",
+        run_chunk=run_chunk,
+        window_tokens=1_000_000,
+        est_tokens=lambda s: len(s) // 4,
+    )
+    assert not result["contract_violations"]
+    assert result["outcome_counts"] == {
+        "clean": 1,
+        "recovered": 0,
+        "empty_outcomes": 0,
+        "unrecoverable": 0,
+    }
+
+
+def test_verify_findings_flags_semantically_empty_outcome_as_contract_violation() -> None:
+    """A `run_chunk` that returns SUCCESSFULLY (no exception — the resilient tolerant-parse
+    stack validated) but with an EMPTY list for a non-empty chunk is the exact silent-degrade
+    ADR 0006 names (a divergent shape normalizes to an empty-but-valid object): it must be
+    flagged LOUDLY and distinctly from both a generic honest-degrade (no violation) and a
+    `StructuredOutputError` shape failure (`shape_failures`) — never silently treated as a
+    valid empty pass. The OUTCOME stays unchanged: those findings still have no verification,
+    so Pass-3 still routes them to INDETERMINATE (resilient parsing is preserved)."""
+    import logging
+
+    findings = [_fnd("f0"), _fnd("f1")]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        return []  # tolerant parse "succeeded" but produced nothing usable
+
+    with caplog_for_verify() as caplog:
+        result = kverify.verify_findings(
+            findings,
+            context="ctx",
+            run_chunk=run_chunk,
+            window_tokens=1_000_000,
+            est_tokens=lambda s: len(s) // 4,
+        )
+    assert result["verifications"] == {}
+    assert result["contract_violations"].get("empty_outcomes") == [0, 1]
+    assert result["outcome_counts"]["empty_outcomes"] == 1
+    assert any(r.levelno == logging.ERROR for r in caplog.records), "must log LOUDLY"
+    assert review_kernel.pass3_decide(result["verifications"].get(0))["decision"] == "indeterminate"
+
+
+def test_verify_findings_recovered_outcome_counted_distinctly_from_clean() -> None:
+    """A non-empty verifier response that still needs tolerant reshaping (e.g. a duplicate
+    index) counts as `recovered`, not `clean` — distinguishing a response the resilient stack
+    had to work for from one that matched the schema outright."""
+    findings = [_fnd("f0"), _fnd("f1")]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        return [
+            {"index": 0, "severity_attributes": {}, "binary": {}},
+            {"index": 0, "severity_attributes": {}, "binary": {}},  # duplicate — needs reshaping
+        ]
+
+    result = kverify.verify_findings(
+        findings,
+        context="ctx",
+        run_chunk=run_chunk,
+        window_tokens=1_000_000,
+        est_tokens=lambda s: len(s) // 4,
+    )
+    assert result["outcome_counts"]["recovered"] == 1
+    assert result["outcome_counts"]["clean"] == 0
+    assert result["contract_violations"].get("duplicates") == [0]
+
+
+def test_verify_findings_mixed_chunks_tally_each_outcome_independently() -> None:
+    """Multiple chunks with distinct outcomes (clean, semantically-empty, shape-failure) tally
+    independently in `outcome_counts` and merge their violation reports without one masking
+    another — a large-batch verifier run must not let one bad chunk's telemetry swallow a good
+    chunk's."""
+    from rebar.llm.errors import StructuredOutputError
+
+    findings = [_fnd(f"f{i}") for i in range(6)]
+
+    def run_chunk(instructions: str, context: str) -> list[dict]:
+        if "### finding index 2" in instructions:
+            return []  # empty outcome
+        if "### finding index 4" in instructions:
+            raise StructuredOutputError("divergent shape")
+        idx = int(instructions.split("### finding index ")[1].split("\n")[0])
+        return [{"index": idx, "severity_attributes": {}, "binary": {}}]
+
+    # A tiny window forces exactly ONE finding per chunk, so each outcome is isolated.
+    window = kverify.VERIFY_SYSTEM_RESERVE_TOKENS + kverify.PER_FINDING_VERIFY_TOKENS + 100
+    result = kverify.verify_findings(
+        findings,
+        context="ctx",
+        run_chunk=run_chunk,
+        window_tokens=window,
+        est_tokens=lambda s: 10,
+        headroom=1.0,
+    )
+    counts = result["outcome_counts"]
+    assert counts["clean"] >= 1
+    assert counts["empty_outcomes"] == 1
+    assert counts["unrecoverable"] == 1
+    assert result["contract_violations"]["empty_outcomes"] == [2]
+    assert result["contract_violations"]["shape_failures"] == [4]
+
+
+def caplog_for_verify():
+    """Small context-manager shim so the empty-outcome test can assert on ERROR logs without
+    depending on pytest's `caplog` fixture injection order relative to the `with` block."""
+    import contextlib
+    import logging
+
+    @contextlib.contextmanager
+    def _cm():
+        logger = logging.getLogger("rebar.llm.review_kernel.verify")
+        handler = logging.Handler()
+        records: list[logging.LogRecord] = []
+        handler.emit = records.append  # type: ignore[method-assign]
+        logger.addHandler(handler)
+        prior_level = logger.level
+        logger.setLevel(logging.ERROR)
+        try:
+
+            class _Caplog:
+                pass
+
+            c = _Caplog()
+            c.records = records
+            yield c
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(prior_level)
+
+    return _cm()
+
+
 def test_resolve_verifier_model_non_frontier_default() -> None:
     # the default model downgrades to the non-frontier verifier default
     assert kverify.resolve_verifier_model("D", default_model="D", verifier_default="V") == "V"
