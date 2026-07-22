@@ -97,7 +97,9 @@ restated here:
   description template, the blocking checklist ("your plan must…"), and the revise→review→claim
   loop → start here: `rebar explain plan` (packaged; source `src/rebar/_guides/writing-a-passing-plan.md`).
 - **Gate protocols** — the plan-review claim gate and the completion-verifier close gate
-  (both **on** for this project), their attestation model, and how to remediate →
+  (both **on** for this project), their attestation model, how to remediate, and — because a
+  moving base ref silently makes an attestation stale — how to check currency cheaply with
+  `rebar review-plan <id> --status` (read-only, no LLM) instead of re-running the review →
   `docs/plan-review-gate.md`.
 - **Plan-review criteria reference** — the generated per-criterion registry (one section per
   criterion, the reviewer's detection detail), the per-ticket structural quality gates, and

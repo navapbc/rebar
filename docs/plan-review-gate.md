@@ -391,6 +391,46 @@ coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live i
 sidecar; a project composes any hard CI gate by checking the signed result + its
 coverage.
 
+### Checking currency cheaply — `review-plan --status` (no LLM)
+
+An attestation that read `PASS` when it was signed can silently stop being **current** —
+most often because `origin/main` (the base ref the review was pinned against) advanced,
+or the plan was edited. Because validity is computed **on read**, you never have to re-run
+the billable review just to *learn* the current verdict: the exact check the `claim` gate
+runs is exposed as a read-only, no-LLM, no-network command:
+
+```sh
+rebar review-plan <id> --status        # exit 0 = current, 12 = stale/absent; add -o json
+```
+
+It prints the currency verdict — `certified` when the attestation is valid right now, else
+the specific reason (`stale-code` / `stale-head`, `stale-material`, `stale-regver`,
+`stale-reopened`, `unsigned`, …) — plus the **code anchor the plan was reviewed against**
+(the pinned `verified-at-sha` for a `--source attested` review, else the signed HEAD). The
+library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_check`).
+
+**The currency rule, as one expression.** An attestation is current iff **all** of: it is
+HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped:
+per-dependency hashes; unscoped: whole-HEAD) · **AND** the bound material fingerprint equals
+the ticket's current one · **AND** the criteria-registry stamp still matches · **AND** it
+post-dates the latest reopen · **AND** any reviewed related-material pins are still fresh.
+These are two *independent* staleness axes the report singled out — **repo state**
+(`verified_at_sha` / dependency hashes) and **ticket content** (`material_fingerprint`) — plus
+the registry/reopen/pin guards; a change on **any** axis flips the verdict away from
+`certified`. Re-gate (re-run `review-plan`) before implementing whenever `--status` is not
+`certified`; under the parallel epic/child workflow, a moving base ref makes this the norm.
+
+### `audit show` is a history view, not a status view
+
+`rebar audit show <id>`'s `plan_reviews` array is the retained **`REVIEW_RESULT` sidecar
+history** (every review that ran), **not** the current signed attestation. It is **newest-first**
+and each entry carries a `reviewed_at` ns-epoch timestamp (so ordering is checkable from the
+data — do **not** read `[-1]` as "current"; `[0]` is newest, and neither answers "is it approved
+*now*"). The history is pruned to a retention bound and is a *different store* from the
+`SIGNATURE` attestation the gate consumes, so a fresh review can be reflected here while the
+current-approval question is still answered only by `--status` / `claim`. Use `audit show` to
+see *what reviews happened*; use `review-plan --status` to ask *is it approved right now*.
+
 ### Phase/floor manifest contract
 
 Compiled tickets carry `plan_review_phase: planning|execution`. A winning transition into
@@ -486,7 +526,9 @@ attestation instead of re-reviewing.
 - The reused verdict is a well-formed `plan_review_verdict` with `verdict: PASS`,
   `coverage.llm_ran: false`, `coverage.idempotent_skip: true`, the current
   `material_fingerprint`, and `signature.signed: true` mirroring the live attestation. A
-  concise log line (`plan review reused ... -- pass --force to re-run`) marks the skip.
+  concise log line (`plan review reused ... -- pass --force to re-run`) marks the skip, and
+  `-o text` prints an explicit `reused: existing attestation is still current` line so a cache
+  hit is never mistaken for a fresh review (the JSON carries `coverage.idempotent_skip`).
 - It is ordered **before** the code-drift `drift_refresh` check below (a fully-valid
   attestation beats a needs-refresh one), and applies only when signing (a `--no-sign` /
   readonly review has no attestation to reuse).
