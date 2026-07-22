@@ -1,0 +1,220 @@
+"""The reconciler backend port — pinned by ADR 0035 §(d) (epic ``bbf1``).
+
+This module defines the vendor-neutral interface the reconciler core drives a
+backend through. It is *pure interface*: ``typing.Protocol`` declarations plus
+the ``RemoteRef`` identity value — no behavior, no vendor imports, stdlib +
+``typing`` only, so it loads in every context the reconciler is exec'd in
+(normal import and ``spec_from_file_location`` by-path).
+
+The design (ADR 0035 §(d)):
+
+* rebar's **local** ticket is the canonical model — the seam speaks the
+  local-field vocabulary and each adapter maps vendor⇄local.
+* **Core owns diff/apply; adapters only read + enact.** A backend never diffs.
+* A backend is one :class:`Backend` object exposing **five required role
+  Protocols** (:class:`TicketTransport`, :class:`OutboundMapper`,
+  :class:`InboundMapper`, :class:`FieldSanitizer`, :class:`IdentityConvention`)
+  plus zero or more **opt-in capability Protocols**
+  (:class:`SupportsLinks`, :class:`SupportsComments`,
+  :class:`SupportsIncremental`).
+* Callers detect a capability by an ``isinstance``-guarded check against the
+  backend (behavioural, not structural introspection); the capability Protocols
+  are therefore ``@runtime_checkable``.
+* :class:`RemoteRef` is the identity tuple ``{vendor, instance, remote_id}`` that
+  replaces the hardcoded ``"jira"`` provider literal and the bare remote key.
+
+S2 (this story) only *defines* the port and lands a thin ``JiraBackend`` +
+``JiraIdentityConvention`` implementation of it; routing core call sites through
+the port is S4, config-driven selection is S3.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
+
+
+@dataclass(frozen=True)
+class RemoteRef:
+    """A backend-neutral identity for one remote work item.
+
+    ``vendor`` names the backend family (e.g. ``"jira"``); ``instance`` names the
+    concrete deployment (e.g. a Jira site / project host) so two instances of the
+    same vendor never collide; ``remote_id`` is the backend's own opaque key for
+    the item (e.g. a Jira issue key ``"DIG-1234"``). Frozen + value-equal so it can
+    be a dict key and compared by identity content.
+    """
+
+    vendor: str
+    instance: str
+    remote_id: str
+
+
+# ---------------------------------------------------------------------------
+# Required role Protocols
+# ---------------------------------------------------------------------------
+
+
+class TicketTransport(Protocol):
+    """CRUD transport against the remote tracker (today: ``acli.AcliClient``).
+
+    The always-present read/write surface the core drives regardless of which
+    optional capabilities a backend advertises.
+    """
+
+    def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]: ...
+
+    def get_issue(self, remote_id: str) -> dict[str, Any]: ...
+
+    def update_issue(self, remote_id: str, **kwargs: Any) -> dict[str, Any]: ...
+
+    def transition_issue_by_name(self, remote_id: str, target_status: str) -> None: ...
+
+    def add_label(self, remote_id: str, label: str) -> None: ...
+
+    def search_issues(
+        self, jql: str, start_at: int = 0, max_results: int = 50
+    ) -> list[dict[str, Any]]: ...
+
+
+class OutboundMapper(Protocol):
+    """Map a local ticket to the backend's field/value shapes (+ rich text).
+
+    Delegates, for Jira, to ``outbound_fields._map_local_to_jira_fields`` (which
+    itself fits rich text via ``adf``). No diffing — that stays in the core.
+    """
+
+    def map_local_to_remote(
+        self,
+        ticket: dict[str, Any],
+        binding_store: Any | None = None,
+        local_ticket_types: dict[str, str] | None = None,
+        emit_detach_clear: bool = False,
+    ) -> dict[str, Any]: ...
+
+
+class InboundMapper(Protocol):
+    """Map a backend issue payload back to local ticket field shapes.
+
+    Delegates, for Jira, to ``inbound_fields._map_jira_to_local_fields``.
+    """
+
+    def map_remote_to_local(self, remote_fields: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class FieldSanitizer(Protocol):
+    """Defend the backend's hard limits on field values (send-side only).
+
+    Delegates, for Jira, to the ``adapters/jira/jira_fields.py`` sanitizers +
+    ``comment_limits``. Each method returns a value fitted to the backend's limit
+    (idempotent) or raises on an unfixable value (e.g. an invalid label).
+    """
+
+    def sanitize_label(self, label: str) -> str: ...
+
+    def sanitize_summary(self, summary: str) -> str: ...
+
+    def sanitize_description(self, description: str) -> str: ...
+
+    def sanitize_comment(self, body: str) -> str: ...
+
+
+class IdentityConvention(Protocol):
+    """How a backend stores + reads the ``rebar-id`` back-pointer label.
+
+    The back-pointer binds a remote issue to its local rebar ticket by stamping
+    the **local id** into a label on the remote item (Jira: ``rebar-id:<local_id>``).
+    Unlike the other four roles this had no single existing delegate — the
+    convention was inlined at four core call sites (``f"rebar-id:{local_id}"``
+    writes at ``dispatch_one``/``binding_store``/``apply_inbound_records`` + a
+    ``rebar-id:``/``rebar-id-`` prefix scan on read at ``binding_walk``). S2
+    introduces it as a self-contained pure object so the string convention lives
+    in exactly one place instead of being hand-inlined.
+
+    ``format_label`` produces the back-pointer label a backend stores for a local
+    id; ``parse_label`` recovers the local id from a stored label (or ``None`` if
+    the label is not an identity marker); ``is_identity_label`` is the cheap
+    membership predicate the read/exclusion paths use. Behaviour is pinned to the
+    current inlined convention (both the canonical ``rebar-id:`` colon form and
+    the legacy ``rebar-id-`` hyphen form are recognised on read).
+    """
+
+    def format_label(self, local_id: str) -> str: ...
+
+    def parse_label(self, label: str) -> str | None: ...
+
+    def is_identity_label(self, label: str) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
+# Opt-in capability Protocols (runtime-checkable for isinstance detection)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class SupportsLinks(Protocol):
+    """A backend that can enact + read issue links (Jira does).
+
+    Core asks a backend to sync links only when ``isinstance(backend,
+    SupportsLinks)``; a backend that does not implement this is never asked.
+    """
+
+    def set_relationship(
+        self, from_id: str, to_id: str, link_type: str = "Blocks"
+    ) -> dict[str, Any]: ...
+
+    def get_issuelinks_map(self, project_key: str) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class SupportsComments(Protocol):
+    """A backend that can enact + read comments (Jira does)."""
+
+    def add_comment(self, remote_id: str, body: str) -> dict[str, Any]: ...
+
+    def get_comment_map(self, project_key: str) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class SupportsIncremental(Protocol):
+    """A backend that can fetch only items changed since a watermark.
+
+    Core uses an incremental fetch only when ``isinstance(backend,
+    SupportsIncremental)``; otherwise it falls back to a full scan.
+    """
+
+    def search_incremental(self, project_key: str, since: str) -> list[dict[str, Any]]: ...
+
+
+# ---------------------------------------------------------------------------
+# The Backend facade
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class Backend(Protocol):
+    """One backend: the five role Protocols behind a single object.
+
+    A concrete backend (e.g. ``JiraBackend``) exposes ``transport``, ``outbound``,
+    ``inbound``, ``sanitizer`` and ``identity`` and may *additionally* implement
+    any capability Protocol. ``vendor`` names the backend family for
+    :class:`RemoteRef` construction.
+    """
+
+    @property
+    def vendor(self) -> str: ...
+
+    @property
+    def transport(self) -> TicketTransport: ...
+
+    @property
+    def outbound(self) -> OutboundMapper: ...
+
+    @property
+    def inbound(self) -> InboundMapper: ...
+
+    @property
+    def sanitizer(self) -> FieldSanitizer: ...
+
+    @property
+    def identity(self) -> IdentityConvention: ...
