@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "corpus": "plan-review-prerequisite-packing-v1",
+  "passed": true,
+  "metrics": {
+    "coverage_completeness": 1.0,
+    "prerequisite_attribution_error_rate": 0.0,
+    "min_recall": 0.9,
+    "max_false_accept": 0.1,
+    "recall": {"v1": 1.0, "v2": 1.0},
+    "false_accept": {"v1": 0.0, "v2": 0.0},
+    "n_gold": 24
+  },
+  "gating_failures": []
+}

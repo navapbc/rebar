@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,24 @@ from rebar.llm.runner import Runner
 
 from . import det_floor, passes, registry
 from .det_floor import PlanContext
+
+
+@dataclass(frozen=True)
+class PrerequisiteBlock:
+    """One authoritative whole prerequisite plan block; never split by packing."""
+
+    canonical_id: str
+    rendered_text: str
+    relation_kind: str = "depends_on"
+
+
+@dataclass(frozen=True)
+class PrerequisiteVerificationBlock:
+    """One focused finding plus its authoritative whole prerequisite context."""
+
+    canonical_id: str
+    findings: tuple[dict[str, Any], ...]
+    rendered_text: str
 
 
 def _child_tokens(child: dict[str, Any]) -> int:
@@ -166,6 +184,78 @@ def verify_request_chunks(
         headroom=headroom,
         per_finding_out_tokens=per_finding_out_tokens,
     )
+
+
+def pack_prerequisite_bins(
+    blocks: list[PrerequisiteBlock] | tuple[PrerequisiteBlock, ...],
+    *,
+    subject_plan: str,
+    system_prompt: str,
+    model: str | None,
+    per_block_output_tokens: int = PER_FINDING_VERIFY_TOKENS,
+    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+) -> tuple[list[list[PrerequisiteBlock]], list[PrerequisiteBlock]]:
+    """Greedily pack stable, whole prerequisite blocks within the actual prompt budget."""
+    limit = int(largest_window_tokens(model) * headroom)
+    fixed = (
+        det_floor.est_tokens(system_prompt)
+        + det_floor.est_tokens(subject_plan)
+        + VERIFY_SYSTEM_RESERVE_TOKENS
+    )
+    bins: list[list[PrerequisiteBlock]] = []
+    oversized: list[PrerequisiteBlock] = []
+    current: list[PrerequisiteBlock] = []
+    used = fixed
+    for block in sorted(blocks, key=lambda item: item.canonical_id):
+        charge = det_floor.est_tokens(block.rendered_text) + per_block_output_tokens
+        if fixed + charge > limit:
+            oversized.append(block)
+            continue
+        if current and used + charge > limit:
+            bins.append(current)
+            current, used = [], fixed
+        current.append(block)
+        used += charge
+    if current:
+        bins.append(current)
+    return bins, oversized
+
+
+def pack_prerequisite_verifier_bins(
+    records: list[PrerequisiteVerificationBlock] | tuple[PrerequisiteVerificationBlock, ...],
+    *,
+    subject_plan: str,
+    system_prompt: str,
+    model: str | None,
+    per_finding_output_tokens: int = PER_FINDING_VERIFY_TOKENS,
+    headroom: float = DEFAULT_VERIFY_WINDOW_HEADROOM,
+) -> tuple[list[list[PrerequisiteVerificationBlock]], list[PrerequisiteVerificationBlock]]:
+    """Pack whole focused verification records; plan text and records are indivisible."""
+    limit = int(largest_window_tokens(model) * headroom)
+    fixed = (
+        det_floor.est_tokens(system_prompt)
+        + det_floor.est_tokens(subject_plan)
+        + VERIFY_SYSTEM_RESERVE_TOKENS
+    )
+    bins: list[list[PrerequisiteVerificationBlock]] = []
+    oversized: list[PrerequisiteVerificationBlock] = []
+    current: list[PrerequisiteVerificationBlock] = []
+    used = fixed
+    for record in sorted(records, key=lambda item: item.canonical_id):
+        charge = det_floor.est_tokens(record.rendered_text) + (
+            per_finding_output_tokens * len(record.findings)
+        )
+        if fixed + charge > limit:
+            oversized.append(record)
+            continue
+        if current and used + charge > limit:
+            bins.append(current)
+            current, used = [], fixed
+        current.append(record)
+        used += charge
+    if current:
+        bins.append(current)
+    return bins, oversized
 
 
 def is_context_limit_error(exc: Exception) -> bool:

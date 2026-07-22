@@ -210,10 +210,13 @@ def test_verification_contract_shares_the_binary_vocabulary() -> None:
     base = kverify.verification_model()
     plan = kverify.plan_review_verification_model()
     code = kverify.code_review_verification_model()
-    # identical Binary vocabulary on ALL THREE models (shared builder — no drift across gates)
+    # Base and code-review remain byte-identical. Plan-review adds the prerequisite-only
+    # attribution veto outside validity arithmetic; it must not leak into the shared/code
+    # contracts or the graded vocabulary.
     assert _binary_fields(base) == expected_binary
-    assert _binary_fields(plan) == expected_binary
     assert _binary_fields(code) == expected_binary
+    assert _binary_fields(plan) == expected_binary | {"prerequisite_attribution_valid"}
+    assert "prerequisite_attribution_valid" not in review_kernel.GRADED_BINARY
     # the plan model is a strict SUPERSET on severity_attributes: the base five + 7 axes + detection
     base_sev = _severity_fields(base)
     plan_sev = _severity_fields(plan)

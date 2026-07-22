@@ -27,6 +27,14 @@ inputs:
       supplied by the gate dispatcher (``[]`` = normal full review).
     type: array
     required: false
+  subject_plan:
+    description: Subject plan from the same review generation as the relation preload.
+    type: string
+    required: false
+  prerequisites:
+    description: Stable direct-prerequisite blocks from the one relation preload.
+    type: array
+    required: false
 steps:
 - id: precheck
   uses: plan_review_precheck
@@ -48,6 +56,9 @@ steps:
       - assemble
       batch:
         prompt: plan-review-finder
+        with:
+          subject_plan: ${{ steps.precheck.outputs.subject_plan }}
+          relation_snapshot: ${{ steps.precheck.outputs.relation_snapshot }}
         model_ladder:
         - claude-haiku-4-5
         - claude-sonnet-4-6
@@ -119,9 +130,27 @@ steps:
           when: '${{ steps.assemble.outputs.include_T8 }}'
         - prompt: plan-review-T9
           when: '${{ steps.assemble.outputs.include_T9 }}'
-    - id: grounding
+    - id: prerequisite_verify_inputs
       needs:
       - finders
+      uses: plan_review_prerequisite_verify_inputs
+      with:
+        subject_plan: ${{ steps.precheck.outputs.subject_plan }}
+        findings: ${{ steps.finders.outputs.prerequisite_findings }}
+        prerequisites: ${{ steps.precheck.outputs.prerequisites }}
+    - id: prerequisite_verify
+      needs:
+      - prerequisite_verify_inputs
+      prompt: plan-review-prerequisite-verifier
+      mode: structured
+      output_schema: plan_review_verification
+      with:
+        findings: ${{ steps.finders.outputs.prerequisite_findings }}
+        plan: ${{ steps.prerequisite_verify_inputs.outputs.plan }}
+        instructions: ${{ steps.prerequisite_verify_inputs.outputs.instructions }}
+    - id: grounding
+      needs:
+      - prerequisite_verify
       uses: plan_review_grounding
       with:
         findings: ${{ steps.finders.outputs.findings }}
@@ -174,6 +203,11 @@ steps:
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
             review_phase: ${{ steps.precheck.outputs.review_phase }}
+            has_prerequisites: ${{ steps.finders.outputs.has_prerequisites }}
+            prerequisite_coverage: ${{ steps.finders.outputs.prerequisite_coverage }}
+            prerequisite_findings: ${{ steps.finders.outputs.prerequisite_findings }}
+            prerequisite_verifications: ${{ steps.prerequisite_verify.outputs.verifications }}
+            prerequisite_input_too_large_ids: ${{ steps.prerequisite_verify_inputs.outputs.input_too_large_ids }}
         - id: coach_inputs
           needs:
           - decide
@@ -182,6 +216,8 @@ steps:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
             blocking: ${{ steps.decide.outputs.blocking }}
+            indeterminate: ${{ steps.decide.outputs.indeterminate }}
+            prerequisite_coverage: ${{ steps.decide.outputs.prerequisite_coverage }}
         # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
         # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
         # findings takes the else arm — coach renders with notes:[] and makes NO coach
@@ -218,6 +254,7 @@ steps:
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
+                prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -235,6 +272,7 @@ steps:
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
+                prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
         else:
         - id: verify_inputs
           uses: plan_review_verify_inputs
@@ -261,6 +299,11 @@ steps:
             det_blocking: ${{ steps.precheck.outputs.det_blocking }}
             det_advisory: ${{ steps.precheck.outputs.det_advisory }}
             review_phase: ${{ steps.precheck.outputs.review_phase }}
+            has_prerequisites: ${{ steps.finders.outputs.has_prerequisites }}
+            prerequisite_coverage: ${{ steps.finders.outputs.prerequisite_coverage }}
+            prerequisite_findings: ${{ steps.finders.outputs.prerequisite_findings }}
+            prerequisite_verifications: ${{ steps.prerequisite_verify.outputs.verifications }}
+            prerequisite_input_too_large_ids: ${{ steps.prerequisite_verify_inputs.outputs.input_too_large_ids }}
         - id: coach_inputs
           needs:
           - decide
@@ -269,6 +312,8 @@ steps:
             ticket_id: ${{ inputs.ticket_id }}
             surviving: ${{ steps.decide.outputs.surfaced }}
             blocking: ${{ steps.decide.outputs.blocking }}
+            indeterminate: ${{ steps.decide.outputs.indeterminate }}
+            prerequisite_coverage: ${{ steps.decide.outputs.prerequisite_coverage }}
         # Pass-4 coach is gated on there being a coachable finding — blocking OR surviving
         # advisory (story 8086: blocking findings get coaching too). A clean PASS with zero
         # findings takes the else arm — coach renders with notes:[] and makes NO coach
@@ -305,6 +350,7 @@ steps:
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
+                prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -322,6 +368,7 @@ steps:
                 hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
+                prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
     else:
     - id: passthrough
       uses: plan_review_passthrough

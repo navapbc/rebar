@@ -40,6 +40,10 @@ from rebar.llm.workflow.executor import StepContext, register_step
 
 logger = logging.getLogger(__name__)
 
+# Register the extracted prerequisite-specific workflow adapter alongside this
+# module's historical step registry population.
+from . import prerequisite_workflow_ops as _prerequisite_workflow_ops  # noqa: E402,F401
+
 _OUTPUT_SCHEMA = "plan_review_verdict"
 
 
@@ -135,6 +139,7 @@ def enrich_operator_attested(
 def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     """Run the DET floor; short-circuit to a deterministic verdict on exempt/blocking."""
     from . import det_floor, orchestrator
+    from .prerequisites import current_blocks
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
@@ -147,6 +152,9 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "det_coverage": {},
         "hierarchy_incomplete": pctx.hierarchy_incomplete,
         "hierarchy_incomplete_detail": pctx.hierarchy_incomplete_detail,
+        "subject_plan": pctx.plan_text,
+        "prerequisites": current_blocks(),
+        "relation_snapshot": current_blocks(),
     }
 
     # session_log / code_review / identity short-circuit to a bare exempt PASS (no review runs).
@@ -394,21 +402,62 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
     advisory — so blocking findings (the ones an agent must remediate) get coaching too;
     it also drives the coach_gate branch condition (fires when EITHER bucket is non-empty)."""
     from . import orchestrator, passes
+    from .prerequisites import current_blocks
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     surviving = list(ctx.inputs.get("surviving") or [])
     blocking = list(ctx.inputs.get("blocking") or [])
-    coachable = blocking + surviving
+    reclassified = [
+        finding
+        for finding in (ctx.inputs.get("indeterminate") or [])
+        if finding.get("reason") == "prerequisite-coverage-indeterminate"
+    ]
+    coachable = blocking + surviving + reclassified
+    prerequisite_ids = {
+        str(record.get("prerequisite_id", ""))
+        for record in (ctx.inputs.get("prerequisite_coverage") or [])
+        if record.get("prerequisite_id")
+    }
+    prerequisite_plan_texts = {
+        str(block.get("rendered_text", ""))
+        for block in current_blocks()
+        if block.get("rendered_text")
+    }
+
+    def _coach_safe(finding: dict[str, Any]) -> dict[str, Any]:
+        if not finding.get("prerequisite_id"):
+            return finding
+        safe = {
+            key: value
+            for key, value in finding.items()
+            if key not in {"prerequisite_id", "evidence", "scenarios", "location"}
+        }
+        for key in ("finding", "checklist_item", "suggested_fix", "impact"):
+            if isinstance(safe.get(key), str):
+                for prerequisite_id in prerequisite_ids:
+                    safe[key] = safe[key].replace(prerequisite_id, "[direct prerequisite]")
+                for prerequisite_plan_text in prerequisite_plan_texts:
+                    safe[key] = safe[key].replace(
+                        prerequisite_plan_text, "[direct prerequisite plan]"
+                    )
+        return safe
+
+    prompt_coachable = [_coach_safe(finding) for finding in coachable]
     # The deterministic applicability filter (WS3): the LLM only sees the moves that apply
     # given the active triggers (plan-review's = the criteria the coachable findings carry).
     # Existing plan-review moves declare no `applies_when` ⇒ always-applicable ⇒ the listing is
     # unchanged; the field + filter are the mechanism a future gate (b744) uses.
     moves = passes.load_move_registry(ctx.repo_root)
-    triggers = {c for f in coachable for c in f.get("criteria", []) or []}
+    triggers = {c for f in prompt_coachable for c in f.get("criteria", []) or []}
     applicable = passes.applicable_moves(moves, triggers)
-    instructions = passes.coach_instructions(coachable, applicable)
-    return {"plan": pctx.plan_text, "instructions": instructions, "findings": coachable}
+    instructions = passes.coach_instructions(prompt_coachable, applicable)
+    return {
+        "plan": pctx.plan_text,
+        "instructions": instructions,
+        "findings": prompt_coachable,
+        "prerequisite_coverage": list(ctx.inputs.get("prerequisite_coverage") or []),
+    }
 
 
 @register_step(
@@ -436,6 +485,27 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     det_advisories = list(ctx.inputs.get("det_advisory") or [])
     # The workflow schema requires this; direct legacy/unit callers model planning by omission.
     review_phase = ctx.inputs.get("review_phase", "planning")
+    has_prerequisites = bool(ctx.inputs.get("has_prerequisites", False))
+    prerequisite_coverage = list(ctx.inputs.get("prerequisite_coverage") or [])
+    prerequisite_findings = list(ctx.inputs.get("prerequisite_findings") or [])
+    prerequisite_raw_verifs = list(ctx.inputs.get("prerequisite_verifications") or [])
+    prerequisite_input_too_large_ids = {
+        str(value) for value in (ctx.inputs.get("prerequisite_input_too_large_ids") or [])
+    }
+    if has_prerequisites:
+        required_focused = {
+            "prerequisite_coverage",
+            "prerequisite_findings",
+            "prerequisite_verifications",
+        }
+        if not required_focused.issubset(ctx.inputs):
+            raise ValueError("has_prerequisites=true requires all focused review arrays")
+        from .prerequisites import prerequisite_coverage_model
+
+        prerequisite_coverage_model().model_validate({"records": prerequisite_coverage})
+        coverage_ids = [str(r.get("prerequisite_id", "")) for r in prerequisite_coverage]
+        if not coverage_ids or len(coverage_ids) != len(set(coverage_ids)):
+            raise ValueError("focused prerequisite coverage must contain unique records")
 
     # The Pass-2 verifier (the workflow's `verify` prompt step) emits a flat list of
     # `{index, severity_attributes, binary}`; reshape it to the `{index: {...}}` map Pass-3
@@ -491,19 +561,118 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
         if verif is not None:  # absent == None to the consumer's verifs.get(i)
             rest_verifs[len(rest)] = verif
         rest.append(f)
+    focused_reshape = review_kernel.reshape_verifications(
+        prerequisite_raw_verifs, valid_indices=range(len(prerequisite_findings))
+    )
+    invalid_prerequisites: set[str] = set()
+    if focused_reshape.has_violations:
+        invalid_prerequisites.update(
+            str(f.get("prerequisite_id", "")) for f in prerequisite_findings
+        )
+    focused_findings: list[dict[str, Any]] = []
+    focused_verifs: dict[int, dict[str, Any]] = {}
+    for index, finding in enumerate(prerequisite_findings):
+        pid = str(finding.get("prerequisite_id", ""))
+        if pid in prerequisite_input_too_large_ids:
+            continue
+        verification = focused_reshape.verifications.get(index)
+        attribution = (
+            (verification.get("binary") or {}).get("prerequisite_attribution_valid", "na")
+            if isinstance(verification, dict)
+            else "na"
+        )
+        if not pid or attribution != "yes":
+            invalid_prerequisites.add(pid)
+            continue
+        assert verification is not None
+        focused_verifs[len(rest) + len(focused_findings)] = dict(verification)
+        focused_findings.append(finding)
+
+    normalized_coverage: list[dict[str, Any]] = []
+    seen_coverage_ids: set[str] = set()
+    for record in sorted(prerequisite_coverage, key=lambda r: str(r.get("prerequisite_id", ""))):
+        pid = str(record.get("prerequisite_id", ""))
+        if not pid or pid in seen_coverage_ids:
+            invalid_prerequisites.add(pid)
+            continue
+        seen_coverage_ids.add(pid)
+        if pid in prerequisite_input_too_large_ids:
+            normalized_coverage.append(
+                {
+                    "prerequisite_id": pid,
+                    "disposition": "indeterminate",
+                    "findings": [],
+                    "reason_code": "evaluation-error",
+                    "detail": "input-too-large",
+                }
+            )
+        elif pid in invalid_prerequisites:
+            normalized_coverage.append(
+                {
+                    "prerequisite_id": pid,
+                    "disposition": "indeterminate",
+                    "findings": [],
+                    "reason_code": "attribution-invalid",
+                }
+            )
+        else:
+            normalized_coverage.append(record)
+    if has_prerequisites and not normalized_coverage:
+        raise ValueError("has_prerequisites=true requires complete prerequisite coverage")
+
+    combined_verifs = dict(rest_verifs)
+    combined_verifs.update(focused_verifs)
     decided = [
         *too_big,
         *shed,
         *orchestrator.pass3_over_findings(
-            rest, rest_verifs, execution_review=review_phase == "execution"
+            [*rest, *focused_findings],
+            combined_verifs,
+            execution_review=review_phase == "execution",
         ),
     ]
 
     parts = orchestrator.partition_findings(
         det_blocks, det_advisories, decided, advisory_cap=orchestrator.DEFAULT_ADVISORY_CAP
     )
+    prerequisite_indeterminate = any(
+        record.get("disposition") == "indeterminate" for record in normalized_coverage
+    )
+    if prerequisite_indeterminate:
+        from .prerequisites import emit_indeterminate
+
+        for record in normalized_coverage:
+            if (
+                record.get("reason_code") == "attribution-invalid"
+                or record.get("prerequisite_id") in prerequisite_input_too_large_ids
+            ):
+                emit_indeterminate(
+                    record,
+                    ticket_id=_ticket_id(ctx),
+                    model=None,
+                    attempts=1,
+                    bin_size=len(normalized_coverage),
+                )
+        retained_det = [f for f in parts["blocking"] if f.get("tier") == "DET"]
+        reclassified = [f for f in parts["blocking"] if f.get("tier") != "DET"]
+        parts["blocking"] = retained_det
+        parts["indeterminate"] = [
+            *parts["indeterminate"],
+            *(
+                {
+                    **f,
+                    "decision": "indeterminate",
+                    "reason": "prerequisite-coverage-indeterminate",
+                }
+                for f in reclassified
+            ),
+        ]
     outcome_counts = review_kernel.decide_outcome_counts(raw_verifs, findings, reshape)
-    return {**parts, "outcome_counts": outcome_counts}
+    return {
+        **dict(parts),
+        "prerequisite_coverage": normalized_coverage,
+        "outcome_counts": outcome_counts,
+    }
 
 
 @register_step(
@@ -568,6 +737,10 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
         "hierarchy_incomplete_detail": ctx.inputs.get("hierarchy_incomplete_detail", []),
         "outcome_counts": ctx.inputs.get("outcome_counts")
         or {"clean": 0, "recovered": 0, "empty_outcomes": 0, "unrecoverable": 0},
+        "prerequisite_indeterminate": any(
+            record.get("disposition") == "indeterminate"
+            for record in (ctx.inputs.get("prerequisite_coverage") or [])
+        ),
     }
     # Surface any Pass-2 verification contract violations recorded by `plan_review_decide` this
     # run (expand-contract observability). Present ONLY when non-empty, so a clean run's verdict

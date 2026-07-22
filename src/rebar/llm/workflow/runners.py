@@ -22,7 +22,7 @@ load — same thin/no-scheduler discipline as the executor).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -72,6 +72,10 @@ class BatchRunRequest:
     repo_root: str | None
     run_id: str
     step_id: str
+    # Step-level inputs resolved by the interpreter.  Kept separate from each
+    # criterion's optional ``with`` mapping so existing batch runners can ignore
+    # it without changing their packing behaviour.
+    with_inputs: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

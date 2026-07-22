@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from rebar.llm.config import resolve_gate_config
 from rebar.llm.runner import Runner, get_runner
@@ -141,9 +141,36 @@ class ProductionBatchRunner(BatchRunner):
             )
 
         findings = run_pass1(ctx, cfg, runner, single, agent, coverage)
+        prerequisite_coverage: list[dict[str, Any]] = []
+        prerequisite_findings: list[dict[str, Any]] = []
+        snapshot_value = req.with_inputs.get("relation_snapshot")
+        if hasattr(snapshot_value, "prerequisite_ids"):
+            snapshot = cast(Any, snapshot_value)
+            blocks = [
+                {
+                    "canonical_id": pid,
+                    "rendered_text": str(snapshot.ticket_states_by_id[pid].get("description", "")),
+                }
+                for pid in snapshot.prerequisite_ids
+            ]
+        else:
+            blocks = list(snapshot_value or req.with_inputs.get("prerequisites") or [])
+        if blocks:
+            from .prerequisites import run_focused_finder
+
+            prerequisite_coverage, prerequisite_findings = run_focused_finder(
+                runner,
+                cfg,
+                subject_plan=str(req.with_inputs.get("subject_plan", ctx.plan_text)),
+                blocks=blocks,
+                ticket_id=str(req.target_ticket or ""),
+            )
         return BatchRunResult(
             outputs={
                 "findings": findings,
+                "prerequisite_coverage": prerequisite_coverage,
+                "prerequisite_findings": prerequisite_findings,
+                "has_prerequisites": bool(prerequisite_coverage),
                 "criteria_count": len(req.criteria),
                 "batch_plan": coverage,
             }

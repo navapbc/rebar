@@ -6,7 +6,9 @@
   "type": "object",
   "properties": {
     "ticket_id": { "type": "string", "description": "The ticket under review (its plan_text becomes {{plan}})." },
-    "surviving": { "type": "array", "description": "The surviving advisory findings (the decide op's `surfaced` partition) listed into the coach instructions." }
+    "surviving": { "type": "array", "description": "The surviving advisory findings (the decide op's `surfaced` partition) listed into the coach instructions." },
+    "indeterminate": { "type": "array" },
+    "prerequisite_coverage": { "type": "array" }
   },
   "required": ["surviving"],
   "additionalProperties": true

@@ -76,6 +76,7 @@ from .coach_moves import (  # noqa: F401
     load_move_registry,
     triage_advisories,
 )
+from .prerequisites import prerequisite_coverage_model as _prerequisite_coverage_model
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,7 @@ def register_contracts() -> None:
     contracts.register_contract("plan_review_novelty", _pass2_novelty_model)
     contracts.register_contract("plan_review_completion", _pass2_completion_model)
     contracts.register_contract("plan_review_coach", _pass4_model)
+    contracts.register_contract("plan_review_prerequisite_coverage", _prerequisite_coverage_model)
 
 
 register_contracts()
@@ -228,6 +230,8 @@ register_contracts()
 # (prompts.get_prompt / resolve_prompt) with `.rebar/prompts/<id>.md` project
 # overrides — never inline string constants. Prompt ids:
 PASS_FINDER = "plan-review-finder"  # Pass-1
+PASS_PREREQUISITE_FINDER = "plan-review-prerequisite-finder"
+PASS_PREREQUISITE_VERIFIER = "plan-review-prerequisite-verifier"
 # Pass-2 verify runs via the workflow gate's `plan-review-verifier` prompt step (the bespoke
 # pass2_verify that once resolved it here was retired in epic solid-timer-unison, WS1). The id
 # constant is retained as the canonical reference to that prompt (used by the prompt-cache split).
