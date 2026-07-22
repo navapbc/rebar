@@ -196,3 +196,22 @@ def test_all_review_results_returns_full_history_newest_first(store: Path) -> No
     hist = plan_sidecar.all_review_results(tid, repo_root=r)
     assert [h["material_fingerprint"] for h in hist] == ["m2", "m1", "m0"]  # newest-first
     assert plan_sidecar.all_review_results("nonexistent", repo_root=r) == []
+
+
+def test_plan_reviews_carry_reviewed_at_timestamp_newest_first(store: Path) -> None:
+    # Report #1: audit show's plan_reviews had no timestamp, so its newest-first ordering was
+    # not verifiable from the data. Each entry now carries the review's ns-epoch `reviewed_at`,
+    # and it decreases newest→oldest.
+    from rebar.audit.read import audit_trail
+
+    r = str(store)
+    tid = rebar.create_ticket("task", "work", description="x" * 60, repo_root=r)
+    assert plan_sidecar.emit(_plan_verdict(tid, "first"), material="m1", repo_root=r)
+    assert plan_sidecar.emit(_plan_verdict(tid, "second"), material="m2", repo_root=r)
+
+    reviews = audit_trail(tid, repo_root=r)["plan_reviews"]
+    assert len(reviews) == 2
+    assert all(isinstance(rv["reviewed_at"], int) for rv in reviews)
+    # newest-first: material m2 is newest and its timestamp is the larger one
+    assert reviews[0]["material_fingerprint"] == "m2"
+    assert reviews[0]["reviewed_at"] >= reviews[1]["reviewed_at"]
