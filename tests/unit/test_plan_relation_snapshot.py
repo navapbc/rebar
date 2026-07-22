@@ -60,10 +60,6 @@ def test_collects_canonical_children_and_both_prerequisite_directions(repo: str)
     rebar.link(subject, outgoing[:8], "depends_on", repo_root=repo)
     rebar.link(incoming, subject, "blocks", repo_root=repo)
     rebar.archive(incoming, repo_root=repo)
-    tracker = Path(config.tracker_dir(repo))
-    (tracker / incoming / ".write.lock").unlink(missing_ok=True)
-    subprocess.run(["git", "add", incoming + "/.archived"], cwd=tracker, check=True)
-    subprocess.run(["git", "commit", "-qm", "track archive marker"], cwd=tracker, check=True)
 
     snapshot = collect_plan_relation_snapshot(subject, repo_root=repo)
 

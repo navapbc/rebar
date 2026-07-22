@@ -33,9 +33,10 @@ from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, r
 from rebar._store.gitutil import run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
+from rebar.reducer.marker import ARCHIVE_MARKER_NAME, MARKER_LOCK_NAME
 
 # Runtime artifacts created in the tracker worktree that must never be committed.
-# The lock/cache names are sourced from their defining constants so this ignore
+# The lock/cache/marker names are sourced from their defining constants so this ignore
 # list cannot drift from them (bug stem-ewe-tomb). The flock write-lock file is
 # intentionally NOT unlinked on release (deleting it races other lockers), so it
 # persists after every write; the graph cache is rewritten on every graph compile.
@@ -51,6 +52,8 @@ _GITIGNORE = f""".env-id
 {WRITE_LOCK_NAME}
 {MKDIR_LOCK_NAME}/
 {_GRAPH_CACHE_FILE}
+*/{ARCHIVE_MARKER_NAME}
+*/{MARKER_LOCK_NAME}
 {APPLIED_MARKER}
 {HINTED_MARKER}
 """

@@ -8,6 +8,9 @@ import os
 
 logger = logging.getLogger(__name__)
 
+ARCHIVE_MARKER_NAME = ".archived"
+MARKER_LOCK_NAME = ".write.lock"
+
 
 def write_marker(ticket_dir: str) -> None:
     """Create <ticket_dir>/.archived as an empty file under an exclusive lock.
@@ -18,8 +21,8 @@ def write_marker(ticket_dir: str) -> None:
     On any OSError: logs a warning to stderr and returns without raising.
     Failed marker writes must not prevent callers from proceeding.
     """
-    lock_path = os.path.join(ticket_dir, ".write.lock")
-    marker_path = os.path.join(ticket_dir, ".archived")
+    lock_path = os.path.join(ticket_dir, MARKER_LOCK_NAME)
+    marker_path = os.path.join(ticket_dir, ARCHIVE_MARKER_NAME)
     try:
         with open(lock_path, "a") as lock_fd:
             try:
@@ -30,7 +33,12 @@ def write_marker(ticket_dir: str) -> None:
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except OSError:
-        logger.warning("failed to write .archived marker for %s", ticket_dir, exc_info=True)
+        logger.warning(
+            "failed to write %s marker for %s",
+            ARCHIVE_MARKER_NAME,
+            ticket_dir,
+            exc_info=True,
+        )
 
 
 def remove_marker(ticket_dir: str) -> None:
@@ -41,8 +49,8 @@ def remove_marker(ticket_dir: str) -> None:
 
     On any OSError: logs a warning to stderr and returns without raising.
     """
-    lock_path = os.path.join(ticket_dir, ".write.lock")
-    marker_path = os.path.join(ticket_dir, ".archived")
+    lock_path = os.path.join(ticket_dir, MARKER_LOCK_NAME)
+    marker_path = os.path.join(ticket_dir, ARCHIVE_MARKER_NAME)
     try:
         with open(lock_path, "a") as lock_fd:
             try:
@@ -54,7 +62,12 @@ def remove_marker(ticket_dir: str) -> None:
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except OSError:
-        logger.warning("failed to remove .archived marker for %s", ticket_dir, exc_info=True)
+        logger.warning(
+            "failed to remove %s marker for %s",
+            ARCHIVE_MARKER_NAME,
+            ticket_dir,
+            exc_info=True,
+        )
 
 
 def check_marker(ticket_dir: str) -> bool:
@@ -62,4 +75,4 @@ def check_marker(ticket_dir: str) -> bool:
 
     No locking needed — existence checks are naturally consistent.
     """
-    return os.path.exists(os.path.join(ticket_dir, ".archived"))
+    return os.path.exists(os.path.join(ticket_dir, ARCHIVE_MARKER_NAME))
