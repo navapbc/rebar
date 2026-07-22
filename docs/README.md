@@ -149,6 +149,9 @@ Developing rebar itself — architecture, internals, and the dev workflow.
   `rebar.attest` signing substrate (DSSE envelope, scheme registry, SSHSIG).
 - **[session-id-shims.md](session-id-shims.md)** — the session-provenance capture shims
   that record which coding-agent session claimed a ticket.
+- **[chatgpt-agent-guide.md](chatgpt-agent-guide.md)** — detecting a checkout-less,
+  tracker-less ChatGPT-connector environment, the safe fallback ticket payload, and the
+  sanctioned exceptional `rebar import` path.
 
 ## Agent
 

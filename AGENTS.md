@@ -114,6 +114,9 @@ restated here:
 - **Metrics** — the `rebar metrics` command (agent-process / code-health / delivery /
   gate-economics lenses, the `unavailable` state, source/confidence labels) →
   `docs/user-guide.md`; the `rebar.metrics` registry/reuse surface → `docs/reuse-surface.md`.
+- **ChatGPT / connector-limited sessions** — detecting a checkout-less, tracker-less
+  environment, the safe fallback ticket payload, and the sanctioned exceptional import path →
+  `docs/chatgpt-agent-guide.md`.
 
 ## Module-size policy (when editing rebar itself)
 
