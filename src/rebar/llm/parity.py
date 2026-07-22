@@ -229,6 +229,8 @@ def prerequisite_fidelity_report(
     min_recall: float = 0.90,
     max_false_accept: float = 0.10,
     min_gold: int = 20,
+    baseline_recall: float | None = None,
+    baseline_false_accept: float | None = None,
 ) -> ParityReport:
     """Gate focused prerequisite recall, coverage and authoritative attribution."""
     report = parity_report(baseline, candidate, min_gold=min_gold)
@@ -251,6 +253,15 @@ def prerequisite_fidelity_report(
         failures.append(
             f"prerequisite false acceptance {false_accept:.3f} exceeds {max_false_accept:.3f}"
         )
+    if baseline_recall is not None and recall + 1e-9 < baseline_recall:
+        failures.append(
+            f"candidate recall {recall:.3f} regressed below baseline recall {baseline_recall:.3f}"
+        )
+    if baseline_false_accept is not None and false_accept > baseline_false_accept + 1e-9:
+        failures.append(
+            f"candidate false acceptance {false_accept:.3f} regressed above baseline "
+            f"false acceptance {baseline_false_accept:.3f}"
+        )
     if completeness < 1.0:
         failures.append(f"prerequisite coverage incomplete: {completeness:.3f}")
     if attribution_errors:
@@ -265,6 +276,8 @@ def prerequisite_fidelity_report(
             "min_gold": min_gold,
             "required_coverage_completeness": 1.0,
             "max_prerequisite_attribution_error_rate": 0.0,
+            "baseline_recall": baseline_recall,
+            "baseline_false_accept": baseline_false_accept,
         }
     )
     return ParityReport(passed=not failures, gating_failures=failures, metrics=metrics)

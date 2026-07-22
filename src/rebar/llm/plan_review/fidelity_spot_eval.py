@@ -25,7 +25,9 @@ offline test re-checks that recording against the same parity bar with no model 
 
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +37,7 @@ from rebar.llm.parity import ItemRecord
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
-from . import passes, registry
+from . import passes, prerequisites, registry
 
 # The gate prompts S2 relocated (their `<!--volatile-->`-split prefix must cache while the
 # moved ticket/diff data rides in the user message). The completion-verifier (the close
@@ -277,27 +279,131 @@ def record_results(reports: dict[str, parity.ParityReport]) -> dict[str, Any]:
     }
 
 
+PREREQUISITE_PACKING_SCENARIOS = (
+    ("all-consistent-a", ()),
+    ("all-consistent-b", ()),
+    ("single-conflict-a", (0,)),
+    ("single-conflict-b", (1,)),
+    ("tail-conflict-a", (2,)),
+    ("tail-conflict-b", (2,)),
+    ("attribution-confusion", (1,)),
+    ("multi-bin", (0, 1, 2)),
+)
+
+
+def _prerequisite_corpus() -> list[dict[str, Any]]:
+    """Eight named, deterministic scenario sets with three whole blocks each."""
+    corpus: list[dict[str, Any]] = []
+    for scenario_index, (name, conflicts) in enumerate(PREREQUISITE_PACKING_SCENARIOS):
+        ids = [f"{scenario_index:04x}-{block_index:04x}-aaaa-bbbb" for block_index in range(3)]
+        blocks = []
+        for block_index, prerequisite_id in enumerate(ids):
+            marker = (
+                "CONFLICT: this prerequisite guarantees interface v1 only, while the subject "
+                "requires incompatible interface v2."
+                if block_index in conflicts
+                else "CONSISTENT: this prerequisite guarantees the interface v2 the subject uses."
+            )
+            # The confusion scenario deliberately repeats the same prose in a clean sibling;
+            # only the explicitly conflicting authoritative id is gold.
+            if name == "attribution-confusion" and block_index == 2:
+                marker = "CONSISTENT: similarly named interface v2 remains compatible."
+            blocks.append({"canonical_id": prerequisite_id, "rendered_text": marker})
+        corpus.append(
+            {
+                "name": name,
+                "subject_plan": "The subject consumes interface v2 from every direct prerequisite.",
+                "blocks": blocks,
+                "conflict_ids": {ids[index] for index in conflicts},
+            }
+        )
+    return corpus
+
+
+def prerequisite_corpus_digest() -> str:
+    serializable = [
+        {**scenario, "conflict_ids": sorted(scenario["conflict_ids"])}
+        for scenario in _prerequisite_corpus()
+    ]
+    encoded = json.dumps(serializable, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _run_prerequisite_mode(*, packed: bool, cfg: LLMConfig, runner: Runner) -> list[ItemRecord]:
+    records: list[ItemRecord] = []
+    for scenario in _prerequisite_corpus():
+        if packed and scenario["name"] == "multi-bin":
+            calls = [scenario["blocks"][:2], scenario["blocks"][2:]]
+        else:
+            calls = [scenario["blocks"]] if packed else [[block] for block in scenario["blocks"]]
+        observed: dict[str, dict[str, Any]] = {}
+        for blocks in calls:
+            coverage, _findings = prerequisites.run_focused_finder(
+                runner,
+                cfg,
+                subject_plan=scenario["subject_plan"],
+                blocks=blocks,
+            )
+            observed.update({str(record["prerequisite_id"]): record for record in coverage})
+        for block in scenario["blocks"]:
+            prerequisite_id = str(block["canonical_id"])
+            is_conflict = prerequisite_id in scenario["conflict_ids"]
+            # Two gold lanes exercise both metrics in parity._recall_false_accept:
+            # ordinary conflicts are recall gold; confusion/multi-bin conflicts are
+            # false-accept gold (they must still be blocked, never shipped).
+            label = (
+                (
+                    "advisory"
+                    if scenario["name"] in {"attribution-confusion", "multi-bin"}
+                    else "block"
+                )
+                if is_conflict
+                else None
+            )
+            record = observed.get(prerequisite_id)
+            findings = list(record.get("findings") or []) if record else []
+            pred_id = (
+                str(findings[0].get("prerequisite_id"))
+                if findings
+                else (str(record.get("prerequisite_id")) if record else None)
+            )
+            records.append(
+                ItemRecord(
+                    valid=bool(record and record.get("disposition") != "indeterminate"),
+                    decision="block" if findings else "advisory",
+                    label=label,
+                    gold_prerequisite_id=prerequisite_id,
+                    pred_prerequisite_id=pred_id,
+                )
+            )
+    return records
+
+
 def prerequisite_packing_spot_eval(
     baseline: list[ItemRecord] | None = None,
     candidate: list[ItemRecord] | None = None,
+    *,
+    singleton: bool = False,
+    config: LLMConfig | None = None,
+    runner: Runner | None = None,
+    baseline_recall: float | None = None,
+    baseline_false_accept: float | None = None,
 ) -> parity.ParityReport:
-    """Dedicated prerequisite packing gate, kept separate from container fidelity."""
+    """Run the focused finder over the same corpus singleton and packed, then compare."""
     if baseline is None or candidate is None:
-        baseline = []
-        candidate = []
-        for index in range(24):
-            pid = f"eval-{index:04d}-aaaa-bbbb"
-            for sink in (baseline, candidate):
-                sink.append(
-                    ItemRecord(
-                        valid=True,
-                        decision="block",
-                        label="block",
-                        gold_prerequisite_id=pid,
-                        pred_prerequisite_id=pid,
-                    )
-                )
-    return parity.prerequisite_fidelity_report(baseline, candidate)
+        cfg = config or LLMConfig.from_env()
+        selected = get_runner(cfg, override=runner)
+        baseline = _run_prerequisite_mode(packed=False, cfg=cfg, runner=selected)
+        candidate = (
+            baseline if singleton else _run_prerequisite_mode(packed=True, cfg=cfg, runner=selected)
+        )
+    return parity.prerequisite_fidelity_report(
+        baseline,
+        candidate,
+        min_gold=8,
+        baseline_recall=baseline_recall,
+        baseline_false_accept=baseline_false_accept,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -317,18 +423,52 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--write-baseline requires --singleton")
     if args.singleton and args.baseline:
         parser.error("--singleton and --baseline are mutually exclusive")
-    report = prerequisite_packing_spot_eval()
+    cfg = LLMConfig.from_env()
+    baseline_metrics: dict[str, Any] | None = None
+    if args.baseline:
+        baseline_metrics = json.loads(args.baseline.read_text(encoding="utf-8"))
+        required = {
+            "recall",
+            "false_accept",
+            "coverage_completeness",
+            "prerequisite_attribution_error_rate",
+            "model",
+            "corpus_digest",
+            "recorded_at",
+        }
+        if not required.issubset(baseline_metrics):
+            raise ValueError("prerequisite packing baseline lacks required atomic metrics")
+        if baseline_metrics["corpus_digest"] != prerequisite_corpus_digest():
+            raise ValueError("prerequisite packing baseline corpus digest does not match")
+        if baseline_metrics["model"] != cfg.model:
+            raise ValueError("prerequisite packing baseline model does not match configured model")
+        datetime.fromisoformat(str(baseline_metrics["recorded_at"]).replace("Z", "+00:00"))
+    report = prerequisite_packing_spot_eval(
+        singleton=args.singleton,
+        config=cfg,
+        baseline_recall=(float(baseline_metrics["recall"]) if baseline_metrics else None),
+        baseline_false_accept=(
+            float(baseline_metrics["false_accept"]) if baseline_metrics else None
+        ),
+    )
+    candidate_recall = float(report.metrics["recall"]["v2"])
+    candidate_false_accept = float(report.metrics["false_accept"]["v2"])
     payload = {
         "schema_version": 1,
         "corpus": "plan-review-prerequisite-packing-v1",
+        "recall": candidate_recall,
+        "false_accept": candidate_false_accept,
+        "coverage_completeness": report.metrics["coverage_completeness"],
+        "prerequisite_attribution_error_rate": report.metrics[
+            "prerequisite_attribution_error_rate"
+        ],
+        "model": cfg.model,
+        "corpus_digest": prerequisite_corpus_digest(),
+        "recorded_at": datetime.now(UTC).isoformat(),
         "passed": report.passed,
         "metrics": report.metrics,
         "gating_failures": report.gating_failures,
     }
-    if args.baseline:
-        previous = json.loads(args.baseline.read_text(encoding="utf-8"))
-        if previous.get("schema_version") != 1 or previous.get("corpus") != payload["corpus"]:
-            raise ValueError("invalid prerequisite packing baseline schema or corpus")
     if args.write_baseline:
         args.write_baseline.parent.mkdir(parents=True, exist_ok=True)
         args.write_baseline.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -340,6 +480,8 @@ __all__ = [
     "RELOCATED_PROMPTS",
     "relocation_spot_eval",
     "packing_spot_eval",
+    "PREREQUISITE_PACKING_SCENARIOS",
+    "prerequisite_corpus_digest",
     "prerequisite_packing_spot_eval",
     "main",
     "record_results",
