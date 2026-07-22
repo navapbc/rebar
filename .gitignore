@@ -12,3 +12,5 @@
 .ensure-hinted
 .opcert-key
 .opcert-key.pub
+*/.archived
+*/.write.lock
