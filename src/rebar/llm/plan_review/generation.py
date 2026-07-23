@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from rebar import config
 
 from .relation_snapshot import (
+    PlanMaterialPin,
     PlanRelationSnapshot,
     PlanRelationSnapshotError,
     collect_plan_relation_snapshot,
@@ -22,11 +23,22 @@ MAX_GENERATION_ATTEMPTS = 3
 
 @dataclass(frozen=True)
 class PlanReviewGeneration:
+    """Immutable identity of the plan material a review was based on.
+
+    Equality is deliberately scoped to exactly what the signed manifest binds: the subject's
+    own material, its DIRECT related material (child/prerequisite pins), and the phase/floor.
+    ``relation_snapshot`` and ``ticket_store_revision`` are carried for downstream readers but are
+    NOT part of identity (``compare=False``) — they are store-WIDE (the full ticket-states map and
+    the tracker HEAD), so including them made an unrelated ticket's concurrent write abort signing
+    even though the signed artifact was unchanged (client report §2).
+    """
+
     phase: Literal["planning", "execution"]
     priority_floor: float | None
     own_material: str
-    relation_snapshot: PlanRelationSnapshot
-    ticket_store_revision: str
+    relation_snapshot: PlanRelationSnapshot = field(compare=False)
+    ticket_store_revision: str = field(compare=False)
+    related_material: tuple[PlanMaterialPin, ...] = ()
 
 
 class PlanReviewGenerationError(RuntimeError):
@@ -77,6 +89,7 @@ def from_snapshot(snapshot: PlanRelationSnapshot) -> PlanReviewGeneration:
         own_material=material_fingerprint(ctx),
         relation_snapshot=snapshot,
         ticket_store_revision=snapshot.ticket_store_revision,
+        related_material=snapshot.related_material,
     )
 
 
