@@ -65,13 +65,9 @@ from rebar_reconciler.outbound_comments import (  # noqa: F401
     _normalize_comment_body,
 )
 
-# The link-diff cluster lives in outbound_links.py (split for module size).
-# _diff_links is called by compute_outbound_mutations below; _existing_jira_links
-# is re-exported so outbound_differ.<name> keeps resolving for the link-diff tests.
-from rebar_reconciler.outbound_links import (  # noqa: F401
-    _diff_links,
-    _existing_jira_links,
-)
+# The link-diff cluster lives in outbound_links.py (split for module size); ticket
+# eefd made it compare in canonical shape via an injected SupportsLinks capability.
+from rebar_reconciler.outbound_links import _diff_links  # noqa: F401
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
@@ -401,6 +397,7 @@ def compute_outbound_mutations(
     *,
     outbound_mapper: OutboundMapper | None = None,
     inbound_mapper: InboundMapper | None = None,
+    links: Any | None = None,
 ) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -417,8 +414,9 @@ def compute_outbound_mutations(
             former trailing ``absent_alive_fields`` out-param is GONE — its
             value is the second element of the return tuple instead.
         outbound_mapper: The injected Backend-port ``OutboundMapper`` (ticket 4af8);
-            the orchestrator passes ``backend.outbound``, and ``None`` resolves the
-            configured backend's mapper via the neutral ``select_backend`` seam.
+            ``None`` resolves the configured backend's mapper via ``select_backend``.
+        links: The injected ``SupportsLinks`` capability (ticket eefd); ``None``
+            resolves the configured backend (a backend IS-A ``SupportsLinks``).
 
     Returns:
         A ``(mutations, absent_alive_fields)`` tuple:
@@ -435,14 +433,12 @@ def compute_outbound_mutations(
     """
     if config is None:
         config = OutboundDiffConfig()
-    # Ticket 4af8: the local->remote field mapper is injected via the Backend port
-    # (run_differs passes ``backend.outbound``). A direct caller that omits it resolves
-    # the configured backend's mapper through the neutral registry seam — naming no
-    # vendor mapper here and yielding the same mapping the vendor delegate performs.
-    # Ticket 625b: the remote->local mapper is injected the same way (run_differs passes
-    # ``backend.inbound``); a direct caller that omits either resolves it through the
-    # same neutral registry seam. inbound_mapper canonicalizes the snapshot + baseline.
-    if outbound_mapper is None or inbound_mapper is None:
+    # Tickets 4af8/625b/eefd: the local->remote mapper, remote->local mapper, and
+    # links capability are each injected via the Backend port (run_differs passes
+    # ``backend.outbound``/``backend.inbound``/``backend``). A direct caller that
+    # omits any of them resolves it through the neutral registry seam instead —
+    # naming no vendor symbol here.
+    if outbound_mapper is None or inbound_mapper is None or links is None:
         from rebar.config import load_config
         from rebar_reconciler._backend_registry import select_backend
 
@@ -451,6 +447,8 @@ def compute_outbound_mutations(
             outbound_mapper = _backend.outbound
         if inbound_mapper is None:
             inbound_mapper = _backend.inbound
+        if links is None:
+            links = _backend
     # Bind the config's fields to locals so the diff body below reads unchanged.
     excluded_statuses = config.excluded_statuses
     local_label_intent = config.local_label_intent
@@ -558,6 +556,7 @@ def compute_outbound_mutations(
                 absent_alive_fields,
                 outbound_mapper,
                 inbound_mapper,
+                links,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
             )
@@ -667,6 +666,7 @@ def _compute_outbound_update_mutation(
     absent_alive_fields,
     outbound_mapper,
     inbound_mapper,
+    links,
     *,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
@@ -771,7 +771,7 @@ def _compute_outbound_update_mutation(
     # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
     # deduped against the snapshot's existing issuelinks so an
     # already-present link emits nothing — no per-pass churn).
-    link_mutations = _diff_links(ticket, jira_fields, binding_store)
+    link_mutations = _diff_links(ticket, jira_fields, binding_store, links)
 
     if fields or comment_mutations or label_mutations or link_mutations:
         # Sync-hardening P5 / bug 57d1: emit a one-line CHANGED-FIELD BREADCRUMB
