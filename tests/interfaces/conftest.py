@@ -37,9 +37,11 @@ def _git(*args: str, cwd: Path) -> None:
 def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """An initialized rebar repo in a temp git dir.
 
-    Sets REBAR_ROOT to the repo
-    so the no-repo-root-leak guard never fires on bridge_state/.tickets-tracker
-    writes, and initializes the ticket system. Yields the repo path.
+    Sets REBAR_ROOT and cwd to the repo so every interface resolves both the
+    ticket store and project-scoped configuration from the same isolated
+    checkout. This also keeps the no-repo-root-leak guard from firing on
+    bridge_state/.tickets-tracker writes. Initializes the ticket system and
+    yields the repo path.
     """
     repo = Path(tmp_path) / "repo"
     repo.mkdir()
@@ -47,5 +49,6 @@ def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     _git("config", "user.email", "test@example.com", cwd=repo)
     _git("config", "user.name", "Test", cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.chdir(repo)
     rebar.init_repo(repo_root=str(repo))
     yield repo

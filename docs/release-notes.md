@@ -8,6 +8,18 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Project policy cutover — plan-review material pins and close reviews
+
+The tracked `rebar.toml` for this project now enables
+`verify.enforce_plan_material_pins` and `verify.require_plan_review_for_close`.
+Agents working in this repository must refresh a review after changing material
+that it pins, and must have a current execution-phase review before an ordinary
+close. Both remain `false` defaults in the reusable configuration schema, so
+downstream projects retain their existing opt-in posture. Legacy attestations with
+no material pins remain compatible, and the change introduces no backfill, stored
+relation migration, list-output change, or new pin-management command. (ticket
+`145e-52a9-26e3-4209`)
+
 ## ONE-WAY DOOR — legacy signature-mirror rollback lever removed (task 7ed9)
 
 The CONTRACT-phase rollback toggle `compact.emit_legacy_signature_mirror` (env

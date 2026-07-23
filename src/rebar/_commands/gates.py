@@ -29,6 +29,26 @@ __all__ = ["close_plan_review_gate_check", "gate_enabled", "plan_review_precheck
 logger = logging.getLogger(__name__)
 
 
+def _claim_gate_reason(check: Mapping[str, object]) -> str:
+    """Render the shared health payload into a stable claim-gate diagnosis."""
+    reason = str(check.get("reason", "plan-review validity was unavailable"))
+    verdict = str(check.get("verdict", "stale"))
+    health = check.get("health")
+    if verdict != "stale-pin-drift" or not isinstance(health, Mapping):
+        return reason
+    targets = health.get("targets")
+    if not isinstance(targets, list):
+        return reason
+    stale_ids = [
+        str(target.get("canonical_id"))
+        for target in targets
+        if isinstance(target, Mapping) and target.get("pin_status") == "stale-pin-drift"
+    ]
+    if not stale_ids:
+        return reason
+    return f"{reason} ({verdict}; targets: {', '.join(stale_ids)})"
+
+
 def gate_enabled(
     cfg_root: str, attr: str, *, ticket_id: str, gate_label: str, extra: str = ""
 ) -> bool:
@@ -186,7 +206,7 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     except Exception:  # noqa: BLE001 — the ssh-keygen probe is advisory; never let it break the gate
         pass
     raise CommandError(
-        f"Error: cannot start work on {ticket_id}: {check.get('reason')}.\n"
+        f"Error: cannot start work on {ticket_id}: {_claim_gate_reason(check)}.\n"
         "  The plan-review gate is enabled (verify.require_plan_review_for_claim) — it\n"
         "  guards starting work via both `claim` and `transition open in_progress`.\n"
         f"{ssh_hint}"

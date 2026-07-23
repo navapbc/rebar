@@ -36,6 +36,10 @@ guide, plus a broad round of plan-review/code-review gate hardening and fixes.
 ### Changed
 - `--force` gate-bypass is generalized to **all** start-work gates (not just
   plan-review), with documented semantics in the user/agent guidance.
+- Rebar's own project configuration now enforces plan-review material pins and
+  requires a current execution-phase plan review before close. The reusable
+  configuration defaults remain opt-in for downstream projects; legacy unpinned
+  attestations remain accepted.
 - Plan-review hardening: honors verified `[rebar:<id>]` cross-ticket citations, binds
   reviews to the related ticket material, requires a current review when configured,
   refuses to pass on an incompletely-loaded ticket hierarchy, evaluates direct
@@ -1229,4 +1233,3 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 [0.3.0]: https://github.com/navapbc/rebar/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/navapbc/rebar/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/navapbc/rebar/compare/v0.1.0...v0.1.1
-
