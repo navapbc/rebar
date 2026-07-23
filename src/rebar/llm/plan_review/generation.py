@@ -109,9 +109,15 @@ def sign_manifest(
     tracker = str(config.tracker_dir(repo_root))
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
-            before = tracker_head_sha(tracker)
-            fresh = collect(ticket_id, repo_root=repo_root)
-            after = tracker_head_sha(tracker)
+            # Ignore UNTRACKED tracker files here, consistently with the authoritative
+            # under-lock re-check below (``under_lock_check``): the fence detects a
+            # concurrent COMMIT during generation (a moving committed HEAD), which
+            # untracked files cannot cause. Treating an unrelated crashed process's stray
+            # artifact in the SHARED tracker as fatal would abort signing (no durable
+            # attestation → the claim gate cannot pass) for a clean plan (bug d7cb-22ae).
+            before = tracker_head_sha(tracker, ignore_untracked=True)
+            fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
+            after = tracker_head_sha(tracker, ignore_untracked=True)
         except PlanRelationSnapshotError as exc:
             _log(logging.ERROR, "plan_review_sign_aborted", reason=exc.reason, attempt=attempt)
             raise PlanReviewGenerationError(exc.reason) from None

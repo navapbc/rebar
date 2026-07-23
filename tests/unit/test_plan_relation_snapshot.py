@@ -11,6 +11,14 @@ import pytest
 
 import rebar
 from rebar import config
+
+# Import ``generation`` at module scope so its ``from .relation_snapshot import
+# collect_plan_relation_snapshot`` binding is captured from the REAL function before any
+# test runs. Tests that ``monkeypatch.setattr(relation_snapshot,
+# "collect_plan_relation_snapshot", ...)`` and then trigger generation's first import
+# (via ``_run_plan_review``) would otherwise permanently capture the patched lambda into
+# ``generation``'s namespace — a leak monkeypatch cannot revert.
+from rebar.llm.plan_review import generation
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.pass1 import material_fingerprint
 
@@ -261,3 +269,75 @@ def test_tracker_head_sha_maps_path_and_subprocess_failures(tracker: str) -> Non
     with pytest.raises(PlanRelationSnapshotError) as caught:
         tracker_head_sha(tracker)
     assert caught.value.reason == "store-read-failure"
+
+
+def test_review_plan_preflight_tolerates_unrelated_untracked_tracker_files(repo: str) -> None:
+    """Regression (bug d7cb-22ae): an unrelated untracked file left in the SHARED
+    tickets-tracker by a crashed process on ANOTHER ticket must not collapse
+    ``review-plan`` to INDETERMINATE/store-read-failure for every other ticket.
+
+    The preflight relation snapshot is a READ that fingerprints the committed HEAD,
+    which untracked files cannot change (the authoritative under-lock signing check
+    already ignores them via ``ignore_untracked=True``), so the preflight must tolerate
+    them. ``.tickets-tracker`` is symlinked into every session, so one stray artifact
+    otherwise blocks review-plan — and therefore ``claim`` — machine-wide.
+    """
+    from rebar.llm.plan_review import review_plan
+
+    subject_id = rebar.create_ticket("bug", "Preflight subject", description="x", repo_root=repo)
+    tracker = Path(config.tracker_dir(repo))
+
+    def review():
+        return review_plan(
+            subject_id, repo_root=repo, sign=False, emit_sidecar=False, runner=None, source="local"
+        )
+
+    def snapshot_reasons(verdict):
+        return [entry.get("reason") for entry in (verdict.get("indeterminate") or [])]
+
+    # Baseline: a CLEAN tracker never short-circuits on the preflight snapshot read.
+    clean = review()
+    assert "store-read-failure" not in snapshot_reasons(clean)
+
+    # A crashed process left sidecar artifacts for a COMPLETELY UNRELATED ticket.
+    (tracker / "6673-7636-a116-4f90-x-REVIEW_RESULT.json").write_text("{}", encoding="utf-8")
+    (tracker / "6673-7636-a116-4f90-x-SIGNATURE.json").write_text("{}", encoding="utf-8")
+
+    dirty = review()
+    # The unrelated untracked files must NOT collapse this ticket's review to
+    # store-read-failure — the observable outcome must match the clean-tracker run.
+    assert "store-read-failure" not in snapshot_reasons(dirty), (
+        "unrelated untracked tracker files collapsed review-plan to store-read-failure "
+        "(shared-tracker blast radius not contained)"
+    )
+    assert dirty["verdict"] == clean["verdict"]
+
+
+def test_sign_manifest_fence_tolerates_unrelated_untracked_tracker_files(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (bug d7cb-22ae, sibling on the SIGNING path): the generation
+    stability fence (``before``/``fresh``/``after`` reads in ``sign_manifest``) must
+    ignore unrelated untracked tracker files too, matching its own authoritative
+    under-lock re-check (which already passes ``ignore_untracked=True``). The fence
+    detects a concurrent COMMIT during generation — a moving committed HEAD, which
+    untracked files cannot cause. Otherwise a stray artifact left by a crashed process
+    on ANOTHER ticket aborts signing (``store-read-failure``), so no durable attestation
+    is persisted and the plan-review claim gate cannot pass even for a clean plan.
+    """
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-2c2d")
+    subject_id = rebar.create_ticket("bug", "Fence subject", description="x", repo_root=repo)
+
+    # Snapshot the generation while the tracker is CLEAN (as the review would).
+    initial = generation.collect(subject_id, repo_root=repo)
+
+    # Only AFTER snapshotting, a crashed process leaves artifacts for a DIFFERENT ticket.
+    tracker = Path(config.tracker_dir(repo))
+    (tracker / "6673-7636-a116-4f90-x-REVIEW_RESULT.json").write_text("{}", encoding="utf-8")
+    (tracker / "6673-7636-a116-4f90-x-SIGNATURE.json").write_text("{}", encoding="utf-8")
+
+    # Must sign (not raise PlanReviewGenerationError/store-read-failure on the fence).
+    signature = generation.sign_manifest(subject_id, ["m1", "m2"], initial, repo_root=repo)
+    assert isinstance(signature, dict)
+    assert signature.get("algorithm"), f"attestation not signed: {signature}"
+    assert signature.get("ticket_id") == subject_id

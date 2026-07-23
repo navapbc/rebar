@@ -509,8 +509,16 @@ def _run_plan_review(
     from . import generation, relation_snapshot
 
     try:
+        # Ignore UNTRACKED files in the SHARED tickets-tracker: this preflight is a READ
+        # that fingerprints the committed HEAD, which untracked files cannot change. A
+        # crashed/slow process elsewhere can leave stray artifacts in the tracker
+        # (symlinked into every session); treating them as fatal here would collapse
+        # review-plan — and therefore claim — to store-read-failure machine-wide. The
+        # authoritative under-lock signing re-check already ignores them (see
+        # generation.py's tracker_head_sha(..., ignore_untracked=True)); tracked dirty
+        # state (modified/staged/unmerged) still fails, as it must.
         review_snapshot = relation_snapshot.collect_plan_relation_snapshot(
-            ticket_id, repo_root=repo_root
+            ticket_id, repo_root=repo_root, ignore_untracked=True
         )
     except relation_snapshot.PlanRelationSnapshotError as exc:
         record = {
