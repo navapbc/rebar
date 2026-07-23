@@ -20,7 +20,7 @@ from typing import Any
 
 from rebar_reconciler import inbound_fields
 from rebar_reconciler._backend_registry import register
-from rebar_reconciler.adapters.jira import jira_fields, outbound_fields
+from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound_fields
 
 from .identity import JiraIdentityConvention
 
@@ -122,6 +122,10 @@ class _JiraInbound:
     def map_remote_to_local(self, remote_fields: dict[str, Any]) -> dict[str, Any]:
         return inbound_fields._map_jira_to_local_fields(remote_fields)
 
+    def normalize_rich_text(self, body: Any) -> str:
+        """Decode a rich-text payload to plain text (ticket 21ca; port member)."""
+        return inbound_fields.normalize_rich_text(body)
+
 
 class _JiraSanitizer:
     """Delegates each sanitizer to the corresponding ``jira_fields._sanitize_*``."""
@@ -137,6 +141,10 @@ class _JiraSanitizer:
 
     def sanitize_comment(self, body: str) -> str:
         return jira_fields._sanitize_comment(body)
+
+    def fit_comment(self, body: str) -> str:
+        """Pure fit-to-limit for comment-diff comparison (ticket 21ca; no warning)."""
+        return comment_limits.truncate_comment_body(body)
 
 
 class JiraBackend:

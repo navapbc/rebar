@@ -128,14 +128,27 @@ def _assignee_matches(local_val: str, jira_raw: Any) -> bool:
     return (local_val or "").strip() in candidates
 
 
-def _normalize_jira_body(body: Any) -> str:
-    """Coerce a Jira comment body (ADF dict or string) to plain text.
+def normalize_rich_text(body: Any) -> str:
+    """Decode a rich-text payload (ADF dict or string) to plain text (ticket 21ca).
 
-    The reconciler marker token is preserved (callers filter on it).
+    Jira: an ADF dict decodes via ``adf_to_text``; a plain string passes through
+    unchanged; ``None`` yields ``""``. This is the ``InboundMapper.normalize_rich_text``
+    Backend-port implementation (``adapters/jira/backend.py:_JiraInbound``); it serves
+    BOTH the inbound apply defense-in-depth (``inbound_translate._normalize_adf_body``)
+    and the outbound comment-diff decode (``outbound_comments._normalize_comment_body``).
     """
     if isinstance(body, dict):
         return _load_adf().adf_to_text(body)
     return str(body) if body is not None else ""
+
+
+def _normalize_jira_body(body: Any) -> str:
+    """Coerce a Jira comment body (ADF dict or string) to plain text.
+
+    The reconciler marker token is preserved (callers filter on it). Thin
+    alias over :func:`normalize_rich_text` (ticket 21ca).
+    """
+    return normalize_rich_text(body)
 
 
 def _identity_of(raw: Any) -> dict[str, Any]:

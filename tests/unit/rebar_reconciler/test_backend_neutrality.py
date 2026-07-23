@@ -314,3 +314,48 @@ def test_inbound_differ_uses_injected_mapper() -> None:
         inbound_mapper=fake,
     )
     assert fake.calls, "the injected inbound_mapper was never called"
+
+
+# ---------------------------------------------------------------------------
+# Ticket 21ca — the UNION lazy-load-literal sweep. After the rich-text codec + comment
+# limits move behind the port (InboundMapper.normalize_rich_text / FieldSanitizer.
+# fit_comment), NO package-root core module may carry a
+# ``"rebar_reconciler.adapters.jira[...]"`` string constant (an actual lazy-load key) —
+# with a SINGLE recorded exemption: inbound_fields.py IS the Jira InboundMapper impl
+# (delegated by adapters/jira/backend.py), kept at the package root only for loader
+# location-pinning; its physical relocation is out of epic bbf1's scope, tracked by
+# follow-up ticket 556a-5a1f-adb3-4139 (linked discovered_from bbf1). A docstring/comment
+# that MENTIONS the string in prose is not a load key, so the gate inspects string
+# CONSTANTS by value (via AST), not raw text.
+_VENDOR_LAZYLOAD_PREFIX = "rebar_reconciler.adapters.jira"
+_SWEEP_EXEMPTIONS = {"inbound_fields.py"}
+
+
+def _has_vendor_lazyload_literal(path: Path) -> bool:
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value == _VENDOR_LAZYLOAD_PREFIX or node.value.startswith(
+                _VENDOR_LAZYLOAD_PREFIX + "."
+            ):
+                return True
+    return False
+
+
+def test_no_root_core_module_carries_vendor_lazyload_literal() -> None:
+    """Union sweep: only inbound_fields.py may carry a vendor lazy-load literal (21ca)."""
+    offenders = [
+        path.name
+        for path in sorted(_REC.glob("*.py"))
+        if path.name not in _SWEEP_EXEMPTIONS and _has_vendor_lazyload_literal(path)
+    ]
+    assert not offenders, (
+        f"package-root core modules must not carry a {_VENDOR_LAZYLOAD_PREFIX!r} lazy-load "
+        f"literal (route rich-text/limit work through InboundMapper.normalize_rich_text / "
+        f"FieldSanitizer.fit_comment); offenders: {offenders}. Only {_SWEEP_EXEMPTIONS} is "
+        f"exempt (follow-up ticket 556a)."
+    )
+
+
+def test_sweep_exemption_is_still_needed() -> None:
+    """The exemption is honest: inbound_fields.py genuinely still carries the literal."""
+    assert _has_vendor_lazyload_literal(_REC / "inbound_fields.py")
