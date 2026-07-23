@@ -204,6 +204,12 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "findings": [],  # failures-only; a PASS has none
             "runner": v.get("runner"),
             "model": v.get("model"),
+            # The immutable commit the verifier ran against + the model-run id (bug e458): two
+            # COMPLETION_VERDICT records can now be compared for input-identity from stored data
+            # alone, so a flipped verdict is provably non-determinism on identical input rather
+            # than ambiguous input drift. `verified_at_sha` is None in local (unattested) mode.
+            "verified_at_sha": v.get("verified_at_sha"),
+            "trace_id": v.get("trace_id"),
             "material_fingerprint": material,
         }
     return {
@@ -215,5 +221,8 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "certifiable": v.get("certifiable"),
         "runner": v.get("runner"),
         "model": v.get("model"),
+        # See the PASS branch: verify-sha + trace id for input-identity diagnosis (bug e458).
+        "verified_at_sha": v.get("verified_at_sha"),
+        "trace_id": v.get("trace_id"),
         "material_fingerprint": material,
     }

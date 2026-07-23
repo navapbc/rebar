@@ -101,6 +101,17 @@ For each requirement:
 2. Decide what evidence would demonstrate it is met, and gather that evidence with your
    tools — `list_directory` to explore, `search_files` to locate code, `read_file` to inspect
    exact lines. Ground every conclusion in what the tools actually return.
+   **Use `search_files` correctly — this is where verifiers most often go wrong.** It is a
+   **literal, case-sensitive substring** match — NOT regex, NOT glob. A query like `verify.*sign`
+   or `moves HEAD` matches only that exact string; a `(no matches)` result means only that *that
+   literal string* is absent, **never** that the code or test is absent. To LOCATE a criterion's
+   test or file, search by **stable literal tokens that will actually appear in it**: the ticket's
+   short id (e.g. `4de6` — filenames and docstrings commonly encode it), an exact function/symbol
+   name, or a distinctive identifier — and `list_directory` the plausible directories (e.g.
+   `tests/interfaces/lifecycle`) to read the filenames directly. **Never conclude "no such test/
+   file exists" from a few failed semantic-phrase or regex searches** — that is an unfaithful
+   reading of the tool. Establish absence only after you have searched by ticket-id AND by exact
+   symbol AND listed the relevant directory, and all came back empty.
 3. Decide MET or NOT MET — but **decompose the judgment** rather than forming a holistic
    impression. A requirement is MET only if the evidence you gathered lets you answer YES to
    each atomic check below (treat it as NOT MET — never guess — if a check is NO or you could
