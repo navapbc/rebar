@@ -148,6 +148,10 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     "applier.py",
     "apply_handlers.py",
     "_attestation.py",
+    # Ticket aff0: the inbound probe's Jira mechanics moved to adapters/jira/probe.py
+    # behind the SupportsAbsenceProbe capability; the root module keeps only the neutral
+    # vocabulary and imports no vendor symbol.
+    "inbound_probe.py",
 )
 
 _FORBIDDEN_IMPORT_SUBSTRINGS = ("adapters.jira", "acli_subprocess")

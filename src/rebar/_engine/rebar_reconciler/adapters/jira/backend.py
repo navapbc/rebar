@@ -64,7 +64,8 @@ class _JiraSanitizer:
 
 
 class JiraBackend:
-    """The Jira backend: five role Protocols + links/comments capabilities."""
+    """The Jira backend: five role Protocols + links/comments/absence-probe
+    capabilities."""
 
     vendor = "jira"
 
@@ -135,6 +136,12 @@ class JiraBackend:
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         return self.transport.get_comment_map(project_key)
+
+    # --- capability: SupportsAbsenceProbe (delegates to adapters/jira/probe.py) ---
+    def probe_remote(self, remote_id: str) -> Any:
+        from rebar_reconciler.adapters.jira import probe as jira_probe
+
+        return jira_probe.probe(remote_id)
 
 
 @register("jira")
