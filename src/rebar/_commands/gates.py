@@ -34,7 +34,7 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
     reason = str(check.get("reason", "plan-review validity was unavailable"))
     verdict = str(check.get("verdict", "stale"))
     health = check.get("health")
-    if verdict != "stale-pin-drift" or not isinstance(health, Mapping):
+    if verdict not in ("stale-pin-drift", "stale-pin-missing") or not isinstance(health, Mapping):
         return reason
     targets = health.get("targets")
     if not isinstance(targets, list):
@@ -42,7 +42,7 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
     stale_ids = [
         str(target.get("canonical_id"))
         for target in targets
-        if isinstance(target, Mapping) and target.get("pin_status") == "stale-pin-drift"
+        if isinstance(target, Mapping) and target.get("pin_status") == verdict
     ]
     if not stale_ids:
         return reason

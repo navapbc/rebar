@@ -82,6 +82,16 @@ pull = "off"
     )
 
 
+def _set_fixture_pin_enforcement(repo: Path, *, enabled: bool) -> None:
+    text = (repo / "rebar.toml").read_text(encoding="utf-8")
+    text = re.sub(
+        r"(?m)^enforce_plan_material_pins = (?:true|false)$",
+        f"enforce_plan_material_pins = {str(enabled).lower()}",
+        text,
+    )
+    (repo / "rebar.toml").write_text(text, encoding="utf-8")
+
+
 def _cli(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],
@@ -234,3 +244,247 @@ def test_planning_phase_review_blocks_close_until_execution_review_through_real_
     assert "incompatible-phase" in result.stderr
     assert "review-plan" in result.stderr
     assert after == "in_progress"
+
+
+def test_natural_a_to_b_to_c_invalidation_requires_each_narrow_material_change(
+    rebar_repo: Path,
+) -> None:
+    """A change propagates through reviewed pins only when each plan changes."""
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    plan_a = _ticket(rebar_repo, "transitive plan A")
+    plan_b = _ticket(rebar_repo, "transitive plan B")
+    plan_c = _ticket(rebar_repo, "transitive plan C")
+    rebar.link(plan_b, plan_a, "depends_on", repo_root=str(rebar_repo))
+    rebar.link(plan_c, plan_b, "depends_on", repo_root=str(rebar_repo))
+    assert (
+        rebar.llm.review_plan(plan_b, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        == "PASS"
+    )
+    assert (
+        rebar.llm.review_plan(plan_c, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        == "PASS"
+    )
+
+    rebar.edit_ticket(
+        plan_a,
+        description=_DESCRIPTION + "\nA changed narrowly.",
+        repo_root=str(rebar_repo),
+    )
+
+    direct = _cli(rebar_repo, "claim", plan_b, "--assignee=fixture")
+    before_propagation = _cli(rebar_repo, "review-plan", plan_c, "--status")
+    assert direct.returncode == 1
+    assert "stale-pin-drift" in direct.stderr
+    assert rebar.show_ticket(plan_b, repo_root=str(rebar_repo))["status"] == "open"
+    assert before_propagation.returncode == 0, before_propagation.stderr
+
+    rebar.edit_ticket(
+        plan_b,
+        description=_DESCRIPTION + "\nB adapted to A.",
+        repo_root=str(rebar_repo),
+    )
+    propagated = _cli(rebar_repo, "review-plan", plan_c, "--status")
+
+    assert propagated.returncode == 12
+    assert "stale-pin-drift" in propagated.stdout + propagated.stderr
+    assert rebar.show_ticket(plan_c, repo_root=str(rebar_repo))["status"] == "open"
+
+
+def test_depends_on_and_inbound_blocks_normalize_to_one_canonical_prerequisite_pin(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    prerequisite = _ticket(rebar_repo, "canonical dual-direction prerequisite")
+    depends_subject = _ticket(rebar_repo, "outgoing depends-on subject")
+    blocked_subject = _ticket(rebar_repo, "inbound blocks subject")
+    rebar.link(depends_subject, prerequisite, "depends_on", repo_root=str(rebar_repo))
+    rebar.link(prerequisite, blocked_subject, "blocks", repo_root=str(rebar_repo))
+
+    depends_result = rebar.llm.review_plan(
+        depends_subject, runner=_PassRunner(), repo_root=str(rebar_repo)
+    )
+    blocks_result = rebar.llm.review_plan(
+        blocked_subject, runner=_PassRunner(), repo_root=str(rebar_repo)
+    )
+    prefix = f"plan-material-pin: prerequisite {prerequisite} "
+    matching_pins = []
+    for subject in (depends_subject, blocked_subject):
+        signature = rebar.verify_signature(subject, kind="plan-review", repo_root=str(rebar_repo))
+        matching_pins.append([line for line in signature["manifest"] if line.startswith(prefix)])
+
+    assert depends_result["verdict"] == blocks_result["verdict"] == "PASS"
+    assert all(len(pins) == 1 for pins in matching_pins)
+    assert matching_pins[0] == matching_pins[1]
+    assert all(
+        _cli(rebar_repo, "review-plan", subject, "--status").returncode == 0
+        for subject in (depends_subject, blocked_subject)
+    )
+
+
+def test_in_progress_to_open_resets_phase_and_requires_a_planning_review(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    ticket_id = _ticket(rebar_repo, "return to open resets review")
+    assert (
+        rebar.llm.review_plan(ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        == "PASS"
+    )
+    assert _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture").returncode == 0
+    assert (
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
+        == "PASS"
+    )
+    returned = _cli(rebar_repo, "transition", ticket_id, "in_progress", "open")
+    assert returned.returncode == 0, returned.stderr
+
+    state = rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))
+    assert state["status"] == "open"
+    assert state["plan_review_phase"] == "planning"
+    status = _cli(rebar_repo, "review-plan", ticket_id, "--status")
+    rejected = _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture")
+    assert status.returncode == 12
+    assert "incompatible-phase" in status.stdout + status.stderr
+    assert rejected.returncode == 1
+    assert "phase is incompatible" in rejected.stderr
+
+    assert (
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
+        == "PASS"
+    )
+    assert _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture").returncode == 0
+    claimed = rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))
+    assert claimed["status"] == "in_progress"
+    assert claimed["plan_review_phase"] == "execution"
+
+
+def test_close_allows_code_only_head_drift_after_execution_review(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    ticket_id = _ticket(rebar_repo, "code-only drift at close")
+    assert (
+        rebar.llm.review_plan(ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        == "PASS"
+    )
+    assert _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture").returncode == 0
+    assert (
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
+        == "PASS"
+    )
+    signing.sign_manifest(
+        ticket_id,
+        ["completion-verifier: PASS", f"ticket: {ticket_id}"],
+        kind="completion-verifier",
+        repo_root=str(rebar_repo),
+    )
+    _commit(rebar_repo)
+
+    result = _cli(rebar_repo, "transition", ticket_id, "in_progress", "closed")
+
+    assert result.returncode == 0, result.stderr
+    assert rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))["status"] == "closed"
+
+
+def test_material_pin_enforcement_enable_disable_and_reenable_through_real_cli(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    enabled_prerequisite = _ticket(rebar_repo, "enabled prerequisite")
+    enabled_subject = _ticket(rebar_repo, "enabled subject")
+    rebar.link(enabled_subject, enabled_prerequisite, "depends_on", repo_root=str(rebar_repo))
+    assert (
+        rebar.llm.review_plan(enabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
+            "verdict"
+        ]
+        == "PASS"
+    )
+    rebar.edit_ticket(
+        enabled_prerequisite,
+        description=_DESCRIPTION + "\nEnabled drift.",
+        repo_root=str(rebar_repo),
+    )
+    enabled = _cli(rebar_repo, "claim", enabled_subject, "--assignee=fixture")
+    assert enabled.returncode == 1
+    assert rebar.show_ticket(enabled_subject, repo_root=str(rebar_repo))["status"] == "open"
+
+    _set_fixture_pin_enforcement(rebar_repo, enabled=False)
+    disabled = _cli(rebar_repo, "claim", enabled_subject, "--assignee=fixture")
+    assert disabled.returncode == 0, disabled.stderr
+
+    reenabled_prerequisite = _ticket(rebar_repo, "re-enabled prerequisite")
+    reenabled_subject = _ticket(rebar_repo, "re-enabled subject")
+    rebar.link(reenabled_subject, reenabled_prerequisite, "depends_on", repo_root=str(rebar_repo))
+    assert (
+        rebar.llm.review_plan(reenabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
+            "verdict"
+        ]
+        == "PASS"
+    )
+    rebar.edit_ticket(
+        reenabled_prerequisite,
+        description=_DESCRIPTION + "\nDisabled drift.",
+        repo_root=str(rebar_repo),
+    )
+    _set_fixture_pin_enforcement(rebar_repo, enabled=True)
+    reenabled = _cli(rebar_repo, "claim", reenabled_subject, "--assignee=fixture")
+
+    assert reenabled.returncode == 1
+    assert "stale-pin-drift" in reenabled.stderr
+    assert rebar.show_ticket(reenabled_subject, repo_root=str(rebar_repo))["status"] == "open"
+
+
+def test_archived_target_stays_readable_and_deleted_target_fails_safe(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    archived_target = _ticket(rebar_repo, "archived readable prerequisite")
+    archived_subject = _ticket(rebar_repo, "subject with archived prerequisite")
+    rebar.link(archived_subject, archived_target, "depends_on", repo_root=str(rebar_repo))
+    assert (
+        rebar.llm.review_plan(archived_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
+            "verdict"
+        ]
+        == "PASS"
+    )
+    rebar.archive(archived_target, repo_root=str(rebar_repo))
+    archived = _cli(rebar_repo, "claim", archived_subject, "--assignee=fixture")
+
+    assert archived.returncode == 0, archived.stderr
+    assert rebar.show_ticket(archived_subject, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+    deleted_target = _ticket(rebar_repo, "deleted prerequisite")
+    deleted_subject = _ticket(rebar_repo, "subject with deleted prerequisite")
+    rebar.link(deleted_subject, deleted_target, "depends_on", repo_root=str(rebar_repo))
+    assert (
+        rebar.llm.review_plan(deleted_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
+            "verdict"
+        ]
+        == "PASS"
+    )
+    deleted = _cli(rebar_repo, "delete", deleted_target, "--user-approved")
+    rejected = _cli(rebar_repo, "claim", deleted_subject, "--assignee=fixture")
+
+    assert deleted.returncode == 0, deleted.stderr
+    assert rejected.returncode == 1
+    assert "stale-pin-missing" in rejected.stderr
+    assert deleted_target in rejected.stderr
+    assert rebar.show_ticket(deleted_subject, repo_root=str(rebar_repo))["status"] == "open"

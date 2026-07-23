@@ -724,9 +724,10 @@ def compute_validity(
 def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | None:
     """Recompute the ticket's material fingerprint from a LIGHT read (the ticket +
     its child ids only — no full child fetch, no LLM), matching
-    :func:`orchestrator.material_fingerprint`. Returns None on any read error
-    (so a read failure never wrongly invalidates — the head_sha + certified checks
-    still gate)."""
+    :func:`orchestrator.material_fingerprint`. Returns None for a deleted target
+    or on any read error. A deleted reducer state is a tombstone, not readable
+    plan material; read failures still fail closed through the head_sha +
+    certified checks."""
     from rebar import _reads
 
     from .det_floor import PlanContext
@@ -734,6 +735,8 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
 
     try:
         state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+        if state.get("status") == "deleted":
+            return None
         canonical = state.get("ticket_id", ticket_id)
         try:
             kids = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []

@@ -57,3 +57,27 @@ def test_wholly_unpinned_material_is_legacy_compatible(records) -> None:
         "enforced": True,
         "targets": [],
     }
+
+
+def test_deleted_material_is_missing_but_archived_material_remains_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rebar import _reads
+
+    state = {
+        "ticket_id": "aaaa-bbbb-cccc-dddd",
+        "ticket_type": "task",
+        "title": "Pinned target",
+        "description": "Material used by a signed plan review.",
+        "status": "archived",
+        "archived": True,
+    }
+    monkeypatch.setattr(_reads, "show_ticket", lambda *args, **kwargs: state)
+    monkeypatch.setattr(_reads, "list_tickets", lambda *args, **kwargs: [])
+
+    archived = attest.current_material_fingerprint("aaaa-bbbb-cccc-dddd", repo_root="/repo")
+    assert archived is not None
+
+    state["status"] = "deleted"
+
+    assert attest.current_material_fingerprint("aaaa-bbbb-cccc-dddd", repo_root="/repo") is None
