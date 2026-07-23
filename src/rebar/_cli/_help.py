@@ -4,7 +4,7 @@ The text is the *contract* the bash dispatcher established (its hand-rolled
 ``_print_overview`` / ``_print_subcommand_help`` ``echo`` strings). To preserve it
 across the Tier E cutover without transcription drift, the canonical strings ship
 as package data under ``rebar/_cli/help/`` — byte-for-byte copies of the captured
-dispatcher output — and are pinned by goldens in ``tests/golden/cli_help``. This
+dispatcher output
 module only loads and renders them; it never reformats.
 
 Streams matter (the dispatcher distinguishes them, so the goldens do too):

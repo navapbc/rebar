@@ -48,6 +48,9 @@ _USAGE = (
     "(requires user approval via hook).\n"
     "  --caused-by=<id>         On a bug close, draw a caused_by link to the culprit "
     "change/ticket (overrides git-blame auto-derivation).\n"
+    "  --ref=<ref>              Completion close gate: verify (and sign) against the committed "
+    "tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit "
+    "while your worktree stays at the epic tip; default HEAD.\n"
     "  Examples:\n"
     "    ticket transition abc1 open closed --class=regression  # close a bug with its class\n"
     "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  "
@@ -93,10 +96,15 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str]:
-    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] [--caused-by[=]] from the
-    args AFTER <current> <target>. Returns (reason, force, force_close_reason, close_class,
-    caused_by). Mirrors ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str, str]:
+    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] [--caused-by[=]] [--ref[=]]
+    from the args AFTER <current> <target>. Returns (reason, force, force_close_reason,
+    close_class, caused_by, ref). Mirrors ticket-transition.sh's flag loop (unknown tokens are
+    silently skipped).
+
+    ``--ref <ref>`` / ``--ref=<ref>`` (bug 80af) is the OPTIONAL completion-close-gate target:
+    the git ref whose committed tree the gate verifies (and signs against) instead of HEAD.
+    Default ``""`` (→ HEAD, today's behavior).
 
     ``--class <value>`` / ``--class=<value>`` (ticket ed13) is the REQUIRED bounded
     classification for a bug close (the vocabulary lives in ``txn.CLOSE_CLASSES``); it is
@@ -115,6 +123,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str]:
     force_close = ""
     close_class = ""
     caused_by = ""
+    ref = ""
     i = 0
     while i < len(args):
         a = args[i]
@@ -153,9 +162,17 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str]:
                 raise CommandError("Error: --caused-by requires a value", returncode=1)
             caused_by = args[i + 1]
             i += 2
+        elif a.startswith("--ref="):
+            ref = a[len("--ref=") :]
+            i += 1
+        elif a == "--ref":
+            if i + 1 >= len(args):
+                raise CommandError("Error: --ref requires a value", returncode=1)
+            ref = args[i + 1]
+            i += 2
         else:
             i += 1
-    return reason, force, force_close, close_class, caused_by
+    return reason, force, force_close, close_class, caused_by, ref
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -186,6 +203,7 @@ def transition_compute(
     force_close: str = "",
     close_class: str = "",
     caused_by: str = "",
+    ref: str | None = None,
     repo_root=None,
     cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
@@ -306,6 +324,7 @@ def transition_compute(
         force_close=force_close,
         close_class=close_class,
         caused_by=caused_by,
+        ref=ref,
     )
 
 
@@ -484,7 +503,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, force_close, close_class, caused_by = _parse_flags(flag_args)
+        reason, force, force_close, close_class, caused_by, ref = _parse_flags(flag_args)
         result = transition_compute(
             ticket_id,
             current_status,
@@ -494,6 +513,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
             force_close=force_close,
             close_class=close_class,
             caused_by=caused_by,
+            ref=(ref or None),
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:

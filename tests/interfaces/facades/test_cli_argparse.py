@@ -1,11 +1,13 @@
-"""Tier E E0: the argparse CLI surface, pinned byte-identical to the dispatcher.
+"""Tier E: the argparse CLI surface — routing coverage, wiring, and stream/exit contracts.
 
-These tests prove the in-process argparse CLI (:mod:`rebar._cli`) reproduces the
-bash dispatcher's help/overview/error output byte-for-byte BEFORE the E1 cutover,
-plus that its routing tables cover every known subcommand and the in-process arms
-are wired correctly. The goldens in ``tests/golden/cli_help`` were captured from
-the live bash dispatcher (every ``rebar <cmd> --help``, the overview, and the two
-unknown-subcommand error paths).
+These prove the in-process argparse CLI (:mod:`rebar._cli`) routes every known subcommand,
+that its in-process read/write arms are wired, and that the help forms and unknown-subcommand
+paths honor their stream/exit contracts. Assertions are on OBSERVABLE BEHAVIOR (return data,
+exit codes, which stream output lands on, help-form equivalence) — not byte-for-byte snapshots
+of help text. (The former ``tests/golden/cli_help`` byte-parity goldens pinned the CLI to the
+retired bash dispatcher during the E1 cutover; post-cutover they only re-asserted "the help
+bytes are what they were last captured", so they were a change-detector — any help edit broke
+them and was "fixed" by re-capturing — and were removed.)
 """
 
 from __future__ import annotations
@@ -14,7 +16,6 @@ import json
 from pathlib import Path
 
 import pytest
-from _engine_path import repo_root
 
 import rebar
 from rebar._cli import (
@@ -29,59 +30,21 @@ from rebar._cli import (
     main,
 )
 
-_GOLDEN = repo_root() / "tests" / "golden" / "cli_help"
-
-# (golden-name, argv) for every captured invocation form except ``reconcile``
-# (passthrough to ``python -m rebar_reconciler`` — covered by the reconciler's own
-# tests and unchanged by this CLI).
-_OVERVIEW_FORMS = [
-    ("__overview_noargs", []),
-    ("__overview_help", ["help"]),
-    ("__overview_dashhelp", ["--help"]),
-    ("__overview_dashh", ["-h"]),
-    ("__unknown__", ["frobnicate"]),
-    ("__help_unknown__", ["help", "frobnicate"]),
-]
-
 
 def _all_subcommands() -> list[str]:
     return sorted(_help.known_subcommands())
 
 
-def _golden(name: str) -> tuple[str, str, int]:
-    out = (_GOLDEN / f"{name}.out").read_text(encoding="utf-8")
-    err = (_GOLDEN / f"{name}.err").read_text(encoding="utf-8")
-    code = int((_GOLDEN / f"{name}.exit").read_text(encoding="utf-8"))
-    return out, err, code
-
-
-def _golden_cases() -> list[tuple[str, list[str]]]:
-    cases = list(_OVERVIEW_FORMS)
+def test_sub_help_equals_help_sub(capsys: pytest.CaptureFixture[str]) -> None:
+    """``rebar <sub> --help`` and ``rebar help <sub>`` are the identical contract (checked LIVE,
+    so this asserts current behavior rather than a captured snapshot)."""
     for sub in _all_subcommands():
-        cases.append((f"{sub}__dashhelp", [sub, "--help"]))
-        cases.append((f"{sub}__help", ["help", sub]))
-    return cases
-
-
-@pytest.mark.parametrize(
-    "name,argv", _golden_cases(), ids=lambda v: v if isinstance(v, str) else None
-)
-def test_help_byte_parity(name: str, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    """Every help/overview/error invocation matches the dispatcher byte-for-byte."""
-    want_out, want_err, want_code = _golden(name)
-    code = main(argv)
-    captured = capsys.readouterr()
-    assert captured.out == want_out, f"{name}: stdout mismatch"
-    assert captured.err == want_err, f"{name}: stderr mismatch"
-    assert code == want_code, f"{name}: exit mismatch"
-
-
-def test_sub_help_equals_help_sub() -> None:
-    """``rebar <sub> --help`` and ``rebar help <sub>`` are the identical contract."""
-    for sub in _all_subcommands():
-        a, _ = _golden(f"{sub}__dashhelp")[0], None
-        b = _golden(f"{sub}__help")[0]
+        main([sub, "--help"])
+        a = capsys.readouterr().out
+        main(["help", sub])
+        b = capsys.readouterr().out
         assert a == b, f"{sub}: the two help forms diverge"
+        assert a, f"{sub}: --help produced no output"
 
 
 def test_routing_tables_cover_every_known_subcommand() -> None:
@@ -161,3 +124,14 @@ def test_unknown_subcommand_streams(capsys: pytest.CaptureFixture[str]) -> None:
     assert code == 1
     assert cap.err == "Error: unknown subcommand 'frobnicate'\n"
     assert cap.out == _help.overview()
+
+
+def test_help_unknown_streams_all_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    """``rebar help <unknown>``: everything to stderr (error line AND the overview), nothing to
+    stdout, exit 1 — the complement of a top-level unknown, which splits the two streams."""
+    code = main(["help", "frobnicate"])
+    cap = capsys.readouterr()
+    assert code == 1
+    assert cap.out == ""
+    assert "unknown subcommand 'frobnicate'" in cap.err
+    assert _help.overview() in cap.err
