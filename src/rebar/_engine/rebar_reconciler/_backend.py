@@ -114,6 +114,28 @@ class OutboundMapper(Protocol):
         emit_detach_clear: bool = False,
     ) -> dict[str, Any]: ...
 
+    def map_fields_to_remote(
+        self,
+        changed: dict[str, Any],
+        ticket: dict[str, Any] | None = None,
+        binding_store: Any | None = None,
+        local_ticket_types: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Map a CANONICAL changed-fields dict (local field names → local values) to the
+        backend's mutation-field shapes, at the emission boundary (ticket 625b). The core
+        diffs in local shape; this translates only the changed subset back — field-name
+        reconciliation and value mapping (incl. rich-text fit) happen HERE."""
+        ...
+
+    def resolve_assignee(
+        self, local_value: str, remote_identity: dict[str, Any] | None
+    ) -> tuple[Any, bool, bool]:
+        """Resolve a local assignee against the remote identity, returning
+        ``(value, authoritative, is_account_id)`` (ticket 625b). Encapsulates the
+        3-state account-resolution fast-path (converged / desired-unassigned /
+        accountId) the core diff consults before emitting an assignee change."""
+        ...
+
 
 class InboundMapper(Protocol):
     """Map a backend issue payload back to local ticket field shapes.

@@ -138,8 +138,22 @@ def _normalize_jira_body(body: Any) -> str:
     return str(body) if body is not None else ""
 
 
+def _identity_of(raw: Any) -> dict[str, Any]:
+    """A fixed-shape canonical identity ``{"display", "email", "account_id"}`` from a
+    Jira user object (``assignee``/``reporter``). A null / non-dict value yields all
+    three ``None`` — so a present-but-unassigned field is distinguishable from an
+    absent one (which emits no identity key at all)."""
+    if isinstance(raw, dict):
+        return {
+            "display": raw.get("displayName"),
+            "email": raw.get("emailAddress"),
+            "account_id": raw.get("accountId"),
+        }
+    return {"display": None, "email": None, "account_id": None}
+
+
 def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
-    """Map Jira fields to local ticket field names/values.
+    """Map Jira fields to local ticket field names/values (partial-tolerant).
 
     ticket 929a: when jira_fields carries a rebar-status: annotation label
     (e.g. ``rebar-status:blocked``), the label takes precedence over the raw
@@ -148,19 +162,44 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
     to In Progress on Jira, cancelled maps to Done). Without this, a
     blocked→In Progress outbound followed by an inbound pass would silently
     overwrite local "blocked" with "in_progress".
+
+    ticket 625b: every field's emission is guarded on its SOURCE vendor key being
+    PRESENT in ``jira_fields`` (``if key in jira_fields``), so a partial subset
+    (e.g. the ``_BASELINE_FIELDS`` slice stored at rest) maps only the keys it
+    carries while a FULL snapshot maps byte-identically to today (a present-but-null
+    field still maps to its former default). An ABSENT vendor key yields NO canonical
+    key — never a fabricated default. Three canonical keys are added so the core
+    never reads a raw Jira snapshot shape: ``assignee_identity`` /
+    ``reporter_identity`` (fixed ``{display,email,account_id}`` shape) and the bare
+    ``remote_parent_id`` string. The scalar ``assignee`` string is kept alongside
+    ``assignee_identity`` (additive — existing consumers).
     """
-    summary = _extract_jira_field_value(jira_fields, "summary") or ""
-    # Bug 1bb2: ``_extract_jira_field_value`` returns nested dicts verbatim
-    # for any field that isn't a {.name/.displayName} object — Jira's
-    # ``description`` is an ADF (Atlassian Document Format) dict in cloud
-    # tenants. Normalize to plain text here so the diff map carries a
-    # string and the applier writes a string into the local EDIT event.
-    description_raw = jira_fields.get("description")
-    description = _normalize_jira_body(description_raw) if description_raw else ""
-    issuetype_raw = _extract_jira_field_value(jira_fields, "issuetype") or "Task"
-    priority_raw = _extract_jira_field_value(jira_fields, "priority") or "Medium"
-    status_raw = _extract_jira_field_value(jira_fields, "status") or "To Do"
-    assignee = _extract_jira_field_value(jira_fields, "assignee") or ""
+    out: dict[str, Any] = {}
+
+    if "summary" in jira_fields:
+        out["title"] = _extract_jira_field_value(jira_fields, "summary") or ""
+    if "description" in jira_fields:
+        # Bug 1bb2: ``_extract_jira_field_value`` returns nested dicts verbatim
+        # for any field that isn't a {.name/.displayName} object — Jira's
+        # ``description`` is an ADF (Atlassian Document Format) dict in cloud
+        # tenants. Normalize to plain text here so the diff map carries a
+        # string and the applier writes a string into the local EDIT event.
+        description_raw = jira_fields.get("description")
+        out["description"] = _normalize_jira_body(description_raw) if description_raw else ""
+    if "issuetype" in jira_fields:
+        issuetype_raw = _extract_jira_field_value(jira_fields, "issuetype") or "Task"
+        out["ticket_type"] = _JIRA_TO_LOCAL_TYPE.get(issuetype_raw, "task")
+    if "priority" in jira_fields:
+        priority_raw = _extract_jira_field_value(jira_fields, "priority") or "Medium"
+        out["priority"] = _JIRA_TO_LOCAL_PRIORITY.get(priority_raw, 2)
+    if "assignee" in jira_fields:
+        out["assignee"] = _extract_jira_field_value(jira_fields, "assignee") or ""
+        out["assignee_identity"] = _identity_of(jira_fields.get("assignee"))
+    if "reporter" in jira_fields:
+        out["reporter_identity"] = _identity_of(jira_fields.get("reporter"))
+    if "parent" in jira_fields:
+        parent_raw = jira_fields.get("parent")
+        out["remote_parent_id"] = parent_raw.get("key") if isinstance(parent_raw, dict) else None
 
     # Prefer rebar-status: annotation label over raw Jira workflow status.
     # Check labels list for any rebar-status: entry and map to local status.
@@ -169,16 +208,12 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
         if label in _REBAR_STATUS_LABEL_TO_LOCAL:
             local_status = _REBAR_STATUS_LABEL_TO_LOCAL[label]
             break
-    if local_status is None:
+    if local_status is None and "status" in jira_fields:
         # Bug 5886: an unmapped Jira status must NOT default to "open" (that silently
         # reopened closed tickets). Leave it None so the dict omits status → no diff.
+        status_raw = _extract_jira_field_value(jira_fields, "status") or "To Do"
         local_status = _JIRA_TO_LOCAL_STATUS.get(status_raw)
+    if local_status is not None:
+        out["status"] = local_status
 
-    return {
-        "title": summary,
-        "description": description,
-        "ticket_type": _JIRA_TO_LOCAL_TYPE.get(issuetype_raw, "task"),
-        "priority": _JIRA_TO_LOCAL_PRIORITY.get(priority_raw, 2),
-        "assignee": assignee,
-        **({"status": local_status} if local_status is not None else {}),
-    }
+    return out

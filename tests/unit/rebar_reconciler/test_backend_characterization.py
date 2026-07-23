@@ -57,6 +57,9 @@ def test_inbound_map_is_byte_for_byte_local_fields():
         "ticket_type": "story",
         "priority": 1,
         "assignee": "Me",
+        # ticket 625b: additive canonical identity key emitted when ``assignee`` is
+        # present, so the core never reads the raw Jira assignee shape.
+        "assignee_identity": {"display": "Me", "email": "me@example.com", "account_id": None},
         "status": "in_progress",
     }
 
