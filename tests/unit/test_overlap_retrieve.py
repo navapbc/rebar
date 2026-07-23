@@ -60,10 +60,24 @@ def test_perf() -> None:
         )
         for i in range(300)
     }
-    start = time.perf_counter()
-    retrieve(query, corpus, exclude=set(), config=LLMConfig())
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 50, f"retrieve took {elapsed_ms:.1f} ms (budget < 50 ms for 300 digests)"
+    # Perf guardrail (bug 5e94): assert the MINIMUM wall-clock across several runs, not
+    # a single sample. ``retrieve`` over 300 digests is ~1-2 ms, so 50 ms is a wide
+    # margin on the true compute cost — but a single sample on a contended CI runner can
+    # spike >100x (observed 289 ms on a loaded shared runner) and flake the gate. The min
+    # reflects the uncontended cost (at least one of N runs hits a quiet slice), so
+    # transient contention no longer flakes it; a real algorithmic regression slows every
+    # run — including the min — and still trips the budget.
+    config = LLMConfig()
+
+    def _elapsed_ms() -> float:
+        start = time.perf_counter()
+        retrieve(query, corpus, exclude=set(), config=config)
+        return (time.perf_counter() - start) * 1000
+
+    best_ms = min(_elapsed_ms() for _ in range(5))
+    assert best_ms < 50, (
+        f"retrieve best-of-5 took {best_ms:.1f} ms (budget < 50 ms for 300 digests)"
+    )
 
 
 def test_boilerplate() -> None:
