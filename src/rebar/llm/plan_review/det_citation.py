@@ -65,28 +65,86 @@ def parse_citations(plan_text: str) -> list[tuple[str, str]]:
     return out
 
 
+# A bound on the parent-chain walk for inherited-link resolution — deep enough for any real
+# epic/story/task nesting, finite so a malformed cyclic ``parent_id`` chain can never spin.
+_MAX_ANCESTOR_WALK = 32
+
+
+def _declares_depends_on(deps: list[dict[str, Any]], cited_id: str) -> bool:
+    return any(
+        d.get("relation") == "depends_on" and d.get("target_id") == cited_id for d in deps or []
+    )
+
+
+def _declares_blocks(deps: list[dict[str, Any]], target_id: str) -> bool:
+    return any(
+        d.get("relation") == "blocks" and d.get("target_id") == target_id for d in deps or []
+    )
+
+
+def _inherited_edge_verified(
+    cited_id: str,
+    cited_deps: list[dict[str, Any]],
+    resolve_deps: Callable[[str], list[dict[str, Any]]],
+    resolve_parent: Callable[[str], str | None],
+    plan_ticket_id: str,
+) -> bool:
+    """True iff an ANCESTOR of ``plan_ticket_id`` carries the verified upstream edge to
+    ``cited_id`` — ``ancestor.depends_on(C)`` or ``C.blocks(ancestor)``. Epics depend on epics
+    and stories on stories, so a parent's dependency is inherited by its children (a child's
+    citation to the parent's prerequisite is grounded). Bounded + cycle-guarded; FAIL-CLOSED on
+    any resolver exception."""
+    seen = {plan_ticket_id}
+    current = plan_ticket_id
+    for _ in range(_MAX_ANCESTOR_WALK):
+        try:
+            parent = resolve_parent(current)
+        except Exception:  # noqa: BLE001 — fail-closed: any resolve error ⇒ unverified
+            return False
+        if not parent or parent in seen:
+            return False
+        seen.add(parent)
+        # (a') an ancestor declares depends_on -> C
+        try:
+            anc_deps = resolve_deps(parent) or []
+        except Exception:  # noqa: BLE001 — fail-closed
+            return False
+        if _declares_depends_on(anc_deps, cited_id):
+            return True
+        # (b') C declares blocks -> ancestor (reuse the already-fetched cited deps)
+        if _declares_blocks(cited_deps, parent):
+            return True
+        current = parent
+    return False
+
+
 def _edge_verified(
     cited_id: str,
     own_deps: list[dict[str, Any]],
     resolve_deps: Callable[[str], list[dict[str, Any]]],
     plan_ticket_id: str,
+    resolve_parent: Callable[[str], str | None] | None = None,
 ) -> bool:
-    """True iff ``cited_id`` is a VERIFIED direct-upstream prerequisite of
-    ``plan_ticket_id`` under either encoding (a) or (b). FAIL-CLOSED: any exception
-    from the injected ``resolve_deps`` reverse lookup ⇒ unverified (returns False),
-    never propagates."""
+    """True iff ``cited_id`` is a VERIFIED upstream prerequisite of ``plan_ticket_id`` under
+    encoding (a) ``P.depends_on(C)``, (b) ``C.blocks(P)``, or — when ``resolve_parent`` is
+    supplied — the INHERITED form where an ancestor of P carries either edge to C. FAIL-CLOSED:
+    any exception from the injected resolvers ⇒ unverified (returns False), never propagates."""
     # (a) P declares depends_on -> C
-    for d in own_deps or []:
-        if d.get("relation") == "depends_on" and d.get("target_id") == cited_id:
-            return True
-    # (b) C declares blocks -> P (bounded reverse lookup; fail-closed).
+    if _declares_depends_on(own_deps, cited_id):
+        return True
+    # C's own deps (reverse lookup); fail-closed.
     try:
         cited_deps = resolve_deps(cited_id) or []
     except Exception:  # noqa: BLE001 — fail-closed: any resolve error ⇒ unverified, never raises
         return False
-    for d in cited_deps:
-        if d.get("relation") == "blocks" and d.get("target_id") == plan_ticket_id:
-            return True
+    # (b) C declares blocks -> P
+    if _declares_blocks(cited_deps, plan_ticket_id):
+        return True
+    # Inherited: an ancestor of P carries the verified upstream edge to C.
+    if resolve_parent is not None:
+        return _inherited_edge_verified(
+            cited_id, cited_deps, resolve_deps, resolve_parent, plan_ticket_id
+        )
     return False
 
 
@@ -95,14 +153,15 @@ def unbacked_citations(
     own_deps: list[dict[str, Any]],
     resolve_deps: Callable[[str], list[dict[str, Any]]],
     plan_ticket_id: str,
+    resolve_parent: Callable[[str], str | None] | None = None,
 ) -> list[str]:
-    """Advisory coaching strings — one per citation whose cited id is NOT a verified
-    direct-upstream prerequisite of ``plan_ticket_id`` (neither ``P.depends_on(C)`` nor
-    ``C.blocks(P)``). Each carries its fix inline. Never blocks (p6 is advisory).
-    Returns ``[]`` when every citation is edge-backed."""
+    """Advisory coaching strings — one per citation whose cited id is NOT a verified upstream
+    prerequisite of ``plan_ticket_id`` (neither ``P.depends_on(C)``, ``C.blocks(P)``, nor — when
+    ``resolve_parent`` is supplied — an inherited ancestor edge to C). Each carries its fix
+    inline. Never blocks (p6 is advisory). Returns ``[]`` when every citation is edge-backed."""
     issues: list[str] = []
     for subject, cited_id in citations:
-        if _edge_verified(cited_id, own_deps, resolve_deps, plan_ticket_id):
+        if _edge_verified(cited_id, own_deps, resolve_deps, plan_ticket_id, resolve_parent):
             continue
         subj = (subject or "").strip()[:80]
         issues.append(
