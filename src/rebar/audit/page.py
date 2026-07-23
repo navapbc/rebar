@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from rebar.audit.read import unavailable_plan_review_health
+
 # The four canonical decision series. ``overflow`` (a payload BUCKET, never a per-finding
 # ``decision`` value) folds into ``advisory``; any unknown decision folds into advisory too.
 SERIES: tuple[str, ...] = ("block", "advisory", "dropped", "indeterminate")
@@ -392,4 +394,5 @@ def build_context(trail: dict, *, plan_round: Any = None, code_round: Any = None
         "plan": _plan_section(plan_reviews, plan_sel, code_sel),
         "completion": _completion_section(trail.get("completion")),
         "code": _code_section(code_reviews, plan_sel, code_sel),
+        "plan_review_health": trail.get("plan_review_health") or unavailable_plan_review_health(),
     }

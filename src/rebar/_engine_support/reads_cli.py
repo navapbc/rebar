@@ -184,6 +184,9 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
                 )
             except Exception:  # noqa: BLE001 — presentation-only; never break `show` on it
                 pass
+            from rebar.audit.read import plan_review_health
+
+            out["plan_review_health"] = plan_review_health(state)
             print(json.dumps(out, indent=2, ensure_ascii=False))
             unresolved = sum(
                 1 for a in state.get("bridge_alerts", []) if not a.get("resolved", False)

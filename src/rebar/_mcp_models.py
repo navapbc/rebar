@@ -23,14 +23,79 @@ its friendly install message before any tool is registered.
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 try:
-    from pydantic import BaseModel, ConfigDict
+    from pydantic import BaseModel, ConfigDict, model_serializer
 
     class _Out(BaseModel):
         # Permissive base: extra fields allowed so the evolving event-sourced
         # shapes never break a tool. Each model mirrors a src/rebar/schemas file;
         # the cross-interface schema tests pin both to the canonical schema.
         model_config = ConfigDict(extra="allow")
+
+    class _HealthOut(_Out):
+        """Preserve omitted additive fields when nested health is serialized."""
+
+        @model_serializer(mode="wrap")
+        def _serialize_only_set_fields(self, handler):  # type: ignore[no-untyped-def]
+            data = handler(self)
+            for name in type(self).model_fields:
+                if name not in self.model_fields_set:
+                    data.pop(name, None)
+            return data
+
+    class PlanReviewHealthTargetOut(_Out):
+        canonical_id: str
+        role: Literal["child", "prerequisite"]
+        pinned_fingerprint: str
+        current_fingerprint: str | None
+        pin_status: Literal["current", "stale-pin-drift", "stale-pin-missing", "malformed-pin"]
+
+    class PlanReviewHealthAvailableOut(_HealthOut):
+        available: Literal[True] = True
+        valid: bool | None = None
+        reason: str | None = None
+        verdict: str | None = None
+        pin_status: Literal[
+            "current",
+            "current-no-relationships",
+            "stale-pin-drift",
+            "stale-pin-missing",
+            "malformed-pin",
+            "legacy-unpinned",
+        ]
+        enforced: bool
+        phase_status: Literal["compatible", "incompatible", "malformed"]
+        signed_phase: Literal["planning", "execution"] | None
+        required_phase: Literal["planning", "execution"] | None
+        effective_execution_floor: float | None
+        advisory: bool
+        targets: list[PlanReviewHealthTargetOut]
+        enforcement_status: Literal["enabled", "disabled"] | None = None
+        related_material_status: (
+            Literal["pinned", "no-related-material", "legacy-unpinned"] | None
+        ) = None
+
+    class PlanReviewHealthUnavailableOut(_Out):
+        model_config = ConfigDict(extra="forbid")
+
+        available: Literal[False]
+        reason: Literal["derived plan-review health unavailable"]
+
+    def _inline_schema_refs(node: Any, defs: dict[str, Any]) -> Any:
+        """Inline local model refs so FastMCP advertises the nested health contract."""
+        if isinstance(node, list):
+            return [_inline_schema_refs(item, defs) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref.removeprefix("#/$defs/")
+            target = defs.get(name, {})
+            siblings = {key: value for key, value in node.items() if key != "$ref"}
+            return _inline_schema_refs({**target, **siblings}, defs)
+        return {key: _inline_schema_refs(value, defs) for key, value in node.items()}
 
     class TicketStateOut(_Out):
         ticket_id: str
@@ -49,6 +114,19 @@ try:
         comments: list[dict] = []
         deps: list[dict] = []
         file_impact: list[dict] = []
+        plan_review_health: PlanReviewHealthAvailableOut | PlanReviewHealthUnavailableOut | None = (
+            None
+        )
+
+        @classmethod
+        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+            schema = super().model_json_schema(*args, **kwargs)
+            defs = schema.get("$defs", {})
+            properties = schema.get("properties", {})
+            health = properties.get("plan_review_health")
+            if isinstance(defs, dict) and isinstance(health, dict):
+                properties["plan_review_health"] = _inline_schema_refs(health, defs)
+            return schema
 
     class DepsGraphOut(_Out):
         ticket_id: str
@@ -172,6 +250,8 @@ try:
     # tests/interfaces/test_mcp_output_schema_coverage.py. Their CLI/library JSON
     # is still pinned to transition_result by test_schema_outputs.py.
 except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
+    PlanReviewHealthTargetOut = PlanReviewHealthAvailableOut = None  # type: ignore[assignment,misc]
+    PlanReviewHealthUnavailableOut = None  # type: ignore[assignment,misc]
     TicketStateOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]

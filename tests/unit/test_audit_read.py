@@ -22,7 +22,7 @@ from rebar.llm.plan_review import sidecar as plan_sidecar
 
 pytestmark = pytest.mark.unit
 
-_EXPECTED_KEYS = {"ticket", "plan_reviews", "completion", "code_reviews"}
+_EXPECTED_KEYS = {"ticket", "plan_reviews", "completion", "code_reviews", "plan_review_health"}
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def test_audit_trail_aggregates_full_history(store: Path) -> None:
     )
 
     trail = audit_trail(tid, repo_root=r)
-    assert set(trail.keys()) == {"ticket", "plan_reviews", "completion", "code_reviews"}
+    assert set(trail.keys()) == _EXPECTED_KEYS
     # plan history: both, newest-first
     assert isinstance(trail["plan_reviews"], list) and len(trail["plan_reviews"]) == 2
     assert trail["plan_reviews"][0]["material_fingerprint"] == "m2"  # newest first
@@ -181,7 +181,7 @@ def test_audit_trail_bare_ticket_yields_empty(store: Path) -> None:
     r = str(store)
     tid = rebar.create_ticket("task", "bare", description="y" * 60, repo_root=r)
     trail = audit_trail(tid, repo_root=r)
-    assert set(trail.keys()) == {"ticket", "plan_reviews", "completion", "code_reviews"}
+    assert set(trail.keys()) == _EXPECTED_KEYS
     assert trail["plan_reviews"] == []
     assert trail["completion"] is None
     assert trail["code_reviews"] == []
