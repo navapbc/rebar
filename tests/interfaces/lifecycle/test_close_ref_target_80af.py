@@ -109,15 +109,17 @@ def test_close_ref_forwards_to_verifier_and_signs_at_target(
 
 
 def test_close_without_ref_targets_head(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Absent --ref, the completion target is HEAD exactly as before (no behavior change)."""
+    """Absent --ref, the completion target is HEAD — now resolved to HEAD's immutable sha ONCE
+    at close entry (bug 4de6) rather than the lazy string "HEAD", so the observable target is
+    the current HEAD commit (sha2), not a re-resolvable symbol."""
     _enable_completion_gate(rebar_repo)
-    story, _sha1, _sha2 = _make_stack(rebar_repo)
+    story, _sha1, sha2 = _make_stack(rebar_repo)
 
     calls: list[dict] = []
     _stub_verifier(monkeypatch, calls)
     rebar.transition(story, "in_progress", "closed", repo_root=str(rebar_repo))
 
-    assert calls and calls[-1]["ref"] in (None, "HEAD"), calls
+    assert calls and calls[-1]["ref"] == sha2, calls
     assert (
         rebar.verify_signature(story, kind="completion-verifier", repo_root=str(rebar_repo))[
             "verdict"
