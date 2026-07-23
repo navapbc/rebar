@@ -589,6 +589,21 @@ def close_ticket(
     verified_result = None
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
+        if ref is None:
+            # 4de6: pin the DEFAULT completion target to ONE immutable sha for the whole
+            # verify+sign unit. Resolving HEAD lazily at verify time AND again at the pre-sign
+            # drift guard let a benign concurrent commit in that window split them (verify saw A,
+            # sign saw B), refusing the signature and closing unsigned. Resolve HEAD once here and
+            # thread the sha through _completion_precheck (verify) AND the drift guard (which
+            # already resolves a non-"HEAD" ref), so both bind the same commit. Best-effort: if
+            # HEAD can't resolve, fall back to the prior lazy "HEAD" behavior (ref stays None) —
+            # never worse than before.
+            try:
+                from rebar._snapshot.repo_snapshot import resolve_ref
+
+                ref = resolve_ref("HEAD", str(config.repo_root(repo_root)), fetch=False)
+            except Exception:  # noqa: BLE001 — resolution is best-effort; lazy HEAD is the fallback
+                ref = None
         from rebar.reducer import reduce_ticket as _reduce
 
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
