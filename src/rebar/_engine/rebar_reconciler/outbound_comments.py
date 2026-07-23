@@ -9,24 +9,30 @@ local→Jira comment comparison and the create-path comment mapping:
       lives here).
     - ``_map_comments_for_create`` — map all local comments to outbound "add"
       mutations for a brand-new issue.
-    - ``_normalize_comment_body`` / ``_decorate_outbound_comment`` — the ADF→text
+    - ``_normalize_comment_body`` / ``_decorate_outbound_comment`` — the rich-text→text
       normalisation and the RECONCILER_MARKER loop-breaker decoration (bug 85a1 /
       Gap 1).
     - ``_is_machine_marker_comment`` — the bridge-internal machine-comment
       exclusion (bug 6afc).
 
 ``compute_outbound_mutations`` (in ``outbound_differ``) imports this module; the
-dependency is one-way. Like ``inbound_differ``, this module keeps its OWN lazy
-``_load_adf`` / ``_load_comment_limits`` loaders (the reconciler modules are
-spec-loaded under test, where ``from . import`` does not resolve) so it never has
-to import back from ``outbound_differ`` — avoiding an import cycle.
+dependency is one-way.
+
+Ticket 21ca: the ADF decode + comment-limit truncation are routed through the
+Backend port (``InboundMapper.normalize_rich_text`` / ``FieldSanitizer.fit_comment``)
+instead of this module's own lazy vendor loaders — this module now carries NO
+``"rebar_reconciler.adapters.jira"`` literal. ``_normalize_comment_body`` and
+``_diff_comments`` accept an optional injected ``inbound_mapper``/``sanitizer``
+(mirroring ``outbound_differ.compute_outbound_mutations``'s injection seam) that
+default to ``None`` and are resolved lazily via ``select_backend(load_config())``
+INSIDE the function body — never at import time — because this module is
+spec-loaded standalone in tests, where package-relative config resolution may not
+be available at import.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-from pathlib import Path
 from typing import Any
 
 # Sentinel: presence of the "comment" key in a snapshot entry confirms the
@@ -42,63 +48,30 @@ _COMMENT_FIELD_KEY = "comment"
 # loop-breaker pattern.
 RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
-# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
-# _loader.py). Import it normally when package context exists, else bootstrap it
-# by file path — this module is itself exec'd standalone via
-# spec_from_file_location in tests.
-try:
-    from rebar_reconciler._loader import lazy_load
-except ImportError:  # standalone load without package context
-    _loader_key = "rebar_reconciler._loader"
-    if _loader_key not in sys.modules:
-        _loader_spec = importlib.util.spec_from_file_location(
-            _loader_key, Path(__file__).parent / "_loader.py"
-        )
-        assert _loader_spec is not None and _loader_spec.loader is not None
-        _loader_mod = importlib.util.module_from_spec(_loader_spec)
-        sys.modules[_loader_key] = _loader_mod
-        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
-    lazy_load = sys.modules[_loader_key].lazy_load
+
+def _resolve_inbound_mapper(inbound_mapper: Any | None) -> Any:
+    """Resolve the injected ``InboundMapper``, falling back to the configured
+    backend (ticket 21ca; mirrors ``outbound_differ.compute_outbound_mutations``'s
+    injection seam). Resolved LAZILY here — never at import time — because this
+    module is spec-loaded standalone in tests, where ``select_backend(load_config())``
+    may not resolve config."""
+    if inbound_mapper is not None:
+        return inbound_mapper
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    return select_backend(load_config()).inbound
 
 
-# Lazy-loader singletons for the sibling adf / comment_limits modules. Kept
-# module-local (each reconciler module owns its own copy) because the differ may
-# be imported via ``importlib.util.spec_from_file_location`` in tests, which does
-# not establish package context, so ``from . import adf`` would fail.
-_ADF_KEY = "rebar_reconciler.adapters.jira.adf"
-_AdfModule = None
+def _resolve_sanitizer(sanitizer: Any | None) -> Any:
+    """Resolve the injected ``FieldSanitizer``, falling back to the configured
+    backend (ticket 21ca; same injection seam as :func:`_resolve_inbound_mapper`)."""
+    if sanitizer is not None:
+        return sanitizer
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
 
-_COMMENT_LIMITS_KEY = "rebar_reconciler.adapters.jira.comment_limits"
-_CommentLimitsModule = None
-
-
-def _load_adf():
-    """Lazy-load the sibling adf module (own copy; mirrors outbound_differ's).
-
-    Loaded by the canonical dotted sys.modules key so the module is executed
-    exactly once across all callers, whether the differ was imported as a normal
-    package module (production) or by file path (tests).
-    """
-    global _AdfModule
-    if _AdfModule is None:
-        _AdfModule = lazy_load(_ADF_KEY, "adapters/jira/adf.py")
-    return _AdfModule
-
-
-def _load_comment_limits():
-    """Lazy-load the sibling comment_limits module (own copy).
-
-    Bug 6afc-20ee-84e5-4dd5: the truncation rule MUST be identical on the send
-    path (acli.add_comment) and this differ comparison path, so both import the
-    single shared ``truncate_comment_body`` helper. Loaded by file path (not
-    ``from . import``) because the differ may be imported via
-    ``importlib.util.spec_from_file_location`` in tests, which does not establish
-    package context.
-    """
-    global _CommentLimitsModule
-    if _CommentLimitsModule is None:
-        _CommentLimitsModule = lazy_load(_COMMENT_LIMITS_KEY, "adapters/jira/comment_limits.py")
-    return _CommentLimitsModule
+    return select_backend(load_config()).sanitizer
 
 
 def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
@@ -113,7 +86,7 @@ def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _normalize_comment_body(body: Any) -> str:
+def _normalize_comment_body(body: Any, inbound_mapper: Any | None = None) -> str:
     """Coerce a comment body to a comparable plain-text string.
 
     Jira comments are returned with ``body`` as an Atlassian Document Format
@@ -124,16 +97,17 @@ def _normalize_comment_body(body: Any) -> str:
     ``_diff_comments`` (Phase 3+ "unhashable type: 'dict'" when an ADF body
     flows into a ``set[str]`` insertion).
 
-    Normalize via ``adf.adf_to_text`` so the canonical comparison is on
-    text. Bug 85a1. The reconciler marker token (Gap 1) is also stripped
-    so dedup compares the *user content* on both sides — without the strip,
-    a previously-pushed Jira body ``"hello\\n\\n<marker>"`` would never match
-    a local ``"hello"`` and the diff would re-emit the same comment.
+    Normalize via the Backend port's ``InboundMapper.normalize_rich_text`` (ticket
+    21ca; Jira: ``adf.adf_to_text``) so the canonical comparison is on text. Bug
+    85a1. The reconciler marker token (Gap 1) is also stripped so dedup compares
+    the *user content* on both sides — without the strip, a previously-pushed
+    Jira body ``"hello\\n\\n<marker>"`` would never match a local ``"hello"`` and
+    the diff would re-emit the same comment.
+
+    ``inbound_mapper``: the injected Backend-port ``InboundMapper`` (ticket 21ca);
+    ``None`` resolves the configured backend's mapper via :func:`_resolve_inbound_mapper`.
     """
-    if isinstance(body, dict):
-        text = _load_adf().adf_to_text(body)
-    else:
-        text = str(body) if body is not None else ""
+    text = _resolve_inbound_mapper(inbound_mapper).normalize_rich_text(body)
     return text.replace(RECONCILER_MARKER, "").strip()
 
 
@@ -188,14 +162,22 @@ def _diff_comments(
     jira_key: str,
     jira_snapshot: dict[str, Any],
     client: Any = None,
+    *,
+    inbound_mapper: Any | None = None,
+    sanitizer: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Compare local comments to Jira comments. Return mutations for new comments.
 
     Matching rule: emit a comment "add" only for local comment bodies NOT
     already present in Jira, after normalising both sides via
-    :func:`_normalize_comment_body` (ADF→text conversion + RECONCILER_MARKER
+    :func:`_normalize_comment_body` (rich-text→text conversion + RECONCILER_MARKER
     strip + whitespace strip). Body equality after normalisation → skip
     (already mirrored); otherwise emit with outbound decoration.
+
+    ``inbound_mapper``/``sanitizer``: the injected Backend-port ``InboundMapper``/
+    ``FieldSanitizer`` (ticket 21ca); ``None`` resolves the configured backend via
+    :func:`_resolve_inbound_mapper`/:func:`_resolve_sanitizer`. Threaded from
+    ``outbound_differ.compute_outbound_mutations`` (which already holds the backend).
 
     Snapshot lookup: the Jira REST API places comments at
     fields["comment"]["comments"] (outer key is "comment", not "comments").
@@ -217,6 +199,11 @@ def _diff_comments(
     Note: PR #402 (ADF walker + comment ID binding) will provide exact ID-
     based binding once available; this body-equality match is the baseline.
     """
+    # Resolve the injected Backend-port members ONCE per call (ticket 21ca) rather
+    # than re-resolving per comment below.
+    inbound_mapper = _resolve_inbound_mapper(inbound_mapper)
+    sanitizer = _resolve_sanitizer(sanitizer)
+
     local_comments = ticket.get("comments", [])
     jira_issue = jira_snapshot.get(jira_key, {})
 
@@ -303,12 +290,12 @@ def _diff_comments(
     jira_bodies: set[str] = set()
     for c in jira_comments:
         raw = c.get("body", "") if isinstance(c, dict) else c
-        jira_bodies.add(_normalize_comment_body(raw))
+        jira_bodies.add(_normalize_comment_body(raw, inbound_mapper=inbound_mapper))
 
     mutations: list[dict[str, Any]] = []
     for c in local_comments:
         raw = c.get("body", "") if isinstance(c, dict) else c
-        body = _normalize_comment_body(raw)
+        body = _normalize_comment_body(raw, inbound_mapper=inbound_mapper)
         # Bug 6afc-20ee-84e5-4dd5: never mirror skill-to-skill machine-marker
         # comments (BRIDGE_CANARY_ALERT:, etc.) outbound to Jira. Symmetric with
         # the label _EXCLUDED_PREFIXES exclusion.
@@ -321,7 +308,7 @@ def _diff_comments(
         # test; otherwise the full local body never matches the truncated Jira
         # body and the diff re-emits forever. The local store is NOT mutated —
         # `body` here is an in-memory comparison key only.
-        compare_body = _load_comment_limits().truncate_comment_body(body)
+        compare_body = sanitizer.fit_comment(body)
         if compare_body and compare_body not in jira_bodies:
             # Decorate the outbound body with the reconciler marker so the
             # inbound differ can identify (and filter) our own echoes on the

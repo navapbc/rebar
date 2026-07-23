@@ -145,6 +145,16 @@ class InboundMapper(Protocol):
 
     def map_remote_to_local(self, remote_fields: dict[str, Any]) -> dict[str, Any]: ...
 
+    def normalize_rich_text(self, body: Any) -> str:
+        """Decode a rich-text payload to plain text (ticket 21ca).
+
+        Jira: an ADF dict decodes via ``adf_to_text``; a plain string passes
+        through unchanged; ``None`` yields ``""``. Serves BOTH the inbound apply
+        path (defense-in-depth, bug 1bb2-5da5) and the outbound comment-diff
+        decode (formerly each a private vendor reach-through).
+        """
+        ...
+
 
 class FieldSanitizer(Protocol):
     """Defend the backend's hard limits on field values (send-side only).
@@ -161,6 +171,16 @@ class FieldSanitizer(Protocol):
     def sanitize_description(self, description: str) -> str: ...
 
     def sanitize_comment(self, body: str) -> str: ...
+
+    def fit_comment(self, body: str) -> str:
+        """Fit a comment body to the backend's hard length limit, WITHOUT the
+        send-side warning ``sanitize_comment`` logs (ticket 21ca).
+
+        A pure fit-to-limit used by the comment-diff comparison (Jira:
+        ``comment_limits.truncate_comment_body``) — distinct from
+        ``sanitize_comment``, which is the send-path sanitizer.
+        """
+        ...
 
 
 class IdentityConvention(Protocol):

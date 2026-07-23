@@ -748,10 +748,10 @@ def _compute_outbound_update_mutation(
         conflict_sink=conflict_sink,
         dropped_field_sink=dropped_field_sink,
     )
-    # Comments use the resolved snapshot (the one-key overlay for the
-    # bounded-GET path) so the GET's native fields.comment.comments is
-    # consulted with NO second network call (C3).
-    comment_mutations = _diff_comments(ticket, jira_key, comment_snapshot, client=client)
+    # Comments use the resolved snapshot (the bounded-GET overlay) — NO second call (C3).
+    comment_mutations = _diff_comments(
+        ticket, jira_key, comment_snapshot, client=client, inbound_mapper=inbound_mapper
+    )
     # bug a06c: intent-gated REMOVE. When local_label_intent is
     # provided but lacks an entry for this local_id, fall back to
     # an empty intent set (lazy first-pass safety: suppresses all

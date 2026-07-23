@@ -18,15 +18,16 @@ here; the local batch-write primitive lives in ``rebar._store``. See
 Event writes and reducer reads now go through the in-package store primitives
 (``rebar._store`` / ``rebar.reducer``) directly — Tier E E5b dropped the bare
 ``event_append`` / ``ticket_reducer`` compat shims and their ``sys.path`` dances.
-The remaining lazy loader (``_load_adf_module``) preserves the engine's by-path
-loading for the sibling ``adf`` module.
+Ticket 21ca: the former ``_load_adf_module`` by-path vendor loader is GONE —
+``_normalize_adf_body`` now routes ADF decode through the Backend port's
+``InboundMapper.normalize_rich_text``, resolved lazily via ``select_backend``.
+This module carries NO ``"rebar_reconciler.adapters.jira"`` literal.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
-import sys
 from pathlib import Path
 from typing import Any, overload
 
@@ -293,37 +294,6 @@ def _extract_name(val, default=""):
     return val or default
 
 
-# ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
-# _loader.py). Import it normally when package context exists, else bootstrap it
-# by file path — this module is itself exec'd standalone via
-# spec_from_file_location in tests.
-try:
-    from rebar_reconciler._loader import lazy_load
-except ImportError:  # standalone load without package context
-    _loader_key = "rebar_reconciler._loader"
-    if _loader_key not in sys.modules:
-        _loader_spec = importlib.util.spec_from_file_location(
-            _loader_key, Path(__file__).parent / "_loader.py"
-        )
-        assert _loader_spec is not None and _loader_spec.loader is not None
-        _loader_mod = importlib.util.module_from_spec(_loader_spec)
-        sys.modules[_loader_key] = _loader_mod
-        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
-    lazy_load = sys.modules[_loader_key].lazy_load
-
-
-_ADF_KEY_APPLIER = "rebar_reconciler.adapters.jira.adf"
-_AdfModule_Applier = None
-
-
-def _load_adf_module():
-    """Lazy-load the sibling adf module (mirrors inbound_differ._load_adf)."""
-    global _AdfModule_Applier
-    if _AdfModule_Applier is None:
-        _AdfModule_Applier = lazy_load(_ADF_KEY_APPLIER, "adapters/jira/adf.py")
-    return _AdfModule_Applier
-
-
 _TICKET_REDUCER_MODULE = None
 
 
@@ -347,15 +317,26 @@ def _load_ticket_reducer():
     return _tr
 
 
-def _normalize_adf_body(body: Any) -> str:
-    """Coerce a Jira description (ADF dict or string) to plain text.
+def _normalize_adf_body(body: Any, inbound_mapper: Any | None = None) -> str:
+    """Coerce a Jira description (rich-text dict or string) to plain text.
 
-    Defense-in-depth: the inbound differ should normalize ADF before
+    Defense-in-depth: the inbound differ should normalize rich text before
     surfacing the field, but a raw ADF dict on the wire here would
     otherwise be written verbatim into an EDIT event's ``description``
     slot — corrupting the local ticket store (reducer would surface a
     dict where a string is expected). See bug 1bb2-5da5.
+
+    Ticket 21ca: routed through the Backend port's ``InboundMapper.normalize_rich_text``
+    (Jira: ``adf.adf_to_text`` for a dict, ``str()`` for a string) instead of a private
+    vendor lazy-load — this module carries NO ``"rebar_reconciler.adapters.jira"``
+    literal. ``inbound_mapper`` is the injected Backend-port ``InboundMapper``; ``None``
+    resolves the configured backend's mapper lazily via ``select_backend(load_config())``
+    INSIDE this function (never at import time — this module is spec-loaded standalone
+    in tests).
     """
-    if isinstance(body, dict):
-        return _load_adf_module().adf_to_text(body)
-    return str(body) if body is not None else ""
+    if inbound_mapper is None:
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        inbound_mapper = select_backend(load_config()).inbound
+    return inbound_mapper.normalize_rich_text(body)
