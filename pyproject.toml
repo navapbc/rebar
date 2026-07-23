@@ -192,11 +192,11 @@ dev = [
     # tightens/adds audits across releases, so an unpinned floor lets findings drift (green
     # here, red in CI). Bump deliberately.
     "zizmor==1.28.0",
-    # Pull the full agents stack so the rebar.llm validation tests (provider
-    # construction for Claude + ChatGPT, MCP/Langfuse paths) RUN in CI rather than
-    # skipping. Self-referential extra — kept here, not in core, so `pip install
-    # nava-rebar` stays dependency-free.
-    "nava-rebar[agents]",
+    # Pull the agents and metrics stacks so optional-capability validation tests
+    # (provider construction, MCP/Langfuse, and real polyglot lizard parsing)
+    # RUN in CI rather than skipping. Self-referential extras stay here, not in
+    # core, so `pip install nava-rebar` remains lean.
+    "nava-rebar[agents,metrics]",
 ]
 
 [project.scripts]

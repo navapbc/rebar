@@ -80,9 +80,11 @@ def test_every_record_carries_coverage_no_silent_noop(mixed_repo) -> None:
     assert ran + skipped == len(result.records)
 
 
-def test_metric_backend_skip_is_reconstructable(mixed_repo) -> None:
-    # scc/lizard are absent on this host -> the metric backend appears in the table as
-    # skipped with no_tool. The skip is recoverable from the records alone.
+def test_metric_backend_skip_is_reconstructable(
+    mixed_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Force tool absence rather than relying on the host's optional extras.
+    monkeypatch.setattr(engine_b, "_METRIC_CANDIDATES", ("missing-metric-tool",))
     result = engine_b.scan(mixed_repo)
     table = _coverage_table(result.records)
     assert engine_b.BACKEND_METRIC in table, "the metric backend must be accounted for"
