@@ -155,6 +155,9 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     # Ticket 625b: the outbound differ now compares in canonical shape (snapshot mapped via
     # the injected InboundMapper), so it no longer imports the vendor field-diff helpers.
     "outbound_differ.py",
+    # Ticket eefd: the outbound link differ compares canonical relations (remote links mapped
+    # via SupportsLinks.map_remote_links), so it no longer imports the vendor link-type map.
+    "outbound_links.py",
 )
 
 _FORBIDDEN_IMPORT_SUBSTRINGS = ("adapters.jira", "acli_subprocess")
