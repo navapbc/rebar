@@ -201,6 +201,7 @@ def _completion_precheck(
     reason: str,
     force_close: str,
     close_class: str = "",
+    ref: str | None = None,
 ):
     """The completion-verification close gate's PRE-close half (runs outside the write lock).
 
@@ -312,7 +313,12 @@ def _completion_precheck(
         # reason to hit the network — and fetching the real origin on every close would add
         # latency and a failure surface (a slow/unreachable remote) to a purely local verify.
         result = llm.verify_completion(
-            ticket_id, graph=False, source="attested", ref="HEAD", fetch=False, repo_root=repo_root
+            ticket_id,
+            graph=False,
+            source="attested",
+            ref=(ref or "HEAD"),
+            fetch=False,
+            repo_root=repo_root,
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
@@ -532,6 +538,7 @@ def close_ticket(
     force_close: str,
     close_class: str = "",
     caused_by: str = "",
+    ref: str | None = None,
 ) -> dict:
     """Perform the locked write and its post-processing tail; return the transition
     result ``{ticket_id, from, to, newly_unblocked, noop}``.
@@ -609,6 +616,7 @@ def close_ticket(
             reason=reason,
             force_close=force_close,
             close_class=close_class,
+            ref=ref,
         )
 
     from rebar._commands import _seam
@@ -649,7 +657,18 @@ def close_ticket(
         # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
         _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
         _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
-        _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
+        # bug 80af: a --ref-targeted close verifies (and must sign against) THAT ref, not HEAD.
+        # So the drift guard must resolve the SAME ref for the fresh sha — otherwise a stacked-story
+        # close (--ref=<story-sha> while the worktree sits at the epic tip) would compare the story
+        # sha against the tip HEAD and be spuriously treated as drifted, landing UNSIGNED. For a
+        # concrete commit the tree is immutable, so resolving the same ref makes the check a stable
+        # no-op and a legitimately-targeted close lands SIGNED.
+        if ref and ref != "HEAD":
+            from rebar._snapshot.repo_snapshot import resolve_ref
+
+            _fresh_sha = resolve_ref(ref, str(config.repo_root(repo_root)), fetch=False)
+        else:
+            _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
         if _material_drifted(_verified_sha, _fresh_sha):
             sys.stderr.write(
                 f"Warning: closed {ticket_id} WITHOUT a completion signature — the code drifted "

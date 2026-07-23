@@ -686,6 +686,25 @@ A non-empty `--force-close` reason bypasses this and completion verification whi
 audit comment. Closing `idea → closed` also bypasses the plan gate because it is a rejection,
 not delivery. Neither bypass relaxes the structural child-closure invariant.
 
+### Which commit the completion gate verifies — `--ref`
+
+When `verify.require_completion_verification_for_close = true`, the completion-verification close
+gate verifies an **immutable snapshot of the committed tree at your worktree HEAD** by default,
+and — on PASS — signs a `verified-at-sha` attestation bound to that commit.
+
+`rebar transition <id> closed --ref <commit>` (library: `transition(..., ref=<commit>)`) targets a
+**specific commit** instead of HEAD: the gate verifies, and signs against, that ref's tree. The
+pre-sign drift guard resolves the **same** ref for its fresh-SHA read, so a fixed commit — whose
+tree is immutable — is a stable no-op rather than being spuriously treated as drift. The close
+therefore lands **signed** even though HEAD is elsewhere. Absent `--ref`, behavior is unchanged
+(verify at HEAD, drift-check against `head_sha`).
+
+**Stacked-epic recipe.** When landing a stack where each story is its own commit, close each story
+against **its own commit** — `rebar transition <story-id> closed --ref <story-sha>` (or check that
+commit out) — while your worktree stays at the epic tip. Each story's scope acceptance-criteria are
+then evaluated against just that story's tree, not the cumulative tip, and each close still signs a
+certified per-story completion attestation.
+
 ## Fail-open behavior
 
 * **Unsupported stack / missing tool / parse error / timeout** in any DET check →
