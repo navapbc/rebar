@@ -39,6 +39,82 @@ class _JiraOutbound:
             ticket, binding_store, local_ticket_types, emit_detach_clear
         )
 
+    def map_fields_to_remote(
+        self,
+        changed: dict[str, Any],
+        ticket: dict[str, Any] | None = None,
+        binding_store: Any | None = None,
+        local_ticket_types: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Map a CANONICAL changed-fields dict (local field names → local values) to
+        the vendor-shaped mutation fields, at the emission boundary (ticket 625b).
+
+        Field-name reconciliation (local ``title`` → Jira ``summary``) and value
+        mapping (``status``/``priority`` → the Jira name; ``description`` fitted to
+        Jira's ADF limit) reuse the existing local→Jira maps in ``outbound_fields``.
+        ``assignee``/``parent``/``reporter`` values are already resolved by the core
+        diff and pass through unchanged, as does the ``_assignee_is_account_id``
+        dispatch sentinel."""
+        out: dict[str, Any] = {}
+        for name, value in changed.items():
+            if name == "title":
+                out["summary"] = value
+            elif name == "description":
+                out["description"] = (
+                    outbound_fields._load_adf().fit_text_to_adf_limit(value)
+                    if isinstance(value, str)
+                    else value
+                )
+            elif name == "status":
+                out["status"] = outbound_fields._LOCAL_TO_JIRA_STATUS.get(value, "To Do")
+            elif name == "priority":
+                out["priority"] = outbound_fields._LOCAL_TO_JIRA_PRIORITY.get(value, "Medium")
+            else:
+                # assignee / parent / reporter (already resolved) + the
+                # _assignee_is_account_id sentinel pass through by their own name.
+                out[name] = value
+        return out
+
+    def resolve_assignee(
+        self, local_value: str, remote_identity: dict[str, Any] | None
+    ) -> tuple[Any, bool, bool]:
+        """Re-home the assignee resolver fast-path (ticket 625b; 264f semantics).
+
+        Returns ``(value, authoritative, is_account_id)``:
+
+        * empty/None ``local_value`` → ``("", False, False)`` (nothing to resolve —
+          non-authoritative, no live account search);
+        * no injected resolver (fixture path) → ``(local_value, False, False)`` so the
+          caller keeps the legacy permissive string match;
+        * authoritative + the resolved account matches the remote identity's
+          ``account_id`` → ``(None, True, …)`` (the CONVERGED signal — caller emits
+          nothing);
+        * authoritative + unmappable (no account) → ``("", True, False)`` (desired
+          unassigned);
+        * authoritative accountId fast-path → ``(account_id, True, True)`` (caller
+          emits the accountId and sets ``_assignee_is_account_id``);
+        * authoritative resolvable-but-mismatched → ``(local_value, True, False)``.
+
+        The live account-search resolver is threaded in by ``compute_outbound_mutations``
+        as ``self._assignee_resolver`` (a ``local_value -> (account|None, authoritative,
+        is_account_id)`` callable bound to the current remote key)."""
+        if not local_value:
+            return ("", False, False)
+        resolver = getattr(self, "_assignee_resolver", None)
+        if resolver is None:
+            return (local_value, False, False)
+        acct, authoritative, is_account_id = resolver(local_value)
+        if not authoritative:
+            return (local_value, False, is_account_id)
+        remote_acct = (remote_identity or {}).get("account_id")
+        if (acct or None) == (remote_acct or None):
+            return (None, True, is_account_id)  # converged
+        if acct is None:
+            return ("", True, False)  # unmappable → desired unassigned
+        if is_account_id:
+            return (acct, True, True)  # accountId fast-path
+        return (local_value, True, False)  # resolvable but mismatched → emit local string
+
 
 class _JiraInbound:
     """Delegates inbound mapping to ``inbound_fields._map_jira_to_local_fields``."""

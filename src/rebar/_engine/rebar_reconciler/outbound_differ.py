@@ -30,21 +30,14 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from rebar_reconciler._loader import lazy_load
 
-# The field-diff cluster lives in outbound_fields.py (split for module size). _diff_fields
-# is called below; _assignee_matches + _LOCAL_TO_JIRA_TYPE + _extract_jira_field are
-# non-mapping field-diff helpers (no Backend-port equivalent) re-exported for the test
-# suite. The local->Jira field MAPPER (_map_local_to_jira_fields) is NO LONGER imported
-# here (ticket 4af8): it is injected as ``outbound_mapper`` (a Backend-port
-# ``OutboundMapper``) by the orchestrator, so this core differ names no vendor mapper.
-from rebar_reconciler.adapters.jira.outbound_fields import (  # noqa: F401
-    _LOCAL_TO_JIRA_TYPE,
-    _assignee_matches,
-    _diff_fields,
-    _extract_jira_field,
-)
+# Ticket 625b: the outbound UPDATE field diff compares in CANONICAL (local) shape via
+# this vendor-neutral core helper (the snapshot is canonicalized by the injected
+# InboundMapper, diffed locally, then mapped back at the boundary), so this differ
+# imports NOTHING from ``adapters.jira`` and names no raw Jira snapshot key.
+from rebar_reconciler.outbound_field_diff import compute_update_fields
 
 if TYPE_CHECKING:
-    from rebar_reconciler._backend import OutboundMapper
+    from rebar_reconciler._backend import InboundMapper, OutboundMapper
 
 # The identity-mapping assignee-resolution cluster (264f) lives in
 # outbound_assignee.py (split for module size; a leaf that imports rebar core
@@ -125,10 +118,8 @@ def _rest_issue_to_snapshot_fields(issue: dict[str, Any]) -> dict[str, Any]:
     """Return the raw ``fields`` block of a REST GET payload (NO normalization).
 
     The fetcher stores each snapshot entry as a verbatim copy of the issue's
-    ``fields`` (``fetcher.py``), and ALL normalization happens downstream in
-    ``_diff_fields`` / ``_extract_jira_field``. Re-normalizing here would
-    double-normalize and reintroduce phantom re-emits — so this helper is a
-    deliberate one-liner kept only so the C2 parity test has a real symbol.
+    ``fields`` (``fetcher.py``); ALL normalization happens downstream (now the
+    injected InboundMapper). A deliberate one-liner kept for the C2 parity test.
     """
     return issue.get("fields", {})
 
@@ -409,6 +400,7 @@ def compute_outbound_mutations(
     config: OutboundDiffConfig | None = None,
     *,
     outbound_mapper: OutboundMapper | None = None,
+    inbound_mapper: InboundMapper | None = None,
 ) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -447,11 +439,18 @@ def compute_outbound_mutations(
     # (run_differs passes ``backend.outbound``). A direct caller that omits it resolves
     # the configured backend's mapper through the neutral registry seam — naming no
     # vendor mapper here and yielding the same mapping the vendor delegate performs.
-    if outbound_mapper is None:
+    # Ticket 625b: the remote->local mapper is injected the same way (run_differs passes
+    # ``backend.inbound``); a direct caller that omits either resolves it through the
+    # same neutral registry seam. inbound_mapper canonicalizes the snapshot + baseline.
+    if outbound_mapper is None or inbound_mapper is None:
         from rebar.config import load_config
         from rebar_reconciler._backend_registry import select_backend
 
-        outbound_mapper = select_backend(load_config()).outbound
+        _backend = select_backend(load_config())
+        if outbound_mapper is None:
+            outbound_mapper = _backend.outbound
+        if inbound_mapper is None:
+            inbound_mapper = _backend.inbound
     # Bind the config's fields to locals so the diff body below reads unchanged.
     excluded_statuses = config.excluded_statuses
     local_label_intent = config.local_label_intent
@@ -557,6 +556,8 @@ def compute_outbound_mutations(
                 local_ticket_types,
                 _assignee_resolver,
                 absent_alive_fields,
+                outbound_mapper,
+                inbound_mapper,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
             )
@@ -664,6 +665,8 @@ def _compute_outbound_update_mutation(
     local_ticket_types,
     _assignee_resolver,
     absent_alive_fields,
+    outbound_mapper,
+    inbound_mapper,
     *,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
@@ -729,17 +732,21 @@ def _compute_outbound_update_mutation(
         # never inbound-mirrored (retirement stays outbound-owned).
         absent_alive_fields[jira_key] = fields
 
-    changed = _diff_fields(
+    # Ticket 625b: the whole vendor-neutral field path (canonicalize snapshot +
+    # baseline, diff in local shape, map back to vendor shape) lives in the core helper.
+    fields = compute_update_fields(
         ticket,
         jira_fields,
+        inbound_mapper=inbound_mapper,
+        outbound_mapper=outbound_mapper,
         binding_store=binding_store,
+        local_id=local_id,
+        jira_key=jira_key,
         local_ticket_types=local_ticket_types,
         assignee_resolver=_assignee_resolver,
-        jira_key=jira_key,
-        prev_jira_fields=(prev_snapshot or {}).get(jira_key),
+        prev_snapshot=prev_snapshot,
         conflict_sink=conflict_sink,
         dropped_field_sink=dropped_field_sink,
-        local_id=local_id,
     )
     # Comments use the resolved snapshot (the one-key overlay for the
     # bounded-GET path) so the GET's native fields.comment.comments is
@@ -766,21 +773,15 @@ def _compute_outbound_update_mutation(
     # already-present link emits nothing — no per-pass churn).
     link_mutations = _diff_links(ticket, jira_fields, binding_store)
 
-    if changed or comment_mutations or label_mutations or link_mutations:
-        # Sync-hardening P5 / bug 57d1 diagnosis enabler: emit a
-        # one-line CHANGED-FIELD BREADCRUMB whenever a bound key gets
-        # an outbound UPDATE carrying field diffs. Logs the changed
-        # FIELD NAMES only (never values — descriptions/assignees may
-        # be large or sensitive) so a re-emitting (non-converging)
-        # field becomes visible in CI logs without live Jira creds.
-        # The field list is the keys of the same `changed` dict
-        # _diff_fields already computed — no recomputation. Comment-
-        # only / label-only updates carry no field diff, so `changed`
-        # is empty and the breadcrumb is skipped (keeps stderr quiet
-        # for the common comment-mirror case).
+    if fields or comment_mutations or label_mutations or link_mutations:
+        # Sync-hardening P5 / bug 57d1: emit a one-line CHANGED-FIELD BREADCRUMB
+        # (field NAMES only, never values — descriptions/assignees may be large or
+        # sensitive) whenever a bound key gets an outbound UPDATE carrying field diffs,
+        # so a re-emitting (non-converging) field is visible in CI logs. Comment-/label-
+        # only updates carry no field diff, so the breadcrumb is skipped.
         print(  # noqa: T201
             f"RECON: outbound_update key={jira_key} "
-            f"changed=[{','.join(sorted(changed))}] "
+            f"changed=[{','.join(sorted(fields))}] "
             f"comments={len(comment_mutations)} "
             f"labels={len(label_mutations)} "
             f"links={len(link_mutations)}",
@@ -791,7 +792,7 @@ def _compute_outbound_update_mutation(
                 local_id=local_id,
                 jira_key=jira_key,
                 action="update",
-                fields=changed,
+                fields=fields,
                 comments=comment_mutations,
                 labels=label_mutations,
                 links=link_mutations,

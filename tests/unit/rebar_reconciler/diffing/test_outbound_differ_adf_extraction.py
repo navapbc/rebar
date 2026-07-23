@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
@@ -56,7 +58,7 @@ def _adf_doc(*lines: str) -> dict:
 def test_extract_jira_field_decodes_single_line_adf_description(differ):
     """An ADF doc with one paragraph extracts to that line as plain text."""
     jira_fields = {"description": _adf_doc("Hello world")}
-    got = differ._extract_jira_field(jira_fields, "description")
+    got = _of._extract_jira_field(jira_fields, "description")
     assert got == "Hello world", (
         f"single-line ADF description should extract to plain text; got {got!r}"
     )
@@ -65,7 +67,7 @@ def test_extract_jira_field_decodes_single_line_adf_description(differ):
 def test_extract_jira_field_decodes_multi_paragraph_adf_description(differ):
     """Multi-paragraph ADF round-trips through adf_to_text matching local format."""
     jira_fields = {"description": _adf_doc("First", "", "Second")}
-    got = differ._extract_jira_field(jira_fields, "description")
+    got = _of._extract_jira_field(jira_fields, "description")
     # text_to_adf splits on \n; adf_to_text adds \n per paragraph then rstrip.
     # "First\n\nSecond" → 3 paragraphs (First, empty, Second) → "First\n\nSecond"
     assert got == "First\n\nSecond", f"multi-paragraph ADF must round-trip cleanly; got {got!r}"
@@ -94,7 +96,7 @@ def test_diff_fields_does_not_flag_description_when_matches_jira_adf(differ):
         "status": {"name": "To Do"},
         "assignee": None,
     }
-    changed = differ._diff_fields(ticket, jira_fields)
+    changed = _of._diff_fields(ticket, jira_fields)
     assert "description" not in changed, (
         f"matching description must NOT appear in changed fields; got: {changed!r}"
     )
@@ -103,7 +105,7 @@ def test_diff_fields_does_not_flag_description_when_matches_jira_adf(differ):
 def test_extract_jira_field_legacy_plain_string_description_passthrough(differ):
     """Legacy snapshots (pre-ADF migration) store plain strings — must still work."""
     jira_fields = {"description": "Legacy plain text"}
-    got = differ._extract_jira_field(jira_fields, "description")
+    got = _of._extract_jira_field(jira_fields, "description")
     assert got == "Legacy plain text"
 
 
@@ -121,5 +123,5 @@ def test_extract_jira_field_assignee_still_returns_displayName(differ):
             "emailAddress": "joe.oakhart@gmail.com",
         }
     }
-    got = differ._extract_jira_field(jira_fields, "assignee")
+    got = _of._extract_jira_field(jira_fields, "assignee")
     assert got == "Joe Oakhart"
