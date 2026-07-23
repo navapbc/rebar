@@ -137,11 +137,17 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         profile=PlanValidityProfile.DEFAULT,
     )
     if not validity["valid"]:
-        return {
+        denial: dict[str, Any] = {
             "ok": False,
             "reason": validity["reason"],
             "verdict": validity.get("verdict", "stale"),
         }
+        # Preserve the single derived health payload for gate callers.  In
+        # particular, claim errors can name a canonically resolved stale target
+        # without recomputing relation material (and risking a different read).
+        if isinstance(validity.get("health"), dict):
+            denial["health"] = validity["health"]
+        return denial
     return {"ok": True, "reason": "certified plan-review attestation", "verdict": "certified"}
 
 

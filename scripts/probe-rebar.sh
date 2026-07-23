@@ -32,7 +32,11 @@ elif [ -x "$_repo_root/.venv/bin/rebar" ]; then
 else
     RB="rebar"
 fi
-command -v "$RB" >/dev/null 2>&1 || { echo "FATAL: rebar not found ($RB)"; exit 1; }
+_rb_path="$(command -v "$RB")" || { echo "FATAL: rebar not found ($RB)"; exit 1; }
+case "$_rb_path" in
+    /*) RB="$_rb_path" ;;
+    *) RB="$(cd "$(dirname "$_rb_path")" && pwd)/$(basename "$_rb_path")" ;;
+esac
 for bin in jq git python3; do
     command -v "$bin" >/dev/null 2>&1 || { echo "FATAL: missing dependency: $bin"; exit 1; }
 done
@@ -70,11 +74,8 @@ _last_id() { printf '%s\n' "$OUT" | grep -E '^[0-9a-f]{4}-' | tail -1; }
 _CLEAN_DIRS=()
 if [ "${PROBE_LIVE:-}" = "1" ]; then
     MODE="LIVE (real project store)"
-    # Snapshot the existing ticket dir set so we only remove what we create.
     _root="${REBAR_ROOT:-$(git -C "$_repo_root" rev-parse --show-toplevel)}"
     export REBAR_ROOT="$_root"
-    TRACKER="$REBAR_ROOT/.tickets-tracker"
-    _PRE_IDS="$(ls -1 "$TRACKER" 2>/dev/null | grep -E '^[0-9a-f]{4}-' | sort || true)"
 else
     MODE="ISOLATED (temp tracker)"
     _tmp="$(mktemp -d)"; _CLEAN_DIRS+=("$_tmp")
@@ -86,9 +87,26 @@ else
     # (non-interactive) the first `create` would otherwise fail. `rebar init`
     # bypasses the interactivity check (see src/rebar/_cli/_init.py).
     ( cd "$REBAR_ROOT" && "$RB" init --silent )
-    TRACKER="$REBAR_ROOT/.tickets-tracker"
+fi
+# The probe changes cwd below, so freeze both the live and isolated store roots
+# as absolute paths first. In live mode the root already exists by definition;
+# isolated mode created it above.
+case "$REBAR_ROOT" in
+    /*) ;;
+    *) REBAR_ROOT="$(cd "$REBAR_ROOT" && pwd)" ;;
+esac
+export REBAR_ROOT
+TRACKER="$REBAR_ROOT/.tickets-tracker"
+if [ "${PROBE_LIVE:-}" = "1" ]; then
+    # Snapshot the existing ticket dir set so cleanup removes only probe tickets.
+    _PRE_IDS="$(ls -1 "$TRACKER" 2>/dev/null | grep -E '^[0-9a-f]{4}-' | sort || true)"
+else
     _PRE_IDS=""
 fi
+# Keep project-scoped configuration aligned with the ticket store under test.
+# Command discovery is already complete above, so this remains safe when the
+# probe exercises an installed binary rather than the checkout's editable one.
+cd "$REBAR_ROOT" || { echo "FATAL: cannot enter REBAR_ROOT ($REBAR_ROOT)"; exit 1; }
 # Skip the network sync (both directions) in isolated/probe runs (no remote).
 export REBAR_SYNC_PULL=off
 export REBAR_SYNC_PUSH=off

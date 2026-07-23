@@ -32,7 +32,7 @@ def _result(monkeypatch, current: str, manifest: list[str]) -> dict:
             "plan_review_phase": current,
         },
         "plan-review",
-        profile=PlanValidityProfile.CLOSE,
+        profile=PlanValidityProfile.DRIFT_REFRESH,
     )
 
 
@@ -62,6 +62,25 @@ def test_malformed_phase_is_reported_in_health(monkeypatch) -> None:
     result = _result(monkeypatch, "execution", manifest)
     assert result["valid"] is False
     assert result["health"]["phase_status"] == "malformed"
+
+
+def test_close_profile_requires_an_execution_review(monkeypatch) -> None:
+    manifest = _manifest(phase="planning")
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "registry")
+    monkeypatch.setattr(attest, "current_material_fingerprint", lambda *a, **k: "material")
+    monkeypatch.setattr(attest, "_read_enforce_plan_material_pins", lambda *a, **k: True)
+
+    result = attest.compute_validity(
+        {"verified": True, "manifest": manifest, "signed_at": 2, "head_sha": "head"},
+        {"ticket_id": "1111-2222-3333-4444", "status": "in_progress"},
+        "plan-review",
+        profile=PlanValidityProfile.CLOSE,
+    )
+
+    assert result["valid"] is False
+    assert result["verdict"] == "incompatible-phase"
+    assert result["health"]["signed_phase"] == "planning"
+    assert result["health"]["required_phase"] == "execution"
 
 
 def test_completion_validity_never_reads_plan_phase(monkeypatch) -> None:

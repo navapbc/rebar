@@ -526,7 +526,16 @@ def compute_validity(
 
         signed_phase: object = None
         signed_floor: object = None
-        current_phase: object = ticket_state.get("plan_review_phase")
+        has_phase_metadata = any(str(line).startswith("review-phase: ") for line in auth_manifest)
+        # Material-pin enforcement promotes a close to an execution decision
+        # when the signed review participates in the phase-aware protocol.
+        # Legacy manifests and projects that only enable the historical close
+        # gate retain their existing compatibility behavior.
+        current_phase: object = (
+            "execution"
+            if profile is PlanValidityProfile.CLOSE and enforced and has_phase_metadata
+            else ticket_state.get("plan_review_phase")
+        )
         if current_phase is None:
             current_phase = (
                 "planning" if ticket_state.get("status") in ("open", "idea") else "execution"
@@ -536,9 +545,18 @@ def compute_validity(
             signed_floor = manifest_priority_floor(auth_manifest)
             from .pin_health import review_phase_status
 
-            plan_health["phase_status"] = cast(
-                Any, review_phase_status(current_phase, signed_phase, signed_floor)
-            )
+            phase_status = review_phase_status(current_phase, signed_phase, signed_floor)
+            # Under material-pin enforcement, a planning review can start work
+            # but cannot certify an ordinary close. Scope this to phase-aware
+            # manifests so legacy close-review attestations remain compatible.
+            if (
+                profile is PlanValidityProfile.CLOSE
+                and enforced
+                and signed_phase == "planning"
+                and has_phase_metadata
+            ):
+                phase_status = "incompatible"
+            plan_health["phase_status"] = cast(Any, phase_status)
         except ManifestFormatError:
             plan_health["phase_status"] = "malformed"
 
@@ -546,7 +564,6 @@ def compute_validity(
         # One additive projection for every detailed reader.  Legacy manifests have
         # no phase token; a current no-relationship review has valid phase metadata
         # but no target rows, so operators can distinguish the two safely.
-        has_phase_metadata = any(str(line).startswith("review-phase: ") for line in auth_manifest)
         if plan_health["pin_status"] == "legacy-unpinned" and has_phase_metadata:
             plan_health["pin_status"] = "current-no-relationships"
         plan_health["signed_phase"] = (

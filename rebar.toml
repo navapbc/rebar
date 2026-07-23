@@ -20,6 +20,15 @@ require_completion_verification_for_close = true
 # docs/plan-review-gate.md. Turning this off is the rollback.
 require_plan_review_for_claim = true
 
+# Rebar itself now enforces the material pins carried by its plan-review attestations.
+# A changed related ticket blocks start/close work until a fresh review records the
+# current material. This is a project opt-in; the reusable schema default stays false.
+enforce_plan_material_pins = true
+
+# Closing work requires a current execution-phase plan review as well as the existing
+# completion verification gate. Roll back either policy independently by setting it false.
+require_plan_review_for_close = true
+
 # Store-wide cross-ticket overlap detection (epic only-crave-art, ADR 0037): when on,
 # plan-review runs an advisory two-stage retrieve-then-rerank pass (BM25F candidate
 # generation with graph exclusion → bounded LLM pairwise judge over enrichment digests)
