@@ -18,9 +18,12 @@ tracker — the middleware returns immediately.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
+
+_log = logging.getLogger(__name__)
 
 
 def _git_toplevel() -> str | None:
@@ -184,3 +187,56 @@ def ensure_initialized(*, init_only: bool) -> None:
     from rebar._engine_support import reads
 
     reads.ensure_fresh(reads.tracker_dir(repo_root))
+
+
+def ensure_store_mounted_best_effort() -> None:
+    """Best-effort central store mount for EVERY dispatched command (bug ad9f).
+
+    The CLI runs this once, before both the pure intercepts (``verify-commit-ticket``,
+    …) and the set-based dispatch, so no store-touching command can silently skip the
+    mount — several pure intercepts resolve ticket ids against the store yet return
+    before the per-arm :func:`ensure_initialized`, and in a fresh linked worktree /
+    clone with no ``.tickets-tracker`` yet they died with "ticket store not found"
+    instead of auto-mounting.
+
+    Its contract is deliberately narrow — **attach-if-possible, never error, never
+    first-time-init, never reconverge**:
+
+    * It MOUNTS the store only in the auto-attachable cases (a worktree symlink to an
+      already-initialized main repo, or attaching to an existing local/origin
+      ``tickets`` branch) — cases that never mutate the underlying repo and never need
+      consent, exactly the ones :func:`_create_tracker` mounts silently.
+    * It NEVER forces a genuine greenfield first-time init (no
+      :func:`_confirm_and_init`): the strict per-arm :func:`ensure_initialized` still
+      owns that refusal for store-REQUIRING arms, so no-store commands (``explain``…)
+      keep working store-less.
+    * It NEVER reconverges (freshness stays owned by the per-arm gate / read path).
+    * It NEVER raises: the whole resolve+attach is swallowed so a no-store command run
+      outside any repo is unaffected.
+    """
+    from rebar import config
+
+    # Explicit tracker injected → embedder/test owns the tracker (same as
+    # ensure_initialized); do not auto-mount the cwd repo's tracker.
+    if config.tracker_dir_override():
+        return
+
+    try:
+        # Resolve the repo root with the dispatcher's precedence. Unlike
+        # ensure_initialized this must not raise when there is no repo — a no-store
+        # command (e.g. `rebar explain`) may run outside any git repo.
+        root = os.environ.get("REBAR_ROOT") or _git_toplevel()
+        if not root:
+            return
+        if config.tracker_dir(root).is_dir():
+            return  # already mounted
+        from rebar._commands import init as _init_cmd
+
+        # Only the auto-attachable cases — a genuine greenfield first-time init is
+        # left to the strict per-arm ensure_initialized, never forced here.
+        if _init_cmd.pending_init_is_symlink(root) or _init_cmd.pending_init_attaches_to_existing(
+            root
+        ):
+            _init_cmd.init_core(root, silent=True)  # nonzero → best-effort no-op
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — best-effort: never propagate to CLI
+        _log.debug("best-effort store mount skipped: %s", exc)
