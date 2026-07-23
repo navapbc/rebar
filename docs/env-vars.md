@@ -162,10 +162,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:760` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:253` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:266` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:270` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:277` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:261` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:274` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:278` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:285` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:383` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`
