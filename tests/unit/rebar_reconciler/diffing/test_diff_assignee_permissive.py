@@ -23,7 +23,19 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
+# Ticket 4af8: the pure field-diff helpers (_diff_fields/_extract_jira_field/
+# _assignee_matches) live in the leaf outbound_fields adapter; the differ reaches them
+# via the Backend port, so this field-diff suite loads the leaf directly.
+DIFFER_PATH = (
+    REPO_ROOT
+    / "src"
+    / "rebar"
+    / "_engine"
+    / "rebar_reconciler"
+    / "adapters"
+    / "jira"
+    / "outbound_fields.py"
+)
 
 
 def _load_differ():

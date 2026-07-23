@@ -130,6 +130,56 @@ def test_differ_apply_core_does_not_import_vendor_mapper(
     )
 
 
+# ---------------------------------------------------------------------------
+# Ticket 4af8 (final residual): the backend-neutral reconciler CORE imports NO
+# ``adapters.jira`` / ``acli_subprocess`` symbol — at module scope OR inside any
+# function/method (AST-walked over EVERY import node). The last coupled sites now
+# route through the Backend port (the injected outbound mapper + link resolver, the
+# ``project`` / ``query_project`` accessors, the neutral ``BackendAssigneeNotFoundError``
+# base, and the backend's ``assert_env_ready`` fail-fast). A regression that re-adds any
+# such import — even a lazy one nested in a function — fails CI.
+_ZERO_ADAPTER_IMPORT_CORE = (
+    "outbound_differ.py",
+    "outbound_links.py",
+    "fetcher.py",
+    "applier.py",
+    "apply_handlers.py",
+    "_attestation.py",
+)
+
+_FORBIDDEN_IMPORT_SUBSTRINGS = ("adapters.jira", "acli_subprocess")
+
+
+def _all_imported_modules(path: Path) -> set[str]:
+    """Every module string reachable via ``import X`` / ``from X import ...`` ANYWHERE in
+    the file — module scope and nested inside functions/classes (full AST walk)."""
+    tree = ast.parse(path.read_text())
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            # relative imports (level>0) carry a None/short module; record the raw
+            # module plus each imported name so ``from X import acli_subprocess`` is seen.
+            if node.module:
+                modules.add(node.module)
+            modules.update(f"{node.module or ''}.{a.name}" for a in node.names)
+    return modules
+
+
+@pytest.mark.parametrize("filename", _ZERO_ADAPTER_IMPORT_CORE)
+def test_core_imports_no_jira_adapter(filename: str) -> None:
+    """The neutralized core file imports NOTHING from ``adapters.jira`` /
+    ``acli_subprocess`` (module-level or function-nested) — ticket 4af8."""
+    modules = _all_imported_modules(_REC / filename)
+    offenders = sorted(m for m in modules if any(sub in m for sub in _FORBIDDEN_IMPORT_SUBSTRINGS))
+    assert not offenders, (
+        f"{filename} still imports vendor adapter symbol(s) {offenders} — route the site "
+        f"through the Backend port (an injected mapper/resolver, the project accessors, "
+        f"BackendAssigneeNotFoundError, or backend.assert_env_ready) instead."
+    )
+
+
 def _load_by_path(name: str, filename: str) -> ModuleType:
     """Load a reconciler module standalone by path (the reconciler test convention)."""
     spec = importlib.util.spec_from_file_location(name, _REC / filename)

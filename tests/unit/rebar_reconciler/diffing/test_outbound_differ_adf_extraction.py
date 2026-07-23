@@ -23,14 +23,27 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
+# Ticket 4af8: ``_extract_jira_field`` / ``_diff_fields`` are the vendor's pure field-diff
+# helpers — they live in the leaf ``adapters/jira/outbound_fields`` module (the outbound
+# differ reaches them through the Backend port, not a re-export), so this characterization
+# suite loads the leaf directly.
+DIFFER_PATH = (
+    REPO_ROOT
+    / "src"
+    / "rebar"
+    / "_engine"
+    / "rebar_reconciler"
+    / "adapters"
+    / "jira"
+    / "outbound_fields.py"
+)
 
 
 def _load_differ():
-    spec = importlib.util.spec_from_file_location("outbound_differ_adf_test", DIFFER_PATH)
+    spec = importlib.util.spec_from_file_location("outbound_fields_adf_test", DIFFER_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["outbound_differ_adf_test"] = mod
+    sys.modules["outbound_fields_adf_test"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
@@ -38,7 +51,7 @@ def _load_differ():
 @pytest.fixture(scope="module")
 def differ():
     if not DIFFER_PATH.exists():
-        pytest.fail(f"outbound_differ.py not found at {DIFFER_PATH}")
+        pytest.fail(f"outbound_fields.py not found at {DIFFER_PATH}")
     return _load_differ()
 
 

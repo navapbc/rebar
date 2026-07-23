@@ -495,7 +495,14 @@ def test_link_sync_writes_absolute_direction_live(relation: str, a_is_blocker: b
             "loc-a", deps=[{"target_id": "loc-b", "relation": relation, "link_uuid": "u1"}]
         )
 
-        links = outbound._diff_links(ticket, {"issuelinks": client.get_issue_links(key_a)}, bind)
+        from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK
+
+        links = outbound._diff_links(
+            ticket,
+            {"issuelinks": client.get_issue_links(key_a)},
+            bind,
+            _RELATION_TO_JIRA_LINK.get,  # ticket 4af8: inject the vendor link resolver
+        )
         assert links and links[0].get("type") == "Blocks", f"expected a Blocks ADD; got {links!r}"
         batch = {
             "action": "update",

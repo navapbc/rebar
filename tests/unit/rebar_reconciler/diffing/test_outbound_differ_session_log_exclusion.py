@@ -80,9 +80,15 @@ def test_session_log_in_excluded_sync_types(reconciler_config: ModuleType) -> No
     assert "session_log" in reconciler_config.EXCLUDED_SYNC_TYPES
 
 
-def test_session_log_absent_from_local_to_jira_type(outbound_differ: ModuleType) -> None:
-    """Leak-loud invariant: session_log must NOT have a Jira issue-type mapping."""
-    assert "session_log" not in outbound_differ._LOCAL_TO_JIRA_TYPE
+def test_session_log_absent_from_local_to_jira_type() -> None:
+    """Leak-loud invariant: session_log must NOT have a Jira issue-type mapping.
+
+    Ticket 4af8: the ``_LOCAL_TO_JIRA_TYPE`` map lives in the leaf ``outbound_fields``
+    adapter (the differ reaches it via the port's ``local_type_to_remote``), so this
+    invariant is pinned against the leaf directly."""
+    from rebar_reconciler.adapters.jira.outbound_fields import _LOCAL_TO_JIRA_TYPE
+
+    assert "session_log" not in _LOCAL_TO_JIRA_TYPE
 
 
 def test_unbound_session_log_produces_no_mutation(outbound_differ: ModuleType) -> None:

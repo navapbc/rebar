@@ -50,6 +50,17 @@ class RemoteRef:
     remote_id: str
 
 
+class BackendAssigneeNotFoundError(Exception):
+    """Vendor-neutral base for "a requested assignee resolves to no assignable
+    remote user" (ticket 4af8).
+
+    The core apply path catches THIS base so it never imports a vendor-specific
+    error type; each adapter's concrete assignee error (Jira:
+    ``acli_subprocess.AssigneeNotFoundError``) subclasses it, so existing raises
+    are unchanged while core-side ``except`` clauses stay backend-neutral.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Required role Protocols
 # ---------------------------------------------------------------------------
@@ -91,6 +102,32 @@ class OutboundMapper(Protocol):
         local_ticket_types: dict[str, str] | None = None,
         emit_detach_clear: bool = False,
     ) -> dict[str, Any]: ...
+
+    # Field-diff surface (ticket 4af8): the core outbound differ diffs a local
+    # ticket against the remote snapshot through these instead of importing the
+    # vendor's ``outbound_fields`` helpers directly. For Jira they delegate to
+    # ``outbound_fields._diff_fields`` / ``._extract_jira_field`` /
+    # ``._assignee_matches`` / the ``_LOCAL_TO_JIRA_TYPE`` map. Pure functions — no
+    # diffing policy lives in the adapter; the core owns when they are called.
+    def diff_fields(
+        self,
+        ticket: dict[str, Any],
+        remote_fields: dict[str, Any],
+        binding_store: Any = None,
+        local_ticket_types: dict[str, str] | None = None,
+        assignee_resolver: Any = None,
+        jira_key: str = "",
+        prev_jira_fields: dict[str, Any] | None = None,
+        conflict_sink: list[tuple[str, str]] | None = None,
+        dropped_field_sink: list[tuple[str, str]] | None = None,
+        local_id: str = "",
+    ) -> dict[str, Any]: ...
+
+    def extract_field(self, remote_fields: dict[str, Any], field: str) -> Any: ...
+
+    def assignee_matches(self, local_val: str, remote_raw: Any) -> bool: ...
+
+    def local_type_to_remote(self, ticket_type: str) -> str: ...
 
 
 class InboundMapper(Protocol):
@@ -165,6 +202,15 @@ class SupportsLinks(Protocol):
 
     def get_issuelinks_map(self, project_key: str) -> dict[str, Any]: ...
 
+    def link_type_for_relation(self, relation: str) -> tuple[str, bool] | None:
+        """Map a rebar link ``relation`` to the backend's ``(link_type, swap)`` pair,
+        or ``None`` when the relation has no reliable backend link type (skip it).
+
+        Neutral accessor over the vendor relation↔link-type vocabulary (Jira:
+        ``jira_fields._RELATION_TO_JIRA_LINK``) so the core outbound link differ never
+        imports that map directly (ticket 4af8)."""
+        ...
+
 
 @runtime_checkable
 class SupportsComments(Protocol):
@@ -218,3 +264,22 @@ class Backend(Protocol):
 
     @property
     def identity(self) -> IdentityConvention: ...
+
+    @property
+    def project(self) -> str:
+        """The backend's effective write/create project scope, with the backend's
+        own create-time default applied (Jira: ``resolve_jira_settings`` with
+        ``project_default="DIG"``). Used by the applier's cross-project safety
+        guard, whose create client targets the SAME defaulted project (ticket
+        4af8). Tolerates a settings-less test fake: it never reads the transport,
+        so a fake transport without a project attribute still resolves."""
+        ...
+
+    @property
+    def query_project(self) -> str:
+        """The backend's configured read/query project scope, WITHOUT any
+        create-time default (empty string when unset). The inbound fetcher scopes
+        its search to this and FAILS CLOSED on an empty/invalid value rather than
+        querying everything (bug 626d), so — unlike :attr:`project` — no default is
+        substituted here (ticket 4af8)."""
+        ...

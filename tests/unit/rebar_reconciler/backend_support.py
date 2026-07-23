@@ -145,6 +145,12 @@ class FakeBackend:
     """In-memory backend implementing the five role Protocols but NO capabilities."""
 
     vendor = "fake"
+    # Facade project accessors (ticket 4af8). The in-memory fake carries a fixed
+    # scope: ``project`` is its effective (defaulted) write scope; ``query_project``
+    # its raw read scope. Distinct from JiraBackend's config-resolved values, but
+    # enough to satisfy the runtime-checkable ``Backend`` facade contract.
+    project = "FAKE"
+    query_project = "FAKE"
 
     def __init__(self) -> None:
         self.transport = FakeTransport()

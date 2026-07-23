@@ -30,21 +30,14 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from rebar_reconciler._loader import lazy_load
 
-# The field-diff cluster lives in outbound_fields.py (split for module size). _diff_fields
-# is called below; _assignee_matches + _LOCAL_TO_JIRA_TYPE + _extract_jira_field are
-# non-mapping field-diff helpers (no Backend-port equivalent) re-exported for the test
-# suite. The local->Jira field MAPPER (_map_local_to_jira_fields) is NO LONGER imported
-# here (ticket 4af8): it is injected as ``outbound_mapper`` (a Backend-port
-# ``OutboundMapper``) by the orchestrator, so this core differ names no vendor mapper.
-from rebar_reconciler.adapters.jira.outbound_fields import (  # noqa: F401
-    _LOCAL_TO_JIRA_TYPE,
-    _assignee_matches,
-    _diff_fields,
-    _extract_jira_field,
-)
-
+# Ticket 4af8: NO ``adapters.jira`` import remains here. Both the field MAPPER and the
+# field-DIFF are reached through the injected ``outbound_mapper`` (a Backend-port
+# ``OutboundMapper``: ``.map_local_to_remote`` / ``.diff_fields`` / ``.extract_field`` /
+# ``.assignee_matches`` / ``.local_type_to_remote``), so this core differ names no vendor
+# helper.
 if TYPE_CHECKING:
     from rebar_reconciler._backend import OutboundMapper
+    from rebar_reconciler.outbound_links import LinkResolver
 
 # The identity-mapping assignee-resolution cluster (264f) lives in
 # outbound_assignee.py (split for module size; a leaf that imports rebar core
@@ -59,10 +52,9 @@ from rebar_reconciler.outbound_assignee import (  # noqa: F401
     _resolve_assignee_account_id,
 )
 
-# The comment-diff cluster lives in outbound_comments.py (split for module size;
-# the comment seam is self-contained and imports one-way). _diff_comments +
-# _map_comments_for_create are called by compute_outbound_mutations below;
-# _normalize_comment_body + RECONCILER_MARKER are re-exported so
+# The comment-diff cluster lives in outbound_comments.py (split for module size; the
+# comment seam is self-contained and imports one-way). _diff_comments +
+# _map_comments_for_create are called below; the rest are re-exported so
 # outbound_differ.<name> keeps resolving for the comment-diff test suite.
 from rebar_reconciler.outbound_comments import (  # noqa: F401
     RECONCILER_MARKER,
@@ -72,9 +64,8 @@ from rebar_reconciler.outbound_comments import (  # noqa: F401
     _normalize_comment_body,
 )
 
-# The link-diff cluster lives in outbound_links.py (split for module size).
-# _diff_links is called by compute_outbound_mutations below; _existing_jira_links
-# is re-exported so outbound_differ.<name> keeps resolving for the link-diff tests.
+# The link-diff cluster lives in outbound_links.py (split for module size). _diff_links
+# is called below; _existing_jira_links is re-exported for the link-diff tests.
 from rebar_reconciler.outbound_links import (  # noqa: F401
     _diff_links,
     _existing_jira_links,
@@ -125,10 +116,10 @@ def _rest_issue_to_snapshot_fields(issue: dict[str, Any]) -> dict[str, Any]:
     """Return the raw ``fields`` block of a REST GET payload (NO normalization).
 
     The fetcher stores each snapshot entry as a verbatim copy of the issue's
-    ``fields`` (``fetcher.py``), and ALL normalization happens downstream in
-    ``_diff_fields`` / ``_extract_jira_field``. Re-normalizing here would
-    double-normalize and reintroduce phantom re-emits — so this helper is a
-    deliberate one-liner kept only so the C2 parity test has a real symbol.
+    ``fields`` (``fetcher.py``), and ALL normalization happens downstream in the
+    outbound_mapper's field diff. Re-normalizing here would double-normalize and
+    reintroduce phantom re-emits — so this helper is a deliberate one-liner kept only
+    so the C2 parity test has a real symbol.
     """
     return issue.get("fields", {})
 
@@ -282,10 +273,9 @@ class OutboundDiffConfig:
     client: Any = None
     pass_id: str = ""
     prev_snapshot: dict[str, Any] | None = None
-    # Observability sinks (bugs a713/acd0). When provided, _diff_fields appends
-    # (jira_key, field) tuples: conflict_sink for a both-sides field conflict,
-    # dropped_field_sink for a mapped-but-allowlist-excluded field that differs. The
-    # orchestrator (run_differs) emits deduped bridge alerts from them post-pass.
+    # Observability sinks (bugs a713/acd0): the field diff appends (jira_key, field)
+    # tuples — conflict_sink for a both-sides conflict, dropped_field_sink for a
+    # mapped-but-allowlist-excluded field that differs. run_differs emits deduped alerts.
     conflict_sink: list[tuple[str, str]] | None = None
     dropped_field_sink: list[tuple[str, str]] | None = None
 
@@ -409,6 +399,7 @@ def compute_outbound_mutations(
     config: OutboundDiffConfig | None = None,
     *,
     outbound_mapper: OutboundMapper | None = None,
+    link_resolver: LinkResolver | None = None,
 ) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -432,26 +423,28 @@ def compute_outbound_mutations(
         A ``(mutations, absent_alive_fields)`` tuple:
           * ``mutations``: the OutboundMutation objects to push to Jira.
           * ``absent_alive_fields``: ``{jira_key: <raw fields dict>}`` for each
-            bound-but-absent key the bounded direct GET resolved as ALIVE
-            (HTTP 200) this pass — the inbound-direction GET-sharing seam (bug
-            0702-3b6d-c1db-4ed3): the reconcile orchestrator merges these into the
-            snapshot it hands to the inbound differ, so each out-of-window-alive
-            key is GET'd exactly ONCE per pass and BOTH directions consume the
-            result. 404/deleted and transport-error keys are deliberately NOT
-            recorded (a gone issue must not be inbound-mirrored; retirement stays
-            owned by the outbound 404-counter). Empty when nothing was resolved.
+            bound-but-absent key the bounded direct GET resolved as ALIVE (HTTP 200)
+            this pass — the inbound-direction GET-sharing seam (bug 0702): the
+            orchestrator merges these into the snapshot it hands the inbound differ, so
+            each out-of-window-alive key is GET'd exactly ONCE per pass and BOTH
+            directions consume it. 404/deleted and transport-error keys are NOT recorded
+            (a gone issue must not be inbound-mirrored). Empty when nothing was resolved.
     """
     if config is None:
         config = OutboundDiffConfig()
-    # Ticket 4af8: the local->remote field mapper is injected via the Backend port
-    # (run_differs passes ``backend.outbound``). A direct caller that omits it resolves
-    # the configured backend's mapper through the neutral registry seam — naming no
-    # vendor mapper here and yielding the same mapping the vendor delegate performs.
-    if outbound_mapper is None:
+    # Ticket 4af8: the field MAPPER and the relation->link-type RESOLVER are injected via
+    # the Backend port (run_differs passes ``backend.outbound`` + ``.link_type_for_relation``).
+    # A direct caller that omits either resolves them through the neutral registry seam —
+    # naming no vendor helper here and yielding the same mapping/vocabulary the adapter does.
+    if outbound_mapper is None or link_resolver is None:
         from rebar.config import load_config
         from rebar_reconciler._backend_registry import select_backend
 
-        outbound_mapper = select_backend(load_config()).outbound
+        _backend = select_backend(load_config())
+        if outbound_mapper is None:
+            outbound_mapper = _backend.outbound
+        if link_resolver is None:
+            link_resolver = _backend.link_type_for_relation
     # Bind the config's fields to locals so the diff body below reads unchanged.
     excluded_statuses = config.excluded_statuses
     local_label_intent = config.local_label_intent
@@ -557,6 +550,8 @@ def compute_outbound_mutations(
                 local_ticket_types,
                 _assignee_resolver,
                 absent_alive_fields,
+                outbound_mapper,
+                link_resolver,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
             )
@@ -664,6 +659,8 @@ def _compute_outbound_update_mutation(
     local_ticket_types,
     _assignee_resolver,
     absent_alive_fields,
+    outbound_mapper,
+    link_resolver,
     *,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
@@ -729,7 +726,7 @@ def _compute_outbound_update_mutation(
         # never inbound-mirrored (retirement stays outbound-owned).
         absent_alive_fields[jira_key] = fields
 
-    changed = _diff_fields(
+    changed = outbound_mapper.diff_fields(
         ticket,
         jira_fields,
         binding_store=binding_store,
@@ -764,20 +761,14 @@ def _compute_outbound_update_mutation(
     # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
     # deduped against the snapshot's existing issuelinks so an
     # already-present link emits nothing — no per-pass churn).
-    link_mutations = _diff_links(ticket, jira_fields, binding_store)
+    link_mutations = _diff_links(ticket, jira_fields, binding_store, link_resolver)
 
     if changed or comment_mutations or label_mutations or link_mutations:
-        # Sync-hardening P5 / bug 57d1 diagnosis enabler: emit a
-        # one-line CHANGED-FIELD BREADCRUMB whenever a bound key gets
-        # an outbound UPDATE carrying field diffs. Logs the changed
-        # FIELD NAMES only (never values — descriptions/assignees may
-        # be large or sensitive) so a re-emitting (non-converging)
-        # field becomes visible in CI logs without live Jira creds.
-        # The field list is the keys of the same `changed` dict
-        # _diff_fields already computed — no recomputation. Comment-
-        # only / label-only updates carry no field diff, so `changed`
-        # is empty and the breadcrumb is skipped (keeps stderr quiet
-        # for the common comment-mirror case).
+        # Sync-hardening P5 / bug 57d1: emit a one-line CHANGED-FIELD BREADCRUMB
+        # whenever a bound key gets an outbound UPDATE carrying field diffs — the
+        # changed FIELD NAMES only (never values, which may be large/sensitive) so a
+        # non-converging field is visible in CI logs without live Jira creds. Comment-
+        # /label-only updates carry no field diff, so the breadcrumb is skipped.
         print(  # noqa: T201
             f"RECON: outbound_update key={jira_key} "
             f"changed=[{','.join(sorted(changed))}] "

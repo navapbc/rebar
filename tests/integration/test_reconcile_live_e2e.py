@@ -538,14 +538,14 @@ def test_c1_conflict_signal(tmp_path):
     alert. Asserts against the exact record C1 lands, driving the real differ +
     alert-emit seam."""
     alert_store = _recon("alert_store")
-    outbound_differ = _recon("outbound_differ")
+    outbound_fields = _recon("outbound_fields")
     run_differs = _recon("run_differs")
 
     conflict_sink: list[tuple[str, str]] = []
     ticket = _local_ticket(description="local-edit")
     jira = _jira_fields(description="jira-edit")
 
-    changed = outbound_differ._diff_fields(
+    changed = outbound_fields._diff_fields(
         ticket,
         jira,
         jira_key="C1-KEY-1",
@@ -571,11 +571,11 @@ def test_c3_field_allowlist_drop_alert(tmp_path):
     (previously the drop was silent — stderr only). The drop behavior is unchanged
     (issuetype is still excluded from the outbound update)."""
     alert_store = _recon("alert_store")
-    outbound_differ = _recon("outbound_differ")
+    outbound_fields = _recon("outbound_fields")
     run_differs = _recon("run_differs")
 
     dropped_sink: list[tuple[str, str]] = []
-    changed = outbound_differ._diff_fields(
+    changed = outbound_fields._diff_fields(
         _local_ticket(ticket_type="bug"),  # -> issuetype "Bug"
         _jira_fields(issuetype={"name": "Task"}),
         jira_key="C3-KEY-1",
@@ -708,13 +708,13 @@ def test_idempotency_zero_mutations_on_noop_pass():
     contributes zero inbound mutations."""
     inbound_differ = _recon("inbound_differ")
     outbound_comments = _recon("outbound_comments")
-    outbound_differ = _recon("outbound_differ")
+    outbound_fields = _recon("outbound_fields")
 
     # (1) field-level idempotency: identical local + jira -> no changed fields.
     # local status "open" maps to Jira "To Do"; pre-seed that so the pass is a true noop.
     same_ticket = _local_ticket(description="D", title="T", status="open")
     same_jira = _jira_fields(summary="T", description="D", status={"name": "To Do"})
-    changed = outbound_differ._diff_fields(same_ticket, same_jira, jira_key="IDEMP-1")
+    changed = outbound_fields._diff_fields(same_ticket, same_jira, jira_key="IDEMP-1")
     assert changed == {}, "a noop pass over just-written data must emit zero field mutations"
 
     # (2) echo suppression: our outbound comment is decorated with the reconciler marker.

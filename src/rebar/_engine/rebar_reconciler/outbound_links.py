@@ -13,22 +13,23 @@ avoiding an import cycle.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-# Two package imports, both safe here because ``outbound_links`` is only ever loaded as
-# the ``rebar_reconciler.outbound_links`` package submodule (never spec-loaded
-# standalone):
-#   * ``_RELATION_TO_JIRA_LINK`` — the rebar-relation <-> Jira-link-type vocabulary.
-#     This Jira-specific map is single-sourced in the vendor adapter at
-#     ``adapters/jira/jira_fields`` (ticket 4af8 relocated it out of this backend-neutral
-#     core); re-exported here so ``outbound_links._RELATION_TO_JIRA_LINK`` attribute
-#     access keeps resolving. It maps ``relation`` -> Jira link type at ``_diff_links``.
-#   * ``resolve_inbound_link`` — the single source of truth for the Jira-issuelink ->
-#     rebar-relation DIRECTION logic, shared with the inbound ADD path (inbound_differ)
-#     and the REMOVE pass below; removing the copy-paste that let a prior inversion hide
-#     on an untouched mirror (bug 4b59).
-from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK
+# ``resolve_inbound_link`` — the single source of truth for the remote-issuelink ->
+# rebar-relation DIRECTION logic, shared with the inbound ADD path (inbound_differ) and
+# the REMOVE pass below; removing the copy-paste that let a prior inversion hide on an
+# untouched mirror (bug 4b59). It is backend-neutral core, so imported directly.
+#
+# The rebar-relation -> ``(link_type, swap)`` vocabulary is NO LONGER imported here
+# (ticket 4af8): it lived in the Jira adapter (``adapters/jira/jira_fields``), so
+# ``_diff_links`` now receives it as an injected ``link_resolver`` (the Backend port's
+# ``link_type_for_relation``) supplied by the outbound differ — keeping this core module
+# free of any ``adapters.jira`` import.
 from rebar_reconciler.link_direction import resolve_inbound_link
+
+# A resolver mapping a rebar ``relation`` -> ``(backend_link_type, swap)`` or ``None``.
+LinkResolver = Callable[[str], "tuple[str, bool] | None"]
 
 # ---------------------------------------------------------------------------
 # Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
@@ -67,13 +68,18 @@ def _diff_links(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
     binding_store: Any,
+    link_resolver: LinkResolver,
 ) -> list[dict[str, Any]]:
     """Compare a local ticket's ``deps`` to its Jira issuelinks. Emits ADDs and REMOVEs.
+
+    ``link_resolver`` maps a rebar ``relation`` -> ``(jira_link_type, swap)`` or ``None``
+    (ticket 4af8 — the Backend port's ``link_type_for_relation``, injected by the outbound
+    differ so this core module names no vendor map).
 
     ADD pass — for each local dep ``{target_id, relation, link_uuid}``:
       - resolve ``target_id`` -> Jira key (skip unbound, mirroring the
         parent-unbound skip in ``_map_local_to_jira_fields``);
-      - map ``relation`` -> Jira link type via ``_RELATION_TO_JIRA_LINK``
+      - map ``relation`` -> Jira link type via ``link_resolver``
         (skip unmapped relations: duplicates / supersedes / discovered_from);
       - DEDUP against the issue's existing ``issuelinks`` by
         ``(jira_link_type, target_key)`` so an already-present link emits
@@ -102,7 +108,7 @@ def _diff_links(
         relation = dep.get("relation")
         if not isinstance(relation, str):
             continue  # malformed dep — no relation to map
-        mapped = _RELATION_TO_JIRA_LINK.get(relation)
+        mapped = link_resolver(relation)
         if mapped is None:
             continue  # no reliable Jira link type — skip (no-op)
         jira_type, swap = mapped

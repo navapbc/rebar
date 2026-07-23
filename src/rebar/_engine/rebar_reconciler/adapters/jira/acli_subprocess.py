@@ -19,6 +19,7 @@ import sys
 import time
 from typing import Any, NamedTuple
 
+from rebar_reconciler._backend import BackendAssigneeNotFoundError
 from rebar_reconciler._errors import RetryExhaustedError  # noqa: F401 — re-exported via acli
 
 logger = logging.getLogger(__name__)
@@ -144,8 +145,13 @@ def _rate_limit_backoff(attempt: int, stderr: str | None) -> float | None:
     return delay
 
 
-class AssigneeNotFoundError(ValueError):
+class AssigneeNotFoundError(BackendAssigneeNotFoundError, ValueError):
     """Raised when a requested assignee does not resolve to any assignable Jira user.
+
+    Subclasses the vendor-neutral :class:`BackendAssigneeNotFoundError` (ticket
+    4af8) so the core apply path can ``except`` the neutral base while this raise
+    site (and every ``except AssigneeNotFoundError`` / ``isinstance`` check) is
+    unchanged — ``ValueError`` stays in the MRO for backward compatibility.
 
     Bug 06a5 / 85a1 (Gap 5 follow-up): mirrors the client-side pre-validation
     pattern used by ``transition_issue_by_name`` (Gap 8). Caught before the

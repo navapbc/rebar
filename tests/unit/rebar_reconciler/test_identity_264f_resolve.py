@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 
 import rebar
+
+# ticket 4af8: field diff lives in the leaf outbound_fields adapter (reached via the port)
+import rebar_reconciler.adapters.jira.outbound_fields as outbound_fields
 import rebar_reconciler.outbound_differ as differ
 
 
@@ -82,7 +85,7 @@ def test_assignee_no_mapping_no_search_degrades_to_unassigned() -> None:
     def resolver(assignee, jira_key):  # (accountId|None, authoritative, is_account_id)
         return (None, True, False)
 
-    changed = differ._diff_fields(
+    changed = outbound_fields._diff_fields(
         ticket, {"fields": {"assignee": None}}, assignee_resolver=resolver, jira_key="REB-1"
     )
     assert "assignee" not in changed  # unmappable + already-unassigned → no churn

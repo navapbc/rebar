@@ -41,6 +41,14 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return mod
 
 
+# Ticket 4af8: outbound ``_diff_links`` now takes an injected link resolver instead of
+# importing the Jira relation->link-type map. These tests pass the SAME vendor map's
+# ``.get`` (from the leaf adapter module) so coverage is behaviour-identical.
+from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK  # noqa: E402
+
+_RESOLVER = _RELATION_TO_JIRA_LINK.get
+
+
 @pytest.fixture(scope="module")
 def outbound_differ() -> ModuleType:
     return _load_module("outbound_differ", OUTBOUND_DIFFER_PATH)
@@ -95,7 +103,7 @@ def test_outbound_diff_links_skips_already_present(outbound_differ):
         ]
     }
 
-    out = outbound_differ._diff_links(ticket, jira_fields, binding)
+    out = outbound_differ._diff_links(ticket, jira_fields, binding, _RESOLVER)
     assert out == [], f"expected no re-ADD for an already-present link, got {out}"
 
 
@@ -106,7 +114,7 @@ def test_outbound_diff_links_emits_when_absent(outbound_differ):
         "ticket_id": "local-a",
         "deps": [{"target_id": "local-b", "relation": "blocks", "link_uuid": "u-1"}],
     }
-    out = outbound_differ._diff_links(ticket, {"issuelinks": []}, binding)
+    out = outbound_differ._diff_links(ticket, {"issuelinks": []}, binding, _RESOLVER)
     assert len(out) == 1
     assert out[0]["type"] == "Blocks"
     assert out[0]["to_key"] == "DIG-2"
@@ -129,7 +137,7 @@ def _emit_relation(outbound_differ, relation: str) -> list:
         "ticket_id": "local-a",
         "deps": [{"target_id": "local-b", "relation": relation, "link_uuid": "u-1"}],
     }
-    return outbound_differ._diff_links(ticket, {"issuelinks": []}, binding)
+    return outbound_differ._diff_links(ticket, {"issuelinks": []}, binding, _RESOLVER)
 
 
 @pytest.mark.parametrize(("relation", "jira_type", "swap"), _MAPPED_RELATIONS)
@@ -163,7 +171,7 @@ def test_outbound_diff_links_dedup_is_direction_agnostic(outbound_differ):
         "deps": [{"target_id": "local-b", "relation": "blocks", "link_uuid": "u-1"}],
     }
     jira_fields = {"issuelinks": [{"type": {"name": "Blocks"}, "inwardIssue": {"key": "DIG-2"}}]}
-    assert outbound_differ._diff_links(ticket, jira_fields, binding) == []
+    assert outbound_differ._diff_links(ticket, jira_fields, binding, _RESOLVER) == []
 
 
 # ---------------------------------------------------------------------------
