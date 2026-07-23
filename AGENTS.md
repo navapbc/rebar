@@ -94,6 +94,12 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
 1. **Find work** — `search <query>` (full-text over titles/descriptions/comments/tags) or
    `list --status=open`; `ready` returns tickets whose blockers are all closed;
    `next-batch <epic>` returns a conflict-aware unblocked batch (uses recorded file-impact).
+   **Plan-review in dependency order — never review a ticket and its dependencies in
+   parallel.** A review pins its direct dependencies' (children/prerequisites') material, so a
+   dependency changing after the review invalidates it (a fresh `review-plan` is then required;
+   `sign-review` will not certify across a changed dependency). Review prerequisites/children
+   before their dependents; prefer `next-batch` over ad-hoc parallel review — see
+   `docs/plan-review-gate.md` §"Review dependencies FIRST".
 2. **Grab work atomically** — `claim <id> --assignee <you>`: moves an **open** ticket to
    `in_progress` and sets the assignee in one step. If another agent already claimed it you
    get **ConcurrencyError / exit 10** — do not retry the same ticket; pick another. Never

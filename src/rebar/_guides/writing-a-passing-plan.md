@@ -32,6 +32,15 @@ it degrades to the deterministic floor (fewer advisories, the hard structural ch
 run). The claim gate itself **fails closed**: no valid attestation ⇒ the claim is blocked;
 `--force="<reason>"` is the audited escape hatch, not the normal path.
 
+**Review in dependency order — dependencies before their dependents.** A review pins not just
+the ticket's own material but its **direct dependencies'** (children, `depends_on`/`blocks`
+prerequisites). If a dependency's plan changes after the review, the recorded PASS is
+**invalidated** and a fresh `review-plan` is required — `rebar sign-review` will *not* certify
+across a changed dependency. So review (and settle) a ticket's prerequisites and children
+**before** the ticket itself, and **don't review a ticket and its dependencies in parallel**:
+a child moving mid-review invalidates the epic's review and wastes the LLM run. Prefer
+`next-batch` (dependency-ready, conflict-aware) over ad-hoc parallel review of related tickets.
+
 ## Leaf vs container decides which sections you need
 
 Scrutiny is keyed on **whether the ticket has children**, *never* on its type. A ticket with

@@ -117,11 +117,27 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
         # no `error`) and a successfully-signed PASS stay exit 0 (ticket middle-actinium-thrush).
         sig = result.get("signature") or {}
         if sig.get("signed") is False and sig.get("error"):
-            sys.stderr.write(
-                "plan review PASSED but the attestation could not be persisted: "
-                f"{sig.get('error')}\n"
-                "re-run `rebar review-plan` to retry — the claim gate needs the signature.\n"
-            )
+            tid = result.get("ticket_id") or "<id>"
+            if sig.get("event") == "plan_review_generation_changed":
+                # A real material change (own OR dependency — sig.error already names which):
+                # the recorded review is STALE and cannot be cheaply re-signed. The only
+                # recovery is a fresh full review; sign-review would (correctly) refuse.
+                sys.stderr.write(
+                    "plan review PASSED but the plan changed before it could be signed: "
+                    f"{sig.get('error')}\n"
+                    "the recorded review is stale — run `rebar review-plan` to re-review "
+                    "and sign.\n"
+                )
+            else:
+                # A TRANSIENT/retryable failure (retry event, a lock, or any non-material
+                # error): nothing materially changed, so the cheap no-LLM recovery applies —
+                # re-persist the already-computed verdict with `rebar sign-review`.
+                sys.stderr.write(
+                    "plan review PASSED but the attestation could not be persisted: "
+                    f"{sig.get('error')}\n"
+                    f"run `rebar sign-review {tid}` to re-sign from the recorded review "
+                    "(no LLM re-run) — the claim gate needs the signature.\n"
+                )
             return 11
         return 0
     if coverage.get("retryable"):

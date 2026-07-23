@@ -151,7 +151,23 @@ def sign_manifest(
                 before=before,
                 after=after,
             )
-            raise PlanReviewGenerationChanged("plan review generation changed; re-review required")
+            if fresh.own_material != initial_generation.own_material:
+                message = (
+                    "the reviewed ticket's own plan material changed since the review "
+                    "(description/AC/file_impact/children edited); re-review required"
+                )
+            elif fresh.related_material != initial_generation.related_material:
+                message = (
+                    "a dependency's plan material changed since the review; re-review required"
+                )
+            elif (
+                fresh.phase != initial_generation.phase
+                or fresh.priority_floor != initial_generation.priority_floor
+            ):
+                message = "the plan review phase changed since the review; re-review required"
+            else:
+                message = "the plan review generation changed since the review; re-review required"
+            raise PlanReviewGenerationChanged(message)
 
         def under_lock_check(expected_after=after) -> None:
             locked_head = tracker_head_sha(tracker, ignore_untracked=True)

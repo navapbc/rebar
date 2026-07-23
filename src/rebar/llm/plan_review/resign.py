@@ -15,7 +15,13 @@ have written — so a subsequent ``claim`` passes the gate.
 
 STALENESS GUARD: the recorded fingerprint must equal ``current_material_fingerprint`` NOW.
 If the plan drifted the old verdict is stale, so we REFUSE (and tell the user to run a full
-``rebar review-plan``) rather than sign a verdict that no longer describes the plan.
+``rebar review-plan``) rather than sign a verdict that no longer describes the plan. A
+positively-detected DEPENDENCY-material drift (a pinned direct child/prerequisite's material
+changed or was lost — pin_status ``stale-pin-drift``/``stale-pin-missing``) now invalidates
+UNCONDITIONALLY, regardless of ``verify.enforce_plan_material_pins`` (bug 790c): sign-review
+must not bypass the dependency invalidation ``sign_manifest`` already enforces at review time.
+Only the metadata-quality pin states (``legacy-unpinned``/``malformed-pin``) stay governed by
+the enforce flag.
 
 Optionality: stdlib + core signing only (the sidecar reader, the attestation machinery, and
 ``current_material_fingerprint`` are all import-light) — it does NOT need the ``[agents]``
@@ -156,16 +162,40 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         )
     except sidecar.ReviewedRelatedMaterialError:
         pin_health = {"pin_status": "malformed-pin", "enforced": enforced, "targets": []}
-    if enforced and pin_health["pin_status"] not in ("current", "legacy-unpinned"):
+    # Bug 790c: a positively-detected DEPENDENCY change/loss must invalidate the recorded PASS
+    # UNCONDITIONALLY — independent of verify.enforce_plan_material_pins (which defaults False).
+    # sign_manifest already aborts at review time when a direct child/prerequisite's material
+    # changes (related_material is part of the immutable PlanReviewGeneration identity), so the
+    # cheap sign-review recovery MUST NOT re-certify past that same drift; otherwise it silently
+    # bypasses the invalidation the review-time path enforces. Only the metadata-quality states
+    # (legacy-unpinned/malformed-pin) stay governed by the enforce flag, as before.
+    dependency_changed = pin_health["pin_status"] in ("stale-pin-drift", "stale-pin-missing")
+    if dependency_changed or (
+        enforced and pin_health["pin_status"] not in ("current", "legacy-unpinned")
+    ):
+        if dependency_changed:
+            changed_ids = ", ".join(
+                str(target["canonical_id"])
+                for target in pin_health["targets"]
+                if target["pin_status"] in ("stale-pin-drift", "stale-pin-missing")
+            )
+            reason = (
+                "a dependency's plan material changed since the review ("
+                + changed_ids
+                + "), so the recorded PASS no longer reflects it — run `rebar review-plan` "
+                "to re-review and sign"
+            )
+        else:
+            reason = (
+                "reviewed related-ticket material is no longer valid "
+                f"({pin_health['pin_status']}) — run `rebar review-plan` to re-review and sign"
+            )
         return {
             "ok": False,
             "signed": False,
             "ticket_id": ticket_id,
             "verdict": pin_health["pin_status"],
-            "reason": (
-                "reviewed related-ticket material is no longer valid "
-                f"({pin_health['pin_status']}) — run `rebar review-plan` to re-review and sign"
-            ),
+            "reason": reason,
             "health": pin_health,
         }
 

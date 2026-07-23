@@ -391,6 +391,36 @@ coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live i
 sidecar; a project composes any hard CI gate by checking the signed result + its
 coverage.
 
+### Review dependencies FIRST — review in dependency-graph order
+
+A plan review binds **more than the subject's own material**: it also pins the material of
+the subject's **direct dependencies** — its children (for a container/epic) and its
+prerequisites (`depends_on` / `blocks` targets). A review is valid only while **both** the
+subject's own material **and** every pinned dependency's material are unchanged since the
+review ran. If a dependency's plan changes **after** the review, the recorded `PASS` no
+longer describes the plan it was based on, so it is **invalidated** — and this holds on both
+paths that could certify it: the in-review sign (`generation.sign_manifest`) and the cheap
+recovery `rebar sign-review` (`resign_plan_review`) **both** refuse a review whose dependency
+drifted. `rebar sign-review` is **not** an escape hatch for a changed dependency — it recovers
+only a *transient* signing failure where nothing material actually moved.
+
+The practical consequence — **review the dependency graph bottom-up, not in parallel:**
+
+- Review (and settle) a ticket's **prerequisites and children before the ticket itself**. A
+  dependency whose own review is still landing is still changing; reviewing its dependent now
+  will just be invalidated when the dependency's plan is finalized.
+- **Do not review a ticket and its dependencies concurrently.** If you fan reviews out across an
+  epic and its children at once, a child's plan moving mid-review invalidates the epic's review
+  (correctly) — you pay for the epic's (minutes-long) LLM review and then have to re-run it. This
+  is the single most common cause of a `PASS` that ends unsigned with
+  *"a dependency's plan material changed since the review; re-review required"*.
+- When a review is invalidated by a genuine dependency change, a fresh `rebar review-plan`
+  **is** required (the recorded verdict is stale). Only a nothing-changed transient is
+  recoverable with `rebar sign-review <id>`.
+
+`next-batch` returns a conflict-aware, dependency-ready batch; prefer it (and plain dependency
+order) over ad-hoc parallel review of related tickets.
+
 ### Checking currency cheaply — `review-plan --status` (no LLM)
 
 An attestation that read `PASS` when it was signed can silently stop being **current** —
