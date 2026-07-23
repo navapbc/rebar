@@ -172,3 +172,50 @@ def test_snapshot_canonicalized_via_injected_inbound_mapper(od) -> None:
     )
     assert spy.seen, "the update path must canonicalize the snapshot via the injected InboundMapper"
     assert spy.seen[0].get("summary") == "T"  # it observed the raw snapshot entry for DIG-1
+
+
+# ── partial-baseline arbitration on the NEW canonical path (ticket 625b AC) ──
+class _BaselineStubBindingStore(_StubBindingStore):
+    """A binding store whose get_baseline returns a RAW (vendor-shaped) partial baseline,
+    canonicalized at read time by the differ — exercises the absent-vs-present ancestor rule."""
+
+    def __init__(self, l2j, baseline):
+        super().__init__(l2j)
+        self._baseline = baseline
+
+    def get_baseline(self, l):  # noqa: E741
+        return self._baseline
+
+
+def _emit_with_baseline(od, backend, t, jf, baseline):
+    bs = _BaselineStubBindingStore({"loc-1": "DIG-1"}, baseline)
+    muts, _ = od.compute_outbound_mutations(
+        [t], {"DIG-1": jf}, bs, outbound_mapper=backend.outbound, inbound_mapper=backend.inbound
+    )
+    for m in muts:
+        fields = getattr(m, "fields", None)
+        if fields is not None:
+            return dict(fields)
+    return None
+
+
+def test_field_absent_from_baseline_is_no_ancestor_local_wins(od, backend) -> None:
+    """A mirrored field ABSENT from the (partial) canonical baseline has no ancestor, so the
+    inbound-directionality guard cannot suppress it: local-wins emits — matching today's
+    whole-None-baseline arbitration (ticket 625b, canonical path)."""
+    ticket = _ticket(status="closed")
+    remote = _jira(status={"name": "To Do"})  # canonical remote status = "open"
+    # Baseline carries only summary — NO status entry → status has no ancestor.
+    emitted = _emit_with_baseline(od, backend, ticket, remote, {"summary": "T"})
+    assert emitted == {"status": "Done"}  # local-wins emitted (not suppressed)
+
+
+def test_field_matching_baseline_is_suppressed_for_inbound(od, backend) -> None:
+    """Contrast: when the field IS present in the baseline and local matches it (unchanged
+    since last sync) while remote differs, the outbound diff suppresses it (leaves the
+    remote for the inbound differ) — proving the canonical baseline is genuinely consulted."""
+    ticket = _ticket(status="closed")
+    remote = _jira(status={"name": "To Do"})  # remote differs (canonical "open")
+    # Baseline status "Done" canonicalizes to local "closed" → local unchanged since sync.
+    emitted = _emit_with_baseline(od, backend, ticket, remote, {"status": {"name": "Done"}})
+    assert emitted is None  # suppressed — inbound differ will mirror the remote change
