@@ -69,6 +69,20 @@ _LOCAL_STATUS_TO_JIRA: dict[str, str] = {
 }
 
 
+# rebar relation -> (Jira link type, swap_endpoints). This is Jira-specific link
+# vocabulary, single-sourced here in the vendor adapter (ticket 4af8 relocated it
+# out of the backend-neutral ``outbound_links`` core, which now reads it from here).
+# ``swap_endpoints`` records that "A relation B" maps to a Jira link with the
+# endpoints reversed: "A depends_on B" == "B blocks A". Relations with no reliable
+# Jira link type (duplicates / supersedes / discovered_from) are intentionally ABSENT
+# and SKIPPED by the differ.
+_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
+    "blocks": ("Blocks", False),
+    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
+    "relates_to": ("Relates", False),
+}
+
+
 # ---------------------------------------------------------------------------
 # Sanitizers
 # ---------------------------------------------------------------------------

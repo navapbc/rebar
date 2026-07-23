@@ -54,6 +54,26 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return mod
 
 
+# Ticket 4af8: the Jira->remote field mapper (``_map_local_to_jira_fields``) is no longer
+# re-exported on ``outbound_differ`` (the core differ receives it by injection). Load it
+# from its owning vendor leaf for the send-shape helper below — LAZILY, under a flat
+# sys.modules key, so importing this test module at collection time does not exec the leaf
+# (whose ``from rebar_reconciler.adapters.jira.adf import ...`` would bind the engine
+# ``rebar_reconciler`` package name and break the test-package conftest resolution during
+# full-tree collection).
+_OUTBOUND_FIELDS: ModuleType | None = None
+
+
+def _outbound_fields() -> ModuleType:
+    global _OUTBOUND_FIELDS
+    if _OUTBOUND_FIELDS is None:
+        _OUTBOUND_FIELDS = _load_module(
+            "_4af8_roundtrip_outbound_fields",
+            RECONCILER_DIR / "adapters" / "jira" / "outbound_fields.py",
+        )
+    return _OUTBOUND_FIELDS
+
+
 @pytest.fixture(scope="module")
 def adf() -> ModuleType:
     return _load_module(
@@ -128,7 +148,7 @@ def _make_ticket(
     }
 
 
-def _outbound_jira_shape(ticket: dict, *, adf, outbound, jira_status: str) -> dict:
+def _outbound_jira_shape(ticket: dict, *, adf, jira_status: str) -> dict:
     """Build the Jira ``fields`` snapshot that results from pushing ``ticket``.
 
     Reproduces the live applier's send transform: scalar fields land as the
@@ -138,7 +158,7 @@ def _outbound_jira_shape(ticket: dict, *, adf, outbound, jira_status: str) -> di
     statuses land on their nearest live state; the annotation label preserves
     the original).
     """
-    mapped = outbound._map_local_to_jira_fields(ticket)
+    mapped = _outbound_fields()._map_local_to_jira_fields(ticket)
     return {
         "summary": mapped["summary"],
         # Jira stores/returns description as ADF (the applier encodes via text_to_adf).
@@ -170,9 +190,7 @@ def test_description_survives_outbound_adf_inbound_unchanged(adf, outbound, inbo
     ticket = _make_ticket("loc-1", description=desc, status="in_progress")
 
     # Outbound encodes local -> Jira ADF; inbound decodes Jira ADF -> local.
-    jira_fields = _outbound_jira_shape(
-        ticket, adf=adf, outbound=outbound, jira_status="In Progress"
-    )
+    jira_fields = _outbound_jira_shape(ticket, adf=adf, jira_status="In Progress")
 
     # Sanity: the snapshot really carries ADF, not the plain string.
     assert isinstance(jira_fields["description"], dict)
@@ -220,7 +238,7 @@ def test_oversize_description_truncated_by_jira_not_pulled_back(adf, outbound, i
     oversize = ("X" * 30 + "\n") * 1500
     ticket = _make_ticket("loc-trunc", description=oversize, status="in_progress")
 
-    mapped = outbound._map_local_to_jira_fields(ticket)
+    mapped = _outbound_fields()._map_local_to_jira_fields(ticket)
     landed = adf.fit_text_to_adf_limit(mapped["description"])
     assert len(landed) < len(oversize), "fixture must actually truncate"
 
@@ -265,7 +283,7 @@ def test_description_with_trailing_whitespace_does_not_churn(adf, outbound, inbo
     """
     bind = StubBindingStore({"loc-2": "DIG-2"})
     ticket = _make_ticket("loc-2", description="Body with trailing blank lines\n\n")
-    jira_fields = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="To Do")
+    jira_fields = _outbound_jira_shape(ticket, adf=adf, jira_status="To Do")
 
     inbound_muts, _ = inbound.compute_inbound_mutations(
         {"DIG-2": jira_fields}, bind, {"loc-2": ticket}
@@ -295,7 +313,7 @@ def test_blocked_status_roundtrips_through_in_progress_plus_label(adf, outbound,
     ticket = _make_ticket("loc-3", status="blocked")
 
     # Outbound: status maps to In Progress, annotation label ADD is emitted.
-    pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="In Progress")
+    pre_push = _outbound_jira_shape(ticket, adf=adf, jira_status="In Progress")
     out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-3": pre_push}, bind)
     (om,) = out_muts
     label_adds = {lm["label"] for lm in om.labels if lm["action"] == "add"}
@@ -328,7 +346,7 @@ def test_cancelled_status_roundtrips_through_done_plus_label(adf, outbound, inbo
     """cancelled -> (Done + rebar-status:cancelled) -> cancelled (the Done twin)."""
     bind = StubBindingStore({"loc-4": "DIG-4"})
     ticket = _make_ticket("loc-4", status="cancelled")
-    pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="Done")
+    pre_push = _outbound_jira_shape(ticket, adf=adf, jira_status="Done")
     out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-4": pre_push}, bind)
     (om,) = out_muts
     assert "rebar-status:cancelled" in {lm["label"] for lm in om.labels if lm["action"] == "add"}
@@ -356,7 +374,7 @@ def test_label_add_does_not_reecho_inbound(adf, outbound, inbound):
     bind = StubBindingStore({"loc-5": "DIG-5"})
     ticket = _make_ticket("loc-5", tags=["frontend"])
 
-    pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="To Do")
+    pre_push = _outbound_jira_shape(ticket, adf=adf, jira_status="To Do")
     out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-5": pre_push}, bind)
     (om,) = out_muts
     assert {"action": "add", "label": "frontend"} in om.labels
@@ -397,14 +415,12 @@ def test_reparent_outbound_then_inbound_converges(adf, outbound, inbound):
     child = _make_ticket("child-1", ticket_type="task", parent_id="epic-1")
 
     # Outbound: resolve parent_id=epic-1 -> DIG-10, emit a parent field.
-    child_jira = _outbound_jira_shape(child, adf=adf, outbound=outbound, jira_status="To Do")
+    child_jira = _outbound_jira_shape(child, adf=adf, jira_status="To Do")
     # No parent yet on the Jira side -> outbound emits the parent diff.
     out_muts, _ = outbound.compute_outbound_mutations(
         [parent_epic, child],
         {
-            "DIG-10": _outbound_jira_shape(
-                parent_epic, adf=adf, outbound=outbound, jira_status="To Do"
-            ),
+            "DIG-10": _outbound_jira_shape(parent_epic, adf=adf, jira_status="To Do"),
             "DIG-20": child_jira,
         },
         bind,
@@ -450,7 +466,7 @@ def test_outbound_comment_not_reimported_inbound(adf, outbound, inbound):
     ticket = _make_ticket("loc-6", comments=[{"body": "Investigated the root cause."}])
 
     # Outbound: the create/update emits a decorated comment add.
-    pre_push = _outbound_jira_shape(ticket, adf=adf, outbound=outbound, jira_status="To Do")
+    pre_push = _outbound_jira_shape(ticket, adf=adf, jira_status="To Do")
     # Snapshot carries the (empty) comment field so _diff_comments uses it directly.
     pre_push["comment"] = {"comments": []}
     out_muts, _ = outbound.compute_outbound_mutations([ticket], {"DIG-6": pre_push}, bind)
@@ -504,8 +520,8 @@ def test_link_relationship_survives_roundtrip_without_reemit(adf, outbound, inbo
     blocked = _make_ticket("loc-8", status="open")
 
     # Outbound: no issuelinks on the Jira side yet → emit the link ADD.
-    pre_blocker = _outbound_jira_shape(blocker, adf=adf, outbound=outbound, jira_status="To Do")
-    pre_blocked = _outbound_jira_shape(blocked, adf=adf, outbound=outbound, jira_status="To Do")
+    pre_blocker = _outbound_jira_shape(blocker, adf=adf, jira_status="To Do")
+    pre_blocked = _outbound_jira_shape(blocked, adf=adf, jira_status="To Do")
     out_muts, _ = outbound.compute_outbound_mutations(
         [blocker, blocked], {"DIG-7": pre_blocker, "DIG-8": pre_blocked}, bind
     )

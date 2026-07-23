@@ -15,40 +15,24 @@ from __future__ import annotations
 
 from typing import Any
 
-# Single source of truth for the Jira-issuelink -> rebar-relation DIRECTION logic,
-# shared with the inbound ADD path (inbound_differ). outbound_links is only ever
-# loaded as the ``rebar_reconciler.outbound_links`` package submodule (never
-# spec-loaded standalone), so a plain package import is safe here — and it removes
-# the copy-paste that let a prior inversion hide on an untouched mirror (bug 4b59).
+# Two package imports, both safe here because ``outbound_links`` is only ever loaded as
+# the ``rebar_reconciler.outbound_links`` package submodule (never spec-loaded
+# standalone):
+#   * ``_RELATION_TO_JIRA_LINK`` — the rebar-relation <-> Jira-link-type vocabulary.
+#     This Jira-specific map is single-sourced in the vendor adapter at
+#     ``adapters/jira/jira_fields`` (ticket 4af8 relocated it out of this backend-neutral
+#     core); re-exported here so ``outbound_links._RELATION_TO_JIRA_LINK`` attribute
+#     access keeps resolving. It maps ``relation`` -> Jira link type at ``_diff_links``.
+#   * ``resolve_inbound_link`` — the single source of truth for the Jira-issuelink ->
+#     rebar-relation DIRECTION logic, shared with the inbound ADD path (inbound_differ)
+#     and the REMOVE pass below; removing the copy-paste that let a prior inversion hide
+#     on an untouched mirror (bug 4b59).
+from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK
 from rebar_reconciler.link_direction import resolve_inbound_link
 
 # ---------------------------------------------------------------------------
 # Link diff (story 25ae-92e6-2927-49b6, Cycle 2)
 # ---------------------------------------------------------------------------
-#
-# Relation <-> Jira link-type mapping. The canonical definition lives in
-# acli_graph._RELATION_TO_JIRA_LINK (Cycle 1), but the differ is loaded
-# standalone via spec_from_file_location in tests (no package context, so
-# ``from rebar_reconciler.adapters.jira.acli_graph import ...`` is not reliably importable
-# and would pull the whole ACLI client import chain). We re-declare a local
-# copy here — the same single-source-of-vocabulary pattern as the local
-# _LOCAL_TO_JIRA_* constants above. Keep in sync with acli_graph.
-#
-# Each entry maps a rebar relation -> (jira_link_type, swap_endpoints).
-# ``swap_endpoints`` records that "A relation B" maps to a Jira link with the
-# endpoints reversed: "A depends_on B" == "B blocks A". Relations with no
-# reliable Jira link type (duplicates / supersedes / discovered_from) are
-# intentionally ABSENT and SKIPPED by the differ.
-_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
-    "blocks": ("Blocks", False),
-    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
-    "relates_to": ("Relates", False),
-}
-
-# The REMOVE pass disambiguates a Jira Blocks link into blocks/depends_on the SAME
-# way as the inbound ADD path — via link_direction.resolve_inbound_link (imported
-# above), the single source of truth. (Previously re-declared locally, which is the
-# copy-paste the bug-4b59 unification removes.)
 
 
 def _existing_jira_links(jira_fields: dict[str, Any]) -> set[tuple[str, str]]:

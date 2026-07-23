@@ -26,21 +26,25 @@ import sys
 import urllib.error
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from rebar_reconciler._loader import lazy_load
 
-# The field-diff cluster lives in outbound_fields.py (split for module size).
-# _map_local_to_jira_fields + _diff_fields are called by compute_outbound_mutations
-# below; _assignee_matches + _LOCAL_TO_JIRA_TYPE are re-exported so
-# outbound_differ.<name> keeps resolving for the field-diff test suite.
+# The field-diff cluster lives in outbound_fields.py (split for module size). _diff_fields
+# is called below; _assignee_matches + _LOCAL_TO_JIRA_TYPE + _extract_jira_field are
+# non-mapping field-diff helpers (no Backend-port equivalent) re-exported for the test
+# suite. The local->Jira field MAPPER (_map_local_to_jira_fields) is NO LONGER imported
+# here (ticket 4af8): it is injected as ``outbound_mapper`` (a Backend-port
+# ``OutboundMapper``) by the orchestrator, so this core differ names no vendor mapper.
 from rebar_reconciler.adapters.jira.outbound_fields import (  # noqa: F401
     _LOCAL_TO_JIRA_TYPE,
     _assignee_matches,
     _diff_fields,
     _extract_jira_field,
-    _map_local_to_jira_fields,
 )
+
+if TYPE_CHECKING:
+    from rebar_reconciler._backend import OutboundMapper
 
 # The identity-mapping assignee-resolution cluster (264f) lives in
 # outbound_assignee.py (split for module size; a leaf that imports rebar core
@@ -403,6 +407,8 @@ def compute_outbound_mutations(
     jira_snapshot: dict[str, Any],
     binding_store: BindingStoreProtocol,
     config: OutboundDiffConfig | None = None,
+    *,
+    outbound_mapper: OutboundMapper | None = None,
 ) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -418,6 +424,9 @@ def compute_outbound_mutations(
             prev_snapshot). None → all defaults (see OutboundDiffConfig). The
             former trailing ``absent_alive_fields`` out-param is GONE — its
             value is the second element of the return tuple instead.
+        outbound_mapper: The injected Backend-port ``OutboundMapper`` (ticket 4af8);
+            the orchestrator passes ``backend.outbound``, and ``None`` resolves the
+            configured backend's mapper via the neutral ``select_backend`` seam.
 
     Returns:
         A ``(mutations, absent_alive_fields)`` tuple:
@@ -434,6 +443,15 @@ def compute_outbound_mutations(
     """
     if config is None:
         config = OutboundDiffConfig()
+    # Ticket 4af8: the local->remote field mapper is injected via the Backend port
+    # (run_differs passes ``backend.outbound``). A direct caller that omits it resolves
+    # the configured backend's mapper through the neutral registry seam — naming no
+    # vendor mapper here and yielding the same mapping the vendor delegate performs.
+    if outbound_mapper is None:
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        outbound_mapper = select_backend(load_config()).outbound
     # Bind the config's fields to locals so the diff body below reads unchanged.
     excluded_statuses = config.excluded_statuses
     local_label_intent = config.local_label_intent
@@ -514,7 +532,13 @@ def compute_outbound_mutations(
 
         if jira_key is None:
             _compute_outbound_create_mutation(
-                mutations, ticket, status, local_id, binding_store, local_ticket_types
+                mutations,
+                ticket,
+                status,
+                local_id,
+                binding_store,
+                local_ticket_types,
+                outbound_mapper,
             )
         else:
             _compute_outbound_update_mutation(
@@ -586,9 +610,13 @@ def _compute_outbound_select_absent_gets(
 
 
 def _compute_outbound_create_mutation(
-    mutations, ticket, status, local_id, binding_store, local_ticket_types
+    mutations, ticket, status, local_id, binding_store, local_ticket_types, outbound_mapper
 ) -> None:
-    """Phase: append the outbound CREATE mutation for an unbound local ticket."""
+    """Phase: append the outbound CREATE mutation for an unbound local ticket.
+
+    ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket 4af8);
+    its ``map_local_to_remote`` replaces the former direct vendor-mapper import.
+    """
     # Unbound -> outbound create
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).
@@ -601,7 +629,7 @@ def _compute_outbound_create_mutation(
             local_id=local_id,
             jira_key=None,
             action="create",
-            fields=_map_local_to_jira_fields(
+            fields=outbound_mapper.map_local_to_remote(
                 ticket,
                 binding_store=binding_store,
                 local_ticket_types=local_ticket_types,

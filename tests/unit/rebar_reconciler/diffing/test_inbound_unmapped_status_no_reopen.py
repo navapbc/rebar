@@ -33,6 +33,14 @@ def _load(name: str, path: Path) -> ModuleType:
 
 _id = _load("inbound_differ_unmapped", INBOUND_DIFFER_PATH)
 
+# Ticket 4af8: the Jira->local field mapper is no longer re-exported on the differ
+# module (the core differ now receives the mapper by injection). Load the mapper from
+# its owning leaf module directly for the isolated mapper assertion below.
+_INBOUND_FIELDS_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "inbound_fields.py"
+)
+_ifields = _load("inbound_fields_unmapped", _INBOUND_FIELDS_PATH)
+
 
 def _jira(status: str) -> dict:
     return {
@@ -53,7 +61,7 @@ def test_unmapped_status_does_not_reopen_closed_ticket():
 
 
 def test_unmapped_status_omitted_from_mapped_fields():
-    mapped = _id._map_jira_to_local_fields(_jira("Totally Custom State"))
+    mapped = _ifields._map_jira_to_local_fields(_jira("Totally Custom State"))
     # The mapper omits status entirely for an unmapped Jira status (no "open" default).
     assert "status" not in mapped
     # Other fields still map.
