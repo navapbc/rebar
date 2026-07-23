@@ -8,6 +8,55 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [0.10.0] - 2026-07-23
+
+A feature release: a pluggable reconciler **Backend port** that decouples the Jira
+adapter behind a typed interface, capability-tiered model delegation and phased
+plan-review attestations for the agent workflow, a ChatGPT connector-limited agent
+guide, plus a broad round of plan-review/code-review gate hardening and fixes.
+
+### Added
+- **Reconciler `Backend` port** — the reconciler's transport is now a typed `Backend`
+  interface (`JiraBackend` + a contract suite), selected through a new
+  `reconciler.backend` config + registry (`select_backend`), with the Jira vendor
+  modules relocated under `adapters/jira/`. This lays the groundwork for non-Jira
+  backends (pinned in ADR 0035 §(d)).
+- **Capability-tiered model delegation** in the `rebar-implement` skill — steps run on
+  model tiers matched to their difficulty.
+- **Phased plan-review attestations** — plan-review attestations are now phase-aware.
+- **ChatGPT connector-limited agent guide** (`docs/chatgpt-agent-guide.md`) for
+  checkout-less / tracker-less sessions.
+- Plan-review **attestation currency**: `rebar review-plan --status` (read-only, no
+  LLM) plus a reuse marker to detect a stale attestation cheaply.
+- `rebar list` accepts **comma-separated type filters** (e.g. `--type=bug,task`).
+- Local **code-review preview** (`rebar review-code`) surfaced as discoverably as
+  `rebar review-plan`.
+- Author guides are **packaged in-package**, so `rebar explain` works from any install.
+
+### Changed
+- `--force` gate-bypass is generalized to **all** start-work gates (not just
+  plan-review), with documented semantics in the user/agent guidance.
+- Plan-review hardening: honors verified `[rebar:<id>]` cross-ticket citations, binds
+  reviews to the related ticket material, requires a current review when configured,
+  refuses to pass on an incompletely-loaded ticket hierarchy, evaluates direct
+  prerequisites independently, and pins the Pass-2 verifier to greedy sampling
+  (temperature 0).
+- `rebar metrics` defaults to a real date window; completion checks are skipped for
+  replaced bugs.
+- Code review's `--base` uses a merge-base (three-dot) diff.
+- Contributor DCO sign-off guidance is identity-neutral.
+
+### Fixed
+- Prerequisite coverage now **accepts runner envelope metadata** (`runner`, `model`,
+  `trace_id`, `_usage`) instead of failing validation and forcing an INDETERMINATE
+  verdict that blocked the claim.
+- Metric-plan routing regression pinned; `T8` applicability made deterministic.
+- The overlap perf gate is robust to CI runner contention.
+
+### Security
+- Bump **zizmor 1.27.0 → 1.28.0** (a yanked release / GHSA advisory) and ruff
+  0.15.19 → 0.15.22.
+
 ## [0.9.1] - 2026-07-19
 
 ### Added
