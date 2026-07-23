@@ -665,8 +665,10 @@ def test_status_round_trip_lossy_labels_no_oscillation():
     label (label precedence). ``idea ↔ IDEA`` is injective (no annotation needed).
     Idempotent over N=3 passes — no oscillation."""
     config = _recon("config")
-    inbound_differ = _recon("inbound_differ")
     outbound_differ = _recon("outbound_differ")
+    # Ticket 4af8: the Jira->local field mapper is no longer re-exported on the differ
+    # module (the core differ receives it by injection); load it from its owning leaf.
+    inbound_fields = _recon("inbound_fields")
 
     # idea <-> IDEA is a unique/injective round-trip (no annotation label).
     assert config.local_to_jira_status["idea"] == "IDEA"
@@ -682,7 +684,7 @@ def test_status_round_trip_lossy_labels_no_oscillation():
     # Inbound restores the EXACT local status from the annotation label, taking
     # precedence over the raw "In Progress" workflow status (which would map to
     # in_progress and lose the blocked intent).
-    restored = inbound_differ._map_jira_to_local_fields(
+    restored = inbound_fields._map_jira_to_local_fields(
         {"status": {"name": "In Progress"}, "labels": ["rebar-status:blocked"]}
     )
     assert restored["status"] == "blocked"
@@ -692,7 +694,7 @@ def test_status_round_trip_lossy_labels_no_oscillation():
     for _ in range(3):
         steady = outbound_differ._diff_status_annotation_labels("blocked", ["rebar-status:blocked"])
         assert steady == [], "a settled annotation label must not re-mutate (no oscillation)"
-        again = inbound_differ._map_jira_to_local_fields(
+        again = inbound_fields._map_jira_to_local_fields(
             {"status": {"name": "In Progress"}, "labels": ["rebar-status:blocked"]}
         )
         assert again["status"] == "blocked"

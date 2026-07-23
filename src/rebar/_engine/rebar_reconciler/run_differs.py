@@ -59,19 +59,20 @@ def _load(name: str, relpath: str):
     return lazy_load(name, relpath)
 
 
-def _load_outbound_diff_transport():
-    """Return the configured backend's transport for the outbound-diff live-comment
-    fetch + pending-binding recovery (S4).
+def _load_reconcile_backend():
+    """Return the configured ``Backend`` for the diff phase (S4 + ticket 4af8).
 
-    This is run_differs' own transport seam (distinct from applier/fetcher's
-    ``_load_acli``): tests patch THIS function to inject a transport-shaped fake.
-    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
-    keep standalone by-path loading working.
+    The orchestrator obtains the backend once and threads its role Protocols down:
+    ``.transport`` for the outbound-diff live-comment fetch + pending-binding recovery,
+    ``.outbound`` / ``.inbound`` as the injected field mappers for the outbound / inbound
+    differs (routing the core differs off the vendor mappers via dependency injection).
+    Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to keep
+    standalone by-path loading working.
     """
     from rebar.config import load_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config()).transport
+    return select_backend(load_config())
 
 
 def _emit_outbound_field_alerts(
@@ -227,8 +228,14 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
 
     _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
     _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe)
-    outbound_raw, absent_alive_fields, outbound_diff_client = _run_differs_outbound(ctx, mutations)
-    _run_differs_inbound(ctx, mutations, outbound_raw, absent_alive_fields)
+    # Ticket 4af8: obtain the configured backend ONCE and thread its role Protocols into
+    # both differ phases (transport for the live-comment fetch; .outbound/.inbound as the
+    # injected field mappers) so the core differs name no vendor mapper.
+    backend = _load_reconcile_backend()
+    outbound_raw, absent_alive_fields, outbound_diff_client = _run_differs_outbound(
+        ctx, mutations, backend
+    )
+    _run_differs_inbound(ctx, mutations, outbound_raw, absent_alive_fields, backend)
     _run_differs_binding_walk(ctx, mutations, outbound_diff_client)
 
     ctx.mutations = mutations
@@ -374,9 +381,13 @@ def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe) -> None:
         mutations.extend(probe_follow_ons)
 
 
-def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
+def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any]:
     """Outbound differ phase: recover bindings, compute label intent + the outbound
     differ, and convert each OutboundMutation -> typed Mutation onto ``mutations``.
+
+    ``backend`` is the configured :class:`Backend` (ticket 4af8); its ``.transport`` is
+    the live-comment/recovery client and its ``.outbound`` mapper is injected into
+    ``compute_outbound_mutations``.
 
     Returns ``(outbound_raw, absent_alive_fields, outbound_diff_client)`` for the
     inbound differ + binding-walk phases that follow.
@@ -409,10 +420,9 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     # recovery AttributeError'd into the fail-open swallow below and NEVER ran. The
     # same client is reused by the outbound differ's live-comment fetch further down.
     # S4: obtain the outbound-diff transport from the configured backend (routes
-    # through the Backend port instead of constructing an AcliClient inline).
-    # Deferred to runtime (not import) so the differ stays importable without
-    # JIRA_URL/JIRA_USER set.
-    outbound_diff_client = _load_outbound_diff_transport()
+    # through the Backend port instead of constructing an AcliClient inline). The
+    # backend is resolved once by the orchestrator and threaded in (ticket 4af8).
+    outbound_diff_client = backend.transport
 
     # Filtered passes skip pending-binding recovery to avoid finalizing
     # bindings for non-test tickets (scope leak).
@@ -481,6 +491,7 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
             conflict_sink=conflict_sink,
             dropped_field_sink=dropped_field_sink,
         ),
+        outbound_mapper=backend.outbound,
     )
     _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
     sync_logger.log(
@@ -554,9 +565,13 @@ def _run_differs_outbound(ctx: Any, mutations) -> tuple[list, dict, Any]:
     return outbound_raw, absent_alive_fields, outbound_diff_client
 
 
-def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields) -> None:
+def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields, backend) -> None:
     """Inbound differ phase (binding-aware): Jira -> local for bound tickets;
-    convert each InboundMutation -> typed Mutation onto ``mutations``."""
+    convert each InboundMutation -> typed Mutation onto ``mutations``.
+
+    ``backend`` is the configured :class:`Backend` (ticket 4af8); its ``.inbound`` mapper
+    is injected into ``compute_inbound_mutations``.
+    """
     local_tickets = ctx.local_tickets
     inbound_differ_mod = ctx.inbound_differ_mod
     binding_store = ctx.binding_store
@@ -593,6 +608,7 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields)
         binding_store,
         local_by_id,
         outbound_mutations=outbound_raw,
+        inbound_mapper=backend.inbound,
     )
     sync_logger.log(
         "inbound_differ_complete",

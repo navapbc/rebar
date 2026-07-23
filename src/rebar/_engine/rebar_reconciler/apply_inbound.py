@@ -7,9 +7,11 @@ delegates to). Each leaf reads its Jira-side payload, translates it via
 inbound_translate, and writes local ticket events; rebar-id/property write-backs
 to Jira run through batch_dispatch._call_with_retry.
 
-Imports downward only (apply_base, batch_dispatch, inbound_translate, and the
-outbound_fields field-mapper for the hard-delete re-create — none import back);
-never imports applier.
+Imports downward only (apply_base, batch_dispatch, inbound_translate — none import
+back); never imports applier. The hard-delete re-create obtains the local->remote
+field mapper from the configured backend via the neutral ``select_backend`` seam
+(ticket 4af8) rather than importing the vendor mapper, so this core module names no
+vendor mapper.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from rebar_reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
 from rebar_reconciler.apply_base import (
     ApplyResult,
     _direction_guard,
@@ -466,8 +467,10 @@ def _build_hard_delete_recreate(follow_on: dict, repo_root, binding_store) -> di
 
     The follow-on carries only ``local_id``; ``create_one`` needs ``fields``. Fetch the
     still-present local ticket by reading ``<tracker>/<local_id>/.cache.json`` ``state``
-    (mirroring ``reconcile_check.load_local_tickets``) and map it via the SAME
-    ``_map_local_to_jira_fields`` the outbound differ uses. Returns ``None`` (log + skip)
+    (mirroring ``reconcile_check.load_local_tickets``) and map it via the SAME backend
+    outbound mapper the outbound differ uses — obtained here from the configured backend
+    (``select_backend(load_config()).outbound``) rather than importing the vendor mapper
+    (ticket 4af8). Returns ``None`` (log + skip)
     when the local ticket is absent/unreadable/malformed or has no mappable summary — a
     hard-deleted ticket with no local content is not re-creatable.
     """
@@ -489,7 +492,14 @@ def _build_hard_delete_recreate(follow_on: dict, repo_root, binding_store) -> di
         return None
     ticket = dict(state)
     ticket.setdefault("ticket_id", local_id)
-    fields = _map_local_to_jira_fields(
+    # Ticket 4af8: obtain the outbound field mapper from the configured backend through
+    # the neutral registry seam (lazy import to keep this module importable standalone
+    # and free of any vendor-mapper import).
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    outbound_mapper = select_backend(load_config()).outbound
+    fields = outbound_mapper.map_local_to_remote(
         ticket,
         binding_store=binding_store,
         local_ticket_types={local_id: ticket.get("ticket_type", "task")},

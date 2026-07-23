@@ -22,7 +22,11 @@ of import wiring and fails BEFORE the S4 rewiring, PASSES after.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -68,3 +72,157 @@ def test_apply_inbound_records_has_single_jira_literal() -> None:
         'the single retained "jira" literal must be the '
         'validate_creation_channel("jira") vocabulary key'
     )
+
+
+# ---------------------------------------------------------------------------
+# Ticket 4af8 — the differ/apply CORE importer sites no longer import the vendor
+# field MAPPER; they receive it via dependency injection (a Backend-port
+# OutboundMapper/InboundMapper) from the orchestrator that owns the configured
+# backend. This gate pins that win: a regression that re-adds a module-level
+# `from ...adapters.jira.outbound_fields import _map_local_to_jira_fields` (or the
+# inbound `from rebar_reconciler.inbound_fields import _map_jira_to_local_fields`)
+# fails CI.
+#
+# The assertion is on MODULE-LEVEL imports only (via AST): a lazy import of the
+# NEUTRAL registry seam (`from rebar_reconciler._backend_registry import
+# select_backend`) inside a function — used by the injection fallback and by
+# apply_inbound's hard-delete re-create — is fine, because it names no vendor
+# mapper. Non-mapping helpers with no port equivalent (e.g. outbound_fields'
+# `_diff_fields` / `_extract_jira_field`, or inbound_fields' value maps) may still
+# be imported; only the mapper entrypoint is forbidden.
+#
+# reconcile_check.py is DELIBERATELY NOT covered here: it uses outbound_fields'
+# INTERNAL `_extract_jira_field` / `_assignee_matches` (not on the Backend port) via
+# a lazy `_load_sibling(...)` INSIDE its functions (not a module-level import), and
+# routing those internals through the port would over-expose vendor internals for no
+# behavioural gain. It stays on the lazy by-path loader and is out of scope for this
+# mapper-injection gate.
+_MAPPER_INJECTED = (
+    ("outbound_differ.py", "_map_local_to_jira_fields"),
+    ("inbound_differ.py", "_map_jira_to_local_fields"),
+    ("apply_inbound.py", "_map_local_to_jira_fields"),
+)
+
+
+def _module_level_imported_names(path: Path) -> set[str]:
+    """Return the set of symbol names imported by MODULE-LEVEL ``from X import ...``
+    statements (imports nested inside functions/classes are excluded)."""
+    tree = ast.parse(path.read_text())
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.name)
+    return names
+
+
+@pytest.mark.parametrize("filename,forbidden_mapper", _MAPPER_INJECTED)
+def test_differ_apply_core_does_not_import_vendor_mapper(
+    filename: str, forbidden_mapper: str
+) -> None:
+    """The differ/apply core receives the vendor field mapper by injection, so it must
+    NOT import the mapper entrypoint at module scope (ticket 4af8)."""
+    names = _module_level_imported_names(_REC / filename)
+    assert forbidden_mapper not in names, (
+        f"{filename} imports the vendor mapper {forbidden_mapper!r} at module scope — "
+        f"route it off the vendor mapper via the injected Backend-port mapper "
+        f"(outbound_mapper/inbound_mapper) supplied by the orchestrator instead."
+    )
+
+
+def _load_by_path(name: str, filename: str) -> ModuleType:
+    """Load a reconciler module standalone by path (the reconciler test convention)."""
+    spec = importlib.util.spec_from_file_location(name, _REC / filename)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault(name, mod)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _RecordingOutboundMapper:
+    """A fake OutboundMapper that returns a sentinel so we can prove the differ used
+    the INJECTED mapper (not a hidden vendor import)."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def map_local_to_remote(
+        self, ticket, binding_store=None, local_ticket_types=None, emit_detach_clear=False
+    ) -> dict:
+        self.calls.append(ticket)
+        return {"summary": "SENTINEL-FROM-INJECTED-MAPPER"}
+
+
+class _RecordingInboundMapper:
+    """A fake InboundMapper returning a sentinel status to prove injection is honored."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def map_remote_to_local(self, remote_fields) -> dict:
+        self.calls.append(remote_fields)
+        return {"status": "closed"}
+
+
+class _NeutralityStubBindingStore:
+    def __init__(self, bindings: dict[str, str] | None = None) -> None:
+        self._l2j = bindings or {}
+        self._j2l = {v: k for k, v in self._l2j.items()}
+
+    def get_jira_key(self, local_id):
+        return self._l2j.get(local_id)
+
+    def is_bound(self, local_id):
+        return local_id in self._l2j
+
+    def get_local_id(self, jira_key):
+        return self._j2l.get(jira_key)
+
+    def is_pending(self, local_id):
+        return False
+
+    def get_baseline(self, local_id):
+        return None
+
+
+def test_outbound_differ_uses_injected_mapper() -> None:
+    """A passed-in ``outbound_mapper`` is actually used by ``compute_outbound_mutations``
+    (proves the injection seam is wired, not bypassed by a hidden vendor call)."""
+    outbound_differ = _load_by_path("outbound_differ_neutrality", "outbound_differ.py")
+    fake = _RecordingOutboundMapper()
+    ticket = {
+        "ticket_id": "loc-1",
+        "title": "T",
+        "description": "d",
+        "status": "open",
+        "priority": 2,
+        "ticket_type": "task",
+        "assignee": "",
+        "tags": [],
+        "comments": [],
+        "deps": [],
+    }
+    result, _ = outbound_differ.compute_outbound_mutations(
+        [ticket],
+        {},
+        _NeutralityStubBindingStore(),
+        outbound_mapper=fake,
+    )
+    assert fake.calls, "the injected outbound_mapper was never called"
+    assert result[0].fields == {"summary": "SENTINEL-FROM-INJECTED-MAPPER"}
+
+
+def test_inbound_differ_uses_injected_mapper() -> None:
+    """A passed-in ``inbound_mapper`` is actually used by ``compute_inbound_mutations``."""
+    inbound_differ = _load_by_path("inbound_differ_neutrality", "inbound_differ.py")
+    fake = _RecordingInboundMapper()
+    bind = _NeutralityStubBindingStore({"loc-1": "DIG-1"})
+    local = {"ticket_id": "loc-1", "title": "T", "description": "d", "status": "open"}
+    _muts, _ = inbound_differ.compute_inbound_mutations(
+        {"DIG-1": {"summary": "T", "status": "Done"}},
+        bind,
+        {"loc-1": local},
+        inbound_mapper=fake,
+    )
+    assert fake.calls, "the injected inbound_mapper was never called"

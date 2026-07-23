@@ -22,12 +22,17 @@ import sys
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 # The Jira->local field/status translation layer lives in the sibling
 # ``inbound_fields`` leaf module (module-size split, epic 716f). Imported back
 # and re-exported here so ``inbound_differ.<symbol>`` attribute access (and the
-# config parity tests) keep resolving unchanged.
+# config parity tests) keep resolving unchanged. The Jira->local field MAPPER
+# (_map_jira_to_local_fields) is NO LONGER imported here (ticket 4af8): the vendor
+# mapper is injected as ``inbound_mapper`` (a Backend-port ``InboundMapper``) by the
+# orchestrator that owns the configured backend, so this core differ names no vendor
+# mapper. The remaining imports are non-mapping value maps / helpers with no Backend
+# -port equivalent, kept for attribute access + the config parity tests.
 from rebar_reconciler.inbound_fields import (  # noqa: F401
     _ADF_KEY_INBOUND,
     _JIRA_TO_LOCAL_PRIORITY,
@@ -37,9 +42,11 @@ from rebar_reconciler.inbound_fields import (  # noqa: F401
     _assignee_matches,
     _extract_jira_field_value,
     _load_adf,
-    _map_jira_to_local_fields,
     _normalize_jira_body,
 )
+
+if TYPE_CHECKING:
+    from rebar_reconciler._backend import InboundMapper
 
 # Reconciler loop-breaker marker (Gap 1). Outbound comments embed this
 # token; inbound passes filter any Jira comment whose body contains it
@@ -127,6 +134,8 @@ def _diff_jira_vs_local(
     jira_fields: dict[str, Any],
     local_ticket: dict[str, Any],
     binding_store: Any = None,
+    *,
+    inbound_mapper: InboundMapper | None = None,
 ) -> dict[str, Any]:
     """Compare Jira fields to local ticket. Return fields where Jira differs.
 
@@ -138,7 +147,16 @@ def _diff_jira_vs_local(
     ``local_ticket["parent_id"]``.  Unbound parent keys are omitted (not
     emitted as changes) so the next pass can retry once the parent is bound.
     """
-    jira_mapped = _map_jira_to_local_fields(jira_fields)
+    # Ticket 4af8: the remote->local mapper is injected. compute_inbound_mutations
+    # passes it down; a direct caller (unit test) that omits it falls back to the
+    # configured backend's mapper via the neutral registry seam (no vendor mapper is
+    # named in this core differ).
+    if inbound_mapper is None:
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        inbound_mapper = select_backend(load_config()).inbound
+    jira_mapped = inbound_mapper.map_remote_to_local(jira_fields)
     changed: dict[str, Any] = {}
 
     # Bug 36af: ticket_type is governed by an approved sync exception —
@@ -534,6 +552,8 @@ def compute_inbound_mutations(
     binding_store: BindingStoreProtocol,
     local_tickets_by_id: dict[str, dict[str, Any]],
     outbound_mutations: list[Any] | None = None,
+    *,
+    inbound_mapper: InboundMapper | None = None,
 ) -> tuple[list[InboundMutation], int]:
     """Detect Jira-side changes for bound tickets.
 
@@ -575,6 +595,17 @@ def compute_inbound_mutations(
             None or empty. Used by reconcile telemetry to emit the
             ``RECON: bidir_suppressed`` line without a second pass.
     """
+    # Ticket 4af8: the remote->local field mapper is injected via the Backend port.
+    # The orchestrator (run_differs) passes ``inbound_mapper=backend.inbound``. When a
+    # direct caller (e.g. an inbound-differ unit test) omits it, resolve the configured
+    # backend's mapper through the neutral registry seam — this names no vendor mapper
+    # in the differ itself and yields the same mapping the vendor delegate performs.
+    if inbound_mapper is None:
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        inbound_mapper = select_backend(load_config()).inbound
+
     mutations: list[InboundMutation] = []
     outbound_ctx = _build_outbound_context(outbound_mutations)
     suppression_count = 0
@@ -590,7 +621,12 @@ def compute_inbound_mutations(
             # Bound but local ticket missing — skip (may be deleted locally)
             continue
 
-        changed = _diff_jira_vs_local(jira_fields, local_ticket, binding_store=binding_store)
+        changed = _diff_jira_vs_local(
+            jira_fields,
+            local_ticket,
+            binding_store=binding_store,
+            inbound_mapper=inbound_mapper,
+        )
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
         link_mutations = _diff_links_inbound(
