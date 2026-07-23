@@ -336,6 +336,16 @@ def _verify_completion_inner(
     # recursion cap mid-run.
     if cfg.max_iterations < _VERIFY_MIN_STEPS:
         cfg = replace(cfg, max_iterations=_VERIFY_MIN_STEPS)
+    # Pin GREEDY decoding for the verifier (bug e458): an unpinned temperature runs at the
+    # provider default (~1.0), whose sampling variance flips borderline judgments — e.g. whether
+    # the agent's (fallible, free-form) search located a criterion's test — between runs on
+    # IDENTICAL input (proven: ad9f FAIL→PASS same-sha). Mirrors the plan-review Pass-2 verifier's
+    # greedy pin; an explicit operator REBAR_LLM_TEMPERATURE (cfg.temperature not None) still wins,
+    # exactly like the model / step-floor tuning above. This is a variance MITIGATION, not the root
+    # fix — the prompt guidance (search by ticket-id/exact-symbols, not regex/semantic phrases)
+    # addresses the mechanism directly.
+    if cfg.temperature is None:
+        cfg = replace(cfg, temperature=0.0)
     # Resolve the ticket type once (one local read; no network). graph default depends on
     # ticket type (epics verify across children).
     root = _reads.show_ticket(ticket_id, repo_root=repo_root)
