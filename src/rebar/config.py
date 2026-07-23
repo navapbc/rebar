@@ -60,18 +60,26 @@ from rebar._config_sources import _map_legacy_env as _map_legacy_env
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
 
-
 # Plan-review criteria authoring-guide deep-links (epic cite-stone-sea / WS10). A NARROW env-read
 # — the base URL for the generated guide's per-criterion anchors — NOT a typed TOML config key
 # (deep-links are a plan-review rendering concern, not core config surface).
+# The canonical hosted guide (pyproject [project.urls] Documentation points at the same tree). A
+# consumer install has no rebar ``docs/`` tree, so a repo-relative ``file://`` default produced a
+# dead link out of the box (client report §5); the hosted URL resolves for consumers, and GitHub
+# slugs a ``## <criterion-id>`` heading to ``#<criterion-id lower-cased>`` — the anchor form below.
+_DEFAULT_DOCS_URL = "https://github.com/navapbc/rebar/blob/main/docs/plan-review-criteria-guide.md"
+
+
 def plan_review_docs_url(explicit_root: str | os.PathLike[str] | None = None) -> str:
     """Base URL for the plan-review criteria authoring guide (no trailing ``#anchor``):
-    ``REBAR_DOCS_URL`` if set, else a repo-relative ``file://`` path to the generated
-    ``docs/plan-review-criteria-guide.md``."""
+    ``REBAR_DOCS_URL`` if set, else the canonical hosted guide. The default is deliberately
+    root-independent so coaching deep-links resolve from a consumer install (which has no rebar
+    ``docs/`` tree). ``explicit_root`` is accepted for signature stability but no longer consulted
+    for the default."""
     env = os.environ.get("REBAR_DOCS_URL", "").strip()
     if env:
         return env.rstrip("/")
-    return (repo_root(explicit_root) / "docs" / "plan-review-criteria-guide.md").as_uri()
+    return _DEFAULT_DOCS_URL
 
 
 def plan_review_guide_anchor(
