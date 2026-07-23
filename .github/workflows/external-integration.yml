@@ -129,11 +129,32 @@ jobs:
           # The external tier is inert unless this opt-in is set (a safety guard
           # against accidental billable calls); the job above already required a key.
           REBAR_RUN_EXTERNAL: "1"
+          # Durable token-usage record for this billable job (rebar.llm.usage_log). The
+          # runner appends one JSONL line per LLM call; the steps below summarize it into
+          # the job summary and upload the raw file. Step-level so ${{ runner.temp }} is
+          # in scope — a JOB-level env entry using runner.* is a parse-time startup
+          # failure (Bug 8002; see tests/unit/test_ci_actionlint_scope.py).
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
         # -p no:cacheprovider + a runner-temp basetemp mirror the main workflow.
         # The Langfuse trace test skips here (no LANGFUSE_HOST) — see langfuse-trace.
         run: >-
           pytest -m external tests/external -q
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Summarize LLM token usage → job summary
+        if: ${{ always() }}
+        env:
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
+        run: |
+          python -m rebar.llm.usage_log summarize "$REBAR_USAGE_LOG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload LLM token-usage log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: external-usage-log
+          path: ${{ runner.temp }}/usage.jsonl
+          if-no-files-found: ignore
 
   langfuse-trace:
     name: langfuse tracing round-trip (ephemeral self-hosted)

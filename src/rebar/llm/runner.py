@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
+from rebar.llm import usage_log
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
     _anthropic_cache_settings,
@@ -484,6 +485,10 @@ class PydanticAIRunner:
         # record cache efficacy into coverage/observability. Private key — non-breaking
         # for every existing consumer of the review_result/structured dict.
         result["_usage"] = usage
+        # Durable, opt-in spend record for the weekly billable CI jobs (no-op unless
+        # REBAR_USAGE_LOG is set) — the runner is the one chokepoint shared by both the
+        # external tier and the live prompt-eval, so a single sink covers both.
+        usage_log.record(usage, op=_call_label)
         return result
 
 
