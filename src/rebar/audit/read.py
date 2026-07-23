@@ -15,6 +15,7 @@ returned shape is the ``AuditTrail`` TypedDict below (a documented, stable contr
                                               # attestation); newest-first; each has reviewed_at
         "completion":   CompletionRecord|None,# None ONLY when BOTH attestation AND sidecar absent
         "code_reviews": list[dict],           # each {ticket_id, sidecars: list[dict]}
+        "plan_review_health": dict,            # current, non-persisted validity projection
     }
     CompletionRecord = {"attestation": dict|None, "sidecar": dict|None}
 """
@@ -22,7 +23,7 @@ returned shape is the ``AuditTrail`` TypedDict below (a documented, stable contr
 from __future__ import annotations
 
 import logging
-from typing import TypedDict
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,48 @@ class AuditTrail(TypedDict):
     plan_reviews: list[dict]
     completion: CompletionRecord | None
     code_reviews: list[dict]
+    plan_review_health: dict[str, Any]
+
+
+def unavailable_plan_review_health() -> dict[str, bool | str]:
+    """The one structured failure contract for all detailed health consumers."""
+    return {
+        "available": False,
+        "reason": "derived plan-review health unavailable",
+    }
+
+
+def plan_review_health(ticket: dict, *, repo_root=None) -> dict[str, Any]:
+    """Return the current structured health for a ticket's plan-review attestation.
+
+    Audit and detailed ticket views are observability surfaces, so an unavailable
+    validity calculation is explicit data rather than an exception.  The close gate
+    separately consumes the same ``compute_validity`` result and remains fail-closed.
+    """
+    try:
+        from rebar import signing
+        from rebar._engine_support import reads as ticket_reads
+        from rebar.llm.plan_review import attest
+
+        ticket_id = ticket.get("ticket_id") or ticket.get("id")
+        if not isinstance(ticket_id, str) or not ticket_id:
+            return unavailable_plan_review_health()
+        with ticket_reads.local_read_context():
+            verified = signing.verify_signature(ticket_id, kind="plan-review", repo_root=repo_root)
+            if (
+                not isinstance(verified, dict)
+                or verified.get("verified") is not True
+                or verified.get("verdict") != "certified"
+            ):
+                return unavailable_plan_review_health()
+            result = attest.compute_validity(verified, ticket, "plan-review", repo_root=repo_root)
+        health = result.get("health") if isinstance(result, dict) else None
+        if isinstance(health, dict):
+            return dict(health)
+        return unavailable_plan_review_health()
+    except Exception:  # noqa: BLE001 -- observability must not break detailed reads
+        logger.warning("plan-review health read failed; rendering unavailable", exc_info=True)
+        return unavailable_plan_review_health()
 
 
 def _completion_attestation(ticket_id: str, *, repo_root=None) -> dict | None:
@@ -153,6 +196,7 @@ def audit_trail(ticket_id: str, *, repo_root=None) -> dict:
     from rebar.llm.plan_review import sidecar as plan_sidecar
 
     ticket = rebar_show(ticket_id, repo_root=repo_root)
+    health = plan_review_health(ticket, repo_root=repo_root)
     plan_reviews = plan_sidecar.all_review_results(ticket_id, repo_root=repo_root)
 
     attestation = _completion_attestation(ticket_id, repo_root=repo_root)
@@ -170,6 +214,7 @@ def audit_trail(ticket_id: str, *, repo_root=None) -> dict:
         "plan_reviews": plan_reviews,
         "completion": completion,
         "code_reviews": code_reviews,
+        "plan_review_health": health,
     }
     return dict(trail)
 

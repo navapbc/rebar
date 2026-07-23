@@ -199,6 +199,49 @@ def _render_text(trail: dict) -> None:
             f"    - verdict={pr.get('verdict')} material={pr.get('material_fingerprint')}\n"
         )
 
+    if trail.get("plan_review_health"):
+        health = trail["plan_review_health"]
+    else:
+        from rebar.audit.read import unavailable_plan_review_health
+
+        health = unavailable_plan_review_health()
+    if health.get("available") is False:
+        sys.stdout.write(f"  plan_review_health: unavailable ({health.get('reason')})\n")
+    else:
+        enforcement = health.get("enforcement_status")
+        if enforcement not in ("enabled", "disabled"):
+            enforcement = "enabled" if health.get("enforced") else "disabled"
+        posture = (
+            "advisory; enforcement disabled"
+            if enforcement == "disabled" and health.get("advisory") is True
+            else "enforcement disabled"
+            if enforcement == "disabled"
+            else "enforced"
+        )
+        pin_status = health.get("pin_status", "unavailable")
+        related_material_status = health.get("related_material_status")
+        if related_material_status == "no-related-material" or (
+            related_material_status is None
+            and pin_status == "current"
+            and not health.get("targets")
+        ):
+            pin_status = "current (no related material)"
+        sys.stdout.write(f"  plan_review_health: {pin_status} ({posture})\n")
+        phase_line = (
+            "    phase: "
+            f"{health.get('signed_phase')} -> {health.get('required_phase')} "
+            f"({health.get('phase_status')})"
+        )
+        floor = health.get("effective_execution_floor")
+        if floor is not None:
+            phase_line += f", floor={float(floor):.2f}"
+        sys.stdout.write(phase_line + "\n")
+        for target in health.get("targets") or []:
+            target_line = "    {} {} {}\n".format(
+                target.get("canonical_id"), target.get("role"), target.get("pin_status")
+            )
+            sys.stdout.write(target_line)
+
     comp = trail.get("completion")
     if comp is None:
         sys.stdout.write("  completion: (none)\n")

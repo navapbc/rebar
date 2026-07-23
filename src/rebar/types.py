@@ -115,6 +115,7 @@ class TicketState(TypedDict):
     comments: NotRequired[list[Comment]]
     deps: NotRequired[list[Dep]]
     file_impact: NotRequired[list[FileImpactEntry]]
+    plan_review_health: NotRequired[Any | None]
     verify_commands: NotRequired[list[VerifyCommandEntry]]
     bridge_alerts: NotRequired[list[Any]]
     reverts: NotRequired[list[Any]]

@@ -294,9 +294,9 @@ LK="$("$RB" list | jq -S --arg t "$TASK" '.[]|select(.ticket_id==$t)|keys')"
 assert_eq '["managed_refs"]' \
     "$(jq -nc --argjson s "$SK" --argjson l "$LK" '($l - $s) | sort')" \
     "list adds exactly managed_refs over show"
-assert_eq '["comments","description","digest_freshness"]' \
+assert_eq '["comments","description","digest_freshness","plan_review_health"]' \
     "$(jq -nc --argjson s "$SK" --argjson l "$LK" '($s - $l) | sort')" \
-    "show adds exactly comments+description+digest_freshness over lean list"
+    "show adds exactly comments+description+digest_freshness+plan_review_health over lean list"
 run_rb show "$TASK"; assert_not_contains '"parent_status_uuid"' "internal key not leaked in show"
 assert_eq '[{"command":"echo","dd_id":"D1","dd_text":"t"}]' \
     "$("$RB" list | jq -c --arg t "$TASK" '.[]|select(.ticket_id==$t)|.verify_commands')" \

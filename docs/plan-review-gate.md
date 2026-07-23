@@ -872,6 +872,28 @@ the review hot path stays byte-identical and best-effort-safe.
 
 ## The CI rigor signal
 
+### Detailed derived plan-review health
+
+Detailed readers (`rebar audit show`, the audit page, default `rebar show`, and MCP
+`show_ticket`) expose the same **derived**, non-persisted `plan_review_health` payload.
+It is recomputed with `compute_validity` from the certified plan-review attestation;
+ordinary lists and ticket events intentionally do not gain this field. The payload includes
+the canonical id and normalized role of every pinned child/prerequisite, its pinned and
+current fingerprints, drift/missing state, enforcement posture, signed and required review
+phases, and the effective execution floor. A disabled pin rule reports observed drift as
+`advisory; enforcement disabled` without changing validity; an enabled rule is `enforced`
+and can invalidate it. A missing execution floor is absent from text displays, never shown as
+`0.00`.
+
+`legacy-unpinned` identifies an older attestation without phase/pin-era metadata, while
+`current-no-relationships` identifies a current attestation that deliberately recorded no
+related-ticket pins. A deleted related ticket is shown as `stale-pin-missing`; repair it by
+restoring/relinking the target as appropriate and running `rebar review-plan` again. Detailed
+read failures use one compact shape — `{available: false,
+reason: "derived plan-review health unavailable"}` — and never change a gate decision. Claim uses the
+normal freshness profile; close uses its close profile (implementation code may advance), but
+both retain material, phase, and enabled-pin checks.
+
 `rebar verify-signature <ticket>` certifies the attestation; a CI process treats a
 **certified plan-review signature at the current HEAD** as the "this plan was
 reviewed" predicate, and a **claimed-without-signature** (or force-claimed) ticket

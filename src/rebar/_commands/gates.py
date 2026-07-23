@@ -93,11 +93,14 @@ def close_plan_review_gate_check(
                 repo_root=repo_root,
                 profile=PlanValidityProfile.CLOSE,
             )
-        return {
+        result = {
             "ok": bool(validity.get("valid")),
             "verdict": str(validity.get("verdict", "unavailable")),
             "reason": str(validity.get("reason", "plan-review validity was unavailable")),
         }
+        if isinstance(validity.get("health"), dict):
+            result["health"] = validity["health"]
+        return result
     except Exception:  # noqa: BLE001 -- local signature/plan reads must fail closed
         record = {"event": "plan_review_close_gate_unavailable", "ticket_id": ticket_id}
         logger.warning(
