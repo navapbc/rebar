@@ -390,6 +390,7 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<
   idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
   bug close requires --class <value>: regression | plan_defect | env_integration | flaky | preexisting | not_a_bug | duplicate | escalated | undetermined.
   With the completion gate enabled, duplicate/not_a_bug/escalated skips verification only when this bug duplicates a live ticket or a live ticket supersedes this bug.
+  --ref=<ref>: Completion close gate: verify (and sign) against the committed tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit while your worktree stays at the epic tip; default HEAD.
 ```
 
 ### `unlink`
