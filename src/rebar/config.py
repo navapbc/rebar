@@ -24,6 +24,7 @@ from rebar._config_schema import (
     coerce_sparse,
     merge_sparse,
 )
+from rebar._config_schema import CodeHealthConfig as CodeHealthConfig
 from rebar._config_schema import CompactConfig as CompactConfig
 from rebar._config_schema import EnsureConfig as EnsureConfig
 from rebar._config_schema import JiraConfig as JiraConfig

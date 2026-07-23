@@ -114,6 +114,25 @@ def _as_str_tuple(v: Any, key: str) -> tuple[str, ...]:
     return tuple(x for x in items if x)
 
 
+def _as_str_list(v: Any, key: str) -> list[str]:
+    """A list of strings from a TOML array or comma-separated CLI override."""
+    return list(_as_str_tuple(v, key))
+
+
+def _as_str_dict(v: Any, key: str) -> dict[str, str]:
+    """A string mapping from a TOML table or JSON-object CLI override."""
+    if isinstance(v, str):
+        import json
+
+        try:
+            v = json.loads(v)
+        except json.JSONDecodeError:
+            raise ConfigError(f"{key}: expected a JSON object, got {v!r}") from None
+    if not isinstance(v, dict):
+        raise ConfigError(f"{key}: expected a table or JSON object, got {type(v).__name__}")
+    return {str(name): _as_str(value, key) for name, value in v.items()}
+
+
 def _as_choice(v: Any, key: str, choices: set[str]) -> str:
     s = str(v).strip().lower()
     if s not in choices:
@@ -532,6 +551,17 @@ class TrackerConfig:
 
 
 @dataclass
+class CodeHealthConfig:
+    """Inert-by-default analyzer selection and module-size policy."""
+
+    enabled: bool = False
+    scan_roots: list[str] = field(default_factory=list)
+    analyzers: dict[str, str] = field(default_factory=dict)
+    size_cap: int | None = None
+    size_near_fraction: float = 0.1
+
+
+@dataclass
 class Config:
     """The typed core configuration — defaults baked in; build with
     :meth:`from_mapping`. Secrets are NOT here (env/.env only)."""
@@ -549,6 +579,7 @@ class Config:
     scratch: ScratchConfig = field(default_factory=ScratchConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     ensure: EnsureConfig = field(default_factory=EnsureConfig)
+    code_health: CodeHealthConfig = field(default_factory=CodeHealthConfig)
 
     @classmethod
     def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
@@ -576,6 +607,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "scratch": ScratchConfig,
     "tracker": TrackerConfig,
     "ensure": EnsureConfig,
+    "code_health": CodeHealthConfig,
 }
 
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
@@ -681,6 +713,13 @@ _SECTIONS: dict[str, dict] = {
     "ensure": {
         "hint_interval_secs": lambda v, k: _as_int(v, k, minimum=0),
         "hint_enabled": lambda v, k: _as_bool(v, k),
+    },
+    "code_health": {
+        "enabled": lambda v, k: _as_bool(v, k),
+        "scan_roots": lambda v, k: _as_str_list(v, k),
+        "analyzers": lambda v, k: _as_str_dict(v, k),
+        "size_cap": lambda v, k: None if v is None else _as_int(v, k, minimum=0),
+        "size_near_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
     },
 }
 

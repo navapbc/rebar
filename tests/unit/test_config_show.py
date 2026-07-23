@@ -187,7 +187,7 @@ def test_config_cli_text_aligns_long_values(tmp_path: Path, capsys: pytest.Captu
     show_config.config_cli(["--root", str(p)])
     out = capsys.readouterr().out
     data_rows = [ln for ln in out.splitlines() if " = " in ln and ln.endswith("]")]
-    bracket_cols = {ln.index("[") for ln in data_rows}
+    bracket_cols = {ln.rindex("[") for ln in data_rows}
     assert len(bracket_cols) == 1  # all source brackets aligned to one column
 
 
