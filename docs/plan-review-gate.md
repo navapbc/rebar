@@ -36,6 +36,22 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    plan-review attestation. This is where the cost + latency live; run it on a
    claim-block or from CI.
 
+   **Not-claimable fast-fail (no LLM).** Because the review's only product is a claim
+   attestation, `review-plan` first checks — cheaply, with no LLM or network — whether
+   the ticket can be claimed at all. If it **can't** — its status is terminal/paused
+   (`closed` / `idea` / `blocked`), or it is `open` but still blocked by an **unclosed
+   dependency** (`ready_to_work` is false) — the review returns immediately with an
+   unsigned `INDETERMINATE` verdict (`coverage.llm_ran = false`, an `indeterminate`
+   finding `ticket-not-claimable`, CLI exit `2`) instead of spending a billable review.
+   Delaying the review until the ticket is claimable also means the plan is assessed
+   against the environment it will actually execute in — a prerequisite closing may move
+   both the plan material and the codebase, which would otherwise invalidate an early
+   review anyway (see [Review dependencies FIRST](#review-dependencies-first--review-in-dependency-graph-order)).
+   An `in_progress` ticket is **never** fast-failed (it is already being worked, so
+   drift/execution re-reviews stay legitimate), and `--force` (library `force=True`)
+   bypasses the check to review a not-yet-claimable ticket anyway. Bugs and session_logs
+   are exempt from the whole gate and unaffected.
+
 2. **The start-work gate** — when `verify.require_plan_review_for_claim` is on,
    starting work on a ticket (**any** entry into `in_progress` — via `claim`, a plain
    `transition <id> open in_progress`, a `blocked` resume, or reactivating a `closed`
@@ -417,6 +433,13 @@ The practical consequence — **review the dependency graph bottom-up, not in pa
 - When a review is invalidated by a genuine dependency change, a fresh `rebar review-plan`
   **is** required (the recorded verdict is stale). Only a nothing-changed transient is
   recoverable with `rebar sign-review <id>`.
+
+The gate now **enforces the first rule** rather than just advising it: reviewing a ticket that
+is still blocked by an **unclosed** `depends_on` / `blocks` prerequisite is
+[fast-failed](#two-surfaces) (`INDETERMINATE`, no LLM) instead of producing a `PASS` that a
+prerequisite closing would immediately invalidate. So the natural order is forced — close a
+ticket's prerequisites, *then* review it. (Use `--force` only when you deliberately want to
+review a not-yet-claimable plan; expect to re-review once the prerequisites land.)
 
 `next-batch` returns a conflict-aware, dependency-ready batch; prefer it (and plain dependency
 order) over ad-hoc parallel review of related tickets.

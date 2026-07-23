@@ -421,6 +421,12 @@ def review_plan(
     session_logs are exempt (PASS, runner=exempt). Raises only on a hard
     context-assembly failure; an unavailable LLM degrades to a DET-only review.
 
+    A ticket that is not yet claimable (status closed/idea/blocked, or ``open`` but
+    blocked by an unclosed dependency) is FAST-FAILED with no LLM — an unsigned
+    INDETERMINATE verdict — since the review's only product is a claim attestation the
+    ticket cannot use yet; ``in_progress`` is never fast-failed and ``force=True`` bypasses
+    the gate (see :mod:`rebar.llm.plan_review.claimability`).
+
     ``ref``/``source`` select the code read-root (attested snapshot at the pinned SHA by
     default; ``local`` reads the in-place checkout). Verdict production runs through the v3
     engine workflow (``gates/plan-review.yaml``) and is SIGNED by this unchanged wrapper.
@@ -508,6 +514,15 @@ def _run_plan_review(
     repo_root,
     force: bool = False,
 ) -> dict[str, Any]:
+    from . import claimability
+
+    # Fast-fail (no LLM) BEFORE any context assembly when the ticket cannot be claimed
+    # anyway — see claimability.not_claimable_verdict. `--force` bypasses this gate.
+    if not force:
+        not_claimable = claimability.not_claimable_verdict(ticket_id, cfg=cfg, repo_root=repo_root)
+        if not_claimable is not None:
+            return not_claimable
+
     # Snapshot all plan-material relations before any path can reach an LLM
     # preflight/probe.  The same value is threaded into signing so one review does
     # exactly one store-wide reduction.
@@ -533,46 +548,23 @@ def _run_plan_review(
             "reference": exc.reference,
         }
         logger.error("plan relation snapshot failed: %s", record, extra=record)
-        error_remediation = (
-            "Repair or remove the unreadable plan relationship, then rerun "
-            "`rebar review-plan`; no plan-review attestation was signed."
-        )
-        return {
-            "verdict": "INDETERMINATE",
-            "ticket_id": exc.canonical_id or ticket_id,
-            "ticket_type": "",
-            "blocking": [],
-            "advisory": [],
-            "coaching": [],
-            "overflow": [],
-            "indeterminate": [
-                {
-                    "id": "plan-relation-snapshot-error",
-                    "reason": exc.reason,
-                    "canonical_id": exc.canonical_id,
-                    "reference": exc.reference,
-                    "remediation": error_remediation,
-                }
-            ],
-            "dropped": [],
-            "coverage": {
-                "llm_ran": False,
-                "plan_relation_snapshot_error": record,
-                "counts": {
-                    "blocking": 0,
-                    "advisory_surfaced": 0,
-                    "advisory_overflow": 0,
-                    "dropped": 0,
-                    "indeterminate": 1,
-                },
+        return claimability.indeterminate_verdict(
+            exc.canonical_id or ticket_id,
+            ticket_type="",
+            finding={
+                "id": "plan-relation-snapshot-error",
+                "reason": exc.reason,
+                "canonical_id": exc.canonical_id,
+                "reference": exc.reference,
             },
-            "signature": {"signed": False, "reason": exc.reason},
-            "sidecar_emitted": False,
-            "runner": cfg.runner,
-            "model": cfg.model,
-            "material_fingerprint": None,
-            "remediation": error_remediation,
-        }
+            coverage_extra={"plan_relation_snapshot_error": record},
+            signature_reason=exc.reason,
+            remediation=(
+                "Repair or remove the unreadable plan relationship, then rerun "
+                "`rebar review-plan`; no plan-review attestation was signed."
+            ),
+            cfg=cfg,
+        )
 
     initial_generation = generation.from_snapshot(review_snapshot)
 

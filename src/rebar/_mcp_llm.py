@@ -196,6 +196,13 @@ def register_llm_tools(mcp, ctx) -> None:
         attestation, the review SHORT-CIRCUITS (no LLM call) and reuses it; pass
         ``force=True`` to bypass that and force a full re-review.
 
+        NOT-CLAIMABLE FAST-FAIL (no LLM): if the ticket cannot be claimed yet — status
+        ``closed``/``idea``/``blocked``, or ``open`` but still blocked by an unclosed
+        dependency — it returns an unsigned INDETERMINATE verdict (``coverage.llm_ran=false``,
+        an ``indeterminate`` finding ``ticket-not-claimable``) instead of a billable review,
+        since the review's only product is a claim attestation the ticket cannot use yet.
+        ``in_progress`` tickets are never fast-failed and ``force=True`` bypasses this too.
+
         ``source=attested`` (default) reviews a snapshot pinned at ``ref`` (default
         ``origin/main``) and binds that SHA into the attestation so the claim gate re-hashes the
         SAME basis; ``source=local`` reviews the in-place checkout. ``REBAR_ROOT`` only locates

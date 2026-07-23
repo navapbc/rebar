@@ -31,7 +31,10 @@ during the normal ticket lifecycle (see the project guide / `AGENTS.md`):
 - **Plan-review gate** — a ticket needs a passing plan review *before it can be
   claimed* (`open → in_progress`). Run it with `rebar review-plan <id>` (MCP
   `review_plan`). A BLOCK verdict must be remediated and re-run; even a PASS asks you
-  to triage advisory findings.
+  to triage advisory findings. A ticket that is **not yet claimable** — status
+  `closed`/`idea`/`blocked`, or `open` but still blocked by an unclosed dependency —
+  fast-fails to INDETERMINATE **without running the LLM** (no attestation): settle its
+  prerequisites first, or pass `--force` to review it anyway.
 - **Completion-verification gate** — closing a work ticket runs the completion
   verifier; a FAIL (or an unavailable LLM) blocks the close, and a PASS that is also
   `certifiable` is signed onto the ticket as the attestation that its criteria are met

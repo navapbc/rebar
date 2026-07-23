@@ -40,6 +40,11 @@ across a changed dependency. So review (and settle) a ticket's prerequisites and
 **before** the ticket itself, and **don't review a ticket and its dependencies in parallel**:
 a child moving mid-review invalidates the epic's review and wastes the LLM run. Prefer
 `next-batch` (dependency-ready, conflict-aware) over ad-hoc parallel review of related tickets.
+This is now **enforced, not just advised**: if you run `review-plan` on a ticket that is still
+blocked by an **unclosed** `depends_on`/`blocks` prerequisite (or on a `closed`/`idea`/`blocked`
+ticket), it **fast-fails without running the LLM** — an unsigned `INDETERMINATE` (exit `2`),
+no attestation — so nothing gates the claim yet. Close the prerequisites first, then review.
+`--force` reviews a not-yet-claimable plan anyway (expect to re-review once they land).
 
 ## Leaf vs container decides which sections you need
 
