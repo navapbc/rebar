@@ -209,6 +209,23 @@ class SupportsLinks(Protocol):
 
     def get_issuelinks_map(self, project_key: str) -> dict[str, Any]: ...
 
+    def map_remote_links(self, remote_fields: dict[str, Any]) -> list[tuple[str | None, str, str]]:
+        """Canonicalize a remote issue's raw link payload into the core's relation
+        vocabulary (ticket eefd). Returns one entry per distinct
+        ``(opaque_vendor_type, remote_key)`` pair: ``(relation, remote_key,
+        opaque_vendor_type)``. ``relation`` is ``None`` when the vendor link type has
+        no canonical rebar relation (the entry is still returned — carrying its
+        remote key + vendor type — so core never mistakes an unmapped link type for
+        "absent" and never removes it)."""
+        ...
+
+    def link_payload_for_relation(self, relation: str) -> tuple[str, bool] | None:
+        """Map a canonical rebar ``relation`` to this backend's outbound link payload
+        ``(opaque_vendor_type, swap_endpoints)`` (ticket eefd), or ``None`` when the
+        relation has no reliable vendor link type (core skips emitting an ADD for
+        it)."""
+        ...
+
 
 @runtime_checkable
 class SupportsComments(Protocol):
