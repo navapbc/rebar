@@ -18,6 +18,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 OUTBOUND_DIFFER_PATH = RECONCILER_DIR / "outbound_differ.py"
@@ -82,7 +84,7 @@ def test_session_log_in_excluded_sync_types(reconciler_config: ModuleType) -> No
 
 def test_session_log_absent_from_local_to_jira_type(outbound_differ: ModuleType) -> None:
     """Leak-loud invariant: session_log must NOT have a Jira issue-type mapping."""
-    assert "session_log" not in outbound_differ._LOCAL_TO_JIRA_TYPE
+    assert "session_log" not in _of._LOCAL_TO_JIRA_TYPE
 
 
 def test_unbound_session_log_produces_no_mutation(outbound_differ: ModuleType) -> None:

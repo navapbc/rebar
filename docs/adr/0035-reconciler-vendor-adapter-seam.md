@@ -135,6 +135,25 @@ never diffs — it reads the remote (transport + inbound map) and enacts a decid
 (outbound map + sanitize + transport). This keeps convergence logic single-sourced in the
 neutral core.
 
+> **Canonical-comparison corollary (the core diffs in LOCAL shape).** Because the local
+> ticket is the canonical model, the core compares in local shape and the port translates
+> only at the boundaries: the core canonicalizes the remote snapshot via `InboundMapper`
+> BEFORE diffing (mirroring the inbound differ), produces a `changed` set keyed by LOCAL
+> field names, and maps that back to vendor field shapes via `OutboundMapper` only at the
+> emission boundary. A vendor shape therefore crosses the core solely as an opaque payload
+> produced/consumed at a port call — a core differ imports nothing from `adapters.*` and
+> names no raw vendor snapshot key. The arbitration **baseline** is likewise canonicalized
+> at READ time (storage stays vendor-shaped at rest), and the `InboundMapper` is
+> partial-tolerant so a stored `_BASELINE_FIELDS` subset maps only the keys it carries.
+> Two vendor operations the field diff still needs are reached only through the port —
+> `OutboundMapper.map_fields_to_remote` (field-name reconciliation + value/rich-text
+> mapping of the changed subset) and `OutboundMapper.resolve_assignee` (the account
+> resolver fast-path). **Delivery:** the outbound-UPDATE **FIELD** diff and the **BASELINE**
+> read are canonicalized here (ticket `625b`, adding the `assignee_identity` /
+> `reporter_identity` / `remote_parent_id` canonical `InboundMapper` keys); the **LINK**
+> diff is canonicalized under sibling ticket `eefd`. Labels/comments/links remain read from
+> the raw snapshot by their own capability-diff paths — only the field path is canonical.
+
 **3. Role Protocols behind one `Backend` facade.** A backend is a `Backend` object exposing
 five required role Protocols, each derived from the de-facto surface the core already calls:
 

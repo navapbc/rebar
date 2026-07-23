@@ -508,6 +508,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
             dropped_field_sink=dropped_field_sink,
         ),
         outbound_mapper=backend.outbound,
+        inbound_mapper=backend.inbound,
     )
     _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
     sync_logger.log(

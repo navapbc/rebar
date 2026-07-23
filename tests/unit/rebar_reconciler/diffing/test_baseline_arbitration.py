@@ -19,6 +19,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
@@ -93,7 +95,7 @@ def test_conflict_keys_on_baseline(differ):
     Jira both differ from the baseline ancestor -> conflict recorded."""
     store = _FakeStore({"description": "D"})  # true ancestor: neither side matches
     conflict_sink: list[tuple[str, str]] = []
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
@@ -118,7 +120,7 @@ def test_dryrun_arbitration_pinned_to_baseline(differ):
     (e.g. reverting to prev_snapshot arbitration) flips this pinned decision.
     """
     store = _FakeStore({"description": "local-edit"})
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
@@ -133,7 +135,7 @@ def test_summary_asymmetry_never_suppressed(differ):
     """Pinned: ``summary`` is not in _INBOUND_MIRRORED_FIELDS, so a local title edit
     is ALWAYS emitted even when the local title == the baseline summary."""
     store = _FakeStore({"summary": "SAME", "description": "D"})
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(title="SAME", description="D"),  # local title == baseline summary
         _jira(summary="jira-changed", description="D"),
         binding_store=store,
@@ -149,7 +151,7 @@ def test_none_baseline_local_wins(differ):
     field is emitted and NO both-sides conflict is recorded."""
     store = _FakeStore(None)
     conflict_sink: list[tuple[str, str]] = []
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
@@ -169,7 +171,7 @@ def test_cold_start_recon_fires_for_confirmed_none_baseline(differ, capsys):
     """A CONFIRMED binding whose baseline is still None is in the warm-up window:
     emit exactly one ``RECON: baseline_cold_start local_id=<id>`` line to stderr."""
     store = _FakeStore(None, bound=True, pending=False)
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
@@ -185,7 +187,7 @@ def test_cold_start_recon_fires_for_confirmed_none_baseline(differ, capsys):
 def test_cold_start_recon_silent_once_baseline_exists(differ, capsys):
     """No cold-start line once a baseline exists for the binding."""
     store = _FakeStore({"description": "D"}, bound=True, pending=False)
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
@@ -199,7 +201,7 @@ def test_cold_start_recon_silent_once_baseline_exists(differ, capsys):
 def test_cold_start_recon_silent_for_pending_binding(differ, capsys):
     """A still-PENDING binding (not yet confirmed) is not counted as cold-start."""
     store = _FakeStore(None, bound=True, pending=True)
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         binding_store=store,
