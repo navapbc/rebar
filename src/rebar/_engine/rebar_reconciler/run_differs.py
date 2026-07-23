@@ -227,11 +227,12 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     )
 
     _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
-    _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe)
-    # Ticket 4af8: obtain the configured backend ONCE and thread its role Protocols into
-    # both differ phases (transport for the live-comment fetch; .outbound/.inbound as the
-    # injected field mappers) so the core differs name no vendor mapper.
+    # Ticket 4af8/aff0: obtain the configured backend ONCE and thread its role Protocols
+    # into both differ phases (transport for the live-comment fetch; .outbound/.inbound as
+    # the injected field mappers) plus the inbound-probe dispatch (.probe_remote, when the
+    # backend advertises SupportsAbsenceProbe) so the core differs name no vendor mapper.
     backend = _load_reconcile_backend()
+    _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe, backend)
     outbound_raw, absent_alive_fields, outbound_diff_client = _run_differs_outbound(
         ctx, mutations, backend
     )
@@ -345,13 +346,21 @@ def _run_differs_report_schema_drift(mutations, skip_invariant_filing, invariant
             )
 
 
-def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe) -> None:
-    """Inbound-probe dispatch phase: route (inbound, probe) mutations, append follow-ons."""
+def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe, backend) -> None:
+    """Inbound-probe dispatch phase: route (inbound, probe) mutations, append follow-ons.
+
+    ``backend`` is the configured :class:`Backend` (ticket aff0). When it advertises
+    ``SupportsAbsenceProbe`` the probe is dispatched through ``backend.probe_remote``;
+    otherwise the mutation is classified UNREACHABLE with a ``backend_lacks_absence_probe``
+    reason (no vendor mechanics live in this neutral module).
+    """
     # Inbound-probe dispatch: any (inbound, probe) Mutation emitted by the
-    # differ is routed through the live inbound_probe classifier, then
+    # differ is routed through the backend's absence-probe capability, then
     # converted into a branch-specific follow-on (or a log-only outcome) via
     # route_inbound_probe. Follow-on mutations are appended in-place so the
     # applier dispatches them in the same pass.
+    from rebar_reconciler._backend import SupportsAbsenceProbe
+
     mut_mod = _load("reconcile_mutation", "mutation.py")
     probe_mod = _load("inbound_probe", "inbound_probe.py")
     probe_follow_ons: list = []
@@ -365,15 +374,22 @@ def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe) -> None:
             continue
         if action != mut_mod.MutationAction.probe:
             continue
-        try:
-            probe_result = probe_mod.probe(_m.target)
-        except probe_mod.ProbeConfigError as exc:
-            # Missing env → treat as unreachable; do not abort the pass.
-            print(  # noqa: T201
-                f"inbound_probe: skipped key={_m.target} reason=config_error err={exc}",
-                file=sys.stderr,
+        if isinstance(backend, SupportsAbsenceProbe):
+            try:
+                probe_result = backend.probe_remote(_m.target)
+            except probe_mod.ProbeConfigError as exc:
+                # Missing env → treat as unreachable; do not abort the pass.
+                print(  # noqa: T201
+                    f"inbound_probe: skipped key={_m.target} reason=config_error err={exc}",
+                    file=sys.stderr,
+                )
+                continue
+        else:
+            probe_result = probe_mod.ProbeResult(
+                probe_mod.ProbeBranch.UNREACHABLE,
+                _m.target,
+                {"reason": "backend_lacks_absence_probe"},
             )
-            continue
         follow_ons = route_inbound_probe(_m, probe_result)
         if follow_ons:
             probe_follow_ons.extend(follow_ons)

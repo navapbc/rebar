@@ -208,6 +208,21 @@ class SupportsIncremental(Protocol):
     def search_incremental(self, project_key: str, since: str) -> list[dict[str, Any]]: ...
 
 
+@runtime_checkable
+class SupportsAbsenceProbe(Protocol):
+    """A backend that can probe a remote item that vanished from the working set.
+
+    Core dispatches an (inbound, probe) Mutation only when ``isinstance(backend,
+    SupportsAbsenceProbe)``; a backend that does not implement this is never asked.
+    """
+
+    def probe_remote(self, remote_id: str) -> Any:
+        """Probe the remote item and classify it. Returns an
+        ``inbound_probe.ProbeResult`` (typed ``Any`` here to keep this module
+        pure stdlib + typing, with no import of the vocabulary module)."""
+        ...
+
+
 # ---------------------------------------------------------------------------
 # The Backend facade
 # ---------------------------------------------------------------------------
