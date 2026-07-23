@@ -15,6 +15,8 @@ Heavy capabilities live behind extras and are imported lazily, so ``import rebar
   * ``[grounding]`` — the code-grounding oracle's in-process structural parsing
     (tree-sitter); the contract + harness are stdlib-only, this extra adds only the
     in-process binding run inside the fail-open worker boundary.
+  * ``[metrics]`` — code-health analysis through the lazily imported lizard library;
+    scc and jscpd remain external command-line tools detected at runtime.
 
 ``guard_import`` is the single chokepoint that turns a missing extra into ONE
 clear, actionable error naming the exact ``pip install`` — instead of an opaque
@@ -42,6 +44,7 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "the contract + harness are stdlib-only; this extra adds the in-process binding "
         "run inside the fail-open worker boundary",
     ),
+    "metrics": ("lizard", "code-health metrics analyzers"),
 }
 
 

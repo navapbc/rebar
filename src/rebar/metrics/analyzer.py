@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from rebar._optional import OptionalDependencyError, guard_import
 from rebar.metrics.registry import Unavailable
 
 
@@ -29,6 +30,15 @@ class Analyzer(Protocol):
 
 
 ANALYZERS: dict[str, Analyzer] = {}
+
+
+def load_lizard(*, accruing_since: str) -> Any | Unavailable:
+    """Load the optional lizard module, or report why it is unavailable."""
+
+    try:
+        return guard_import("lizard", extra="metrics")
+    except OptionalDependencyError as exc:
+        return Unavailable(reason=str(exc), accruing_since=accruing_since)
 
 
 def resolve_analyzer(language: str) -> Analyzer | None:
