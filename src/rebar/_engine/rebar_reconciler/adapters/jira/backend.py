@@ -75,6 +75,51 @@ class JiraBackend:
         self.sanitizer = _JiraSanitizer()
         self.identity = JiraIdentityConvention()
 
+    # --- project accessors (ticket 97f2/bbf1) ---
+    @property
+    def project(self) -> str:
+        """Effective write/create project, DIG-defaulted to match the create
+        client (bug 4fa9). Resolved from settings, never the transport, so a
+        JiraBackend built with a fake transport still answers."""
+        from rebar_reconciler.adapters.jira import acli_subprocess
+
+        return acli_subprocess.resolve_jira_settings(project_default="DIG").project
+
+    @property
+    def query_project(self) -> str:
+        """Configured read/query project WITHOUT the create-time default — empty
+        when unset so the fetcher fails closed (bug 626d)."""
+        from rebar_reconciler.adapters.jira import acli_subprocess
+
+        return acli_subprocess.resolve_jira_settings().project
+
+    def assert_env_ready(self) -> None:
+        """Fail-fast when a connection essential (JIRA_URL / JIRA_USER /
+        JIRA_API_TOKEN) is missing, BEFORE the transport is used for bootstrap-band
+        execution. Preserves the pre-97f2 ``build_acli_client_from_env`` contract:
+        a clear error naming the missing var(s) rather than a cryptic downstream
+        failure — raises the neutral :class:`BackendEnvError` (subclasses
+        ``RuntimeError``)."""
+        from rebar_reconciler._backend import BackendEnvError
+        from rebar_reconciler.adapters.jira import acli_subprocess
+
+        settings = acli_subprocess.resolve_jira_settings(project_default="DIG")
+        missing = [
+            name
+            for name, value in (
+                ("JIRA_URL", settings.url),
+                ("JIRA_USER", settings.user),
+                ("JIRA_API_TOKEN", settings.api_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise BackendEnvError(
+                f"missing JIRA_* configuration: {', '.join(missing)} "
+                "(set via env or [tool.rebar.jira]; JIRA_API_TOKEN is env-only) "
+                "(required to build the backend transport for bootstrap band execution)"
+            )
+
     # --- capability: SupportsLinks (delegates to transport) ---
     def set_relationship(
         self, from_id: str, to_id: str, link_type: str = "Blocks"

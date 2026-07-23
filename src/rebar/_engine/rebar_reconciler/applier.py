@@ -596,14 +596,6 @@ def _apply_batch(
     # on every CREATE — bug 4fa9-0846-519e-4c30), so no inline construction is needed.
     client = _load_acli()
 
-    # Resolve the configured project (project_default="DIG", matching the backend
-    # factory) for the downstream cross-project safety guard (bug 626d). Read via the
-    # stable acli_subprocess floor rather than the transport so a test fake without a
-    # jira_project attribute still works.
-    from rebar_reconciler.adapters.jira import acli_subprocess
-
-    _s = acli_subprocess.resolve_jira_settings(project_default="DIG")
-
     mutations_with_outcomes: list[dict] = []
 
     # Load concurrency module once (used both in the fast path and the main loop)
@@ -629,20 +621,31 @@ def _apply_batch(
             _handle_failed_write_result(write_result, pass_id)
         return manifest_path
 
+    # Resolve the configured project scope for the cross-project safety guard
+    # (bug 626d) via the Backend port's ``project`` (ticket 97f2/bbf1) — the
+    # DIG-defaulted write scope matches the create client. Read off the backend
+    # (not the transport) so a test fake transport without a jira_project
+    # attribute still works. Resolved HERE (past the empty-mutations fast path)
+    # so a zero-mutation pass builds no extra backend.
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    _project = select_backend(load_config()).project
+
     # Cross-project safety guard (bug 626d): refuse — BEFORE issuing any Jira
     # write — to push outbound updates/deletes at issues outside the configured
     # jira.project. Stale bindings/labels from a prior sync to another project
     # would otherwise silently mutate the wrong project's issues. Fail-closed:
     # abort the whole pass (no partial writes) so a misconfiguration cannot leak.
-    offenders = _cross_project_targets(mutations, _s.project)
+    offenders = _cross_project_targets(mutations, _project)
     if offenders:
         sample = ", ".join(f"{k}(→{p})" for k, p in offenders[:5])
         more = " …" if len(offenders) > 5 else ""
         raise CrossProjectTargetError(
             f"refusing to apply {len(offenders)} outbound mutation(s) targeting a "
-            f"Jira project other than configured {_s.project!r}: {sample}{more}. "
+            f"Jira project other than configured {_project!r}: {sample}{more}. "
             f"The store carries bindings/labels for another project; re-target it to "
-            f"{_s.project!r} (clear stale bindings + strip foreign id labels) before "
+            f"{_project!r} (clear stale bindings + strip foreign id labels) before "
             f"syncing — see docs/jira-sync-setup.md."
         )
 

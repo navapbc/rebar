@@ -48,10 +48,11 @@ def build_acli_client_from_env() -> Any:
     (the no-arg constructor was the root cause of the bands' production
     crash before this helper existed).
 
-    S4: the transport is obtained from the configured backend
-    (``select_backend(load_config()).transport``) rather than constructed
-    inline, but the fail-fast missing-env guard is preserved AHEAD of backend
-    selection so an absent required var still raises the clear RuntimeError.
+    Ticket 97f2/bbf1: the transport is obtained from the configured backend
+    (``select_backend(load_config()).transport``) and the fail-fast missing-env
+    guard is delegated to the backend's neutral ``assert_env_ready()`` — so this
+    core module imports NO ``adapters.jira`` symbol while preserving the exact
+    RuntimeError contract (same message naming the missing JIRA_* var(s)).
 
     Returns:
         The configured backend's transport (a ``TicketTransport``, i.e. an
@@ -62,31 +63,10 @@ def build_acli_client_from_env() -> Any:
     """
     from rebar.config import load_config
     from rebar_reconciler._backend_registry import select_backend
-    from rebar_reconciler.adapters.jira import acli_subprocess
 
-    # url/user/project resolve through the typed config (JIRA_URL/JIRA_USER/
-    # JIRA_PROJECT env override the [tool.rebar.jira] file) via the stable
-    # acli_subprocess floor; the secret api_token is env-only. All three connection
-    # essentials are still REQUIRED (env or config) — checked here, BEFORE backend
-    # selection, to preserve the pre-S4 fail-fast contract.
-    settings = acli_subprocess.resolve_jira_settings(project_default="DIG")
-    missing = [
-        name
-        for name, value in (
-            ("JIRA_URL", settings.url),
-            ("JIRA_USER", settings.user),
-            ("JIRA_API_TOKEN", settings.api_token),
-        )
-        if not value
-    ]
-    if missing:
-        raise RuntimeError(
-            f"missing JIRA_* configuration: {', '.join(missing)} "
-            "(set via env or [tool.rebar.jira]; JIRA_API_TOKEN is env-only) "
-            "(required to build the backend transport for bootstrap band execution)"
-        )
-
-    return select_backend(load_config()).transport
+    backend = select_backend(load_config())
+    backend.assert_env_ready()
+    return backend.transport
 
 
 def verify_attested_commit(sha: str, allowlist: list[str], repo_root: Path | None = None) -> bool:

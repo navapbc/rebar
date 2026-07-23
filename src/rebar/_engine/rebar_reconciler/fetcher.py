@@ -372,13 +372,15 @@ def _build_snapshot(
     # TicketTransport, i.e. an AcliClient carrying its resolved connection settings).
     client = _load_acli()
 
-    # Resolve the project key for JQL scoping via the stable acli_subprocess floor
-    # WITH NO default (bug 626d): an absent/invalid project must raise in jql_active()
-    # to fail the pass closed rather than searching all projects — so we deliberately
-    # do NOT read client.jira_project (which now defaults to "DIG").
-    from rebar_reconciler.adapters.jira import acli_subprocess
+    # Resolve the project key for JQL scoping via the Backend port's
+    # ``query_project`` (ticket 97f2/bbf1) — the UN-defaulted configured project:
+    # an absent/invalid value must raise in jql_active() to fail the pass closed
+    # rather than searching all projects, so we deliberately do NOT read
+    # client.jira_project (which now defaults to "DIG").
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
 
-    _s = acli_subprocess.resolve_jira_settings()
+    _query_project = select_backend(load_config()).query_project
 
     # Lazy load to avoid a circular at module-load time (alert_store is leaf).
     alert_store = _load_alert_store()
@@ -394,8 +396,8 @@ def _build_snapshot(
     # raises in jql_active(), failing the pass closed rather than searching all
     # projects.
     queries: tuple[tuple[str, int | None], ...] = (
-        (jql_active(_s.project), None),
-        (jql_done_recent(_s.project), _DONE_RECENT_CAP),
+        (jql_active(_query_project), None),
+        (jql_done_recent(_query_project), _DONE_RECENT_CAP),
     )
 
     for jql, cap in queries:
@@ -438,9 +440,7 @@ def _build_snapshot(
     try:
         # Project key: the configured jira.project (config file, overridden by the
         # JIRA_PROJECT env), else derived from the first snapshot key ("DIG-123" → "DIG").
-        from rebar_reconciler.adapters.jira import acli_subprocess
-
-        project_key = acli_subprocess.resolve_jira_settings().project
+        project_key = _query_project
         if not project_key and snapshot:
             first_key = next(iter(snapshot))
             project_key = first_key.rsplit("-", 1)[0] if "-" in first_key else ""
