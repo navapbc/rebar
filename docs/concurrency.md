@@ -127,7 +127,10 @@ are), so claiming a leaf task can be **blocked by the parent's missing/stale
 attestation**, and the error names the **parent** as the cause. Earn the parent's
 attestation (`rebar review-plan <parent>`) — or claim the parent yourself first —
 before claiming the child, or pass `--force`, which propagates up the cascade and
-bypasses the gate at **each** level with an audit note. The same "the cascaded
+bypasses the gate at **each** level with an audit note. Note that if the parent is
+itself **not yet claimable** (its own prerequisites are still open), `review-plan
+<parent>` fast-fails without running the LLM and cannot mint the attestation until
+those prerequisites close — so settle them first (or `--force`). The same "the cascaded
 operation is the *full* operation" rule is why the cascade also stamps your
 `--assignee` onto every ancestor it claims. See
 [plan-review-gate.md](plan-review-gate.md) for the attestation model the gate reads.

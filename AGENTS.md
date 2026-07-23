@@ -99,7 +99,10 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    dependency changing after the review invalidates it (a fresh `review-plan` is then required;
    `sign-review` will not certify across a changed dependency). Review prerequisites/children
    before their dependents; prefer `next-batch` over ad-hoc parallel review — see
-   `docs/plan-review-gate.md` §"Review dependencies FIRST".
+   `docs/plan-review-gate.md` §"Review dependencies FIRST". This is partly **enforced**:
+   `review-plan` on a ticket that is not yet claimable — status `closed`/`idea`/`blocked`, or
+   `open` but still blocked by an unclosed dependency — **fast-fails with no LLM** (unsigned
+   `INDETERMINATE`, exit 2) unless you pass `--force`; close the prerequisites, then review.
 2. **Grab work atomically** — `claim <id> --assignee <you>`: moves an **open** ticket to
    `in_progress` and sets the assignee in one step. If another agent already claimed it you
    get **ConcurrencyError / exit 10** — do not retry the same ticket; pick another. Never

@@ -128,6 +128,96 @@ def _legacy_plan_attestation(repo: Path, ticket_id: str) -> None:
     signing.sign_manifest(ticket_id, manifest, kind="plan-review", repo_root=str(repo))
 
 
+class _BoomRunner(FakeRunner):
+    """Fails loudly if the review reaches the LLM — proves the not-claimable fast-fail
+    returns before any LLM pass."""
+
+    name = "boom"
+
+    def run(self, req):  # type: ignore[override]
+        raise AssertionError("LLM runner must not be invoked for a non-claimable ticket")
+
+
+def _assert_not_claimable(result: dict, ticket_id: str) -> None:
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["ticket_id"] == ticket_id
+    assert result["coverage"]["llm_ran"] is False
+    finding_ids = [f.get("id") for f in result.get("indeterminate", [])]
+    assert "ticket-not-claimable" in finding_ids
+    assert result.get("signature", {}).get("signed") is False
+
+
+def test_open_ticket_blocked_by_open_prerequisite_fast_fails_without_llm(rebar_repo: Path) -> None:
+    _enable_fixture(rebar_repo)
+    _commit(rebar_repo)
+    prerequisite = _ticket(rebar_repo, "open prerequisite")
+    subject = _ticket(rebar_repo, "link-blocked subject")
+    rebar.link(subject, prerequisite, "depends_on", repo_root=str(rebar_repo))
+
+    result = rebar.llm.review_plan(subject, runner=_BoomRunner(), repo_root=str(rebar_repo))
+
+    _assert_not_claimable(result, subject)
+    assert prerequisite in result["indeterminate"][0]["blockers"]
+    # No attestation was minted, so the claim gate still refuses to start work.
+    claimed = _cli(rebar_repo, "claim", subject, "--assignee=fixture")
+    assert claimed.returncode != 0
+
+
+def test_force_reviews_a_link_blocked_ticket_past_the_gate(rebar_repo: Path) -> None:
+    _enable_fixture(rebar_repo)
+    _commit(rebar_repo)
+    prerequisite = _ticket(rebar_repo, "open prerequisite")
+    subject = _ticket(rebar_repo, "link-blocked subject")
+    rebar.link(subject, prerequisite, "depends_on", repo_root=str(rebar_repo))
+
+    result = rebar.llm.review_plan(
+        subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+    )
+
+    assert result["verdict"] == "PASS"
+    assert result["coverage"]["llm_ran"] is True
+
+
+def test_blocked_status_ticket_fast_fails_without_llm(rebar_repo: Path) -> None:
+    _enable_fixture(rebar_repo)
+    _commit(rebar_repo)
+    subject = _ticket(rebar_repo, "paused subject")
+    rebar.transition(subject, "open", "blocked", repo_root=str(rebar_repo))
+
+    result = rebar.llm.review_plan(subject, runner=_BoomRunner(), repo_root=str(rebar_repo))
+
+    _assert_not_claimable(result, subject)
+    assert result["indeterminate"][0]["status"] == "blocked"
+
+
+def test_idea_status_ticket_fast_fails_without_llm(rebar_repo: Path) -> None:
+    _enable_fixture(rebar_repo)
+    _commit(rebar_repo)
+    idea_id = rebar.idea("undesigned idea", description=_DESCRIPTION, repo_root=str(rebar_repo))
+
+    result = rebar.llm.review_plan(idea_id, runner=_BoomRunner(), repo_root=str(rebar_repo))
+
+    _assert_not_claimable(result, idea_id)
+    assert result["indeterminate"][0]["status"] == "idea"
+
+
+def test_in_progress_ticket_with_open_blocker_is_not_fast_failed(rebar_repo: Path) -> None:
+    # No claim gate here, so the subject can be claimed into in_progress directly while
+    # its prerequisite stays open. A claimed ticket is worked in place, so drift/force
+    # re-reviews must still run the LLM rather than being fast-failed.
+    _commit(rebar_repo)
+    prerequisite = _ticket(rebar_repo, "still-open prerequisite")
+    subject = _ticket(rebar_repo, "in-progress subject")
+    rebar.link(subject, prerequisite, "depends_on", repo_root=str(rebar_repo))
+    rebar.claim(subject, assignee="fixture", repo_root=str(rebar_repo))
+    assert rebar.show_ticket(subject, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+    result = rebar.llm.review_plan(subject, runner=_PassRunner(), repo_root=str(rebar_repo))
+
+    assert result["verdict"] == "PASS"
+    assert result["coverage"]["llm_ran"] is True
+
+
 def test_project_enables_both_policies_while_library_defaults_remain_off() -> None:
     _assert_project_policies_enabled()
     defaults = config.Config.from_mapping(None)
@@ -160,7 +250,11 @@ def test_current_pins_and_execution_review_close_through_real_cli(rebar_repo: Pa
     ticket_id = _ticket(rebar_repo, "current pinned plan")
     rebar.link(ticket_id, prerequisite, "depends_on", repo_root=str(rebar_repo))
 
-    planning = rebar.llm.review_plan(ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo))
+    # The subject is link-blocked by an open prerequisite, so a default review would
+    # fast-fail as not-yet-claimable; force the planning review to exercise pinning.
+    planning = rebar.llm.review_plan(
+        ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+    )
     assert planning["verdict"] == "PASS"
     claimed = _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture")
     assert claimed.returncode == 0, claimed.stderr
@@ -194,8 +288,11 @@ def test_drifted_related_pin_blocks_claim_with_canonical_target_through_real_cli
     prerequisite = _ticket(rebar_repo, "canonical prerequisite")
     ticket_id = _ticket(rebar_repo, "drifted pinned plan")
     rebar.link(ticket_id, prerequisite, "depends_on", repo_root=str(rebar_repo))
+    # Link-blocked by an open prerequisite: force the review past the not-claimable gate.
     assert (
-        rebar.llm.review_plan(ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
         == "PASS"
     )
     rebar.edit_ticket(prerequisite, description="material changed", repo_root=str(rebar_repo))
@@ -258,12 +355,18 @@ def test_natural_a_to_b_to_c_invalidation_requires_each_narrow_material_change(
     plan_c = _ticket(rebar_repo, "transitive plan C")
     rebar.link(plan_b, plan_a, "depends_on", repo_root=str(rebar_repo))
     rebar.link(plan_c, plan_b, "depends_on", repo_root=str(rebar_repo))
+    # B and C are each link-blocked by an open prerequisite; force past the
+    # not-claimable gate to establish the pins this transitive-drift test relies on.
     assert (
-        rebar.llm.review_plan(plan_b, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        rebar.llm.review_plan(plan_b, runner=_PassRunner(), repo_root=str(rebar_repo), force=True)[
+            "verdict"
+        ]
         == "PASS"
     )
     assert (
-        rebar.llm.review_plan(plan_c, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        rebar.llm.review_plan(plan_c, runner=_PassRunner(), repo_root=str(rebar_repo), force=True)[
+            "verdict"
+        ]
         == "PASS"
     )
 
@@ -312,11 +415,13 @@ def test_depends_on_and_inbound_blocks_normalize_to_one_canonical_prerequisite_p
     rebar.link(depends_subject, prerequisite, "depends_on", repo_root=str(rebar_repo))
     rebar.link(prerequisite, blocked_subject, "blocks", repo_root=str(rebar_repo))
 
+    # Both subjects are link-blocked by the open prerequisite (one via depends_on, one
+    # via an inbound blocks); force past the not-claimable gate to compare their pins.
     depends_result = rebar.llm.review_plan(
-        depends_subject, runner=_PassRunner(), repo_root=str(rebar_repo)
+        depends_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
     )
     blocks_result = rebar.llm.review_plan(
-        blocked_subject, runner=_PassRunner(), repo_root=str(rebar_repo)
+        blocked_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
     )
     prefix = f"plan-material-pin: prerequisite {prerequisite} "
     matching_pins = []
@@ -460,10 +565,11 @@ def test_material_pin_enforcement_enable_disable_and_reenable_through_real_cli(
     enabled_prerequisite = _ticket(rebar_repo, "enabled prerequisite")
     enabled_subject = _ticket(rebar_repo, "enabled subject")
     rebar.link(enabled_subject, enabled_prerequisite, "depends_on", repo_root=str(rebar_repo))
+    # Link-blocked by an open prerequisite; force past the not-claimable gate.
     assert (
-        rebar.llm.review_plan(enabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
-            "verdict"
-        ]
+        rebar.llm.review_plan(
+            enabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
         == "PASS"
     )
     rebar.edit_ticket(
@@ -482,10 +588,11 @@ def test_material_pin_enforcement_enable_disable_and_reenable_through_real_cli(
     reenabled_prerequisite = _ticket(rebar_repo, "re-enabled prerequisite")
     reenabled_subject = _ticket(rebar_repo, "re-enabled subject")
     rebar.link(reenabled_subject, reenabled_prerequisite, "depends_on", repo_root=str(rebar_repo))
+    # Link-blocked by an open prerequisite; force past the not-claimable gate.
     assert (
-        rebar.llm.review_plan(reenabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
-            "verdict"
-        ]
+        rebar.llm.review_plan(
+            reenabled_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
         == "PASS"
     )
     rebar.edit_ticket(
@@ -510,10 +617,12 @@ def test_archived_target_stays_readable_and_deleted_target_fails_safe(
     archived_target = _ticket(rebar_repo, "archived readable prerequisite")
     archived_subject = _ticket(rebar_repo, "subject with archived prerequisite")
     rebar.link(archived_subject, archived_target, "depends_on", repo_root=str(rebar_repo))
+    # Prerequisite is still open at review time, so the subject is link-blocked; force
+    # past the not-claimable gate to pin it before it is archived below.
     assert (
-        rebar.llm.review_plan(archived_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
-            "verdict"
-        ]
+        rebar.llm.review_plan(
+            archived_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
         == "PASS"
     )
     rebar.archive(archived_target, repo_root=str(rebar_repo))
@@ -525,10 +634,12 @@ def test_archived_target_stays_readable_and_deleted_target_fails_safe(
     deleted_target = _ticket(rebar_repo, "deleted prerequisite")
     deleted_subject = _ticket(rebar_repo, "subject with deleted prerequisite")
     rebar.link(deleted_subject, deleted_target, "depends_on", repo_root=str(rebar_repo))
+    # Prerequisite is still open at review time, so the subject is link-blocked; force
+    # past the not-claimable gate to pin it before it is deleted below.
     assert (
-        rebar.llm.review_plan(deleted_subject, runner=_PassRunner(), repo_root=str(rebar_repo))[
-            "verdict"
-        ]
+        rebar.llm.review_plan(
+            deleted_subject, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
         == "PASS"
     )
     deleted = _cli(rebar_repo, "delete", deleted_target, "--user-approved")

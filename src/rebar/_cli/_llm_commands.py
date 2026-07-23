@@ -438,7 +438,9 @@ def _review_plan(argv: list[str]) -> int:
     ``REVIEW_RESULT`` sidecar, and (on a non-blocking PASS) signs a plan-review
     attestation so a subsequent ``claim`` passes the gate (when enabled). Needs the
     'agents' extra + a model API key to run the LLM tiers; the DET floor runs
-    without them. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
+    without them. A ticket that is not yet claimable (status closed/idea/blocked, or
+    open but blocked by an unclosed dependency) fast-fails to INDETERMINATE with no LLM
+    unless ``--force`` is passed. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
     import json as _json
 
     from rebar import config
@@ -463,7 +465,9 @@ def _review_plan(argv: list[str]) -> int:
         "--force",
         action="store_true",
         help="re-run the review even if a current attestation exists "
-        "(bypass the idempotence short-circuit)",
+        "(bypass the idempotence short-circuit); also reviews a ticket that is not "
+        "yet claimable (closed/idea/blocked status, or blocked by an unclosed "
+        "dependency), which is otherwise fast-failed without running the LLM",
     )
     parser.add_argument(
         "--check",
@@ -590,6 +594,14 @@ def _render_plan_review_text(result: dict) -> None:
         f"overflow={overflow} "
         f"dropped={counts.get('dropped', 0)} indeterminate={counts.get('indeterminate', 0)}\n"
     )
+    # Surface each indeterminate finding's reason (+ remediation) so a non-PASS with no
+    # blocking findings — e.g. a not-claimable fast-fail or a snapshot-collection error —
+    # tells the reader WHY and how to proceed, not just a bare count.
+    for f in result.get("indeterminate", []):
+        reason = f.get("reason") or f.get("finding") or ""
+        sys.stdout.write(f"  [indeterminate {f.get('id', '')}] {reason}\n")
+        if f.get("remediation"):
+            sys.stdout.write(f"    → {f['remediation']}\n")
     blocking = result.get("blocking", [])
     group_sizes: dict = {}
     for f in blocking:

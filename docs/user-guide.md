@@ -229,7 +229,10 @@ rebar verify-completion <id>    # check the ticket's completion criteria are met
 `review-plan` sanity-checks a ticket's plan before it's worked;
 `verify-completion` checks the acceptance/success criteria are demonstrably met.
 Depending on project configuration these can gate claiming and closing — see
-[plan-review-gate.md](plan-review-gate.md) for the full model.
+[plan-review-gate.md](plan-review-gate.md) for the full model. `review-plan` **fast-fails
+without running the LLM** when the ticket isn't claimable yet — status `closed`/`idea`/`blocked`,
+or `open` but blocked by an unclosed dependency (returns an unsigned `INDETERMINATE`, exit `2`);
+pass `--force` to review it anyway.
 
 `rebar claim <id> --force[=<reason>]` bypasses any enabled start-work gate (e.g.
 plan-review) — not just plan-review specifically, but whatever gate is configured to run
