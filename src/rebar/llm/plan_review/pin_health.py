@@ -19,7 +19,12 @@ class PlanValidityProfile(Enum):
 
 
 PinStatus = Literal[
-    "current", "stale-pin-drift", "stale-pin-missing", "malformed-pin", "legacy-unpinned"
+    "current",
+    "current-no-relationships",
+    "stale-pin-drift",
+    "stale-pin-missing",
+    "malformed-pin",
+    "legacy-unpinned",
 ]
 TargetPinStatus = Literal["current", "stale-pin-drift", "stale-pin-missing", "malformed-pin"]
 
@@ -39,7 +44,21 @@ class DerivedPlanMaterialPinHealth(TypedDict):
 
 
 class DerivedPlanReviewHealth(DerivedPlanMaterialPinHealth):
+    """The read-time plan-review relationship and phase health contract.
+
+    This is deliberately derived from the authenticated attestation on every read;
+    it is never persisted into a ticket event.  Detailed surfaces can therefore
+    render one payload while the lifecycle gates retain their existing decision
+    semantics.
+    """
+
     phase_status: Literal["compatible", "incompatible", "malformed"]
+    signed_phase: Literal["planning", "execution"] | None
+    required_phase: Literal["planning", "execution"] | None
+    effective_execution_floor: float | None
+    advisory: bool
+    enforcement_status: Literal["enabled", "disabled"]
+    related_material_status: Literal["pinned", "no-related-material", "legacy-unpinned"]
 
 
 def review_phase_status(current_phase: object, signed_phase: object, floor: object) -> str:

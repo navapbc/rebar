@@ -47,7 +47,11 @@ def register_read_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def show_ticket(ticket_id: str) -> TicketStateOut:
         """Show compiled ticket state (accepts full id, short id, or alias)."""
-        return TicketStateOut.model_validate(rebar.show_ticket(ticket_id))
+        from rebar.audit.read import plan_review_health
+
+        ticket = dict(rebar.show_ticket(ticket_id))
+        ticket["plan_review_health"] = plan_review_health(ticket)
+        return TicketStateOut.model_validate(ticket)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def explain_criterion(criterion_id: str) -> dict:

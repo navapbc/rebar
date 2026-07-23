@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 # Re-export manifest helpers so historical ``attest.<name>`` imports remain stable.
 from .manifest import (
@@ -33,7 +33,7 @@ from .manifest import (
     registry_version,
     validate_review_phase_metadata,
 )
-from .pin_health import DerivedPlanMaterialPinHealth, PlanValidityProfile
+from .pin_health import DerivedPlanMaterialPinHealth, DerivedPlanReviewHealth, PlanValidityProfile
 from .relation_snapshot import PlanMaterialPin
 
 logger = logging.getLogger(__name__)
@@ -487,7 +487,7 @@ def compute_validity(
         return {"valid": False, "reason": f"no certified {kind} attestation", "verdict": "unsigned"}
     signed_at = attestation.get("signed_at")
 
-    plan_health: Any = None
+    plan_health: DerivedPlanReviewHealth | None = None
     auth_manifest = None
     if kind == _MANIFEST_PREFIX:
         if attestation.get("verified") is False:
@@ -506,27 +506,73 @@ def compute_validity(
         enforced = _read_enforce_plan_material_pins(repo_root)
         try:
             pins = manifest_pins(auth_manifest)
-            plan_health = derive_plan_material_pin_health(
-                pins, repo_root=repo_root, enforced=enforced
+            plan_health = cast(
+                DerivedPlanReviewHealth,
+                dict(derive_plan_material_pin_health(pins, repo_root=repo_root, enforced=enforced)),
             )
         except ManifestFormatError:
-            plan_health = {"pin_status": "malformed-pin", "enforced": enforced, "targets": []}
+            plan_health = {
+                "pin_status": "malformed-pin",
+                "enforced": enforced,
+                "targets": [],
+                "phase_status": "malformed",
+                "signed_phase": None,
+                "required_phase": None,
+                "effective_execution_floor": None,
+                "advisory": False,
+                "enforcement_status": "enabled" if enforced else "disabled",
+                "related_material_status": "pinned",
+            }
 
+        signed_phase: object = None
+        signed_floor: object = None
+        current_phase: object = ticket_state.get("plan_review_phase")
+        if current_phase is None:
+            current_phase = (
+                "planning" if ticket_state.get("status") in ("open", "idea") else "execution"
+            )
         try:
             signed_phase = manifest_review_phase(auth_manifest)
             signed_floor = manifest_priority_floor(auth_manifest)
-            current_phase = ticket_state.get("plan_review_phase")
-            if current_phase is None:
-                current_phase = (
-                    "planning" if ticket_state.get("status") in ("open", "idea") else "execution"
-                )
             from .pin_health import review_phase_status
 
-            plan_health["phase_status"] = review_phase_status(
-                current_phase, signed_phase, signed_floor
+            plan_health["phase_status"] = cast(
+                Any, review_phase_status(current_phase, signed_phase, signed_floor)
             )
         except ManifestFormatError:
             plan_health["phase_status"] = "malformed"
+
+        assert plan_health is not None
+        # One additive projection for every detailed reader.  Legacy manifests have
+        # no phase token; a current no-relationship review has valid phase metadata
+        # but no target rows, so operators can distinguish the two safely.
+        has_phase_metadata = any(str(line).startswith("review-phase: ") for line in auth_manifest)
+        if plan_health["pin_status"] == "legacy-unpinned" and has_phase_metadata:
+            plan_health["pin_status"] = "current-no-relationships"
+        plan_health["signed_phase"] = (
+            signed_phase if signed_phase in ("planning", "execution") else None
+        )
+        plan_health["required_phase"] = (
+            current_phase if current_phase in ("planning", "execution") else None
+        )
+        plan_health["effective_execution_floor"] = (
+            float(signed_floor)
+            if isinstance(signed_floor, (int, float)) and not isinstance(signed_floor, bool)
+            else None
+        )
+        plan_health["advisory"] = bool(
+            not enforced
+            and plan_health["pin_status"]
+            not in ("current", "current-no-relationships", "legacy-unpinned")
+        )
+        plan_health["enforcement_status"] = "enabled" if enforced else "disabled"
+        plan_health["related_material_status"] = (
+            "no-related-material"
+            if plan_health["pin_status"] == "current-no-relationships"
+            else "legacy-unpinned"
+            if plan_health["pin_status"] == "legacy-unpinned"
+            else "pinned"
+        )
 
         if plan_health["pin_status"] == "malformed-pin" and enforced:
             return {
@@ -647,6 +693,7 @@ def compute_validity(
             return _result(False, "plan-review phase is incompatible", "incompatible-phase")
         if plan_health["enforced"] and plan_health["pin_status"] not in (
             "current",
+            "current-no-relationships",
             "legacy-unpinned",
         ):
             pin_status = plan_health["pin_status"]

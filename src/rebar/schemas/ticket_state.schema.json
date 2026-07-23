@@ -47,6 +47,78 @@
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/file_impact_entry" }
     },
+    "plan_review_health": {
+      "description": "Detailed-only, read-time plan-review health computed from the certified attestation. It is never persisted in ticket events and is omitted from ordinary list/search projections. The unavailable variant is compact and exact; available variants remain extensible.",
+      "type": ["object", "null"],
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["pin_status", "enforced", "phase_status", "signed_phase", "required_phase", "effective_execution_floor", "advisory", "targets"],
+          "properties": {
+            "available": { "const": true },
+            "valid": { "type": ["boolean", "null"] },
+            "reason": { "type": ["string", "null"] },
+            "verdict": { "type": ["string", "null"] },
+            "pin_status": {
+              "type": "string",
+              "enum": ["current", "current-no-relationships", "stale-pin-drift", "stale-pin-missing", "malformed-pin", "legacy-unpinned"]
+            },
+            "enforced": { "type": "boolean" },
+            "phase_status": {
+              "type": "string",
+              "enum": ["compatible", "incompatible", "malformed"]
+            },
+            "signed_phase": {
+              "type": ["string", "null"],
+              "enum": ["planning", "execution", null]
+            },
+            "required_phase": {
+              "type": ["string", "null"],
+              "enum": ["planning", "execution", null]
+            },
+            "effective_execution_floor": { "type": ["number", "null"] },
+            "advisory": { "type": "boolean" },
+            "enforcement_status": {
+              "type": ["string", "null"],
+              "enum": ["enabled", "disabled", null]
+            },
+            "related_material_status": {
+              "type": ["string", "null"],
+              "enum": ["pinned", "no-related-material", "legacy-unpinned", null]
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": ["canonical_id", "role", "pinned_fingerprint", "current_fingerprint", "pin_status"],
+                "properties": {
+                  "canonical_id": { "type": "string" },
+                  "role": { "type": "string", "enum": ["child", "prerequisite"] },
+                  "pinned_fingerprint": { "type": "string" },
+                  "current_fingerprint": { "type": ["string", "null"] },
+                  "pin_status": {
+                    "type": "string",
+                    "enum": ["current", "stale-pin-drift", "stale-pin-missing", "malformed-pin"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "reason"],
+          "properties": {
+            "available": { "const": false },
+            "reason": { "const": "derived plan-review health unavailable" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
     "verify_commands": {
       "type": "array",
       "description": "DD-level verification commands (always present; default []).",

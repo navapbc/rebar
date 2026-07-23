@@ -39,8 +39,43 @@ def _raise_plan_review_close_gate_error(ticket_id: str, check: dict[str, object]
     """Raise the stable, separately-remediated plan-review close-gate error."""
     verdict = str(check.get("verdict", "unavailable"))
     reason = str(check.get("reason", "plan-review validity was unavailable")).rstrip(".")
+    health = check.get("health")
+    detail = ""
+    if isinstance(health, dict):
+        targets = health.get("targets") or []
+        target_detail = ", ".join(
+            f"{target.get('canonical_id')} {target.get('role')} {target.get('pin_status')}"
+            for target in targets
+            if isinstance(target, dict) and target.get("pin_status") != "current"
+        )
+        enforcement = health.get("enforcement_status")
+        if enforcement not in ("enabled", "disabled"):
+            enforcement = "enabled" if health.get("enforced") else "disabled"
+        posture = (
+            "advisory; enforcement disabled"
+            if enforcement == "disabled" and health.get("advisory") is True
+            else "enforcement disabled"
+            if enforcement == "disabled"
+            else "enforced"
+        )
+        pin_status = health.get("pin_status")
+        related_material_status = health.get("related_material_status")
+        if related_material_status == "no-related-material" or (
+            related_material_status is None and pin_status == "current" and not targets
+        ):
+            pin_status = "current (no related material)"
+        detail = (
+            f" Health: {pin_status} "
+            f"({posture}); "
+            f"phase {health.get('signed_phase')} -> {health.get('required_phase')} "
+            f"({health.get('phase_status')})"
+        )
+        if health.get("effective_execution_floor") is not None:
+            detail += f"; floor={health['effective_execution_floor']}"
+        if target_detail:
+            detail += f"; targets: {target_detail}"
     raise CommandError(
-        f"plan-review close gate: {verdict}: {reason}. "
+        f"plan-review close gate: {verdict}: {reason}.{detail} "
         f"Run rebar review-plan {ticket_id} separately, then retry close.",
         returncode=1,
     )

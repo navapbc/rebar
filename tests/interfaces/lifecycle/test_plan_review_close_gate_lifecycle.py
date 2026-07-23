@@ -160,8 +160,19 @@ def test_close_gate_uses_only_local_ticket_reads(rebar_repo: Path, monkeypatch) 
     monkeypatch.setattr(signing, "verify_signature", lambda *a, **k: verified)
     result = gates.close_plan_review_gate_check(tid, state, repo_root=str(rebar_repo))
 
-    assert result == {
+    assert {key: result[key] for key in ("ok", "verdict", "reason")} == {
         "ok": True,
         "verdict": "certified",
         "reason": "certified plan-review attestation",
     }
+    health = result["health"]
+    assert health["pin_status"] == "current-no-relationships"
+    assert health["related_material_status"] == "no-related-material"
+    assert health["targets"] == []
+    assert health["enforced"] is False
+    assert health["enforcement_status"] == "disabled"
+    assert health["advisory"] is False
+    assert health["signed_phase"] == "planning"
+    assert health["required_phase"] == "execution"
+    assert health["phase_status"] == "compatible"
+    assert health["effective_execution_floor"] is None

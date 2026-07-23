@@ -105,6 +105,29 @@
   {% set section = plan %}{% set gate_id = "gate-plan" %}{% set gate_title = "Plan review" %}{% set is_plan = True %}
   {% include "_gate_section.html" %}
 
+  <section id="plan-review-health">
+    <h2>Plan-review health</h2>
+    {% if plan_review_health.available is sameas false %}
+      <div class="empty">Derived plan-review health unavailable: {{ plan_review_health.reason }}</div>
+    {% else %}
+      {% set no_related_material = plan_review_health.related_material_status == "no-related-material" or (plan_review_health.related_material_status is undefined and plan_review_health.pin_status == "current" and not plan_review_health.targets) %}
+      {% set enforcement_disabled = plan_review_health.enforcement_status == "disabled" or (plan_review_health.enforcement_status is undefined and plan_review_health.enforced is sameas false) %}
+      <p class="roundhdr">
+        {% if no_related_material %}current (no related material){% else %}{{ plan_review_health.pin_status }}{% endif %}
+        · {% if enforcement_disabled and plan_review_health.advisory is sameas true %}advisory; enforcement disabled{% elif enforcement_disabled %}enforcement disabled{% else %}enforced{% endif %}
+        · phase: {{ plan_review_health.signed_phase }} → {{ plan_review_health.required_phase }}
+        ({{ plan_review_health.phase_status }}){% if plan_review_health.effective_execution_floor is not none %} · floor: {{ "%.2f"|format(plan_review_health.effective_execution_floor) }}{% endif %}
+      </p>
+      {% if plan_review_health.targets %}
+        {% for target in plan_review_health.targets %}
+          <div class="crit-row"><span class="badge">{{ target.role }}</span><span>{{ target.canonical_id }} · {{ target.pin_status }} · pinned {{ target.pinned_fingerprint }} · current {{ target.current_fingerprint or "missing" }}</span></div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">{% if no_related_material %}current (no related material){% else %}{{ plan_review_health.pin_status }}{% endif %}</div>
+      {% endif %}
+    {% endif %}
+  </section>
+
   {% include "_completion.html" %}
 
   {% set section = code %}{% set gate_id = "gate-code" %}{% set gate_title = "Code review" %}{% set is_plan = False %}
