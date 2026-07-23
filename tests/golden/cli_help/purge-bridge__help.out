@@ -1,1 +1,0 @@
-Usage: rebar purge-bridge --keep=<PROJECT_KEY> [--dry-run]

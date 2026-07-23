@@ -1,1 +1,0 @@
-Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match the signature; exit 0=certified, 1=mismatch/foreign/unsigned)

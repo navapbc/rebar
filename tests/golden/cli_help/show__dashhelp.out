@@ -1,1 +1,0 @@
-Usage: rebar show [--output llm] [--no-pull] <ticket_id> [<ticket_id> ...]

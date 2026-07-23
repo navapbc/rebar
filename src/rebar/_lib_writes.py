@@ -336,6 +336,7 @@ def transition(
     force_close: str | None = None,
     close_class: str = "",
     caused_by: str = "",
+    ref: str | None = None,
     repo_root=None,
 ) -> TransitionResult:
     """Transition a ticket's status with optimistic concurrency.
@@ -365,7 +366,9 @@ def transition(
     ignored for non-bug transitions. ``caused_by`` is the library counterpart of the CLI
     ``--caused-by``: on a bug close it draws a best-effort ``caused_by`` link from the
     (now-closed) bug to the given culprit change/ticket, overriding git-blame
-    auto-derivation; ignored for non-bug transitions.
+    auto-derivation; ignored for non-bug transitions. ``ref`` is the library
+    counterpart of the CLI ``--ref``: the git ref whose committed tree the completion
+    close gate verifies (and signs against); ``None`` means HEAD (today's behavior).
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -393,6 +396,7 @@ def transition(
             force_close=force_close or "",
             close_class=close_class,
             caused_by=caused_by,
+            ref=ref,
             repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:

@@ -1,6 +1,0 @@
-Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--force-close=<reason>] [--output json]
-       rebar transition <ticket_id> <target_status>   (auto-detects current status)
-  status: idea | open | in_progress | closed | blocked
-  idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
-  bug close requires --class <value>: regression | plan_defect | env_integration | flaky | preexisting | not_a_bug | duplicate | escalated | undetermined.
-  With the completion gate enabled, duplicate/not_a_bug/escalated skips verification only when this bug duplicates a live ticket or a live ticket supersedes this bug.

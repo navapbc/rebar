@@ -1,1 +1,0 @@
-Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)

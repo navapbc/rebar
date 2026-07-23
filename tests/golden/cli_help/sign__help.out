@@ -1,1 +1,0 @@
-Usage: rebar sign <ticket_id> <manifest_json>   (HMAC-sign a JSON array of verified-step strings with the environment key; [--output json])
