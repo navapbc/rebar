@@ -75,6 +75,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REBAR_EVAL_MAX_CASES: "12"
+          # Durable token-usage record for this billable job (rebar.llm.usage_log). The
+          # runner appends one JSONL line per LLM call; the next step summarizes it into
+          # the job summary and uploads the raw file. Step-level so ${{ runner.temp }} is
+          # in scope — a JOB-level env entry using runner.* is a parse-time startup
+          # failure (Bug 8002; see tests/unit/test_ci_actionlint_scope.py).
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
         run: |
           python - <<'PY'
           import glob, os
@@ -98,6 +104,19 @@ jobs:
           if failed:
               print(f"::warning::live eval regressions (advisory): {failed}")
           PY
+      - name: Summarize LLM token usage → job summary
+        if: ${{ always() }}
+        env:
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
+        run: |
+          python -m rebar.llm.usage_log summarize "$REBAR_USAGE_LOG" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload LLM token-usage log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-usage-log
+          path: ${{ runner.temp }}/usage.jsonl
+          if-no-files-found: ignore
       - name: Upload eval JUnit
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
