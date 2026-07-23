@@ -3,10 +3,11 @@
 **Audience: the plan author (you, writing a ticket description before you `claim` it).**
 This is the on-ramp. It is hand-written and stays short. The authoritative, per-criterion
 detail lives in the generated registry — `rebar explain <id>` or
-[plan-review-criteria-guide.md](plan-review-criteria-guide.md) — and the gate's mechanics are
-in [plan-review-gate.md](plan-review-gate.md). Read those *after* this when you need depth.
-(The code-review sibling is [passing-code-review.md](passing-code-review.md); `rebar explain
-review` prints it.)
+[plan-review-criteria-guide.md](https://github.com/navapbc/rebar/blob/main/docs/plan-review-criteria-guide.md)
+— and the gate's mechanics are in
+[plan-review-gate.md](https://github.com/navapbc/rebar/blob/main/docs/plan-review-gate.md). Read
+those *after* this when you need depth. (For the code-review sibling, run `rebar explain
+review`.)
 
 ## The loop
 

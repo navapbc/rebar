@@ -134,6 +134,21 @@ def test_explain_guide_unknown_name() -> None:
     with pytest.raises(registry.ExplainError) as ei:
         registry.explain_guide("nonesuch")
     assert ei.value.kind == "unknown-id"
+    # the diagnostic lists the known guides, so a client discovers `commit-trailer` from an error
+    assert "commit-trailer" in str(ei.value)
+
+
+def test_explain_commit_trailer_prints_canonical_format(capsys) -> None:
+    # `rebar explain commit-trailer` serves the required trailer format from any install — the
+    # CLI-discoverable home for repo-less clients. It quotes the single-source EXPECTED_FORMAT.
+    from rebar._cli import main
+    from rebar._commands import verify_commit
+
+    assert "commit-trailer" in registry.AUTHOR_GUIDES
+    assert main(["explain", "commit-trailer"]) == 0
+    out = capsys.readouterr().out
+    assert verify_commit.EXPECTED_FORMAT in out
+    assert "rebar verify-commit-ticket" in out  # the local self-check is surfaced too
 
 
 def test_explain_guide_repo_root_independent(monkeypatch, tmp_path) -> None:
@@ -221,3 +236,65 @@ def test_coach_deeplink_emitted_and_parseable() -> None:
     assert note["guide_url"].endswith("#f1")
     # a downstream consumer parses coaching[] — the additive field does not break prose reads
     assert note["coaching"] and note["guide_url"].split("#")[-1] == "f1"
+
+
+# ── in-command help resolves for a repo-less client (dead-consumer-link guard) ───
+def test_all_in_command_help_links_resolve_for_repoless_client() -> None:
+    """Every markdown link in the prose `rebar explain` serves — the packaged author guides AND
+    the rendered criterion sections — must resolve for a consumer who has the CLI but no rebar
+    checkout. A repo-relative target (`](docs/…)`, `](../…)`, `](foo.md)`) is a dead link there;
+    only an absolute URL, an intra-doc `#anchor`, or `mailto:` is safe. And any `rebar explain
+    <topic>` the prose points at must name a real registered guide/criterion, so the
+    reachable-pointer promise can't rot. Driven by the registries, so new help is covered
+    automatically. (This is the class of bug `62933ff62` fixed for plan-review deep-links.)"""
+    import re
+
+    link = re.compile(r"\]\(([^)]+)\)")
+    explain_topic = re.compile(r"rebar explain (\S+)")
+    # a bare repo-relative path reference (`docs/…`, `../…`) that is NOT part of a hosted
+    # `…/blob/main/…` URL — a parenthetical/inline dead reference the `](…)` regex misses.
+    bare_repo_path = re.compile(r"(?<!blob/main/)(?:\.\./|docs/)[A-Za-z0-9._/-]+")
+    ok_prefixes = ("http://", "https://", "#", "mailto:")
+
+    guides = dict(registry.AUTHOR_GUIDES)
+    criteria_ids = {c["id"] for c in registry.load_criteria()}
+    known_topics = set(guides) | criteria_ids
+
+    # every string a repo-less client can read via `rebar explain`
+    prose: dict[str, str] = {f"guide:{n}": registry.explain_guide(n) for n in guides}
+    prose.update({f"criterion:{cid}": registry.explain_criterion(cid) for cid in criteria_ids})
+
+    dead_links: list[str] = []
+    dangling_topics: list[str] = []
+    for where, text in prose.items():
+        for target in link.findall(text):
+            if not target.startswith(ok_prefixes):
+                dead_links.append(f"{where}: dead link -> {target!r}")
+        for tok in explain_topic.findall(text):
+            topic = tok.strip("`.,;:)")
+            if topic.startswith("<") and topic.endswith(">"):
+                continue  # a placeholder like `<id>` / `<criterion-id>`
+            if topic not in known_topics:
+                dangling_topics.append(f"{where}: `rebar explain {topic}` names no known topic")
+
+    # The bare-path scan runs only over the packaged guides — criterion sections legitimately
+    # discuss `docs/ADR`-style paths as prose, whereas the hand-written guides must not strand a
+    # repo-less reader on a `docs/…`/`../…` reference (use a hosted URL or `rebar explain`).
+    bare_paths: list[str] = []
+    for name in guides:
+        for hit in bare_repo_path.findall(registry.explain_guide(name)):
+            bare_paths.append(f"guide:{name}: bare repo-relative path -> {hit!r}")
+
+    assert not dead_links, "consumer-dead links in in-command help:\n" + "\n".join(dead_links)
+    assert not dangling_topics, "unreachable explain pointers:\n" + "\n".join(dangling_topics)
+    assert not bare_paths, "bare repo-relative refs in packaged guides:\n" + "\n".join(bare_paths)
+
+
+def test_mcp_explain_docstring_names_every_author_guide() -> None:
+    """The MCP `explain_criterion` tool dispatches on `AUTHOR_GUIDES` dynamically, but its
+    docstring (what an MCP client reads to discover guide names) is hand-written — assert every
+    registered guide is named there so the two can't silently drift (which would hide a guide
+    like `commit-trailer` from MCP clients)."""
+    doc = _mcp_explain_tool().__doc__ or ""
+    missing = [name for name in registry.AUTHOR_GUIDES if name not in doc]
+    assert not missing, f"MCP explain_criterion docstring omits AUTHOR_GUIDES: {missing}"

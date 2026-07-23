@@ -235,3 +235,14 @@ def test_expected_format_documented_in_reference() -> None:
     assert vc.EXPECTED_FORMAT in doc.read_text(encoding="utf-8"), (
         "docs/commit-ticket-trailer.md must quote EXPECTED_FORMAT verbatim (single source of truth)"
     )
+
+
+def test_expected_format_quoted_in_packaged_explain_guide() -> None:
+    # The `commit-trailer` guide served offline by `rebar explain commit-trailer` must quote the
+    # SAME single-source constant verbatim, so a repo-less client sees the canonical format.
+    from rebar.llm.plan_review import registry
+
+    guide = registry.explain_guide("commit-trailer")
+    assert vc.EXPECTED_FORMAT in guide, (
+        "the packaged commit-trailer guide must quote EXPECTED_FORMAT verbatim (single source)"
+    )

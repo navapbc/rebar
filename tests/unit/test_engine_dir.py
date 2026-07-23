@@ -116,14 +116,18 @@ def test_wheel_contains_no_compiled_bytecode(tmp_path):
 
 
 def test_wheel_ships_author_guides(tmp_path):
-    """The packaged author guides (`rebar explain plan` / `review`) must ride in the wheel.
+    """Every registered author guide (`rebar explain plan` / `review` / `commit-trailer` / …)
+    must ride in the wheel.
 
     They are the canonical source (moved out of repo-root ``docs/``) precisely so an installed
-    rebar can serve them; if the wheel dropped them, ``explain_guide`` would 500 on real installs.
-    Builds the wheel in-process (same pattern as the bytecode guard) and asserts both ``.md`` files
-    ship under ``rebar/_guides/``.
+    rebar can serve them; if the wheel dropped one, ``explain_guide`` would 500 on real installs.
+    Builds the wheel in-process (same pattern as the bytecode guard) and asserts every file in
+    ``AUTHOR_GUIDES`` ships under ``rebar/_guides/`` — driven by the registry so a newly-added
+    guide is packaging-guarded automatically.
     """
     import zipfile
+
+    from rebar.llm.plan_review.registry import AUTHOR_GUIDES
 
     hatchling_wheel = pytest.importorskip("hatchling.builders.wheel")
 
@@ -135,7 +139,7 @@ def test_wheel_ships_author_guides(tmp_path):
 
     with zipfile.ZipFile(wheels[0]) as zf:
         names = set(zf.namelist())
-    for guide in ("writing-a-passing-plan.md", "passing-code-review.md"):
+    for guide in AUTHOR_GUIDES.values():
         assert f"rebar/_guides/{guide}" in names, (
             f"wheel is missing packaged guide rebar/_guides/{guide}"
         )

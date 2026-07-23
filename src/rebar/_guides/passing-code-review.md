@@ -2,11 +2,14 @@
 
 **Audience: the change author, about to push a commit to Gerrit for the `LLM-Review` +
 `Verified` gates.** This is the on-ramp. The authoritative detail lives in
-[review-policy.md](review-policy.md) (what the votes mean), [review-kernel.md](review-kernel.md)
-(how the LLM reviewer decides), and [CONTRIBUTING.md](../CONTRIBUTING.md) §2 (the exact
-mechanics). Read those when you need depth. See also its sibling,
-[writing-a-passing-plan.md](writing-a-passing-plan.md), for the *plan*-review gate that runs
-before you claim a ticket. `rebar explain review` prints this file. Just as `rebar review-plan`
+[review-policy.md](https://github.com/navapbc/rebar/blob/main/docs/review-policy.md) (what the
+votes mean),
+[review-kernel.md](https://github.com/navapbc/rebar/blob/main/docs/review-kernel.md) (how the
+LLM reviewer decides), and
+[CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md) §2 (the exact
+mechanics). Read those when you need depth. See also its sibling guide — run `rebar explain
+plan` — for the *plan*-review gate that runs before you claim a ticket. `rebar explain review`
+prints this file. Just as `rebar review-plan`
 lets you run the plan gate locally before you claim, `rebar review-code` runs **this** gate's
 reviewer locally before you push — see [Preview the review locally](#preview-the-review-locally-before-you-push).
 
@@ -32,11 +35,13 @@ and re-pushing — each push is a new patchset and both bots re-run.
 CI's `Verified` gate rejects the push outright if any of these is missing:
 
 - **A `rebar-ticket: <id>` trailer** (or a leading `<id>:` subject) — every commit references a
-  claimed ticket (`docs/commit-ticket-trailer.md`).
+  claimed ticket. Run `rebar explain commit-trailer` for the exact format and accepted id forms,
+  and `rebar verify-commit-ticket` to check your HEAD locally before you push.
 - **A DCO sign-off** — exactly `Signed-off-by: <real name> <email>`, added with `git commit -s`.
   Real name, no pseudonyms; enforced at push time.
 - **A `Change-Id`** — auto-stamped by the Gerrit `commit-msg` hook. A fresh worktree needs the
-  hook installed (see CONTRIBUTING.md §1b / AGENTS.md).
+  hook installed (see
+  [CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md) §1b).
 - **Push to the magic ref** — `git push origin HEAD:refs/for/main` (creates/updates a change;
   never touches `main`). GitHub is a read-only mirror; PRs don't merge.
 

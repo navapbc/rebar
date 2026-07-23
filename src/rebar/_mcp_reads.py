@@ -57,7 +57,8 @@ def register_read_tools(mcp, ctx) -> None:
     def explain_criterion(criterion_id: str) -> dict:
         """Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea /
         WS10) — OR print an author-facing prose guide when ``criterion_id`` is a guide name
-        (``plan`` = how to write a passing plan; ``review`` = how to pass code review). A pure
+        (``plan`` = how to write a passing plan; ``review`` = how to pass code review;
+        ``commit-trailer`` = the required ``rebar-ticket:`` commit-trailer format). A pure
         registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared
         lookup as the `rebar explain` CLI. On failure returns a structured error ``{error, kind}``
         (kind ∈ unknown-id / malformed-registry / missing-file)."""

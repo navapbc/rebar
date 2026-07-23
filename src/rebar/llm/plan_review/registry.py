@@ -669,6 +669,7 @@ def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -
 AUTHOR_GUIDES: dict[str, str] = {
     "plan": "writing-a-passing-plan.md",
     "review": "passing-code-review.md",
+    "commit-trailer": "commit-ticket-trailer.md",
 }
 
 _GUIDE_PACKAGE = "rebar._guides"

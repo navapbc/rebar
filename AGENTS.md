@@ -186,7 +186,9 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   branch's source of truth = the `sync.remote` rebar auto-pushes ticket events to); `gerrit` →
   the code-review remote. **Code review goes to `gerrit`; ticket events go to `origin`.**
 - **Every commit needs** a `rebar-ticket: <id>` trailer (or a leading `<id>:` subject) so CI's
-  `Verified` gate accepts it, **and** a DCO sign-off. Before committing, verify
+  `Verified` gate accepts it (`rebar explain commit-trailer` for the exact format and accepted
+  id forms; `rebar verify-commit-ticket` to check a commit locally), **and** a DCO sign-off.
+  Before committing, verify
   `git config user.name` and `git config user.email` are set to **your own real, configured
   git identity** (not a placeholder), then add the sign-off with `git commit -s` — it stamps
   `Signed-off-by: <that name> <that email>`. A machine/operator that runs commits under a

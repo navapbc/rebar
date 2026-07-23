@@ -7,6 +7,12 @@ ticket store**. It is enforced in CI as part of the Gerrit **Verified** gate (th
 `rebar verify-commit-ticket` command backs the CI gate and can also run locally or from a
 client-side hook.
 
+> **Discovering this from the CLI (no repo checkout needed).** The format is served offline by
+> **`rebar explain commit-trailer`** (packaged in the wheel), and **`rebar verify-commit-ticket`**
+> checks a commit and prints the format on failure — both work in a consuming project that has
+> the `rebar` CLI but not this repo. This doc is the deeper reference (CI wiring, config,
+> security); the packaged guide is the on-ramp.
+
 ## The expected format (what clients must do)
 
 ```
