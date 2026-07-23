@@ -152,9 +152,39 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     # behind the SupportsAbsenceProbe capability; the root module keeps only the neutral
     # vocabulary and imports no vendor symbol.
     "inbound_probe.py",
+    # Ticket 625b: the outbound differ now compares in canonical shape (snapshot mapped via
+    # the injected InboundMapper), so it no longer imports the vendor field-diff helpers.
+    "outbound_differ.py",
 )
 
 _FORBIDDEN_IMPORT_SUBSTRINGS = ("adapters.jira", "acli_subprocess")
+
+# Ticket 625b: after canonicalization the outbound differ must not name any RAW Jira snapshot
+# key. Those vendor-shaped reads live only under adapters/jira/ now.
+_VENDOR_SNAPSHOT_KEY_LITERALS = (
+    "accountId",
+    "emailAddress",
+    "displayName",
+    "issuetype",
+    "issuelinks",
+    "inwardIssue",
+    "outwardIssue",
+)
+
+
+def test_outbound_differ_names_no_vendor_snapshot_key() -> None:
+    """The canonical outbound differ reads local field names only; no raw Jira snapshot key
+    used AS A STRING LITERAL (a dict-key read like ``jira_fields["accountId"]``) appears in its
+    source (ticket 625b). Bare mentions in comments/docstrings are not reads and are allowed."""
+    text = (_REC / "outbound_differ.py").read_text()
+    offenders = sorted(
+        k for k in _VENDOR_SNAPSHOT_KEY_LITERALS if f'"{k}"' in text or f"'{k}'" in text
+    )
+    assert not offenders, (
+        f"outbound_differ.py reads raw Jira snapshot key(s) {offenders} as string literals — "
+        f"compare in canonical (local) shape via the injected InboundMapper; vendor-key reads "
+        f"belong under adapters/jira/."
+    )
 
 
 def _all_imported_modules(path: Path) -> set[str]:

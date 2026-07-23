@@ -23,6 +23,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 
@@ -77,7 +79,7 @@ def _jira(**ov) -> dict:
 
 def test_jira_side_assignee_change_suppressed(differ):
     # last sync: assignee=Alice; local still Alice; Jira now Bob (teammate edit).
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(assignee="alice@x.com"), _jira(assignee=BOB), prev_jira_fields={"assignee": ALICE}
     )
     assert "assignee" not in changed, "Jira-side assignee change must mirror inbound, not revert"
@@ -85,7 +87,7 @@ def test_jira_side_assignee_change_suppressed(differ):
 
 def test_jira_side_status_change_suppressed(differ):
     # local 'open' maps to 'To Do' == prev; Jira now 'In Progress'.
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(status="open"),
         _jira(status={"name": "In Progress"}),
         prev_jira_fields={"status": {"name": "To Do"}},
@@ -94,7 +96,7 @@ def test_jira_side_status_change_suppressed(differ):
 
 
 def test_jira_side_description_change_suppressed(differ):
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="old body"),
         _jira(description="new body from Jira"),
         prev_jira_fields={"description": "old body"},
@@ -107,14 +109,14 @@ def test_jira_side_description_change_suppressed(differ):
 
 def test_local_assignee_change_still_emits(differ):
     # last sync: Alice; local changed to Bob; Jira unchanged (Alice).
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(assignee="bob@x.com"), _jira(assignee=ALICE), prev_jira_fields={"assignee": ALICE}
     )
     assert changed.get("assignee") == "bob@x.com", "a genuine local change still pushes outbound"
 
 
 def test_local_description_change_still_emits(differ):
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="locally edited"),
         _jira(description="old body"),
         prev_jira_fields={"description": "old body"},
@@ -126,7 +128,7 @@ def test_local_description_change_still_emits(differ):
 
 
 def test_no_prev_degrades_to_local_wins(differ):
-    changed = differ._diff_fields(_ticket(assignee="alice@x.com"), _jira(assignee=BOB))
+    changed = _of._diff_fields(_ticket(assignee="alice@x.com"), _jira(assignee=BOB))
     assert changed.get("assignee") == "alice@x.com", (
         "without prev, behaviour is unchanged local-wins"
     )

@@ -14,7 +14,9 @@ is already an accountId (and does not leak the flag to the ACLI subprocess); and
 from __future__ import annotations
 
 import rebar_reconciler.adapters.jira.acli as acli
-import rebar_reconciler.outbound_differ as differ
+
+# ticket 625b: the field-diff helpers are now adapter-internal (outbound_fields).
+from rebar_reconciler.adapters.jira import outbound_fields as _of
 
 
 def _ticket(assignee: str) -> dict:
@@ -37,7 +39,7 @@ def test_diff_fields_sets_sentinel_on_identity_mapping_hit() -> None:
     def resolver(assignee, jira_key):  # 3-tuple: (accountId, authoritative, is_account_id)
         return ("acct-ada", True, True)
 
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket("ada@example.com"), _jira(None), assignee_resolver=resolver, jira_key="REB-1"
     )
     assert changed.get("assignee") == "acct-ada"
@@ -48,7 +50,7 @@ def test_diff_fields_no_sentinel_on_search_resolution() -> None:
     def resolver(assignee, jira_key):
         return ("acct-bob", True, False)  # resolved via search, not identity mapping
 
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket("bob"), _jira(None), assignee_resolver=resolver, jira_key="REB-1"
     )
     # On the non-identity (search/legacy) path the differ keeps legacy behaviour —

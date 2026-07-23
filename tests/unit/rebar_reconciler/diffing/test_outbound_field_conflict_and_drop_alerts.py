@@ -12,6 +12,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar_reconciler.adapters.jira import outbound_fields as _of  # 625b: adapter-internal
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DIFFER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "outbound_differ.py"
 RUN_DIFFERS_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "run_differs.py"
@@ -64,7 +66,7 @@ def test_both_sides_conflict_is_recorded(differ) -> None:
     """local AND Jira both diverged from the baseline → conflict recorded; local still
     wins (the field is still in `changed`)."""
     sink: list[tuple[str, str]] = []
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         jira_key="KEY-1",
@@ -78,7 +80,7 @@ def test_both_sides_conflict_is_recorded(differ) -> None:
 def test_one_sided_local_change_is_not_a_conflict(differ) -> None:
     """local changed, Jira still at baseline → local-wins, but NO conflict."""
     sink: list[tuple[str, str]] = []
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="D"),
         jira_key="KEY-2",
@@ -91,7 +93,7 @@ def test_one_sided_local_change_is_not_a_conflict(differ) -> None:
 
 def test_no_baseline_never_fabricates_a_conflict(differ) -> None:
     sink: list[tuple[str, str]] = []
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(description="local-edit"),
         _jira(description="jira-edit"),
         jira_key="KEY-3",
@@ -106,7 +108,7 @@ def test_dropped_issuetype_is_recorded(differ) -> None:
     """A local issuetype that differs from Jira is dropped by the outbound allowlist —
     it must be recorded, and still NOT emitted."""
     dropped: list[tuple[str, str]] = []
-    changed = differ._diff_fields(
+    changed = _of._diff_fields(
         _ticket(ticket_type="bug"),  # -> issuetype "Bug"
         _jira(issuetype={"name": "Task"}),
         jira_key="KEY-4",
@@ -118,7 +120,7 @@ def test_dropped_issuetype_is_recorded(differ) -> None:
 
 def test_matching_issuetype_is_not_flagged(differ) -> None:
     dropped: list[tuple[str, str]] = []
-    differ._diff_fields(
+    _of._diff_fields(
         _ticket(ticket_type="task"),  # -> "Task"
         _jira(issuetype={"name": "Task"}),
         jira_key="KEY-5",
