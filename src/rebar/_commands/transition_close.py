@@ -688,7 +688,10 @@ def close_ticket(
             sys.stderr.write(
                 f"Warning: closed {ticket_id} WITHOUT a completion signature — the code drifted "
                 f"between verify ({str(_verified_sha)[:12]}) and sign ({str(_fresh_sha)[:12]}); "
-                "not attesting stale state. Re-close to certify against the current tree.\n"
+                "not attesting stale state. To certify, reopen and re-close against the verified "
+                f"commit: `rebar reopen {ticket_id}`, move it back to in_progress, then re-close "
+                f"with `--ref {_verified_sha}`. (A plain re-close of an already-closed ticket is a "
+                "no-op — reopen first.)\n"
             )
         else:
             try:
@@ -702,7 +705,9 @@ def close_ticket(
                 # warn and skip signing (exit 0). Re-close once OpenSSH >= 8.9 is installed.
                 sys.stderr.write(
                     f"Warning: closed {ticket_id} WITHOUT a completion signature — {exc.message} "
-                    "Re-close once signing is available to certify against the current tree.\n"
+                    f"Once signing is available, `rebar reopen {ticket_id}`, move it back to "
+                    "in_progress, and re-close to certify (a plain re-close of a closed ticket is "
+                    "a no-op).\n"
                 )
 
     # Blame-Hunt Advisory (ticket 555e): on a BUG close, draw a best-effort caused_by link
