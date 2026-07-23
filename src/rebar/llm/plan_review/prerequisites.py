@@ -186,10 +186,22 @@ def run_focused_finder(
         for block in oversized
     ]
 
-    def run_bin(bin_: list[Any], model: str | None) -> list[dict[str, Any]]:
+    # prerequisite_id -> (model that produced the record, number of model attempts). A ladder
+    # escalation re-runs a bin on a HIGHER model, so the producing model is not always cfg.model;
+    # emit_indeterminate must report what actually ran, not what was configured (client report §4).
+    produced: dict[str, tuple[str | None, int]] = {}
+
+    def run_bin(bin_: list[Any], model: str | None, attempt: int = 1) -> list[dict[str, Any]]:
         import dataclasses
 
         ids = [block.canonical_id for block in bin_]
+
+        def _from(model_used: str | None, records_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            # Record the producing model/attempt for every id this terminal path yielded.
+            for pid in ids:
+                produced[pid] = (model_used, attempt)
+            return records_
+
         instructions = (
             "Judge each subject-to-prerequisite pair independently. Return exactly one record "
             "per id; never compare prerequisites with each other.\n\n"
@@ -210,30 +222,41 @@ def run_focused_finder(
                     execution_mode="single_turn",
                 )
             )
-            return normalize_coverage_records(raw, ids)
+            return _from(model, normalize_coverage_records(raw, ids))
         except Exception as exc:  # noqa: BLE001 - unresolved provider output is indeterminate
             if not sizing.is_context_limit_error(exc):
-                return [_indeterminate(pid, "evaluation-error", "provider-failure") for pid in ids]
+                return _from(
+                    model,
+                    [_indeterminate(pid, "evaluation-error", "provider-failure") for pid in ids],
+                )
             if len(bin_) > 1:
+                # A split is a subdivision, not a model retry: the sub-bins keep the same attempt
+                # depth and each records its own producing model.
                 middle = len(bin_) // 2
-                return [*run_bin(bin_[:middle], model), *run_bin(bin_[middle:], model)]
+                return [
+                    *run_bin(bin_[:middle], model, attempt),
+                    *run_bin(bin_[middle:], model, attempt),
+                ]
             ladder = sizing.models_at_or_above(model)
             try:
                 next_model = ladder[ladder.index(model) + 1] if model in ladder else ladder[0]
             except (ValueError, IndexError):
-                return [_indeterminate(ids[0], "evaluation-error", "input-too-large")]
-            return run_bin(bin_, next_model)
+                return _from(model, [_indeterminate(ids[0], "evaluation-error", "input-too-large")])
+            return run_bin(bin_, next_model, attempt + 1)
 
     for bin_ in bins:
         records.extend(run_bin(bin_, cfg.model))
     records.sort(key=lambda record: record["prerequisite_id"])
     for record in records:
         if record.get("disposition") == "indeterminate":
+            used_model, used_attempts = produced.get(
+                str(record.get("prerequisite_id", "")), (cfg.model, 1)
+            )
             emit_indeterminate(
                 record,
                 ticket_id=ticket_id,
-                model=cfg.model,
-                attempts=1,
+                model=used_model,
+                attempts=used_attempts,
                 bin_size=len(blocks),
             )
     findings = [finding for record in records for finding in record.get("findings", [])]
