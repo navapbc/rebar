@@ -505,11 +505,17 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     def _resolve_deps(cid: str) -> list[dict[str, Any]]:
         return _reads.show_ticket(cid, repo_root=ctx.tickets_root).get("deps", []) or []
 
+    # Inherited-link resolution (client report §7): a child's citation is grounded when an
+    # ANCESTOR carries the upstream edge (epics depend on epics, stories on stories).
+    def _resolve_parent(cid: str) -> str | None:
+        return _reads.show_ticket(cid, repo_root=ctx.tickets_root).get("parent_id") or None
+
     cit_issues = det_citation.unbacked_citations(
         det_citation.parse_citations(ctx.plan_text),
         ctx.state.get("deps", []) or [],
         _resolve_deps,
         ctx.ticket_id,
+        _resolve_parent,
     )
     issues.extend(cit_issues)
     cov = {
