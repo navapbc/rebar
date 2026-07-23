@@ -280,6 +280,14 @@ def test_natural_a_to_b_to_c_invalidation_requires_each_narrow_material_change(
     assert rebar.show_ticket(plan_b, repo_root=str(rebar_repo))["status"] == "open"
     assert before_propagation.returncode == 0, before_propagation.stderr
 
+    unchanged = rebar.llm.review_plan(
+        plan_b, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+    )
+    after_unchanged_review = _cli(rebar_repo, "review-plan", plan_c, "--status")
+
+    assert unchanged["verdict"] == "PASS"
+    assert after_unchanged_review.returncode == 0, after_unchanged_review.stderr
+
     rebar.edit_ticket(
         plan_b,
         description=_DESCRIPTION + "\nB adapted to A.",
@@ -397,6 +405,49 @@ def test_close_allows_code_only_head_drift_after_execution_review(
     result = _cli(rebar_repo, "transition", ticket_id, "in_progress", "closed")
 
     assert result.returncode == 0, result.stderr
+    assert rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))["status"] == "closed"
+
+
+def test_in_progress_self_edit_requires_fresh_execution_review_before_close(
+    rebar_repo: Path,
+) -> None:
+    _assert_project_policies_enabled()
+    _commit(rebar_repo)
+    _enable_fixture(rebar_repo)
+    ticket_id = _ticket(rebar_repo, "execution self-edit")
+    assert (
+        rebar.llm.review_plan(ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo))["verdict"]
+        == "PASS"
+    )
+    assert _cli(rebar_repo, "claim", ticket_id, "--assignee=fixture").returncode == 0
+    assert (
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
+        == "PASS"
+    )
+
+    rebar.edit_ticket(
+        ticket_id,
+        description=_DESCRIPTION + "\nExecution adaptation.",
+        repo_root=str(rebar_repo),
+    )
+    rejected = _cli(rebar_repo, "transition", ticket_id, "in_progress", "closed")
+
+    assert rejected.returncode == 1
+    assert "stale-material" in rejected.stderr
+    assert "review-plan" in rejected.stderr
+    assert rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))["status"] == "in_progress"
+
+    assert (
+        rebar.llm.review_plan(
+            ticket_id, runner=_PassRunner(), repo_root=str(rebar_repo), force=True
+        )["verdict"]
+        == "PASS"
+    )
+    closed = _cli(rebar_repo, "transition", ticket_id, "in_progress", "closed")
+
+    assert closed.returncode == 0, closed.stderr
     assert rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))["status"] == "closed"
 
 
