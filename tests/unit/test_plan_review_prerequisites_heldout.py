@@ -150,20 +150,17 @@ def test_prerequisite_fidelity_report_rejects_missing_and_wrong_attribution() ->
     assert any("attribution" in failure for failure in report.gating_failures)
 
 
-def test_prerequisite_indeterminate_precedes_visible_det_blocker() -> None:
+def _finalize(parts_blocking, coverage):
     context = PlanContext(
         ticket_id="aaaa-bbbb-cccc-dddd",
         ticket_type="story",
         title="Subject",
         description="Plan",
     )
-    det = {"id": "det-1", "finding": "Structural defect", "criteria": ["P1"]}
-    coverage = {"llm_ran": True, "prerequisite_indeterminate": True}
-
-    verdict = orchestrator.finalize_verdict(
+    return orchestrator.finalize_verdict(
         context,
         {
-            "blocking": [det],
+            "blocking": parts_blocking,
             "surfaced": [],
             "overflow": [],
             "indeterminate": [],
@@ -175,9 +172,23 @@ def test_prerequisite_indeterminate_precedes_visible_det_blocker() -> None:
         model="fake-model",
     )
 
-    assert verdict["verdict"] == "INDETERMINATE"
+
+def test_visible_det_blocker_outranks_prerequisite_indeterminate() -> None:
+    # A genuine blocking finding must not be masked by a subsidiary prerequisite-pass
+    # indeterminacy: the author should see an actionable BLOCK, not a transient INDETERMINATE
+    # ("re-run"). Precedence: BLOCK before prerequisite_indeterminate (client report §3).
+    det = {"id": "det-1", "finding": "Structural defect", "criteria": ["P1"]}
+    verdict = _finalize([det], {"llm_ran": True, "prerequisite_indeterminate": True})
+    assert verdict["verdict"] == "BLOCK"
     assert verdict["blocking"] == [det]
     assert verdict["coverage"]["prerequisite_indeterminate"] is True
+
+
+def test_prerequisite_indeterminate_without_blocker_is_indeterminate() -> None:
+    # Unchanged: with no blocking finding, a prerequisite-pass indeterminacy still yields
+    # INDETERMINATE.
+    verdict = _finalize([], {"llm_ran": True, "prerequisite_indeterminate": True})
+    assert verdict["verdict"] == "INDETERMINATE"
 
 
 def test_verifier_largest_window_exhaustion_preserves_input_too_large_reason() -> None:
