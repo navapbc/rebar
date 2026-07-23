@@ -20,7 +20,7 @@ import subprocess
 import sys
 
 from rebar._cli import _help
-from rebar._cli._init import ensure_initialized
+from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
 from rebar._cli._llm_commands import (
     _criteria,
     _explain,
@@ -35,6 +35,11 @@ from rebar._cli._llm_commands import (
 )
 from rebar._cli._workflow_commands import _workflow
 
+# Commands EXCLUDED from the central best-effort store-mount gate (bug ad9f): `init`
+# IS init (it must not pre-mount) and `scratch` is filesystem-only (the dispatcher
+# gives it no init). Everything else passes through the gate, which silently no-ops
+# when there is no attachable store, so no-store reads keep working store-less.
+_NO_AUTO_MOUNT = frozenset({"init", "scratch"})
 # Read arms that auto-init only; the read path owns its own throttled reconverge.
 _READS_INIT_ONLY = frozenset(
     {"show", "list", "next-batch", "deps", "ready", "search", "session-logs"}
@@ -391,6 +396,15 @@ def _main_dispatch(argv: list[str]) -> int:
         except _config.ConfigError as exc:
             sys.stderr.write(f"Error: {exc}\n")
             return 1
+
+    # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the pure
+    # intercepts below (verify-commit-ticket, ...) that historically bypassed the per-arm
+    # ensure_initialized — mounts the store ONCE here, before dispatch, so none can silently skip
+    # it. Best-effort (attach-if-possible, never error, never first-time-init, never reconverge):
+    # the strict per-arm ensure_initialized calls remain and still own greenfield refusal +
+    # reconverge for store-REQUIRING arms. Commands that never touch the store are excluded.
+    if argv and argv[0] not in _NO_AUTO_MOUNT:
+        ensure_store_mounted_best_effort()
 
     # reconcile intercept (the dispatcher has no reconcile arm).
     if argv and argv[0] == "reconcile":
