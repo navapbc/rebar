@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rebar_reconciler.adapters.jira.acli_subprocess import AssigneeNotFoundError
+from rebar_reconciler._backend import BackendAssigneeNotFoundError
 from rebar_reconciler.batch_dispatch import create_one, delete_one, update_one
 from rebar_reconciler.pass_io import (
     _load_alert_store,
@@ -65,7 +65,9 @@ class BatchApplyContext:
     read the resolved transport (``client``) and pass metadata, and mutate the
     running ``rest_calls`` budget plus the ``deferred_creates`` / ``events_list``
     accumulators that ``create_one`` appends to. The assignee soft-fail path catches
-    ``AssigneeNotFoundError`` via a direct import (S4), not off the transport.
+    the vendor-neutral ``BackendAssigneeNotFoundError`` base (ticket 97f2/bbf1) — the
+    adapter's concrete assignee error subclasses it — so the core handler names no
+    vendor error.
     """
 
     client: Any
@@ -180,7 +182,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         outcome["result"] = None
         outcome["error"] = f"stale-binding-404: {exc!s}"
         return HandlerResult(outcome, soft_failed=True)
-    except AssigneeNotFoundError as exc:
+    except BackendAssigneeNotFoundError as exc:
         alert_store = _load_alert_store()
         alert_store.append(
             {

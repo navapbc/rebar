@@ -146,6 +146,18 @@ five required role Protocols, each derived from the de-facto surface the core al
 | `FieldSanitizer` | defend vendor hard limits (label/summary/comment/description) | `adapters/jira/jira_fields.py` + `comment_limits.py` |
 | `IdentityConvention` | how the backend stores/reads the `rebar-id` back-pointer | new pure object (Jira: `rebar-id:<id>` label) |
 
+**Scalar surface (ticket `97f2`).** Beyond the five role Protocols, `Backend` also pins three
+scalar members so the reconciler core stops reaching into `adapters.jira`/`acli_subprocess`
+for project scope and connection readiness, plus two vendor-neutral exception types:
+
+| Member | Responsibility | Today's Jira delegate |
+|---|---|---|
+| `Backend.project` | write/create project scope, with the backend's create-time default applied | `resolve_jira_settings(project_default="DIG").project` |
+| `Backend.query_project` | read/query project scope, WITHOUT any create-time default (fail-closed) | `resolve_jira_settings().project` |
+| `Backend.assert_env_ready()` | fail fast when a connection essential is missing, before the transport is used | checks `JIRA_URL`/`JIRA_USER`/`JIRA_API_TOKEN` |
+| `BackendEnvError` | neutral "connection essentials missing" error raised by `assert_env_ready()` (subclasses `RuntimeError`) | n/a |
+| `BackendAssigneeNotFoundError` | neutral base for "assignee resolves to no assignable remote user" | Jira's `acli_subprocess.AssigneeNotFoundError` subclasses it |
+
 Plus three **opt-in capability Protocols** a backend advertises only when it supports the
 feature: `SupportsLinks`, `SupportsComments`, `SupportsIncremental`. Callers detect a
 capability by an `isinstance`-guarded check against the backend (a backend that does not

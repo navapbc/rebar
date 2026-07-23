@@ -34,6 +34,28 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 
+class BackendEnvError(RuntimeError):
+    """Vendor-neutral "connection essentials missing" error (ticket 97f2/bbf1).
+
+    Raised by ``Backend.assert_env_ready`` when a required connection setting
+    (e.g. Jira's ``JIRA_URL``/``JIRA_USER``/``JIRA_API_TOKEN``) is absent.
+    Subclasses ``RuntimeError`` so the pre-port ``except RuntimeError`` contract
+    at existing call sites (e.g. ``build_acli_client_from_env``) is preserved
+    even as those sites move to catching this neutral type.
+    """
+
+
+class BackendAssigneeNotFoundError(Exception):
+    """Vendor-neutral base for "a requested assignee resolves to no assignable
+    remote user" (ticket 97f2/bbf1).
+
+    The core apply path catches THIS base so it never imports a vendor-specific
+    error type; each adapter's concrete assignee error (Jira:
+    ``acli_subprocess.AssigneeNotFoundError``) subclasses it, so existing raises
+    are unchanged while core-side ``except`` clauses stay backend-neutral.
+    """
+
+
 @dataclass(frozen=True)
 class RemoteRef:
     """A backend-neutral identity for one remote work item.
@@ -218,3 +240,30 @@ class Backend(Protocol):
 
     @property
     def identity(self) -> IdentityConvention: ...
+
+    @property
+    def project(self) -> str:
+        """The backend's effective write/create project scope, with the backend's
+        own create-time default applied (Jira: ``resolve_jira_settings`` with
+        ``project_default="DIG"``). Used by the applier's cross-project safety
+        guard, whose create client targets the SAME defaulted project (ticket
+        97f2). Tolerates a settings-less test fake: it never reads the transport,
+        so a fake transport without a project attribute still resolves."""
+        ...
+
+    @property
+    def query_project(self) -> str:
+        """The backend's configured read/query project scope, WITHOUT any
+        create-time default (empty string when unset). The inbound fetcher scopes
+        its search to this and FAILS CLOSED on an empty/invalid value rather than
+        querying everything (bug 626d), so — unlike :attr:`project` — no default is
+        substituted here (ticket 97f2)."""
+        ...
+
+    def assert_env_ready(self) -> None:
+        """Fail fast when a connection essential (e.g. Jira's JIRA_URL / JIRA_USER /
+        JIRA_API_TOKEN) is missing, BEFORE the transport is used for bootstrap-band
+        execution. Raises the neutral :class:`BackendEnvError` naming the missing
+        var(s) rather than letting a downstream call fail with a cryptic error
+        (ticket 97f2)."""
+        ...

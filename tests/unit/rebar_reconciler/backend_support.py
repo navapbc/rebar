@@ -145,6 +145,8 @@ class FakeBackend:
     """In-memory backend implementing the five role Protocols but NO capabilities."""
 
     vendor = "fake"
+    project = "FAKE"
+    query_project = "FAKE"
 
     def __init__(self) -> None:
         self.transport = FakeTransport()
@@ -155,3 +157,6 @@ class FakeBackend:
 
     def remote_ref(self, remote_id: str) -> RemoteRef:
         return RemoteRef(vendor=self.vendor, instance="test", remote_id=remote_id)
+
+    def assert_env_ready(self) -> None:
+        """No-op: the fake is always ready."""
