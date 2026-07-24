@@ -15,6 +15,7 @@ from rebar.llm.criteria.model import CriteriaError
 from rebar.llm.errors import LLMError
 from rebar.llm.workflow import executor as _ex
 from rebar.llm.workflow import gate_dispatch
+from rebar.llm.workflow import steps as _steps  # noqa: F401 — registers workflow ops
 from rebar.llm.workflow.runners import BatchRunRequest
 
 _PROJECT_ID = "project.foo"
@@ -415,3 +416,127 @@ def test_project_det_criterion_stays_outside_llm_fan_in(tmp_path, monkeypatch) -
 
     assert verdict["verdict"] == "PASS"
     assert _PROJECT_PROMPT not in runner.calls
+
+
+def _project_finding() -> dict:
+    return {
+        "finding": "project routing finding",
+        "criteria": [_PROJECT_ID],
+        "evidence": ["x.py:1"],
+        "location": "x.py:1",
+    }
+
+
+def _project_verification() -> dict:
+    return {
+        "index": 0,
+        "binary": {
+            "is_verifiable": "yes",
+            "evidence_entails_finding": "yes",
+            "path_reachable": "yes",
+            "impact_follows_necessarily": "yes",
+            "no_viable_alternative_explanation": "yes",
+            "no_existing_mitigation": "yes",
+            "severity_claim_justified": "yes",
+        },
+        "severity_attributes": {},
+    }
+
+
+def _decide_project_finding(repo_root: str | None) -> dict:
+    return _ex.STEP_REGISTRY["code_review_decide"](
+        _ex.StepContext(
+            run_id="project-routing",
+            step_id="decide",
+            kind="uses",
+            step={"uses": "code_review_decide"},
+            inputs={
+                "findings": [_project_finding()],
+                "verifications": [_project_verification()],
+            },
+            workflow={},
+            repo_root=repo_root,
+        )
+    )
+
+
+def test_project_routing_controls_pass3_blocking(tmp_path) -> None:
+    repo = _project_repo(
+        tmp_path,
+        routing={
+            **_PROJECT_ROUTING,
+            "block_threshold": 0.0,
+            "blocking_enabled": True,
+        },
+    )
+
+    result = _decide_project_finding(str(repo))
+
+    assert [finding["finding"] for finding in result["blocking"]] == ["project routing finding"]
+    assert not result["surfaced"]
+
+
+def test_project_routing_controls_pass3_nit_suppression(tmp_path) -> None:
+    repo = _project_repo(
+        tmp_path,
+        routing={
+            **_PROJECT_ROUTING,
+            "blocking_enabled": False,
+            "nit_suppressed": True,
+        },
+    )
+
+    result = _decide_project_finding(str(repo))
+
+    assert not result["surfaced"]
+    assert result["dropped"][0]["decision"] == "dropped"
+    assert result["dropped"][0]["reason"] == "nit-suppressed"
+
+
+def test_project_routing_controls_pass3_through_production_gate(tmp_path, monkeypatch) -> None:
+    repo = _project_repo(
+        tmp_path,
+        routing={
+            **_PROJECT_ROUTING,
+            "block_threshold": 0.0,
+            "blocking_enabled": True,
+        },
+    )
+    runner = _ProductionRecordingRunner()
+    from rebar.llm.code_review import detectors
+
+    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+
+    verdict = gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            source="local",
+            diff_text="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('changed')\n",
+            changed_files=["x.py"],
+            runner=runner,
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+
+    project = next(
+        finding for finding in verdict["blocking"] if finding.get("reviewer_id") == _PROJECT_PROMPT
+    )
+    assert project["criteria"] == ["existing-tag", _PROJECT_ID]
+
+
+def test_overlay_absent_repo_preserves_pass3_disposition(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    (repo / ".rebar" / "criteria_routing.json").unlink()
+
+    repo_aware = _decide_project_finding(str(repo))
+
+    assert not repo_aware["blocking"]
+    assert not repo_aware["dropped"]
+    assert len(repo_aware["surfaced"]) == 1
+    finding = repo_aware["surfaced"][0]
+    assert finding["decision"] == "advisory"
+    assert finding["reason"] == "default-advisory"
+    assert finding["block_threshold"] == 0.95
+    assert finding["blocking_enabled"] is False

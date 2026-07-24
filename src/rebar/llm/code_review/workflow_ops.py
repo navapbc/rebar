@@ -415,10 +415,11 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
         diff_text=str(ctx.inputs.get("diff_text") or ""),
         repo_root=ctx.repo_root,
     )
+    routing = registry.effective_routing(ctx.repo_root)
     decided = review_kernel.pass3_over_findings(
         findings,
         reshape.verifications,
-        threshold_for=registry.threshold_for,
+        threshold_for=lambda criteria: registry.threshold_for(criteria, routing),
         impact_fn=review_kernel.impact_code,
     )
     # Nit-suppression (story grusome-uncheerful-nematode): an ADVISORY finding whose criteria are
@@ -426,7 +427,7 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
     # dropped so it adds no coaching noise. POST-pass3: partition-only — validity/impact/priority
     # and every BLOCK decision are untouched; a finding that ALSO maps to a non-suppressed
     # criterion still surfaces (all-criteria rule).
-    nit_suppressed = registry.nit_suppressed_criteria()
+    nit_suppressed = registry.nit_suppressed_criteria(routing)
     buckets: dict[str, list[dict[str, Any]]] = {
         "blocking": [],
         "surfaced": [],
