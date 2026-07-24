@@ -136,7 +136,15 @@ def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
     until = until if until and until.strip() else default_until
 
     root = str(config.repo_root(repo_root) if repo_root is not None else config.repo_root())
-    ctx = SimpleNamespace(repo_root=root, since=since, until=until)
+    code_health = config.load_config(root).code_health
+    ctx = SimpleNamespace(
+        repo_root=root,
+        since=since,
+        until=until,
+        scan_roots=code_health.scan_roots,
+        size_cap=code_health.size_cap,
+        size_near_fraction=code_health.size_near_fraction,
+    )
 
     # Hydrate REGISTRY: importing the PACKAGE runs the reader modules' registration
     # side effects. Importing only ``rebar.metrics.registry`` would leave it empty.

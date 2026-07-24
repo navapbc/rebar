@@ -1,24 +1,16 @@
-"""Held-out contracts for the git-derivation readers (ticket 7931). WITHHELD.
-
-- ``over_cap_count`` actually counts modules exceeding the single-sourced cap,
-- ``cap_change_events`` surfaces a change to .github/module-size-limit.txt with the
-  old and new values, and returns [] for a range with no such change,
-- the metrics register into the c085 registry with source="git" (authoritative).
-"""
+"""Held-out contracts for analyzer-backed module-size metrics. WITHHELD."""
 
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from rebar.metrics.git_metrics import (
-    cap_change_events,
-    module_size_distribution,
-    refactor_to_addition_ratio,
-)
-from rebar.metrics.registry import REGISTRY, is_authoritative
+from rebar.metrics import git_metrics
+from rebar.metrics.analyzer import AnalyzerResult
+from rebar.metrics.registry import REGISTRY, Unavailable, evaluate
 
 pytestmark = pytest.mark.unit
 
@@ -41,42 +33,88 @@ def _commit(repo: Path, msg: str) -> None:
     _git(repo, "commit", "-q", "-m", msg)
 
 
-def test_over_cap_count_uses_the_single_sourced_cap(tmp_path):
-    repo = tmp_path / "repo"
-    _init(repo)
-    (repo / ".github").mkdir()
-    # A deliberately small cap so a modest module counts as "over".
-    (repo / ".github" / "module-size-limit.txt").write_text("50\n", encoding="utf-8")
-    src = repo / "src" / "rebar"
-    src.mkdir(parents=True)
-    (src / "under.py").write_text("\n".join(str(i) for i in range(20)) + "\n", encoding="utf-8")
-    (src / "over.py").write_text("\n".join(str(i) for i in range(90)) + "\n", encoding="utf-8")
-    _commit(repo, "seed")
+def test_near_cap_boundary():
+    loc = {
+        "files": {"a": 720, "b": 800, "c": 719, "d": 801},
+        "max_loc": 801,
+    }
 
-    dist = module_size_distribution(str(repo))
-    assert dist["over_cap_count"] == 1  # only over.py (90) exceeds the cap of 50
-    assert dist["max_loc"] == 90
+    assert git_metrics.module_size_distribution(loc, 800, 0.1) == {
+        "count": 4,
+        "near_cap_count": 2,
+        "over_cap_count": 1,
+        "max_loc": 801,
+    }
 
 
-def test_cap_change_events(tmp_path):
-    repo = tmp_path / "repo"
-    _init(repo)
-    limit = repo / ".github" / "module-size-limit.txt"
-    limit.parent.mkdir()
-    limit.write_text("500\n", encoding="utf-8")
-    _commit(repo, "introduce cap 500")
-    limit.write_text("800\n", encoding="utf-8")
-    _commit(repo, "raise cap to 800")
+def test_no_cap():
+    loc = {"files": {"a": 720, "b": 801}, "max_loc": 801}
 
-    events = cap_change_events(str(repo), "2000-01-01", "2100-01-01")
-    # The raise 500 -> 800 is surfaced with both values.
-    raises = [
-        e for e in events if str(e.get("old_limit")) == "500" and str(e.get("new_limit")) == "800"
+    assert git_metrics.module_size_distribution(loc, None, 0.1) == {
+        "count": 2,
+        "near_cap_count": None,
+        "over_cap_count": None,
+        "max_loc": 801,
+    }
+    oversized = getattr(git_metrics, "oversized_module_count", None)
+    assert callable(oversized), "the analyzer-backed oversized metric must be public"
+    assert oversized(loc, None, 0.1) is None
+
+
+def test_analyzer_specs_use_context_config(monkeypatch, tmp_path):
+    calls: list[tuple[Path, list[str]]] = []
+
+    def analyze(root: Path, scan_roots: list[str]) -> AnalyzerResult:
+        calls.append((root, scan_roots))
+        return AnalyzerResult(loc={"files": {"src/a.py": 801}, "max_loc": 801})
+
+    analyzer_module = getattr(git_metrics, "scc_loc", None)
+    assert analyzer_module is not None, "module-size specs must use the scc adapter"
+    monkeypatch.setattr(analyzer_module, "analyze", analyze)
+    specs = {spec.id: spec for spec in REGISTRY}
+    ctx = SimpleNamespace(
+        repo_root=str(tmp_path),
+        scan_roots=["src", "web"],
+        size_cap=800,
+        size_near_fraction=0.1,
+    )
+
+    distribution = evaluate(specs["module_size_distribution"], ctx)
+    oversized = evaluate(specs["oversized_module_count"], ctx)
+
+    assert distribution.value["over_cap_count"] == 1
+    assert oversized.value == 1
+    assert calls == [
+        (tmp_path, ["src", "web"]),
+        (tmp_path, ["src", "web"]),
     ]
-    assert raises, f"expected a 500->800 cap-change event, got {events}"
 
-    # A future-only range has no cap change.
-    assert cap_change_events(str(repo), "2099-01-01", "2100-01-01") == []
+
+def test_analyzer_unavailable_is_not_fabricated_or_leaked(monkeypatch, tmp_path):
+    analyzer_module = getattr(git_metrics, "scc_loc", None)
+    assert analyzer_module is not None, "module-size specs must use the scc adapter"
+    monkeypatch.setattr(
+        analyzer_module,
+        "analyze",
+        lambda *_args, **_kwargs: Unavailable(
+            reason="could not run scc: [Errno 2] missing",
+            accruing_since="2026-01-01T00:00:00+00:00",
+        ),
+    )
+    spec = next(spec for spec in REGISTRY if spec.id == "module_size_distribution")
+    result = evaluate(
+        spec,
+        SimpleNamespace(
+            repo_root=str(tmp_path),
+            scan_roots=[],
+            size_cap=800,
+            size_near_fraction=0.1,
+        ),
+    )
+
+    assert isinstance(result, Unavailable)
+    assert result.reason == "no data has accrued for 'module_size_distribution' yet"
+    assert "Errno" not in result.reason
 
 
 def test_refactor_ratio_none_on_zero_insertions(tmp_path):
@@ -86,18 +124,21 @@ def test_refactor_ratio_none_on_zero_insertions(tmp_path):
     (repo / "seed.py").write_text("x\n", encoding="utf-8")
     _commit(repo, "seed")
     # A future-only window has no commits -> zero insertions -> None.
-    assert refactor_to_addition_ratio(str(repo), "2099-01-01", "2100-01-01") is None
+    assert git_metrics.refactor_to_addition_ratio(str(repo), "2099-01-01", "2100-01-01") is None
 
 
-def test_git_metrics_registered_with_labels():
-    git_specs = {s.id: s for s in REGISTRY if s.source == "git"}
-    assert git_specs, "7931 must register git-sourced metrics into REGISTRY"
-    for s in git_specs.values():
-        assert is_authoritative(s.source) is True
-    # The specific new metric ids must actually be registered, each labeled code_health/git.
-    named = {"module_size_distribution", "churn", "cap_change_events", "refactor_to_addition_ratio"}
-    present = named & set(git_specs)
-    assert present, f"expected 7931's git metric ids in REGISTRY, got {sorted(git_specs)}"
-    for mid in present:
-        assert git_specs[mid].lens == "code_health"
-        assert git_specs[mid].source == "git"
+def test_provenance_and_no_dup_seed():
+    for metric_id in ("module_size_distribution", "oversized_module_count"):
+        matches = [spec for spec in REGISTRY if spec.id == metric_id]
+        assert len(matches) == 1
+        assert matches[0].lens == "code_health"
+        assert matches[0].source == "structural"
+        assert matches[0].confidence == "high"
+        assert matches[0].accruing_since == "2026-01-01T00:00:00+00:00"
+
+
+def test_trend_unavailable():
+    specs = {spec.id: spec for spec in REGISTRY}
+    assert "cap_change_events" not in specs
+    result = evaluate(specs["module_size_trend"], SimpleNamespace())
+    assert isinstance(result, Unavailable)
