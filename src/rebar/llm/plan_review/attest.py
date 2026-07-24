@@ -198,6 +198,14 @@ def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any]
     )
     if not validity.get("valid"):
         return None
+    # Registry drift is grandfathered at the CLAIM gate (ADR 0053) but must still deny the
+    # progressive-refresh REUSE path: a probe carries the prior verdict forward, and that verdict
+    # was reached under the older criteria. Denying here only costs a full re-review, never a
+    # blocked claim — so this dimension stays conservative, matching ``registry_unchanged`` in
+    # ``remediation_mode_candidate`` / ``drift_floor``. Before ADR 0053 the ``stale-regver``
+    # verdict enforced this implicitly; it is now explicit.
+    if validity.get("registry_drift") is not None:
+        return None
     manifest = _authoritative_manifest(result)
     deps = manifest_deps(manifest)
     if not deps:  # unscoped attestation — nothing to probe against; full review
@@ -595,10 +603,16 @@ def compute_validity(
                 "health": plan_health,
             }
 
+    # Criteria-registry drift, when detected below, is GRANDFATHERED (ADR 0053): it is
+    # reported on every result this call returns but never flips ``valid``.
+    registry_drift: dict[str, str | None] | None = None
+
     def _result(valid: bool, reason: str, verdict: str) -> dict[str, Any]:
         result = {"valid": valid, "reason": reason, "verdict": verdict}
         if plan_health is not None:
             result["health"] = plan_health
+        if registry_drift is not None:
+            result["registry_drift"] = registry_drift
         return result
 
     # A signature at/before the latest reopen no longer describes the reactivated ticket.
@@ -637,16 +651,18 @@ def compute_validity(
     if kind == _MANIFEST_PREFIX:  # plan-review
         assert auth_manifest is not None
         # Every freshness input comes from the authenticated manifest, never its plaintext mirror.
+        # GRANDFATHERED (ADR 0053, amending ADR 0015). ``regver`` hashes the WHOLE effective
+        # routing index, so any criteria edit — a tightened rule and a typo fix alike — rotates
+        # it and would otherwise invalidate every outstanding attestation repo-wide at once.
+        # An attestation certifies that the plan passed the criteria AS THEY STOOD AT SIGNING
+        # TIME; a later registry change does not falsify that. So drift is recorded and
+        # reported, never blocking. The other freshness dimensions below still block.
+        # Read from the AUTHENTICATED manifest only — reporting must not become a channel for
+        # unauthenticated plaintext (ADR 0049).
         signed_regver = manifest_regver(auth_manifest)
-        if signed_regver is None or signed_regver != registry_version(repo_root):
-            return _result(
-                False,
-                (
-                    "the criteria registry changed since the plan review "
-                    "(overlay activated/edited/disabled)"
-                ),
-                "stale-regver",
-            )
+        current_regver = registry_version(repo_root)
+        if signed_regver is None or signed_regver != current_regver:
+            registry_drift = {"signed": signed_regver, "current": current_regver}
         # DEFAULT re-hashes scoped dependencies; unscoped records use whole-HEAD freshness.
         if profile is PlanValidityProfile.DEFAULT:
             deps = manifest_deps(auth_manifest)

@@ -277,13 +277,15 @@ def test_compute_validity_still_catches_a_real_material_edit(store: Path) -> Non
     assert v["verdict"] == "stale-material"
 
 
-# ── Finding B (manifest): SIGNED payload manifest authoritative for stale-code / stale-regver ──
+# ── Finding B (manifest): SIGNED payload manifest authoritative for stale-code / registry drift ──
 def test_compute_validity_ignores_plaintext_manifest_dep_and_regver_tamper(store: Path) -> None:
     """An op-cert plan-review record's SIGNED-payload manifest is authoritative for the code-drift
-    (stale-code) and registry-version (stale-regver) freshness checks. Corrupting the PLAINTEXT
-    record manifest's ``dep <hash> <path>`` line AND its ``regver:`` line — leaving the DSSE
-    envelope intact — does NOT flip ``compute_validity`` to ``stale-code`` / ``stale-regver``: the
-    signed manifest still carries the genuine, matching hash + regver."""
+    (stale-code) check AND for the registry-drift REPORT. Corrupting the PLAINTEXT record
+    manifest's ``dep <hash> <path>`` line AND its ``regver:`` line — leaving the DSSE envelope
+    intact — does NOT flip ``compute_validity`` to ``stale-code`` and does NOT fabricate a
+    ``registry_drift`` report: the signed manifest still carries the genuine, matching hash +
+    regver. Since ADR 0053 registry drift no longer blocks, but it must still never be
+    reportable from unauthenticated plaintext."""
     x = rebar.create_ticket(
         "task",
         "ticket X with enough body for a real material fingerprint to be computed here",
@@ -330,11 +332,14 @@ def test_compute_validity_ignores_plaintext_manifest_dep_and_regver_tamper(store
     # Verdict is invariant under plaintext-manifest mutation: the SIGNED manifest is authoritative.
     assert v_tampered["valid"] is True
     assert v_tampered["verdict"] == "certified"
+    # And the tampered plaintext regver must not surface as a drift report either.
+    assert "registry_drift" not in v_tampered
 
 
-def test_compute_validity_still_catches_a_real_regver_change(store: Path) -> None:
-    """No weakening (stale-regver): a GENUINE criteria-registry version change — the current regver
-    no longer equals the SIGNED one — still invalidates the attestation as ``stale-regver``."""
+def test_compute_validity_grandfathers_a_real_regver_change(store: Path) -> None:
+    """ADR 0053: a GENUINE criteria-registry version change — the current regver no longer equals
+    the SIGNED one — is grandfathered. The attestation stays valid and the skew is REPORTED via
+    ``registry_drift``, sourced from the authenticated manifest."""
     x = rebar.create_ticket(
         "task",
         "ticket X with enough body for a real material fingerprint to be computed here",
@@ -350,8 +355,9 @@ def test_compute_validity_still_catches_a_real_regver_change(store: Path) -> Non
 
     res = verify_opcert_record(rec, resolved_x, kind="plan-review", repo_root=str(store))
     v = compute_validity(res, state, "plan-review", repo_root=str(store))
-    assert v["valid"] is False
-    assert v["verdict"] == "stale-regver"
+    assert v["valid"] is True
+    assert v["registry_drift"]["signed"] == "an-old-registry-version"
+    assert v["registry_drift"]["current"] != "an-old-registry-version"
 
 
 def test_compute_validity_still_catches_a_real_code_drift(store: Path) -> None:

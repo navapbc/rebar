@@ -54,10 +54,10 @@ def test_completion_valid_when_reclosed_after_reopen(monkeypatch) -> None:
 
 
 # ── plan-review (unscoped: no dep map → whole-HEAD freshness) ───────────────────
-# Every production plan-review manifest carries a regver stamp; compute_validity now treats a
-# stamp that no longer matches the current (overlay-aware) registry_version — or a MISSING stamp —
-# as stale-regver (story 08af). These unscoped tests carry a matching stamp to reach the head/
-# material checks under test.
+# Every production plan-review manifest carries a regver stamp. Since ADR 0053 a stamp that no
+# longer matches the current (overlay-aware) registry_version — or a MISSING stamp — is
+# GRANDFATHERED: reported as non-blocking ``registry_drift``, never invalidating. These unscoped
+# tests carry a matching stamp so the head/material checks under test are the only variable.
 def _regver(monkeypatch, value="rv0") -> str:
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: value)
     return f"regver: {value}"
@@ -90,7 +90,9 @@ def test_plan_review_invalid_on_head_drift(monkeypatch) -> None:
     assert res["valid"] is False and res["verdict"] == "stale-head"
 
 
-def test_plan_review_stale_when_regver_changed(monkeypatch) -> None:
+def test_plan_review_grandfathered_when_regver_changed(monkeypatch) -> None:
+    """ADR 0053: a rotated criteria-registry stamp is GRANDFATHERED — the attestation stays
+    valid (nothing about the plan or the code moved) and the drift is reported instead."""
     _fp(monkeypatch, "pm")
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "rv-NEW")
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
@@ -101,17 +103,53 @@ def test_plan_review_stale_when_regver_changed(monkeypatch) -> None:
     }
     state = {"ticket_id": "t", "status": "in_progress"}
     res = compute_validity(att, state, "plan-review")
-    assert res["valid"] is False and res["verdict"] == "stale-regver"
+    assert res["valid"] is True and res["verdict"] == "certified"
+    assert res["registry_drift"] == {"signed": "rv-OLD", "current": "rv-NEW"}
 
 
-def test_plan_review_stale_when_regver_missing(monkeypatch) -> None:
+def test_plan_review_grandfathered_when_regver_missing(monkeypatch) -> None:
+    """An older manifest with no ``regver:`` line is grandfathered too, and reports a
+    ``None`` signed stamp so the drift is still visible."""
     _fp(monkeypatch, "pm")
     _regver(monkeypatch)
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
     att = {"manifest": ["plan-review: PASS", "material: pm"], "head_sha": "headA", "signed_at": 100}
     state = {"ticket_id": "t", "status": "in_progress"}
     res = compute_validity(att, state, "plan-review")
-    assert res["valid"] is False and res["verdict"] == "stale-regver"
+    assert res["valid"] is True and res["verdict"] == "certified"
+    assert res["registry_drift"] == {"signed": None, "current": "rv0"}
+
+
+def test_regver_drift_does_not_mask_other_staleness(monkeypatch) -> None:
+    """Only the REGISTRY dimension was grandfathered: an attestation that is both
+    regver-drifted AND head-drifted still fails on the head axis, carrying the drift report."""
+    _fp(monkeypatch, "pm")
+    monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "rv-NEW")
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headB")
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", "regver: rv-OLD"],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is False and res["verdict"] == "stale-head"
+    assert res["registry_drift"] == {"signed": "rv-OLD", "current": "rv-NEW"}
+
+
+def test_no_registry_drift_key_when_regver_matches(monkeypatch) -> None:
+    """A matching stamp reports nothing — ``registry_drift`` is absent, not a null."""
+    _fp(monkeypatch, "pm")
+    rv = _regver(monkeypatch)
+    monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
+    att = {
+        "manifest": ["plan-review: PASS", "material: pm", rv],
+        "head_sha": "headA",
+        "signed_at": 100,
+    }
+    state = {"ticket_id": "t", "status": "in_progress"}
+    res = compute_validity(att, state, "plan-review")
+    assert res["valid"] is True and "registry_drift" not in res
 
 
 def test_plan_review_invalid_when_reopened(monkeypatch) -> None:

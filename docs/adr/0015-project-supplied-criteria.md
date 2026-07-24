@@ -1,6 +1,8 @@
 # ADR 0015: Project-supplied review criteria — a `.rebar/` routing overlay over one shared registry
 
-- **Status:** Accepted
+- **Status:** Accepted (the `stale-regver` claim-gate check **amended by ADR 0053** — a
+  registry-version mismatch is now grandfathered and reported, not blocking; the `regver`
+  stamp, its overlay-awareness, and `disabled: true` all stand)
 - **Context:** Epic *Project-supplied review criteria + project-invariant compliance
   (unified cross-gate registry)* (`3156`), story *Criteria registry: open the vocabulary +
   `.rebar/` routing overlay + activation + cache isolation (plan-review MVP root)* (`ef7e`).
@@ -102,6 +104,11 @@ review that never saw it. Three moving parts make the gate overlay-aware:
   manifest's signed `regver:` against the current `registry_version(repo_root)`; a mismatch — or a
   **missing** `regver:` line (expand-contract: every production plan-review manifest carries one) —
   is `{valid: false, verdict: "stale-regver"}`, forcing a fresh `review-plan` before the claim.
+  **AMENDED BY ADR 0053:** because `regver` hashes the whole routing index, this could not tell a
+  tightened criterion from a typo fix and invalidated every outstanding attestation on any edit.
+  A mismatch is now **grandfathered** — reported as non-blocking `registry_drift`, and the
+  `stale-regver` verdict is retired. The stamp itself is unchanged and still gates drift-refresh
+  reuse.
 - **Built-in `disabled: true`.** An overlay `plan_review` entry for an **un-prefixed built-in** id
   may carry `"disabled": true` (rejected on a `project.` id — turn a project criterion off by
   omitting it from `activate`). A disabled built-in is removed from `effective_criteria` (never

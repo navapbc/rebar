@@ -462,7 +462,7 @@ rebar review-plan <id> --status        # exit 0 = current, 12 = stale/absent; ad
 ```
 
 It prints the currency verdict — `certified` when the attestation is valid right now, else
-the specific reason (`stale-code` / `stale-head`, `stale-material`, `stale-regver`,
+the specific reason (`stale-code` / `stale-head`, `stale-material`,
 `stale-reopened`, `unsigned`, …) — plus the **code anchor the plan was reviewed against**
 (the pinned `verified-at-sha` for a `--source attested` review, else the signed HEAD). The
 library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_check`).
@@ -470,12 +470,16 @@ library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_
 **The currency rule, as one expression.** An attestation is current iff **all** of: it is
 HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped:
 per-dependency hashes; unscoped: whole-HEAD) · **AND** the bound material fingerprint equals
-the ticket's current one · **AND** the criteria-registry stamp still matches · **AND** it
+the ticket's current one · **AND** it
 post-dates the latest reopen · **AND** any reviewed related-material pins are still fresh.
 These are two *independent* staleness axes the report singled out — **repo state**
 (`verified_at_sha` / dependency hashes) and **ticket content** (`material_fingerprint`) — plus
-the registry/reopen/pin guards; a change on **any** axis flips the verdict away from
-`certified`. Re-gate (re-run `review-plan`) before implementing whenever `--status` is not
+the reopen/pin guards; a change on **any** axis flips the verdict away from
+`certified`. The **criteria-registry stamp is deliberately NOT on this list**: since ADR 0053 a
+rotated `regver` is grandfathered — surfaced as a non-blocking `registry_drift` on the result
+(the plan was reviewed under an older criteria registry) rather than invalidating the
+attestation, because a criteria edit changes neither the plan nor the code it was reviewed
+against. Re-gate (re-run `review-plan`) before implementing whenever `--status` is not
 `certified`; under the parallel epic/child workflow, a moving base ref makes this the norm.
 
 ### `audit show` is a history view, not a status view
@@ -763,7 +767,7 @@ Failures are deliberately remediated out of band and use this stable form:
 plan-review close gate: <verdict>: <reason>. Run rebar review-plan <canonical-id> separately, then retry close.
 ```
 
-Typical verdicts include `unsigned`, `stale-reopened`, `stale-regver`, `stale-material`,
+Typical verdicts include `unsigned`, `stale-reopened`, `stale-material`,
 `unverifiable-material`, `stale-pin-drift`, `stale-pin-missing`, `malformed-pin`,
 `incompatible-phase`, `malformed-phase`, and `unavailable`. An unexpected local read, parser,
 or signature failure is fail-closed as `unavailable` and emits the structured warning event
