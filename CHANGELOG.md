@@ -8,6 +8,50 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [0.10.1] - 2026-07-24
+
+A maintenance release: plan-review and completion-close gate hardening, a set of
+deterministic code-health analyzers behind `rebar metrics`, and continued build-out
+of the reconciler **Backend** port — no breaking changes.
+
+### Added
+- **Code-health analyzers** — deterministic `scc` LOC and `lizard` complexity
+  analyzers plus a shared `jscpd` duplication analyzer, exposed through a new
+  code-health configuration surface (the code-health `rebar metrics` lens now draws
+  on these; size metrics moved onto the `scc` analyzer).
+- The completion close gate can target a **specific commit** via `--ref` (rather than
+  only the worktree HEAD).
+
+### Changed
+- **Plan-review gate:** `review-plan` now fast-fails non-claimable tickets before
+  spending an LLM call; a genuine `BLOCK` outranks a prerequisite-pass
+  `INDETERMINATE`; reviews are invalidated consistently on dependency drift; signing
+  is scoped to the subject + related material (not the whole store); `[rebar:<id>]`
+  citation edge-verification honors inherited hierarchy links; and the close gate
+  accepts an unchanged planning-phase attestation.
+- Plan-review deep-links default to the **hosted guide** instead of a consumer
+  `file://` path, and the commit-trailer format + CLI-served guides now resolve for
+  repo-less clients.
+- **Completion close** is pinned to a single HEAD sha across verify/sign to close a
+  TOCTOU window.
+- The store is mounted at **one central CLI gate**, so no command can skip it.
+- **Reconciler `Backend` port** build-out: scalar port surface
+  (`project`/`query_project`/`assert_env_ready`), inbound absence probe behind a
+  `SupportsAbsenceProbe` capability, canonical-shape outbound field diff and link diff
+  (`SupportsLinks`), a rich-text codec + comment limits behind the port, and the vendor
+  mapper injected into the differ/apply core.
+- The optional-`metrics` dependency boundary is enforced, keeping the core install
+  lean.
+
+### Fixed
+- The residual unsigned-close warning now points at a working recovery path.
+- Completion-verifier test discovery is reliable and diagnosable.
+- Prerequisite-indeterminate logs report the model that actually ran.
+
+### Ops
+- The review bot reads per-run `_usage` and emits token counts to CloudWatch, and the
+  two weekly live-LLM jobs record their token usage.
+
 ## [0.10.0] - 2026-07-23
 
 A feature release: a pluggable reconciler **Backend port** that decouples the Jira
@@ -1221,7 +1265,11 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.8.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/navapbc/rebar/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/navapbc/rebar/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/navapbc/rebar/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/navapbc/rebar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/navapbc/rebar/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/navapbc/rebar/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/navapbc/rebar/compare/v0.6.0...v0.7.0
