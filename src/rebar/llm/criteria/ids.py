@@ -7,13 +7,17 @@ whose id must be FILESYSTEM-SAFE — ``[A-Za-z0-9][A-Za-z0-9-]*`` (``prompt_auth
 — because a ``.`` in ``.rebar/prompts/<id>.md`` collides with the ``<id>.<variant>.md`` overlay
 convention (and ``_valid_id`` forbids it outright).
 
-So the logical id is DECOUPLED from the physical prompt id via this single deterministic,
-FORWARD-ONLY map — the pattern popular, actively-maintained tools use (Semgrep's dotted rule
-``id`` is metadata decoupled from the filename; npm maps ``@scope/name`` →
-``node_modules/@scope/name``; Python maps ``a.b.c`` → ``a/b/c.py``):
+So the logical id is DECOUPLED from the physical prompt id via this deterministic,
+FORWARD-ONLY, gate-qualified map — the pattern popular, actively-maintained tools use (Semgrep's
+dotted rule ``id`` is metadata decoupled from the filename; npm maps ``@scope/name`` →
+``node_modules/@scope/name``; Python maps ``a.b.c`` → ``a/b/c.py``). The default
+``gate_key="plan_review"`` preserves the existing plan-review mapping; ``gate_key="code_review"``
+uses the corresponding code-review prefix:
 
-    built-in  ``F1``           → ``plan-review-F1``           (unchanged)
-    project   ``project.foo``  → ``plan-review-project-foo``  (the one namespace dot → ``-``)
+    plan_review built-in  ``F1``           → ``plan-review-F1``
+    plan_review project   ``project.foo``  → ``plan-review-project-foo``
+    code_review built-in  ``F1``           → ``code-review-F1``
+    code_review project   ``project.foo``  → ``code-review-project-foo``
 
 The map is TOTAL and INJECTIVE because a project ``<name>`` is constrained to the SAME charset as
 any prompt id (``[A-Za-z0-9][A-Za-z0-9-]*`` — alnum + dash, NO dots/underscores; enforced by
@@ -27,16 +31,32 @@ carried explicitly, never reverse-derived.
 
 from __future__ import annotations
 
+from rebar.llm.criteria.model import CriteriaError
+
 #: The prompt-library id prefix every plan-review criterion rubric carries.
 PLAN_REVIEW_PROMPT_PREFIX = "plan-review-"
+#: The prompt-library id prefix every code-review criterion rubric carries.
+CODE_REVIEW_PROMPT_PREFIX = "code-review-"
+#: Prompt-library prefixes keyed by their owning review gate.
+_PROMPT_PREFIX = {
+    "plan_review": PLAN_REVIEW_PROMPT_PREFIX,
+    "code_review": CODE_REVIEW_PROMPT_PREFIX,
+}
 #: The dotted project-criterion namespace (mirrors ``criteria.overlay._PROJECT_PREFIX``).
 PROJECT_PREFIX = "project."
 
 
-def criterion_prompt_id(criterion_id: str) -> str:
+def criterion_prompt_id(criterion_id: str, *, gate_key: str = "plan_review") -> str:
     """The filesystem-safe prompt-library id storing ``criterion_id``'s rubric.
 
-    ``project.<name>`` → ``plan-review-project-<name>`` (the single namespace dot → ``-``);
-    every other id → ``plan-review-<id>`` unchanged. Forward-only + injective given the project
-    name charset (see module docstring)."""
-    return f"{PLAN_REVIEW_PROMPT_PREFIX}{criterion_id.replace('.', '-')}"
+    ``project.<name>`` → ``<gate>-project-<name>`` (the single namespace dot → ``-``);
+    every other id → ``<gate>-<id>`` unchanged. Forward-only + injective given the project name
+    charset (see module docstring)."""
+    try:
+        prefix = _PROMPT_PREFIX[gate_key]
+    except KeyError as exc:
+        raise CriteriaError(
+            f"criterion_prompt_id: unknown gate {gate_key!r} "
+            "(expected 'plan_review' or 'code_review')"
+        ) from exc
+    return f"{prefix}{criterion_id.replace('.', '-')}"
