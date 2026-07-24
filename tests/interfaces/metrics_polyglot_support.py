@@ -28,13 +28,7 @@ def copy_project(tmp_path: Path, language: str) -> Path:
 def _initialize_project(project: Path) -> None:
     """Create the disposable repository and ticket store required by the CLI."""
 
-    for command in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "fixture@example.test"],
-        ["git", "config", "user.name", "Metrics Fixture"],
-        ["git", "commit", "--allow-empty", "-qm", "Initialize fixture repository"],
-        [sys.executable, "-m", "rebar.cli", "init"],
-    ):
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
             command,
             cwd=project,
@@ -43,6 +37,42 @@ def _initialize_project(project: Path) -> None:
             check=False,
         )
         assert completed.returncode == 0, completed.stderr
+        return completed
+
+    for command in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "fixture@example.test"],
+        ["git", "config", "user.name", "Metrics Fixture"],
+        ["git", "add", "--", "pyproject.toml", "src"],
+        ["git", "commit", "-qm", "Add fixture project"],
+        [sys.executable, "-m", "rebar.cli", "init"],
+    ):
+        run(command)
+
+    created = run(
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "create",
+            "task",
+            "Exercise metrics fixture",
+            "--output",
+            "json",
+        ]
+    )
+    ticket_id = json.loads(created.stdout)["id"]
+    run(
+        [
+            sys.executable,
+            "-m",
+            "rebar.cli",
+            "claim",
+            ticket_id,
+            "--assignee",
+            "fixture@example.test",
+        ]
+    )
 
 
 def fake_analyzer_bin(tmp_path: Path) -> Path:

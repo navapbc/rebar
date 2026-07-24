@@ -43,3 +43,15 @@ def test_metrics_cli_names_missing_analyzers_without_fabricating_zeroes(
     ):
         assert "value" not in metrics[metric_id]
         assert "Errno" not in metrics[metric_id]["unavailable"]["reason"]
+    expected_insertions = sum(
+        len(path.read_text(encoding="utf-8").splitlines())
+        for path in (project / "pyproject.toml", project / source_path)
+    )
+    assert metrics["churn"]["value"] == {
+        "insertions": expected_insertions,
+        "deletions": 0,
+    }
+    assert metrics["refactor_to_addition_ratio"]["value"] == 0.0
+    attempts = metrics["attempts_per_ticket"]["value"]
+    assert list(attempts.values()) == [1]
+    assert metrics["first_pass_rate"]["value"] == 1.0
