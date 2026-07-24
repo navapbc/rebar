@@ -131,10 +131,22 @@ gate's **blocking** criteria — cross-section coherence, no unresolved/placehol
 measurable in-session acceptance criteria, single-concern decomposition, a sound approach with
 a stated positive rationale, compat/rollback for any migration, and maintainability/ADR — and
 its **overlays** (security trust-boundary, infra endpoint-auth, prior-art, migration-safety,
-new-prohibition consumer scan, CI-trigger). Then run the plan-review gate on each ticket
-(`rebar review-plan <id>`); remediate any BLOCK and apply the advisory findings that genuinely
-improve the plan before claiming. Reading the gate first is standard process: it is far cheaper
-to author to the criteria than to remediate a BLOCK after the fact.
+new-prohibition consumer scan, CI-trigger).
+
+**Establish the dependency graph before you review.** After creating the tickets, `link` the
+children into their parent/prerequisite structure (`blocks`/`depends_on`) so the blocking
+relationships are recorded first. Plan-review is dependency-scoped: a review pins its direct
+dependencies' material, and `rebar review-plan` **fast-fails with no LLM** (unsigned
+`INDETERMINATE`, exit 2) on a ticket that is not yet claimable — one still `open` but blocked by
+an unclosed dependency. So **run the plan-review gate only on unblocked tickets** (`rebar ready`
+identifies them — those whose blockers are all closed), and review **in dependency order** —
+prerequisites/children before their dependents, never a ticket and its dependencies in parallel.
+As dependencies close and later tickets become unblocked, review those in turn. (If `rebar
+ready` returns an empty set right after linking, the graph likely has a cycle or an authoring
+error — inspect and fix the links before proceeding, rather than forcing a review.) For each
+reviewed ticket run `rebar review-plan <id>`; remediate any BLOCK and apply the advisory
+findings that genuinely improve the plan before claiming. Reading the gate first is standard
+process: it is far cheaper to author to the criteria than to remediate a BLOCK after the fact.
 
 Before recording any ticket whose acceptance criteria will include or reference testing,
 verification, or behavioral oracles, also read **`test-design.md` in this skill's
