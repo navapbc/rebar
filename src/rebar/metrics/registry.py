@@ -140,14 +140,6 @@ REGISTRY: list[MetricSpec] = [
         accruing_since="2026-07-18T00:00:00+00:00",
     ),
     MetricSpec(
-        id="oversized_module_count",
-        lens="code_health",
-        source="structural",
-        confidence="high",
-        compute=_no_data_yet,
-        accruing_since="2026-07-18T00:00:00+00:00",
-    ),
-    MetricSpec(
         id="commit_cadence_trend",
         lens="delivery",
         source="git",
