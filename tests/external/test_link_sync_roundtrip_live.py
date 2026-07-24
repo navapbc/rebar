@@ -389,21 +389,26 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
         assert ia_link.get("target_id") == "loc-b", (
             f"inbound link change should target loc-b: {ia_link!r}"
         )
-        # DIRECTION ASSERTION (documented).
+        # DIRECTION ASSERTION — ROUND-TRIP FIDELITY (verified against live Jira).
         #
-        # set_relationship(A, B, "Blocks") runs `link create --out A --in B` =
-        # "A blocks B". Viewing A's REST issuelinks, B therefore appears as the
-        # INWARDISSUE (A is the outward/blocker side). The inbound differ
-        # (_diff_links_inbound) maps "other issue is inwardIssue + Blocks" to the
-        # rebar relation **'blocks'** on A targeting B. So we assert 'blocks'.
+        # The local dep applied above is 'blocks' (loc-a blocks loc-b), so
+        # set_relationship(A, B, "Blocks") runs `link create --out A --in B` = "A blocks
+        # B". Confirmed against live Jira (navasage, standard semantics): viewing A's REST
+        # issuelinks, B appears as the **outwardIssue** on A (A is the outward/blocker
+        # side; "outward" for a Blocks link is "blocks"). The inbound differ
+        # (_diff_links_inbound, via the shared resolve_inbound_link) maps that
+        # "B is outwardIssue + Blocks" back to rebar relation **'blocks'** on A targeting
+        # B — a FAITHFUL round-trip. (The mirror case: an applied 'depends_on' dep issues
+        # set_relationship(B, A, "Blocks") so B is inwardIssue on A, and the differ
+        # reconstructs 'depends_on'.)
         #
-        # ROBUSTNESS: if the installed ACLI/Jira instead records B as
-        # outwardIssue on A (i.e. the live link direction is reversed from what
-        # was verified during development), the differ would emit 'depends_on'.
-        # We assert the relation matches whichever direction the LIVE link
-        # actually has, and surface a clear message documenting the observed
-        # shape, so a direction surprise is an informative finding, not an
-        # opaque failure.
+        # The invariant under test is round-trip fidelity: applying relation R and reading
+        # it back must reconstruct R, regardless of Jira's internal link representation.
+        # An earlier version of this assertion flipped the expectation to 'depends_on' when
+        # B was outward — that was an inverted assumption (A-blocks-B genuinely records B
+        # OUTWARD on A); it masked the correct behavior as a failure. We now assert the
+        # applied relation is reconstructed, and surface the observed live direction so a
+        # genuine direction regression is an informative finding, not an opaque failure.
         b_is_inward = any(
             isinstance(lk, dict)
             and (lk.get("type") or {}).get("name") == "Blocks"
@@ -416,15 +421,20 @@ def test_link_sync_differ_apply_roundtrip_live() -> None:
             and (lk.get("outwardIssue") or {}).get("key") == key_b
             for lk in live_links_a
         )
-        expected_relation = "blocks" if b_is_inward else "depends_on"
         assert b_is_inward or b_is_outward, (
             f"live link to B has neither inwardIssue nor outwardIssue==B: {live_links_a!r}"
         )
-        assert ia_link.get("relation") == expected_relation, (
-            f"inbound relation mismatch: live link records B as "
-            f"{'inwardIssue' if b_is_inward else 'outwardIssue'} on A "
-            f"(expected rebar relation {expected_relation!r}), but differ emitted "
-            f"{ia_link.get('relation')!r}. live_links={live_links_a!r}"
+        # A 'blocks' dep must record B as the OUTWARD side on A (A is the blocker).
+        assert b_is_outward and not b_is_inward, (
+            f"live direction surprise: an applied 'blocks' dep should record B as "
+            f"outwardIssue on A, but got inward={b_is_inward} outward={b_is_outward}. "
+            f"live_links={live_links_a!r}"
+        )
+        # Round-trip fidelity: the applied 'blocks' relation is reconstructed as 'blocks'.
+        assert ia_link.get("relation") == "blocks", (
+            f"link direction round-trip BROKE: applied a 'blocks' dep (B outward on A), "
+            f"but the inbound differ reconstructed {ia_link.get('relation')!r} instead of "
+            f"'blocks'. live_links={live_links_a!r}"
         )
 
         # =================================================================
