@@ -48,3 +48,15 @@ def test_metrics_cli_reports_polyglot_code_health_values(
         "clones": 1,
         "percentage": 12.5,
     }
+    expected_insertions = sum(
+        len(path.read_text(encoding="utf-8").splitlines())
+        for path in (project / "pyproject.toml", project / source_path)
+    )
+    assert metrics["churn"]["value"] == {
+        "insertions": expected_insertions,
+        "deletions": 0,
+    }
+    assert metrics["refactor_to_addition_ratio"]["value"] == 0.0
+    attempts = metrics["attempts_per_ticket"]["value"]
+    assert list(attempts.values()) == [1]
+    assert metrics["first_pass_rate"]["value"] == 1.0
