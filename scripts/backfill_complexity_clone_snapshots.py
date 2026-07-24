@@ -17,10 +17,10 @@ import json
 import logging
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from rebar.metrics import snapshot
+from rebar.metrics.analyzers._jscpd import run_jscpd
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +67,7 @@ def _measure_complexity(tree: str) -> int | None:
 
 def _measure_clone_count(tree: str) -> int | None:
     """Read ``statistics.total.clones`` from a ``jscpd`` JSON report."""
-    with tempfile.TemporaryDirectory() as out_dir:
-        proc = subprocess.run(
-            ["jscpd", "--reporters", "json", "--output", out_dir, tree],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            return None
-        report_path = Path(out_dir) / "jscpd-report.json"
-        if not report_path.exists():
-            return None
-        data = json.loads(report_path.read_text(encoding="utf-8"))
-    return int(data["statistics"]["total"]["clones"])
+    return int(run_jscpd(tree)["clones"])
 
 
 def _commit_date(repo_root: str | Path, sha: str) -> str:
