@@ -164,8 +164,10 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
 
     Returns ``{ok, verdict, reason, verified_at_sha, signed_at}`` where ``verdict`` is the
     :func:`compute_validity` classifier — ``certified`` when current, else one of ``stale-code`` /
-    ``stale-head`` / ``stale-material`` / ``stale-regver`` / ``stale-reopened`` / ``unsigned`` /
-    ``wrong-kind`` / ``malformed-pin`` / ``unverifiable-material`` / ``error``. ``verified_at_sha``
+    ``stale-head`` / ``stale-material`` / ``stale-reopened`` / ``unsigned`` /
+    ``wrong-kind`` / ``malformed-pin`` / ``unverifiable-material`` / ``error``. Criteria-registry
+    drift is NOT among them: it is grandfathered (ADR 0053) and surfaces as the non-blocking
+    ``registry_drift`` field on :func:`compute_validity`'s result. ``verified_at_sha``
     is the code anchor the plan was reviewed against — the pinned verified-at-sha for a
     scoped/attested review, else the signed HEAD for an unscoped/local one — and ``signed_at`` the
     sign timestamp; both are ``None`` when no readable certified attestation exists.

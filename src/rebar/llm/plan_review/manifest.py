@@ -118,8 +118,9 @@ def registry_version(repo_root=None) -> str:
     OVERLAY-AWARE (story 08af): with ``repo_root`` given, the stamp hashes the repo's
     EFFECTIVE routing (packaged ⊕ the ``.rebar/criteria_routing.json`` overlay) plus the
     overlay's activated-project ids and disabled-built-in set — so activating / re-tuning /
-    disabling a project criterion changes the stamp, which the claim gate reads as
-    ``stale-regver`` (invalidating a prior plan-review attestation). With ``repo_root=None``,
+    disabling a project criterion changes the stamp. Since ADR 0053 a rotated stamp is
+    GRANDFATHERED at the claim gate: it is reported as non-blocking ``registry_drift`` rather
+    than invalidating a prior plan-review attestation. With ``repo_root=None``,
     OR a repo with NO overlay, the basis is BYTE-IDENTICAL to the historical packaged stamp
     (``activated`` / ``disabled`` are only added when non-empty), so existing attestations —
     signed before this change — stay valid (zero churn)."""

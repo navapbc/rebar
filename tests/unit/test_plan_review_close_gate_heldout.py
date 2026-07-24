@@ -15,7 +15,8 @@ from rebar._commands import gates
     [
         ("unsigned", "no certified plan-review attestation"),
         ("stale-reopened", "review predates reopen"),
-        ("stale-regver", "criteria registry changed"),
+        # NB: no ``stale-regver`` row — ADR 0053 retired that verdict; criteria-registry drift
+        # is grandfathered and reported as non-blocking ``registry_drift`` instead.
         ("stale-material", "ticket material changed"),
         ("unverifiable-material", "material unavailable"),
         ("stale-pin-drift", "prerequisite drifted"),

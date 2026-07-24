@@ -1,12 +1,15 @@
-"""Overlay-aware attestation invalidation (story 08af, epic 3156).
+"""Overlay-aware registry stamping and its (grandfathered) effect on attestations
+(story 08af, epic 3156; amended by ADR 0053).
 
-The plan-review claim gate must invalidate a prior attestation when the project's criteria
-overlay changes — activating, re-tuning, or disabling a criterion. These tests pin:
+``registry_version`` is still overlay-aware — activating, re-tuning, or disabling a criterion
+rotates the stamp, which still gates drift-refresh REUSE. What changed in ADR 0053 is the claim
+gate's response: a rotated stamp is GRANDFATHERED rather than invalidating. These tests pin:
 
 * ``registry_version(repo_root)`` is overlay-aware, but overlay-ABSENT is BYTE-IDENTICAL to the
   packaged ``registry_version()`` (existing certs stay valid — zero churn);
-* ``compute_validity`` returns ``stale-regver`` when the overlay changed vs the signed regver
-  (and when the regver line is missing entirely), and ``valid`` when unchanged;
+* ``compute_validity`` stays ``valid`` and reports ``registry_drift`` when the overlay changed
+  vs the signed regver (and when the regver line is missing entirely), and reports no drift
+  when unchanged;
 * a ``"disabled": true`` built-in is removed from ``effective_criteria`` + surfaces in
   ``disabled_builtins`` (and ``disabled`` on a ``project.`` id is a located load error);
 * ``build_manifest`` emits + ``manifest_disabled_builtins`` parses the ``disabled_builtins:``
@@ -85,10 +88,10 @@ def test_activating_project_criterion_changes_registry_version(tmp_path):
     assert "project.no-print" in registry.effective_criteria(active)
 
 
-# ── (c)/(d) compute_validity stale-regver ────────────────────────────────────────
+# ── (c)/(d) compute_validity grandfathers registry drift (ADR 0053) ──────────────
 def _plan_att(regver: str) -> dict:
     # Unscoped (no dep map) plan-review attestation, no material line (skips the material check),
-    # so the regver check is what is under test.
+    # so the regver handling is what is under test.
     return {
         "manifest": ["plan-review: PASS", f"regver: {regver}"],
         "head_sha": "headA",
@@ -96,18 +99,22 @@ def _plan_att(regver: str) -> dict:
     }
 
 
-def test_compute_validity_valid_when_regver_unchanged(tmp_path, monkeypatch):
+def test_compute_validity_valid_and_no_drift_when_regver_unchanged(tmp_path, monkeypatch):
     root = _make_repo(tmp_path, overlay={"plan_review": {"F1": {"block_threshold": 0.7}}})
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
     att = _plan_att(attest.registry_version(root))
     state = {"ticket_id": "t", "status": "in_progress"}
-    assert attest.compute_validity(att, state, "plan-review", repo_root=root)["valid"] is True
+    res = attest.compute_validity(att, state, "plan-review", repo_root=root)
+    assert res["valid"] is True and "registry_drift" not in res
 
 
-def test_compute_validity_stale_when_overlay_changed(tmp_path, monkeypatch):
+def test_compute_validity_grandfathers_when_overlay_changed(tmp_path, monkeypatch):
+    """ADR 0053: editing the overlay rotates the stamp but must NOT block the claim — the
+    plan and the code it was reviewed against are both untouched."""
     root = _make_repo(tmp_path, overlay={"plan_review": {"F1": {"block_threshold": 0.7}}})
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
-    att = _plan_att(attest.registry_version(root))  # signed against the current overlay
+    signed_regver = attest.registry_version(root)
+    att = _plan_att(signed_regver)  # signed against the current overlay
     # Now EDIT the overlay (new content ⇒ new signature ⇒ new regver).
     (Path(root) / ".rebar" / "criteria_routing.json").write_text(
         json.dumps({"plan_review": {"F1": {"block_threshold": 0.2}}}), encoding="utf-8"
@@ -116,17 +123,21 @@ def test_compute_validity_stale_when_overlay_changed(tmp_path, monkeypatch):
     res = attest.compute_validity(
         att, {"ticket_id": "t", "status": "in_progress"}, "plan-review", repo_root=root
     )
-    assert res["valid"] is False and res["verdict"] == "stale-regver"
+    current_regver = attest.registry_version(root)
+    assert current_regver != signed_regver, "overlay edit should rotate the stamp"
+    assert res["valid"] is True
+    assert res["registry_drift"] == {"signed": signed_regver, "current": current_regver}
 
 
-def test_compute_validity_stale_when_regver_line_missing(tmp_path, monkeypatch):
+def test_compute_validity_grandfathers_when_regver_line_missing(tmp_path, monkeypatch):
     root = _make_repo(tmp_path, overlay=None)
     monkeypatch.setattr("rebar.signing.head_sha", lambda repo_root: "headA")
     att = {"manifest": ["plan-review: PASS"], "head_sha": "headA", "signed_at": 100}
     res = attest.compute_validity(
         att, {"ticket_id": "t", "status": "in_progress"}, "plan-review", repo_root=root
     )
-    assert res["valid"] is False and res["verdict"] == "stale-regver"
+    assert res["valid"] is True
+    assert res["registry_drift"] == {"signed": None, "current": attest.registry_version(root)}
 
 
 # ── (e) disabling a built-in ─────────────────────────────────────────────────────
