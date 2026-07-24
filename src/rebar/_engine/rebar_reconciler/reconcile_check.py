@@ -8,6 +8,18 @@ This is the self-healing diagnostic tool — invoked as:
 The function :func:`reconcile_check` is pure (no I/O besides the return
 value); the CLI wiring in ``__main__.py`` handles snapshot loading and
 JSON output.
+
+Ticket ad44: field comparison is canonicalized the same way 625b canonicalized
+the outbound differ. Each bound Jira snapshot entry is mapped to LOCAL shape
+via the injected backend's ``InboundMapper`` (``backend.inbound.map_remote_to_local``)
+and compared against the local ticket in local vocabulary; the local
+description is fit through the injected ``OutboundMapper``
+(``backend.outbound.map_fields_to_remote``) before the text compare, mirroring
+the canonical outbound differ (``outbound_field_diff.py``). This module
+therefore imports NOTHING from ``adapters.jira`` and by-path-loads no
+``adapters/jira/*`` sibling — the backend is resolved via the neutral
+``select_backend`` registry seam (``None`` default) or injected directly by
+the caller for tests.
 """
 
 from __future__ import annotations
@@ -37,14 +49,16 @@ except ImportError:  # standalone load without package context
         _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
     lazy_load = sys.modules[_loader_key].lazy_load
 
+# Ticket ad44: the shape-tolerant assignee equality is the canonical-shape
+# helper 625b's outbound differ already established — reuse it rather than
+# reimplement it. ``outbound_field_diff`` is core (imports nothing from
+# ``adapters.jira``), so this is a normal package import, not a by-path load.
+from rebar_reconciler.outbound_field_diff import _assignee_matches  # noqa: E402
+
 
 def _load_sibling(module_name: str, file_name: str) -> ModuleType:
     """Load a sibling module under a stable cache key without PYTHONPATH."""
     return lazy_load(f"rebar_reconciler_{module_name}", file_name)
-
-
-def _load_config() -> ModuleType:
-    return _load_sibling("config", "config.py")
 
 
 def _load_classify() -> ModuleType:
@@ -58,23 +72,6 @@ def _load_classify() -> ModuleType:
     return _load_sibling("classify", "classify.py")
 
 
-def _load_outbound_fields() -> ModuleType:
-    """Load the outbound field-normalization helpers (bug runny-lens-strafe).
-
-    reconcile-check must extract/normalize a LIVE Jira snapshot the SAME way the
-    real differ does before comparing — ``_extract_jira_field`` unwraps nested
-    ``{"name": ...}`` objects and decodes ADF descriptions, ``_assignee_matches``
-    does shape-tolerant assignee equality — otherwise raw nested Jira shapes are
-    compared against local scalars and every binding is falsely flagged.
-    """
-    return _load_sibling("outbound_fields", "adapters/jira/outbound_fields.py")
-
-
-def _load_adf() -> ModuleType:
-    """Load the ADF helpers (``fit_text_to_adf_limit``) for description parity."""
-    return _load_sibling("adf", "adapters/jira/adf.py")
-
-
 def _load_inbound_differ() -> ModuleType:
     """Load the inbound differ for its canonical bridge-internal label prefixes."""
     return _load_sibling("inbound_differ", "inbound_differ.py")
@@ -83,38 +80,6 @@ def _load_inbound_differ() -> ModuleType:
 # ---------------------------------------------------------------------------
 # Field comparison helpers
 # ---------------------------------------------------------------------------
-
-_STATUS_LOCAL_TO_JIRA: dict[str, str] | None = None
-_STATUS_JIRA_TO_LOCAL: dict[str, str] | None = None
-
-
-def _status_maps() -> tuple[dict[str, str], dict[str, str]]:
-    """Return (local_to_jira, jira_to_local) status mappings, cached."""
-    global _STATUS_LOCAL_TO_JIRA, _STATUS_JIRA_TO_LOCAL  # noqa: PLW0603
-    if _STATUS_LOCAL_TO_JIRA is None:
-        cfg = _load_config()
-        _STATUS_LOCAL_TO_JIRA = dict(getattr(cfg, "local_to_jira_status", {}))
-        _STATUS_JIRA_TO_LOCAL = {v: k for k, v in _STATUS_LOCAL_TO_JIRA.items()}
-    assert _STATUS_JIRA_TO_LOCAL is not None
-    return _STATUS_LOCAL_TO_JIRA, _STATUS_JIRA_TO_LOCAL
-
-
-# Priority mapping: local integer (0-4) ↔ Jira name
-_PRIORITY_LOCAL_TO_JIRA: dict[int, str] = {
-    0: "Highest",
-    1: "High",
-    2: "Medium",
-    3: "Low",
-    4: "Lowest",
-}
-
-# Issue type mapping: local type ↔ Jira issuetype
-_TYPE_LOCAL_TO_JIRA: dict[str, str] = {
-    "epic": "Epic",
-    "story": "Story",
-    "task": "Task",
-    "bug": "Bug",
-}
 
 
 def _is_rebar_internal_label(label: str) -> bool:
@@ -150,34 +115,6 @@ def _compare_labels(
     ]
 
 
-def _values_match_with_mapping(
-    field: str,
-    local_val: Any,
-    jira_val: Any,
-) -> bool:
-    """Return True when local and jira values are equivalent under known mappings."""
-    if local_val == jira_val:
-        return True
-
-    if field == "status":
-        l2j, _ = _status_maps()
-        return l2j.get(str(local_val)) == jira_val
-
-    if field == "priority":
-        try:
-            local_int = int(local_val) if local_val is not None else None
-        except (TypeError, ValueError):
-            local_int = None
-        if local_int is not None:
-            return _PRIORITY_LOCAL_TO_JIRA.get(local_int) == jira_val
-        return False
-
-    if field == "issuetype":
-        return _TYPE_LOCAL_TO_JIRA.get(str(local_val)) == jira_val
-
-    return False
-
-
 # Fields compared on each bound pair.  "title"↔"summary" is handled specially.
 # Bug runny-lens-strafe: "issuetype" is DELIBERATELY absent — it is a
 # sync-excepted field the inbound differ never dispatches (Jira's coarse
@@ -196,9 +133,20 @@ def _compare_pair(
     jira_key: str,
     local_ticket: dict[str, Any],
     jira_issue: dict[str, Any],
+    backend: Any,
 ) -> list[dict[str, Any]]:
-    """Compare one bound pair and return a list of field discrepancies."""
+    """Compare one bound pair and return a list of field discrepancies.
+
+    Ticket ad44: the Jira snapshot entry is canonicalized ONCE via the injected
+    backend's ``InboundMapper`` (the same port 625b's canonical outbound differ
+    uses) and every field is then compared in LOCAL vocabulary — no raw Jira
+    shape (nested ``{"name": ...}`` objects, ADF description dicts, assignee
+    dicts) is ever compared against a local scalar. The reported ``jira_value``
+    stays the RAW snapshot value (what is actually stored in Jira); only the
+    comparison itself moves to canonical shape.
+    """
     discs: list[dict[str, Any]] = []
+    canonical = backend.inbound.map_remote_to_local(jira_issue)
 
     # title ↔ summary
     local_title = local_ticket.get("title", local_ticket.get("summary"))
@@ -214,16 +162,6 @@ def _compare_pair(
             }
         )
 
-    # Bug runny-lens-strafe: on a LIVE store the Jira snapshot fields are nested
-    # objects (status/priority = {"name": ...}, assignee = {accountId,...},
-    # description = an ADF dict), so a raw ``jira_issue.get(field)`` compared to
-    # a local scalar NEVER matched and flagged every binding. Extract/normalize
-    # each field with the SAME helpers the real inbound differ uses before
-    # comparing, so reconcile-check's discrepancy set mirrors what the differ
-    # would actually dispatch. The reported ``jira_value`` stays the raw snapshot
-    # value (what is actually stored in Jira).
-    of = _load_outbound_fields()
-    adf = _load_adf()
     for field in _COMPARABLE_FIELDS:
         local_val = local_ticket.get(field)
         jira_val = jira_issue.get(field)
@@ -231,21 +169,32 @@ def _compare_pair(
             continue
 
         if field == "assignee":
-            # Shape-tolerant equality: a live Jira assignee is a dict; local is a
-            # bare string that may be any of {email, accountId, displayName}.
-            matches = of._assignee_matches(str(local_val or ""), jira_val)
+            # Neutral membership match: local matches when it equals ANY
+            # non-None canonical identity form ({display, email, account_id})
+            # or the canonical scalar assignee; both-empty also matches.
+            matches = _assignee_matches(
+                str(local_val or ""),
+                canonical.get("assignee"),
+                canonical.get("assignee_identity"),
+            )
         elif field == "description":
-            # Decode the ADF description to text and apply the identical
-            # ADF-fit + trailing-whitespace tolerance the differ uses, so an
-            # oversized/normalized body does not read as drift.
-            jira_text = of._extract_jira_field(jira_issue, "description")
-            local_text = adf.fit_text_to_adf_limit(str(local_val or ""))
-            matches = local_text.rstrip() == (jira_text or "").rstrip()
+            # Fit the local text through the OUTBOUND port exactly as the
+            # canonical differ does (outbound_field_diff.py) — NOT
+            # FieldSanitizer.sanitize_description, which is send-side and
+            # emits a truncation WARNING (wrong for a read-only diagnostic).
+            fitted = backend.outbound.map_fields_to_remote(
+                {"description": local_ticket.get("description") or ""},
+                ticket=local_ticket,
+            ).get("description", local_val)
+            matches = str(fitted or "").rstrip() == str(canonical.get("description") or "").rstrip()
         else:
-            # status / priority: unwrap the nested {"name": ...} object, then
-            # apply the local→Jira mapping comparison.
-            jira_norm = of._extract_jira_field(jira_issue, field)
-            matches = _values_match_with_mapping(field, local_val, jira_norm)
+            # status / priority: the InboundMapper already applied the
+            # local<->Jira value mapping (and, for status, the
+            # rebar-status:blocked/cancelled annotation-label precedence — see
+            # inbound_fields._map_jira_to_local_fields). A field the mapper
+            # does not emit (e.g. an unmapped remote status) is treated as
+            # divergent, preserving today's behavior.
+            matches = field in canonical and local_val == canonical[field]
 
         if not matches:
             discs.append(
@@ -318,6 +267,7 @@ def reconcile_check(
     local_tickets: list[dict[str, Any]],
     jira_snapshot: dict[str, dict[str, Any]],
     binding_store: Any,
+    backend: Any = None,
 ) -> dict[str, Any]:
     """Compare all bound pairs and report discrepancies.
 
@@ -328,12 +278,23 @@ def reconcile_check(
             working-set snapshot.
         binding_store: An object with ``.all_bindings() -> dict[str, dict]``
             returning ``{local_id: {"jira_key": ..., ...}}`` entries.
+        backend: The injected Backend-port object (ticket ad44) whose
+            ``inbound``/``outbound`` mappers canonicalize the field compare.
+            ``None`` (the default) resolves the configured backend lazily via
+            ``select_backend(load_config())`` — mirrors the outbound differ's
+            fallback. Tests inject a pure ``JiraBackend(transport=object())``.
 
     Returns:
         A report dict with keys: ``total_bindings``, ``checked``,
         ``in_sync``, ``discrepancies``, ``orphaned_bindings``,
         ``orphaned_jira``, ``unbound_local``, ``unbound_jira``.
     """
+    if backend is None:
+        from rebar.config import load_config
+        from rebar_reconciler._backend_registry import select_backend
+
+        backend = select_backend(load_config())
+
     # Build lookup maps
     local_by_id: dict[str, dict[str, Any]] = {}
     for ticket in local_tickets:
@@ -374,7 +335,9 @@ def reconcile_check(
 
         # Present-present pair — run the field-level comparison.
         checked += 1
-        pair_discs = _compare_pair(local_id, jira_key, local_ticket or {}, jira_issue or {})
+        pair_discs = _compare_pair(
+            local_id, jira_key, local_ticket or {}, jira_issue or {}, backend
+        )
         discrepancies.extend(pair_discs)
 
     # Orphaned Jira: issues with rebar-id-* labels but no binding (an L10 anomaly —

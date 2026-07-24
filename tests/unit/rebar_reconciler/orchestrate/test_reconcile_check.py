@@ -14,6 +14,8 @@ from types import ModuleType
 
 import pytest
 
+from rebar_reconciler.adapters.jira.backend import JiraBackend
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
@@ -34,6 +36,14 @@ def _load_module(name: str, path: Path) -> ModuleType:
 @pytest.fixture(scope="module")
 def rc_mod() -> ModuleType:
     return _load_module("reconcile_check", RC_PATH)
+
+
+@pytest.fixture(scope="module")
+def backend() -> JiraBackend:
+    """A pure JiraBackend (mappers only, no live transport/env) — the
+    injection seam ``reconcile_check(..., backend=...)`` exercises (ticket
+    ad44), mirroring the outbound differ's test convention."""
+    return JiraBackend(transport=object())
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +74,7 @@ class StubBindingStore:
 # ---------------------------------------------------------------------------
 
 
-def test_all_in_sync(rc_mod: ModuleType) -> None:
+def test_all_in_sync(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """When all bound pairs match, report 0 discrepancies."""
     local_tickets = [
         {"id": "abc-1234", "title": "Fix bug", "status": "open", "description": "desc"},
@@ -78,7 +88,7 @@ def test_all_in_sync(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("abc-1234", "DIG-100")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert report["total_bindings"] == 1
     assert report["checked"] == 1
@@ -88,7 +98,7 @@ def test_all_in_sync(rc_mod: ModuleType) -> None:
     assert report["orphaned_jira"] == []
 
 
-def test_title_mismatch(rc_mod: ModuleType) -> None:
+def test_title_mismatch(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """When local title differs from Jira summary, a discrepancy is reported."""
     local_tickets = [
         {"id": "abc-1234", "title": "Fix bug", "status": "open"},
@@ -98,7 +108,7 @@ def test_title_mismatch(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("abc-1234", "DIG-100")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert report["checked"] == 1
     assert report["in_sync"] == 0
@@ -109,7 +119,7 @@ def test_title_mismatch(rc_mod: ModuleType) -> None:
     assert d["jira_value"] == "Fix bug in login"
 
 
-def test_orphaned_binding(rc_mod: ModuleType) -> None:
+def test_orphaned_binding(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """When binding exists but local ticket is deleted, it is an orphaned binding."""
     local_tickets = []  # ticket deleted
     jira_snapshot = {
@@ -117,13 +127,13 @@ def test_orphaned_binding(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("abc-deleted", "DIG-100")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert "abc-deleted" in report["orphaned_bindings"]
     assert report["checked"] == 0
 
 
-def test_orphaned_jira(rc_mod: ModuleType) -> None:
+def test_orphaned_jira(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """Jira issue with rebar-id-* label but not in binding store is orphaned."""
     local_tickets = [{"id": "abc-1234", "title": "Local only"}]
     jira_snapshot = {
@@ -134,12 +144,12 @@ def test_orphaned_jira(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([])  # no bindings
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert "DIG-999" in report["orphaned_jira"]
 
 
-def test_unbound_counts(rc_mod: ModuleType) -> None:
+def test_unbound_counts(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """Unbound local tickets and Jira issues without rebar-id labels are counted."""
     local_tickets = [
         {"id": "local-1", "title": "A"},
@@ -153,13 +163,13 @@ def test_unbound_counts(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("bound-1", "DIG-100")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert report["unbound_local"] == 2
     assert report["unbound_jira"] == 2
 
 
-def test_priority_mismatch_with_mapping(rc_mod: ModuleType) -> None:
+def test_priority_mismatch_with_mapping(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """Priority 2 (local int) should match 'Medium' (Jira), not 'Highest'."""
     local_tickets = [
         {"id": "abc-1", "title": "T", "priority": 2, "status": "open"},
@@ -169,7 +179,7 @@ def test_priority_mismatch_with_mapping(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("abc-1", "DIG-1")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     priority_discs = [d for d in report["discrepancies"] if d["field"] == "priority"]
     assert len(priority_discs) == 1
@@ -177,7 +187,7 @@ def test_priority_mismatch_with_mapping(rc_mod: ModuleType) -> None:
     assert priority_discs[0]["jira_value"] == "Highest"
 
 
-def test_labels_exclude_rebar_id(rc_mod: ModuleType) -> None:
+def test_labels_exclude_rebar_id(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """rebar-id-* and imported:* labels are excluded from comparison."""
     local_tickets = [
         {
@@ -196,7 +206,7 @@ def test_labels_exclude_rebar_id(rc_mod: ModuleType) -> None:
     }
     store = StubBindingStore([("abc-1", "DIG-1")])
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     label_discs = [d for d in report["discrepancies"] if d["field"] == "labels"]
     assert label_discs == []
@@ -268,7 +278,9 @@ def test_load_local_tickets_skips_dirs_without_cache(rc_mod: ModuleType, tmp_pat
     assert rc_mod.load_local_tickets(tracker) == []
 
 
-def test_bound_ticket_via_cache_is_checked_not_orphaned(rc_mod: ModuleType, tmp_path: Path) -> None:
+def test_bound_ticket_via_cache_is_checked_not_orphaned(
+    rc_mod: ModuleType, backend: JiraBackend, tmp_path: Path
+) -> None:
     """Regression for bug ad39: a binding whose local ticket (in .cache.json)
     AND Jira issue both exist must count as checked/in_sync — NOT orphaned.
 
@@ -281,7 +293,7 @@ def test_bound_ticket_via_cache_is_checked_not_orphaned(rc_mod: ModuleType, tmp_
     store = StubBindingStore([("abc-1234", "DIG-100")])
 
     local_tickets = rc_mod.load_local_tickets(tracker)
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert report["orphaned_bindings"] == []  # was ["abc-1234"] before the fix
     assert report["checked"] == 1
@@ -289,7 +301,7 @@ def test_bound_ticket_via_cache_is_checked_not_orphaned(rc_mod: ModuleType, tmp_
 
     # Demonstrate the OLD behavior: with the broken loader (no ticket.json →
     # empty local_tickets) the same binding is reported orphaned.
-    broken_report = rc_mod.reconcile_check([], jira_snapshot, store)
+    broken_report = rc_mod.reconcile_check([], jira_snapshot, store, backend=backend)
     assert broken_report["orphaned_bindings"] == ["abc-1234"]
     assert broken_report["checked"] == 0
 
@@ -343,33 +355,41 @@ def _live_binding(status_name: str) -> tuple[list[dict], dict, StubBindingStore]
                 "displayName": "User X",
                 "accountId": "acc-1",
             },
-            # jira-only reconciler-written labels that the differ excludes.
-            "labels": ["team:backend", "rebar-status:blocked", "rebar-id:abc-1"],
+            # jira-only reconciler-written labels that the differ excludes. NOTE
+            # (ticket ad44): no ``rebar-status:`` annotation label here — under
+            # canonical mapping that label takes PRECEDENCE over the raw Jira
+            # workflow status for the local status field (inbound_fields), which
+            # would make every ``status_name`` canonicalize to the SAME local
+            # status and defeat this fixture's ``status_name`` parameterization
+            # (used by both the in-sync and the genuine-drift test below).
+            "labels": ["team:backend", "rebar-id:abc-1"],
         },
     }
     store = StubBindingStore([("abc-1", "DIG-1")])
     return local_tickets, jira_snapshot, store
 
 
-def test_normalized_agree_raw_differ_counts_in_sync(rc_mod: ModuleType) -> None:
+def test_normalized_agree_raw_differ_counts_in_sync(
+    rc_mod: ModuleType, backend: JiraBackend
+) -> None:
     """A healthy live-shape binding whose normalized values agree with local
     must count as in_sync with ZERO discrepancies (the false-positive bug)."""
     local_tickets, jira_snapshot, store = _live_binding("To Do")
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     assert report["checked"] == 1
     assert report["in_sync"] == 1
     assert report["discrepancies"] == []
 
 
-def test_real_status_drift_still_reported(rc_mod: ModuleType) -> None:
+def test_real_status_drift_still_reported(rc_mod: ModuleType, backend: JiraBackend) -> None:
     """Normalization must NOT suppress actionable drift: an identical binding
     except a genuinely different Jira status ("Done" vs local "open") must
     still report exactly one status discrepancy (critical guard)."""
     local_tickets, jira_snapshot, store = _live_binding("Done")
 
-    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store)
+    report = rc_mod.reconcile_check(local_tickets, jira_snapshot, store, backend=backend)
 
     status_discs = [d for d in report["discrepancies"] if d["field"] == "status"]
     assert len(status_discs) == 1
