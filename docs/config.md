@@ -176,6 +176,40 @@ ensure.hint_enabled       = true     # kill-switch: false silences the nudge ent
 > of scope; `rebar fsck` WARNs when the configured branch/dir does not match what is actually
 > mounted so the divergence is observable.
 
+### Code-health analyzers (`code_health.*`)
+
+Code-health analysis is inert by default. Configure it in standalone `rebar.toml` with a
+`[code_health]` table, or in `pyproject.toml` with `[tool.rebar.code_health]`; the keys and
+values are otherwise identical:
+
+```toml
+# rebar.toml
+[code_health]
+enabled = true                         # bool; default false
+scan_roots = ["src", "web"]           # list[str]; default []
+analyzers = { python = "lizard" }      # dict[str, str]; default {}
+size_cap = 800                          # optional int; default unset/None
+size_near_fraction = 0.15              # float; default 0.1
+```
+
+```toml
+# pyproject.toml
+[tool.rebar.code_health]
+enabled = true
+scan_roots = ["src", "web"]
+analyzers = { python = "lizard" }
+size_cap = 800
+size_near_fraction = 0.15
+```
+
+`enabled` is a `bool` and defaults to `false`; `scan_roots` is `list[str]` and defaults to
+`[]`; `analyzers` is `dict[str, str]` and defaults to `{}`; `size_cap` is an optional `int`
+and defaults to unset/`None`; and `size_near_fraction` is a `float` and defaults to `0.1`.
+TOML has no null value, so omit `size_cap` unless setting an integer. The `analyzers` mapping
+is selector/configuration metadata (for example, `python = "lizard"`); it does **not** install
+or download an analyzer. Install the required tools separately as described in
+[user-guide.md](user-guide.md) (§ Metrics).
+
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
 
 `reconciler.*` and `jira.*` are settable in `[tool.rebar.reconciler]` /

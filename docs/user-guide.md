@@ -271,6 +271,22 @@ high-confidence trend. The library/registry side of this surface is documented i
 [reuse-surface.md](reuse-surface.md); the exact CLI syntax is in
 [cli-reference.md](cli-reference.md).
 
+### Code-health analyzer installation and fallback
+
+Analyzer-backed code-health metrics need all three parts of this installation:
+
+- `pip install "nava-rebar[metrics]"` installs the optional Python dependency, **lizard**.
+- Install **scc** separately and ensure its executable is on `PATH` for LOC and module-size
+  metrics.
+- Install **jscpd** separately and ensure its executable is on `PATH` for duplication metrics.
+
+The `[metrics]` extra contains only lizard; scc and jscpd are external executables, never pip
+dependencies of rebar. The analyzers map to their signals as follows: scc → LOC/module size,
+lizard → complexity, and jscpd → duplication. If an analyzer is absent or fails, its affected
+metric returns a structured `Unavailable`; rebar does not fabricate a zero and the whole
+`rebar metrics` command does not crash. Git- and event-derived metrics remain independently
+available.
+
 ## Concurrency, in one line
 
 rebar is meant to be used by many people/clones at once. Status-changing operations

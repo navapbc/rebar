@@ -454,3 +454,26 @@ The optional harness-specific adapters (`rebar.metrics.adapters.*` — GitHub-Ac
 transcripts) are quarantined behind their backfill scripts and are **never** imported by the
 core command or the registry, keeping the command harness-agnostic. See
 [user-guide.md](user-guide.md) (§ Metrics) for the CLI view.
+
+### Code-health analyzer seam
+
+Analyzer-backed code-health metrics are isolated behind the
+`rebar.metrics.analyzers` adapter modules and composed by `rebar.metrics.git_metrics`:
+`scc_loc` provides LOC and module-size input, `lizard_complexity` provides complexity input,
+and `jscpd_dup` provides duplication input. An adapter returns an `AnalyzerResult` for its
+available signal or a structured `Unavailable`; registry composition then lets one unavailable
+analyzer leave the other metrics usable. This is the extension seam for a new analyzer:
+normalize its output to `AnalyzerResult` and preserve an honest `Unavailable` when the tool
+cannot run.
+
+The prerequisites are deliberately split:
+
+- Install `nava-rebar[metrics]` for the optional Python dependency, **lizard**. The
+  `[metrics]` extra contains only lizard.
+- Install **scc** separately and make its executable available on `PATH` for LOC/module-size
+  analysis.
+- Install **jscpd** separately and make its executable available on `PATH` for duplication
+  analysis.
+
+Neither `scc` nor `jscpd` is a pip dependency of rebar. Their adapters resolve executables
+from `PATH`; a missing or failing tool is reported as `Unavailable`, never as fabricated zero.
