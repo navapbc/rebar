@@ -136,6 +136,17 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     agent_calls = 0
     # Pass-2 verifier model-request count (mirror plan-review's verify-step sum).
     verify_requests = 0
+    # Token usage summed across every step that exposes per-call `_usage` (the runner attaches
+    # it; see runner._extract_usage). Today that is the Pass-2 `verify` + Pass-3 `decide` agent
+    # steps — the Pass-1 finder batch does not surface `_usage` on its step output (follow-up),
+    # so these totals are the review's agent-step token usage. Enables the review bot to emit
+    # token counts to CloudWatch and enriches the persisted code_review artifact.
+    token_totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
     # Pass-3 dropped findings (from the `decide` step; absent from the terminal verdict).
     dropped = 0
     changed_files = 0
@@ -155,6 +166,10 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
             agent_calls += 1
             if step_id == _STEP_VERIFY:
                 verify_requests += int((outputs.get("_usage") or {}).get("requests") or 0)
+        usage = outputs.get("_usage")
+        if isinstance(usage, dict):
+            for field in token_totals:
+                token_totals[field] += int(usage.get(field) or 0)
         if step_id == _STEP_DECIDE:
             dropped += len(outputs.get("dropped") or [])
         if step_id == STEP_ASSEMBLE_DIFF:
@@ -190,6 +205,8 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
         "findings_per_run": len(blocking) + len(advisory),
         "verify_requests": verify_requests,
         "grounding_health": grounding_health,
+        **token_totals,
+        "total_tokens": token_totals["input_tokens"] + token_totals["output_tokens"],
     }
     # Advisory notes live on `coverage` (NOT in `metrics`), and NEVER on `verdict['verdict']`.
     if grounding_health == "low":

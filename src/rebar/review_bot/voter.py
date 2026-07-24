@@ -180,6 +180,66 @@ def _merge_change_error(event: str, reason: str, **fields: Any) -> None:
     _publish_merge_change_error_metric(reason)
 
 
+# ── token-usage observability (ticket clayish-basaltine-bug) ─────────────────
+# Names of the token fields the runner records on each call's `_usage` and that the
+# code-review metrics assembler sums into `coverage['metrics']` (see
+# rebar.llm.code_review.finalize._attach_code_review_metrics).
+_TOKEN_METRIC_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "total_tokens",
+)
+
+
+def _publish_token_usage_metrics(metrics: dict[str, Any]) -> None:
+    """Best-effort publish of the review's per-review LLM token counts to CloudWatch
+    (``rebar/host:review_bot_llm_<field>_tokens``, ``Unit=Count``), mirroring
+    :func:`_publish_voter_error_metric`. ``metrics`` is the verdict's
+    ``coverage['metrics']`` dict (agent-step token totals; the Pass-1 finder batch is a
+    documented follow-up gap). Any missing field contributes 0; a review with no token data
+    publishes nothing. In-container boto3 may not reach IMDS, so any failure is swallowed — the
+    ``LLM_TOKEN_USAGE`` journald marker emitted by the caller is the reliable fallback."""
+    data = [
+        {
+            "MetricName": f"review_bot_llm_{field}",
+            "Value": float(int(metrics.get(field) or 0)),
+            "Unit": "Count",
+        }
+        for field in _TOKEN_METRIC_FIELDS
+    ]
+    if all(entry["Value"] == 0 for entry in data):
+        return  # no token data recorded for this review — nothing to publish
+    try:
+        import boto3  # noqa: PLC0415 — optional, lazy: only when a review actually recorded usage
+
+        boto3.client("cloudwatch").put_metric_data(Namespace="rebar/host", MetricData=data)
+    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
+        pass
+
+
+def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) -> None:
+    """Record the review's LLM token usage: a greppable ``LLM_TOKEN_USAGE`` journald line
+    (the reliable, host-probe-parseable path) plus a best-effort direct CloudWatch publish.
+    Best-effort throughout — the vote is already cast, so token accounting NEVER fails a
+    review (any error is swallowed)."""
+    try:
+        record = {
+            "event": "LLM_TOKEN_USAGE",
+            "timestamp": time.time(),
+            "change_id": change_id,
+            "revision_id": revision,
+            **{f: int(metrics.get(f) or 0) for f in _TOKEN_METRIC_FIELDS},
+        }
+        line = "LLM_TOKEN_USAGE " + json.dumps(record, default=str)
+        logger.info(line)
+        print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+        _publish_token_usage_metrics(metrics)
+    except Exception:  # noqa: BLE001 — observability must never fail an already-cast vote
+        logger.warning("token-usage emission failed; continuing", exc_info=True)
+
+
 def _merge_coverage_gap_decision(note: str) -> dict[str, Any]:
     """A fail-closed BLOCK decision for a merge-path infra failure — cast as a ``-1`` with a
     coverage-gap tag so the merge change is BLOCKED and the operator sees an INFRA veto (the
@@ -655,6 +715,14 @@ async def review_and_vote(
             merge=is_merge,
             parent_count=parent_count,
         )
+        # Token-usage observability (ticket clayish-basaltine-bug): record the review's LLM
+        # token counts (from the verdict's coverage.metrics) to journald + CloudWatch. A
+        # fail-closed review carries no verdict/metrics → nothing recorded. Best-effort.
+        _review_metrics = ((decision.get("verdict") or {}).get("coverage") or {}).get(
+            "metrics"
+        ) or {}
+        if _review_metrics:
+            _emit_token_usage(change_id, revision, _review_metrics)
         # Data capture (story limestone-unethical-zebrafinch): emit a durable, change-scoped
         # code_review artifact into the AMBIENT tickets store (repo_root=None — NOT the temp code
         # clone, which is already deleted) and link it relates_to the change's trailer-cited
