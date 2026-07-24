@@ -527,15 +527,14 @@ def compute_validity(
         signed_phase: object = None
         signed_floor: object = None
         has_phase_metadata = any(str(line).startswith("review-phase: ") for line in auth_manifest)
-        # Material-pin enforcement promotes a close to an execution decision
-        # when the signed review participates in the phase-aware protocol.
-        # Legacy manifests and projects that only enable the historical close
-        # gate retain their existing compatibility behavior.
-        current_phase: object = (
-            "execution"
-            if profile is PlanValidityProfile.CLOSE and enforced and has_phase_metadata
-            else ticket_state.get("plan_review_phase")
-        )
+        # Compatibility compares the ticket's CURRENT compiled phase against the phase the
+        # signed review actually ran under, via the fixed `review_phase_status` table (tickets
+        # 5967 + 2bbd; docs/plan-review-gate.md §"phase_status compatibility"). At CLOSE this is
+        # identical to DEFAULT/DRIFT_REFRESH: a planning (or legacy-planning) attestation is
+        # compatible with an execution-phase ticket. The close gate's job is to catch a plan
+        # that CHANGED during execution — enforced via own-material + pin drift, which still
+        # invalidate here — NOT to compel a fresh execution-phase review when nothing changed.
+        current_phase: object = ticket_state.get("plan_review_phase")
         if current_phase is None:
             current_phase = (
                 "planning" if ticket_state.get("status") in ("open", "idea") else "execution"
@@ -546,16 +545,6 @@ def compute_validity(
             from .pin_health import review_phase_status
 
             phase_status = review_phase_status(current_phase, signed_phase, signed_floor)
-            # Under material-pin enforcement, a planning review can start work
-            # but cannot certify an ordinary close. Scope this to phase-aware
-            # manifests so legacy close-review attestations remain compatible.
-            if (
-                profile is PlanValidityProfile.CLOSE
-                and enforced
-                and signed_phase == "planning"
-                and has_phase_metadata
-            ):
-                phase_status = "incompatible"
             plan_health["phase_status"] = cast(Any, phase_status)
         except ManifestFormatError:
             plan_health["phase_status"] = "malformed"

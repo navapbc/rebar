@@ -508,6 +508,14 @@ malformed rather than normalized.
 `compute_validity` returns this as `health.phase_status` for every parsed plan-review result.
 Completion-verifier validity does not parse plan-review phase, floor, or material pins.
 
+The **CLOSE** profile uses this same table (it is not stricter on phase): a planning (or
+legacy-planning) attestation certifies close for an execution-phase ticket. The close gate's
+purpose is to catch a plan that *changed* during execution — enforced by own-material and pin
+drift, which still invalidate at close — not to compel a fresh execution-phase review when the
+plan is unchanged. The implementation itself is validated by the separate completion-verifier
+gate. (An execution-phase ticket whose plan *did* drift invalidates on material/pin, forcing a
+re-review, which — run while `in_progress` — is an execution review.)
+
 ### Why the execution floor is fixed at 0.80
 
 Execution edits happen after implementation has begun, when accepting an under-specified change is

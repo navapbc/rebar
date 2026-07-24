@@ -308,9 +308,13 @@ def test_drifted_related_pin_blocks_claim_with_canonical_target_through_real_cli
     assert after == "open"
 
 
-def test_planning_phase_review_blocks_close_until_execution_review_through_real_cli(
+def test_planning_phase_review_certifies_close_through_real_cli(
     rebar_repo: Path,
 ) -> None:
+    # An UNCHANGED planning-phase review certifies close (tickets 5967 + 2bbd; docs
+    # §"phase_status compatibility": execution-ticket + planning-signed = compatible).
+    # The close gate blocks a plan that CHANGED during execution via material/pin drift,
+    # not by compelling a fresh execution-phase review.
     _assert_project_policies_enabled()
     _commit(rebar_repo)
     _enable_fixture(rebar_repo)
@@ -330,17 +334,24 @@ def test_planning_phase_review_blocks_close_until_execution_review_through_real_
     assert config.load_config(str(rebar_repo)).verify.require_plan_review_for_close is True
     from rebar._commands import gates
 
+    # The plan-review close gate now accepts the (unchanged) planning attestation.
     check = gates.close_plan_review_gate_check(ticket_id, state, repo_root=str(rebar_repo))
-    assert check["ok"] is False, check
-    assert check["verdict"] == "incompatible-phase"
+    assert check["ok"] is True, check
+    assert check["verdict"] == "certified"
+
+    # End-to-end close succeeds once the separate completion-verifier gate is satisfied.
+    signing.sign_manifest(
+        ticket_id,
+        ["completion-verifier: PASS", f"ticket: {ticket_id}"],
+        kind="completion-verifier",
+        repo_root=str(rebar_repo),
+    )
     result = _cli(rebar_repo, "transition", ticket_id, "in_progress", "closed")
     after = rebar.show_ticket(ticket_id, repo_root=str(rebar_repo))["status"]
 
     assert before == "in_progress"
-    assert result.returncode == 1
-    assert "incompatible-phase" in result.stderr
-    assert "review-plan" in result.stderr
-    assert after == "in_progress"
+    assert result.returncode == 0, result.stderr
+    assert after == "closed"
 
 
 def test_natural_a_to_b_to_c_invalidation_requires_each_narrow_material_change(
