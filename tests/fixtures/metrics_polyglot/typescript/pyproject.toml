@@ -1,0 +1,4 @@
+[tool.rebar.code_health]
+enabled = true
+scan_roots = ["src"]
+size_cap = 800
