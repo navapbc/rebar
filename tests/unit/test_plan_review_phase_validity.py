@@ -64,7 +64,12 @@ def test_malformed_phase_is_reported_in_health(monkeypatch) -> None:
     assert result["health"]["phase_status"] == "malformed"
 
 
-def test_close_profile_requires_an_execution_review(monkeypatch) -> None:
+def test_close_profile_accepts_a_planning_review(monkeypatch) -> None:
+    # The documented compatibility table (tickets 5967 + 2bbd; docs §"phase_status
+    # compatibility") makes a planning attestation compatible with an execution-phase
+    # ticket at CLOSE. The close gate blocks a plan that CHANGED during execution via
+    # material/pin drift, not by compelling a fresh execution-phase review — so an
+    # unchanged planning review certifies close.
     manifest = _manifest(phase="planning")
     monkeypatch.setattr(attest, "registry_version", lambda repo_root=None: "registry")
     monkeypatch.setattr(attest, "current_material_fingerprint", lambda *a, **k: "material")
@@ -77,10 +82,10 @@ def test_close_profile_requires_an_execution_review(monkeypatch) -> None:
         profile=PlanValidityProfile.CLOSE,
     )
 
-    assert result["valid"] is False
-    assert result["verdict"] == "incompatible-phase"
+    assert result["valid"] is True
+    assert result["verdict"] == "certified"
     assert result["health"]["signed_phase"] == "planning"
-    assert result["health"]["required_phase"] == "execution"
+    assert result["health"]["phase_status"] == "compatible"
 
 
 def test_completion_validity_never_reads_plan_phase(monkeypatch) -> None:
