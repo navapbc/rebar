@@ -1421,3 +1421,200 @@ def test_review_plan_cli_text_shows_reuse_on_second_run(rebar_repo: Path, capsys
     assert _review(tid, rebar_repo)["signature"]["signed"]
     assert _cli.main(["review-plan", tid, "-o", "text"]) == 0
     assert "reused" in capsys.readouterr().out
+
+
+# ── epic 58f2: sign-on-PASS is a DEFENDED invariant at each public boundary ─────
+#
+# The signing default was already correct on both public plan-review routes, but nothing
+# pinned it at the REAL parser/API boundary — a refactor could silently flip it with no test
+# failing. These tests make the default load-bearing: they assert the flag→kwarg mapping
+# through the actual CLI parser, the library's `sign=True` default, the end-to-end
+# review→claim loop over the real CLI route, the never-sign guard table, and the idempotent
+# reuse path's promise that it emits no SECOND signature.
+
+
+def _capture_review_plan_kwargs(monkeypatch) -> dict:
+    """Swap `llm.review_plan` for a recorder and return the dict it fills in.
+
+    `_llm_commands` does `from rebar import llm` INSIDE each command function, so the
+    attribute is resolved on the module object at call time — patching it here is a genuine
+    parser-boundary interception, not a re-implementation of the dispatch."""
+    import rebar.llm as _llm_mod
+
+    seen: dict = {}
+
+    def _recorder(ticket_id, **kwargs):
+        seen["ticket_id"] = ticket_id
+        seen.update(kwargs)
+        return {
+            "verdict": "PASS",
+            "ticket_id": ticket_id,
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+            "coverage": {"counts": {}},
+            "signature": {"signed": True},
+        }
+
+    monkeypatch.setattr(_llm_mod, "review_plan", _recorder)
+    return seen
+
+
+def test_cli_review_plan_signs_by_default_at_the_parser_boundary(rebar_repo: Path, monkeypatch):
+    """AC3 (default half): omitting `--no-sign` reaches the library as `sign=True`."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    seen = _capture_review_plan_kwargs(monkeypatch)
+    assert _cli.main(["review-plan", tid]) == 0
+    assert seen["sign"] is True  # the default is SIGN, asserted through the real parser
+
+
+def test_cli_review_plan_no_sign_is_the_only_way_to_skip(rebar_repo: Path, monkeypatch):
+    """AC3 (opt-out half): unsigned execution requires the EXPLICIT flag."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    seen = _capture_review_plan_kwargs(monkeypatch)
+    assert _cli.main(["review-plan", tid, "--no-sign"]) == 0
+    assert seen["sign"] is False
+
+
+def test_library_review_plan_signs_by_default(rebar_repo: Path) -> None:
+    """AC1/AC4 (default half): the library default persists a CLAIM-VALID attestation —
+    asserted on the ticket itself, not just on the returned verdict."""
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "PASS" and verdict["signature"]["signed"] is True
+    # Persisted on the TICKET (the durable artifact), and accepted by the claim gate.
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("signature")
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is True
+
+
+def test_library_review_plan_sign_false_leaves_the_claim_gate_blocked(rebar_repo: Path) -> None:
+    """AC4 (opt-out half): `sign=False` is the ONLY library route to an unsigned PASS, and it
+    genuinely withholds the gate artifact — the claim stays blocked."""
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, sign=False, repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "PASS"
+    assert verdict["signature"]["signed"] is False
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is False
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_cli_review_plan_earns_a_claim_without_a_second_llm_call(rebar_repo: Path, monkeypatch):
+    """AC2: the full loop over the REAL CLI route — `rebar review-plan <id>` with no opt-out
+    signs an attestation bound to the current material, and the subsequent `rebar claim`
+    is satisfied by it WITHOUT running the LLM again."""
+    from rebar.llm import runner as _runner_mod
+    from rebar.llm.plan_review import attest
+    from rebar.llm.plan_review import orchestrator as _orch
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+
+    counting = _CountingFake()
+    # `orchestrator` binds `get_runner` at module import, so patching the runner module alone
+    # would miss it; patch both to guarantee no live backend is reachable from this test.
+    monkeypatch.setattr(_runner_mod, "get_runner", lambda cfg, override=None: counting)
+    monkeypatch.setattr(_orch, "get_runner", lambda cfg, override=None: counting)
+
+    assert _cli.main(["review-plan", tid]) == 0
+    assert counting.calls > 0  # the CLI route really ran the review
+    after_review = counting.calls
+
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is True
+    rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "in_progress"
+    assert counting.calls == after_review  # the CLAIM itself is a pure local verify
+
+
+def test_never_sign_guard_table(rebar_repo: Path) -> None:
+    """AC5: the verdicts that must NEVER carry a passing signature.
+
+    Covers the guards `attest.sign_plan_review` actually enforces (non-PASS and degraded)
+    plus the explicit library opt-out. NOTE: `source="local"` is deliberately ABSENT — the
+    CLI documents it as "never signs" but it currently DOES sign a claim-valid attestation.
+    That is tracked as its own bug (melancholy-firstborn-shihtzu) rather than pinned here,
+    because pinning today's behavior would encode the bypass as expected."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+
+    cases = []
+
+    # (a) BLOCK — the deterministic floor rejects a plan with no Acceptance Criteria.
+    blocked = _make(rebar_repo, desc=_NO_AC_DESC)
+    cases.append(
+        ("det-block", rebar.llm.review_plan(blocked, runner=_CLEAN, repo_root=str(rebar_repo)))
+    )
+
+    # (b) INDETERMINATE — a not-yet-claimable ticket fast-fails with NO LLM call.
+    unclaimable = _make(rebar_repo)
+    rebar.transition(unclaimable, "open", "blocked", repo_root=str(rebar_repo))
+    cases.append(
+        (
+            "not-claimable",
+            rebar.llm.review_plan(unclaimable, runner=_CLEAN, repo_root=str(rebar_repo)),
+        )
+    )
+
+    # (c) explicit opt-out on an otherwise perfectly signable PASS.
+    opted_out = _make(rebar_repo)
+    cases.append(
+        (
+            "sign-false",
+            rebar.llm.review_plan(opted_out, runner=_CLEAN, sign=False, repo_root=str(rebar_repo)),
+        )
+    )
+
+    for label, verdict in cases:
+        # `.signed` is the boolean of record; the object itself is always present.
+        assert verdict["signature"]["signed"] is False, f"{label} must not sign"
+
+
+def test_idempotent_reuse_emits_no_second_signature(rebar_repo: Path) -> None:
+    """AC7 (the untested half): the short-circuit is already known not to re-run the LLM, but
+    it must also not mint a DUPLICATE attestation. `signed_at` is the witness — a re-sign
+    would move it."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+
+    counting = _CountingFake()
+    first = rebar.llm.review_plan(tid, runner=counting, repo_root=str(rebar_repo))
+    assert first["verdict"] == "PASS" and first["signature"]["signed"] is True
+    calls_after_first = counting.calls
+    signed_at = rebar.show_ticket(tid, repo_root=str(rebar_repo))["signature"]["signed_at"]
+
+    second = rebar.llm.review_plan(tid, runner=counting, repo_root=str(rebar_repo))
+    assert second["coverage"]["idempotent_skip"] is True
+    assert counting.calls == calls_after_first  # no LLM
+    # …and no NEW signature event: the stored attestation is byte-identical, not re-minted.
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["signature"]["signed_at"] == signed_at
+
+
+def test_review_plan_help_states_that_pass_signs_by_default(capsys) -> None:
+    """AC8: the help is the author's contract. It must say PASS SIGNS by default, so the
+    `--no-sign` flag reads as the exception it is rather than as the way to get a signature."""
+    with pytest.raises(SystemExit):
+        _cli.main(["review-plan", "--help"])
+    # argparse hard-wraps help at the terminal width, so collapse whitespace before matching
+    # phrases — otherwise the assertion breaks on where the line happens to fold.
+    help_text = " ".join(capsys.readouterr().out.lower().split())
+    assert "--no-sign" in help_text
+    # The default must be STATED, not merely implied by the flag's existence.
+    assert "by default a non-blocking pass signs one" in help_text
+    # …and the help must name the cheap recovery path for a signature that was lost.
+    assert "sign-review" in help_text

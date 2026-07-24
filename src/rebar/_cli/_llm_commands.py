@@ -459,7 +459,13 @@ def _review_plan(argv: list[str]) -> int:
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     parser.add_argument(
-        "--no-sign", action="store_true", help="run the review but do NOT sign an attestation"
+        "--no-sign",
+        action="store_true",
+        help="run the review but do NOT sign an attestation. By default a non-blocking PASS "
+        "SIGNS one — that attestation is the review's durable product, and it is what the "
+        "claim gate consumes — so this flag is the explicit opt-out, not the way to get a "
+        "signature. An unsigned PASS leaves the claim gate unsatisfied; recover a lost "
+        "signature cheaply (no LLM) with `rebar sign-review <id>`",
     )
     parser.add_argument(
         "--force",
