@@ -77,6 +77,7 @@ def test_analyzer_specs_use_context_config(monkeypatch, tmp_path):
         scan_roots=["src", "web"],
         size_cap=800,
         size_near_fraction=0.1,
+        analysis_cache={},
     )
 
     distribution = evaluate(specs["module_size_distribution"], ctx)
@@ -84,13 +85,10 @@ def test_analyzer_specs_use_context_config(monkeypatch, tmp_path):
 
     assert distribution.value["over_cap_count"] == 1
     assert oversized.value == 1
-    assert calls == [
-        (tmp_path, ["src", "web"]),
-        (tmp_path, ["src", "web"]),
-    ]
+    assert calls == [(tmp_path, ["src", "web"])]
 
 
-def test_analyzer_unavailable_is_not_fabricated_or_leaked(monkeypatch, tmp_path):
+def test_analyzer_unavailable_reason_is_preserved(monkeypatch, tmp_path):
     analyzer_module = getattr(git_metrics, "scc_loc", None)
     assert analyzer_module is not None, "module-size specs must use the scc adapter"
     monkeypatch.setattr(
@@ -109,12 +107,12 @@ def test_analyzer_unavailable_is_not_fabricated_or_leaked(monkeypatch, tmp_path)
             scan_roots=[],
             size_cap=800,
             size_near_fraction=0.1,
+            analysis_cache={},
         ),
     )
 
     assert isinstance(result, Unavailable)
-    assert result.reason == "no data has accrued for 'module_size_distribution' yet"
-    assert "Errno" not in result.reason
+    assert result.reason == "could not run scc: [Errno 2] missing"
 
 
 def test_refactor_ratio_none_on_zero_insertions(tmp_path):

@@ -1,8 +1,7 @@
 """Git and structural code-health metric derivations.
 
-The module-size metrics consume the configured ``scc`` analyzer's normalized
-LOC result. Git-history metrics remain deterministic derivations over
-``git log --numstat``.
+Structural metrics consume normalized analyzer results once per metrics context.
+Git-history metrics remain deterministic derivations over ``git log --numstat``.
 """
 
 from __future__ import annotations
@@ -12,7 +11,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from rebar.metrics.analyzers import scc_loc
+from rebar.metrics.analyzer import AnalyzerResult
+from rebar.metrics.analyzers import jscpd_dup, lizard_complexity, scc_loc
 from rebar.metrics.registry import REGISTRY, MetricSpec, Unavailable
 
 
@@ -158,16 +158,66 @@ def _git_spec(metric_id: str, fn: Any) -> MetricSpec:
     )
 
 
-def _analyzer_spec(metric_id: str, fn: Any) -> MetricSpec:
-    """Adapt configured SCC LOC into a structural module-size metric."""
+def _analysis_cache(ctx: Any) -> dict[tuple[object, ...], AnalyzerResult | Unavailable]:
+    """Return the cache owned by one metrics evaluation context."""
+
+    cache = getattr(ctx, "analysis_cache", None)
+    if cache is None:
+        cache = {}
+        ctx.analysis_cache = cache
+    return cache
+
+
+def _cached_analysis(
+    ctx: Any,
+    producer: str,
+    inputs: tuple[object, ...],
+    analyze: Any,
+) -> AnalyzerResult | Unavailable:
+    """Run an analyzer once for its immutable repository/input configuration."""
+
+    root = Path(ctx.repo_root)
+    key = (producer, str(root.resolve()), *inputs)
+    cache = _analysis_cache(ctx)
+    if key not in cache:
+        cache[key] = analyze(root)
+    return cache[key]
+
+
+def _scc_analysis(ctx: Any) -> AnalyzerResult | Unavailable:
+    """Return the cached SCC result for the context's configured scan roots."""
+
+    scan_roots = tuple(str(scan_root) for scan_root in ctx.scan_roots)
+    return _cached_analysis(
+        ctx,
+        "scc",
+        (scan_roots,),
+        lambda root: scc_loc.analyze(root, ctx.scan_roots),
+    )
+
+
+def _lizard_analysis(ctx: Any) -> AnalyzerResult | Unavailable:
+    """Return the cached Lizard result for the context repository."""
+
+    return _cached_analysis(ctx, "lizard", (), lizard_complexity.analyze)
+
+
+def _jscpd_analysis(ctx: Any) -> AnalyzerResult | Unavailable:
+    """Return the cached JSCPD result for the context repository."""
+
+    return _cached_analysis(ctx, "jscpd", (), jscpd_dup.analyze)
+
+
+def _structural_spec(metric_id: str, fn: Any, analyze: Any) -> MetricSpec:
+    """Adapt one cached analyzer payload into a structural metric."""
 
     def compute(ctx: Any) -> Any:
         if ctx is None:
             return None
-        result = scc_loc.analyze(Path(ctx.repo_root), ctx.scan_roots)
+        result = analyze(ctx)
         if isinstance(result, Unavailable):
-            return None
-        return fn(result.loc, ctx.size_cap, ctx.size_near_fraction)
+            return result
+        return fn(result, ctx)
 
     return MetricSpec(
         id=metric_id,
@@ -184,8 +234,26 @@ def register() -> None:
 
     existing = {spec.id for spec in REGISTRY}
     specs = [
-        _analyzer_spec("module_size_distribution", module_size_distribution),
-        _analyzer_spec("oversized_module_count", oversized_module_count),
+        _structural_spec(
+            "module_size_distribution",
+            lambda result, ctx: module_size_distribution(
+                result.loc, ctx.size_cap, ctx.size_near_fraction
+            ),
+            _scc_analysis,
+        ),
+        _structural_spec(
+            "oversized_module_count",
+            lambda result, ctx: oversized_module_count(
+                result.loc, ctx.size_cap, ctx.size_near_fraction
+            ),
+            _scc_analysis,
+        ),
+        _structural_spec(
+            "complexity_summary", lambda result, ctx: result.complexity, _lizard_analysis
+        ),
+        _structural_spec(
+            "duplication_summary", lambda result, ctx: result.duplication, _jscpd_analysis
+        ),
         _git_spec("churn", churn),
         _git_spec("refactor_to_addition_ratio", refactor_to_addition_ratio),
     ]

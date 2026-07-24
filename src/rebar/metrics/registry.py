@@ -109,6 +109,8 @@ def evaluate(spec: MetricSpec, context: Any = None) -> MetricValue | Unavailable
     """
 
     result = spec.compute(context)
+    if isinstance(result, Unavailable):
+        return result
     if result is None:
         return Unavailable(
             reason=f"no data has accrued for '{spec.id}' yet",
