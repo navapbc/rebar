@@ -91,12 +91,9 @@ def test_apply_inbound_records_has_single_jira_literal() -> None:
 # `_diff_fields` / `_extract_jira_field`, or inbound_fields' value maps) may still
 # be imported; only the mapper entrypoint is forbidden.
 #
-# reconcile_check.py is DELIBERATELY NOT covered here: it uses outbound_fields'
-# INTERNAL `_extract_jira_field` / `_assignee_matches` (not on the Backend port) via
-# a lazy `_load_sibling(...)` INSIDE its functions (not a module-level import), and
-# routing those internals through the port would over-expose vendor internals for no
-# behavioural gain. It stays on the lazy by-path loader and is out of scope for this
-# mapper-injection gate.
+# (Ticket ad44 removed the former reconcile_check.py carve-out: reconcile_check now
+# compares in canonical shape via the injected InboundMapper/OutboundMapper — see its
+# entries in the scalar-import tuple and the by-path-load sweep below.)
 _MAPPER_INJECTED = (
     ("outbound_differ.py", "_map_local_to_jira_fields"),
     ("inbound_differ.py", "_map_jira_to_local_fields"),
@@ -158,7 +155,35 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     # Ticket eefd: the outbound link differ compares canonical relations (remote links mapped
     # via SupportsLinks.map_remote_links), so it no longer imports the vendor link-type map.
     "outbound_links.py",
+    # Ticket ad44: reconcile_check compares in canonical shape via the injected
+    # InboundMapper/OutboundMapper, so it no longer imports (or by-path loads) vendor siblings.
+    "reconcile_check.py",
 )
+
+
+# Ticket ad44: reconcile_check.py loaded vendor siblings BY PATH
+# (``_load_sibling("outbound_fields", "adapters/jira/outbound_fields.py")``) — a string-literal
+# path the AST import walker cannot see. After canonicalization it carries no such path literal.
+def test_reconcile_check_has_no_vendor_by_path_load() -> None:
+    """reconcile_check.py contains NO string CONSTANT that is an ``adapters/jira/...`` path
+    (the by-path ``_load_sibling("...", "adapters/jira/outbound_fields.py")`` vendor loads are
+    gone) — ticket ad44. Complements the AST import gate (which cannot see a string-literal
+    path argument). A docstring/comment that merely MENTIONS the string in prose is not a load
+    path (its value does not START WITH the vendor prefix), so the gate inspects AST string
+    constants by value, not raw text."""
+    tree = ast.parse((_REC / "reconcile_check.py").read_text())
+    offenders = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("adapters/jira/")
+    ]
+    assert not offenders, (
+        f"reconcile_check.py still by-path loads a vendor sibling — path literal(s) {offenders}. "
+        "Canonicalize via the injected InboundMapper/OutboundMapper instead."
+    )
+
 
 _FORBIDDEN_IMPORT_SUBSTRINGS = ("adapters.jira", "acli_subprocess")
 

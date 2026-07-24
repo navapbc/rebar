@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar_reconciler.adapters.jira.backend import JiraBackend
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 
@@ -363,6 +365,7 @@ class TestReconcileCheckMode:
             local_tickets,
             jira_snapshot,
             FakeBindings(),
+            backend=JiraBackend(transport=object()),
         )
         assert "total_bindings" in report
         assert "checked" in report
