@@ -526,7 +526,9 @@ def test_project_routing_controls_pass3_through_production_gate(tmp_path, monkey
     assert project["criteria"] == ["existing-tag", _PROJECT_ID]
 
 
-def test_overlay_absent_repo_preserves_pass3_disposition(tmp_path) -> None:
+def test_pass3_routing_parity_overlay_absent_repo_preserves_disposition(
+    tmp_path,
+) -> None:
     repo = _project_repo(tmp_path)
     (repo / ".rebar" / "criteria_routing.json").unlink()
 
