@@ -40,6 +40,8 @@ def analyze(
         command = ["scc", "--format", "json", str(scan_root)]
         try:
             completed = run(command)
+        except FileNotFoundError:
+            return _unavailable("scc executable is unavailable")
         except OSError as exc:
             return _unavailable(f"could not run scc: {exc}")
 

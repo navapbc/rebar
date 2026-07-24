@@ -17,7 +17,9 @@ import pytest
 
 import rebar
 import rebar.metrics  # noqa: F401 — hydrate REGISTRY via package __init__ (side-effect import)
-from rebar.metrics.registry import REGISTRY, MetricSpec
+from rebar.metrics.analyzer import AnalyzerResult
+from rebar.metrics.analyzers import jscpd_dup, lizard_complexity, scc_loc
+from rebar.metrics.registry import REGISTRY, MetricSpec, Unavailable
 
 pytestmark = pytest.mark.interface
 
@@ -131,3 +133,78 @@ def test_foreign_repo_honest_unavailable(rebar_repo):
         reason = entry["unavailable"]["reason"]
         assert "Errno" not in reason
         assert "module-size-limit.txt" not in reason
+
+
+def test_metrics_cli_emits_composed_code_health_values(rebar_repo, monkeypatch, capsys):
+    from rebar import config
+    from rebar._commands.metrics import metrics_cli
+
+    (rebar_repo / "pyproject.toml").write_text(
+        '[tool.rebar.code_health]\nscan_roots = ["src"]\nsize_cap = 800\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    monkeypatch.setattr(
+        scc_loc,
+        "analyze",
+        lambda *_args, **_kwargs: AnalyzerResult(
+            loc={"files": {"src/app.py": 801}, "max_loc": 801}
+        ),
+    )
+    monkeypatch.setattr(
+        lizard_complexity,
+        "analyze",
+        lambda *_args, **_kwargs: AnalyzerResult(
+            complexity={"files": {}, "functions": 1, "total_ccn": 3, "max_ccn": 3}
+        ),
+    )
+    monkeypatch.setattr(
+        jscpd_dup,
+        "analyze",
+        lambda *_args, **_kwargs: AnalyzerResult(duplication={"clones": 2, "percentage": 4.5}),
+    )
+
+    assert metrics_cli(["--output", "json"], repo_root=str(rebar_repo)) == 0
+    metrics = json.loads(capsys.readouterr().out)["metrics"]
+
+    assert metrics["module_size_distribution"]["value"]["over_cap_count"] == 1
+    assert metrics["oversized_module_count"]["value"] == 1
+    assert metrics["complexity_summary"]["value"]["max_ccn"] == 3
+    assert metrics["duplication_summary"]["value"] == {
+        "clones": 2,
+        "percentage": 4.5,
+    }
+
+
+def test_metrics_cli_names_missing_producers(rebar_repo, monkeypatch, capsys):
+    from rebar._commands.metrics import metrics_cli
+
+    def missing(reason):
+        return lambda *_args, **_kwargs: Unavailable(
+            reason=reason,
+            accruing_since="2026-01-01T00:00:00+00:00",
+        )
+
+    monkeypatch.setattr(scc_loc, "analyze", missing("could not run scc: missing"))
+    monkeypatch.setattr(
+        lizard_complexity,
+        "analyze",
+        missing("optional dependency 'lizard' is missing"),
+    )
+    monkeypatch.setattr(jscpd_dup, "analyze", missing("could not run jscpd: missing"))
+
+    assert metrics_cli(["--output", "json"], repo_root=str(rebar_repo)) == 0
+    metrics = json.loads(capsys.readouterr().out)["metrics"]
+
+    assert metrics["module_size_distribution"]["unavailable"]["reason"] == (
+        "could not run scc: missing"
+    )
+    assert metrics["oversized_module_count"]["unavailable"]["reason"] == (
+        "could not run scc: missing"
+    )
+    assert metrics["complexity_summary"]["unavailable"]["reason"] == (
+        "optional dependency 'lizard' is missing"
+    )
+    assert metrics["duplication_summary"]["unavailable"]["reason"] == (
+        "could not run jscpd: missing"
+    )

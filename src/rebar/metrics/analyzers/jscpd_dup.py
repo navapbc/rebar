@@ -24,6 +24,8 @@ def analyze(
     del languages
     try:
         duplication = run_jscpd(repo_root.resolve())
+    except FileNotFoundError:
+        return _unavailable("jscpd executable not found")
     except (
         OSError,
         subprocess.SubprocessError,
