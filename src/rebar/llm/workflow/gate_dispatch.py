@@ -609,8 +609,36 @@ def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
     return _CodeReviewPrep(dc, doc, rec, inputs, context_overrides, t_total)
 
 
+def _activated_code_review_project_criteria(repo_root: str | None) -> tuple[dict[str, str], ...]:
+    """Resolve active project-owned code-review criteria to their physical prompt ids.
+
+    The shared overlay registry carries logical ids (``project.<name>``), while the prompt
+    library uses gate-qualified filesystem-safe ids. Keeping that translation here gives the
+    batch runner both forms: the physical id drives the prompt, and the logical id remains on
+    emitted findings for routing and user-visible attribution.
+    """
+    from rebar.llm.code_review.registry import effective_criteria, effective_routing
+    from rebar.llm.criteria.ids import criterion_prompt_id
+
+    routing = effective_routing(repo_root)
+    return tuple(
+        {
+            "criterion_id": criterion_id,
+            "prompt": criterion_prompt_id(criterion_id, gate_key="code_review"),
+        }
+        for criterion_id in effective_criteria(repo_root)
+        if criterion_id.startswith("project.")
+        and str((routing.get(criterion_id) or {}).get("exec", "1-TURN")).upper() != "DET"
+    )
+
+
 def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> dict[str, Any]:
-    """Run the four-pass gate (snapshot session) + finalize; outage/mid-tail -> INDETERMINATE."""
+    """Run the four-pass gate in a snapshot session, then finalize.
+
+    Systemic runtime outages degrade to ``INDETERMINATE``. Project configuration errors,
+    including invalid project-criterion prompts, fail loudly so they cannot silently remove
+    review coverage.
+    """
     import time
 
     from rebar.llm import gate_source, review_kernel
@@ -641,7 +669,9 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                     runner=runner_sel, repo_root=request.repo_root, config=cfg
                 ),
                 batch_runner=CodeReviewBatchRunner(
-                    context=prep.dc.context, context_overrides=prep.context_overrides
+                    context=prep.dc.context,
+                    context_overrides=prep.context_overrides,
+                    project_criteria=_activated_code_review_project_criteria(request.repo_root),
                 ),
                 recorder=prep.rec,
             )

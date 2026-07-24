@@ -16,17 +16,26 @@ constructs it with the context it assembled; the offline test constructs it dire
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
+from rebar.llm.errors import LLMError
 from rebar.llm.workflow.runners import BatchRunner, BatchRunRequest, BatchRunResult
 
 _FINDINGS_SCHEMA = "code_review_findings"
+_ROUND_A_STEP_ID = "round_a"
 
 
 class CodeReviewBatchRunner(BatchRunner):
     """Run each INCLUDED overlay's own prompt as a structured finder over the diff context."""
 
-    def __init__(self, context: str = "", context_overrides: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        context: str = "",
+        context_overrides: dict[str, str] | None = None,
+        project_criteria: Sequence[Mapping[str, str]] = (),
+    ) -> None:
         self._context = context
         # Per-overlay ticket_context overrides keyed by prompt_id. When an overlay's prompt_id is
         # present, that string is injected as ITS ticket_context instead of the shared diff
@@ -35,6 +44,10 @@ class CodeReviewBatchRunner(BatchRunner):
         # unchanged. produce_code_review_verdict populates {"code-review-scope-intent": <union
         # ticket scope>} ONLY when the commit's rebar-ticket trailers resolve >=1 ticket.
         self._context_overrides = context_overrides or {}
+        # Project criteria are assembled by the gate dispatcher from the repository's active
+        # code-review registry. They are additive because the static workflow schema owns the
+        # built-in overlay entries; project-owned entries have no YAML slot.
+        self._project_criteria = tuple(project_criteria)
 
     def run(self, req: BatchRunRequest, agent_runner: Any = None) -> BatchRunResult:
         from rebar.llm.workflow.executor import StepContext
@@ -43,10 +56,15 @@ class CodeReviewBatchRunner(BatchRunner):
         plan: dict[str, Any] = {
             "finder": req.finder,
             "ran": [],
-            "criteria_count": len(req.criteria),
+            "criteria_count": 0,
         }
         findings: list[Any] = []
-        for crit in req.criteria:
+        active_criteria: list[Mapping[str, Any]] = list(req.criteria)
+        # Project criteria run in the stable, deterministic Round-A fan-in only. They must not
+        # enter Round B, whose membership is intentionally controlled solely by escalation.
+        if req.step_id == _ROUND_A_STEP_ID:
+            active_criteria.extend(self._validated_project_criteria(req.repo_root))
+        for crit in active_criteria:
             prompt_id = crit.get("prompt")
             if not prompt_id:
                 continue
@@ -77,8 +95,42 @@ class CodeReviewBatchRunner(BatchRunner):
             for f in emitted:
                 if isinstance(f, dict):
                     f.setdefault("reviewer_id", prompt_id)
+                    logical_id = crit.get("criterion_id")
+                    if isinstance(logical_id, str) and logical_id:
+                        tags = f.get("criteria")
+                        if isinstance(tags, list):
+                            if logical_id not in tags:
+                                tags.append(logical_id)
+                        else:
+                            f["criteria"] = [logical_id]
             findings.extend(emitted)
             plan["ran"].append(prompt_id)
+        plan["criteria_count"] = len(plan["ran"])
         return BatchRunResult(
-            outputs={"findings": findings, "criteria_count": len(req.criteria), "batch_plan": plan}
+            outputs={"findings": findings, "criteria_count": len(plan["ran"]), "batch_plan": plan}
         )
+
+    def _validated_project_criteria(self, repo_root: str | None) -> tuple[Mapping[str, str], ...]:
+        """Return usable project entries, failing with a located error on bad prompts."""
+        from rebar.llm.prompting.prompts import PromptError, get_prompt
+
+        validated: list[Mapping[str, str]] = []
+        for entry in self._project_criteria:
+            logical_id = entry.get("criterion_id")
+            prompt_id = entry.get("prompt")
+            if not isinstance(logical_id, str) or not isinstance(prompt_id, str):
+                continue
+            expected = Path(".rebar") / "prompts" / f"{prompt_id}.md"
+            try:
+                prompt = get_prompt(prompt_id, repo_root=repo_root)
+            except PromptError as exc:
+                raise LLMError(
+                    f"project criterion {logical_id!r} requires a valid prompt at {expected}: {exc}"
+                ) from exc
+            if prompt.outputs != _FINDINGS_SCHEMA:
+                raise LLMError(
+                    f"project criterion {logical_id!r} requires a valid prompt at {expected}: "
+                    f"expected outputs {_FINDINGS_SCHEMA!r}, got {prompt.outputs!r}"
+                )
+            validated.append(entry)
+        return tuple(validated)
