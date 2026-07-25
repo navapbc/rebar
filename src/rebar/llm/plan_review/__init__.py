@@ -451,6 +451,12 @@ def review_plan(
             advisory_cap=advisory_cap,
             repo_root=repo_root,
             force=force,
+            # The RESOLVED source, decided from the handle: `gate_source.annotate_result`
+            # only stamps `verdict["source"]` AFTER `_run_plan_review` returns, so any
+            # signing/sidecar decision that needs the source in there must receive it
+            # explicitly — a guard reading `verdict["source"]` at the sign site would be a
+            # silent no-op (bug 5128-0856 melancholy-firstborn-shihtzu, proven at runtime).
+            source_mode=handle.source,
         )
     return gate_source.annotate_result(verdict, handle)
 
@@ -516,6 +522,7 @@ def _run_plan_review(
     advisory_cap: int | None,
     repo_root,
     force: bool = False,
+    source_mode: str | None = None,
 ) -> dict[str, Any]:
     from . import claimability
 
@@ -590,7 +597,10 @@ def _run_plan_review(
     # plan still matches the code, refresh the attestation instead of a full re-review.
     # Always on (operator-authorized 2026-07-12; off switch retired in story 4cdf); still
     # self-gated by ``if sign`` (a --no-sign / readonly review has no attestation to refresh).
-    if sign:
+    # A LOCAL-source run additionally never refreshes: a refresh RE-SIGNS the prior verdict
+    # against the current basis, and an unattested basis is never certifiable (bug 5128-0856;
+    # refresh_attestation's no-null-pin invariant would refuse anyway — skip the probe cost).
+    if sign and source_mode != "local":
         refreshed = orchestrator.drift_refresh(
             ctx,
             cfg,
@@ -706,7 +716,30 @@ def _run_plan_review(
     # Sign only a genuine PASS where the LLM tier actually ran. The verdict is already
     # INDETERMINATE when the tier was unavailable; the explicit llm_ran guard is
     # defense-in-depth so a DET-only result can never be signed (fuel-posse-ball).
+    # An UNATTESTED read is never certifiable (ADR 0005; `repo_snapshot.SOURCE_LOCAL` is
+    # documented "dirty allowed, never signed"). `source=local` reads the in-place checkout —
+    # uncommitted edits included — so a signature minted from it would bind no committed SHA
+    # (`verified_at_sha=None`) while still satisfying the claim gate. The completion close
+    # gate already enforces this (transition_close: a `source == "local"` result returns
+    # before signing); plan-review was the surface that missed it (bug 5128-0856).
     if (
+        sign
+        and source_mode == "local"
+        and verdict.get("verdict") == "PASS"
+        and verdict.get("runner") != "exempt"
+        and verdict.get("coverage", {}).get("llm_ran") is not False
+    ):
+        verdict["signature"] = {
+            "signed": False,
+            # Machine-readable POLICY refusal — distinct from a signing *failure* (which
+            # carries an `error` key) and from the non-PASS reason (the verdict string).
+            "reason": "local-source-never-signs",
+            "detail": (
+                "a --source local review reads the in-place checkout and is never "
+                "certifiable; re-run with the attested source to sign (ADR 0005)"
+            ),
+        }
+    elif (
         sign
         and verdict.get("verdict") == "PASS"
         and verdict.get("runner") != "exempt"
@@ -749,6 +782,10 @@ def _run_plan_review(
             review_phase=review_phase,
             priority_floor=priority_floor,
             repo_root=repo_root,
+            # Recorded so sign-review/resign can refuse to re-certify a local-source PASS
+            # (bug 5128-0856): the payload's verified_at_sha alone cannot tell — it falls
+            # back to git HEAD for local reads (see sidecar.review_code_sha).
+            source=source_mode,
         )
         if emit_sidecar
         else False
