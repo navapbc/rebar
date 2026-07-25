@@ -451,6 +451,8 @@ def review_plan(
             advisory_cap=advisory_cap,
             repo_root=repo_root,
             force=force,
+            # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
+            source_mode=handle.source,
         )
     return gate_source.annotate_result(verdict, handle)
 
@@ -516,6 +518,7 @@ def _run_plan_review(
     advisory_cap: int | None,
     repo_root,
     force: bool = False,
+    source_mode: str | None = None,
 ) -> dict[str, Any]:
     from . import claimability
 
@@ -590,7 +593,8 @@ def _run_plan_review(
     # plan still matches the code, refresh the attestation instead of a full re-review.
     # Always on (operator-authorized 2026-07-12; off switch retired in story 4cdf); still
     # self-gated by ``if sign`` (a --no-sign / readonly review has no attestation to refresh).
-    if sign:
+    # A local run never refreshes: a refresh RE-SIGNS, and local never signs (bug 5128).
+    if sign and source_mode != "local":
         refreshed = orchestrator.drift_refresh(
             ctx,
             cfg,
@@ -700,18 +704,23 @@ def _run_plan_review(
     # sidecar emit so the group stamps land in the persisted payload.
     _group_blocking_fix_units(verdict)
 
-    # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate). The
-    # attestation = "process followed, no blocking red flags + coverage", NOT
-    # "perfect"; advisory findings are coaching, not blocks.
-    # Sign only a genuine PASS where the LLM tier actually ran. The verdict is already
-    # INDETERMINATE when the tier was unavailable; the explicit llm_ran guard is
-    # defense-in-depth so a DET-only result can never be signed (fuel-posse-ball).
-    if (
+    # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate) where the LLM
+    # tier actually ran — the llm_ran guard is defense-in-depth so a DET-only result can
+    # never be signed (fuel-posse-ball). The attestation = "process followed, no blocking
+    # red flags + coverage", NOT "perfect"; advisory findings are coaching, not blocks.
+    certifiable_pass = (
         sign
         and verdict.get("verdict") == "PASS"
         and verdict.get("runner") != "exempt"
         and verdict.get("coverage", {}).get("llm_ran") is not False
-    ):
+    )
+    # An UNATTESTED read is never certifiable (ADR 0005: local is "dirty allowed, never
+    # signed") — it would bind no committed SHA while still satisfying the claim gate. The
+    # close gate already enforces this; plan-review missed it (bug 5128-0856). The POLICY
+    # reason is machine-readable, distinct from a signing *failure* (`error`) and non-PASS.
+    if certifiable_pass and source_mode == "local":
+        verdict["signature"] = {"signed": False, "reason": "local-source-never-signs"}
+    elif certifiable_pass:
         try:
             sig = attest.sign_plan_review(
                 verdict,
@@ -749,6 +758,8 @@ def _run_plan_review(
             review_phase=review_phase,
             priority_floor=priority_floor,
             repo_root=repo_root,
+            # Lets sign-review refuse a local PASS; verified_at_sha cannot tell (bug 5128).
+            source=source_mode,
         )
         if emit_sidecar
         else False

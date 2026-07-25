@@ -870,8 +870,14 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 42  # material change\n")  # dep.py now drifted
+    _commit_all(rebar_repo)  # drift is what LANDED — the attested basis moved
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
     ctx = orchestrator.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
+    # A refresh RE-SIGNS, and signing requires an attested session (the no-null-pin
+    # invariant, bug 5128-0856) — enter one the way review_plan would.
+    from rebar.llm import gate_source
+
+    handle = gate_source.resolve_gate_handle("HEAD", "attested", str(rebar_repo), fetch=False)
 
     def _verdict(*, blocking, advisory):
         return {
@@ -888,7 +894,10 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
         "produce_plan_review_verdict",
         lambda *a, **k: _verdict(blocking=[{"decision": "block", "criteria": ["E4"]}], advisory=[]),
     )
-    assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+    with gate_source.gate_read_root(handle):
+        assert (
+            orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+        )
 
     # (b) a PASS probe whose surfaced advisory CITES the drifted dep.py → escalate.
     monkeypatch.setattr(
@@ -899,7 +908,10 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
             advisory=[{"decision": "advisory", "citations": [{"kind": "file", "path": "dep.py"}]}],
         ),
     )
-    assert orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+    with gate_source.gate_read_root(handle):
+        assert (
+            orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo)) is None
+        )
 
     # (c) a PASS probe whose advisory cites an UNDRIFTED file → NO escalation (refreshes).
     monkeypatch.setattr(
@@ -912,7 +924,8 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
             ],
         ),
     )
-    refreshed = orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo))
+    with gate_source.gate_read_root(handle):
+        refreshed = orchestrator.drift_refresh(ctx, cfg, runner=_CLEAN, repo_root=str(rebar_repo))
     assert refreshed is not None and refreshed["coverage"].get("drift_refresh") is True
 
 
@@ -991,11 +1004,15 @@ def test_block_verdict_carries_no_passing_signature(rebar_repo: Path) -> None:
 
 
 def test_pass_verdict_carries_a_passing_signature(rebar_repo: Path) -> None:
-    """The mirror case: a genuine PASS DOES sign — ``signature.signed`` is True."""
+    """The mirror case: a genuine PASS DOES sign — ``signature.signed`` is True.
+
+    Reviewed on the ATTESTED source. This test used to pass ``source="local"`` and assert a
+    signature, which quietly encoded the melancholy-firstborn-shihtzu bypass as expected
+    behavior: only an attested read is certifiable, so a local review must NOT sign."""
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)  # _DESC carries the AC block → the DET floor passes
-    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, repo_root=str(rebar_repo))
     assert verdict["verdict"] == "PASS"
     assert verdict["signature"]["signed"] is True
 
@@ -1684,3 +1701,114 @@ def test_review_plan_help_states_that_pass_signs_by_default(capsys) -> None:
     assert "by default a non-blocking pass signs one" in help_text
     # …and the help must name the cheap recovery path for a signature that was lost.
     assert "sign-review" in help_text
+
+
+# ── melancholy-firstborn-shihtzu: an UNATTESTED read is never certifiable ───────
+#
+# `--source local` reads the in-place checkout, uncommitted edits included. It used to sign a
+# fully claim-valid attestation bound to `verified_at_sha=None` — a dirty worktree could mint
+# the artifact the claim gate trusts. ADR 0005 and `_snapshot.repo_snapshot.SOURCE_LOCAL` both
+# document local as "dirty allowed, never signed"; the completion close gate already enforced
+# it. These pin the plan-review half.
+
+
+def test_local_source_pass_is_never_signed(rebar_repo: Path) -> None:
+    """A local-source PASS is a real PASS that deliberately carries NO signature."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "PASS"  # the review still runs and still passes…
+    assert verdict["signature"]["signed"] is False  # …it is simply not certifiable
+    # Nothing was written to the ticket either — the durable artifact is absent, not just the
+    # in-verdict flag.
+    assert rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("signature") in (None, {})
+
+
+def test_local_source_review_leaves_the_claim_gate_blocked(rebar_repo: Path) -> None:
+    """The consequence that makes it a SECURITY property, not a cosmetic flag: a local review
+    cannot buy a claim. This is the exact bypass that was reachable before the fix."""
+    from rebar.llm.plan_review import attest
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert attest.claim_gate_check(tid, repo_root=str(rebar_repo))["ok"] is False
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert ei.value.returncode == 1
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_no_signed_attestation_can_carry_a_null_verified_at_sha(rebar_repo: Path) -> None:
+    """The invariant behind the rule: a signature asserts "this plan was reviewed against THIS
+    committed tree". An unattested read has no committed tree to name, so any signed
+    attestation must carry a real `verified-at-sha`. Guards against a future change that
+    re-enables local signing without also pinning a SHA."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+
+    for label, kwargs in (
+        ("attested", {}),
+        ("local", {"source": "local"}),
+    ):
+        tid = _make(rebar_repo)
+        verdict = rebar.llm.review_plan(tid, runner=_CLEAN, repo_root=str(rebar_repo), **kwargs)
+        if not verdict["signature"]["signed"]:
+            continue  # unsigned is the local case — nothing to constrain
+        sha = verdict.get("verified_at_sha")
+        assert isinstance(sha, str) and sha, f"{label}: a SIGNED verdict must name a commit"
+
+
+def test_sign_review_refuses_to_resign_a_local_source_pass(rebar_repo: Path) -> None:
+    """The completeness gap behind the never-sign guard: the recovery path (`rebar
+    sign-review`) re-signs from the REVIEW_RESULT sidecar, so a local-source PASS sidecar
+    must be refused too — otherwise a dirty-worktree review could still buy a claim via the
+    back door. The sidecar records the resolved source precisely for this refusal."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
+    assert verdict["verdict"] == "PASS" and verdict["signature"]["signed"] is False
+    res = rebar.llm.resign_plan_review(tid, repo_root=str(rebar_repo))
+    assert res["ok"] is False and res["signed"] is False
+    assert "local" in res["reason"]
+    with pytest.raises(rebar.RebarError):
+        rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "open"
+
+
+def test_sign_review_recovery_binds_a_committed_verified_at_sha(rebar_repo: Path) -> None:
+    """The recovery path itself now signs inside an attested gate session, so the recovered
+    attestation carries a real verified-at-sha pin (it used to sign from the working tree
+    with no pin — violating the invariant the review path enforces)."""
+    from rebar import signing
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+    assert _review(tid, rebar_repo)["signature"]["signed"] is True
+    res = rebar.llm.resign_plan_review(tid, repo_root=str(rebar_repo))
+    assert res["ok"] is True, res
+    v = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    sha = signing.verified_at_sha_from_manifest(v["manifest"])
+    assert isinstance(sha, str) and sha
+
+
+def test_drift_refreshed_attestation_carries_a_verified_at_sha(rebar_repo: Path) -> None:
+    """A drift refresh re-binds the prior verdict to current hashes; it must pin the
+    committed tree those hashes came from, like any other new attestation (the refresh
+    path used to omit the pin entirely)."""
+    from rebar import signing
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _scoped(rebar_repo)
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")
+    _commit_all(rebar_repo)
+    v = _review(tid, rebar_repo)
+    assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
+    ver = rebar.verify_signature(tid, repo_root=str(rebar_repo))
+    sha = signing.verified_at_sha_from_manifest(ver["manifest"])
+    assert isinstance(sha, str) and sha
