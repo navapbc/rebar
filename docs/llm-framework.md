@@ -357,6 +357,46 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
    (one runner pass each, bounded cost) for coverage gaps / conflicts / overlaps,
    and concatenates + ranks the findings — reusing the same findings contract.
 
+## Code-review project criteria
+
+Repository-owned code-review criteria use the same four-pass gate as the
+built-in reviewers, while retaining their repository-effective identity and
+routing.
+
+### Runtime contract
+
+#### Round A/B fan-in
+
+Active LLM-backed project criteria are validated and injected exactly once
+into the `round_a` finder batch. They are not injected into `round_b`; that
+bounded pass remains limited to overlays selected by the Round A escalation
+result. Each emitted finding keeps its reviewer prompt provenance and appends
+the logical criterion id in the `project.<name>` namespace to its criteria
+tags.
+
+#### Effective routing in Pass 3
+
+Pass 3 resolves the finding's logical project id through the repository's
+effective routing map. That routing supplies the threshold and posture used
+for deterministic blocking, advisory, and nit-suppression decisions, so a
+project criterion is decided by its repository configuration rather than by
+the physical prompt id.
+
+#### criteria eval resolution
+
+`criteria eval project.<name>` checks the effective plan-review and
+code-review registries. An id active in exactly the code-review registry is
+calibrated through the code-review prompt and eval-spec arm. An id in neither
+registry is unknown; an id active in both is ambiguous and is rejected before
+calibration.
+
+#### Configuration error
+
+An activated project criterion with a missing or invalid prompt fails with a
+located configuration error instead of being silently skipped. A missing eval
+spec likewise reports both the logical criterion id and the expected
+code-review eval-spec path.
+
 ## Pluggable output contracts (each operation declares its own shape)
 
 The runner no longer hardcodes the findings model: the **structured-output contract** is
