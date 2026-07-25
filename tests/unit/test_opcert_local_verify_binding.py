@@ -395,3 +395,43 @@ def test_compute_validity_still_catches_a_real_code_drift(store: Path) -> None:
     v = compute_validity(res, state, "plan-review", repo_root=str(store))
     assert v["valid"] is False
     assert v["verdict"] == "stale-code"
+
+
+def test_regver_drift_does_not_mask_code_drift_on_a_scoped_attestation(store: Path) -> None:
+    """ADR 0053 grandfathers ONLY the registry dimension. On ONE scoped attestation that is
+    BOTH registry-rotated AND dependency-drifted, the verdict must still be ``stale-code`` —
+    proving the grandfathering did not swallow a real code-drift signal — while the registry
+    skew rides along as the non-blocking ``registry_drift`` report."""
+    x = rebar.create_ticket(
+        "task",
+        "ticket X with enough body for a real material fingerprint to be computed here",
+        repo_root=str(store),
+    )
+    resolved_x = rebar.show_ticket(x, repo_root=str(store))["ticket_id"]
+    fp = current_material_fingerprint(resolved_x, repo_root=str(store))
+    head = signing.head_sha(str(store))
+
+    depfile = store / "watched_both.py"
+    depfile.write_text("x = 1\n")
+    from rebar.llm.plan_review.attest import _hash_basis, _hash_file
+
+    good_hash = _hash_file("watched_both.py", base=_hash_basis(repo_root=str(store)))
+    # Sign against a registry version the environment does NOT currently produce → genuine skew.
+    manifest = [
+        "plan-review: PASS",
+        f"material: {fp}",
+        "regver: an-old-registry-version",
+        f"dep {good_hash} watched_both.py",
+    ]
+    rec = _sign_opcert(store, x, manifest, material=fp, commit=head)
+    state = rebar.show_ticket(resolved_x, repo_root=str(store))
+
+    # ...and ALSO drift the watched dependency after signing.
+    depfile.write_text("x = 2  # a real, post-signing code change\n")
+    res = verify_opcert_record(rec, resolved_x, kind="plan-review", repo_root=str(store))
+    v = compute_validity(res, state, "plan-review", repo_root=str(store))
+
+    assert v["valid"] is False
+    assert v["verdict"] == "stale-code", "registry grandfathering must not mask real code drift"
+    assert v["registry_drift"]["signed"] == "an-old-registry-version"
+    assert v["registry_drift"]["current"] != "an-old-registry-version"
