@@ -498,9 +498,10 @@ class ReconcilerConfig:
     jira_cli_timeout: int = 0
     # Which vendor backend the reconciler drives (ADR 0035 §(d) vendor-adapter seam,
     # epic bbf1). Selects the adapter via the in-tree backend registry
-    # (rebar_reconciler._backend_registry.select_backend). Only "jira" exists today;
-    # a second backend widens the choice-set here when it lands (epic be74). The
-    # REBAR_RECONCILER_BACKEND env override is auto-derived from this field.
+    # (rebar_reconciler._backend_registry.select_backend). "jira" (Cloud) and
+    # "jira-datacenter" (Server / Data Center) exist today; a further backend widens
+    # the choice-set here when it lands. The REBAR_RECONCILER_BACKEND env override is
+    # auto-derived from this field.
     backend: str = "jira"
     # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
     # max(1, lease // 3). Consumed by the refs/reconciler/* CAS lock (epic
@@ -693,7 +694,7 @@ _SECTIONS: dict[str, dict] = {
         "enabled": lambda v, k: _as_bool(v, k),
     },
     "reconciler": {
-        "backend": lambda v, k: _as_choice(v, k, {"jira"}),
+        "backend": lambda v, k: _as_choice(v, k, {"jira", "jira-datacenter"}),
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
         "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),

@@ -13,3 +13,4 @@
 # registry (rebar_reconciler._backend_registry) as an import side-effect, so
 # select_backend() finds it after a lazy `import rebar_reconciler.adapters`.
 from .jira import backend as _jira_backend  # noqa: F401,E402
+from .jira_datacenter import backend as _jira_datacenter_backend  # noqa: F401,E402

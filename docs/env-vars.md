@@ -20,8 +20,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py` |  |
+| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py` |  |
 | `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
@@ -142,7 +143,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_132 variables._
+_133 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
