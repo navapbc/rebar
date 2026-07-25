@@ -17,10 +17,10 @@ Checklist:
 ## COH
 **Cross-section coherence pass (cross-cutting)** — exec:1-TURN, blocking, facet:coherence
 
-CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan — e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the success criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
+CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan — e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the acceptance criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
 
 Checklist:
-- No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs success criteria; approach vs a stated constraint).
+- No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs acceptance criteria; approach vs a stated constraint).
 - ANTI-FP: only genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
 
 ## E1
@@ -37,9 +37,9 @@ Checklist:
 ## E2
 **Ambiguity / executable-without-clarification** — exec:1-TURN, blocking, facet:ac-text-quality
 
-Decide whether an executing agent could act on this plan WITHOUT stopping to ask a clarifying question. Run the 6-signal ambiguity scan: (1) undefined scope boundaries ('improve performance' — of what, by how much); (2) implicit acceptance criteria (types/size limits unstated); (3) conflicting signals (title says X, body Y); (4) missing persona (admin vs end-user); (5) unstated constraints (an API with no auth/rate-limit mention); (6) ambiguous priority (essential vs nice-to-have unranked). Plus flag any scope bullet that is a PLACEHOLDER not a decision: contains 'verify whether', 'check if', 'TBD', 'figure out', 'depends on investigation', or defers a real design choice to the executor ('choose an appropriate X'). SEVERITY: an ambiguity that BLOCKS planning ('cannot proceed without this') is MAJOR; a defaultable gap ('assume X unless told') is MINOR. ANTI-FP: never flag something clearly inferrable from the parent epic or an obvious convention. PASS if the plan is executable without clarification.
+Decide whether an executing agent could act on this plan WITHOUT stopping to ask a clarifying question. Run the 6-signal ambiguity scan: (1) undefined scope boundaries ('improve performance' — of what, by how much); (2) implicit acceptance criteria (types/size limits unstated); (3) conflicting signals (title says X, body Y); (4) missing persona (admin vs end-user); (5) unstated constraints (an API with no auth/rate-limit mention); (6) ambiguous priority (essential vs nice-to-have unranked). A referenced output field or sentinel value with no stated source/provenance, and a derived metric with no computation or aggregation protocol, are ordinary data-design ambiguities under signals (1)/(2) even when their dataclass or enum shape is clear; route them here, not through an LLM overlay. Plus flag any scope bullet that is a PLACEHOLDER not a decision: contains 'verify whether', 'check if', 'TBD', 'figure out', 'depends on investigation', or defers a real design choice to the executor ('choose an appropriate X'). SEVERITY: an ambiguity that BLOCKS planning ('cannot proceed without this') is MAJOR; a defaultable gap ('assume X unless told') is MINOR. ANTI-FP: never flag something clearly inferrable from the parent epic or an obvious convention. PASS if the plan is executable without clarification.
 
-DEFAULTABLE-GAPS COACHING: a MINOR defaultable gap ('assume X unless told otherwise') is coached as 'state the default in the plan', NOT as 'answer this question' — the productive fix is a stated default the executor can act on, not a round-trip back to the author. OPERATOR-ATTESTED (ADR 0043): a criterion tagged with the exact case-insensitive prefix `[operator-attested]` is NOT ambiguous merely because its 'done' evidence lives outside the codebase; it is met by a recorded attestation (change id / vote / timestamp) — do not flag it on that basis.
+DEFAULTABLE-GAPS COACHING: a MINOR defaultable gap ('assume X unless told otherwise') is coached as 'state the default in the plan', NOT as 'answer this question' — the productive fix is a stated default the executor can act on, not a round-trip back to the author. OPERATOR-ATTESTED RULE: treat a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as sufficiently specified when its 'done' evidence lives outside the codebase and is a concrete attestation recorded on the ticket (change id / vote / timestamp).
 
 Checklist:
 - No undefined scope boundaries ('improve performance' — of what, by how much).
@@ -96,7 +96,7 @@ Checklist:
 
 Check that the work has a clear way to be verified done and that the steps actually reach the stated end-state (a two-step check: identify the proving command for each claim, then confirm the union of steps proves every criterion). Binary checks: (a) every completion-relevant claim has a concrete proving command/check that would produce evidence on success (not 'should work'); (b) the claim is free of red-flag hedges ('should', 'probably', 'seems'); (c) every acceptance criterion maps to at least one described step; (d) the UNION of the steps actually reaches the stated end-state — no gap between 'what we'll do' and 'what done looks like'; (e) user-facing flows have an end-to-end check or a documented rationale for its absence; (f) PROVING-COMMAND-EXERCISES-THE-CHANGE: when the plan CUTS OVER or DEFAULTS to a new code path, at least one acceptance criterion EXERCISES that path as it will run in production (e.g. end-to-end against the live model/dependency) — a proving command that passes on a mock/offline substitute which BYPASSES the new behavior does NOT prove the criterion, because the AC can be satisfied without the changed risky path ever executing (green offline tests plus a signed completion verdict are necessary but NOT sufficient). SEVERITY: a criterion no step reaches, or a claimed-but-unmeasured outcome, is MAJOR; a cutover/defaulted path with no criterion that exercises it end-to-end (live) is MAJOR; a hedge without a proving command is MINOR. ANTI-FP: universal lint/format/test commands do not by themselves prove a specific criterion; (f) is not-applicable when the new path has no live/external boundary, when the cutover stays behind a non-default opt-in flag, or when the end-to-end exercise is explicitly deferred to a named child with rationale. PASS if done-ness is verifiable and the end-state is reachable.
 
-VERIFY-COMMAND DEFECT TAXONOMY — nine ways a PRESENT, plausible-looking proving command silently lies (flag any): (1) substring false-positive — anchor the pattern with a word-boundary / quoted key (grep -E '"cycle_count"[[:space:]]*:' not grep cycle); (2) shell-expansion leakage — a $VAR / $? inside a grep pattern expands before grep runs; (3) wrong helper-script argv — cross-check flag names against --help (a --label vs --labels mismatch ships a silent runtime failure); (4) fixture invalidity — the fixture does not actually exercise the claim; (5) missing cardinality assertion when the criterion names a count (assert `jq '.events | length'` -eq N); (6) prose-vs-structured assertion target — assert on the structured artifact with `jq -e`, not on prose output; (7) missing prerequisite-state ordering — a command assumes state a prior step must establish; (8) conflicting ACs (tests-pass vs test-fails-RED) needing a sequencing AC; (9) references a sibling ticket's files with no dependency edge. Coach the corrected command with a concrete anchor. OPERATOR-ATTESTED EXCEPTION (ADR 0043): when an acceptance criterion's checkbox text begins with the exact case-insensitive tag `[operator-attested]`, its proving 'command' is a concrete attestation RECORDED ON THE TICKET (a change id / vote outcome / timestamp) rather than an in-session command — do not flag the absence of an in-session proving command for such a criterion. CITED-PREREQUISITE EXCEPTION to taxonomy item 9 (`[rebar:<C>]`): a proving command or step that targets a symbol/file a PREREQUISITE ticket will create may cite it `<subject> [rebar:<C>]`. Item 9 (references a sibling ticket's files with no dependency edge) does NOT fire when the deterministic Layer-1 edge check verified the prerequisite edge (P `depends_on` C, or C `blocks` P) AND, on retrieving C via the `show_ticket(C)` tool, C's plan/file_impact affirmatively establishes the SPECIFIC targeted functionality; credit it ONLY on affirmative confirmation. This is an LLM judgment, not a string match. FAIL-CLOSED: an uncited cross-ticket reference, an edge-unbacked citation, or a citation whose coverage you cannot confirm is graded as normal (item 9 stands / still fails closed).
+VERIFY-COMMAND DEFECT TAXONOMY — nine ways a PRESENT, plausible-looking proving command silently lies (flag any): (1) substring false-positive — anchor the pattern with a word-boundary / quoted key (grep -E '"cycle_count"[[:space:]]*:' not grep cycle); (2) shell-expansion leakage — a $VAR / $? inside a grep pattern expands before grep runs; (3) wrong helper-script argv — cross-check flag names against --help (a --label vs --labels mismatch ships a silent runtime failure); (4) fixture invalidity — the fixture does not actually exercise the claim; (5) missing cardinality assertion when the criterion names a count (assert `jq '.events | length'` -eq N); (6) prose-vs-structured assertion target — assert on the structured artifact with `jq -e`, not on prose output; (7) missing prerequisite-state ordering — a command assumes state a prior step must establish; (8) conflicting ACs (tests-pass vs test-fails-RED) needing a sequencing AC; (9) references a sibling ticket's files with no dependency edge. Coach the corrected command with a concrete anchor. OPERATOR-ATTESTED RULE: when an acceptance criterion's checkbox text begins with the exact case-insensitive tag `[operator-attested]`, use a concrete attestation RECORDED ON THE TICKET (a change id / vote outcome / timestamp) as its proving evidence. CITED-PREREQUISITE EXCEPTION to taxonomy item 9 (`[rebar:<C>]`): a proving command or step that targets a symbol/file a PREREQUISITE ticket will create may cite it `<subject> [rebar:<C>]`. Item 9 (references a sibling ticket's files with no dependency edge) does NOT fire when the deterministic Layer-1 edge check verified the prerequisite edge (P `depends_on` C, or C `blocks` P) AND, on retrieving C via the `show_ticket(C)` tool, C's plan/file_impact affirmatively establishes the SPECIFIC targeted functionality; credit it ONLY on affirmative confirmation. This is an LLM judgment, not a string match. FAIL-CLOSED: an uncited cross-ticket reference, an edge-unbacked citation, or a citation whose coverage you cannot confirm is graded as normal (item 9 stands / still fails closed).
 
 Checklist:
 - Every completion-relevant claim has a concrete proving command/check that produces evidence on success.
@@ -109,7 +109,7 @@ Checklist:
 ## F1
 **Measurability & in-session completability** — exec:1-TURN, blocking, facet:ac-text-quality
 
-Examine each acceptance/success criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. OPERATOR-ATTESTED EXCEPTION (ADR 0043): a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` has "done" evidence that inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) — it is MET by a concrete attestation recorded on the ticket (a change id / vote outcome / timestamp), NOT by an in-session repo/CI check. Do NOT flag a tagged criterion as post-sprint-only or in-session-uncompletable; that is by design.
+Examine each acceptance criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. OPERATOR-ATTESTED RULE: classify a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as in-session completable when its "done" evidence inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) and a concrete attestation is recorded on the ticket (a change id / vote outcome / timestamp).
 
 Checklist:
 - Each criterion states a specific observable outcome (what changes for user/system), not effort or a subjective term.
@@ -141,12 +141,12 @@ Checklist:
 ## G3
 **Child coverage [agent, container]** — exec:AGENT, advisory, facet:container
 
-CONTAINER-only (has_children): does the union of children cover the parent's acceptance/success criteria? 4-bucket audit per criterion (fully / partially / uncovered / structural) + a coverage map; an uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-definition by a named consumer counts.
+CONTAINER-only (has_children): does the union of children cover the parent's acceptance criteria? 4-bucket audit per criterion (fully / partially / uncovered / structural) + a coverage map; an uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-definition by a named consumer counts.
 
-THREE-PART COVERAGE STANDARD — a child covers a parent criterion only when ALL hold: (1) SAME OBSERVABLE OUTCOME (not a related one, not a precursor); (2) scope MATCHING-OR-EXCEEDING (no narrowing of conditions, users, data shapes, or environments); (3) measurable IN THE SAME TERMS. When in doubt, classify partial. THREE SC-CONTRADICTION PATTERNS a coverage map alone cannot see (each is a finding — the plan is structurally guaranteed to fail the completion verifier): bypass-annotation (a child plans to annotate/exclude items from the parent's metric instead of resolving them — 'SC says zero matches, the DD annotates exceptions'); scope-narrowing (a child covers a narrower condition set than the parent criterion); partial-without-remainder (a child covers part and does not name the uncovered remainder).
+THREE-PART COVERAGE STANDARD — a child covers a parent criterion only when ALL hold: (1) SAME OBSERVABLE OUTCOME (not a related one, not a precursor); (2) scope MATCHING-OR-EXCEEDING (no narrowing of conditions, users, data shapes, or environments); (3) measurable IN THE SAME TERMS. When in doubt, classify partial. THREE AC-CONTRADICTION PATTERNS a coverage map alone cannot see (each is a finding — the plan is structurally guaranteed to fail the completion verifier): bypass-annotation (a child plans to annotate/exclude items from the parent's metric instead of resolving them — 'the AC says zero matches, the DD annotates exceptions'); scope-narrowing (a child covers a narrower condition set than the parent criterion); partial-without-remainder (a child covers part and does not name the uncovered remainder).
 
 Checklist:
-- The union of children covers each parent acceptance/success criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding.
+- The union of children covers each parent acceptance criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding.
 
 ## G4
 **Child consistency [agent, container]** — exec:AGENT, advisory, facet:container
@@ -170,7 +170,7 @@ independently-valuable / independently-releasable OUTCOME, carries more than one
 change" (a distinct actor/persona/concern), or MIXES heterogeneous change kinds (e.g. a
 bug-fix AND a new feature AND an unrelated refactor). For an epic/parent that means it should
 have children; the tell is a structural 'and' joining genuinely independent goals, spanning
-independent personas, or a set of unrelated success criteria.
+independent personas, or a set of unrelated acceptance criteria.
 
 VALUE-PRESERVATION (a decomposition finding must satisfy this to stand). A unit is right-sized
 as one piece when it delivers a SINGLE increment of value whose parts would be tightly coupled,
@@ -230,18 +230,18 @@ Checklist:
 
 LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal.
 
-FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Success Criteria/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
+FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
 
 FIRE A FINDING when the leaf is NOT a subset of the parent — specifically when the leaf:
 - (a) delivers something the parent's plan does not contain, or that the parent implies is out of scope;
-- (b) contradicts a parent acceptance/success criterion; or
+- (b) contradicts a parent acceptance criterion; or
 - (c) redefines a deliverable the parent specifies differently.
 Consistent NARROWING — a leaf that does PART of what the parent describes, faithfully and without contradiction — is NOT a finding.
 
 CONFLICT RULE — the PARENT WINS. On any conflict between the leaf and the parent, the parent's plan is authoritative. The productive move is to realign the leaf to the parent. If you believe the parent is genuinely wrong, do NOT silently diverge the leaf — instead update the parent first (which stales the parent's own plan-review attestation and forces its re-review), and only then re-review the leaf against the corrected parent. Realigning the leaf to a subset of the parent, or updating the parent, are the only acceptable resolutions.
 
 Checklist:
-- The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent AC/success criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding.
+- The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent acceptance criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding.
 
 ## ISF
 **Intent-source fidelity (plan vs linked design intent)** — exec:2-STEP, advisory, facet:intent-provenance
@@ -723,6 +723,86 @@ advisory→blocking promotion gate in docs/plan-review-gate.md (the standing rec
 Checklist:
 - GATE: the plan PROPOSES A CHANGE to existing behavior/code (adds a mechanism, alters a code path, fixes a defect). no (a pure investigation/spike/doc-only/test-only plan, or a plan whose deliverable is explicitly a justified no-op) -> not-applicable -> PASS.
 - Only when gated in: the plan DEMONSTRATES the change is needed — it reproduces or concretely motivates the CURRENT behavior the change targets (a reproduction, an Expected/Actual, a named defect/gap, or a stated user/system problem the current behavior causes). FIRE when the plan adds a mechanism WITHOUT establishing the need — no reproduction, no motivation, no evidence the current behavior is wrong/insufficient (the FixedBench over-action gap: 35-65% of changes acted without demonstrating necessity). ACCEPT a well-motivated plan (reproduction/motivation present) and a justified no-op/docs-only/test-only outcome. This probes MOTIVATION of the change, DISTINCT from R1 asserted-capability (which greps whether a named module already provides the capability) and from E4 (broad assertion/existence). Advisory — never blocks.
+
+## project.portability
+**Rebar portability** — exec:1-TURN, blocking, facet:project-invariants
+
+You are reviewing a rebar plan for **portability** across the full set of supported
+client shapes. rebar is a harness that must run identically for every consumer — as a
+Python library, a CLI, and a remote MCP server — against many kinds of target project,
+on many platforms and venues, and from many project locations. A plan violates
+portability when it silently bakes in an assumption that is only true for *one* corner
+of that support matrix and would break another. Your job is to flag those assumptions
+with a concrete, falsifiable counterexample — not to speculate.
+
+## Finding threshold
+
+Emit a finding ONLY when you can construct a complete counterexample: all four of the
+following elements must be present, named, and causally connected. If any one is
+missing, do not emit the finding — silence is correct when the assumption is not
+demonstrably breaking. A finding requires:
+
+1. a `cited plan mechanism` — the specific step, command, path, or design decision in
+   the plan that carries the assumption;
+2. a `materially different supported client shape` — a real cell of the support matrix
+   below that differs from the one the plan assumes, not a hypothetical or unsupported
+   configuration;
+3. a `causal failure mechanism` — the concrete reason the cited mechanism cannot work
+   in that shape (a missing binary, an unavailable filesystem, an OS path rule, an
+   absent dependency), stated as cause and effect;
+4. an `observable breakage scenario` — a specific, observable outcome (an error, a
+   wrong result, a crash, a no-op) that a user in that shape would actually witness.
+
+All four must appear together. A plan mechanism plus a vague "might not be portable" is
+not a finding; you must carry it through to an observable breakage scenario in a named
+alternate shape.
+
+## Required finding fields
+
+Every finding you emit MUST populate exactly these fields, with these types:
+
+- `location: str` — the plan citation: the heading, step number, or quoted phrase in
+  the plan where the assumption lives.
+- `finding: str` — the assumption plus its causal mechanism: state what the plan
+  assumes and precisely why that assumption fails.
+- `scenarios: list[str]` — the alternate client shape plus the observable breakage: each
+  entry names a matrix cell that differs and the concrete outcome a user there would see.
+- `evidence: list[str]` — the plan quote plus grounding facts: the verbatim text from
+  the plan that carries the assumption, together with any codebase or platform facts you
+  relied on.
+- `criteria: list[str]` — a list containing `project.portability`.
+
+Keep each field tight and load-bearing; do not pad with restatements.
+
+## Supported client-shape matrix
+
+These are the shapes rebar must support. A finding's alternate shape MUST come from a
+cell of this matrix — anything outside it is out of scope and not a finding.
+
+- `Harness`: Python library, CLI, remote MCP; no Claude Code or Codex dependency.
+- `Target project`: Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.
+- `Platform and venue`: macOS, Windows, Linux, BSD, CI, servers, developer workstations.
+- `Project location and access`: in-checkout current working directory, explicitly located workspace, server outside the checkout, no unrestricted-local-filesystem assumption.
+
+When you assert that a plan step breaks in an alternate shape, name the specific cell —
+e.g. that a step assuming a POSIX shell breaks the `Windows` platform, or that a step
+shelling out to `python` breaks a `Ruby` or `.NET` target project, or that a step
+reading a hardcoded `.rebar/` path under the current working directory breaks a
+`server outside the checkout` deployment.
+
+## Non-findings
+
+Some things look like portability problems but are not. Do NOT emit a finding for these:
+
+- `Silence about portability is not a finding` — a plan that simply does not discuss
+  portability, but whose mechanisms are shape-agnostic, is fine; absence of a portability
+  section is never itself a violation.
+- `Project-specific behavior behind project configuration or an explicit extension boundary is allowed` — behavior that is intentionally gated on project config, a documented
+  extension point, or an explicit capability boundary is portable by design; a shape that
+  simply does not opt into that configured behavior is not "broken" by it.
+
+When in doubt, prefer silence: emit a finding only when the four-element counterexample
+above is fully and concretely satisfiable.
 
 ## removal-rationale
 **Removal rationale (Chesterton's Fence)** — exec:AGENT, advisory, facet:codebase-grounding

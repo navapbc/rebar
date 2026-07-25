@@ -541,7 +541,7 @@
     "checklist": [
       {
         "key": "cross_section_contradiction",
-        "check": "No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs success criteria; approach vs a stated constraint)."
+        "check": "No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs acceptance criteria; approach vs a stated constraint)."
       },
       {
         "key": "not_within_section",
@@ -827,7 +827,7 @@
     "checklist": [
       {
         "key": "coverage_map",
-        "check": "The union of children covers each parent acceptance/success criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding."
+        "check": "The union of children covers each parent acceptance criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding."
       }
     ],
     "routing": "container",
@@ -905,7 +905,7 @@
     "checklist": [
       {
         "key": "scope_subset",
-        "check": "The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent AC/success criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding."
+        "check": "The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent acceptance criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding."
       }
     ],
     "routing": "leaf",

@@ -9,11 +9,11 @@ dimension: leaf
 ---
 LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal.
 
-FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Success Criteria/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
+FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
 
 FIRE A FINDING when the leaf is NOT a subset of the parent — specifically when the leaf:
 - (a) delivers something the parent's plan does not contain, or that the parent implies is out of scope;
-- (b) contradicts a parent acceptance/success criterion; or
+- (b) contradicts a parent acceptance criterion; or
 - (c) redefines a deliverable the parent specifies differently.
 Consistent NARROWING — a leaf that does PART of what the parent describes, faithfully and without contradiction — is NOT a finding.
 

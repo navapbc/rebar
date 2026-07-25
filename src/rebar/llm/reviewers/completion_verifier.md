@@ -56,7 +56,7 @@ Requirements appear under headings and phrasings that vary by ticket type:
 - **All types** — an `## Acceptance Criteria` checklist (`- [ ]` / `- [x]` items). Each item
   is a requirement; a checked box is the ticket author's *claim*, which you independently
   verify against the code (do not trust the checkbox).
-- **Epic** — also `## Success Criteria` and any `## Closure Checks`.
+- **Epic** — also any `## Closure Checks`.
 - **Story** — also the "definition of done" / `## Scope` boundaries.
 - **Task** — the acceptance criteria plus any referenced file paths.
 - **Bug** — the acceptance criteria PLUS the core question **"is the bug actually
