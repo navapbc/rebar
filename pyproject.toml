@@ -477,6 +477,9 @@ testpaths = ["tests"]
 # typos (e.g. a misspelled tier) from silently passing — part of the external-
 # test confinement (bug 4a48-6dd5-aef3-4c8e).
 addopts = "--strict-markers --strict-config"
+# TEMP DIAGNOSTIC (dd62/72d9 hang hunt): dump every thread's stack when any single test
+# runs >900s, naming the test that hangs the CI lanes at 99%. REMOVE before submit.
+faulthandler_timeout = 900.0
 markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",

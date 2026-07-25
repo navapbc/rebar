@@ -416,6 +416,11 @@ jobs:
           echo "Public-types drift gate: OK (types.py is up to date)."
 
       - name: Run the default suite (Python tiers; excludes integration + external)
+        # TEMP DIAGNOSTIC (dd62/72d9 hang hunt): faulthandler dumps every thread's stack
+        # when any single test exceeds 900s, naming the hung test in the log; the step
+        # timeout guarantees the job completes and flushes logs instead of idling for
+        # hours. REMOVE before submit.
+        timeout-minutes: 60
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
         # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
@@ -434,6 +439,7 @@ jobs:
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
           -q -p no:cacheprovider --durations=25
+          --faulthandler-timeout=900
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           --cov=rebar --cov-report=term-missing:skip-covered
 
