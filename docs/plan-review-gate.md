@@ -786,6 +786,23 @@ commit out) — while your worktree stays at the epic tip. Each story's scope ac
 then evaluated against just that story's tree, not the cumulative tip, and each close still signs a
 certified per-story completion attestation.
 
+### When the acceptance criteria no longer match reality
+
+Sometimes the close gate blocks because the ticket's criteria have gone out of date — later
+work moved a file they name, or the fix itself made them describe something that no longer
+exists. **Edit the ticket so its criteria are accurate, re-run `rebar review-plan <id>` to
+re-pass the plan gate, then close against the corrected criteria.**
+
+Do not reach for `--force-close`, and do not point `--ref` at an older commit where the stale
+criteria still happened to hold. Both can produce a close, but both leave **inaccurate state**
+in the ticket system: the ticket goes on asserting something untrue of the codebase, and the
+ticket store is the shared, durable record every other agent reads. A close that passed only
+because it was measured against an old tree is a close whose criteria still lie.
+
+(`--ref` is for the stacked-epic case above — evaluating a story against *its own* commit,
+where the criteria are correct and the tree is simply not HEAD. That is a different problem
+from criteria that are wrong.)
+
 ## Fail-open behavior
 
 * **Unsupported stack / missing tool / parse error / timeout** in any DET check →
