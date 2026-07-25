@@ -40,6 +40,60 @@ from rebar._cli._workflow_commands import _workflow
 # gives it no init). Everything else passes through the gate, which silently no-ops
 # when there is no attachable store, so no-store reads keep working store-less.
 _NO_AUTO_MOUNT = frozenset({"init", "scratch"})
+# Every pure-intercept subcommand `_main_dispatch` routes ABOVE the set-based arms. The
+# central store mount (bug ad9f) must keep firing for these — several touch the store yet
+# return before any per-arm ensure_initialized. Kept adjacent to the intercept ladder it
+# mirrors; test_central_mount_gate_ad9f pins the store-touching-intercept behavior.
+_INTERCEPTS = frozenset(
+    {
+        "reconcile",
+        "review",
+        "review-code",
+        "scan-spec",
+        "verify-completion",
+        "review-plan",
+        "sign-review",
+        "enrich",
+        "explain",
+        "verify-commit-ticket",
+        "verify-identity",
+        "verify-authorship",
+        "verify-opcert",
+        "trusted-env",
+        "remote-cert",
+        "workflow",
+        "llm",
+        "jira-onboard",
+        "prompt",
+        "criteria",
+        "identity",
+        "audit",
+        "config",
+        "metrics",
+    }
+)
+
+
+def _store_mount_eligible(argv: list[str]) -> bool:
+    """Should the central best-effort store mount (bug ad9f) run for this invocation?
+
+    NOT for: an empty invocation, the no-mount arms (``init``/``scratch``), any HELP
+    rendering (``rebar help …`` / ``--help`` / ``-h`` anywhere), or an UNKNOWN subcommand
+    (about to be rejected with usage). Rendering usage/help is a pure read of the CLI
+    surface — creating repo state (``.tickets-tracker``) for it surprised every fresh
+    worktree and clone (bug dd62 ``sapient-rutile-penguin``). Everything else mounts,
+    exactly as before. Skipping here can never break a store-REQUIRING arm: the strict
+    per-arm ``ensure_initialized`` calls still own their own mount + greenfield refusal."""
+    if not argv:
+        return False
+    sub = argv[0]
+    if sub in _NO_AUTO_MOUNT or sub in ("help", "--help", "-h"):
+        return False
+    if "--help" in argv or "-h" in argv:
+        return False
+    return sub in _INTERCEPTS or sub in _help.known_subcommands()
+
+
 # Read arms that auto-init only; the read path owns its own throttled reconverge.
 _READS_INIT_ONLY = frozenset(
     {"show", "list", "next-batch", "deps", "ready", "search", "session-logs"}
@@ -402,8 +456,9 @@ def _main_dispatch(argv: list[str]) -> int:
     # ensure_initialized — mounts the store ONCE here, before dispatch, so none can silently skip
     # it. Best-effort (attach-if-possible, never error, never first-time-init, never reconverge):
     # the strict per-arm ensure_initialized calls remain and still own greenfield refusal +
-    # reconverge for store-REQUIRING arms. Commands that never touch the store are excluded.
-    if argv and argv[0] not in _NO_AUTO_MOUNT:
+    # reconverge for store-REQUIRING arms. Excluded: no-store commands, help/usage rendering,
+    # and unknown subcommands (bug dd62 — see _store_mount_eligible).
+    if _store_mount_eligible(argv):
         ensure_store_mounted_best_effort()
 
     # reconcile intercept (the dispatcher has no reconcile arm).

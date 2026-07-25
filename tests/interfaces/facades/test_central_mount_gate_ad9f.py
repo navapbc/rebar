@@ -124,3 +124,38 @@ def test_no_store_command_is_not_force_mounted(tmp_path, monkeypatch, capsys) ->
 
     assert code == 0, capsys.readouterr()
     assert not (repo / ".tickets-tracker").exists(), "explain wrongly force-mounted a store"
+
+
+def test_help_and_unknown_subcommands_do_not_mount(
+    clone_with_origin_tickets, monkeypatch, capsys
+) -> None:
+    """Bug dd62 (sapient-rutile-penguin): usage/help rendering and the unknown-subcommand
+    rejection are pure reads of the CLI surface — they must not create ``.tickets-tracker``
+    in the repo. This is exactly the attachable-clone case where the central mount would
+    otherwise fire (and did: any CLI help invocation from an unsandboxed cwd leaked a
+    tracker into the repo root)."""
+    clone, _tid = clone_with_origin_tickets
+    _use_clone(clone, monkeypatch)
+
+    for args in ([], ["no-such-subcommand"], ["help"], ["--help"], ["review-plan", "--help"]):
+        try:
+            main(args)
+        except SystemExit:  # argparse-owned help (e.g. review-plan --help) exits directly
+            pass
+        capsys.readouterr()
+        assert not (clone / ".tickets-tracker").exists(), f"{args!r} mounted the store"
+
+
+def test_known_subcommand_still_mounts_after_the_dd62_gate(
+    clone_with_origin_tickets, monkeypatch, capsys
+) -> None:
+    """The dd62 eligibility gate must not eat the ad9f contract: a real, known,
+    non-help invocation still auto-mounts in the attachable clone."""
+    clone, tid = clone_with_origin_tickets
+    _use_clone(clone, monkeypatch)
+
+    code = main(["list"])
+
+    assert code == 0
+    assert tid in capsys.readouterr().out
+    assert (clone / ".tickets-tracker").is_dir(), "the central mount stopped mounting"
