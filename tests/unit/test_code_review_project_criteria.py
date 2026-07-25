@@ -23,6 +23,7 @@ from rebar.llm.workflow.runners import BatchRunRequest
 
 _PROJECT_ID = "project.foo"
 _PROJECT_PROMPT = "code-review-project-foo"
+_PLAN_PROJECT_PROMPT = "plan-review-project-foo"
 _PROJECT_RUBRIC = """\
 ---
 schema_version: 1
@@ -35,12 +36,32 @@ dimension: project-foo
 ---
 Find project foo violations in the supplied change.
 """
+_PLAN_PROJECT_RUBRIC = """\
+---
+schema_version: 1
+title: Project foo plan review
+description: Project-owned plan-review finder used by the ambiguity contract.
+outputs: plan_review_findings
+execution_mode: single_turn
+category: plan-review-criterion
+dimension: project-foo
+---
+Find project foo violations in the supplied plan.
+"""
 _PROJECT_ROUTING = {
     "exec": "1-TURN",
     "applies_to": [],
     "default_posture": "advisory",
     "block_threshold": 0.8,
     "blocking_enabled": False,
+}
+_PLAN_PROJECT_ROUTING = {
+    "exec": "1-TURN",
+    "facet": "project-invariants",
+    "applies_at": {"scope": ["container", "leaf"]},
+    "block_threshold": 0.9,
+    "default_posture": "advisory",
+    "checklist": [],
 }
 
 
@@ -311,6 +332,17 @@ def _write_eval_spec(repo: Path, prompt_id: str) -> None:
     )
 
 
+def _activate_plan_review_project_criterion(repo: Path) -> None:
+    routing_path = repo / ".rebar" / "criteria_routing.json"
+    routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    routing["plan_review"] = {_PROJECT_ID: _PLAN_PROJECT_ROUTING}
+    routing_path.write_text(json.dumps(routing), encoding="utf-8")
+    (repo / ".rebar" / "prompts" / f"{_PLAN_PROJECT_PROMPT}.md").write_text(
+        _PLAN_PROJECT_RUBRIC,
+        encoding="utf-8",
+    )
+
+
 class _ProductionRecordingRunner:
     name = "project-criteria-test"
 
@@ -445,6 +477,81 @@ def test_eval_calibrate_missing_project_spec_has_logical_id_and_path(tmp_path) -
     message = str(exc_info.value)
     assert _PROJECT_ID in message
     assert f"{_PROJECT_PROMPT}.eval.yaml" in message
+
+
+def test_cli_admits_code_review_only_project_criterion(tmp_path, monkeypatch, capsys) -> None:
+    repo = _project_repo(tmp_path)
+    from rebar import config
+    from rebar._cli._llm_commands import _criteria
+    from rebar.llm.plan_review import registry as plan_review_registry
+
+    assert _PROJECT_ID not in plan_review_registry.by_id(str(repo))
+    assert _PROJECT_ID in code_review_registry.effective_criteria(str(repo))
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    calls: list[tuple[str, str | None, int]] = []
+
+    def calibrate(criterion_id: str, *, repo_root=None, runs: int = 1) -> dict:
+        calls.append((criterion_id, repo_root, runs))
+        return {"criterion": criterion_id, "prompt": _PROJECT_PROMPT}
+
+    monkeypatch.setattr(_eval, "calibrate_criterion", calibrate)
+
+    assert _criteria(["eval", _PROJECT_ID, "--output", "json"]) == 0
+    assert calls == [(_PROJECT_ID, str(repo), 1)]
+    assert json.loads(capsys.readouterr().out)["prompt"] == _PROJECT_PROMPT
+
+
+def test_cli_rejects_unknown_criterion_with_distinct_message(tmp_path, monkeypatch, capsys) -> None:
+    repo = _project_repo(tmp_path)
+    from rebar import config
+    from rebar._cli._llm_commands import _criteria
+
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+
+    def unexpected_calibration(*_args, **_kwargs):
+        pytest.fail("unknown criteria must be rejected before calibration")
+
+    monkeypatch.setattr(_eval, "calibrate_criterion", unexpected_calibration)
+
+    assert _criteria(["eval", "project.unknown"]) == 1
+    error = capsys.readouterr().err
+    assert "unknown criterion 'project.unknown'" in error
+    assert "ambiguous" not in error
+
+
+def test_cli_rejects_both_gates_as_ambiguous(tmp_path, monkeypatch, capsys) -> None:
+    repo = _project_repo(tmp_path)
+    _activate_plan_review_project_criterion(repo)
+    from rebar import config
+    from rebar._cli._llm_commands import _criteria
+    from rebar.llm.plan_review import registry as plan_review_registry
+
+    assert _PROJECT_ID in plan_review_registry.by_id(str(repo))
+    assert _PROJECT_ID in code_review_registry.effective_criteria(str(repo))
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+
+    def unexpected_calibration(*_args, **_kwargs):
+        pytest.fail("ambiguous criteria must be rejected before calibration")
+
+    monkeypatch.setattr(_eval, "calibrate_criterion", unexpected_calibration)
+
+    assert _criteria(["eval", _PROJECT_ID]) == 1
+    error = capsys.readouterr().err
+    assert f"ambiguous criterion '{_PROJECT_ID}'" in error
+    assert "plan_review" in error
+    assert "code_review" in error
+
+
+def test_cli_help_names_project_code_review_example(capsys) -> None:
+    from rebar._cli._llm_commands import _criteria
+
+    with pytest.raises(SystemExit) as exc_info:
+        _criteria(["eval", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert _PROJECT_ID in help_text
+    assert "code-review" in help_text
 
 
 def test_project_criterion_fan_in_executes_once_through_production_two_round_gate(
