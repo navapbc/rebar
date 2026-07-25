@@ -17,10 +17,10 @@ Checklist:
 ## COH
 **Cross-section coherence pass (cross-cutting)** — exec:1-TURN, blocking, facet:coherence
 
-CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan — e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the success criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
+CROSS-CUTTING coherence pass (distinct from E1's criteria<->description check): a single structured scan for CONTRADICTIONS BETWEEN SECTIONS of the plan — e.g. the testing strategy contradicts the decomposition; the sequencing contradicts the declared dependencies; the context/problem contradicts the acceptance criteria; an approach choice contradicts a stated constraint. One pass, not a debate. SEVERITY: a contradiction that would send the implementer in two directions = MAJOR. ANTI-FP: only flag genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
 
 Checklist:
-- No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs success criteria; approach vs a stated constraint).
+- No contradiction BETWEEN sections (testing vs decomposition; sequencing vs declared deps; context/problem vs acceptance criteria; approach vs a stated constraint).
 - ANTI-FP: only genuine cross-section contradictions, not within-section nitpicks (those belong to E1/E2).
 
 ## E1
@@ -109,7 +109,7 @@ Checklist:
 ## F1
 **Measurability & in-session completability** — exec:1-TURN, blocking, facet:ac-text-quality
 
-Examine each acceptance/success criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. OPERATOR-ATTESTED RULE: classify a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as in-session completable when its "done" evidence inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) and a concrete attestation is recorded on the ticket (a change id / vote outcome / timestamp).
+Examine each acceptance criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. OPERATOR-ATTESTED RULE: classify a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as in-session completable when its "done" evidence inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) and a concrete attestation is recorded on the ticket (a change id / vote outcome / timestamp).
 
 Checklist:
 - Each criterion states a specific observable outcome (what changes for user/system), not effort or a subjective term.
@@ -141,12 +141,12 @@ Checklist:
 ## G3
 **Child coverage [agent, container]** — exec:AGENT, advisory, facet:container
 
-CONTAINER-only (has_children): does the union of children cover the parent's acceptance/success criteria? 4-bucket audit per criterion (fully / partially / uncovered / structural) + a coverage map; an uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-definition by a named consumer counts.
+CONTAINER-only (has_children): does the union of children cover the parent's acceptance criteria? 4-bucket audit per criterion (fully / partially / uncovered / structural) + a coverage map; an uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-definition by a named consumer counts.
 
-THREE-PART COVERAGE STANDARD — a child covers a parent criterion only when ALL hold: (1) SAME OBSERVABLE OUTCOME (not a related one, not a precursor); (2) scope MATCHING-OR-EXCEEDING (no narrowing of conditions, users, data shapes, or environments); (3) measurable IN THE SAME TERMS. When in doubt, classify partial. THREE SC-CONTRADICTION PATTERNS a coverage map alone cannot see (each is a finding — the plan is structurally guaranteed to fail the completion verifier): bypass-annotation (a child plans to annotate/exclude items from the parent's metric instead of resolving them — 'SC says zero matches, the DD annotates exceptions'); scope-narrowing (a child covers a narrower condition set than the parent criterion); partial-without-remainder (a child covers part and does not name the uncovered remainder).
+THREE-PART COVERAGE STANDARD — a child covers a parent criterion only when ALL hold: (1) SAME OBSERVABLE OUTCOME (not a related one, not a precursor); (2) scope MATCHING-OR-EXCEEDING (no narrowing of conditions, users, data shapes, or environments); (3) measurable IN THE SAME TERMS. When in doubt, classify partial. THREE AC-CONTRADICTION PATTERNS a coverage map alone cannot see (each is a finding — the plan is structurally guaranteed to fail the completion verifier): bypass-annotation (a child plans to annotate/exclude items from the parent's metric instead of resolving them — 'the AC says zero matches, the DD annotates exceptions'); scope-narrowing (a child covers a narrower condition set than the parent criterion); partial-without-remainder (a child covers part and does not name the uncovered remainder).
 
 Checklist:
-- The union of children covers each parent acceptance/success criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding.
+- The union of children covers each parent acceptance criterion — 4-bucket audit (fully/partially/uncovered/structural); an uncovered criterion is a finding.
 
 ## G4
 **Child consistency [agent, container]** — exec:AGENT, advisory, facet:container
@@ -170,7 +170,7 @@ independently-valuable / independently-releasable OUTCOME, carries more than one
 change" (a distinct actor/persona/concern), or MIXES heterogeneous change kinds (e.g. a
 bug-fix AND a new feature AND an unrelated refactor). For an epic/parent that means it should
 have children; the tell is a structural 'and' joining genuinely independent goals, spanning
-independent personas, or a set of unrelated success criteria.
+independent personas, or a set of unrelated acceptance criteria.
 
 VALUE-PRESERVATION (a decomposition finding must satisfy this to stand). A unit is right-sized
 as one piece when it delivers a SINGLE increment of value whose parts would be tightly coupled,
@@ -230,18 +230,18 @@ Checklist:
 
 LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal.
 
-FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Success Criteria/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
+FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
 
 FIRE A FINDING when the leaf is NOT a subset of the parent — specifically when the leaf:
 - (a) delivers something the parent's plan does not contain, or that the parent implies is out of scope;
-- (b) contradicts a parent acceptance/success criterion; or
+- (b) contradicts a parent acceptance criterion; or
 - (c) redefines a deliverable the parent specifies differently.
 Consistent NARROWING — a leaf that does PART of what the parent describes, faithfully and without contradiction — is NOT a finding.
 
 CONFLICT RULE — the PARENT WINS. On any conflict between the leaf and the parent, the parent's plan is authoritative. The productive move is to realign the leaf to the parent. If you believe the parent is genuinely wrong, do NOT silently diverge the leaf — instead update the parent first (which stales the parent's own plan-review attestation and forces its re-review), and only then re-review the leaf against the corrected parent. Realigning the leaf to a subset of the parent, or updating the parent, are the only acceptable resolutions.
 
 Checklist:
-- The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent AC/success criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding.
+- The leaf's What/Scope/ACs are a SUBSET of the parent's declared scope — a leaf that delivers something the parent's plan does not contain, contradicts a parent acceptance criterion, or redefines a parent deliverable is a finding; consistent narrowing (a leaf doing PART of the parent) is NOT a finding.
 
 ## ISF
 **Intent-source fidelity (plan vs linked design intent)** — exec:2-STEP, advisory, facet:intent-provenance
