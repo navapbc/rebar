@@ -8,11 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from rebar.llm.code_review import registry as code_review_registry
 from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
 from rebar.llm.config import LLMConfig
 from rebar.llm.criteria.ids import criterion_prompt_id
 from rebar.llm.criteria.model import CriteriaError
 from rebar.llm.errors import LLMError
+from rebar.llm.evals import eval as _eval
+from rebar.llm.evals import eval_solver
 from rebar.llm.workflow import executor as _ex
 from rebar.llm.workflow import gate_dispatch
 from rebar.llm.workflow import steps as _steps  # noqa: F401 — registers workflow ops
@@ -278,6 +281,36 @@ def _project_repo(
     return repo
 
 
+def _write_eval_spec(repo: Path, prompt_id: str) -> None:
+    evals = repo / ".rebar" / "evals"
+    evals.mkdir(parents=True, exist_ok=True)
+    (evals / f"{prompt_id}.eval.yaml").write_text(
+        json.dumps(
+            {
+                "prompt": prompt_id,
+                "model": "anthropic:claude-sonnet-4-6",
+                "epochs": 1,
+                "gate": "at_least(1)",
+                "coverage_threshold": 1.0,
+                "scorers": [
+                    {
+                        "type": "deterministic",
+                        "name": "code_review_emits_valid_findings",
+                    }
+                ],
+                "dataset": [
+                    {
+                        "id": "project-fire",
+                        "expect": "finding",
+                        "diff": "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('changed')\n",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class _ProductionRecordingRunner:
     name = "project-criteria-test"
 
@@ -332,6 +365,86 @@ class _ProductionRecordingRunner:
         if prompt_id == "code-review-coach":
             return {"notes": []}
         return {}
+
+
+def test_eval_code_review_prompt_id_admits_active_project(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    active = code_review_registry.effective_criteria(str(repo))
+    assert _PROJECT_ID in active
+
+    assert (
+        eval_solver._code_review_prompt_id(_PROJECT_PROMPT, repo_root=str(repo)) == _PROJECT_PROMPT
+    )
+
+
+def test_eval_calibrate_active_project_criterion_through_code_review_arm(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    _write_eval_spec(repo, _PROJECT_PROMPT)
+    runner = _ProductionRecordingRunner()
+
+    result = _eval.calibrate_criterion(
+        _PROJECT_ID,
+        repo_root=str(repo),
+        runner=runner,
+    )
+
+    assert result["prompt"] == _PROJECT_PROMPT
+    assert (result["n_fire"], result["recall"]) == (1, 1.0)
+    assert runner.calls == [_PROJECT_PROMPT]
+
+
+def test_eval_code_review_prompt_id_rejects_inactive_project(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    inactive_id = "project.inactive"
+    assert inactive_id not in code_review_registry.effective_criteria(str(repo))
+
+    assert (
+        eval_solver._code_review_prompt_id(
+            criterion_prompt_id(inactive_id, gate_key="code_review"),
+            repo_root=str(repo),
+        )
+        is None
+    )
+
+
+def test_eval_code_review_prompt_id_keeps_builtins_with_or_without_repo_root(tmp_path) -> None:
+    assert eval_solver._code_review_prompt_id("code-review-tests") == "code-review-tests"
+    repo = _project_repo(tmp_path)
+
+    for prompt_id in ("code-review-base", "code-review-verify", "code-review-tests"):
+        assert eval_solver._code_review_prompt_id(prompt_id, repo_root=str(repo)) == prompt_id
+
+
+def test_eval_calibrate_plan_review_with_repo_root_keeps_existing_arm(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    _write_eval_spec(repo, "plan-review-F1")
+    assert "F1" not in code_review_registry.effective_criteria(str(repo))
+    calls: list[str] = []
+
+    def solve(prompt_id: str, case: dict) -> dict:
+        calls.append(prompt_id)
+        return {"findings": [{"finding": case["id"]}]}
+
+    result = _eval.calibrate_criterion("F1", repo_root=str(repo), solve=solve)
+
+    assert result["prompt"] == "plan-review-F1"
+    assert calls == ["plan-review-F1"]
+
+
+def test_eval_calibrate_missing_project_spec_has_logical_id_and_path(tmp_path) -> None:
+    repo = _project_repo(tmp_path)
+    assert _PROJECT_ID in code_review_registry.effective_criteria(str(repo))
+
+    with pytest.raises(_eval.EvalError) as exc_info:
+        _eval.calibrate_criterion(
+            _PROJECT_ID,
+            repo_root=str(repo),
+            solve=lambda _prompt_id, _case: {"findings": []},
+        )
+
+    message = str(exc_info.value)
+    assert _PROJECT_ID in message
+    assert f"{_PROJECT_PROMPT}.eval.yaml" in message
 
 
 def test_project_criterion_fan_in_executes_once_through_production_two_round_gate(

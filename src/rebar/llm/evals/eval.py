@@ -408,17 +408,26 @@ def calibrate_criterion(
     from rebar.llm.evals.eval_scorers import FIRE_EXPECTS, NOFIRE_EXPECTS
 
     runs = max(1, int(runs))
-    # The criterion's eval fixture lives at its filesystem-safe prompt id (task stew-kid-motif):
-    # a project.<name> criterion's fixture is `.rebar/evals/plan-review-project-<name>.eval.yaml`,
-    # decoupled from the dotted logical id — same mapping the rubric uses.
+    # The criterion's eval fixture lives at its filesystem-safe prompt id (task stew-kid-motif).
+    # An active code-review criterion owns its code-review-namespaced fixture; all other
+    # criteria retain the plan-review mapping, even when a repo root is available.
+    from rebar.llm.code_review.registry import effective_criteria
     from rebar.llm.criteria.ids import criterion_prompt_id
 
+    code_review_criterion = repo_root is not None and criterion_id in effective_criteria(repo_root)
     prompt_id = (
-        criterion_id
+        criterion_prompt_id(criterion_id, gate_key="code_review")
+        if code_review_criterion
+        else criterion_id
         if criterion_id.startswith("plan-review-")
         else criterion_prompt_id(criterion_id)
     )
-    spec = load_eval_spec(prompt_id, repo_root=repo_root)
+    try:
+        spec = load_eval_spec(prompt_id, repo_root=repo_root)
+    except EvalError as exc:
+        if code_review_criterion:
+            raise EvalError(f"criterion {criterion_id!r}: {exc}") from None
+        raise
     fire_nofire = FIRE_EXPECTS | NOFIRE_EXPECTS
     all_cases = list(spec.get("dataset") or [])
     if not any(c.get("expect") in fire_nofire for c in all_cases):
