@@ -47,6 +47,25 @@ _AGENTS_STACK = (
 # live credentials to exercise the path); import-cleanliness + gating still run.
 _AGENTS = agents_extra_installed()
 
+
+@pytest.fixture(autouse=True)
+def _gate_source_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin THIS module to the explicit in-place read (``source=local``).
+
+    These tests exercise the [agents]-extra degradation seam, not gate semantics: each op
+    must fail with a typed ``LLMError`` naming the extra (or, for the fail-safe op, return
+    cleanly). The suite-wide default is ``attested``/``ref=HEAD`` (tests/conftest.py), but
+    the shared ``rebar_repo`` fixture's repo has NO code-branch commit, so ``HEAD`` cannot
+    resolve — under attested, the clean-wheel CI lane (where these tests actually run;
+    they skip wherever the extra is installed) died on ``SnapshotRefError`` before ever
+    reaching the degradation seam. A production lean install is unaffected (a real repo
+    resolves its ref long before the LLM seam); local simply keeps the fixture repos on
+    the read path these tests are about. Local reads are fine here: degradation never
+    signs anything."""
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+    monkeypatch.delenv("REBAR_GATE_REF", raising=False)
+
+
 # The full operation matrix. The exhaustiveness test below asserts this stays in
 # lock-step with the public ops exported by rebar.llm, so a newly-added operation
 # cannot ship without an optionality entry here.

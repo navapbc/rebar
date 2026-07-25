@@ -300,6 +300,12 @@ def test_compute_validity_ignores_plaintext_manifest_dep_and_regver_tamper(store
     # code-drift check re-hashes it and finds NO drift.
     depfile = store / "watched.py"
     depfile.write_text("x = 1\n")
+    # COMMIT it: the claim-gate drift check re-hashes at the CURRENT gate ref's snapshot
+    # (bug 72d9), so the dep must exist in the committed tree for "no drift" to hold.
+    subprocess.run(["git", "add", "watched.py"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "watched"], cwd=store, check=True, capture_output=True
+    )
     from rebar.llm.plan_review.attest import _hash_basis, _hash_file
 
     good_hash = _hash_file("watched.py", base=_hash_basis(repo_root=str(store)))
@@ -377,6 +383,12 @@ def test_compute_validity_still_catches_a_real_code_drift(store: Path) -> None:
 
     depfile = store / "watched.py"
     depfile.write_text("x = 1\n")
+    # COMMIT it: the claim-gate drift check re-hashes at the CURRENT gate ref's snapshot
+    # (bug 72d9), so the dep must exist in the committed tree for "no drift" to hold.
+    subprocess.run(["git", "add", "watched.py"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "watched"], cwd=store, check=True, capture_output=True
+    )
     from rebar.llm.plan_review.attest import _hash_basis, _hash_file
 
     good_hash = _hash_file("watched.py", base=_hash_basis(repo_root=str(store)))
@@ -389,8 +401,13 @@ def test_compute_validity_still_catches_a_real_code_drift(store: Path) -> None:
     rec = _sign_opcert(store, x, manifest, material=fp, commit=head)
     state = rebar.show_ticket(resolved_x, repo_root=str(store))
 
-    # Genuinely edit the watched dependency file → the current hash diverges from the signed one.
+    # Genuinely edit AND LAND the watched dependency file → the current gate ref's hash
+    # diverges from the signed one (uncommitted edits are invisible to the gate since 72d9).
     depfile.write_text("x = 2  # a real, post-signing code change\n")
+    subprocess.run(["git", "add", "watched.py"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "drift"], cwd=store, check=True, capture_output=True
+    )
     res = verify_opcert_record(rec, resolved_x, kind="plan-review", repo_root=str(store))
     v = compute_validity(res, state, "plan-review", repo_root=str(store))
     assert v["valid"] is False
