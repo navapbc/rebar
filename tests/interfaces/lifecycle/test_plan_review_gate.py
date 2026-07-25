@@ -1584,15 +1584,24 @@ def test_cli_review_plan_earns_a_claim_without_a_second_llm_call(rebar_repo: Pat
 
 
 def test_never_sign_guard_table(rebar_repo: Path) -> None:
-    """AC5: the verdicts that must NEVER carry a passing signature.
+    """AC5: the verdicts that must NEVER carry a passing signature — all five in one table:
+    BLOCK, INDETERMINATE, degraded (LLM outage), local-source, and explicit `sign=False`.
 
-    Covers the guards `attest.sign_plan_review` actually enforces (non-PASS and degraded)
-    plus the explicit library opt-out. NOTE: `source="local"` is deliberately ABSENT — the
-    CLI documents it as "never signs" but it currently DOES sign a claim-valid attestation.
-    That is tracked as its own bug (melancholy-firstborn-shihtzu) rather than pinned here,
-    because pinning today's behavior would encode the bypass as expected."""
+    Each row goes through the public `review_plan` entry point end-to-end. The degraded row
+    is the LLM-outage flavor (runner raises `LLMUnavailableError` → the review degrades and
+    must not sign); the primitive-level degraded guard (`resolution_class` on the coverage
+    block) is additionally pinned at the artifact that owns it by
+    `test_sign_plan_review_refuses_non_certifiable_verdicts`. The local-source row also
+    checks the machine-readable POLICY reason (bug melancholy-firstborn-shihtzu: local reads
+    the in-place checkout and is never certifiable)."""
+    from rebar.llm.errors import LLMUnavailableError
+
     _commit(rebar_repo)
     _enable(rebar_repo)
+
+    class _Outage(FakeRunner):
+        def run(self, request):  # noqa: ARG002 — signature fixed by the Runner seam
+            raise LLMUnavailableError("the LLM provider call failed: ANTHROPIC_API_KEY not set")
 
     cases = []
 
@@ -1612,7 +1621,25 @@ def test_never_sign_guard_table(rebar_repo: Path) -> None:
         )
     )
 
-    # (c) explicit opt-out on an otherwise perfectly signable PASS.
+    # (c) DEGRADED — the LLM tier resolves abnormally (provider outage) mid-review.
+    outage = _make(rebar_repo)
+    cases.append(
+        (
+            "degraded-outage",
+            rebar.llm.review_plan(outage, runner=_Outage(), repo_root=str(rebar_repo)),
+        )
+    )
+
+    # (d) LOCAL SOURCE — a genuine PASS against the in-place checkout: never certifiable.
+    local = _make(rebar_repo)
+    cases.append(
+        (
+            "local-source",
+            rebar.llm.review_plan(local, runner=_CLEAN, source="local", repo_root=str(rebar_repo)),
+        )
+    )
+
+    # (e) explicit opt-out on an otherwise perfectly signable PASS.
     opted_out = _make(rebar_repo)
     cases.append(
         (
@@ -1624,6 +1651,10 @@ def test_never_sign_guard_table(rebar_repo: Path) -> None:
     for label, verdict in cases:
         # `.signed` is the boolean of record; the object itself is always present.
         assert verdict["signature"]["signed"] is False, f"{label} must not sign"
+    # The local row is a POLICY refusal, not a failure: machine-readable reason required.
+    local_verdict = dict(cases)["local-source"]
+    assert local_verdict["verdict"] == "PASS"  # the review itself still passes…
+    assert local_verdict["signature"]["reason"] == "local-source-never-signs"
 
 
 def test_sign_plan_review_refuses_non_certifiable_verdicts(rebar_repo: Path) -> None:
@@ -1720,6 +1751,9 @@ def test_local_source_pass_is_never_signed(rebar_repo: Path) -> None:
     verdict = rebar.llm.review_plan(tid, runner=_CLEAN, source="local", repo_root=str(rebar_repo))
     assert verdict["verdict"] == "PASS"  # the review still runs and still passes…
     assert verdict["signature"]["signed"] is False  # …it is simply not certifiable
+    # The refusal is machine-readable POLICY, distinguishable from a signing *failure*
+    # (which carries an `error` key) and from a non-PASS reason (the verdict string).
+    assert verdict["signature"]["reason"] == "local-source-never-signs"
     # Nothing was written to the ticket either — the durable artifact is absent, not just the
     # in-verdict flag.
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo)).get("signature") in (None, {})
