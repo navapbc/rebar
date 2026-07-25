@@ -112,10 +112,13 @@ def test_recert_after_done_requeues(repo: str) -> None:
     assert Q.reduce_ticket(tid, tracker, now_ns=now + 101 * _MIN)["pending"] is True
 
 
-def test_cert_enqueues(repo: str) -> None:
+def test_cert_enqueues(repo: str, monkeypatch) -> None:
     # sign_plan_review (the certification path) enqueues the ticket for enrichment.
     from rebar.llm.plan_review import attest
 
+    # Simulate an active attested session: the sign seam's no-null-pin invariant
+    # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
     tid = rebar.create_ticket("task", "Cert enqueues", repo_root=repo)
     verdict = {"verdict": "PASS", "ticket_id": tid}
     attest.sign_plan_review(verdict, material="deadbeef", repo_root=repo)

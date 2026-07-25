@@ -101,8 +101,10 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
         review_phase=None,
         priority_floor=None,
         repo_root=None,
+        source=None,
     ):
         captured.update(
+            source=source,
             material=material,
             reviewed_related_material=reviewed_related_material,
             review_phase=review_phase,
@@ -123,6 +125,7 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
     )
     assert result["sidecar_emitted"] is True
     assert captured == {
+        "source": None,  # no resolved gate handle on a direct _run_plan_review call
         "material": plan_review.generation.from_snapshot(snapshot).own_material,
         "reviewed_related_material": snapshot.related_material,
         "review_phase": "planning",
