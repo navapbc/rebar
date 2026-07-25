@@ -49,8 +49,10 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    review anyway (see [Review dependencies FIRST](#review-dependencies-first--review-in-dependency-graph-order)).
    An `in_progress` ticket is **never** fast-failed (it is already being worked, so
    drift/execution re-reviews stay legitimate), and `--force` (library `force=True`)
-   bypasses the check to review a not-yet-claimable ticket anyway. Bugs and session_logs
-   are exempt from the whole gate and unaffected.
+   bypasses the check to review a not-yet-claimable ticket anyway. `session_log` /
+   `code_review` / `identity` tickets are exempt from the whole gate and unaffected; a
+   `bug` is reviewed under the bug tier (see above) and so is subject to this fast-fail
+   like any other reviewed type.
 
 2. **The start-work gate** — when `verify.require_plan_review_for_claim` is on,
    starting work on a ticket (**any** entry into `in_progress` — via `claim`, a plain
@@ -64,7 +66,10 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    consolidated check (`rebar._commands.gates.plan_review_precheck`), so they cannot
    diverge. No LLM, no
    network — a pure HMAC verify + a light fingerprint recompute. Bugs and session_logs
-   are exempt. `--force="<reason>"` bypasses it (audit-logged; on the `transition` path
+   are exempt **from this gate** — i.e. they need no signed attestation to be claimed. That
+   is a DIFFERENT axis from whether the plan-review gate *reviews* a ticket: a bug is not
+   claim-gated, but it IS reviewed (under the bug tier). Conflating the two is a common
+   error. `--force="<reason>"` bypasses it (audit-logged; on the `transition` path
    pass `--force` and the `--reason` text becomes the audit note). `claim` additionally
    reuses rebar's atomic claim primitive, so two agents still cannot both claim a ticket.
 
@@ -1133,8 +1138,11 @@ current table lives in `src/rebar/llm/plan_review/criteria_routing.json` (pinned
 `tests/unit/test_threshold_recalibration.py`). Recalibrate on a cadence as more
 sidecar data accrues — ADR 0036 mandates the replay be segmented by
 `impact_model_version` (the calibration-2 thresholds predate the `plan-v2` impact
-model shipped the same day, so a plan-v2-segmented replay is the standing next step). Bugs are exempt (a dedicated follow-on). See the epic for the full criteria
-registry and the experiment-grounded defaults.
+model shipped the same day, so a plan-v2-segmented replay is the standing next step).
+Bug tickets are scored under the separate bug tier (`BUG_TIER_CRITERIA`), whose findings are
+always advisory, so they are excluded from this blocking-threshold calibration rather than
+exempt from review. See the epic for the full criteria registry and the experiment-grounded
+defaults.
 
 ## Definition-of-done for a cutover/engine swap (live exercise required)
 
