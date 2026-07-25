@@ -147,6 +147,9 @@ def test_plan_review_pass_produces_envelope_and_certifies(
         "rebar.llm.plan_review.attest.current_material_fingerprint",
         lambda ticket_id, repo_root=None: "fp-static",
     )
+    # Simulate an active attested session: the sign seam's no-null-pin invariant
+    # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
     tid = rebar.create_ticket("task", "pr pass", repo_root=str(store))
     verdict = {"verdict": "PASS", "ticket_id": tid, "model": "m", "runner": "pydantic_ai"}
     attest.sign_plan_review(verdict, material="fp-static", repo_root=str(store))
@@ -188,6 +191,9 @@ def test_refresh_attestation_re_signs_as_opcert(
         "rebar.llm.plan_review.attest.current_material_fingerprint",
         lambda ticket_id, repo_root=None: "fp-static",
     )
+    # Simulate an active attested session: the sign seam's no-null-pin invariant
+    # (bug 5128-0856) refuses to sign with no snapshot SHA at all.
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: "c" * 40)
     monkeypatch.setattr("rebar.llm.plan_review.registry.disabled_builtins", lambda repo_root: [])
     tid = rebar.create_ticket("task", "refresh", repo_root=str(store))
     attest.sign_plan_review(

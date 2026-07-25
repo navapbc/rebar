@@ -48,11 +48,14 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
       material fingerprint still matches the current plan; the attestation was re-signed and the
       claim gate now passes.
     * ``ok=False`` (``signed=False``) — REFUSED, with a ``reason``: no sidecar at all, the latest
-      sidecar is not a signable PASS (BLOCK / INDETERMINATE / degraded), or the plan changed since
+      sidecar is not a signable PASS (BLOCK / INDETERMINATE / degraded), the review ran with
+      ``--source local`` (never certifiable — bug 5128-0856), or the plan changed since
       the review (stale — run a full ``rebar review-plan``). NEVER signs a non-PASS / degraded /
-      stale verdict.
+      local-source / stale verdict.
 
-    NO LLM and NO network — a sidecar read, a light fingerprint recompute, and a local HMAC sign.
+    NO LLM and NO network — a sidecar read, a light fingerprint recompute, and a local HMAC
+    sign inside an attested gate session resolved from the LOCAL object DB (``fetch=False``),
+    so the recovered attestation binds a committed ``verified-at-sha`` like any other.
     """
     payload = sidecar.latest_review_result(ticket_id, repo_root=repo_root)
     if payload is None:
@@ -86,6 +89,24 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
                     else ""
                 )
                 + ") — run `rebar review-plan` to produce a fresh verdict"
+            ),
+        }
+
+    # Local-source refusal (bug 5128-0856): a `--source local` review reads the in-place
+    # checkout — uncommitted edits included — so its PASS is not a certifiable basis, and
+    # re-signing it here would reopen exactly the hole the review-time never-sign guard
+    # closed. Only an explicit "local" refuses: legacy payloads predate the field (None)
+    # and are treated as the attested production default they almost certainly were.
+    if payload.get("source") == "local":
+        return {
+            "ok": False,
+            "signed": False,
+            "ticket_id": ticket_id,
+            "verdict": recorded_verdict or None,
+            "reason": (
+                "the latest review ran with --source local, which never signs (the recorded "
+                "PASS was reached against the in-place checkout, not a committed snapshot) — "
+                "run `rebar review-plan` with the attested source to review and sign"
             ),
         }
 
@@ -212,14 +233,40 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         "coverage": coverage,
     }
     try:
-        sig = attest.sign_plan_review(
-            verdict,
-            material=current_material,
-            review_phase=phase_metadata["phase"],
-            priority_floor=phase_metadata["priority_floor"],
-            initial_generation=initial_generation,
-            repo_root=repo_root,
-        )
+        # Sign inside an ATTESTED gate session (bug 5128-0856): sign_plan_review's
+        # no-null-pin invariant refuses to mint an attestation without a committed
+        # verified_at_sha, and this recovery path used to sign outside any session — deps
+        # hashed from the working tree, no pin. Resolving the configured gate ref here
+        # (fetch=False: local object DB only, preserving the NO-network contract; drift
+        # visibility is as fresh as the last fetch) binds the recovery attestation to the
+        # same committed basis a fresh attested review would — which is exactly what the
+        # claim gate re-checks against. Source is pinned to attested: minting a
+        # claim-valid artifact is this function's whole job, so a configured local
+        # back-out must not silently downgrade it (the sign would only be refused later).
+        import contextlib
+
+        from rebar.llm import gate_source
+
+        try:
+            handle = gate_source.resolve_gate_handle(
+                None, gate_source.SOURCE_ATTESTED, repo_root, fetch=False
+            )
+            session: contextlib.AbstractContextManager = gate_source.gate_read_root(handle)
+        except Exception:  # noqa: BLE001 — snapshot unavailable: fall through; the sign seam's
+            # no-null-pin invariant then refuses an unattested basis with a clear reason
+            # (surfaced by the structured-refusal handler below), instead of resign dying
+            # on ref resolution with a different, less actionable error.
+            logger.warning("attested snapshot unavailable for sign-review", exc_info=True)
+            session = contextlib.nullcontext()
+        with session:
+            sig = attest.sign_plan_review(
+                verdict,
+                material=current_material,
+                review_phase=phase_metadata["phase"],
+                priority_floor=phase_metadata["priority_floor"],
+                initial_generation=initial_generation,
+                repo_root=repo_root,
+            )
     except Exception as exc:  # noqa: BLE001 — public recovery path returns structured refusal
         # Relation failures are an unsigned, retry-after-repair gate outcome, not
         # an opaque signing failure.  Keep the public no-throw recovery contract
