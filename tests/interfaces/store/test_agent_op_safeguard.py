@@ -135,7 +135,14 @@ def test_run_workflow_executes_llm_workflow_inside_gate_session(tmp_path, monkey
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@e.com")
+    _git(repo, "config", "user.name", "T")
+    _git(repo, "commit", "--allow-empty", "-q", "-m", "init")
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "g"))
+    # This bare repo has no rebar store (no `tickets` branch), so an attested gate cannot
+    # materialize its pinned ticket-store copy. The subject here is the GATING decision
+    # (LLM workflow => in_gate_session), which is source-agnostic — pin the local read.
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
 
     seen: dict = {}
 
@@ -158,7 +165,7 @@ def test_run_workflow_executes_llm_workflow_inside_gate_session(tmp_path, monkey
     # Isolate the GATING decision from workflow-schema validation (a separate concern):
     # return the doc as-is so has_llm_steps drives the gate.
     monkeypatch.setattr(runs, "load_workflow_doc", lambda src, rr=None: src)
-    # conftest sets REBAR_GATE_SOURCE=local → local gate (no fetch/materialize needed offline).
+    # conftest defaults the gate to attested/ref=HEAD (offline-safe: local object DB).
     runs.run(_AGENT_DOC, {}, repo_root=str(repo))
     agent_gated = seen["wf"]
     seen.clear()

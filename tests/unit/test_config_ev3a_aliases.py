@@ -108,6 +108,7 @@ def test_mcp_allow_jira_sync_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     from rebar import mcp_server
 
     monkeypatch.chdir(tmp_path)  # repo_root=None resolution
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     assert mcp_server._allow_jira_sync() is False  # default off (fail-safe)
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
     cfg.reset_config_cache()
@@ -132,6 +133,7 @@ def test_mcp_allow_jira_sync_failsafe_on_garbage(
     from rebar import mcp_server
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "maybe")  # invalid bool -> ConfigError
     cfg.reset_config_cache()
     assert mcp_server._allow_jira_sync() is False  # fail-safe off
@@ -155,6 +157,7 @@ def test_mcp_readonly_honors_config_file_and_env(
 
     p = _proj_git(tmp_path)
     monkeypatch.chdir(p)
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     assert mcp_server._readonly() is False  # default
     (p / "rebar.toml").write_text("[mcp]\nreadonly = true\n", encoding="utf-8")
     cfg.reset_config_cache()
@@ -173,6 +176,7 @@ def test_mcp_readonly_fails_closed_on_malformed(
 
     p = _proj_git(tmp_path)
     monkeypatch.chdir(p)
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     (p / "pyproject.toml").write_text("[tool.rebar] broken === [[\n", encoding="utf-8")
     cfg.reset_config_cache()
     assert mcp_server._readonly() is True  # fail-CLOSED
@@ -183,6 +187,7 @@ def test_mcp_allow_llm_gate_and_failsafe(tmp_path: Path, monkeypatch: pytest.Mon
 
     p = _proj_git(tmp_path)
     monkeypatch.chdir(p)
+    monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     assert mcp_server._allow_llm() is False  # default off
     (p / "rebar.toml").write_text("[mcp]\nallow_llm = true\n", encoding="utf-8")
     cfg.reset_config_cache()

@@ -473,8 +473,10 @@ the specific reason (`stale-code` / `stale-head`, `stale-material`,
 library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_check`).
 
 **The currency rule, as one expression.** An attestation is current iff **all** of: it is
-HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped:
-per-dependency hashes; unscoped: whole-HEAD) · **AND** the bound material fingerprint equals
+HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped: the
+per-dependency hashes signed at the review's pinned SHA, re-hashed at a snapshot of the
+**current gate ref** — so a landed change to a reviewed file invalidates while an unrelated
+commit or an uncommitted working-tree edit does not; unscoped: whole-HEAD) · **AND** the bound material fingerprint equals
 the ticket's current one · **AND** it
 post-dates the latest reopen · **AND** any reviewed related-material pins are still fresh.
 These are two *independent* staleness axes the report singled out — **repo state**

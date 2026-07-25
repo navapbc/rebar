@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -215,21 +216,65 @@ def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
 
 
-@pytest.fixture(autouse=True)
-def _gate_source_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default the code-reading gates to ``source=local`` for the offline test suite
-    (epic raze-vet-ditch).
+@pytest.fixture(scope="session")
+def _rebar_root_sandbox_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One session-scoped, store-less git repo backing the suite-wide ``REBAR_ROOT``
+    default below. It has no ``tickets`` branch and is not a linked worktree, so the
+    CLI's central store mount (bug ad9f) has nothing to attach and silently no-ops."""
+    root = tmp_path_factory.mktemp("rebar-root-sandbox")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    return root
 
-    In production the gates default to ``source=attested``/``ref=origin/main`` — they
-    fetch + materialize a snapshot at the pinned SHA. The test suite runs OFFLINE on
-    disposable ``tmp_path`` repos that have no ``origin`` remote, so attested would
-    (correctly) fail closed resolving ``origin/main``. ``local`` reads the in-place
-    checkout — the faithful continuation of the pre-snapshot behavior these gate-logic
-    tests assert. A test that specifically exercises the attested path sets
-    ``REBAR_GATE_SOURCE`` / passes ``source="attested"`` explicitly (an explicit arg
-    wins over this default), so the attested path is still covered."""
+
+@pytest.fixture(autouse=True)
+def _default_rebar_root_to_sandbox(
+    _rebar_root_sandbox_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default ``REBAR_ROOT`` to a sandbox repo for every test (bug dd62 fallout).
+
+    Without this, any test that drives the CLI/library WITHOUT setting ``REBAR_ROOT``
+    resolves the repo root to the developer/CI CHECKOUT (git toplevel of the cwd) — and a
+    real, mount-eligible command then auto-attaches ``.tickets-tracker`` into the real
+    repo root (bug ad9f's central mount). Under xdist that single creation lands inside
+    the per-test snapshot window of EVERY concurrently running test, so the repo-root
+    leak guard flags a random spray of victims — the CI failure mode this closes.
+
+    Precedence is preserved: a test-owned fixture (``rebar_repo`` et al.) monkeypatches
+    ``REBAR_ROOT`` AFTER this autouse default and wins; a test that ``delenv``s it still
+    gets the cwd fallback it asked for. Only the implicit
+    tests-run-against-the-checkout default is removed."""
+    monkeypatch.setenv("REBAR_ROOT", str(_rebar_root_sandbox_repo))
+
+
+@pytest.fixture(autouse=True)
+def _gate_source_attested_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the code-reading gates to ``source=attested``/``ref=HEAD`` for the offline
+    test suite (epic raze-vet-ditch; retargeted by melancholy-firstborn-shihtzu).
+
+    In production the gates default to ``source=attested``/``ref=origin/main`` — they fetch
+    + materialize a snapshot at the pinned SHA. The suite runs OFFLINE on disposable
+    ``tmp_path`` repos with no ``origin``, so ``origin/main`` cannot resolve.
+
+    This USED to default to ``source=local`` (read the in-place checkout), which resolves
+    offline but is **unsignable by contract** — ADR 0005 and
+    ``_snapshot.repo_snapshot.SOURCE_LOCAL`` both document local as "dirty allowed, never
+    signed". That made a defect (plan review signing a local read) load-bearing for ~47
+    lifecycle tests, so the defect could not be fixed without the suite going red.
+
+    ``ref=HEAD`` is the offline-safe attested basis — it resolves from the LOCAL object DB
+    with no remote, and is the same recipe the completion close gate already uses
+    (``source="attested", ref="HEAD", fetch=False``). Gate logic is now exercised against an
+    immutable pinned tree, as in production.
+
+    Consequence for test authors: **code drift must be COMMITTED to be visible.** Writing a
+    file into the worktree no longer changes what the gate reads, because the gate reads the
+    pinned snapshot — which is the honest meaning of drift (the attested basis moved), not an
+    artifact. A test that specifically needs the in-place read sets ``REBAR_GATE_SOURCE`` or
+    passes ``source="local"`` explicitly (an explicit arg wins), and must then expect NO
+    signature."""
     if "REBAR_GATE_SOURCE" not in os.environ:
-        monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+        monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
+        monkeypatch.setenv("REBAR_GATE_REF", "HEAD")
 
 
 @pytest.fixture(autouse=True)
