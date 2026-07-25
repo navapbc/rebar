@@ -11,6 +11,8 @@ Pass-4 coaching notes carry an additive `guide_url` deep-link anchored to `#<cri
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from rebar.llm.plan_review import registry
@@ -208,8 +210,11 @@ def test_criteria_guide_parity_fails_on_removed_section(tmp_path) -> None:
 
 
 def test_criteria_guide_in_sync_with_registry() -> None:
-    # the committed generated guide covers every CANONICAL_LLM criterion (regenerate-in-place gate)
-    assert registry.validate_criteria_guide() == []
+    # the committed generated guide covers every CANONICAL_LLM criterion (regenerate-in-place
+    # gate). The guide under test is THIS CHECKOUT's committed docs/ — resolve it explicitly
+    # (the suite-wide REBAR_ROOT default points at a docs-less sandbox repo).
+    checkout = Path(__file__).resolve().parents[2]
+    assert registry.validate_criteria_guide(str(checkout)) == []
 
 
 # ── coach deep-links ──────────────────────────────────────────────────────────────

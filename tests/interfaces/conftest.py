@@ -51,4 +51,8 @@ def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.chdir(repo)
     rebar.init_repo(repo_root=str(repo))
+    # Give the CODE branch a root commit so the suite-wide attested/``ref=HEAD`` gate
+    # default (tests/conftest.py) can resolve a snapshot: an unborn HEAD fails ref
+    # resolution before any gate op gets to its actual subject under test.
+    _git("commit", "--allow-empty", "-q", "-m", "init", cwd=repo)
     yield repo

@@ -28,10 +28,16 @@ def copy_project(tmp_path: Path, language: str) -> Path:
 def _initialize_project(project: Path) -> None:
     """Create the disposable repository and ticket store required by the CLI."""
 
+    env = os.environ.copy()
+    # The children must resolve the repo from their cwd (the fixture project) — drop the
+    # suite-wide sandbox REBAR_ROOT default (tests/conftest.py), which would win over cwd.
+    env.pop("REBAR_ROOT", None)
+
     def run(command: list[str]) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
             command,
             cwd=project,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -126,6 +132,9 @@ def run_metrics(project: Path, *, path: str) -> dict[str, Any]:
 
     env = os.environ.copy()
     env["PATH"] = path
+    # The child must resolve the repo from its cwd (the fixture project) — drop the
+    # suite-wide sandbox REBAR_ROOT default (tests/conftest.py), which would win over cwd.
+    env.pop("REBAR_ROOT", None)
     completed = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "metrics", "--output", "json"],
         cwd=project,

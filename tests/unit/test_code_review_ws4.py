@@ -16,6 +16,25 @@ from rebar.llm.workflow import gate_dispatch
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _local_gate_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin THIS module to the in-place (``local``) gate read.
+
+    These are unit tests of WS4 gate DISPATCH logic (enabled/disabled/override/degrade)
+    over a bare diff string — they own no repo, so under the suite-wide
+    ``attested``/``ref=HEAD`` default (tests/conftest.py) ``resolve_gate_handle`` targets
+    the AMBIENT checkout via the snapshot layer's cwd fallback. On CI's shallow,
+    blobless-fetched checkout, ``materialize_tickets`` then degenerates into per-object
+    lazy HTTPS fetching inside ``git checkout-index`` — the mechanism that hung every
+    pytest lane at 99% for hours (bug hunt on 72d9/968; faulthandler stacks pinned the
+    blocked frame to exactly these tests). A local read is the correct repo-less
+    semantics here and is what these tests always exercised before the suite default
+    flipped; code-review results are unsigned under either source."""
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+    monkeypatch.delenv("REBAR_GATE_REF", raising=False)
+
+
 _DIFF = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
 # A structured payload a FakeRunner returns for EVERY structured agent call (base/overlay/
 # verify/coach) — enough to drive the gate offline to a verdict.

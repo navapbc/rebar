@@ -73,7 +73,8 @@ def test_prompt_contract_front_matter():
 
 # ── criteria guide section ───────────────────────────────────────────────────────────────────
 def test_criteria_guide_section_present_and_clean():
-    assert registry.validate_criteria_guide() == []
+    checkout = Path(__file__).resolve().parents[2]
+    assert registry.validate_criteria_guide(str(checkout)) == []
     guide = (_ROOT / "docs/plan-review-criteria-guide.md").read_text(encoding="utf-8")
     assert f"## {_CID}" in guide
     assert registry.explain_criterion(_CID).startswith(f"## {_CID}")
