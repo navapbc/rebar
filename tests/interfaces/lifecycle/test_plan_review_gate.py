@@ -1584,6 +1584,47 @@ def test_never_sign_guard_table(rebar_repo: Path) -> None:
         assert verdict["signature"]["signed"] is False, f"{label} must not sign"
 
 
+def test_sign_plan_review_refuses_non_certifiable_verdicts(rebar_repo: Path) -> None:
+    """AC5 (the DEGRADED clause): the guard is enforced by the signing primitive itself, so it
+    holds for every caller — not just the ones the end-to-end table happens to exercise.
+
+    A *degraded* run is the case the end-to-end table cannot reach cheaply: it needs the LLM
+    tier to resolve abnormally, which the offline fake cannot produce on demand. Driving
+    `sign_plan_review` directly pins the same guard at the artifact that owns it
+    (`plan_review/attest.py`), where a `resolution_class` on the coverage block marks the run
+    degraded."""
+    from rebar.llm.plan_review import attest
+    from rebar.signing import SigningError
+
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    tid = _make(rebar_repo)
+
+    def _verdict(**over) -> dict:
+        base = {
+            "verdict": "PASS",
+            "ticket_id": tid,
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+            "coverage": {"counts": {}},
+        }
+        base.update(over)
+        return base
+
+    refused = {
+        # A degraded run is NOT certifiable even though the verdict letter reads PASS.
+        "degraded": _verdict(coverage={"counts": {}, "resolution_class": "degraded"}),
+        "block": _verdict(verdict="BLOCK"),
+        "indeterminate": _verdict(verdict="INDETERMINATE"),
+    }
+    for label, verdict in refused.items():
+        with pytest.raises(SigningError) as ei:
+            attest.sign_plan_review(verdict, material="deadbeef", repo_root=str(rebar_repo))
+        # The refusal names WHY, so an operator can tell a degrade from a genuine BLOCK.
+        assert "refusing to sign" in str(ei.value), f"{label} must be refused by name"
+
+
 def test_idempotent_reuse_emits_no_second_signature(rebar_repo: Path) -> None:
     """AC7 (the untested half): the short-circuit is already known not to re-run the LLM, but
     it must also not mint a DUPLICATE attestation. `signed_at` is the witness — a re-sign

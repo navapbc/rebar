@@ -234,6 +234,25 @@ without running the LLM** when the ticket isn't claimable yet — status `closed
 or `open` but blocked by an unclosed dependency (returns an unsigned `INDETERMINATE`, exit `2`);
 pass `--force` to review it anyway.
 
+**A passing plan review SIGNS by default.** The attestation — not the printed findings — is
+the review's durable product, and it is what the claim gate consumes, so `review-plan` signs
+one automatically on a non-blocking `PASS`. You do not ask for the signature; you ask to skip
+it:
+
+```sh
+rebar review-plan <id>            # PASS -> signs an attestation (the default)
+rebar review-plan <id> --no-sign  # run the review, deliberately sign nothing
+```
+
+Some outcomes are **never** signed, whatever you pass: a `BLOCK` or `INDETERMINATE` verdict,
+and a degraded run (one whose LLM tier resolved abnormally) — none of those is a certifiable
+`PASS`. An unsigned result leaves the claim gate unsatisfied, so `rebar claim` still fails.
+
+If a review computed a genuine `PASS` but the signature was lost (it failed to persist), you
+do **not** need to pay for the review again — `rebar sign-review <id>` re-signs from the
+recorded `REVIEW_RESULT` sidecar with **no LLM call**. It refuses if the plan changed since
+the review or if the recorded verdict was not a signable `PASS`.
+
 `rebar claim <id> --force[=<reason>]` bypasses any enabled start-work gate (e.g.
 plan-review) — not just plan-review specifically, but whatever gate is configured to run
 on claim, now or in the future. `--force` is CLI-only: it is not exposed over MCP (an MCP

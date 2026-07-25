@@ -80,7 +80,9 @@ INTERCEPT_COMMANDS: dict[str, str] = {
     ),
     "review-plan": (
         "Run the plan-review gate on a ticket; on a non-blocking PASS it signs the plan-review "
-        "attestation the claim gate consumes."
+        "attestation the claim gate consumes. Signing is the DEFAULT — `--no-sign` is the "
+        "explicit opt-out — and a BLOCK, an INDETERMINATE, or a degraded run is never signed. "
+        "Recover a PASS whose signature was lost with `sign-review` (no LLM call)."
     ),
     "scan-spec": "Scan prose/spec text for spec-implied work in batches, emitting findings.",
     "sign-review": (

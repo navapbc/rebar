@@ -545,11 +545,31 @@ cache bump, it drops the derived phase; a later forward upgrade bootstraps plann
 phase precision loss when compaction/re-signing was not paused. No stored signature is rewritten
 merely because policy changes.
 
+### Signing is the DEFAULT on a passing review
+
+You do not ask `review-plan` for a signature — you ask it to *skip* one. On a non-blocking
+`PASS` every public route signs automatically, because the attestation, not the printed
+findings, is the review's durable product and the only thing the claim gate consumes:
+
+| Route | Signs by default | Explicit opt-out |
+|---|---|---|
+| CLI `rebar review-plan <id>` | yes | `--no-sign` |
+| Library `rebar.llm.review_plan(tid)` | yes (`sign: bool = True`) | `sign=False` |
+
+An unsigned `PASS` is a deliberate act with a real consequence: the claim gate stays
+unsatisfied and `rebar claim` still fails. If a genuine `PASS` was computed but its signature
+failed to *persist*, do not re-run the review — `rebar sign-review <id>`
+(library `rebar.llm.resign_plan_review`) re-signs from the recorded `REVIEW_RESULT` sidecar
+with **no LLM call**, refusing if the plan changed since the review or the recorded verdict
+was not a signable `PASS`.
+
 ### What the `signature` field guarantees (read this before trusting it)
 
 A signature (a real `SIGNATURE` event + a manifest whose first line is `plan-review:
 PASS`) is emitted **only** on a genuine non-blocking `PASS` where the LLM tier actually
-ran — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
+ran — and never on a **degraded** run (one whose coverage carries a `resolution_class`;
+`attest.sign_plan_review` raises `SigningError` rather than certify an abnormal
+resolution) — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
 runner (`bug` / `session_log` tickets, which are exempt from the gate). On every other
 outcome no manifest is signed and **no event is written to the ticket** (the ticket's
 own `signature` stays null), so the start-work gate has nothing to verify and the claim

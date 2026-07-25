@@ -482,6 +482,32 @@ across repos that didn't opt in.
   (`rebar.llm.review_plan` / `rebar review-plan`; the claim gate): the *inverse* of
   the completion close gate, a worked consumer of all of the above.
 
+### Library contract: `review_plan` signs on PASS by default
+
+`rebar.llm.review_plan(...)` takes **`sign: bool = True`**. On a non-blocking `PASS` it
+persists a plan-review attestation, because that attestation — not the returned findings — is
+what the claim gate consumes; a library caller that wanted a review and got no signature would
+have paid the full model cost for a discarded artifact. Unsigned execution is the explicit
+exception:
+
+```python
+import rebar.llm
+rebar.llm.review_plan(tid)               # PASS -> signs (the default)
+rebar.llm.review_plan(tid, sign=False)   # pure read: run the review, sign nothing
+```
+
+The signing primitive (`rebar.llm.plan_review.attest.sign_plan_review`) **refuses** every
+non-certifiable verdict regardless of caller — a `BLOCK`, an `INDETERMINATE`, or a degraded
+run (one carrying a `coverage.resolution_class`) raises `SigningError` rather than minting an
+attestation. So `sign=True` is a request, not a guarantee: read `verdict["signature"]["signed"]`
+(the boolean of record) rather than testing the `signature` object for presence — it is always
+present.
+
+A `PASS` whose signature failed to *persist* is recoverable without paying for the review
+again: `rebar.llm.resign_plan_review(tid)` (CLI `rebar sign-review <id>`) re-signs from the
+recorded `REVIEW_RESULT` sidecar with **no LLM call**, and refuses if the plan changed since
+the review or the recorded verdict was not a signable `PASS`.
+
 ## Deployment notes
 
 - **Langfuse** cloud is low-friction; self-hosting needs Postgres + ClickHouse +
