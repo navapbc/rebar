@@ -184,13 +184,14 @@ def _run_novelty_case(case: dict, *, runner: Runner, repo_root: str | None) -> d
     return {"novelty": novelty_map.get(0, 0.0)}
 
 
-def _code_review_prompt_id(prompt_id: str) -> str | None:
+def _code_review_prompt_id(prompt_id: str, *, repo_root: str | None = None) -> str | None:
     """Resolve ``prompt_id`` to a code-review PROMPT id this arm can eval as a single-prompt
     run over a case's diff, else ``None``. The evaluable set is the base reviewer
-    (``code-review-base``), the Pass-2 verifier (``code-review-verify``), and the 11 specialist
-    overlays (``code-review-<overlay>`` for overlay in ``code_review.registry.OVERLAY_IDS``) —
-    the coach prompt is NOT evaluated. Guarded by the ``code-review-`` prefix so it can never
-    collide with a plan-review criterion id (story f93a)."""
+    (``code-review-base``), the Pass-2 verifier (``code-review-verify``), and the specialist
+    overlays (``code-review-<overlay>`` for overlay in ``code_review.registry.OVERLAY_IDS``).
+    With ``repo_root``, active repository criteria are admitted through their code-review
+    physical ids too. The coach prompt is NOT evaluated. Guarded by the ``code-review-`` prefix
+    so it can never collide with a plan-review criterion id (story f93a)."""
     if not prompt_id.startswith("code-review-"):
         return None
     from rebar.llm.code_review.registry import OVERLAY_IDS
@@ -198,6 +199,14 @@ def _code_review_prompt_id(prompt_id: str) -> str | None:
     valid = {"code-review-base", "code-review-verify"} | {
         f"code-review-{oid}" for oid in OVERLAY_IDS
     }
+    if repo_root is not None:
+        from rebar.llm.code_review.registry import effective_criteria
+        from rebar.llm.criteria.ids import criterion_prompt_id
+
+        valid |= {
+            criterion_prompt_id(criterion_id, gate_key="code_review")
+            for criterion_id in effective_criteria(repo_root)
+        }
     return prompt_id if prompt_id in valid else None
 
 
@@ -276,7 +285,7 @@ def run_case(
     # and return its NATIVE structured output — no disposable store / ticket scaffolding
     # (like the criterion arm, the input is inline text). Checked before case_store so a
     # code-review id never falls through to the agentic reviewers.
-    if _code_review_prompt_id(prompt_id) is not None:
+    if _code_review_prompt_id(prompt_id, repo_root=repo_root) is not None:
         return _run_code_review_case(prompt_id, case, runner=runner, repo_root=repo_root)
 
     # The code-reading gates snapshot a ref (default origin/main) unless source=local;
