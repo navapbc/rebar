@@ -24,9 +24,7 @@ _TYPES = ("story", "epic")
 
 def _make(repo: Path, ttype: str) -> str:
     desc = (
-        "Body long enough for the gates.\n\n"
-        "## Acceptance Criteria\n- [ ] done\n\n"
-        "## Success Criteria\n- [ ] shipped\n\n## Context\nfoo\n"
+        "Body long enough for the gates.\n\n## Acceptance Criteria\n- [ ] done\n\n## Context\nfoo\n"
     )
     tid = rebar.create_ticket(ttype, f"Gate {ttype}", description=desc, repo_root=str(repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(repo))

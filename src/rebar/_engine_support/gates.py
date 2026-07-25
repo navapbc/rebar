@@ -133,7 +133,7 @@ def _clarity_score(description: str, ticket_type: str) -> int:
         if re.search(r"expected|actual", description, re.IGNORECASE):
             score += 1
     elif ticket_type == "epic":
-        if re.search(r"^##\s+Success Criteria", description, re.MULTILINE | re.IGNORECASE):
+        if re.search(r"^##\s+Acceptance Criteria", description, re.MULTILINE | re.IGNORECASE):
             score += 2
         if re.search(r"^##\s+Context\b", description, re.MULTILINE | re.IGNORECASE):
             score += 1

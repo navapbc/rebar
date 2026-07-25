@@ -105,8 +105,7 @@ def test_container_routing():
         ticket_id="abcd-0000-0000-0002",
         ticket_type="epic",
         title="A container epic",
-        description="## Success Criteria\n- [ ] shipped\n\n## Acceptance Criteria\n"
-        "- [ ] all child stories closed\n" + "x" * 200,
+        description="## Acceptance Criteria\n- [ ] all child stories closed\n" + "x" * 200,
         children=[{"ticket_id": "c000-0000-0000-0001", "ticket_type": "task", "status": "open"}],
         repo_root=REPO_ROOT,
     )
