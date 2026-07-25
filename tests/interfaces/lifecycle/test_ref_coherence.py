@@ -64,8 +64,25 @@ def _sign(repo: Path, tid: str, *, attested: bool):
         handle = gate_source.resolve_gate_handle("origin/main", "attested", str(repo))
         with gate_source.gate_read_root(handle):
             attest.sign_plan_review(verdict, material=material, repo_root=str(repo))
-    else:  # local: no contextvar → working-tree basis, no pin
-        attest.sign_plan_review(verdict, material=material, repo_root=str(repo))
+    else:
+        # Simulate a PRE-S4B (legacy) attestation: working-tree dependency hashes, no
+        # verified-at-sha pin. Minted BELOW the policy seam (build_manifest +
+        # signing.sign_manifest directly) because sign_plan_review's no-null-pin invariant
+        # (bug 5128-0856) now refuses to create these — but stores still hold them, and the
+        # verify side must keep reading them.
+        from rebar import signing
+        from rebar.llm.plan_review import relation_snapshot as _rs
+        from rebar.llm.plan_review.manifest import build_manifest, registry_version
+
+        snapshot = _rs.collect_plan_relation_snapshot(tid, repo_root=str(repo))
+        manifest = build_manifest(
+            verdict,
+            material=material,
+            deps=attest.dependency_hashes(verdict, repo_root=str(repo)),
+            regver=registry_version(str(repo)),
+            pins=snapshot.related_material,
+        )
+        signing.sign_manifest(tid, manifest, kind="plan-review", repo_root=str(repo))
 
 
 # --------------------------------------------------------------------------------------

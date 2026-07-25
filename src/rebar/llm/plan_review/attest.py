@@ -116,6 +116,16 @@ def sign_plan_review(
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
+    # THE no-null-pin invariant (bug 5128-0856): every NEW attestation must bind a real
+    # verified_at_sha. Enforced at this one seam so every signer inherits it; pre-S4b
+    # attestations remain readable (legacy tolerance is verify-side, not here).
+    if not current_code_sha():
+        raise SigningError(
+            "refusing to sign a plan-review attestation with no attested snapshot "
+            "(verified_at_sha would be None): only an attested, committed basis is "
+            "certifiable — a local-source review never signs (ADR 0005)"
+        )
+
     from . import registry
     from . import relation_snapshot as relation_snapshot_module
 
@@ -401,12 +411,23 @@ def refresh_attestation(
         fields["coverage"]["disabled_builtins"] = disabled
     prior_digest = signing.verify_signature(ticket_id, repo_root=repo_root).get("key_id", "?")
     new_deps = _rehash(manifest_deps(prior_manifest).keys(), repo_root=repo_root)
+    # Same no-null-pin invariant as sign_plan_review (bug 5128-0856): a refresh re-signs
+    # against CURRENT hashes, so refuse outside an attested session (no unpinned mints).
+    from rebar.llm.config import current_code_sha as _current_code_sha
+
+    refreshed_at_sha = _current_code_sha()
+    if not refreshed_at_sha:
+        raise signing.SigningError(
+            "refusing to drift-refresh a plan-review attestation with no attested snapshot "
+            "(verified_at_sha would be None) — run `rebar review-plan` from an attested gate"
+        )
     manifest = build_manifest(
         fields,
         material=manifest_material(prior_manifest) or "",
         deps=new_deps,
         regver=registry_version(repo_root),
         refreshed_from=f"{prior_digest} probe={probe}",
+        verified_at_sha=refreshed_at_sha,
         pins=snapshot.related_material,
         review_phase=manifest_review_phase(prior_manifest),
         priority_floor=manifest_priority_floor(prior_manifest),
@@ -667,11 +688,8 @@ def compute_validity(
         if profile is PlanValidityProfile.DEFAULT:
             deps = manifest_deps(auth_manifest)
             if deps:
-                # Re-hash at the CURRENT gate ref, NOT at the signature's own pinned
-                # ``verified_at_sha`` — that compared the manifest against the immutable
-                # tree it was generated from, which always matched, so scoped drift was
-                # structurally undetectable in attested mode (bug 72d9). The signed hashes
-                # stay pinned at the review's SHA; only the comparison basis moves.
+                # Re-hash at the CURRENT gate ref, NOT the signature's own pinned SHA —
+                # that tautology made scoped drift undetectable in attested mode (72d9).
                 base = _hash_basis(repo_root, at_current_gate_ref=True)
                 drifted = [
                     p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
