@@ -116,6 +116,20 @@ def sign_plan_review(
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
+    # THE no-null-pin invariant (bug 5128-0856 melancholy-firstborn-shihtzu): a signature
+    # asserts "this plan was reviewed against THIS committed tree", so every NEW attestation
+    # must bind a real verified_at_sha. An unattested (local / no-gate-session) basis has no
+    # committed tree to name — signing from it is what let a dirty worktree mint a
+    # claim-valid attestation. Enforced at this single seam so every signer (review_plan,
+    # sign-review/resign, drift refresh) inherits it; pre-S4b attestations already in stores
+    # remain readable (legacy tolerance lives on the verify side, not here).
+    if not current_code_sha():
+        raise SigningError(
+            "refusing to sign a plan-review attestation with no attested snapshot "
+            "(verified_at_sha would be None): only an attested, committed basis is "
+            "certifiable — a local-source review never signs (ADR 0005)"
+        )
+
     from . import registry
     from . import relation_snapshot as relation_snapshot_module
 
@@ -401,12 +415,28 @@ def refresh_attestation(
         fields["coverage"]["disabled_builtins"] = disabled
     prior_digest = signing.verify_signature(ticket_id, repo_root=repo_root).get("key_id", "?")
     new_deps = _rehash(manifest_deps(prior_manifest).keys(), repo_root=repo_root)
+    # Same no-null-pin invariant as sign_plan_review (bug 5128-0856): a refresh re-binds the
+    # prior verdict to the CURRENT hashes, so it must also name the committed tree those
+    # hashes came from. A drift refresh only runs inside an attested review session, so the
+    # active snapshot SHA is present; refusing (rather than silently minting an unpinned
+    # attestation) keeps the refresh path from being the loophole the sign path closed.
+    from rebar.llm.config import current_code_sha as _current_code_sha
+
+    refreshed_at_sha = _current_code_sha()
+    if not refreshed_at_sha:
+        from rebar.signing import SigningError
+
+        raise SigningError(
+            "refusing to drift-refresh a plan-review attestation with no attested snapshot "
+            "(verified_at_sha would be None) — run `rebar review-plan` from an attested gate"
+        )
     manifest = build_manifest(
         fields,
         material=manifest_material(prior_manifest) or "",
         deps=new_deps,
         regver=registry_version(repo_root),
         refreshed_from=f"{prior_digest} probe={probe}",
+        verified_at_sha=refreshed_at_sha,
         pins=snapshot.related_material,
         review_phase=manifest_review_phase(prior_manifest),
         priority_floor=manifest_priority_floor(prior_manifest),

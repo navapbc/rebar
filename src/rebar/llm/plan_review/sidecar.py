@@ -60,6 +60,7 @@ def emit(
     review_phase: object = "planning",
     priority_floor: object = None,
     repo_root=None,
+    source: str | None = None,
 ) -> bool:
     """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict, then prune
     to the retention bound. Returns True on success, False on any failure (the sidecar
@@ -76,6 +77,7 @@ def emit(
             review_phase=review_phase,
             priority_floor=priority_floor,
             repo_root=repo_root,
+            source=source,
         )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the review
@@ -494,6 +496,7 @@ def build_payload(
     review_phase: object = "planning",
     priority_floor: object = None,
     repo_root=None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates
@@ -598,6 +601,13 @@ def build_payload(
         # sidecar-branch precondition (fail-safe).
         "verified_at_sha": _baseline_sha,
         "regver": _baseline_regver,
+        # The resolved gate source (attested|local) of the review that produced this
+        # payload (bug 5128-0856): sign-review/resign refuses to re-certify a local-source
+        # PASS, and verified_at_sha above cannot carry that signal — review_code_sha falls
+        # back to the committed git HEAD exactly in local mode. None on legacy payloads
+        # (emitted before this field existed) and on callers that do not resolve a gate
+        # handle; resign treats only an explicit "local" as refusing.
+        "source": source,
         "model": verdict.get("model"),
         "runner": verdict.get("runner"),
         # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage for

@@ -472,6 +472,19 @@ the specific reason (`stale-code` / `stale-head`, `stale-material`,
 (the pinned `verified-at-sha` for a `--source attested` review, else the signed HEAD). The
 library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_check`).
 
+**`--source local` never signs.** A local review reads the in-place checkout — uncommitted
+edits included — so its PASS is real feedback but is **not certifiable**: it carries
+`signature.signed=false` with the machine-readable reason `local-source-never-signs`, the
+claim gate stays unsatisfied, and `rebar sign-review` refuses to re-certify a local-source
+PASS from the sidecar (the sidecar records the resolved `source` for exactly this refusal).
+The invariant behind the rule: **no new signed attestation may carry a null
+`verified-at-sha`** — a signature asserts the plan was reviewed against a specific committed
+tree, which a dirty worktree cannot name. Enforced once at the signing seam
+(`attest.sign_plan_review`), so the review, recovery (`sign-review`), and drift-refresh
+paths all inherit it (ADR 0005; bug `melancholy-firstborn-shihtzu`). Pre-existing unpinned
+(pre-S4b) attestations remain readable. To review-and-sign offline, use the attested source
+with a local ref instead: `--ref HEAD` resolves from the local object DB with no network.
+
 **The currency rule, as one expression.** An attestation is current iff **all** of: it is
 HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped: the
 per-dependency hashes signed at the review's pinned SHA, re-hashed at a snapshot of the
