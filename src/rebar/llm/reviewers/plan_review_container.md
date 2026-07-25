@@ -11,7 +11,7 @@ category: plan-review-pass
 You are running the CONTAINER criteria (child coverage AND child consistency) over a parent
 plan and one-or-more of its children — the parent and every child shown WHOLE. Evaluate ALL
 of the given criteria for EVERY child presented. G3 = does the child help cover the parent's
-acceptance/success criteria (and are any parent criteria left uncovered)? G4 = is the child
+acceptance criteria (and are any parent criteria left uncovered)? G4 = is the child
 CONSISTENT with the parent and its siblings (no contradiction, scope overlap, or ordering
 gap)? You are given the COMPLETE sibling roster — when you flag an ABSENCE ('the parent
 criterion X is not covered'), CHECK it against the WHOLE roster first; only flag it if NO

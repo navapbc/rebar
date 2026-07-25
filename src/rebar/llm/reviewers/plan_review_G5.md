@@ -16,7 +16,7 @@ independently-valuable / independently-releasable OUTCOME, carries more than one
 change" (a distinct actor/persona/concern), or MIXES heterogeneous change kinds (e.g. a
 bug-fix AND a new feature AND an unrelated refactor). For an epic/parent that means it should
 have children; the tell is a structural 'and' joining genuinely independent goals, spanning
-independent personas, or a set of unrelated success criteria.
+independent personas, or a set of unrelated acceptance criteria.
 
 VALUE-PRESERVATION (a decomposition finding must satisfy this to stand). A unit is right-sized
 as one piece when it delivers a SINGLE increment of value whose parts would be tightly coupled,
