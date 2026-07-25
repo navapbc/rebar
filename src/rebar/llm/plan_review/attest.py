@@ -173,10 +173,10 @@ def sign_plan_review(
     return sig
 
 
-def _rehash(paths, *, repo_root=None, pinned_sha: str | None = None) -> dict[str, str]:
+def _rehash(paths, *, repo_root=None) -> dict[str, str]:
     """Re-hash the given dependency paths through the shared :func:`_hash_basis` boundary
-    (the pinned-SHA snapshot when given, else the active snapshot / working tree)."""
-    base = _hash_basis(repo_root, pinned_sha=pinned_sha)
+    (the active snapshot during a gate run, else the working tree)."""
+    base = _hash_basis(repo_root)
     return {p: _hash_file(p, base=base) for p in sorted(paths)}
 
 
@@ -667,8 +667,12 @@ def compute_validity(
         if profile is PlanValidityProfile.DEFAULT:
             deps = manifest_deps(auth_manifest)
             if deps:
-                pinned = signing.verified_at_sha_from_manifest(auth_manifest)
-                base = _hash_basis(repo_root, pinned_sha=pinned)
+                # Re-hash at the CURRENT gate ref, NOT at the signature's own pinned
+                # ``verified_at_sha`` — that compared the manifest against the immutable
+                # tree it was generated from, which always matched, so scoped drift was
+                # structurally undetectable in attested mode (bug 72d9). The signed hashes
+                # stay pinned at the review's SHA; only the comparison basis moves.
+                base = _hash_basis(repo_root, at_current_gate_ref=True)
                 drifted = [
                     p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
                 ]

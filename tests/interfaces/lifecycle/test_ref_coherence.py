@@ -1,10 +1,16 @@
-"""S4b — claim-gate <-> plan-review ref-resolution coherence (epic raze-vet-ditch).
+"""S4b — claim-gate <-> plan-review ref-resolution coherence (epic raze-vet-ditch,
+amended by bug 72d9 ``athletic-esthetical-polecat``).
 
-Plan-review hashes its file_impact dependency map AT a ref basis; the claim-gate freshness
-re-check must hash those paths at the SAME basis or it re-introduces the staleness
-false-positive ADR 0002 prevents. This proves both sides resolve through the ONE shared
-boundary (`attest._hash_basis`) at the SAME pinned-SHA — and that the back-out (a local
-attestation, no pin) cleanly falls back to the working-tree basis on both sides.
+Plan-review hashes its file_impact dependency map AT the review's pinned snapshot; the
+claim-gate freshness re-check hashes those paths at the CURRENT gate ref. Both resolve
+through the ONE shared boundary (`attest._hash_basis`) with the same semantics — a
+committed snapshot under the same gate configuration — which is what prevents the
+staleness false-positive ADR 0002 exists for (a mere working-tree edit, or an unrelated
+commit, must not invalidate). They must NOT resolve to the identical tree: re-hashing at
+the signature's own ``verified_at_sha`` compared the manifest against the very tree it
+was generated from, which always matched, so scoped drift was structurally undetectable
+in attested mode (bug 72d9). The back-out (a configured ``source=local`` gate) falls
+back to the working-tree basis on both sides.
 """
 
 from __future__ import annotations
@@ -63,19 +69,52 @@ def _sign(repo: Path, tid: str, *, attested: bool):
 
 
 # --------------------------------------------------------------------------------------
-# AC1/AC2 — both sides hash at the SAME pinned-SHA basis (guards whole-HEAD divergence)
+# AC1/AC2 — both sides hash committed snapshots (guards working-tree divergence), while a
+# committed change to a signed dependency IS visible (guards the 72d9 tautology)
 # --------------------------------------------------------------------------------------
-def test_attested_claim_gate_hashes_pinned_sha_not_drifted_working_tree(tmp_path, monkeypatch):
+def test_attested_claim_gate_ignores_uncommitted_working_tree_drift(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
     _sign(repo, tid, attested=True)
 
-    # Drift the WORKING TREE away from origin/main (the pinned snapshot still says v1).
+    # Drift the WORKING TREE only (the current gate ref still says v1).
     (repo / "dep.py").write_text("DRIFTED = 999\n")
 
     chk = attest.claim_gate_check(tid, repo_root=str(repo))
-    # The claim gate re-hashes at the PINNED snapshot (same basis plan-review signed) — so a
-    # mere working-tree drift does NOT produce a false stale-code. Both sides agree.
+    # The claim gate re-hashes at the CURRENT gate ref's snapshot — a mere working-tree
+    # edit moves neither side, so no false stale-code. This is the S4b property we keep.
+    assert chk["verdict"] != "stale-code", chk
+    assert chk["ok"] is True, chk
+
+
+def test_attested_claim_gate_sees_committed_drift_in_signed_dependency(tmp_path, monkeypatch):
+    """The 72d9 regression pin: signed hashes stay at the review's pinned SHA, the gate
+    re-hashes at the current ref — so a LANDED change to a reviewed file invalidates."""
+    repo = _repo(tmp_path, monkeypatch)
+    tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
+    _sign(repo, tid, attested=True)
+
+    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    _git(repo, "add", "dep.py")
+    _git(repo, "commit", "-q", "-m", "dep v2")  # the attested basis (ref=HEAD) moved
+
+    chk = attest.claim_gate_check(tid, repo_root=str(repo))
+    assert chk["verdict"] == "stale-code", chk
+    assert chk["ok"] is False, chk
+
+
+def test_attested_claim_gate_ignores_unrelated_committed_change(tmp_path, monkeypatch):
+    """The worm-folly-barge property scoping exists for: an unrelated commit moves the
+    gate ref but not the signed dependency's content — the attestation stays valid."""
+    repo = _repo(tmp_path, monkeypatch)
+    tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
+    _sign(repo, tid, attested=True)
+
+    (repo / "unrelated.py").write_text("OTHER = 1\n")
+    _git(repo, "add", "unrelated.py")
+    _git(repo, "commit", "-q", "-m", "unrelated")
+
+    chk = attest.claim_gate_check(tid, repo_root=str(repo))
     assert chk["verdict"] != "stale-code", chk
     assert chk["ok"] is True, chk
 
@@ -92,18 +131,19 @@ def test_attested_pin_recorded_in_signature(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------------------
-# AC4 — back-out: a local attestation (no pin) hashes the working tree on BOTH sides
+# AC4 — back-out: a configured local gate hashes the working tree on BOTH sides
 # --------------------------------------------------------------------------------------
-def test_local_attestation_uses_working_tree_basis_on_both_sides(tmp_path, monkeypatch):
+def test_local_gate_config_uses_working_tree_basis_on_both_sides(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")  # the documented back-out
     tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
     _sign(repo, tid, attested=False)  # local: working-tree basis, no verified-at-sha pin
     from rebar import signing
 
     v = rebar.verify_signature(tid, repo_root=str(repo))
     assert signing.verified_at_sha_from_manifest(v["manifest"]) is None
-    # No pin → the claim gate falls back to the working tree (prior per-site behavior). A
-    # working-tree drift therefore DOES register as stale-code (coherent: both used the tree).
+    # A local-configured gate re-hashes the working tree (pre-S4b behavior), so a
+    # working-tree drift DOES register as stale-code (coherent: both sides used the tree).
     (repo / "dep.py").write_text("DRIFTED = 999\n")
     chk = attest.claim_gate_check(tid, repo_root=str(repo))
     assert chk["verdict"] == "stale-code", chk
@@ -121,8 +161,19 @@ def test_hash_basis_resolution(tmp_path, monkeypatch):
     # active attested code root → that snapshot
     with use_code_root("/some/snap"):
         assert attest._hash_basis(str(repo)) == "/some/snap"
-    # pinned_sha → the materialized snapshot at that SHA
+    # at_current_gate_ref + attested config → the materialized snapshot at the gate ref
     main_sha = _git(repo, "rev-parse", "origin/main")
-    basis = attest._hash_basis(str(repo), pinned_sha=main_sha)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
+    monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
+    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
     assert basis.endswith(main_sha)
     assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
+    # at_current_gate_ref + local config → the working tree (the documented back-out)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    assert basis == str(rebar.config.repo_root(str(repo)))
+    # at_current_gate_ref + an unresolvable ref → degrade to the working tree (never crash)
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
+    monkeypatch.setenv("REBAR_GATE_REF", "no-such-ref")
+    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    assert basis == str(rebar.config.repo_root(str(repo)))

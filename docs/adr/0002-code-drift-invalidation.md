@@ -104,20 +104,34 @@ re-check (this ADR) re-hashes those paths at another. If the two resolved the re
 plan-review at the pinned-SHA snapshot, the claim gate at whole-HEAD / the working tree — they
 would disagree and re-introduce the staleness false-positive this ADR exists to prevent.
 
-**Consolidation.** There is now exactly ONE shared ref-resolution boundary,
-`rebar.llm.plan_review.attest._hash_basis(repo_root, *, pinned_sha=None)`, that BOTH consumers
-resolve through (the Rule-of-Three is satisfied by the two consumers + the concrete divergence
-risk, not speculative generality):
+**Consolidation** *(amended by bug 72d9 `athletic-esthetical-polecat` — see below)*. There is
+now exactly ONE shared ref-resolution boundary,
+`rebar.llm.plan_review.attest._hash_basis(repo_root, *, at_current_gate_ref=False)`, that BOTH
+consumers resolve through (the Rule-of-Three is satisfied by the two consumers + the concrete
+divergence risk, not speculative generality):
 
 - **plan-review signing** (`dependency_hashes` / `_rehash`) hashes at the active attested snapshot
   (S3's context-local code root) and records the snapshot SHA in the signed manifest as a
   `verified-at-sha:<sha>` step (the same channel S4 uses — no payload/version change).
-- **the claim gate** (`claim_gate_check`) reads that pinned `verified_at_sha` back out of the
-  signed manifest and re-hashes the dependency paths at the SAME SHA's snapshot — so the two
-  bases are identical by construction.
+- **the claim gate** (`claim_gate_check`) re-hashes the dependency paths at a snapshot of the
+  **current gate ref** (`REBAR_GATE_REF` / `[snapshot].ref` / `origin/main`, resolved from the
+  local object DB with no network) and compares against the manifest's pinned hashes.
 
-**Back-out.** A plan-review signed in `local` mode (or any pre-S4b attestation) carries no
-`verified-at-sha` step; `_hash_basis` then resolves BOTH sides to the in-place checkout, exactly
-the per-site working-tree behavior that predated this consolidation. Reverting is therefore a
-no-op rollback (drop the pin → both fall back to the working tree); the per-path map contract and
-the material-fingerprint binding are untouched.
+The boundary's guarantee is that both sides resolve with the SAME **semantics** — a committed
+snapshot under the same gate configuration — never a possibly-dirty working tree on one side
+and a snapshot on the other. It must NOT make the two bases **identical**: the original S4b
+consolidation had the claim gate re-hash at the signature's own pinned `verified_at_sha`,
+which compared the manifest against the immutable tree it was generated from. That comparison
+always matched, so scoped drift was structurally undetectable in attested mode — the
+production default (bug 72d9, `athletic-esthetical-polecat`). With the amended basis, a signed
+dependency file that changed between the review's pinned SHA and the current gate ref
+registers as drift, while an unrelated commit still does not (per-path content comparison —
+the anti-false-positive property this ADR exists for). An uncommitted working-tree edit moves
+neither side, so the S4b false-positive protection is preserved.
+
+**Back-out.** A configured `source=local` gate — or a gate ref/snapshot that cannot be
+resolved — degrades the claim-gate basis to the in-place checkout, exactly the per-site
+working-tree behavior that predated this consolidation (the conservative direction: the
+checkout normally contains the drift). A pre-S4b attestation carries no `verified-at-sha`
+step; it still verifies, with its signed hashes compared against the same current-gate-ref
+basis. The per-path map contract and the material-fingerprint binding are untouched.
