@@ -10,6 +10,11 @@ Environment variables (all optional; sensible defaults):
   REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``); the runner is the
                           provider-agnostic pydantic_ai runtime (``fake`` is test-only,
                           reachable only via the library ``runner=`` arg).
+  REBAR_LLM_MODEL_PROVIDER  override provider inference (``anthropic``/``openai``/``google_genai``)
+  REBAR_LLM_BASE_URL      OpenAI-compatible endpoint (LiteLLM/vLLM/Ollama/proxy); routes the
+                          model through a Pydantic AI OpenAIProvider (needs the ``openai`` extra)
+  REBAR_LLM_API_KEY       key for the OpenAI-compatible endpoint (a dummy value for no-auth
+                          local servers); only honored alongside REBAR_LLM_BASE_URL
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
                           50 ~= 25 tool calls).

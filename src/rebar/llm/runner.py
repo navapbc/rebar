@@ -39,6 +39,7 @@ from rebar.llm.errors import (
     StructuredOutputError,
     UnretryableOutputError,
 )
+from rebar.llm.openai_model import build_openai_compatible_model
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +266,11 @@ class PydanticAIRunner:
         # The retrying httpx.AsyncClient to close on teardown (story arcticduck); None on the
         # non-anthropic / model_override paths, which build no client here.
         _http_client = None
-        if self._model_override is None and resolved.startswith("anthropic"):
+        if self._model_override is None and cfg.base_url:
+            # Checked before provider inference so REBAR_LLM_BASE_URL wins for any model id.
+            _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
+            model = build_openai_compatible_model(_name, cfg=cfg)
+        elif self._model_override is None and resolved.startswith("anthropic"):
             # ONE unified construction for ANY anthropic model (normal AND loopback-bypass):
             # both get the retrying transport with SDK max_retries=0. `_direct` (None on the
             # normal path) only varies the base_url. Before this, the normal path let
@@ -313,7 +318,9 @@ class PydanticAIRunner:
         # resolved anthropic provider and applied at THIS shared seam only — no
         # RunRequest content-list change, so the structured-output retry path is
         # untouched. A test model_override is non-anthropic, so caching is off there.
-        cache_settings = _anthropic_cache_settings(resolved if not self._model_override else "")
+        cache_settings = _anthropic_cache_settings(
+            resolved if not self._model_override and not cfg.base_url else ""
+        )
         # Wire the configured OUTPUT cap into the call. cfg.max_tokens was previously DROPPED
         # (only the cache flags were sent as model_settings), so pydantic-ai fell back to its
         # max_tokens=4096 default — far too small for a multi-child container review, whose
@@ -393,7 +400,8 @@ class PydanticAIRunner:
                 usage = _extract_usage(run_result)
             else:
                 structured, usage = _pai_structured(
-                    Agent, model, resolved, req, kwargs, usage_limits
+                    Agent, model, resolved, req, kwargs, usage_limits,
+                    force_prompted=bool(cfg.base_url),
                 )
                 outcome = {"structured_response": structured}
             # Agent-build invariant (story anole): telemetry warning on a REAL run whose
@@ -527,7 +535,10 @@ def _import_pydantic_ai():
 _FAULTY_OUTPUT_SNIPPET_CHARS = 2000
 
 
-def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits):
+def _pai_structured(
+    Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits, *,
+    force_prompted: bool = False,
+):
     """Obtain a validated structured object via the reliability stack (1268).
 
     NATIVE path: where the provider enforces a strict json_schema (output_mode ->
@@ -543,7 +554,9 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     from rebar.llm import contracts, structured
 
     model_cls = contracts.response_model_for(req.output_schema)
-    mode_obj = structured.output_mode(model_cls, resolved, thinking=req.thinking)
+    mode_obj = structured.output_mode(
+        model_cls, resolved, thinking=req.thinking, force_prompted=force_prompted
+    )
     if isinstance(mode_obj, NativeOutput):
         agent = Agent(
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
@@ -651,18 +664,26 @@ def _extract_usage(run_result) -> dict[str, int]:
 
 
 def _pai_check_config(cfg: LLMConfig) -> None:
-    """Refuse, LOUDLY, config this runner does not yet honour rather than silently
-    dropping it. The Pydantic AI runner picks the model purely from the model string,
-    so an explicit ``base_url`` / ``api_key`` (OpenAI-compatible local servers) would
-    be silently ignored — a real capability gap. Fail with a clear message until it is
-    wired through a Pydantic AI provider object."""
-    unsupported = [k for k in ("base_url", "api_key") if getattr(cfg, k, None)]
-    if unsupported:
+    """Validate the OpenAI-compatible endpoint config (``REBAR_LLM_BASE_URL`` /
+    ``REBAR_LLM_API_KEY``). ``base_url`` (with an optional ``api_key``) is honored: the
+    runner binds it to a Pydantic AI ``OpenAIProvider`` (``openai_model``). An ``api_key``
+    WITHOUT a ``base_url`` is ambiguous (the direct-OpenAI path reads ``OPENAI_API_KEY``),
+    so it is refused rather than silently dropped."""
+    if cfg.api_key and not cfg.base_url:
         raise LLMConfigError(
-            f"the pydantic_ai runner does not yet support {unsupported} "
-            f"(OpenAI-compatible local-server config); omit these settings. "
-            f"Not silently ignored."
+            "REBAR_LLM_API_KEY is set without REBAR_LLM_BASE_URL: the api_key is only honored "
+            "for an OpenAI-compatible endpoint. Set REBAR_LLM_BASE_URL, or use OPENAI_API_KEY "
+            "for the direct OpenAI provider. Not silently ignored."
         )
+    if cfg.base_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(cfg.base_url)
+        if not (parsed.scheme and parsed.netloc):
+            raise LLMConfigError(
+                f"REBAR_LLM_BASE_URL={cfg.base_url!r} is not a valid absolute URL "
+                "(expected e.g. http://localhost:4000/v1)."
+            )
 
 
 # Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,

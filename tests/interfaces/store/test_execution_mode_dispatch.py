@@ -67,7 +67,9 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
 
     # Stub the structured path to capture kwargs without a real model/network call.
     # Returns (payload, usage) — the story-0250 contract.
-    def _fake_structured(Agent, model, resolved, req, kwargs, usage_limits):
+    def _fake_structured(
+        Agent, model, resolved, req, kwargs, usage_limits, *, force_prompted=False
+    ):
         captured["tools"] = kwargs.get("tools")
         captured["toolsets"] = kwargs.get("toolsets")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}

@@ -48,7 +48,7 @@ _NATIVE_OUTPUT_PROVIDERS = frozenset({"openai", "google-gla", "google-vertex", "
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
-def output_mode(model_cls, model_str: str, *, thinking: bool = False):
+def output_mode(model_cls, model_str: str, *, thinking: bool = False, force_prompted: bool = False):
     """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
 
     NativeOutput for providers that enforce a strict json_schema; PromptedOutput for
@@ -56,11 +56,13 @@ def output_mode(model_cls, model_str: str, *, thinking: bool = False):
     so it stays compatible with Claude extended thinking, which pydantic_ai's default
     ToolOutput mode is not). ``thinking`` forces PromptedOutput regardless of provider:
     pairing extended thinking with a native/forced output constraint is the documented
-    Anthropic 400, so the prompted mode is the only thinking-compatible choice."""
+    Anthropic 400, so the prompted mode is the only thinking-compatible choice.
+    ``force_prompted`` forces it for an OpenAI-compatible gateway (REBAR_LLM_BASE_URL) whose
+    backend is opaque, so native Structured Outputs cannot be assumed from the model prefix."""
     from pydantic_ai import NativeOutput, PromptedOutput
 
     provider = model_str.split(":", 1)[0] if ":" in model_str else ""
-    if not thinking and provider in _NATIVE_OUTPUT_PROVIDERS:
+    if not thinking and not force_prompted and provider in _NATIVE_OUTPUT_PROVIDERS:
         return NativeOutput(model_cls)
     return PromptedOutput(model_cls)
 

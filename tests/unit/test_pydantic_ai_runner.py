@@ -252,23 +252,16 @@ def test_search_files_skips_vendored_noise(tmp_path):
     assert ".venv" not in out  # the discovery filter prunes vendored dirs
 
 
-def test_unsupported_config_is_a_loud_error():
-    # base_url / api_key are dropped by this runner; surfacing them must FAIL, not
-    # silently ignore (they would otherwise be a silent capability gap).
-    runner = PydanticAIRunner(_cfg(base_url="http://localhost:1234/v1"))
-    with pytest.raises(LLMConfigError, match="base_url"):
-        runner.preflight()
-    runner2 = PydanticAIRunner(_cfg(api_key="sk-local"))
+def test_openai_compatible_config_contract():
+    PydanticAIRunner(_cfg(base_url="http://localhost:1234/v1")).preflight()
+
+    runner = PydanticAIRunner(_cfg(api_key="sk-local"))
     with pytest.raises(LLMConfigError, match="api_key"):
-        runner2.run(
-            RunRequest(
-                system_prompt="x",
-                instructions="y",
-                config=runner2._config,
-                reviewers=["v"],
-                mode="text",
-            )
-        )
+        runner.preflight()
+
+    runner2 = PydanticAIRunner(_cfg(base_url="not-a-url"))
+    with pytest.raises(LLMConfigError, match="BASE_URL"):
+        runner2.preflight()
 
 
 def test_rebar_tools_are_least_privilege():
@@ -364,7 +357,9 @@ def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved,
 
     captured: dict = {}
 
-    def _fake_structured(Agent, model, resolved_, req, kwargs, usage_limits):
+    def _fake_structured(
+        Agent, model, resolved_, req, kwargs, usage_limits, *, force_prompted=False
+    ):
         captured["model_settings"] = kwargs.get("model_settings")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
@@ -407,7 +402,9 @@ def _capture_model_settings(monkeypatch, cfg):
 
     captured: dict = {}
 
-    def _fake_structured(Agent, model, resolved_, req, kwargs, usage_limits):
+    def _fake_structured(
+        Agent, model, resolved_, req, kwargs, usage_limits, *, force_prompted=False
+    ):
         captured["model_settings"] = kwargs.get("model_settings")
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
