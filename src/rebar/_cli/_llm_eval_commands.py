@@ -108,7 +108,10 @@ def _criteria(argv: list[str]) -> int:
     )
     subparsers = parser.add_subparsers(dest="cmd")
     p_eval = subparsers.add_parser("eval", help="run a criterion's calibration fixtures live")
-    p_eval.add_argument("criterion_id", help="criterion id (e.g. F1, project.no_print)")
+    p_eval.add_argument(
+        "criterion_id",
+        help="criterion id (e.g. F1, project.no_print; code-review: project.foo)",
+    )
     p_eval.add_argument(
         "--runs", type=int, default=1, help="N-run stability: runs per fixture (default 1)"
     )
@@ -140,11 +143,20 @@ def _criteria_eval(args) -> int:
     except Exception:  # noqa: BLE001 — not in a repo — fall open to repo_root=None
         repo_root = None
 
-    # Reject an unknown criterion up front (before touching fixtures) with a clear message.
+    # Reject an unknown or cross-gate-ambiguous criterion up front (before touching fixtures).
     try:
-        from rebar.llm.plan_review import registry
+        from rebar.llm.code_review import registry as code_review_registry
+        from rebar.llm.plan_review import registry as plan_review_registry
 
-        if args.criterion_id not in registry.by_id(repo_root):
+        active_plan_review = args.criterion_id in plan_review_registry.by_id(repo_root)
+        active_code_review = args.criterion_id in code_review_registry.effective_criteria(repo_root)
+        if active_plan_review and active_code_review:
+            sys.stderr.write(
+                f"Error: ambiguous criterion {args.criterion_id!r} is active in both "
+                "plan_review and code_review\n"
+            )
+            return 1
+        if not (active_plan_review or active_code_review):
             sys.stderr.write(
                 f"Error: unknown criterion {args.criterion_id!r} (not in the effective registry; "
                 "activate a project criterion in .rebar/criteria_routing.json first)\n"
