@@ -417,8 +417,11 @@ def review_plan(
     signs a plan-review attestation (so a subsequent ``claim`` passes the gate).
 
     Returns ``{verdict: PASS|BLOCK|INDETERMINATE, ticket_id, ticket_type, blocking[],
-    advisory[], coaching[], indeterminate[], coverage, signature?, ...}``. Bugs and
-    session_logs are exempt (PASS, runner=exempt). Raises only on a hard
+    advisory[], coaching[], indeterminate[], coverage, signature?, ...}``. ``session_log`` /
+    ``code_review`` / ``identity`` short-circuit to a bare exempt PASS (``runner=exempt``, no
+    review runs). A ``bug`` does NOT: since the bug review tier (epic 6982/R4) it gets a light
+    advisory review — the DET floor plus the restricted ``BUG_TIER_CRITERIA`` probe — that can
+    surface advisories but can never BLOCK, so a bug always PASSes. Raises only on a hard
     context-assembly failure; an unavailable LLM degrades to a DET-only review.
 
     A ticket that is not yet claimable (status closed/idea/blocked, or ``open`` but

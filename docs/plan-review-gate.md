@@ -360,8 +360,13 @@ container epics that stand up infrastructure. The **T10 infra** overlay addition
 checks an *endpoint access contract*: any network-reachable service a plan stands up
 must state its human/admin authentication (a named mechanism **or** a justified
 no-auth), independently of the machine credentials (deploy keys/tokens) it configures.
-Separately, **bugs and session_logs are exempt** from the whole gate (a distinct
-exemption axis, not part of container/leaf scrutiny); mechanical/test *leaves* suppress
+Separately, **`session_log` / `code_review` / `identity` tickets are exempt** from the whole
+gate (a distinct exemption axis, not part of container/leaf scrutiny). A **bug is NOT
+exempt**: since the bug review tier (epic 6982/R4) it gets a light advisory review — the DET
+floor plus the restricted `BUG_TIER_CRITERIA` probe — whose findings are always downgraded to
+advisory, so a bug can be coached but never BLOCKED. (A bug still needs no signed attestation
+to be *claimed*; that CLI-side exemption is a separate axis and is unchanged.)
+Mechanical/test *leaves* suppress
 noisy criteria. Overlays fire from
 low-false-positive deterministic triggers where safe (T5a/T5d/T7/T12) and are
 LLM-routed otherwise. **Only the code-grounding set (E4/G1G2/A1/G6) greps the
@@ -570,7 +575,8 @@ PASS`) is emitted **only** on a genuine non-blocking `PASS` where the LLM tier a
 ran — and never on a **degraded** run (one whose coverage carries a `resolution_class`;
 `attest.sign_plan_review` raises `SigningError` rather than certify an abnormal
 resolution) — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
-runner (`bug` / `session_log` tickets, which are exempt from the gate). On every other
+runner (`session_log` / `code_review` / `identity`, which short-circuit the gate entirely; a
+`bug` is reviewed under the bug tier and is NOT exempt here). On every other
 outcome no manifest is signed and **no event is written to the ticket** (the ticket's
 own `signature` stays null), so the start-work gate has nothing to verify and the claim
 is denied.
