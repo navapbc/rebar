@@ -34,9 +34,10 @@ The checks
   the content (or, for a container, a parent+child pairing) exceeds the largest
   configured context window even at one-criterion-per-call ("too big to review in
   full; reduce/decompose it" — the extreme of P4 / G5).
-* **P9 file-impact coverage** — for a LEAF work ticket, warns (advisory, **never
-  blocks**) when ``file_impact`` is empty: without it the code-drift gate (ADR 0002)
-  cannot scope the attestation and falls back to invalidating on any commit.
+* **P9 file-impact coverage** — warns (advisory, **never blocks**) when the drift
+  gate (ADR 0002) cannot scope the attestation: a LEAF with empty ``file_impact``, or
+  a CONTAINER whose child-impact inheritance is poisoned (ticket 3e4b). Lives in
+  :mod:`det_lint` (module-size seam); re-exported here.
 
 The only sound, unambiguous blockers are therefore **P1, P5 (cycle), and P8**.
 Everything else is advisory or coverage-only, consistent with "the DET floor
@@ -56,6 +57,7 @@ from .det_lint import (
     _lint_verify_command,
     _verify_command_strings,
     decomposition_state_block,  # noqa: F401 — re-exported for pass1.py + test_g5_decomp_det
+    p9_file_impact_coverage,  # noqa: F401 — the DET_CHECKS entry; moved for the 800-LOC cap
     veto_undecomposed_g5,  # noqa: F401 — re-exported for pass1.py + test_g5_decomp_det
 )
 
@@ -634,44 +636,6 @@ def p8_reviewability(ctx: PlanContext) -> DetResult:
             "suggested_fix": (
                 "Reduce or decompose the ticket (and/or its children) so the content fits a "
                 "single review pass."
-            ),
-        },
-        coverage=cov,
-    )
-
-
-# ── P9 file-impact coverage (advisory; epic boil-golem-veto / ADR 0002) ──────────
-def p9_file_impact_coverage(ctx: PlanContext) -> DetResult:
-    """Advisory. A LEAF work ticket with no ``file_impact`` cannot have its plan-review
-    attestation scoped to specific files, so the code-drift gate (ADR 0002) falls back
-    to invalidating on ANY commit, and ``next_batch`` cannot schedule it conflict-free.
-    Surfaces a coaching nudge to declare the files; NEVER blocks. Not applicable to
-    containers (anything with children) or non-work types, where ``file_impact`` is
-    legitimately absent — those pass."""
-    fi = ctx.state.get("file_impact") or []
-    # Applicable to any LEAF (no children) — a leaf of any type is a work ticket that
-    # should scope its attestation. Container tickets pass (file_impact legitimately
-    # lives on their children). Bug/session_log are gate-exempt upstream, so they never
-    # reach the DET floor — no ticket-type gate is needed here.
-    applicable = not ctx.children
-    cov = {"ran": True, "file_impact": len(fi), "applicable": applicable}
-    if not applicable or fi:
-        return DetResult("P9", "file-impact-coverage", "pass", coverage=cov)
-    return DetResult(
-        "P9",
-        "file-impact-coverage",
-        "fail",
-        finding={
-            "finding": "No file_impact declared on a leaf work ticket.",
-            "evidence": ["file_impact is empty"],
-            "impact": (
-                "The plan-review attestation cannot be scoped to specific files, so ANY "
-                "commit invalidates it (the conservative code-drift fallback, ADR 0002), "
-                "and next_batch cannot schedule this ticket conflict-free."
-            ),
-            "suggested_fix": (
-                "Record the {path, reason} files this work will touch (e.g. via "
-                "set_file_impact) so the attestation is scoped to them."
             ),
         },
         coverage=cov,

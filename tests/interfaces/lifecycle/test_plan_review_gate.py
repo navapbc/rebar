@@ -1846,3 +1846,126 @@ def test_drift_refreshed_attestation_carries_a_verified_at_sha(rebar_repo: Path)
     ver = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     sha = signing.verified_at_sha_from_manifest(ver["manifest"])
     assert isinstance(sha, str) and sha
+
+
+# ── 3e4b saddened-unadult-snowmonkey: a container's drift scope inherits its direct
+# children's declared file_impact (poison rule; closed children neither add nor poison) ──
+
+
+def _container_with_children(repo: Path, impacts: list) -> tuple[str, list[str]]:
+    """A story with one task child per entry of ``impacts`` (a file_impact list, or None
+    to leave the child undeclared). Returns (parent_id, child_ids)."""
+    parent = rebar.create_ticket("story", "container plan", description=_DESC, repo_root=str(repo))
+    kids = []
+    for i, impact in enumerate(impacts):
+        kid = rebar.create_ticket(
+            "task", f"child {i}", description=_DESC, parent=parent, repo_root=str(repo)
+        )
+        if impact:
+            rebar.set_file_impact(kid, impact, repo_root=str(repo))
+        kids.append(kid)
+    return parent, kids
+
+
+def _signed_deps(tid: str, repo: Path) -> dict:
+    from rebar.llm.plan_review import attest
+
+    v = rebar.verify_signature(tid, repo_root=str(repo))
+    return attest.manifest_deps(v["manifest"])
+
+
+def test_container_dep_set_inherits_the_children_union(rebar_repo: Path) -> None:
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "b.py").write_text("B = 1\n")
+    _commit_all(rebar_repo)
+    _enable(rebar_repo)
+    parent, _kids = _container_with_children(
+        rebar_repo,
+        [[{"path": "a.py", "reason": "r"}], [{"path": "b.py", "reason": "r"}]],
+    )
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    deps = _signed_deps(parent, rebar_repo)
+    assert set(deps) >= {"a.py", "b.py"}, deps
+
+
+def test_container_poison_rule_keeps_the_pre_change_set(rebar_repo: Path) -> None:
+    """One non-closed child with NO file_impact → no inheritance at all: a partial union
+    would be fail-open for exactly the undeclared scope. The empty set falls back to
+    whole-HEAD invalidation (fail-closed), pinned by the claim being blocked after an
+    UNRELATED commit."""
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    _commit_all(rebar_repo)
+    _enable(rebar_repo)
+    parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}], None])
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    assert _signed_deps(parent, rebar_repo) == {}
+    (rebar_repo / "unrelated.py").write_text("U = 1\n")
+    _commit_all(rebar_repo)  # whole-HEAD fallback: ANY landed commit invalidates
+    with pytest.raises(rebar.RebarError):
+        rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))
+    assert _status(parent, rebar_repo) == "open"
+
+
+def test_container_closed_children_neither_contribute_nor_poison(rebar_repo: Path) -> None:
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    _commit_all(rebar_repo)
+    parent, kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}], None])
+    # Close the impact-less child BEFORE the gate is enabled (delivered work).
+    rebar.claim(kids[1], assignee="me", repo_root=str(rebar_repo))
+    rebar.transition(kids[1], "in_progress", "closed", repo_root=str(rebar_repo))
+    _enable(rebar_repo)
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    deps = _signed_deps(parent, rebar_repo)
+    assert "a.py" in deps  # the live child's scope is inherited…
+    # …and the closed child's emptiness did not poison the union back to whole-HEAD.
+    assert deps != {}
+
+
+def test_container_unrelated_commit_does_not_invalidate(rebar_repo: Path) -> None:
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    _commit_all(rebar_repo)
+    _enable(rebar_repo)
+    parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    (rebar_repo / "unrelated.py").write_text("U = 1\n")
+    _commit_all(rebar_repo)
+    rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))  # scoped: claim survives
+    assert _status(parent, rebar_repo) == "in_progress"
+
+
+def test_container_child_declared_file_drift_invalidates(rebar_repo: Path) -> None:
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    _commit_all(rebar_repo)
+    _enable(rebar_repo)
+    parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    (rebar_repo / "a.py").write_text("A = 2  # the child-declared file moved on main\n")
+    _commit_all(rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))
+    assert "drift" in ei.value.stderr.lower()
+    assert _status(parent, rebar_repo) == "open"
+
+
+def test_child_impact_edit_invalidates_the_container_attestation(rebar_repo: Path) -> None:
+    """The self-healing that makes signing-time inheritance sound: a child's file_impact
+    is covered by its material fingerprint, which the container review PINS — so editing
+    it invalidates the container attestation (forcing a re-review that recomputes the
+    union) without any drift machinery involved. The pin check invalidates the CLAIM only
+    under ``verify.enforce_plan_material_pins`` (schema default false; rebar's own project
+    sets it true) — the config pairing the docs recommend alongside inheritance."""
+    from rebar.llm.plan_review import attest
+
+    (rebar_repo / "a.py").write_text("A = 1\n")
+    _commit_all(rebar_repo)
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\nenforce_plan_material_pins = true\n"
+    )
+    parent, kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
+    assert _review(parent, rebar_repo)["signature"]["signed"] is True
+    assert attest.claim_gate_check(parent, repo_root=str(rebar_repo))["ok"] is True
+    rebar.set_file_impact(
+        kids[0], [{"path": "widened.py", "reason": "scope grew"}], repo_root=str(rebar_repo)
+    )
+    chk = attest.claim_gate_check(parent, repo_root=str(rebar_repo))
+    assert chk["ok"] is False, chk

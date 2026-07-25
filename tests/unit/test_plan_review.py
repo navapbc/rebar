@@ -743,11 +743,55 @@ def test_p9_passes_when_file_impact_present() -> None:
     assert r.status == "pass"
 
 
-def test_p9_not_applicable_for_container() -> None:
+def test_p9_container_passes_when_inheritance_is_effective() -> None:
+    # Every non-closed direct child declares file_impact → the container's drift scope
+    # inherits their union (ticket 3e4b), so P9 has nothing to nudge about.
     r = det_floor.p9_file_impact_coverage(
-        _ctx(_GOOD_AC, ttype="story", children=[{"ticket_id": "c1"}])
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {"ticket_id": "c1", "status": "open", "file_impact": [{"path": "a.py"}]},
+                {"ticket_id": "c2", "status": "in_progress", "file_impact": [{"path": "b.py"}]},
+            ],
+        )
     )
-    assert r.status == "pass" and r.coverage["applicable"] is False
+    assert r.status == "pass" and r.coverage["container"] is True
+    assert r.coverage["poisoning_children"] == 0
+
+
+def test_p9_container_advisory_names_poisoning_children() -> None:
+    # A non-closed, impact-less child poisons the inheritance: the container stays on
+    # whole-HEAD invalidation and the advisory names exactly the offending child id.
+    r = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {"ticket_id": "c1", "status": "open", "file_impact": [{"path": "a.py"}]},
+                {"ticket_id": "c2", "status": "open", "file_impact": []},
+            ],
+        )
+    )
+    assert r.status == "fail" and not r.blocking and r.finding  # advisory, never blocks
+    assert "c2" in r.finding["finding"] and "c1" not in r.finding["finding"]
+    assert r.coverage["poisoning_children"] == 1
+
+
+def test_p9_container_closed_children_do_not_poison() -> None:
+    # A CLOSED impact-less child neither contributes nor poisons (delivered work,
+    # ADR 0024): with every live child declaring impact, the container still passes.
+    r = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {"ticket_id": "c1", "status": "open", "file_impact": [{"path": "a.py"}]},
+                {"ticket_id": "c2", "status": "closed", "file_impact": []},
+            ],
+        )
+    )
+    assert r.status == "pass" and r.coverage["poisoning_children"] == 0
 
 
 # NOTE: the bespoke `orchestrator.run_review` path was retired (story B-RETIRE). Its

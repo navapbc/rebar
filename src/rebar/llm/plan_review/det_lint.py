@@ -25,7 +25,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .det_floor import PlanContext
+    from .det_floor import DetResult, PlanContext
 
 
 # ── G5 decomposition signal (store-derived, task spangly-beggarly-blackrhino) ────────
@@ -261,3 +261,80 @@ def _verify_command_strings(ctx: PlanContext) -> list[str]:
             out.append(m.group(1).strip())
         out.extend(re.findall(r"`([^`]+)`", ln))  # backtick-fenced commands
     return out
+
+
+# ── P9 file-impact coverage (advisory; epic boil-golem-veto / ADR 0002) ──────────
+def p9_file_impact_coverage(ctx: PlanContext) -> DetResult:
+    """Advisory. A LEAF work ticket with no ``file_impact`` cannot have its plan-review
+    attestation scoped to specific files, so the code-drift gate (ADR 0002) falls back
+    to invalidating on ANY commit, and ``next_batch`` cannot schedule it conflict-free.
+    A CONTAINER (anything with children) inherits its direct children's declared
+    ``file_impact`` into its signed dependency set (ticket 3e4b) — it passes when that
+    inheritance is effective (every non-closed child declares some) and gets an advisory
+    naming the poisoning child id(s) otherwise. Surfaces coaching nudges only; NEVER
+    blocks."""
+    from .det_floor import DetResult  # lazy: det_floor imports this module at load
+
+    fi = ctx.state.get("file_impact") or []
+    if ctx.children:
+        # CONTAINER (ticket 3e4b): drift scope inherits the DIRECT children's declared
+        # file_impact when every non-closed child declares some (poison rule: a partial
+        # union is fail-open for the undeclared scope). Advisory names the poisoners;
+        # never blocks. ctx.children are already-fetched full states — no extra reads.
+        poisoning = sorted(
+            str(c.get("ticket_id") or "<unknown>")
+            for c in ctx.children
+            if isinstance(c, dict)
+            and c.get("status") != "closed"
+            and not (c.get("file_impact") or [])
+        )
+        cov = {"ran": True, "file_impact": len(fi), "applicable": True, "container": True}
+        cov["poisoning_children"] = len(poisoning)
+        if not poisoning:
+            return DetResult("P9", "file-impact-coverage", "pass", coverage=cov)
+        return DetResult(
+            "P9",
+            "file-impact-coverage",
+            "fail",
+            finding={
+                "finding": (
+                    "Container drift-scope inheritance is poisoned: non-closed child(ren) "
+                    f"with no file_impact: {', '.join(poisoning)}."
+                ),
+                "evidence": [f"{cid}: file_impact is empty" for cid in poisoning],
+                "impact": (
+                    "A container inherits its direct children's declared file_impact into "
+                    "its signed dependency set (ADR 0002 / ticket 3e4b) only when every "
+                    "non-closed child declares some; until then ANY commit invalidates its "
+                    "attestation (whole-HEAD fallback)."
+                ),
+                "suggested_fix": (
+                    "Record {path, reason} file_impact on the named child ticket(s) so the "
+                    "container's attestation scopes to the children's union."
+                ),
+            },
+            coverage=cov,
+        )
+    # LEAF: bug/session_log are gate-exempt upstream, so they never reach the DET floor.
+    cov = {"ran": True, "file_impact": len(fi), "applicable": True}
+    if fi:
+        return DetResult("P9", "file-impact-coverage", "pass", coverage=cov)
+    return DetResult(
+        "P9",
+        "file-impact-coverage",
+        "fail",
+        finding={
+            "finding": "No file_impact declared on a leaf work ticket.",
+            "evidence": ["file_impact is empty"],
+            "impact": (
+                "The plan-review attestation cannot be scoped to specific files, so ANY "
+                "commit invalidates it (the conservative code-drift fallback, ADR 0002), "
+                "and next_batch cannot schedule this ticket conflict-free."
+            ),
+            "suggested_fix": (
+                "Record the {path, reason} files this work will touch (e.g. via "
+                "set_file_impact) so the attestation is scoped to them."
+            ),
+        },
+        coverage=cov,
+    )

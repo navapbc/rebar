@@ -40,6 +40,16 @@ governs only the *code*-drift signal.
 
 5. **Empty dependency set → conservative fallback** (invalidate on any commit), plus a new
    DET-floor advisory (`P9`) nudging authors to populate `file_impact` so scoping works.
+   *(Amended by ticket 3e4b `saddened-unadult-snowmonkey`:)* a **container** additionally
+   inherits the union of its **direct** children's declared `file_impact` into the signed
+   set — with a poison rule (any non-closed child with empty impact disables inheritance,
+   keeping the fallback fail-closed) and closed children neither contributing nor
+   poisoning (ADR 0024). One level deep only: the container review's plan-material pins
+   cover a direct child's `file_impact`, so a child impact edit invalidates the container
+   attestation and the union is recomputed on re-review (claim-blocking under
+   `verify.enforce_plan_material_pins`); no such self-healing exists for grandchildren.
+   `P9` is container-aware: it passes a container with effective inheritance and names the
+   poisoning children otherwise.
 
 ## Consequences
 

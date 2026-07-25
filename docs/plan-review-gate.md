@@ -485,6 +485,20 @@ paths all inherit it (ADR 0005; bug `melancholy-firstborn-shihtzu`). Pre-existin
 (pre-S4b) attestations remain readable. To review-and-sign offline, use the attested source
 with a local ref instead: `--ref HEAD` resolves from the local object DB with no network.
 
+**Containers inherit their children's declared scope.** A container's signed dependency set
+is its own `file_impact` ∪ the review's file citations ∪ the union of its **direct**
+children's declared `file_impact` — so an epic/story attestation is no longer invalidated by
+every unrelated merge merely because containers rarely declare impact themselves. Two rules
+keep this fail-closed: the **poison rule** (any non-closed direct child with an empty
+`file_impact` disables inheritance entirely — a partial union would be fail-open for exactly
+the undeclared scope — and the P9 advisory names the offending children), and **closed
+children neither contribute nor poison** (their delivered files' later churn belongs to other
+tickets, per ADR 0024's completion floor). Inheritance is one level deep by design: the
+container review pins each direct child's material fingerprint (which covers its
+`file_impact`), so a child impact edit invalidates the container attestation and forces the
+union to be recomputed — that self-healing invalidates the **claim** only under
+`verify.enforce_plan_material_pins = true`, the recommended pairing (this project sets it).
+
 **The currency rule, as one expression.** An attestation is current iff **all** of: it is
 HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped: the
 per-dependency hashes signed at the review's pinned SHA, re-hashed at a snapshot of the

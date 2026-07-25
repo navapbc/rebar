@@ -101,6 +101,7 @@ def sign_plan_review(
     repo_root=None,
     relation_snapshot=None,
     initial_generation=None,
+    children: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Sign a non-degraded PASS; refuse every non-certifiable verdict."""
     from rebar.signing import SigningError
@@ -138,7 +139,8 @@ def sign_plan_review(
         )
     )
 
-    deps = dependency_hashes(verdict, repo_root=repo_root)
+    # children = the caller's pre-fetched direct-child states; None → no inheritance (3e4b).
+    deps = dependency_hashes(verdict, repo_root=repo_root, children=children)
     # Stamp disabled built-ins authoritatively at the sign boundary.
     disabled = registry.disabled_builtins(repo_root)
     if disabled:

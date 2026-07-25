@@ -730,6 +730,8 @@ def _run_plan_review(
                 repo_root=repo_root,
                 relation_snapshot=review_snapshot,
                 initial_generation=initial_generation,
+                # A container's dep set inherits the children's file_impact (3e4b).
+                children=ctx.children,
             )
             verdict["signature"] = {
                 "signed": True,

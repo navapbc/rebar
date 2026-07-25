@@ -238,15 +238,60 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
     return active if active else str(_config.repo_root(repo_root))
 
 
-def dependency_hashes(verdict: dict[str, Any], *, repo_root=None) -> dict[str, str]:
+def _inherited_child_impact(children: Sequence[dict[str, Any]] | None) -> set[str]:
+    """The container drift-scope inheritance (ticket 3e4b ``saddened-unadult-snowmonkey``):
+    the union of DIRECT children's declared ``file_impact`` paths, or ``{}`` when
+    inheritance must not apply.
+
+    Pure — operates only on the caller's already-fetched child states (the orchestrator's
+    ``ctx.children``; no store reads, no root ambiguity). Rules:
+
+    * no children / ``None`` (a leaf, or a caller with no assembled context, e.g. the
+      resign recovery path) → ``{}`` — the dep set stays the pre-change own ∪ citations;
+    * POISON RULE: any non-closed child with an empty ``file_impact`` → ``{}`` — a partial
+      union would flip the empty-set whole-HEAD fallback from fail-closed to fail-open for
+      exactly the undeclared scope;
+    * CLOSED children neither contribute nor poison: their work is delivered (ADR 0024's
+      completion floor stops re-litigating it) and their files' later churn belongs to
+      other tickets.
+
+    One-level-deep by design: container reviews pin each direct child's material
+    fingerprint (which covers the child's ``file_impact``), so a child impact edit already
+    invalidates the container attestation and forces a re-review that recomputes this
+    union — the self-healing does NOT extend to grandchildren, so neither does the union."""
+    out: set[str] = set()
+    contributed = False
+    for child in children or []:
+        if not isinstance(child, dict):
+            continue
+        if child.get("status") == "closed":
+            continue
+        paths = [
+            str(entry["path"])
+            for entry in (child.get("file_impact") or [])
+            if isinstance(entry, dict) and entry.get("path")
+        ]
+        if not paths:
+            return set()  # poison: undeclared scope on a live child → whole-HEAD fallback
+        out.update(paths)
+        contributed = True
+    return out if contributed else set()
+
+
+def dependency_hashes(
+    verdict: dict[str, Any], *, repo_root=None, children: Sequence[dict[str, Any]] | None = None
+) -> dict[str, str]:
     """The signed dependency set: ``{path: sha256}`` for the union of the ticket's
-    declared ``file_impact`` and the files the review CITED (``kind=file``), hashed
-    from the working tree. Sorted for reproducible signing. Empty when nothing is
-    declared/cited — the claim gate then falls back to whole-HEAD freshness."""
+    declared ``file_impact``, the files the review CITED (``kind=file``), and — for a
+    container whose non-closed direct children ALL declare ``file_impact`` — the children's
+    union (:func:`_inherited_child_impact`; ticket 3e4b). Sorted for reproducible signing.
+    Empty when nothing is declared/cited/inherited — the claim gate then falls back to
+    whole-HEAD freshness (any commit invalidates), the fail-closed direction."""
     import rebar
 
     ticket_id = verdict.get("ticket_id", "")
     paths: set[str] = set(_cited_paths(verdict))
+    paths.update(_inherited_child_impact(children))
     try:
         for entry in rebar.get_file_impact(ticket_id, repo_root=repo_root) or []:
             p = entry.get("path") if isinstance(entry, dict) else None
