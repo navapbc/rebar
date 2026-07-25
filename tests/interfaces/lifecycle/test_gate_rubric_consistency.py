@@ -1,7 +1,7 @@
 """The per-ticket gates share one heading vocabulary (ticket bandy-name-hilt).
 
 clarity-check and check-ac historically diverged: clarity rewarded a per-type
-heading (## Success Criteria for epics, ## Why/## What for stories) and only gave
+heading (## Acceptance Criteria for epics, ## Why/## What for stories) and only gave
 the Acceptance-Criteria bonus to tasks, while check-ac required a literal
 "## Acceptance Criteria" checklist on EVERY type. So a clarity-perfect epic/story
 without an AC block passed clarity but failed check-ac.
@@ -33,7 +33,7 @@ WELL_FORMED = {
     "task": _FILLER + "\n\n## Notes\nTouches src/rebar/foo.py and tests/test_foo.py.\n" + _AC,
     "story": _FILLER + "\n\n## Why\nContext.\n\n## What\nThe change.\n\n## Scope\nBounded.\n" + _AC,
     "bug": _FILLER + "\n\n## Reproduction Steps\n- run it\n\nExpected X, actual Y.\n" + _AC,
-    "epic": _FILLER + "\n\n## Success Criteria\n- done\n\n## Context\nWhy now.\n" + _AC,
+    "epic": _FILLER + "\n\n## Context\nWhy now.\n" + _AC,
 }
 
 # Same per-type richness but NO Acceptance Criteria block: clarity must now FAIL

@@ -250,7 +250,7 @@ def assemble_diff_context(
 # ── scope-intent: the UNION scope/AC of the commit's rebar-ticket: trailer tickets ───────────
 # Section markers the ticket templates use for scope-bearing prose; we surface these (when
 # present) rather than the whole body, else fall back to the full description. Case-insensitive.
-_SCOPE_HEADINGS = ("## why", "## what", "## scope", "## success criteria", "## acceptance criteria")
+_SCOPE_HEADINGS = ("## why", "## what", "## scope", "## acceptance criteria")
 
 
 def _scope_sections(description: str) -> str:

@@ -214,10 +214,7 @@ def test_child_closure_trust(rebar_repo: Path) -> None:
     parent = rebar.create_ticket(
         "epic",
         "parent",
-        description=(
-            "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n"
-            "## Success Criteria\n- [ ] y\n\n## Context\nc\n"
-        ),
+        description=("Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Context\nc\n"),
         repo_root=str(rebar_repo),
     )
     child = rebar.create_ticket(
@@ -288,10 +285,7 @@ def test_child_closure_gate_short_circuits_before_llm(rebar_repo: Path) -> None:
     parent = rebar.create_ticket(
         "epic",
         "parent",
-        description=(
-            "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n"
-            "## Success Criteria\n- [ ] y\n\n## Context\nc\n"
-        ),
+        description=("Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Context\nc\n"),
         repo_root=str(rebar_repo),
     )
     child = rebar.create_ticket(
@@ -353,7 +347,7 @@ def test_op_result_validates_against_schema(rebar_repo: Path, ttype: str) -> Non
     epic still PASSes here, isolating the schema-shape guarantee from the child-closure rule.)"""
     desc = (
         "Body long enough for the gates.\n\n## Acceptance Criteria\n- [ ] done\n"
-        "\n## Success Criteria\n- [ ] shipped\n\n## Context\nc\n## Reproduction Steps\n- run\n"
+        "\n## Context\nc\n## Reproduction Steps\n- run\n"
     )
     tid = rebar.create_ticket(ttype, f"v {ttype}", description=desc, repo_root=str(rebar_repo))
     # graph=None exercises the auto-default (True for epic, False otherwise).
@@ -420,10 +414,7 @@ def test_graph_auto_default_depends_on_ticket_type(rebar_repo: Path, monkeypatch
     epic = rebar.create_ticket(
         "epic",
         "E",
-        description=(
-            "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n"
-            "## Success Criteria\n- [ ] y\n\n## Context\nc\n"
-        ),
+        description=("Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Context\nc\n"),
         repo_root=str(rebar_repo),
     )
     task = _seed(rebar_repo)
@@ -460,10 +451,7 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
     def rid(t: str) -> str:
         return resolve_ticket_id(t, str(_config.tracker_dir(str(rebar_repo))))
 
-    D = (
-        "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n"
-        "## Success Criteria\n- [ ] y\n\n## Context\nc\n"
-    )
+    D = "Body.\n\n## Acceptance Criteria\n- [ ] x\n\n## Context\nc\n"
     epic = rebar.create_ticket("epic", "E", description=D, repo_root=str(rebar_repo))
     child = rebar.create_ticket("story", "C", parent=epic, description=D, repo_root=str(rebar_repo))
     grandchild = rebar.create_ticket(

@@ -24,9 +24,7 @@ from pathlib import Path
 import rebar
 import rebar.llm
 
-_DESC = (
-    "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n## Success Criteria\n- [ ] x\n\n## Context\nc\n"
-)
+_DESC = "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n## Context\nc\n"
 
 
 def _enable(repo: Path) -> None:
