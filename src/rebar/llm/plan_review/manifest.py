@@ -188,38 +188,50 @@ def _cited_paths(verdict: dict[str, Any]) -> set[str]:
     return out
 
 
-def _hash_basis(repo_root=None, *, pinned_sha: str | None = None) -> str:
-    """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b) that BOTH the
-    plan-review signing-time hashing AND the claim-gate freshness re-check resolve through,
-    so they cannot diverge (whole-HEAD vs pinned-SHA) and re-introduce the staleness
-    false-positive ADR 0002 prevents.
+def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
+    """The ONE shared ref-resolution boundary (epic raze-vet-ditch S4b, amended by bug
+    72d9 ``athletic-esthetical-polecat``) that BOTH the plan-review signing-time hashing
+    AND the claim-gate freshness re-check resolve through. The S4b guarantee is that the
+    two sides resolve with the SAME semantics (a committed snapshot under the same gate
+    configuration) — NOT that they resolve to the identical tree: re-hashing at the
+    signature's own pinned ``verified_at_sha`` compared the manifest against the immutable
+    tree it was generated from, which always matched, making scoped drift structurally
+    undetectable in attested mode (bug 72d9).
 
     Resolution (single source):
-      * ``pinned_sha`` given (the claim gate, reading the signature's ``verified_at_sha``) →
-        the materialized snapshot at that SHA (a cache hit when the review's snapshot is
-        still warm; a local ``read-tree`` otherwise — no network when the objects are
-        present). If it cannot be materialized, degrade to the working tree (the gate then
-        fails CLOSED on any drift — the conservative direction).
+      * ``at_current_gate_ref`` (the claim-gate freshness re-check) → the materialized
+        snapshot at the CURRENT gate ref (``REBAR_GATE_REF`` / ``[snapshot].ref`` /
+        ``origin/main``), resolved from the LOCAL object DB (no network — drift visibility
+        is as fresh as the last fetch). Signed hashes were produced at the review's pinned
+        SHA, so a signed dependency file that changed between that SHA and the current ref
+        registers as drift, while an unrelated commit still does not (the per-path scoping
+        ADR 0002 exists for). A configured ``source=local`` gate — or a ref/snapshot that
+        cannot be resolved — degrades to the in-place checkout (the pre-S4b behavior; the
+        conservative direction, since the checkout normally contains the drift).
       * else the active attested gate snapshot (``current_code_root``, set during an attested
-        ``review_plan``) → the same snapshot the signature was produced against.
+        ``review_plan``) → the tree the signature is being produced against.
       * else the in-place checkout (``_config.repo_root``) — the local / back-out basis.
 
-    BACK-OUT: a plan-review signed in local mode (or pre-S4b) carries no ``verified_at_sha``;
-    both sides then resolve to the working tree exactly as before this consolidation."""
+    Legacy tolerance: an attestation with no ``verified_at_sha`` (pre-S4b) still verifies —
+    its signed hashes are simply compared against the same current-gate-ref basis."""
     from rebar import config as _config
 
-    if pinned_sha:
+    if at_current_gate_ref:
         try:
             from rebar._snapshot import cache as _cache
+            from rebar._snapshot.repo_snapshot import resolve_ref
+            from rebar.llm import gate_source
 
-            handle = _cache.acquire(
-                pinned_sha, source_mode="attested", repo_root=repo_root, fetch=False
-            )
-            return str(handle.path)
-        except Exception:  # noqa: BLE001 — snapshot unavailable → degrade to the working tree (never crash the gate)
+            root = str(_config.repo_root(repo_root))
+            if gate_source.default_source(root) == gate_source.SOURCE_ATTESTED:
+                sha = resolve_ref(gate_source.default_ref(root), root, fetch=False)
+                handle = _cache.acquire(sha, source_mode="attested", repo_root=root, fetch=False)
+                return str(handle.path)
+        except Exception:  # noqa: BLE001 — gate-ref snapshot unavailable → degrade to the working tree (never crash the gate)
             logger.warning(
-                "snapshot for pinned sha %s unavailable; hashing the working tree", pinned_sha
+                "current gate-ref snapshot unavailable; hashing the working tree", exc_info=True
             )
+        return str(_config.repo_root(repo_root))
     from rebar.llm.config import current_code_root
 
     active = current_code_root()

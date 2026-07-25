@@ -578,6 +578,12 @@ def test_review_ticket_end_to_end(rebar_repo: Path) -> None:
 
     epic = _seed(rebar_repo)
     (rebar_repo / "app.py").write_text("import os\nKEY='x'\n", encoding="utf-8")
+    # COMMIT it: the gate reads the attested snapshot at HEAD (suite default), so the cited
+    # file must be in the committed tree for citation resolution to keep kind="file".
+    subprocess.run(["git", "add", "app.py"], cwd=rebar_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "app"], cwd=rebar_repo, check=True, capture_output=True
+    )
     runner = llm.FakeRunner(
         findings=[
             {

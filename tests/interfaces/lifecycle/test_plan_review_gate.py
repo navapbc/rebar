@@ -119,6 +119,23 @@ def _commit(repo: Path) -> None:
     )
 
 
+def _commit_all(repo: Path) -> None:
+    """STAGE the working tree, then commit — as opposed to :func:`_commit`, which makes an
+    empty commit purely to advance HEAD.
+
+    The gates read an ATTESTED snapshot of a committed tree (see the suite-wide default in
+    ``tests/conftest.py``), so file content only exists for a gate once it is committed.
+    Writing a file and calling ``_commit`` would advance HEAD while leaving the content
+    invisible — which is how the drift tests silently passed against the live checkout."""
+    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "c"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+
 def _make(repo: Path, ttype: str = "task", desc: str = _DESC) -> str:
     return rebar.create_ticket(ttype, f"plan {ttype}", description=desc, repo_root=str(repo))
 
@@ -675,6 +692,7 @@ def _scoped(repo: Path, *, dep: str = "dep.py", content: str = "v = 1\n") -> str
     """A claimable, reviewed ticket whose attestation is SCOPED to one dependency
     file (via file_impact). Returns the ticket id; the attestation is signed."""
     (repo / dep).write_text(content)
+    _commit_all(repo)  # the reviewed file must exist in the attested snapshot
     tid = _make(repo)
     rebar.set_file_impact(
         tid, [{"path": dep, "reason": "the code under review"}], repo_root=str(repo)
@@ -689,6 +707,7 @@ def test_code_drift_in_dependency_file_invalidates(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 2  # changed\n")  # drift in the reviewed file
+    _commit_all(rebar_repo)  # drift is what LANDED — the attested basis moved
     with pytest.raises(rebar.RebarError) as ei:
         rebar.claim(tid, repo_root=str(rebar_repo))
     assert "drift" in ei.value.stderr.lower()
@@ -712,6 +731,7 @@ def test_dependency_file_deletion_invalidates(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").unlink()  # deleting a reviewed file is drift
+    _commit_all(rebar_repo)
     with pytest.raises(rebar.RebarError):
         rebar.claim(tid, repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "open"
@@ -745,6 +765,7 @@ def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
     for i in range(30):
         (rebar_repo / f"d{i}.py").write_text(f"x = {i}\n")
         impact.append({"path": f"d{i}.py", "reason": "r"})
+    _commit_all(rebar_repo)  # the reviewed files must be IN the attested basis
     tid = _make(rebar_repo)
     rebar.set_file_impact(tid, impact, repo_root=str(rebar_repo))
     assert _review(tid, rebar_repo)["signature"]["signed"]
@@ -780,6 +801,7 @@ def test_drift_refresh_reuses_on_immaterial_drift(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)  # signed; dep.py hashed into the manifest
     (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")  # drift
+    _commit_all(rebar_repo)
     v = _review(tid, rebar_repo)
     assert v["coverage"].get("drift_refresh") is True
     assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
@@ -794,8 +816,10 @@ def test_refreshed_attestation_rebinds_to_current_code(rebar_repo: Path) -> None
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 2\n")
+    _commit_all(rebar_repo)
     _review(tid, rebar_repo)  # refresh, now bound to "v = 2"
     (rebar_repo / "dep.py").write_text("v = 3\n")  # drift again
+    _commit_all(rebar_repo)
     with pytest.raises(rebar.RebarError) as ei:
         rebar.claim(tid, repo_root=str(rebar_repo))
     assert "drift" in ei.value.stderr.lower()
@@ -910,6 +934,7 @@ def test_progressive_drift_refresh_always_takes_probe(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
     (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    _commit_all(rebar_repo)
     v = _review(tid, rebar_repo)
     assert "drift_refresh" in v["coverage"]  # always-on: the scoped probe path is taken
     # the probe not only fires but REFRESHES the attestation (no full re-review)
