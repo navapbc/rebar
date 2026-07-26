@@ -9,5 +9,14 @@
       "checklist": []
     }
   },
-  "activate": ["project.portability"]
+  "code_review": {
+    "project.review-phase-boundaries": {
+      "exec": "1-TURN",
+      "default_posture": "advisory",
+      "block_threshold": 0.90,
+      "blocking_enabled": false,
+      "applies_to": []
+    }
+  },
+  "activate": ["project.portability", "project.review-phase-boundaries"]
 }

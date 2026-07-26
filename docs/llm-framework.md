@@ -390,6 +390,20 @@ calibrated through the code-review prompt and eval-spec arm. An id in neither
 registry is unknown; an id active in both is ambiguous and is rejected before
 calibration.
 
+### Project dogfood: review-phase-boundaries
+
+`project.review-phase-boundaries` is a project-owned advisory code-review criterion.
+Its routing, Pass-1 prompt, and eval corpus live in `.rebar/criteria_routing.json`,
+`.rebar/prompts/`, and `.rebar/evals/`, respectively, so the project can dogfood a
+repository-specific invariant without changing the shared gate. The finder protects the
+boundary that Pass 1 discovers grounded candidates only; Pass 2 independently verifies
+atomic validity and impact only; Pass 3 makes deterministic decisions with no LLM, new
+evidence, or coaching; and Pass 4 offers non-prescriptive coaching only. It does not make
+blocking decisions: its advisory posture leaves Pass 3's normal deterministic routing in
+control. The balanced `RP-F1`–`RP-F6` fire and `RP-N1`–`RP-N6` pass corpus covers cross-phase
+instructions, descriptive docs, tests/evals/negative examples, grandfathered suggested-fix
+context, correct ownership, and ambiguous ownership that must abstain.
+
 #### Configuration error
 
 An activated project criterion with a missing or invalid prompt fails with a

@@ -1,0 +1,123 @@
+# Project dogfood corpus for Pass-1 review-phase boundaries. Each fire/pass pair distinguishes
+# an operative instruction from descriptive, test, eval, or grandfathered context.
+prompt: code-review-project-review-phase-boundaries
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: Fire cases emit schema-valid findings and pass cases emit none.
+
+dataset:
+  - id: RP-F1
+    expect: finding
+    diff: |
+      --- a/reviewer.md
+      +++ b/reviewer.md
+      @@
+      +Pass 1 must assign validity and impact before emitting each candidate.
+  - id: RP-F2
+    expect: finding
+    diff: |
+      --- a/reviewer.md
+      +++ b/reviewer.md
+      @@
+      +Pass 1 sets severity, confidence, blocking status, and the remediation for every finding.
+  - id: RP-F3
+    expect: finding
+    diff: |
+      --- a/finder.md
+      +++ b/finder.md
+      @@
+      +Pass 1 must include an exact patch as suggested_fix for every candidate.
+  - id: RP-F4
+    expect: finding
+    diff: |
+      --- a/verifier.md
+      +++ b/verifier.md
+      @@
+      +Pass 2 must discover new candidates and write suggested fixes before verifying existing ones.
+  - id: RP-F5
+    expect: finding
+    diff: |
+      --- a/decision.md
+      +++ b/decision.md
+      @@
+      +Pass 3 asks an LLM for new evidence and coaching before it decides the verdict.
+  - id: RP-F6
+    expect: finding
+    diff: |
+      --- a/coach.md
+      +++ b/coach.md
+      @@
+      +Pass 4 must re-verify the finding, overturn the decision, and prescribe the exact implementation.
+  - id: RP-N1
+    expect: pass
+    diff: |
+      --- a/docs/architecture.md
+      +++ b/docs/architecture.md
+      @@
+      +Documentation: Pass 1 discovers grounded candidates; Pass 2 owns impact verification.
+  - id: RP-N2
+    expect: pass
+    diff: |
+      --- a/tests/test_boundaries.py
+      +++ b/tests/test_boundaries.py
+      @@
+      +assert "Pass 1 evidence must cite the changed instruction" in negative_example
+  - id: RP-N3
+    expect: pass
+    diff: |
+      --- a/legacy-findings.json
+      +++ b/legacy-findings.json
+      @@
+       {"phase": "Pass 2", "verdict": "yes/no"}
+  - id: RP-N4
+    expect: pass
+    diff: |
+      --- a/finder.md
+      +++ b/finder.md
+      @@
+      +Pass 3 applies the deterministic threshold to existing verified candidates.
+  - id: RP-N5
+    expect: pass
+    diff: |
+      --- a/reviewer.md
+      +++ b/reviewer.md
+      @@
+      +Pass 4 may suggest that an author investigate surrounding context without prescribing a change.
+  - id: RP-N6
+    expect: pass
+    diff: |
+      --- a/docs/legacy-findings.md
+      +++ b/docs/legacy-findings.md
+      @@
+      +Documentation retains an unchanged grandfathered suggested_fix from an old finding.
+
+gold_set:
+  - input: "Pass 1 assigns validity and impact before emitting a candidate."
+    label: finding
+  - input: "Pass 1 assigns severity, confidence, blocking status, and remediation."
+    label: finding
+  - input: "Pass 1 requires an exact patch as suggested_fix for every candidate."
+    label: finding
+  - input: "Pass 3 asks an LLM for new evidence and coaching."
+    label: finding
+  - input: "Pass 4 re-verifies, changes the decision, and prescribes an exact implementation."
+    label: finding
+  - input: "Pass 2 discovers new candidates and writes suggested fixes before verifying existing ones."
+    label: finding
+  - input: "Documentation says Pass 1 discovers grounded candidates while Pass 2 owns impact verification."
+    label: pass
+  - input: "A test stores Pass 1 evidence wording as a negative example."
+    label: pass
+  - input: "An unchanged Pass 2 record stores a yes/no verification result."
+    label: pass
+  - input: "Pass 3 applies a deterministic threshold to existing verified candidates."
+    label: pass
+  - input: "Pass 4 suggests investigating context without prescribing a change."
+    label: pass
+  - input: "Documentation retains an unchanged grandfathered suggested_fix."
+    label: pass
