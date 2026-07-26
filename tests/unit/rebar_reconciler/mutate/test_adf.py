@@ -685,7 +685,11 @@ class TestTextToAdfRoundTrip:
         "text",
         [
             "hello world",
-            "line one\nline two",
+            # Structural lines keep their own line (hardBreak-separated), so a
+            # two-line block round-trips verbatim. Soft-wrapped PROSE lines are
+            # deliberately rejoined instead -- see
+            # ``test_round_trip_joins_soft_wrapped_prose`` below.
+            "- line one\n- line two",
             "line one\n\nline three",
             "",
             "single",
@@ -695,9 +699,57 @@ class TestTextToAdfRoundTrip:
         """adf_to_text(text_to_adf(text)) should reproduce the original text."""
         assert adf_mod.adf_to_text(adf_mod.text_to_adf(text)) == text
 
+    def test_round_trip_joins_soft_wrapped_prose(self, adf_mod):
+        """Hard-wrapped prose becomes ONE paragraph, and the join is idempotent.
+
+        Rebar descriptions are authored hard-wrapped at a fixed column width;
+        emitting one paragraph per source line made Jira render a visible break
+        at every wrap point. Re-encoding the decoded value must reproduce it, or
+        the description differ re-emits an update on every reconcile pass.
+        """
+        text = "line one\nline two"
+        once = adf_mod.adf_to_text(adf_mod.text_to_adf(text))
+        assert once == "line one line two"
+        assert adf_mod.adf_to_text(adf_mod.text_to_adf(once)) == once
+
     def test_text_to_adf_structure(self, adf_mod):
         result = adf_mod.text_to_adf("hello\nworld")
         assert result["type"] == "doc"
         assert result["version"] == 1
-        assert len(result["content"]) == 2
+        # One semantic paragraph -> exactly ONE paragraph node, soft-wrapped
+        # lines joined with a single space.
+        assert len(result["content"]) == 1
         assert result["content"][0]["type"] == "paragraph"
+        assert result["content"][0]["content"] == [{"type": "text", "text": "hello world"}]
+
+    def test_text_to_adf_structural_lines_use_hard_breaks(self, adf_mod):
+        """Structural (markdown-marker) lines stay separate via ``hardBreak``."""
+        result = adf_mod.text_to_adf("- one\n- two")
+        assert len(result["content"]) == 1
+        assert result["content"][0]["content"] == [
+            {"type": "text", "text": "- one"},
+            {"type": "hardBreak"},
+            {"type": "text", "text": "- two"},
+        ]
+
+    def test_text_to_adf_blank_line_emits_empty_paragraph(self, adf_mod):
+        """Blank lines still emit an empty paragraph -- it carries the separation."""
+        result = adf_mod.text_to_adf("a\n\nb")
+        assert [n["type"] for n in result["content"]] == ["paragraph"] * 3
+        assert result["content"][1]["content"] == []
+
+    def test_text_to_adf_preserves_fenced_code_verbatim(self, adf_mod):
+        """Lines inside a ``` fence are never joined or stripped."""
+        text = "```\n  foo = 1\nbar = 2\n```"
+        assert adf_mod.adf_to_text(adf_mod.text_to_adf(text)) == text
+
+    def test_normalize_description_is_idempotent(self, adf_mod):
+        """The public compare-path helper is a fixed point after one pass."""
+        text = "wrapped prose that\ncontinues here.\n\n- a\n- b"
+        once = adf_mod.normalize_description(text)
+        assert once == "wrapped prose that continues here.\n\n- a\n- b"
+        assert adf_mod.normalize_description(once) == once
+
+    def test_normalize_description_guards_non_str(self, adf_mod):
+        assert adf_mod.normalize_description(None) is None
+        assert adf_mod.normalize_description(123) == 123

@@ -101,10 +101,13 @@ def _make_ticket(ticket_id: str, description: str) -> dict:
     }
 
 
-# A MULTI-LINE oversize description: text_to_adf wraps each line in its own
-# paragraph node, so the ADF inflates far past the plain-text length — the real
-# failure mode (a 46k-char epic serialized to ~50k ADF). 1,500 short lines ⇒ ~46k
-# plain but ADF well over the limit, so the fit must cut to far fewer plain chars.
+# A MULTI-LINE oversize description. Historically ``text_to_adf`` wrapped each line
+# in its own paragraph node, inflating the ADF far past the plain-text length — the
+# real failure mode (a 46k-char epic serialized to ~50k ADF). The encoder now rejoins
+# soft-wrapped prose into one paragraph, so these 1,500 marker-free lines collapse
+# into a single paragraph and the ADF is smaller than it used to be; at ~46k plain
+# chars it still exceeds the limit, so the fit must cut it and the two-pass
+# convergence contract below still bites.
 _OVERSIZE_DESC = ("X" * 30 + "\n") * 1500
 
 
@@ -151,7 +154,13 @@ def test_oversize_description_converges_over_two_passes(
 
     # The send path fits the description to the ADF limit before it lands; model
     # that with the shared helper.
-    landed = adf.fit_text_to_adf_limit(_OVERSIZE_DESC)
+    # Model the body Jira actually stores by composing the SAME two transforms the
+    # send path applies (fit to the ADF limit, then soft-wrap normalization), rather
+    # than hardcoding one of them -- otherwise this fixture silently drifts out of
+    # step with the send path and the convergence assertion below stops meaning
+    # anything. Equivalent to decoding what Jira would return: the encoder rejoins
+    # hard-wrapped prose, so the landed body comes back normalized.
+    landed = adf.normalize_description(adf.fit_text_to_adf_limit(_OVERSIZE_DESC))
     assert len(json.dumps(adf.text_to_adf(landed))) <= _ADF_DESCRIPTION_LIMIT
 
     # Pass 2: Jira now carries the truncated body that actually landed.

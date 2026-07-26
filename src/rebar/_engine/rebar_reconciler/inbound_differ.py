@@ -206,8 +206,19 @@ def _diff_jira_vs_local(
         # local description and invalidating its plan-review fingerprint). The fit
         # is applied to an in-memory comparison copy only — never written into
         # ``changed`` — so a genuine Jira-side edit (Jira != fit(local)) still flows.
+        # The same holds for soft-wrap normalization: the ADF encoder rejoins
+        # hard-wrapped prose into one paragraph, so the Jira body decodes back
+        # JOINED while the local value stays hard-wrapped. Normalize the local
+        # comparison copy identically or inbound clobbers the local wrapping. The
+        # Jira side is normalized for the COMPARISON only (``jira_emit`` keeps the
+        # value actually pulled into ``changed``); in production it is already the
+        # decoded — hence normalized — ADF body, so this is a no-op there.
+        jira_emit = jira_val
         if local_field == "description" and isinstance(local_val, str):
-            local_val = _load_adf().fit_text_to_adf_limit(local_val)
+            adf = _load_adf()
+            local_val = adf.normalize_description(adf.fit_text_to_adf_limit(local_val))
+            if isinstance(jira_val, str):
+                jira_val = adf.normalize_description(jira_val)
         # Bug (plateau): trailing-whitespace round-trip stability.
         # Mirror of the outbound_differ fix — Jira's ADF normalization
         # strips trailing whitespace, so a local description ending in
@@ -229,7 +240,7 @@ def _diff_jira_vs_local(
         ):
             continue
         if jira_val != local_val:
-            changed[local_field] = jira_val
+            changed[local_field] = jira_emit
 
     # Parent sync (ticket 8b25): diff Jira parent against local parent_id.
     # Skip when no binding_store provided (legacy call path).

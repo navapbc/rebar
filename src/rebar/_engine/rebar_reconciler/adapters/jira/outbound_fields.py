@@ -562,9 +562,21 @@ def _diff_fields(
         # Jira value is the truncated form. Apply the IDENTICAL shared ADF-aware fit
         # to the local value before comparing; otherwise an oversized local
         # description never matches the landed Jira body and the differ re-emits an
-        # update every pass.
+        # update every pass. The same reasoning applies to soft-wrap normalization:
+        # ``text_to_adf`` rejoins hard-wrapped prose into one paragraph, so the body
+        # Jira stores (and hence the value refetched here) is the JOINED form while
+        # the local description stays hard-wrapped — normalize the local value the
+        # identical way or the differ re-emits a description update forever.
+        # The REMOTE value is deliberately NOT normalized here. An issue whose body
+        # was written by the old paragraph-per-line encoder decodes back hard-wrapped;
+        # normalizing it too would make it compare equal to the local value, so the
+        # differ would never rewrite it and every already-synced description would
+        # keep its unreadable per-line formatting forever. Comparing against the raw
+        # decoded body lets the differ re-emit each stale description exactly ONCE;
+        # the rewritten body then decodes to the normalized form and converges.
         if field_name == "description" and isinstance(local_val, str):
-            local_val = _load_adf().fit_text_to_adf_limit(local_val)
+            adf = _load_adf()
+            local_val = adf.normalize_description(adf.fit_text_to_adf_limit(local_val))
         # Bug (plateau): Jira's ADF normalization strips trailing
         # whitespace from descriptions (and titles) on every write. If
         # local carries trailing ``\n\n`` (or any trailing whitespace),

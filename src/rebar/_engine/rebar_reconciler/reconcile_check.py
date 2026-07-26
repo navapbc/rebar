@@ -182,6 +182,15 @@ def _compare_pair(
             # canonical differ does (outbound_field_diff.py) — NOT
             # FieldSanitizer.sanitize_description, which is send-side and
             # emits a truncation WARNING (wrong for a read-only diagnostic).
+            # The port also normalizes soft-wrapped prose (the ADF encoder rejoins a
+            # hard-wrapped paragraph), so route the REMOTE value through the same
+            # port: comparing two values that went through one idempotent transform
+            # is what keeps this diagnostic from reporting a permanent phantom
+            # description discrepancy on every hard-wrapped ticket.
+            # Only the LOCAL value goes through the port. The remote value is compared
+            # raw so this diagnostic agrees with the outbound differ: a body still in
+            # the old paragraph-per-line form is a real, pending discrepancy that the
+            # next pass rewrites, not a phantom one to be normalized away.
             fitted = backend.outbound.map_fields_to_remote(
                 {"description": local_ticket.get("description") or ""},
                 ticket=local_ticket,

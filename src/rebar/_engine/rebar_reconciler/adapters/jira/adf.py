@@ -14,6 +14,7 @@ Round-trip property:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -236,19 +237,90 @@ _NODE_HANDLERS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
+# A line that opens a markdown block construct. Such a line is never joined onto
+# its neighbour: it is separated by a ``hardBreak`` (which ``adf_to_text``
+# decodes back to exactly "\n"), so the block structure survives the round trip.
+_BLOCK_MARKER_RE = re.compile(r"^(?:[-*+](?=\s|$)|\d+[.)](?=\s|$)|#|>|\||```)")
+
+
+def _is_structural(line: str, *, in_fence: bool) -> bool:
+    """True when ``line`` must keep its own line rather than be soft-wrap joined."""
+    if in_fence:
+        return True
+    if line != line.lstrip():
+        return True  # indented continuation
+    return bool(_BLOCK_MARKER_RE.match(line))
+
+
+def _paragraph_from_block(block: list[tuple[str, bool]]) -> dict[str, Any]:
+    """Build ONE ``paragraph`` node from a block of ``(line, is_structural)`` pairs.
+
+    Consecutive soft-wrapped prose lines are stripped and joined with a single
+    space; every other adjacency is separated by a ``hardBreak`` node.
+    """
+    content: list[dict[str, Any]] = []
+    for idx, (line, structural) in enumerate(block):
+        text = line if structural else line.strip()
+        if idx:
+            if structural or block[idx - 1][1]:
+                content.append({"type": "hardBreak"})
+            else:
+                # Soft-wrapped continuation of the previous prose line.
+                content[-1]["text"] += " " + text
+                continue
+        content.append({"type": "text", "text": text})
+    return {"type": "paragraph", "content": content}
+
+
 def text_to_adf(text: str) -> dict[str, Any]:
     """Convert a plain text string to Atlassian Document Format (ADF).
 
     Jira REST API v3 (used by ACLI Go v1.3+) requires the ``description``
     field to be an ADF object, not a plain string.
+
+    Rebar descriptions are authored hard-wrapped at a fixed column width. Emitting
+    one paragraph per SOURCE line (the historical behaviour) made Jira render a
+    visible break at the end of every wrapped line. Instead the text is split into
+    blocks on blank lines, and each non-empty block becomes exactly ONE paragraph
+    whose soft-wrapped prose lines are rejoined with a single space. Blank lines
+    still emit an empty paragraph, which is what carries blank-line separation back
+    through ``adf_to_text``. The transform is idempotent — encoding an already
+    decoded value reproduces it — so the description differ converges instead of
+    re-emitting an update on every reconcile pass.
     """
-    paragraphs: list[dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = []
+    block: list[tuple[str, bool]] = []
+    in_fence = False
     for line in text.split("\n"):
-        if line:
-            paragraphs.append({"type": "paragraph", "content": [{"type": "text", "text": line}]})
-        else:
-            paragraphs.append({"type": "paragraph", "content": []})
-    return {"type": "doc", "version": 1, "content": paragraphs}
+        if not line.strip():
+            if block:
+                nodes.append(_paragraph_from_block(block))
+                block = []
+            nodes.append({"type": "paragraph", "content": []})
+            continue
+        structural = _is_structural(line, in_fence=in_fence)
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        block.append((line, structural))
+    if block:
+        nodes.append(_paragraph_from_block(block))
+    return {"type": "doc", "version": 1, "content": nodes}
+
+
+def normalize_description(text: str) -> str:
+    """Return ``text`` as it will read after a Jira ADF round trip.
+
+    ``text_to_adf`` rejoins soft-wrapped prose, so the body Jira stores — and
+    therefore the value a later fetch decodes back — is the JOINED form while the
+    local rebar description stays hard-wrapped. Applying this identical
+    normalization to the local value before a description comparison keeps the
+    differ convergent (same precedent as ``fit_text_to_adf_limit``). Idempotent:
+    a value already normalized is returned unchanged. Send/diff-side only; the
+    local ticket store is never mutated.
+    """
+    if not isinstance(text, str):
+        return text
+    return adf_to_text(text_to_adf(text))
 
 
 # Jira enforces the description-field length limit on the ADF representation, NOT
