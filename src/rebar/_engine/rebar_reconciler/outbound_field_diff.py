@@ -275,6 +275,17 @@ def diff_canonical_fields(
         fitted = outbound_mapper.map_fields_to_remote(
             {"description": local_desc}, ticket=ticket
         ).get("description", local_desc)
+        # The port also normalizes soft-wrapped prose (the ADF encoder rejoins a
+        # hard-wrapped paragraph into one), so the body that lands — and that a later
+        # fetch decodes back — is the NORMALIZED form. Route the remote value through
+        # the same idempotent port before comparing, or a hard-wrapped local
+        # description never matches its own landed form and the differ re-emits a
+        # description update on every pass.
+        # The REMOTE value is deliberately compared RAW. A body written by the old
+        # paragraph-per-line encoder decodes back hard-wrapped; routing it through the
+        # port too would make it match the normalized local value, so a stale
+        # description would never be rewritten. Comparing raw re-emits it once, after
+        # which the landed body decodes to the normalized form and converges.
         if not _text_matches(fitted, canonical_remote.get("description", "")):
             changed["description"] = fitted
 

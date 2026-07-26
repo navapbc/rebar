@@ -25,6 +25,19 @@ from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound
 from .identity import JiraIdentityConvention
 
 
+def _fit_description(value: str) -> str:
+    """Fit to Jira's ADF length limit, then normalize soft wraps.
+
+    Order is load-bearing: ``fit_text_to_adf_limit`` measures the ADF the send path
+    actually serializes, and the body Jira stores is then read back through
+    ``adf_to_text`` — i.e. normalized. Composing them in this order makes the result
+    its own fixed point (both halves are idempotent and normalization only shrinks
+    the ADF), so the send value and every description comparison converge.
+    """
+    adf = outbound_fields._load_adf()
+    return adf.normalize_description(adf.fit_text_to_adf_limit(value))
+
+
 class _JiraOutbound:
     """Delegates outbound mapping to ``outbound_fields._map_local_to_jira_fields``."""
 
@@ -60,11 +73,13 @@ class _JiraOutbound:
             if name == "title":
                 out["summary"] = value
             elif name == "description":
-                out["description"] = (
-                    outbound_fields._load_adf().fit_text_to_adf_limit(value)
-                    if isinstance(value, str)
-                    else value
-                )
+                # Soft-wrap normalization runs BEFORE the length fit: the ADF encoder
+                # rejoins hard-wrapped prose into one paragraph, so the normalized form
+                # is what actually lands in Jira (and what a later fetch decodes back).
+                # Fitting the normalized text keeps the send value and every
+                # description comparison that routes through this port — including
+                # ``reconcile_check`` — on the identical, convergent value.
+                out["description"] = _fit_description(value) if isinstance(value, str) else value
             elif name == "status":
                 out["status"] = outbound_fields._LOCAL_TO_JIRA_STATUS.get(value, "To Do")
             elif name == "priority":

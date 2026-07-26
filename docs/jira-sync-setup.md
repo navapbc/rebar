@@ -11,7 +11,7 @@ project-specific lives in GitHub repo Variables/Secrets, not in the files:
 
 | Workflow | File | Cadence | Purpose |
 |----------|------|---------|---------|
-| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | every 20 min | runs `rebar reconcile --mode live`, commits the resulting events back to the `tickets` branch, and pushes |
+| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | `*/20` floor; **~pass-duration (this repo: ~7 min)** when `RECONCILE_CONTINUOUS=true` — see [§ Continuous loop](#continuous-loop--running-more-often-than-the-20-minute-floor) | runs `rebar reconcile --mode live`, commits the resulting events back to the `tickets` branch, and pushes |
 | **Reconciler Heartbeat Canary** | `.github/workflows/reconcile-bridge-canary.yml` | hourly | files a rebar bug ticket if the bridge goes stale, and auto-closes it on recovery |
 
 > The pair is **sufficient** for an automated, durable, bidirectional sync and
