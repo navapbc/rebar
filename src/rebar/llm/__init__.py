@@ -35,6 +35,7 @@ from rebar.llm.config import (
 )
 from rebar.llm.enrich import enrich
 from rebar.llm.errors import (
+    CompletionRecoveryError,
     LLMConfigError,
     LLMError,
     LLMRunnerError,
@@ -111,5 +112,6 @@ __all__ = [
     "LLMConfigError",
     "LLMUnavailableError",
     "LLMRunnerError",
+    "CompletionRecoveryError",
     "StructuredOutputError",
 ]

@@ -484,6 +484,30 @@ standalone `rebar verify-completion <id> --graph` still inlines the subtree for 
 > here. An explicit non-default `REBAR_LLM_MODEL` still wins. The untrusted ticket/file content is delimited and
 the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
 
+**Bounded completion recovery.** The ordinary verifier keeps the one-call path
+above. If that aggregate call is provider-truncated (`max_tokens`/`length`),
+rebar does not retry the same growing history or merely recommend a larger
+response cap. It isolates each explicit checklist criterion in a fresh
+evidence-gathering history, removes repository tools after 16 agent run steps,
+and caps each evidence call at 40 iterations and 4,096 output tokens. Recovery
+appends the bug verifier's deterministic “actually resolved” core criterion;
+non-bug tickets without explicit checklist criteria cannot be exhaustively
+enumerated and fail closed before recovery calls. Recovery
+accepts at most 32 criteria, 4,000 characters per criterion, 32,000 criterion
+characters in total, and 24,000 characters of ticket context. Each compact
+evidence record is limited to 12,000 characters, all evidence is limited to
+96,000 characters, and the complete finalizer input is limited to 132,000
+characters. These deterministic bounds are checked before the corresponding
+billable recovery call. One fresh,
+tool-free structured turn then merges the compact evidence into the public
+`completion_verdict`. Rebar deterministically requires exact coverage of every
+expected criterion before accepting it; incomplete evidence, another
+truncation, or incomplete finalizer coverage remains a typed fail-closed error
+and can never become PASS. A `gate_error_v1` sidecar records the recovery stage,
+criterion progress, executable bounds, and request/tool/token/trace metadata
+when available. Inspect that diagnostic first: increasing
+`REBAR_LLM_MAX_TOKENS` alone does not repair repeated tool-history growth.
+
 **The close gate** (`verify.require_completion_verification_for_close`, default off; **on for
 this project**) wires this into `transition` **outside the write lock**, ordering
 **verify → close → sign**. It verifies the committed `HEAD` of **whichever checkout the

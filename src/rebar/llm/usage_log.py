@@ -18,6 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,79 @@ ENV_VAR = "REBAR_USAGE_LOG"
 
 #: The integer token fields ``_extract_usage()`` reports (runner.py); summed by summarize().
 _FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "requests")
+_FAILURE_MESSAGE_SINK: ContextVar[list[object] | None] = ContextVar(
+    "rebar_failure_message_sink", default=None
+)
+
+
+@contextmanager
+def collect_failure_messages(sink: list[object]) -> Iterator[None]:
+    """Make ``sink`` available to every nested pydantic-ai attempt."""
+
+    token = _FAILURE_MESSAGE_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _FAILURE_MESSAGE_SINK.reset(token)
+
+
+@contextmanager
+def capture_attempt_messages() -> Iterator[None]:
+    """Append one pydantic-ai attempt to the active failure counter source."""
+
+    from pydantic_ai import capture_run_messages
+
+    with capture_run_messages() as messages:
+        try:
+            yield
+        finally:
+            sink = _FAILURE_MESSAGE_SINK.get()
+            if sink is not None:
+                sink.extend(messages)
+
+
+def failure_usage(
+    messages: list[object],
+    *,
+    request_limit: int,
+    tool_calls_limit: int,
+) -> dict[str, int | str | None]:
+    """Return safe counters from pydantic-ai messages when a run raises.
+
+    Prompts, response text, tool arguments, and tool results are deliberately
+    excluded so the payload is safe for a durable gate-error record.
+    """
+
+    totals = {
+        "requests": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    finish_reason: str | None = None
+    for message in messages:
+        if type(message).__name__ == "ModelResponse":
+            totals["requests"] += 1
+            finish_reason = getattr(message, "finish_reason", None) or finish_reason
+            usage = getattr(message, "usage", None)
+            for field in (
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+            ):
+                totals[field] += int(getattr(usage, field, 0) or 0)
+        for part in getattr(message, "parts", ()) or ():
+            if type(part).__name__ == "ToolCallPart":
+                totals["tool_calls"] += 1
+    return {
+        **totals,
+        "finish_reason": finish_reason,
+        "request_limit": request_limit,
+        "tool_calls_limit": tool_calls_limit,
+    }
 
 
 def record(usage: dict, *, op: str) -> None:

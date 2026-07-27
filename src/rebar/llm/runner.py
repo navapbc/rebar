@@ -81,6 +81,13 @@ class RunRequest:
     # extraction step (both already supported by the engine) — rather than forcing one
     # step to do both; this flag covers the single-step case.
     thinking: bool = False
+    # Hard ceilings for deliberately bounded exploratory sub-calls. Unlike
+    # ``config.max_iterations`` these may LOWER an operation-wide floor.
+    iteration_limit: int | None = None
+    output_token_limit: int | None = None
+    # Remove all tools after this pydantic-ai run step, leaving a final turn
+    # that can summarize gathered evidence as text.
+    tool_step_limit: int | None = None
 
 
 @runtime_checkable
@@ -294,6 +301,20 @@ class PydanticAIRunner:
         # Gated on model_override is None (the test double is never checked) and tools present.
         if self._model_override is None and tools:
             _check_tool_capability(model, resolved)
+        if req.tool_step_limit is not None and tools:
+            # Executable convergence boundary. This is intentionally not a
+            # forced structured-output tool on the exploratory history.
+            from pydantic_ai.toolsets import FunctionToolset
+
+            limit = max(0, int(req.tool_step_limit))
+
+            def available(run_ctx, _tool_def):
+                return run_ctx.run_step <= limit
+
+            all_toolsets = [FunctionToolset(tools), *toolsets]
+            tools = []
+            toolsets = [toolset.filtered(available) for toolset in all_toolsets]
+
         kwargs: dict[str, Any] = {
             "system_prompt": req.system_prompt,
             "tools": tools,
@@ -327,6 +348,8 @@ class PydanticAIRunner:
         eff_max_tokens = effective_max_tokens(
             cfg.max_tokens, getattr(req.config, "max_tokens", None)
         )
+        if req.output_token_limit is not None:
+            eff_max_tokens = min(eff_max_tokens, max(256, int(req.output_token_limit)))
         if eff_max_tokens:
             model_settings["max_tokens"] = eff_max_tokens
         # Wire the configured wall-clock timeout so the operator's REBAR_LLM_TIMEOUT
@@ -368,6 +391,8 @@ class PydanticAIRunner:
         eff_max_iter = effective_max_iterations(
             cfg.max_iterations, getattr(req.config, "max_iterations", None)
         )
+        if req.iteration_limit is not None:
+            eff_max_iter = min(eff_max_iter, max(2, int(req.iteration_limit)))
         # The model-REQUEST ceiling (~1 per tool-call cycle). Bound to a LOCAL so the telemetry
         # logs report it directly instead of reading it back off the UsageLimits object (which a
         # test may stub) — and so the step-usage line reports the EFFECTIVE per-request budget.
@@ -385,16 +410,27 @@ class PydanticAIRunner:
         )
         _t0 = time.monotonic()
         usage: dict[str, int] = {}
+        run_messages: list[Any] = []
         try:
             if req.mode == "text":
                 agent = Agent(model, **kwargs)
-                run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+                with usage_log.collect_failure_messages(run_messages):
+                    with usage_log.capture_attempt_messages():
+                        run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+                # Text is an intermediate artifact for bounded evidence
+                # gathering. A provider-truncated fragment is incomplete
+                # evidence and must never be handed to a verdict finalizer.
+                from rebar.llm import structured as _structured
+
+                if req.tool_step_limit is not None:
+                    _structured.check_response(run_result.response)
                 outcome = {"messages": [SimpleNamespace(content=str(run_result.output))]}
                 usage = _extract_usage(run_result)
             else:
-                structured, usage = _pai_structured(
-                    Agent, model, resolved, req, kwargs, usage_limits
-                )
+                with usage_log.collect_failure_messages(run_messages):
+                    structured, usage = _pai_structured(
+                        Agent, model, resolved, req, kwargs, usage_limits
+                    )
                 outcome = {"structured_response": structured}
             # Agent-build invariant (story anole): telemetry warning on a REAL run whose
             # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
@@ -411,13 +447,26 @@ class PydanticAIRunner:
                 eff_max_iter,
                 time.monotonic() - _t0,
             )
-            raise LLMRunnerError(
+            budget_err = LLMRunnerError(
                 f"agent exceeded its step budget (max_iterations={eff_max_iter}; "
                 "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
                 "the task."
-            ) from exc
-        except LLMError:
-            raise  # our own typed errors (e.g. StructuredOutputError) pass through unchanged
+            )
+            budget_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+                run_messages,
+                request_limit=req_limit,
+                tool_calls_limit=max(8, eff_max_iter),
+            )
+            raise budget_err from exc
+        except LLMError as exc:
+            # Preserve the typed failure while attaching bounded counters from
+            # the failed run (no prompt/tool content).
+            exc.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+                run_messages,
+                request_limit=req_limit,
+                tool_calls_limit=max(8, eff_max_iter),
+            )
+            raise
         except Exception as exc:  # noqa: BLE001 — a SYSTEMIC provider failure (auth / missing
             # key / connection / rate-limit). Unify into the provider-agnostic
             # LLMUnavailableError so every prompt-using client gets ONE recognizable
@@ -430,15 +479,22 @@ class PydanticAIRunner:
                 time.monotonic() - _t0,
                 exc,
             )
-            err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+            provider_err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+            provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+                run_messages,
+                request_limit=req_limit,
+                tool_calls_limit=max(8, eff_max_iter),
+            )
             # Attach the classified disposition as METADATA (story civilized-immediate-mamba).
             # This does NOT change the raised type — every existing `except LLMUnavailableError`
             # still catches, and the per-seam wiring + exit-code use is story blackbear's. Kept
             # total (classify_llm_failure never raises), so enriching the error can't mask it.
             from rebar.llm.failure import ClassifyContext, classify_llm_failure
 
-            err.outcome = classify_llm_failure(exc, ClassifyContext(model=ran_model))  # type: ignore[attr-defined]
-            raise err from exc
+            provider_err.outcome = classify_llm_failure(  # type: ignore[attr-defined]
+                exc, ClassifyContext(model=ran_model)
+            )
+            raise provider_err from exc
         finally:
             # Close the per-run retrying httpx.AsyncClient (story arcticduck). aclose() is
             # async; after run_sync()'s own loop is gone, the stdlib asyncio.run() closes the
@@ -548,7 +604,8 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
         agent = Agent(
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
         )
-        run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+        with usage_log.capture_attempt_messages():
+            run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
         # Silent-success parity (story drake): the PromptedOutput path below already checks
         # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
         # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
@@ -567,7 +624,8 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     prompt = f"{req.instructions}\n\n{schema_hint}"
     last: Exception | None = None
     for _ in range(structured.OUTPUT_RETRIES + 1):
-        result = agent.run_sync(prompt, usage_limits=usage_limits)
+        with usage_log.capture_attempt_messages():
+            result = agent.run_sync(prompt, usage_limits=usage_limits)
         try:
             # A refused / TRUNCATED turn is surfaced as a clear error BEFORE the tolerant
             # parse — else json-repair would "fix" a truncated fragment into a

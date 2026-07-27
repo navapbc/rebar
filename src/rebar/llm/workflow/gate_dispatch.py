@@ -720,8 +720,8 @@ def produce_completion_verdict(
     from rebar.llm.runner import get_runner
 
     from . import executor as _ex
+    from .completion_recovery import CompletionAgentStep, raise_completion_workflow_failure
     from .recorder import MemoryRecorder
-    from .runs import RunnerAgentStep
 
     runner_sel = get_runner(cfg, override=runner)
     try:
@@ -743,24 +743,27 @@ def produce_completion_verdict(
     doc = _gate_doc("completion-verification", repo_root)
     # Publish the caller-resolved cfg for the run so the completion ops (precheck child-failure,
     # reconcile) read the SAME config via resolve_gate_config, not a per-op from_env (586c).
+    completion_step = CompletionAgentStep(
+        runner=runner_sel,
+        repo_root=repo_root,
+        config=cfg,
+    )
+    recorder = MemoryRecorder()
     with gate_config(cfg):
         res = _ex.run_workflow(
             doc,
             {"ticket_id": ticket_id, "graph": bool(graph)},
             target_ticket=ticket_id,
             repo_root=repo_root,
-            agent_runner=RunnerAgentStep(runner=runner_sel, repo_root=repo_root, config=cfg),
-            recorder=MemoryRecorder(),
+            agent_runner=completion_step,
+            recorder=recorder,
         )
     verdict = res.terminal_output
     if res.status != "succeeded" or not isinstance(verdict, dict) or "verdict" not in verdict:
         # The verifier failed mid-run — fail closed (never a silent PASS). Raise so the
         # close gate blocks, mirroring the bespoke path's raise-on-failed-run.
-        from rebar.llm.errors import LLMError
-
-        raise LLMError(
-            f"completion verification workflow did not produce a verdict: "
-            f"{res.error or 'LLM tier failed'}"
+        raise_completion_workflow_failure(
+            ticket_id, res, completion_step.failure_diagnostic, len(recorder.steps), repo_root
         )
     return verdict
 

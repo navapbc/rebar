@@ -19,7 +19,12 @@ import pytest
 
 import rebar
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.errors import (
+    CompletionRecoveryError,
+    LLMError,
+    LLMUnavailableError,
+    UnretryableOutputError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +40,34 @@ class _OutageRunner:
 
     def run(self, req):  # noqa: ANN001, ANN201
         raise LLMUnavailableError("simulated systemic provider outage")
+
+
+class _AlwaysTruncatedRunner:
+    name = "truncated"
+
+    def preflight(self) -> None:
+        return None
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        exc = UnretryableOutputError("finish_reason=length token cap")
+        exc.trace_id = "trace-cap-123"
+        exc.usage = {
+            "requests": 66,
+            "tool_calls": 117,
+            "input_tokens": 3_350_000,
+            "output_tokens": 4_096,
+        }
+        raise exc
+
+
+class _RefusalRunner:
+    name = "refusal"
+
+    def preflight(self) -> None:
+        return None
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        raise UnretryableOutputError("the model refused to answer")
 
 
 @pytest.fixture
@@ -108,3 +141,64 @@ def test_plan_review_outage_writes_gate_error_and_still_degrades(store):
     rec = errs[0]
     assert rec["verdict"] == "ERROR"
     assert rec.get("error", {}).get("cause"), "gate_error record must carry a non-empty error.cause"
+
+
+def test_completion_recovery_failure_persists_bounded_diagnostic(store):
+    criteria = "\n".join(f"- [ ] criterion {index}" for index in range(1, 7))
+    tid = rebar.create_ticket(
+        "bug",
+        "completion recovery",
+        description=f"## Acceptance Criteria\n{criteria}",
+        repo_root=store,
+    )
+
+    from rebar.llm.workflow.gate_dispatch import produce_completion_verdict
+
+    with pytest.raises(CompletionRecoveryError):
+        produce_completion_verdict(
+            tid,
+            graph=False,
+            repo_root=store,
+            cfg=LLMConfig.from_env(repo_root=store),
+            runner=_AlwaysTruncatedRunner(),
+        )
+
+    records = _gate_errors(tid, store, "COMPLETION_VERDICT")
+    assert len(records) == 1
+    error = records[0]["error"]
+    assert "raise max_tokens" not in error["cause"]
+    assert error["evidence_ref"] == "completion-verification/recovery"
+    diagnostic = error["diagnostic"]
+    assert diagnostic["stage"] == "evidence"
+    assert diagnostic["criteria_total"] == 7
+    assert diagnostic["criteria_completed"] == 0
+    assert diagnostic["tool_step_limit"] == 16
+    assert "requests" in diagnostic
+    assert "tool_calls" in diagnostic
+    assert diagnostic["trace_id"] == "trace-cap-123"
+    assert diagnostic["requests"] == 66
+    assert diagnostic["tool_calls"] == 117
+    assert diagnostic["input_tokens"] == 3_350_000
+    assert diagnostic["output_tokens"] == 4_096
+
+
+def test_completion_non_recovery_failure_does_not_persist_gate_error(store):
+    tid = rebar.create_ticket(
+        "bug",
+        "completion refusal",
+        description="## Acceptance Criteria\n- [ ] refusal is reported",
+        repo_root=store,
+    )
+
+    from rebar.llm.workflow.gate_dispatch import produce_completion_verdict
+
+    with pytest.raises(LLMError):
+        produce_completion_verdict(
+            tid,
+            graph=False,
+            repo_root=store,
+            cfg=LLMConfig.from_env(repo_root=store),
+            runner=_RefusalRunner(),
+        )
+
+    assert _gate_errors(tid, store, "COMPLETION_VERDICT") == []

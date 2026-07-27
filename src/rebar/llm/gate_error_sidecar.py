@@ -36,16 +36,23 @@ _GATE_EVENT_TYPE = {
 
 
 def build_gate_error_payload(
-    gate: str, *, cause: str, evidence_ref: str | None = None
+    gate: str,
+    *,
+    cause: str,
+    evidence_ref: str | None = None,
+    diagnostic: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The dedicated ERROR payload: ``verdict == "ERROR"`` + an ``error{cause, evidence_ref}``
     object, tagged ``schema == "gate_error_v1"``. Deliberately a SEPARATE builder from the
     verdict sidecars so it never touches ``reconcile_verdict`` (which would coerce ERROR→FAIL)."""
+    error: dict[str, Any] = {"cause": cause, "evidence_ref": evidence_ref}
+    if diagnostic:
+        error["diagnostic"] = dict(diagnostic)
     return {
         "schema": GATE_ERROR_SCHEMA,
         "verdict": "ERROR",
         "gate": gate,
-        "error": {"cause": cause, "evidence_ref": evidence_ref},
+        "error": error,
     }
 
 
@@ -55,6 +62,7 @@ def emit_gate_error(
     *,
     cause: str,
     evidence_ref: str | None = None,
+    diagnostic: dict[str, Any] | None = None,
     repo_root=None,
 ) -> bool:
     """Append a ``gate_error_v1`` sidecar record for ``ticket_id`` onto ``gate``'s host event
@@ -67,7 +75,12 @@ def emit_gate_error(
     try:
         event_type = _GATE_EVENT_TYPE[gate]
         tracker = _config.tracker_dir(repo_root)
-        payload = build_gate_error_payload(gate, cause=cause, evidence_ref=evidence_ref)
+        payload = build_gate_error_payload(
+            gate,
+            cause=cause,
+            evidence_ref=evidence_ref,
+            diagnostic=diagnostic,
+        )
         append_event(ticket_id, event_type, payload, tracker, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged, never changes the gate outcome
         logger.warning("gate_error sidecar emit failed; continuing", exc_info=True)

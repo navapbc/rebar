@@ -41,6 +41,10 @@ steps:
       prompt: completion-verifier
       mode: structured
       output_schema: completion_verdict
+      # The gate dispatcher preserves this aggregate one-call fast path.
+      # A typed truncation is intercepted by CompletionAgentStep, which
+      # evaluates explicit criteria in bounded isolated histories and runs a
+      # fresh tool-free structured finalizer. Other failures still fail closed.
       with:
         # The graph-aware, fenced ticket context the precheck assembled (epics carry their
         # descendants) — so the verify step's context matches bespoke verify_completion.

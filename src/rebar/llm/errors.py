@@ -45,6 +45,19 @@ class UnretryableOutputError(StructuredOutputError):
     ``except StructuredOutputError`` / ``except LLMError`` handler still catches it."""
 
 
+class CompletionRecoveryError(StructuredOutputError):
+    """Primary completion verification and its bounded recovery both failed.
+
+    ``diagnostic`` is restricted to sanitized counters and references. It must
+    never contain prompts, tool arguments/results, or model response text
+    because callers may persist it in a gate-error sidecar.
+    """
+
+    def __init__(self, message: str, *, diagnostic: dict | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic = dict(diagnostic or {})
+
+
 class WorkflowError(LLMError):
     """Base class for the workflow engine (DSL parse/lint/migrate/execute)."""
 
