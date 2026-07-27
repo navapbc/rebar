@@ -263,19 +263,28 @@ def test_write_criterion_overlay_activates(tmp_path):
     assert registry.effective_routing(root)["project.foo"]["block_threshold"] == 0.9
     data = json.loads((tmp_path / ".rebar" / "criteria_routing.json").read_text())
     assert data["plan_review"]["project.foo"] == _LLM_ROUTING
-    assert "project.foo" in data["activate"]
+    assert data["activate"]["project.foo"] == ["plan_review"]
 
 
 def test_write_criterion_overlay_merges_into_existing(tmp_path):
     root = _make_repo(
         tmp_path,
-        overlay={"plan_review": {"project.a": _LLM_ROUTING}, "activate": ["project.a"]},
+        overlay={
+            "plan_review": {"project.a": _LLM_ROUTING},
+            "activate": {"project.a": ["plan_review"]},
+        },
         prompts={"plan-review-project-a": _RUBRIC, "plan-review-project-b": _RUBRIC},
     )
     write_criterion_overlay(root, "project.b", _LLM_ROUTING)
     prompt_library._invalidate_caches()
     eff = set(registry.effective_criteria(root))
     assert {"project.a", "project.b"} <= eff  # the first entry survives the read-modify-write
+
+    data = json.loads((tmp_path / ".rebar" / "criteria_routing.json").read_text())
+    assert data["activate"] == {
+        "project.a": ["plan_review"],
+        "project.b": ["plan_review"],
+    }
 
 
 def test_author_criterion_overlay_keys_by_dotted_id(tmp_path):

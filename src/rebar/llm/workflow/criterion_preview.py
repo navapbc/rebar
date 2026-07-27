@@ -515,10 +515,19 @@ def write_criterion_overlay(repo_root: str, criterion_id: str, routing: dict[str
     plan_review[criterion_id] = routing
     data["plan_review"] = plan_review
     activate = data.get("activate")
-    if not isinstance(activate, list):
-        activate = []
-    if criterion_id not in activate:
-        activate.append(criterion_id)
+    if isinstance(activate, dict):
+        review_types = activate.get(criterion_id)
+        if not isinstance(review_types, list):
+            review_types = []
+        if "plan_review" not in review_types:
+            review_types.append("plan_review")
+        activate[criterion_id] = review_types
+    elif isinstance(activate, list):
+        # Preserve the legacy list form when editing an existing overlay.
+        if criterion_id not in activate:
+            activate.append(criterion_id)
+    else:
+        activate = {criterion_id: ["plan_review"]}
     data["activate"] = activate
     atomic_write(path, json.dumps(data, indent=2, sort_keys=True) + "\n", permissions=0o600)
 

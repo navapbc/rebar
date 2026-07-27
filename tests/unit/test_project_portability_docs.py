@@ -55,7 +55,7 @@ def test_routing_example():
     assert '["container", "leaf"]' in sub
     assert '"default_posture": "blocking"' in sub
     assert '"block_threshold": 0.9' in sub
-    assert '"activate": ["project.portability"]' in sub
+    assert '"project.portability": ["plan_review"]' in sub
 
 
 # ── the prompt path + execution mode ─────────────────────────────────────────────

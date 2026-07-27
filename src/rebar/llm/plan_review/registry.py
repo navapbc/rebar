@@ -196,7 +196,8 @@ _ROUTING_RESOURCE = "criteria_routing.json"
 # ── project-supplied criteria overlay (epic 3156, story ef7e; unified in 5065) ──────
 # A project may add its OWN plan-review criteria + re-tune/disable a built-in via a
 # `.rebar/criteria_routing.json` overlay that REUSES the packaged routing schema, keyed
-# by gate:  {"plan_review": {"<id>": {…routing…}}, "code_review": {…}, "activate": […]}.
+# by gate:  {"plan_review": {"<id>": {…routing…}}, "code_review": {…},
+#            "activate": {"project.<id>": ["plan_review", "code_review"]}}.
 # The overlay MERGE / activation / cache-isolation machinery lives in the SHARED
 # `rebar.llm.criteria` layer (story 5065); this registry registers the plan-review gate
 # with it (its packaged index + canonical set) and its public `effective_*` /
