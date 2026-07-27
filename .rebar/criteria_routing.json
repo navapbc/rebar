@@ -18,5 +18,8 @@
       "applies_to": []
     }
   },
-  "activate": ["project.portability", "project.review-phase-boundaries"]
+  "activate": {
+    "project.portability": ["plan_review"],
+    "project.review-phase-boundaries": ["code_review"]
+  }
 }
