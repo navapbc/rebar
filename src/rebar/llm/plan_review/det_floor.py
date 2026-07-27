@@ -51,6 +51,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from rebar._plan_clarity import evaluate_plan_clarity
+
 from .det_lint import (
     _file_interference,
     _find_cycle,
@@ -156,17 +158,7 @@ def _count_ac_items(text: str) -> int:
     """`- [ ]` / `- [x]` checklist items under `## Acceptance Criteria`
     (reset on the next `## ` heading). Mirrors gates._count_ac_reset so the DET
     floor shares the exact vocabulary of the standalone check_ac gate."""
-    count, found = 0, False
-    for ln in text.split("\n"):
-        if ln.lower().startswith("## acceptance criteria"):
-            found = True
-            continue
-        if found and ln.startswith("## "):
-            found = False
-            continue
-        if found and ln.startswith("- ["):
-            count += 1
-    return count
+    return len(evaluate_plan_clarity(text).ac_items)
 
 
 def p1_readiness_shape(ctx: PlanContext) -> DetResult:
@@ -174,27 +166,58 @@ def p1_readiness_shape(ctx: PlanContext) -> DetResult:
     ``## Acceptance Criteria`` checklist with ≥1 item, across all types. Clarity
     (a heuristic) is recorded as coverage but does NOT block (it can false-fail)."""
     text = ctx.plan_text
-    n = _count_ac_items(text)
+    floor = evaluate_plan_clarity(text)
+    n = len(floor.ac_items)
     clarity = _clarity_score(ctx.description, ctx.ticket_type)
-    cov = {"ran": True, "ac_items": n, "clarity_score": clarity}
-    if n >= 1:
+    cov = {
+        "ran": True,
+        "ac_items": n,
+        "empty_ac_items": len(floor.empty_ac_items),
+        "sentinel_assignments": len(floor.sentinel_assignments),
+        "clarity_score": clarity,
+    }
+    if floor.passes:
         return DetResult("P1", "readiness-shape", "pass", coverage=cov)
+
+    defects: list[str] = []
+    evidence: list[str] = []
+    fixes: list[str] = []
+    if not floor.ac_items:
+        defects.append("no standard `## Acceptance Criteria` checklist")
+        evidence.append("No `## Acceptance Criteria` section with `- [ ]` items found.")
+        fixes.append(
+            "add standard `- [ ]` checklist items under an exact `## Acceptance Criteria` heading"
+        )
+    if floor.empty_ac_items:
+        defects.append("empty Acceptance Criteria items")
+        evidence.extend(
+            f"Acceptance Criteria item {index} is empty after joining its continuation lines."
+            for index in floor.empty_ac_items
+        )
+        fixes.append("give every checklist item a non-whitespace observable outcome")
+    if floor.sentinel_assignments:
+        defects.append("unresolved sentinel assignments")
+        evidence.extend(
+            f"{item.section} line {item.line_number}: {item.line}"
+            for item in floor.sentinel_assignments
+        )
+        fixes.append("replace each unresolved sentinel value with the chosen execution detail")
+
     return DetResult(
         "P1",
         "readiness-shape",
         "fail",
         blocking=True,
         finding={
-            "finding": (
-                "The ticket has no `## Acceptance Criteria` checklist. A plan cannot be "
-                "reviewed for completion without testable, checkable criteria."
+            "finding": "The ticket fails the deterministic readiness floor: "
+            + ", ".join(defects)
+            + ".",
+            "evidence": evidence,
+            "impact": (
+                "The plan is not dispatchable without a complete definition of done and "
+                "resolved execution choices."
             ),
-            "evidence": ["No `## Acceptance Criteria` section with `- [ ]` items found."],
-            "impact": "The plan is not dispatchable: no objective definition of done.",
-            "suggested_fix": (
-                "Add an `## Acceptance Criteria` section with `- [ ]` checklist items, one per "
-                "observable, in-session-verifiable outcome."
-            ),
+            "suggested_fix": "Revise the plan to " + "; ".join(fixes) + ".",
         },
         coverage=cov,
     )

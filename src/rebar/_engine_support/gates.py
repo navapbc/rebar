@@ -20,6 +20,7 @@ import sys
 
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._engine_support.reads import ReadError, deps_state, show_state
+from rebar._plan_clarity import evaluate_plan_clarity
 
 # Non-graph artifact types (verbose logs / bulk review artifacts) carry no dispatchable work,
 # so the per-ticket readiness gates (check_ac / clarity / quality) are a no-op PASS for them.
@@ -161,8 +162,8 @@ def clarity_check_compute(ticket_type: str, description: str, threshold: int) ->
         # work, so the clarity heuristic does not apply — they are gate-exempt (pass).
         return {"score": 0, "verdict": "pass", "threshold": threshold}, 0
     score = _clarity_score(description, ticket_type)
-    ac_count = _count_ac_reset(description)
-    if score >= threshold and ac_count >= 1:
+    floor = evaluate_plan_clarity(description)
+    if score >= threshold and floor.passes:
         return {"score": score, "verdict": "pass", "threshold": threshold}, 0
     return {"score": score, "verdict": "fail", "threshold": threshold}, 1
 
