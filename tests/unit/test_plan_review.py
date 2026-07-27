@@ -660,6 +660,49 @@ def test_move_registry_foundation_enhancement_and_no_defer() -> None:
     assert "proxy" in reg["9"]["template"].lower()
 
 
+_POPULATION_MOVE_TEMPLATE = (
+    "Treat {subject} as one sample from a population, not a single item to fix — "
+    "enumerate the whole population by the distinct ways the pattern occurs, then add "
+    "a machine-checkable acceptance criterion that fails while any instance remains."
+)
+
+
+def test_population_move_template_is_locked() -> None:
+    # Ticket e3cf: move 15 reframes a named instance as a sample and demands a machine-checkable
+    # completeness proof. The template is LOCKED (the LLM only names {subject}) — pin it verbatim.
+    m15 = orchestrator.MOVE_REGISTRY["15"]
+    assert m15["name"] == "sample, not the population"
+    assert m15["template"] == _POPULATION_MOVE_TEMPLATE
+    assert m15["template"].count("{subject}") == 1
+
+
+def test_population_move_triggers_are_the_grounding_criteria() -> None:
+    # Scoped to the criteria where a finding names one member of a population: codebase-grounding
+    # (G1G2/E4/A1) + mechanism-correctness edge cases (G6). Verifiability (E6/F1) is NOT a
+    # population, so it must stay out or the move fires where no enumeration exists.
+    m15 = orchestrator.MOVE_REGISTRY["15"]
+    assert set(m15["applies_when"]) == {"G1G2", "E4", "G6", "A1"}
+    assert not {"E6", "F1"} & set(m15["applies_when"])
+
+
+def test_population_move_applicability_is_off_until_a_trigger_fires() -> None:
+    # The deterministic applicability filter gates it: absent from an untriggered review, offered
+    # once any one of its four criteria appears in a surviving finding's criteria[].
+    import importlib
+
+    # `rebar.llm.review_kernel.coach` the FUNCTION shadows the module on the package, so the
+    # module has to be imported by name (same idiom as tests/unit/test_review_kernel.py).
+    kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
+
+    m15 = orchestrator.MOVE_REGISTRY["15"]
+    assert not kcoach.move_applies(m15, active_triggers=[])
+    assert not kcoach.move_applies(m15, active_triggers=["E6", "F1"])
+    for trigger in ("G1G2", "E4", "G6", "A1"):
+        assert kcoach.move_applies(m15, active_triggers=[trigger]), trigger
+    assert "15" not in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, [])
+    assert "15" in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["G1G2"])
+
+
 def test_move_registry_matches_docs_table() -> None:
     # WS8 AC: docs/plan-review-gate.md's move table mirrors MOVE_REGISTRY id -> template.
     import re

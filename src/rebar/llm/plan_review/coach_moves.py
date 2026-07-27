@@ -110,6 +110,24 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
         ),
         "applies_when": ["G7"],
     },
+    # Sample-not-population (ticket e3cf): coaching is rendered PER FINDING, so a broken
+    # enumeration METHOD surfaces as N instance-level fixes — the author adds the one file the
+    # reviewer named, resubmits, and the next pass finds the next member of the same
+    # population. Move 12 ("generalize the finding") is the nearest existing move but carries no
+    # PROOF obligation, so "I have enumerated them all" stays an unverifiable claim. This move
+    # asks for the population AND a machine-checkable criterion that fails while any instance
+    # remains. Scoped (applies_when) to the criteria where a population actually exists:
+    # codebase-grounding (G1G2/E4/A1) and mechanism-correctness edge cases (G6). Verifiability
+    # criteria (E6/F1) are excluded — a missing proving command is not a population.
+    "15": {
+        "name": "sample, not the population",
+        "template": (
+            "Treat {subject} as one sample from a population, not a single item to fix — "
+            "enumerate the whole population by the distinct ways the pattern occurs, then add "
+            "a machine-checkable acceptance criterion that fails while any instance remains."
+        ),
+        "applies_when": ["G1G2", "E4", "G6", "A1"],
+    },
 }
 
 
