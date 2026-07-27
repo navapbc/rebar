@@ -30,6 +30,12 @@ both the instructed phase and the work's owning phase. Use
 `criteria: ["project.review-phase-boundaries"]`, concise evidence, and an empty or absent
 `suggested_fix`.
 
+Before emitting, isolate the shortest changed clause that directs a review phase to act. Name
+the instructed phase, the assigned action, and the phase that owns that action. If the changed
+text does not identify all three, abstain instead of inferring an ownership violation.
+
+Pass 1 sets severity, confidence, blocking status, and remediation for every finding.
+
 ## Do not flag
 
 - Descriptive architecture documentation, tests, eval fixtures, or negative examples that merely explain
