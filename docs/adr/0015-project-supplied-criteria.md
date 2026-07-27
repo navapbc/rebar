@@ -36,8 +36,11 @@ code runs in the gate; an unreadable/absent overlay fails open to the packaged b
 ```json
 {
   "plan_review": { "<id>": { …routing… }, … },
-  "code_review": { … },              // reserved for the code-review gate (later story)
-  "activate":    ["project.<name>", …]
+  "code_review": { "<id>": { …routing… }, … },
+  "activate": {
+    "project.<name>": ["plan_review"],
+    "project.<other-name>": ["plan_review", "code_review"]
+  }
 }
 ```
 
@@ -48,9 +51,12 @@ code runs in the gate; an unreadable/absent overlay fails open to the packaged b
   project id can never rebind a built-in. A malformed overlay (bad JSON, wrong shape, invalid
   `exec`/`block_threshold`/`default_posture`) is a **located** `RegistryError`, never a silent
   skip.
-- **Explicit activation:** a project criterion runs only if listed in `activate` — presence in
-  the file is **not** activation. Built-ins are always active; listing one in `activate` is a
-  no-op.
+- **Explicit activation:** each project criterion maps to the review type or types it opts into:
+  `plan_review`, `code_review`, or both. Presence in a gate's routing map is **not** activation.
+  An opted-in review type must have a matching routing entry; unknown review types and dangling
+  activations are located load-time errors. The legacy `activate: ["project.<name>"]` list remains
+  accepted and infers review types from the overlay's gate maps, independent of registry import
+  order. Built-ins are always active; listing one in the legacy form is a no-op.
 
 ### The vocabulary seam
 

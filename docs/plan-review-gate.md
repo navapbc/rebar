@@ -268,7 +268,9 @@ across all four passes with no core change.
       "block_threshold": 0.9
     }
   },
-  "activate": ["project.portability"]
+  "activate": {
+    "project.portability": ["plan_review"]
+  }
 }
 ```
 

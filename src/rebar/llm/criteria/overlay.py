@@ -3,7 +3,8 @@ merge / activation / cache-isolation logic both review gates delegate to (story 
 
 This GENERALIZES the overlay machinery landed for plan-review in story ef7e (which was
 keyed to the literal ``"plan_review"`` gate key) so the SAME ``.rebar/criteria_routing.json``
-can carry a per-gate map — ``{"plan_review": {…}, "code_review": {…}, "activate": [...]}`` —
+can carry a per-gate map —
+``{"plan_review": {…}, "code_review": {…}, "activate": {"project.x": ["plan_review"]}}`` —
 and each gate reads its OWN key. The merge rules, the located load-time validation, and the
 ``(repo_root, overlay-content-signature)`` lru_cache isolation (the G6 cross-repo-leak fix)
 are the exact ones from ef7e, now taking the gate key + the gate's packaged index + canonical
@@ -31,6 +32,7 @@ from .model import CriteriaError
 
 _OVERLAY_FILENAME = "criteria_routing.json"
 _PROJECT_PREFIX = "project."
+_REVIEW_TYPES = frozenset({"plan_review", "code_review"})
 
 
 @dataclass(frozen=True)
@@ -273,9 +275,55 @@ def _effective_routing_cached(gate_key: str, rr: str, _overlay_sig: str) -> dict
     return merged
 
 
+def _activation_map(overlay: dict[str, Any], *, where: str) -> dict[str, frozenset[str]]:
+    """Return project criterion ids mapped to review types they opt into.
+
+    The canonical shape is ``{"activate": {"project.x": ["plan_review"]}}``.
+    Legacy id lists remain accepted and infer review types from the overlay's
+    gate-keyed routing maps, independent of which registry modules are imported.
+    """
+
+    raw = overlay.get("activate") or {}
+    if isinstance(raw, list):
+        activations: dict[str, frozenset[str]] = {}
+        for aid in raw:
+            if not isinstance(aid, str):
+                raise CriteriaError(f"{where}: 'activate' entries must be strings")
+            activations[aid] = frozenset(
+                review_type
+                for review_type in _REVIEW_TYPES
+                if isinstance(overlay.get(review_type), dict) and aid in overlay[review_type]
+            )
+        return activations
+
+    if not isinstance(raw, dict):
+        raise CriteriaError(
+            f"{where}: 'activate' must be an object mapping criterion ids to review types "
+            f"(or a legacy list of ids), got {type(raw).__name__}"
+        )
+
+    activations = {}
+    for aid, review_types in raw.items():
+        if not isinstance(aid, str):
+            raise CriteriaError(f"{where}: 'activate' keys must be criterion-id strings")
+        if not isinstance(review_types, list) or not review_types:
+            raise CriteriaError(
+                f"{where}: activation for {aid!r} must be a non-empty list of review types"
+            )
+        if any(not isinstance(review_type, str) for review_type in review_types):
+            raise CriteriaError(
+                f"{where}: activation for {aid!r} must contain only review-type strings"
+            )
+        unknown = sorted(set(review_types) - _REVIEW_TYPES)
+        if unknown:
+            raise CriteriaError(f"{where}: unknown review type {unknown[0]!r} for {aid!r}")
+        activations[aid] = frozenset(review_types)
+    return activations
+
+
 def effective_criteria(repo_root: str | None = None, *, gate_key: str) -> tuple[str, ...]:
     """The ACTIVE criterion-id vocabulary for a repo = the gate's canonical built-ins ∪ the
-    project ids listed in the overlay's ``activate`` list (presence in the file ≠ active),
+    project ids whose overlay activation opts into this review type (presence is not activation),
     minus any built-in the overlay DISABLES. An activated project id with no routing entry, or
     a non-``project.`` id in ``activate``, is a LOCATED load-time error."""
     rr = _resolve_repo_root(repo_root)
@@ -283,18 +331,17 @@ def effective_criteria(repo_root: str | None = None, *, gate_key: str) -> tuple[
     overlay = _load_overlay(rr)
     ids = set(canonical)
     if overlay is not None:
-        activate = overlay.get("activate") or []
-        if not isinstance(activate, list):
-            raise CriteriaError(
-                f"criteria overlay {_overlay_path(rr)}: 'activate' must be a list of ids, "
-                f"got {type(activate).__name__}"
-            )
         routing = effective_routing(rr, gate_key=gate_key)
-        for aid in activate:
-            if not isinstance(aid, str):
-                raise CriteriaError(
-                    f"criteria overlay {_overlay_path(rr)}: 'activate' entries must be strings"
-                )
+        activations = _activation_map(
+            overlay,
+            where=f"criteria overlay {_overlay_path(rr)}",
+        )
+        for aid, review_types in activations.items():
+            # A non-empty set comes from either the canonical mapping or a legacy id
+            # whose routing identifies its gate(s). An empty set is a dangling legacy
+            # activation and must still be validated so it produces a located error.
+            if review_types and gate_key not in review_types:
+                continue
             if aid in canonical:
                 continue  # activating a built-in is a no-op (built-ins are always active)
             if not aid.startswith(_PROJECT_PREFIX):
@@ -303,19 +350,6 @@ def effective_criteria(repo_root: str | None = None, *, gate_key: str) -> tuple[
                     f"'{_PROJECT_PREFIX}<name>' project criterion (built-ins are always active)"
                 )
             if aid not in routing:
-                # The `activate` list is SHARED across gates (one top-level list), so a project
-                # criterion defined for a DIFFERENT gate legitimately appears here — it is simply
-                # not active for THIS gate. Only ERROR when the id is defined for NO gate at all
-                # (a genuine dangling activation). This keeps each gate's vocabulary isolated
-                # (story 5065) while preserving the "activate a criterion that exists nowhere is a
-                # located error" contract.
-                in_another_gate = any(
-                    isinstance(overlay.get(g), dict) and aid in overlay[g]
-                    for g in _GATES
-                    if g != gate_key
-                )
-                if in_another_gate:
-                    continue
                 raise CriteriaError(
                     f"criteria overlay {_overlay_path(rr)}: activated criterion {aid!r} has no "
                     f"'{gate_key}' routing entry"

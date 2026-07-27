@@ -12,6 +12,8 @@ delegation.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -126,6 +128,86 @@ def test_code_review_overlay_is_isolated_from_plan_review_key(tmp_path):
     assert "project.cr-only" in cr.effective_criteria(root)
     assert "project.cr-only" not in pr.effective_routing(root)
     assert "project.cr-only" not in pr.effective_criteria(root)
+
+
+def test_project_criteria_explicitly_opt_into_one_or_both_review_types(tmp_path):
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "plan_review": {
+                "project.plan-only": _CR_ROUTING,
+                "project.both": _CR_ROUTING,
+            },
+            "code_review": {
+                "project.code-only": _CR_ROUTING,
+                "project.both": _CR_ROUTING,
+            },
+            "activate": {
+                "project.plan-only": ["plan_review"],
+                "project.code-only": ["code_review"],
+                "project.both": ["plan_review", "code_review"],
+            },
+        },
+    )
+
+    plan_ids = set(pr.effective_criteria(root))
+    code_ids = set(cr.effective_criteria(root))
+
+    assert {"project.plan-only", "project.both"} <= plan_ids
+    assert "project.code-only" not in plan_ids
+    assert {"project.code-only", "project.both"} <= code_ids
+    assert "project.plan-only" not in code_ids
+
+
+def test_explicit_review_type_requires_matching_routing(tmp_path):
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "code_review": {"project.code-only": _CR_ROUTING},
+            "activate": {"project.code-only": ["plan_review"]},
+        },
+    )
+
+    with pytest.raises(shared.CriteriaError, match="has no 'plan_review' routing entry"):
+        pr.effective_criteria(root)
+
+
+def test_explicit_activation_rejects_unknown_review_type(tmp_path):
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "code_review": {"project.code-only": _CR_ROUTING},
+            "activate": {"project.code-only": ["pull_request"]},
+        },
+    )
+
+    with pytest.raises(shared.CriteriaError, match="unknown review type 'pull_request'"):
+        cr.effective_criteria(root)
+
+
+def test_legacy_activation_isolated_without_importing_other_gate(tmp_path):
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "code_review": {"project.code-only": _CR_ROUTING},
+            "activate": ["project.code-only"],
+        },
+    )
+    script = """
+import sys
+from rebar.llm.plan_review import registry
+
+assert "project.code-only" not in registry.effective_criteria(sys.argv[1])
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script, root],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 # ── (c) exec-tier-polymorphic build_descriptor ──────────────────────────────────────
