@@ -334,6 +334,31 @@ ORACLE_GRADE01: dict[str | None, float] = {
     "missing_oracle": 1.0,
 }
 _ORACLE_FLOOR_GRADES = ("broken_oracle", "missing_oracle")
+# divergent_implementation is likewise graded by DIVERGENCE KIND, not the ordinal ladder (story
+# doggish-nonorganic-tsetsefly, plan-v4). Field evidence from the plan-v3 corpus: the axis fired on
+# only 7.72% of findings, and in the "omitted scope site / unenumerated consumer" class it exists to
+# describe it was graded `none` ~90% of the time (1173/1307) — so a plan that provably under-scopes
+# reality scored impact 0.0 and could not block. Grading the axis, rather than merely widening it,
+# follows the ac_unverifiable precedent: a blunt widening would have routed 113 corpus findings into
+# the 0.85 floor at once (4.3% of runs flipping PASS→BLOCK), the same over-fire calibration 3 had to
+# walk back. contradicts_reality/omits_required_site keep the floor; incomplete_enumeration (the
+# omitted site is optional/cosmetic — docs, comments, a redundant mention — and the goal still
+# holds) is coached, never auto-blocked.
+# INVARIANT: DIVERGENCE_INCOMPLETE_CONTRIB stays strictly below the lowest blocking block_threshold
+# in plan_review/criteria_routing.json (0.60) — pinned by test_impact_plan.py, same as
+# UNDERSPECIFIED_ORACLE_CONTRIB, so a future recalibration below it fails loudly.
+DIVERGENCE_INCOMPLETE_CONTRIB = 0.55
+DIVERGENCE_GRADE01: dict[str | None, float] = {
+    "none": 0.0,
+    "incomplete_enumeration": DIVERGENCE_INCOMPLETE_CONTRIB,
+    "contradicts_reality": 1.0,
+    "omits_required_site": 1.0,
+}
+_DIVERGENCE_FLOOR_GRADES = ("contradicts_reality", "omits_required_site")
+# The two axes graded by a CLOSED KIND SET rather than the ordinal none|low|medium|high ladder.
+# Both are hard-override axes whose floor is decided by grade, so both are special-cased out of the
+# generic _SEV01 loops in impact_plan.
+_PLAN_GRADED_AXES = ("ac_unverifiable", "divergent_implementation")
 
 
 def impact_plan(attrs: dict[str, Any]) -> float:
@@ -344,12 +369,17 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     2. DETECTION AMPLIFIER: ``mult`` = 0.8 for a ``self_revealing`` finding, else 1.0; a present
        ``dod_uncertifiable`` forces 1.0 (a DoD you cannot certify is never "self-revealing").
        ``amplified = min(1.0, impact_sev * mult)``;
-    3. HARD OVERRIDE (applied LAST, as a floor): if any of {dod_uncertifiable, undecomposed,
-       divergent_implementation} is present (non-none), OR ac_unverifiable is graded
-       broken_oracle/missing_oracle, the result is floored at 0.85. ac_unverifiable is graded
-       by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story large-sleepful-needlefish): an
-       underspecified_oracle contributes ``UNDERSPECIFIED_ORACLE_CONTRIB`` (below every
-       blocking threshold) and never floors.
+    3. HARD OVERRIDE (applied LAST, as a floor): if either of {dod_uncertifiable, undecomposed}
+       is present (non-none), OR ac_unverifiable is graded broken_oracle/missing_oracle, OR
+       divergent_implementation is graded contradicts_reality/omits_required_site, the result is
+       floored at 0.85. TWO axes are graded by a CLOSED KIND SET instead of the ordinal ladder
+       (``_PLAN_GRADED_AXES``): ac_unverifiable by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story
+       large-sleepful-needlefish) — an underspecified_oracle contributes
+       ``UNDERSPECIFIED_ORACLE_CONTRIB`` and never floors; divergent_implementation by
+       DIVERGENCE KIND (``DIVERGENCE_GRADE01``, plan-v4, story doggish-nonorganic-tsetsefly) — an
+       incomplete_enumeration contributes ``DIVERGENCE_INCOMPLETE_CONTRIB`` and never floors. Both
+       contributions sit below every blocking threshold, so each axis's cosmetic grade is coached
+       rather than auto-blocked.
 
     The override is floored AFTER the amplifier on purpose. The ticket's stated compose
     (``impact_sev = max(impact_sev, 0.85)`` THEN ``× mult``) lets a self-revealing override
@@ -358,9 +388,10 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     guarantees an override finding is always ≥ 0.85, mirroring impact_code's reversibility
     floor. All three mechanisms (MAX, override, amplifier) are present, per AC2."""
     contribs = [
-        _SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES if a != "ac_unverifiable"
+        _SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES if a not in _PLAN_GRADED_AXES
     ]
     contribs.append(ORACLE_GRADE01.get(attrs.get("ac_unverifiable"), 0.0))
+    contribs.append(DIVERGENCE_GRADE01.get(attrs.get("divergent_implementation"), 0.0))
     impact_sev = max(contribs) if contribs else 0.0
     mult = 0.8 if attrs.get("silent_vs_self_revealing") == "self_revealing" else 1.0
     if _SEV01.get(attrs.get("dod_uncertifiable"), 0.0) > 0.0:
@@ -370,9 +401,10 @@ def impact_plan(attrs: dict[str, Any]) -> float:
         any(
             _SEV01.get(attrs.get(a), 0.0) > 0.0
             for a in _PLAN_HARD_OVERRIDE_AXES
-            if a != "ac_unverifiable"
+            if a not in _PLAN_GRADED_AXES
         )
         or attrs.get("ac_unverifiable") in _ORACLE_FLOOR_GRADES
+        or attrs.get("divergent_implementation") in _DIVERGENCE_FLOOR_GRADES
     )
     result = max(amplified, _PLAN_HARD_OVERRIDE_FLOOR) if has_override else amplified
     return round(result, 4)

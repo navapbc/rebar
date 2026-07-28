@@ -1274,12 +1274,15 @@ class _GroundingVerifierFake(_GateFake):
         # High PLAN-severity so a NON-dropped finding clears E4's 0.75 block threshold —
         # the negative control must be able to actually BLOCK. `impact_plan` reads the
         # plan-severity axes (NOT the code-review keys); `divergent_implementation`
-        # (a hard-override axis: "the plan will build the wrong thing") set to "high"
-        # yields impact 1.0, so priority = validity × impact clears the threshold.
+        # (a hard-override axis: "the plan will build the wrong thing") graded
+        # "contradicts_reality" — a plan-v4 FLOOR grade — yields impact 1.0, so
+        # priority = validity × impact clears the threshold. The axis moved off the ordinal
+        # none|low|medium|high ladder onto a closed kind set in plan-v4 (story
+        # doggish-nonorganic-tsetsefly); "high" is no longer a valid grade.
         return {
             "index": index,
             "severity_attributes": {
-                "divergent_implementation": "high",
+                "divergent_implementation": "contradicts_reality",
             },
             "binary": {
                 "cited_reference_accurate": cited_reference_accurate,

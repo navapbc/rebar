@@ -41,9 +41,11 @@ def test_hard_override_floors_low_axis_to_085() -> None:
 
 
 def test_each_ordinal_override_axis_triggers_floor() -> None:
-    # The three ordinal override axes keep the any-non-none floor (story
-    # large-sleepful-needlefish left them untouched).
-    for axis in ("dod_uncertifiable", "undecomposed", "divergent_implementation"):
+    # The remaining ORDINAL override axes keep the any-non-none floor. Two override axes are now
+    # graded by a closed kind set instead and are covered by their own suites:
+    # ac_unverifiable (plan-v3, test_oracle_grade_split.py) and divergent_implementation
+    # (plan-v4, test_divergence_grade_split.py).
+    for axis in ("dod_uncertifiable", "undecomposed"):
         assert impact_plan({axis: "low"}) >= 0.85, axis
 
 
@@ -105,9 +107,11 @@ def test_silent_is_full_weight() -> None:
 def test_override_survives_self_revealing_amplifier() -> None:
     # The coherence fix (COH/E1/G6): the ticket's literal compose would give
     # 0.85 * 0.8 = 0.68 (< 0.70) for a self-revealing override finding, defeating "auto-high".
-    # Flooring the override LAST guarantees it stays >= 0.85.
-    attrs = {"divergent_implementation": "medium", "silent_vs_self_revealing": "self_revealing"}
-    assert impact_plan(attrs) == 0.85
+    # Flooring the override LAST guarantees it stays >= 0.85. Uses undecomposed because
+    # divergent_implementation moved to a closed grade set in plan-v4 (the same property is
+    # pinned for its floor grades in test_divergence_grade_split.py).
+    attrs = {"undecomposed": "medium", "silent_vs_self_revealing": "self_revealing"}
+    assert impact_plan(attrs) >= 0.85
 
 
 def test_dod_uncertifiable_forces_full_detection_weight() -> None:

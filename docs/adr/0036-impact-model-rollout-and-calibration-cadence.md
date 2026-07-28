@@ -63,6 +63,19 @@ segmented replay will never mix the old and new scores.
 5. **Re-run per version bump** — each `IMPACT_MODEL_VERSION` change resets the cohort; do not carry a
    threshold tuned on an older version into a newer one without re-running steps 3–4.
 
+> **NARROWED by ADR 0054 (2026-07-28).** Step 4's "A/B gate" must not be read as licence to
+> commission LLM work to justify a calibration. ADR 0054 **rejects** purpose-built LLM eval suites,
+> bulk re-review sweeps, and newly commissioned hand-labeled sets as calibration instruments, on
+> cost-effectiveness grounds: Pass-3 is deterministic over the persisted verification payload, so
+> the field corpus this cadence already accumulates answers the question at zero marginal LLM cost.
+> The only two permitted A/B forms are **(a) offline replay of the version-matched sidecar corpus**
+> under the candidate value and **(b) dogfooding the candidate in normal use and observing the
+> sidecars that follow**. `ab_impact_model.py` itself is retained — it runs offline against a
+> committed fixture and is an instance of (a). Everything else in this ADR — the permissive
+> invariant, version-tagging, and the no-pooling-across-versions rule — stands unchanged; ADR 0054
+> additionally notes that because a version bump closes a cohort, related impact-model changes
+> should be **batched into one bump**.
+
 ## Consequences
 
 - Threshold tuning becomes a data-gated, reproducible decision rather than a judgement call.

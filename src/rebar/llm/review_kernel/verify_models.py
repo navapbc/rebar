@@ -237,10 +237,20 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
             "be broken down). Grade only a GENUINE gap: the deterministic G5 signal already "
             "suppresses false 'flat' findings on tickets that have children. HARD-OVERRIDE axis.",
         )
-        divergent_implementation: str = Field(
+        divergent_implementation: Literal[
+            "none", "contradicts_reality", "omits_required_site", "incomplete_enumeration"
+        ] = Field(
             default="none",
-            description="none|low|medium|high — the plan diverges from the implementation/reality "
-            "it claims to describe (builds the wrong thing). HARD-OVERRIDE axis.",
+            description="Divergence-kind grade (closed set — NOT the ordinal ladder): the plan"
+            " diverges from the implementation/reality it claims to describe."
+            " contradicts_reality = the plan asserts something about the code/system that is FALSE"
+            " (a named symbol/file/behavior does not exist as described, or exists differently);"
+            " omits_required_site = the plan's scope/file list omits a site the change provably"
+            " MUST touch, where omitting it changes runtime behavior or leaves the goal unmet;"
+            " incomplete_enumeration = a site is omitted but touching it is optional/cosmetic"
+            " (docs, comments, a redundant mention) and the goal still holds without it."
+            " HARD-OVERRIDE for contradicts_reality/omits_required_site ONLY (floors impact to"
+            " 0.85); incomplete_enumeration scores below every blocking threshold, never floors.",
         )
         internal_conflict: str = Field(
             default="none",
