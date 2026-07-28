@@ -67,6 +67,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "T8": (0.7, "blocking"),
     "T9": (0.95, "advisory"),
     "hedge": (0.95, "advisory"),
+    "no-file-impact": (0.95, "advisory"),
     "removal-rationale": (0.95, "advisory"),
     "asserted-capability": (0.95, "advisory"),
     "decomp-shape": (0.95, "advisory"),

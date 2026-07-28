@@ -283,6 +283,31 @@
       }
     ]
   },
+  "no-file-impact": {
+    "exec": "1-TURN",
+    "facet": "scope-intent",
+    "applies_at": {
+      "require_file_impact_scope": [
+        "none"
+      ]
+    },
+    "block_threshold": 0.95,
+      "default_posture": "advisory",
+      "checklist": [
+        {
+          "key": "assertion_plausible",
+          "check": "SUB-ANSWER 1 — Is the `none` declaration consistent with every required deliverable? Answer yes/no/insufficient."
+        },
+        {
+          "key": "reason_grounded",
+          "check": "SUB-ANSWER 2 — Does the declared no-file-impact reason concretely explain why no repository artifact is needed? Answer yes/no/insufficient."
+        },
+        {
+          "key": "repo_file_change_named",
+          "check": "SUB-ANSWER 3 — Does the plan name a repository edit, including source, tests, configuration, automation, generated tracked artifacts, or documentation? Answer yes/no."
+        }
+      ]
+  },
   "T5a": {
     "exec": "1-TURN",
     "facet": "overlay-perf",

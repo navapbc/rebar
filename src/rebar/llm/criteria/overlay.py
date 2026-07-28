@@ -220,6 +220,19 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
                 f"{where}: criterion {cid!r} applies_at.require_parent_id must be a boolean, "
                 f"got {ap['require_parent_id']!r}"
             )
+        # `require_file_impact_scope` restricts a criterion to one or more persisted
+        # declaration kinds. Its declarative list shape lets criteria select another
+        # explicit scope without another routing-key type.
+        scope_requirement = ap.get("require_file_impact_scope")
+        if scope_requirement is not None and (
+            not isinstance(scope_requirement, list)
+            or not scope_requirement
+            or any(not isinstance(value, str) or not value for value in scope_requirement)
+        ):
+            raise CriteriaError(
+                f"{where}: criterion {cid!r} applies_at.require_file_impact_scope must be "
+                f"a non-empty list of strings, got {scope_requirement!r}"
+            )
 
 
 # ── effective (overlay-merged) views, gate-parameterized + repo-keyed ───────────────

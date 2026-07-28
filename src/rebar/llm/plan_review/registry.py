@@ -168,6 +168,9 @@ CANONICAL_LLM = frozenset(
         # dogfood-gated criteria_routing.json change (see the promotion gate in
         # docs/plan-review-gate.md).
         "necessity",
+        # Advisory sanity check for explicit no-file-impact declarations. A plan that
+        # requires source/tests/config/docs contradicts `none`; external-only work does not.
+        "no-file-impact",
         # Cross-cutting
         "COH",
     }
@@ -320,7 +323,7 @@ def load_criteria(repo_root: str | None = None) -> tuple[dict[str, Any], ...]:
 def _load_criteria_cached(rr: str, _overlay_sig: str) -> tuple[dict[str, Any], ...]:
     """The (repo_root, overlay-signature)-keyed compute for :func:`load_criteria` (bounded
     LRU, cross-repo-isolated). ``rr == ""`` means no resolvable repo (packaged-only)."""
-    rr_arg: str | None = rr or None
+    rr_arg: str | None = rr
     routing_map = effective_routing(rr_arg)
     out = []
     for cid in effective_criteria(rr_arg):
@@ -378,6 +381,7 @@ def applies(
     *,
     has_children: bool = False,
     has_parent: bool = False,
+    file_impact_scope: str | None = None,
     ticket_type: str | None = None,
     plan: str = "",
 ) -> bool:
@@ -388,7 +392,8 @@ def applies(
     a story with children is a container. A criterion's ``scope`` lists the nodes it
     runs at (subset of ``["container", "leaf"]``; absent ⇒ both). ``suppress_types``
     (the bug/session_log exemption axis) and the ``suppress_when`` conditions
-    (test-task / mechanical-leaf) still apply. Defaults are permissive (run
+    (test-task / mechanical-leaf) still apply. ``require_file_impact_scope``
+    selects an explicit persisted declaration kind. Defaults are permissive (run
     everywhere) when ``applies_at`` is absent."""
     ap = crit.get("applies_at") or {}
     if ticket_type and ticket_type in (ap.get("suppress_types") or []):
@@ -400,6 +405,9 @@ def applies(
     # `require_parent_id` (G7): a criterion that only runs on a ticket WITH a parent
     # (e.g. leaf-parent-containment). Absent/false ⇒ no parent requirement.
     if ap.get("require_parent_id") and not has_parent:
+        return False
+    required_file_impact_scopes = ap.get("require_file_impact_scope")
+    if required_file_impact_scopes and file_impact_scope not in required_file_impact_scopes:
         return False
     for cond in ap.get("suppress_when") or []:
         if cond == "test_task" and is_test_task(plan):
@@ -587,9 +595,13 @@ def _guide_section_body(criterion: dict[str, Any]) -> str:
 
 
 def regenerate_criteria_guide(repo_root_path: str | None = None) -> str:
-    """Generate docs/plan-review-criteria-guide.md from the registry — one `## <id>` section per
-    criterion, sorted by id. Returns the written path (regenerate-in-place; diff detects drift)."""
-    criteria = sorted(load_criteria(repo_root=repo_root_path), key=lambda c: c["id"])
+    """Generate docs/plan-review-criteria-guide.md for the canonical built-in registry.
+
+    ``repo_root_path`` selects the output checkout only.  Project-local overlays remain
+    available through :func:`explain_criterion`, but are intentionally excluded from this
+    tracked, package-wide guide so regeneration inside a configured project stays parity-clean.
+    """
+    criteria = sorted(load_criteria(repo_root=""), key=lambda c: c["id"])
     header = (
         "# Plan-review criteria authoring guide\n\n"
         "GENERATED from the criteria registry (`python -m rebar.llm.plan_review.registry "

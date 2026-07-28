@@ -351,6 +351,15 @@ def _ticket_size(ctx: PlanContext) -> str:
     return "moderate"
 
 
+def _no_file_impact_context(ctx: PlanContext) -> str:
+    """Render the persisted no-file-impact rationale for its Pass-1 rubric."""
+    reason = ctx.state.get("no_file_impact_reason")
+    payload = {"declared_reason": reason if isinstance(reason, str) else ""}
+    return "## Declared no-file-impact context\n" + json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+
+
 def run_pass1(
     ctx: PlanContext,
     cfg: LLMConfig,
@@ -414,8 +423,14 @@ def run_pass1(
         if cached is not None:
             resumed += 1
             return cached
-        # Inject the store-derived decomposition state ONLY into the G5-bearing chunk.
-        extra = decomp_context if any(c.get("id") == "G5" for c in chunk) else ""
+        # These criterion-scoped contexts compose in a stable order when G5 and
+        # no-file-impact share a facet chunk: child-state first, declaration second.
+        context_parts: list[str] = []
+        if any(c.get("id") == "G5" for c in chunk) and decomp_context:
+            context_parts.append(decomp_context)
+        if any(c.get("id") == "no-file-impact" for c in chunk):
+            context_parts.append(_no_file_impact_context(ctx))
+        extra = "\n\n".join(context_parts)
         out = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
         sizing.save_checkpoint(ctx, material, chunk, cfg.model, agentic, out)
         return out

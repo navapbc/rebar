@@ -1,0 +1,96 @@
+prompt: plan-review-no-file-impact
+model: anthropic:claude-sonnet-4-6
+epochs: 1
+gate: at_least(1)
+coverage_threshold: 1.0
+scorers:
+  - type: deterministic
+    name: emits_valid_findings
+    description: >-
+      The external-only control emits no finding. Plans that require repository
+      source or documentation edits, and plans too vague to ground the declared
+      reason, emit a schema-valid advisory finding.
+dataset:
+  - id: NFI-P1-external-operator-action
+    corpus: rebar
+    criterion: no-file-impact
+    expect: pass
+    note: >-
+      A release operator rotates a credential in an external service; the
+      repository is only read for runbook context and no repository artifact is
+      changed.
+    input: |
+      ## Plan
+      Ask the release operator to rotate the production credential in the
+      external secret manager. Read the existing runbook for the endpoint name;
+      do not edit the repository.
+
+      ## Declared no-file-impact context
+      {"declared_reason":"credential rotation occurs entirely in the external secret manager"}
+
+      ## Acceptance Criteria
+      - [ ] The external credential is rotated and its external health check passes.
+
+  - id: NFI-F1-source-change
+    corpus: rebar
+    criterion: no-file-impact
+    expect: finding
+    note: >-
+      The plan declares no impact but explicitly requires a new CLI flag and
+      tests, which necessarily edit repository files.
+    input: |
+      ## Plan
+      Add a `--rotate-credential` flag to the rebar CLI and unit tests for the
+      new command path.
+
+      ## Declared no-file-impact context
+      {"declared_reason":"operator action only"}
+
+      ## Acceptance Criteria
+      - [ ] The new CLI flag rotates the credential.
+      - [ ] Unit tests cover success and error behavior.
+
+  - id: NFI-F2-docs-change
+    corpus: rebar
+    criterion: no-file-impact
+    expect: finding
+    note: >-
+      Documentation is a repository file, so a docs-only deliverable contradicts
+      a none declaration and should coach the author to declare the doc path.
+    input: |
+      ## Plan
+      Update `docs/operator-runbook.md` with the credential-rotation procedure.
+
+      ## Declared no-file-impact context
+      {"declared_reason":"docs only"}
+
+      ## Acceptance Criteria
+      - [ ] The operator runbook documents every rotation step.
+
+  - id: NFI-F3-insufficient-reason
+    corpus: rebar
+    criterion: no-file-impact
+    expect: finding
+    note: >-
+      The plan and reason do not name a deliverable or locate the work, so the
+      criterion should coach the author to strengthen the declaration without
+      treating the ambiguity as a blocking contradiction.
+    input: |
+      ## Plan
+      Handle the credential task.
+
+      ## Declared no-file-impact context
+      {"declared_reason":""}
+
+      ## Acceptance Criteria
+      - [ ] The task is complete.
+
+gold_set:
+  - input: "External secret-manager rotation with repository read-only context."
+    label: pass
+  - input: "Adds a CLI flag and tests while declaring no file impact."
+    label: finding
+  - input: "Edits a documentation file while declaring no file impact."
+    label: finding
+  - input: "Names no deliverable and supplies an empty no-impact reason."
+    label: finding
