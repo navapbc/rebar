@@ -121,7 +121,7 @@ jobs:
       # Story alive-ogre-tiger (epic clumsy-jab-yacht).
       - name: degradation-path tests run with NO agents extra
         run: |
-          /tmp/clean/bin/pip install pytest jsonschema mcp
+          /tmp/clean/bin/pip install pytest jsonschema 'mcp>=1.28.1,<2'
           /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
           # F2: drive the completion close-gate fail-closed path with the [agents] extra
           # genuinely ABSENT (not just a monkeypatched error) — the lean lane is the one
