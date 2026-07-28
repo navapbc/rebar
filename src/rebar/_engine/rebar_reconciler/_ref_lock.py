@@ -38,6 +38,19 @@ acquire/release do the CAS as a ``git push --force-with-lease=<ref>:<old>``
 old-oid ``update-ref`` CAS. The reconciler passes ``remote="origin"`` (wired in
 C3); AC0 proves the ``refs/reconciler/*`` refspec round-trips through GitHub.
 
+**The remote is the decider — in both directions.** The local ref is only a cache
+of it, so remote ABSENCE must propagate too: git cannot delete a local ref through
+a refspec whose source is gone, so :func:`_fetch_ref` follows a failed fetch with
+an ``ls-remote`` probe and prunes the local ref when the remote is reachable and
+the ref is provably absent, and :func:`release` deletes both halves (remote push
+delete + local ``update-ref -d``). Without that, a local ``read`` planted a copy
+of another machine's lock which outlived the holder's remote-only release and
+wedged the clone: every later ``read`` said HELD, and ``steal`` could not break it
+(``--force-with-lease`` against an absent remote ref is rejected as "stale info",
+i.e. classified as a CAS mismatch). A remote we cannot REACH is different: it
+leaves the local ref alone (fail-closed / still HELD), because declaring locks
+free during a network outage would destroy cross-machine mutual exclusion.
+
 **Fail-closed reads.** :func:`read` raises :class:`RefLockCorruptError` on a
 corrupt / partial / empty blob and :class:`RefLockTimeoutError` on a subprocess
 timeout; callers treat either (indeed any read failure) as HELD, never free.
@@ -285,12 +298,80 @@ def _hash_object(repo_root: Path, blob: bytes) -> str:
     return result.stdout.decode("utf-8").strip()
 
 
+def _remote_ref_absent(repo_root: Path, ref: str, remote: str) -> bool | None:
+    """Is *ref* absent on *remote*? ``True`` absent, ``False`` present, ``None`` unknown.
+
+    The discriminator is ``git ls-remote --exit-code``'s **exit status**, not its
+    stderr text: exit 0 means "talked to the remote and found the ref", exit **2**
+    means "talked to the remote, no matching ref" (documented for ``--exit-code``),
+    and anything else (128 …) is a transport / auth failure. Exit codes are
+    locale-independent, so this stays robust where matching git's
+    "couldn't find remote ref" message would not. ``None`` (unknown) is the
+    fail-closed answer: a caller must NOT treat an unreachable remote as free.
+    """
+    result = _git(
+        repo_root,
+        ["ls-remote", "--exit-code", remote, ref],
+        timeout=_REMOTE_TIMEOUT_SECS,
+        check=False,
+    )
+    if result.returncode == 0:
+        return False
+    if result.returncode == 2:
+        return True
+    logger.warning(
+        "ref-lock: git ls-remote %s %s failed (exit %s) — cannot tell absent from "
+        "unreachable; fail-closed: %s",
+        remote,
+        ref,
+        result.returncode,
+        (result.stderr or "").strip()[:200],
+    )
+    return None
+
+
 def _fetch_ref(repo_root: Path, ref: str, remote: str) -> None:
-    """Force-sync the local *ref* from *remote* (best-effort — absent remote ref is fine)."""
-    # ``+<ref>:<ref>`` force-updates the local ref to the remote truth; an absent
-    # remote ref makes fetch exit non-zero, which we swallow (ref stays / becomes
-    # absent locally = free).
-    _git(repo_root, ["fetch", remote, f"+{ref}:{ref}"], timeout=_REMOTE_TIMEOUT_SECS, check=False)
+    """Force-sync the local *ref* to the *remote* truth — including remote ABSENCE.
+
+    ``+<ref>:<ref>`` force-updates the local ref while the remote ref exists, but
+    git cannot DELETE a local ref through a refspec whose source is missing: when
+    the remote ref is gone the fetch just fails (exit 128, "couldn't find remote
+    ref") and any local copy planted by an earlier read SURVIVES — which used to
+    strand an orphan that made every later :func:`read` report HELD against a free
+    remote. So on a failed fetch we ask :func:`_remote_ref_absent` which case it
+    was and prune the local ref only when the remote is reachable and the ref is
+    provably absent. A transport error (unknown) leaves the local ref untouched —
+    fail-closed, never "everything is free" during a network outage.
+    """
+    result = _git(
+        repo_root, ["fetch", remote, f"+{ref}:{ref}"], timeout=_REMOTE_TIMEOUT_SECS, check=False
+    )
+    if result.returncode == 0:
+        return
+    if _local_ref_oid(repo_root, ref) is None:
+        return  # nothing stranded — no need to spend a second round-trip
+    if _remote_ref_absent(repo_root, ref, remote) is True:
+        logger.info(
+            "ref-lock: pruning orphaned local %s — remote %s is reachable and the ref is absent",
+            ref,
+            remote,
+        )
+        _delete_local_ref(repo_root, ref)
+
+
+def _delete_local_ref(repo_root: Path, ref: str) -> None:
+    """Best-effort unconditional delete of the LOCAL *ref* (a cache of the remote truth).
+
+    Used to prune an orphaned local copy (see :func:`_fetch_ref`) and to clear the
+    local half on :func:`release` — ADR 0031's "operator break-glass" names
+    ``git push origin :<ref>`` and ``git update-ref -d <ref>`` as the two halves of
+    clearing a lock. Never raises on an already-absent ref (``check=False``).
+    """
+    result = _git(repo_root, ["update-ref", "-d", ref], timeout=_LOCAL_TIMEOUT_SECS, check=False)
+    if result.returncode != 0:
+        logger.debug(
+            "ref-lock: local delete of %s exited %s (already absent?)", ref, result.returncode
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -298,10 +379,8 @@ def _fetch_ref(repo_root: Path, ref: str, remote: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ref_oid(repo_root: Path, ref: str, *, remote: str | None = None) -> str | None:
-    """Return the OID *ref* points at (force-syncing from *remote* first), or None if absent."""
-    if remote is not None:
-        _fetch_ref(repo_root, ref, remote)
+def _local_ref_oid(repo_root: Path, ref: str) -> str | None:
+    """Return the OID the LOCAL *ref* points at, or ``None`` if it is absent."""
     result = _git(
         repo_root,
         ["rev-parse", "--verify", "--quiet", ref],
@@ -312,6 +391,18 @@ def _ref_oid(repo_root: Path, ref: str, *, remote: str | None = None) -> str | N
         return None  # ref absent
     oid = result.stdout.strip()
     return oid or None
+
+
+def _ref_oid(repo_root: Path, ref: str, *, remote: str | None = None) -> str | None:
+    """Return the OID *ref* points at (force-syncing from *remote* first), or None if absent.
+
+    With a *remote* the sync is authoritative in BOTH directions —
+    :func:`_fetch_ref` also prunes a local ref the remote provably no longer has —
+    so a leftover local copy can never make a free remote lock look HELD.
+    """
+    if remote is not None:
+        _fetch_ref(repo_root, ref, remote)
+    return _local_ref_oid(repo_root, ref)
 
 
 def _read_blob_bytes(repo_root: Path, ref: str, oid: str) -> bytes:
@@ -386,6 +477,10 @@ def release(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -
     gone, or now owned by another holder after a steal) is a benign idempotent
     success — returns ``False`` (nothing deleted); a successful delete returns
     ``True``. Never raises on a stale oid.
+
+    With a *remote* this clears BOTH halves — the remote ref (the CAS delete) and
+    any local copy a previous :func:`read` force-fetch planted — so a release never
+    strands a local orphan that later reads would mistake for a live lock.
     """
 
     def _delete() -> None:
@@ -394,7 +489,16 @@ def release(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -
         else:
             _push_delete_cas(repo_root, ref, oid, remote)
 
-    if _cas_once(_delete, ref):
+    deleted = _cas_once(_delete, ref)
+    if remote is not None:
+        # Clear the LOCAL half too. A read() force-fetch plants a local copy of the
+        # remote ref, and a remote-only delete strands it — an orphan that makes every
+        # later read report HELD against a now-free remote (and that steal cannot break,
+        # because --force-with-lease against an absent remote ref is rejected as "stale
+        # info"). ADR 0031's operator break-glass names both halves; do both, even on a
+        # mismatched CAS, where our local copy is equally stale.
+        _delete_local_ref(repo_root, ref)
+    if deleted:
         return True
     logger.info(
         "ref-lock release: %s no longer points at %s (already released or stolen) — "
