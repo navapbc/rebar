@@ -187,7 +187,8 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         if step_temperature is not None:
             cfg = _replace(cfg, temperature=float(step_temperature))
         prompt_id = ctx.step.get("prompt") or ""
-        prompt = prompts.get_prompt(prompt_id, repo_root=self._repo_root)
+        prompt_repo_root = cfg.repo_path or self._repo_root
+        prompt = prompts.get_prompt(prompt_id, repo_root=prompt_repo_root)
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         variables = {
             "ticket_id": ticket_id,
@@ -242,7 +243,11 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             # so the cached system prefix stays byte-identical across runs. The system prefix
             # is identical across chunks; only the per-chunk base_instructions differ.
             system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
-                prompt, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
+                prompt,
+                variables,
+                base_instructions=base_instructions,
+                langfuse_cfg=cfg.langfuse,
+                repo_root=prompt_repo_root,
             )
             req = build_agent_request(
                 prompt,

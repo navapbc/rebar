@@ -8,6 +8,7 @@ with an injected FakeRunner, so it is fully offline (no tokens, no network).
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,17 @@ def test_single_turn_step_runs_structured_against_prompt_outputs(rebar_repo: Pat
         "---\nexecution_mode: single_turn\noutputs: completion_verdict\n---\n"
         "Decide on {{ticket_id}}.",
         encoding="utf-8",
+    )
+    # The workflow defaults to an attested HEAD snapshot, so its project prompt must be
+    # committed. An uncommitted prompt would correctly be invisible to the runner.
+    subprocess.run(
+        ["git", "add", ".rebar/prompts/single-shot.md"], cwd=r, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add test prompt"],
+        cwd=r,
+        check=True,
+        capture_output=True,
     )
     tid = rebar.create_ticket("task", "ST", description="body", repo_root=r)
     doc = {

@@ -25,7 +25,7 @@ driven by the B1 ``ProductionBatchRunner``; agent steps (verify/coach) run throu
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -655,6 +655,9 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
         ref=request.head, source=request.source, repo_root=request.repo_root
     )
     cfg = gate_source.apply_handle(request.cfg, handle)
+    if handle.source == gate_source.SOURCE_LOCAL:
+        cfg = replace(cfg, repo_path=str(handle.path))
+    execution_repo_root = cfg.repo_path
     # Rebuild the runner from the RE-ROOTED cfg (bug pelt-mead-aeon): the preflight runner baked the
     # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
     runner_sel = request.runner or get_runner(cfg)
@@ -664,14 +667,14 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 prep.doc,
                 prep.inputs,
                 target_ticket=request.target_ticket,
-                repo_root=request.repo_root,
+                repo_root=execution_repo_root,
                 agent_runner=RunnerAgentStep(
                     runner=runner_sel, repo_root=request.repo_root, config=cfg
                 ),
                 batch_runner=CodeReviewBatchRunner(
                     context=prep.dc.context,
                     context_overrides=prep.context_overrides,
-                    project_criteria=_activated_code_review_project_criteria(request.repo_root),
+                    project_criteria=_activated_code_review_project_criteria(execution_repo_root),
                 ),
                 recorder=prep.rec,
             )

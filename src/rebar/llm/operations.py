@@ -138,7 +138,8 @@ def review_ticket(
         if cfg.max_iterations < _REVIEW_MIN_STEPS:
             cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
         rid = reviewer_id or default_reviewer_id()
-        reviewer = prompts.get_prompt(rid, repo_root=repo_root)
+        prompt_repo_root = cfg.repo_path or repo_root
+        reviewer = prompts.get_prompt(rid, repo_root=prompt_repo_root)
 
         context, ids = assemble_context(ticket_id, graph=graph, repo_root=repo_root)
         variables = {
@@ -166,7 +167,11 @@ def review_ticket(
         # Engine-wide caching (story c6e5): cache the byte-stable reviewer rubric and route
         # the volatile per-run ticket context to the user message. Unmarked → pre-S2 behavior.
         system_prompt, instructions, langfuse_prompt = prompts.resolve_prompt_cached(
-            reviewer, variables, base_instructions=base_instructions, langfuse_cfg=cfg.langfuse
+            reviewer,
+            variables,
+            base_instructions=base_instructions,
+            langfuse_cfg=cfg.langfuse,
+            repo_root=prompt_repo_root,
         )
 
         req = RunRequest(

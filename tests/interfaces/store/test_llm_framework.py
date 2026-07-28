@@ -559,6 +559,74 @@ def test_scan_epics_for_spec_batches(rebar_repo: Path) -> None:
     assert result["reviewers"] == ["spec-alignment"]
 
 
+def test_scan_epics_executes_prompt_from_configured_snapshot(rebar_repo: Path) -> None:
+    import rebar.llm as llm
+
+    rebar.create_ticket("epic", "Snapshot epic", repo_root=str(rebar_repo))
+    prompt_id = "project-spec-scan"
+    snapshot_root = rebar_repo.parent / "spec-snapshot"
+
+    def write_prompt(root: Path, sentinel: str) -> None:
+        prompt_dir = root / ".rebar" / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / f"{prompt_id}.md").write_text(
+            f"""\
+---
+schema_version: 1
+title: Project spec scan
+description: Repository-only spec scan prompt.
+inputs: reviewer_input
+outputs: review_result
+execution_mode: agentic
+category: review
+dimension: spec-alignment
+---
+{sentinel}
+
+{{{{spec}}}}
+{{{{epics}}}}
+""",
+            encoding="utf-8",
+        )
+
+    write_prompt(rebar_repo, "LIVE-CHECKOUT-PROMPT")
+    write_prompt(snapshot_root, "ATTESTED-SNAPSHOT-PROMPT")
+
+    class CapturingRunner(llm.FakeRunner):
+        def __init__(self) -> None:
+            super().__init__(findings=[])
+            self.requests = []
+
+        def run(self, req):
+            self.requests.append(req)
+            return super().run(req)
+
+    runner = CapturingRunner()
+    llm.scan_epics_for_spec(
+        "The system must match the spec.",
+        reviewer_id=prompt_id,
+        source="local",
+        repo_root=str(rebar_repo),
+        config=llm.LLMConfig(repo_path=str(snapshot_root)),
+        runner=runner,
+    )
+
+    assert "ATTESTED-SNAPSHOT-PROMPT" in runner.requests[0].system_prompt
+    assert "LIVE-CHECKOUT-PROMPT" not in runner.requests[0].system_prompt
+
+    live_runner = CapturingRunner()
+    llm.scan_epics_for_spec(
+        "The system must match the spec.",
+        reviewer_id=prompt_id,
+        source="local",
+        repo_root=str(rebar_repo),
+        config=llm.LLMConfig(repo_path=None),
+        runner=live_runner,
+    )
+    assert "LIVE-CHECKOUT-PROMPT" in live_runner.requests[0].system_prompt
+    assert "ATTESTED-SNAPSHOT-PROMPT" not in live_runner.requests[0].system_prompt
+
+
 # ── review_ticket end-to-end (FakeRunner against a real store) ────────────────
 def _seed(repo: Path) -> str:
     r = str(repo)
@@ -601,6 +669,62 @@ def test_review_ticket_end_to_end(rebar_repo: Path) -> None:
     assert result["reviewers"] == ["ticket-quality"]
     assert result["target"]["kind"] == "ticket"
     assert result["findings"][0]["citations"][0]["kind"] == "file"  # real file kept
+
+
+def test_review_ticket_executes_repository_prompt_override(rebar_repo: Path) -> None:
+    import rebar.llm as llm
+
+    epic = _seed(rebar_repo)
+    snapshot_root = rebar_repo.parent / "snapshot"
+
+    def write_override(root: Path, sentinel: str, dimension: str) -> None:
+        prompt_dir = root / ".rebar" / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / "ticket-quality.md").write_text(
+            f"""\
+---
+schema_version: 1
+title: Project ticket quality
+description: Repository override used by the review operation.
+inputs: reviewer_input
+outputs: review_result
+execution_mode: agentic
+category: review
+dimension: {dimension}
+---
+{sentinel}
+
+{{{{ticket_context}}}}
+""",
+            encoding="utf-8",
+        )
+
+    write_override(rebar_repo, "LIVE-CHECKOUT-PROMPT", "live-checkout-dimension")
+    write_override(snapshot_root, "ATTESTED-SNAPSHOT-PROMPT", "snapshot-dimension")
+
+    class CapturingRunner(llm.FakeRunner):
+        def __init__(self) -> None:
+            super().__init__(findings=[])
+            self.requests = []
+
+        def run(self, req):
+            self.requests.append(req)
+            return super().run(req)
+
+    runner = CapturingRunner()
+    llm.review_ticket(
+        epic,
+        "ticket-quality",
+        source="local",
+        repo_root=str(rebar_repo),
+        config=llm.LLMConfig(repo_path=str(snapshot_root)),
+        runner=runner,
+    )
+
+    assert "ATTESTED-SNAPSHOT-PROMPT" in runner.requests[0].system_prompt
+    assert "LIVE-CHECKOUT-PROMPT" not in runner.requests[0].system_prompt
+    assert "'snapshot-dimension'" in runner.requests[0].instructions
+    assert "'live-checkout-dimension'" not in runner.requests[0].instructions
 
 
 def test_review_ticket_graph_includes_children(rebar_repo: Path) -> None:
