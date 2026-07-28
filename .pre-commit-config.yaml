@@ -9,6 +9,16 @@
 # Install: `make install` (or `pre-commit install`). The ruff used by the `lint` hook
 # is the version pinned EXACTLY in pyproject's [dev] extra, so the hook, `make lint`,
 # and CI all agree.
+#
+# TWO hook types are installed (see `default_install_hook_types`): `pre-commit` for the
+# code gates, and `commit-msg` for the message-wrap gate — the commit message does not
+# exist yet at the pre-commit stage, so wrap checking can only run at commit-msg.
+# IMPORTANT: this repo also uses Gerrit's own `commit-msg` hook (it stamps `Change-Id`).
+# pre-commit installs in MIGRATION mode by default, preserving that hook as
+# `commit-msg.legacy` and running BOTH — so never install with `-f`/`--overwrite`, which
+# would drop the Change-Id stamp and break every push to Gerrit.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   # Lightweight, CHECK-ONLY hygiene hooks (these error; they do not reformat code).
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -52,3 +62,17 @@ repos:
         language: system
         pass_filenames: false
         types_or: [python, pyi]
+
+      # The message gate — the 50/72 rule. Gerrit renders a change description as
+      # preformatted text and preserves the author's newlines, so the wrapping you
+      # commit is what reviewers read (and what `git log` shows in an 80-col terminal).
+      # Gerrit's bundled commit-message-length-validator only WARNS, which is easy to
+      # ignore; this makes it a local gate. CHECK-ONLY like the others: it never
+      # rewrites your message, it tells you which lines to wrap. Trailers, URLs/paths,
+      # table rows and fenced code blocks are exempt. Runs at the commit-msg stage
+      # because the message does not exist during pre-commit.
+      - id: commit-message-wrap
+        name: commit message (50/72 wrap; never mutates)
+        entry: python3 scripts/check_commit_message_wrap.py
+        language: system
+        stages: [commit-msg]

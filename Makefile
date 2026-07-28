@@ -43,6 +43,11 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 	@# safe to unset; any OTHER value is a deliberate setup we must not clobber — guide and
 	@# stop. Then install and VERIFY the hook file exists, so the gate is never silently
 	@# absent (the failure mode that let a format error reach CI).
+	@# Installed WITHOUT -f/--overwrite on purpose: `default_install_hook_types` adds the
+	@# commit-msg hook (the 50/72 message gate), and Gerrit's own commit-msg hook (which
+	@# stamps Change-Id) already owns that slot. pre-commit's default migration mode
+	@# preserves it as commit-msg.legacy and runs BOTH; -f would delete it and silently
+	@# break every push to Gerrit. Both hooks AND the Change-Id chain are verified below.
 	@hp="$$(git config --get core.hooksPath || true)"; \
 	common="$$(git rev-parse --git-common-dir)"; \
 	if [ -n "$$hp" ]; then \
@@ -60,11 +65,29 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 	fi; \
 	pre-commit install; \
 	hook="$$common/hooks/pre-commit"; \
+	msg_hook="$$common/hooks/commit-msg"; \
 	if [ -f "$$hook" ]; then \
 		echo "✓ commit gate active: pre-commit hook installed at $$hook"; \
 	else \
 		echo "ERROR: pre-commit hook NOT found at $$hook after install — the commit gate is NOT active."; \
 		exit 1; \
+	fi; \
+	if [ -f "$$msg_hook" ]; then \
+		echo "✓ message gate active: commit-msg hook installed at $$msg_hook"; \
+	else \
+		echo "ERROR: commit-msg hook NOT found at $$msg_hook — the 50/72 message gate is NOT active."; \
+		exit 1; \
+	fi; \
+	if grep -q "Change-Id" "$$msg_hook" 2>/dev/null; then \
+		echo "✓ Gerrit Change-Id stamping preserved (in the commit-msg hook itself)"; \
+	elif [ -f "$$msg_hook.legacy" ] && grep -q "Change-Id" "$$msg_hook.legacy" 2>/dev/null; then \
+		echo "✓ Gerrit Change-Id stamping preserved (chained as commit-msg.legacy)"; \
+	else \
+		echo "WARNING: no Change-Id stamping found in $$msg_hook or its .legacy chain."; \
+		echo "         Pushes to Gerrit will be rejected without a Change-Id. Reinstall it:"; \
+		echo "           curl -sLo \"\$$(git rev-parse --git-path hooks/commit-msg.legacy)\" \\"; \
+		echo "             https://rebar.solutions.navateam.com/tools/hooks/commit-msg"; \
+		echo "           chmod +x \"\$$(git rev-parse --git-path hooks/commit-msg.legacy)\""; \
 	fi
 
 worktree:  ## Create a fresh worktree from origin/main + provision its venv & hooks. Usage: make worktree name=<branch> [dir=<path>]
