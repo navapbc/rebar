@@ -9,6 +9,7 @@ import pathlib
 
 import pytest
 
+import rebar
 from rebar.llm.evals import eval_scorers as sc
 from rebar.llm.evals import eval_solver
 from rebar.llm.runner import FakeRunner
@@ -70,6 +71,35 @@ def test_spec_alignment_batch_case_runs() -> None:
     )
     out = eval_solver.run_case("spec-alignment", case, runner=fake)
     assert sc.score("recall_on_gaps_and_conflicts", case, out).passed is True
+
+
+def test_spec_alignment_fixture_uses_one_acceptance_criteria_heading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_descriptions: list[str] = []
+    create_ticket = rebar.create_ticket
+
+    def capture_create_ticket(*args: object, **kwargs: object) -> object:
+        if args and args[0] == "epic":
+            captured_descriptions.append(str(kwargs["description"]))
+        return create_ticket(*args, **kwargs)
+
+    monkeypatch.setattr(rebar, "create_ticket", capture_create_ticket)
+
+    eval_solver.run_case(
+        "spec-alignment",
+        {
+            "id": "sa-single-heading",
+            "expect": "pass",
+            "spec": "MUST ingest events.",
+            "epics": ["Epic A: event ingestion"],
+        },
+        runner=FakeRunner(findings=[]),
+    )
+
+    assert len(captured_descriptions) == 1
+    assert captured_descriptions[0].count("## Acceptance Criteria") == 1
+    assert "## Success Criteria" not in captured_descriptions[0]
 
 
 def _novelty_fake(answer: str) -> FakeRunner:

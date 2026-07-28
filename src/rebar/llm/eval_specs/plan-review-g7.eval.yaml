@@ -33,7 +33,7 @@ scorers:
     rubric: >
       Score 0..1 whether the G7 verdict is grounded against the PARENT's plan: a fire is justified
       ONLY when the leaf delivers something outside the parent's declared scope, contradicts a
-      parent acceptance/success criterion, or redefines a parent deliverable; a leaf that merely
+      parent acceptance criterion, or redefines a parent deliverable; a leaf that merely
       does PART of the parent (consistent narrowing) must NOT fire. Length-neutral; a fire
       manufactured from a benign narrowing scores low.
     grader:

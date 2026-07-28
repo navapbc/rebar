@@ -3,7 +3,7 @@
 #
 # The container criteria evaluate a (parent + single child) pairing against the WHOLE
 # sibling roster:
-#   * G3 = does the union of children COVER the parent's acceptance/success criteria?
+#   * G3 = does the union of children COVER the parent's acceptance criteria?
 #     An uncovered parent criterion is a finding. ANTI-FP: a criterion covered-by-
 #     definition by a named consumer counts as covered (no finding).
 #   * G4 = is the child CONSISTENT with the parent + siblings across the 7 interaction
@@ -88,9 +88,9 @@ dataset:
     expect: finding
     note: silent-coverage-gap
     input: >
-      An epic whose success criteria include "the reconciler is idempotent under retried
+      An epic whose acceptance criteria include "the reconciler is idempotent under retried
       webhooks". Its children cover the importer, the API, and the UI — but NO child
-      addresses idempotency. G3 SHOULD fire: a parent success criterion left uncovered by
+      addresses idempotency. G3 SHOULD fire: a parent acceptance criterion left uncovered by
       the whole child set (checked against the complete roster, not one child).
   - id: G3-R-uncovered-rollback-snap
     corpus: snap
@@ -202,7 +202,7 @@ dataset:
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus). Also the
 # labelled set parity.container_fidelity_report diffs candidate vs baseline over.
 gold_set:
-  - input: "A parent idempotency success criterion no child covers (G3-R-uncovered-ac-rebar)."
+  - input: "A parent idempotency acceptance criterion no child covers (G3-R-uncovered-ac-rebar)."
     label: finding
   - input: "A required rollback path the child set omits (G3-R-uncovered-rollback-snap)."
     label: finding
