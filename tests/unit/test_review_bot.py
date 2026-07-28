@@ -220,6 +220,77 @@ def test_adapter_blocking_finding_is_block(monkeypatch, tmp_path):
     assert any(f["detail"] == "rce" for f in out["findings"])
 
 
+@pytest.mark.parametrize(
+    ("finding_count", "expected_overflow"),
+    [
+        (10, None),
+        (11, "1 additional blocking finding omitted from this summary."),
+        (12, "2 additional blocking findings omitted from this summary."),
+    ],
+)
+def test_adapter_discloses_truncated_blocking_summary(
+    monkeypatch, tmp_path, finding_count, expected_overflow
+):
+    long_detail = "actionable finding detail " * 20
+    blocking = [
+        {
+            "finding": f"{long_detail}{i}",
+            "criteria": ["quality"],
+            "location": f"x.py:{i + 1}",
+        }
+        for i in range(finding_count)
+    ]
+    assert len(long_detail) > 240
+    assert len(blocking) == finding_count
+    assert len(blocking) >= 10
+    _patch_verdict(
+        monkeypatch,
+        {
+            "verdict": "BLOCK",
+            "blocking": blocking,
+            "advisory": [],
+            "coverage": {},
+        },
+    )
+
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
+
+    bullets = [line for line in out["message"].splitlines() if line.startswith("- ")]
+    assert len(bullets) == 10
+    rendered_detail = bullets[0].split(") ", 1)[1].rsplit(" [", 1)[0]
+    expected_detail = f"{long_detail}0"
+    assert rendered_detail == f"{expected_detail[:239]}…"
+    assert len(rendered_detail) == 240
+    if expected_overflow is None:
+        assert "omitted" not in out["message"]
+    else:
+        overflow = out["message"].splitlines()[-1]
+        assert overflow == expected_overflow
+    assert len(out["findings"]) == finding_count
+    assert out["findings"][0]["detail"] == expected_detail
+
+
+def test_adapter_preserves_blocking_detail_at_summary_limit(monkeypatch, tmp_path):
+    boundary_detail = "x" * 240
+    _patch_verdict(
+        monkeypatch,
+        {
+            "verdict": "BLOCK",
+            "blocking": [{"finding": boundary_detail, "criteria": ["quality"]}],
+            "advisory": [],
+            "coverage": {},
+        },
+    )
+
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
+
+    bullet = next(line for line in out["message"].splitlines() if line.startswith("- "))
+    rendered_detail = bullet.split(") ", 1)[1]
+    assert rendered_detail == boundary_detail
+    assert "…" not in rendered_detail
+    assert "omitted" not in out["message"]
+
+
 def test_adapter_indeterminate_is_coverage_gap_block(monkeypatch, tmp_path):
     _patch_verdict(
         monkeypatch,
