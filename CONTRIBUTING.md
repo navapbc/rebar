@@ -92,6 +92,15 @@ git commit -m "component: what changed and why
 rebar-ticket: blank-guild-koi"
 ```
 
+**Wrap the message body at ~72 columns** (and keep the subject under ~50). Gerrit's
+commit-message validator warns otherwise — `warning: subject >50 characters` and
+`warning: too many message lines longer than 72 characters; manually wrap lines` — and
+Gerrit renders the message as preformatted text, so the newlines you write are the
+newlines reviewers see. Nothing in rebar reflows a commit message: the wrapping in a
+Gerrit change description is exactly what the author committed (ticket
+`gargantuan-illhumored-drongo`). Wrap prose at the column; leave code blocks, trailers,
+and URLs unwrapped even when they exceed it.
+
 ### 2b. Push for review
 Push to the magic `refs/for/main` ref — this creates (or updates) a Gerrit **change**,
 it does **not** touch `main`:
