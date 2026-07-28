@@ -59,6 +59,12 @@ several criteria.
   where every deliverable is covered by a child and children don't overlap (G3/G4/G5). It
   **defers testing to its children** — don't write leaf-level tests on a container.
 
+For an epic, keep the description durable as its decomposition evolves: describe the child
+responsibilities, but do **not** state how many children the epic has. An epic also does
+**not** need a separate acceptance criterion saying that all children are closed or completed;
+rebar's parent-completion guard already enforces child closure. Use the epic's criteria for
+substantive outcomes instead of graph bookkeeping.
+
 ## The description template
 
 Write these as Markdown headings. An **`## Acceptance Criteria`** block is always required
