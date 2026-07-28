@@ -468,6 +468,7 @@ def test_plaintext_none_scope_cannot_override_authenticated_unscoped_manifest(
         ([], "undeclared", False, "unscoped"),
         ([], "paths", False, "unscoped"),
         ([], "undeclared", True, "none"),
+        ([], "paths", True, "unscoped"),
     ],
 )
 def test_file_scope_classifier_contract(
@@ -484,6 +485,104 @@ def test_file_scope_classifier_contract(
         )
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_deps", "expected_scope"),
+    [
+        ("parent-paths-all-none", {"parent.py"}, "unscoped"),
+        ("parent-none-all-none", set(), "none"),
+        ("no-live-children", set(), "unscoped"),
+        ("malformed-child-poisons", set(), "unscoped"),
+    ],
+)
+def test_normal_sign_container_scope_contract(
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    expected_deps: set[str],
+    expected_scope: str,
+) -> None:
+    for path in ("parent.py", "child.py"):
+        (store / path).write_text(f"# {path}\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "parent.py", "child.py"],
+        cwd=store,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "scope fixtures"],
+        cwd=store,
+        check=True,
+        capture_output=True,
+    )
+
+    ticket_id = rebar.create_ticket("story", case, repo_root=str(store))
+    none_child = {
+        "ticket_id": "none-child",
+        "status": "open",
+        "file_impact": [],
+        "file_impact_scope": "none",
+    }
+    if case == "parent-paths-all-none":
+        rebar.set_file_impact(
+            ticket_id,
+            [{"path": "parent.py", "reason": "parent implementation"}],
+            repo_root=str(store),
+        )
+        children = [none_child]
+    elif case == "parent-none-all-none":
+        rebar.declare_no_file_impact(
+            ticket_id,
+            "coordination container",
+            repo_root=str(store),
+        )
+        children = [none_child]
+    elif case == "malformed-child-poisons":
+        children = [
+            {
+                "ticket_id": "path-child",
+                "status": "open",
+                "file_impact": [{"path": "child.py"}],
+                "file_impact_scope": "paths",
+            },
+            {
+                "ticket_id": "malformed-child",
+                "status": "open",
+                "file_impact": [],
+                "file_impact_scope": "paths",
+            },
+        ]
+    else:
+        children = []
+
+    monkeypatch.setattr(
+        "rebar.llm.config.current_code_sha",
+        lambda: signing.head_sha(str(store)),
+    )
+    material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert material is not None
+    attest.sign_plan_review(
+        {
+            "verdict": "PASS",
+            "ticket_id": ticket_id,
+            "model": "test",
+            "runner": "test",
+            "coverage": {"counts": {}, "llm_ran": True},
+        },
+        material=material,
+        children=children,
+        repo_root=str(store),
+    )
+    verified = signing.verify_signature(
+        ticket_id,
+        kind="plan-review",
+        repo_root=str(store),
+    )
+
+    assert set(attest.manifest_deps(verified["manifest"])) == expected_deps
+    assert attest.manifest_file_scope(verified["manifest"]) == expected_scope
 
 
 def test_none_reason_edit_invalidates_signed_material(store: Path) -> None:

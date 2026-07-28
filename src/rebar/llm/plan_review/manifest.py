@@ -20,6 +20,7 @@ import math
 import os
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 if TYPE_CHECKING:
@@ -239,19 +240,51 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
     return active if active else str(_config.repo_root(repo_root))
 
 
-def _inherited_child_impact(children: Sequence[dict[str, Any]] | None) -> set[str]:
+@dataclass(frozen=True)
+class _ChildImpact:
+    """Direct-child impact available to a container's signed dependency set."""
+
+    paths: frozenset[str]
+    all_none: bool
+
+
+def _normalized_child_impact(
+    child: object,
+) -> tuple[Literal["paths", "none", "undeclared"], frozenset[str]]:
+    """Normalize one child state without trusting inconsistent scope metadata."""
+    if not isinstance(child, dict):
+        return "undeclared", frozenset()
+    impact = child.get("file_impact")
+    valid_paths = isinstance(impact, list) and all(
+        isinstance(entry, dict)
+        and isinstance(entry.get("path"), str)
+        and bool(entry["path"].strip())
+        for entry in impact
+    )
+    paths = frozenset(entry["path"] for entry in impact) if valid_paths and impact else frozenset()
+    if "file_impact_scope" not in child:
+        return ("paths", paths) if paths else ("undeclared", frozenset())
+    scope = child.get("file_impact_scope")
+    if scope == "paths" and paths:
+        return "paths", paths
+    if scope == "none" and impact == []:
+        return "none", frozenset()
+    return "undeclared", frozenset()
+
+
+def _inherited_child_impact(children: Sequence[dict[str, Any]] | None) -> _ChildImpact:
     """The container drift-scope inheritance (ticket 3e4b ``saddened-unadult-snowmonkey``):
-    the union of DIRECT children's declared ``file_impact`` paths, or ``{}`` when
-    inheritance must not apply.
+    the union of DIRECT children's declared ``file_impact`` paths plus whether every
+    live child explicitly declares no impact.
 
     Pure — operates only on the caller's already-fetched child states (the orchestrator's
     ``ctx.children``; no store reads, no root ambiguity). Rules:
 
-    * no children / ``None`` (a leaf, or a caller with no assembled context, e.g. the
-      resign recovery path) → ``{}`` — the dep set stays the pre-change own ∪ citations;
-    * POISON RULE: any non-closed child with an empty ``file_impact`` → ``{}`` — a partial
-      union would flip the empty-set whole-HEAD fallback from fail-closed to fail-open for
-      exactly the undeclared scope;
+    * no children / ``None`` (a leaf, or a caller with no assembled context) → no paths and
+      ``all_none=False`` — the dep set stays the pre-change own ∪ citations;
+    * live ``paths`` children contribute their paths; live ``none`` children are neutral;
+    * POISON RULE: a live ``undeclared`` child clears inherited paths, since a partial union
+      would flip the empty-set whole-HEAD fallback from fail-closed to fail-open;
     * CLOSED children neither contribute nor poison: their work is delivered (ADR 0024's
       completion floor stops re-litigating it) and their files' later churn belongs to
       other tickets.
@@ -261,38 +294,40 @@ def _inherited_child_impact(children: Sequence[dict[str, Any]] | None) -> set[st
     invalidates the container attestation and forces a re-review that recomputes this
     union — the self-healing does NOT extend to grandchildren, so neither does the union."""
     out: set[str] = set()
-    contributed = False
+    live_count = 0
+    all_none = True
     for child in children or []:
-        if not isinstance(child, dict):
+        if isinstance(child, dict) and child.get("status") == "closed":
             continue
-        if child.get("status") == "closed":
+        live_count += 1
+        scope, child_paths = _normalized_child_impact(child)
+        if scope == "none":
             continue
-        paths = [
-            str(entry["path"])
-            for entry in (child.get("file_impact") or [])
-            if isinstance(entry, dict) and entry.get("path")
-        ]
-        if not paths:
-            return set()  # poison: undeclared scope on a live child → whole-HEAD fallback
-        out.update(paths)
-        contributed = True
-    return out if contributed else set()
+        if scope == "undeclared":
+            return _ChildImpact(frozenset(), False)
+        all_none = False
+        out.update(child_paths)
+    return _ChildImpact(frozenset(out), live_count > 0 and all_none)
 
 
 def dependency_hashes(
-    verdict: dict[str, Any], *, repo_root=None, children: Sequence[dict[str, Any]] | None = None
+    verdict: dict[str, Any],
+    *,
+    repo_root=None,
+    children: Sequence[dict[str, Any]] | None = None,
+    child_impact: _ChildImpact | None = None,
 ) -> dict[str, str]:
     """The signed dependency set: ``{path: sha256}`` for the union of the ticket's
-    declared ``file_impact``, the files the review CITED (``kind=file``), and — for a
-    container whose non-closed direct children ALL declare ``file_impact`` — the children's
-    union (:func:`_inherited_child_impact`; ticket 3e4b). Sorted for reproducible signing.
+    declared ``file_impact``, the files the review CITED (``kind=file``), and the paths from
+    a container's declared direct children (:func:`_inherited_child_impact`; ticket 3e4b).
+    Sorted for reproducible signing.
     Empty when nothing is declared/cited/inherited — the claim gate then falls back to
     whole-HEAD freshness (any commit invalidates), the fail-closed direction."""
     import rebar
 
     ticket_id = verdict.get("ticket_id", "")
     paths: set[str] = set(_cited_paths(verdict))
-    paths.update(_inherited_child_impact(children))
+    paths.update((child_impact or _inherited_child_impact(children)).paths)
     try:
         for entry in rebar.get_file_impact(ticket_id, repo_root=repo_root) or []:
             p = entry.get("path") if isinstance(entry, dict) else None
@@ -312,7 +347,7 @@ def classify_file_scope(
     """Classify signed code freshness without weakening legacy empty scopes."""
     if any(dependency_paths):
         return "paths"
-    if own_scope == "none" or container_all_none:
+    if own_scope == "none" or (own_scope == "undeclared" and container_all_none):
         return "none"
     return "unscoped"
 

@@ -19,6 +19,7 @@ from .manifest import (
     _cited_paths,
     _hash_basis,
     _hash_file,
+    _inherited_child_impact,
     build_manifest,
     classify_file_scope,
     dependency_hashes,
@@ -121,7 +122,6 @@ def sign_plan_review(
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
-    # New attestations require an attested snapshot; legacy records remain readable.
     if not current_code_sha():
         raise SigningError(
             "refusing to sign a plan-review attestation with no attested snapshot "
@@ -141,7 +141,8 @@ def sign_plan_review(
         )
     )
 
-    deps = dependency_hashes(verdict, repo_root=repo_root, children=children)
+    child_impact = _inherited_child_impact(children)
+    deps = dependency_hashes(verdict, repo_root=repo_root, child_impact=child_impact)
     try:
         import rebar
 
@@ -150,11 +151,9 @@ def sign_plan_review(
         )
     except Exception:  # noqa: BLE001 — unreadable scope keeps conservative whole-HEAD freshness
         own_scope = "undeclared"
-    # Stamp disabled built-ins authoritatively at the sign boundary.
     disabled = registry.disabled_builtins(repo_root)
     if disabled:
         verdict.setdefault("coverage", {})["disabled_builtins"] = disabled
-    # Bind the dependency snapshot SHA and overlay-aware registry version.
     manifest = build_manifest(
         verdict,
         material=material,
@@ -164,7 +163,9 @@ def sign_plan_review(
         pins=snapshot.related_material,
         review_phase=review_phase,
         priority_floor=priority_floor,
-        file_scope=classify_file_scope(deps.keys(), own_scope),
+        file_scope=classify_file_scope(
+            deps.keys(), own_scope, container_all_none=child_impact.all_none
+        ),
     )
     if initial_generation is not None:
         from . import generation
@@ -178,7 +179,6 @@ def sign_plan_review(
         sig = signing.sign_manifest(
             verdict["ticket_id"], manifest, kind=_MANIFEST_PREFIX, repo_root=repo_root
         )
-    # Certification triggers the best-effort overlap-enrichment soak queue.
     try:
         from rebar.llm.config import LLMConfig
         from rebar.llm.overlap import queue as _enqueue_queue

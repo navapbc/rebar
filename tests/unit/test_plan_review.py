@@ -840,6 +840,118 @@ def test_p9_container_advisory_names_poisoning_children() -> None:
     assert r.coverage["poisoning_children"] == 1
 
 
+def test_p9_declared_none_leaf_passes() -> None:
+    result = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="task",
+            state={"file_impact": [], "file_impact_scope": "none"},
+        )
+    )
+
+    assert result.status == "pass"
+
+
+def test_p9_container_treats_none_child_as_neutral() -> None:
+    result = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {
+                    "ticket_id": "path-child",
+                    "status": "open",
+                    "file_impact": [{"path": "src/path_child.py"}],
+                    "file_impact_scope": "paths",
+                },
+                {
+                    "ticket_id": "none-child",
+                    "status": "in_progress",
+                    "file_impact": [],
+                    "file_impact_scope": "none",
+                },
+            ],
+        )
+    )
+
+    assert result.status == "pass"
+    assert result.coverage["poisoning_children"] == 0
+
+
+def test_p9_container_all_none_children_passes() -> None:
+    result = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {
+                    "ticket_id": "none-one",
+                    "status": "open",
+                    "file_impact": [],
+                    "file_impact_scope": "none",
+                },
+                {
+                    "ticket_id": "none-two",
+                    "status": "in_progress",
+                    "file_impact": [],
+                    "file_impact_scope": "none",
+                },
+            ],
+        )
+    )
+
+    assert result.status == "pass"
+    assert result.coverage["poisoning_children"] == 0
+
+
+def test_p9_container_undeclared_child_names_both_remedies() -> None:
+    result = det_floor.p9_file_impact_coverage(
+        _ctx(
+            _GOOD_AC,
+            ttype="story",
+            children=[
+                {
+                    "ticket_id": "unknown-child",
+                    "status": "open",
+                    "file_impact": [],
+                    "file_impact_scope": "undeclared",
+                }
+            ],
+        )
+    )
+
+    assert result.status == "fail"
+    assert result.finding
+    assert "unknown-child" in result.finding["finding"]
+    assert "file_impact" in result.finding["suggested_fix"]
+    assert "--none" in result.finding["suggested_fix"]
+
+
+@pytest.mark.parametrize(
+    "child",
+    [
+        {
+            "ticket_id": "empty-paths-child",
+            "status": "open",
+            "file_impact": [],
+            "file_impact_scope": "paths",
+        },
+        {
+            "ticket_id": "unknown-scope-child",
+            "status": "open",
+            "file_impact": [],
+            "file_impact_scope": "future-scope",
+        },
+    ],
+)
+def test_p9_container_advises_malformed_child_scope(child: dict) -> None:
+    result = det_floor.p9_file_impact_coverage(_ctx(_GOOD_AC, ttype="story", children=[child]))
+
+    assert result.status == "fail"
+    assert result.finding
+    assert child["ticket_id"] in result.finding["finding"]
+
+
 def test_p9_container_closed_children_do_not_poison() -> None:
     # A CLOSED impact-less child neither contributes nor poisons (delivered work,
     # ADR 0024): with every live child declaring impact, the container still passes.

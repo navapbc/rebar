@@ -26,9 +26,25 @@ def _payload() -> dict:
 
 
 def _generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    child_id = "aaaa-bbbb-cccc-dddd"
+    snapshot = SimpleNamespace(
+        child_ids=(child_id,),
+        ticket_states_by_id={
+            child_id: {
+                "ticket_id": child_id,
+                "status": "open",
+                "file_impact": [{"path": "child.py"}],
+                "file_impact_scope": "paths",
+            }
+        },
+    )
     monkeypatch.setattr(
         "rebar.llm.plan_review.generation.collect",
-        lambda *a, **k: SimpleNamespace(own_material="a" * 16, phase="planning"),
+        lambda *a, **k: SimpleNamespace(
+            own_material="a" * 16,
+            phase="planning",
+            relation_snapshot=snapshot,
+        ),
     )
 
 
