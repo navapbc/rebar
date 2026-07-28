@@ -183,17 +183,41 @@ def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...
     return parsed
 
 
-def set_file_impact(ticket_id: str, json_array: str, *, repo_root=None) -> None:
-    """Append a FILE_IMPACT event (mirrors ``ticket_set_file_impact``)."""
+def _validate_no_file_impact_reason(reason: str) -> None:
+    """Require an auditable explanation for an explicit no-impact declaration."""
+    if not isinstance(reason, str) or len("".join(reason.split())) < 10:
+        raise CommandError(
+            "Error: no-file-impact reason must contain at least 10 non-whitespace characters",
+            returncode=2,
+        )
+
+
+def set_file_impact(
+    ticket_id: str, json_array: str, *, no_file_impact_reason: str | None = None, repo_root=None
+) -> None:
+    """Append a FILE_IMPACT event, retaining legacy bytes unless declaring none."""
     tracker = tracker_dir(repo_root)
     if not ticket_id:
         raise CommandError("Error: ticket_id must be non-empty")
     file_impact = _validate_json_array(json_array, "file_impact", ("path", "reason"))
+    if no_file_impact_reason is not None:
+        _validate_no_file_impact_reason(no_file_impact_reason)
     resolved = require_id(ticket_id, tracker)
     require_not_ghost(resolved, tracker)
-    append_event(
-        resolved, "FILE_IMPACT", {"file_impact": file_impact}, tracker, repo_root=repo_root
-    )
+    data: dict = {"file_impact": file_impact}
+    if no_file_impact_reason is not None:
+        data.update(
+            {
+                "file_impact_scope": "none",
+                "no_file_impact_reason": no_file_impact_reason,
+            }
+        )
+    append_event(resolved, "FILE_IMPACT", data, tracker, repo_root=repo_root)
+
+
+def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> None:
+    """Explicitly declare that a ticket touches no repository file."""
+    set_file_impact(ticket_id, "[]", no_file_impact_reason=reason, repo_root=repo_root)
 
 
 def set_verify_commands(ticket_id: str, json_array: str, *, repo_root=None) -> None:

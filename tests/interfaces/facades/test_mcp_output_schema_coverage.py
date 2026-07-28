@@ -87,8 +87,10 @@ EXEMPT_GENERIC: dict[str, str] = {
     "string (a read-only render); no canonical structured shape.",
 }
 
-# Tools that HAVE a canonical schema but advertise NO outputSchema by design.
+# Tools that deliberately advertise NO outputSchema by design.
 NO_SCHEMA_EXEMPT: dict[str, str] = {
+    "declare_no_file_impact": "string ack intentionally uses FastMCP's unstructured-output "
+    "mode, so no outputSchema is advertised.",
     "audit_trail": "audit read-layer aggregator (story 46f0): a best-effort READ that composes "
     "the observability sidecars into a free-form AuditTrail dict "
     "({ticket, plan_reviews, completion, code_reviews}) whose nested payloads are the "
@@ -161,10 +163,9 @@ def test_no_schema_advertisers_are_exhaustively_classified() -> None:
     and so escaped every other guard.
 
     A tool is "structured" if it advertises an outputSchema (a dict/model return)
-    OR is recorded in NO_SCHEMA_EXEMPT (a structured dict deliberately advertising
-    none). The only tools legitimately outside all three sets are the generic
-    string-ack writers, which surface as ``-> str`` advertisers and are caught
-    here as CANONICAL/EXEMPT_GENERIC members. This guard asserts the partition is
+    OR is recorded in NO_SCHEMA_EXEMPT (a deliberately schema-less result). The
+    only tools legitimately outside all three sets are generic string-ack writers
+    that advertise their auto-derived output schema. This guard asserts the partition is
     total and disjoint, so an unclassified structured tool can never recur.
     """
     sets = {

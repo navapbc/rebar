@@ -253,6 +253,12 @@ def register_write_tools(mcp, ctx) -> None:
         rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
         return "ok"
 
+    @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"], structured_output=False)
+    def declare_no_file_impact(ticket_id: str, reason: str) -> str:
+        """Declare that a ticket has no repository-file impact, with a reason."""
+        rebar.declare_no_file_impact(ticket_id, reason)
+        return "ok"
+
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> str:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""

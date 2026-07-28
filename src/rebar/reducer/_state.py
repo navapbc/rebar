@@ -38,6 +38,8 @@ def make_initial_state() -> dict:
         "bridge_alerts": [],
         "reverts": [],
         "file_impact": [],
+        "file_impact_scope": "undeclared",
+        "no_file_impact_reason": "",
         "verify_commands": [],
         "signature": None,
         # Identity key lifecycle (epic gnu-whale-ichor): a POSITION-based keyring of

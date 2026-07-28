@@ -111,6 +111,21 @@ def get_file_impact(ticket_id: str, *, repo_root=None) -> list[FileImpactEntry]:
     return field_reads.file_impact(ticket_id, tracker)
 
 
+def get_file_impact_scope(ticket_id: str, *, repo_root=None) -> dict[str, object]:
+    """Get the current file-impact declaration: undeclared, paths, or none."""
+    from rebar._engine_support import reads
+
+    tracker = reads.tracker_dir(repo_root)
+    reads.ensure_fresh(tracker)
+    state = reads.show_state(ticket_id, tracker)
+    paths = list(state.get("file_impact") or [])
+    return {
+        "kind": state.get("file_impact_scope") or "undeclared",
+        "reason": state.get("no_file_impact_reason") or "",
+        "paths": paths,
+    }
+
+
 def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
     """Record file impact (list of {path, reason} dicts, or a JSON string)."""
     import json as _json
@@ -120,6 +135,19 @@ def set_file_impact(ticket_id: str, impact, *, repo_root=None) -> None:
 
     _python_leaf(
         leaf.set_file_impact, ticket_id, payload, repo_root=repo_root, what="set-file-impact"
+    )
+
+
+def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> None:
+    """Record a validated explicit declaration that a ticket has no file impact."""
+    from rebar._commands import leaf
+
+    _python_leaf(
+        leaf.declare_no_file_impact,
+        ticket_id,
+        reason,
+        repo_root=repo_root,
+        what="declare-no-file-impact",
     )
 
 

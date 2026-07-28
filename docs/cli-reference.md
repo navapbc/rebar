@@ -349,6 +349,7 @@ Usage: rebar session-logs [--output json|llm] [--limit=<n>] [--no-pull]   (lists
 
 ```
 Usage: rebar set-file-impact <ticket_id> <json_array>   (array of {path,reason} objects)
+   or: rebar set-file-impact <ticket_id> --none "<reason>"
 ```
 
 ### `set-verify-commands`

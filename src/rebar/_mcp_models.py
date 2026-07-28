@@ -114,6 +114,8 @@ try:
         comments: list[dict] = []
         deps: list[dict] = []
         file_impact: list[dict] = []
+        file_impact_scope: Literal["undeclared", "paths", "none"] = "undeclared"
+        no_file_impact_reason: str = ""
         plan_review_health: PlanReviewHealthAvailableOut | PlanReviewHealthUnavailableOut | None = (
             None
         )
