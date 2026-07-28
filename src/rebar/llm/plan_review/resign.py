@@ -38,6 +38,36 @@ from . import attest, sidecar
 logger = logging.getLogger(__name__)
 
 
+def _generation_child_states(initial_generation) -> tuple[list[dict[str, Any]] | None, dict | None]:
+    """Return the exact direct-child states captured with a review generation."""
+    try:
+        snapshot = getattr(initial_generation, "relation_snapshot", None)
+        if snapshot is None:
+            return None, {"event": "plan_review_child_impact_snapshot_invalid", "reason": "missing"}
+        states = getattr(snapshot, "ticket_states_by_id", None)
+        if not isinstance(states, dict):
+            return None, {"event": "plan_review_child_impact_snapshot_invalid", "reason": "states"}
+        children: list[dict[str, Any]] = []
+        for child_id in snapshot.child_ids:
+            state = states.get(child_id)
+            if not isinstance(state, dict):
+                return None, {
+                    "event": "plan_review_child_impact_snapshot_invalid",
+                    "reason": "missing-child-state",
+                    "child_id": str(child_id),
+                }
+            if state.get("ticket_id") != child_id:
+                return None, {
+                    "event": "plan_review_child_impact_snapshot_invalid",
+                    "reason": "child-id-mismatch",
+                    "child_id": str(child_id),
+                }
+            children.append(state)
+        return children, None
+    except (AttributeError, TypeError):
+        return None, {"event": "plan_review_child_impact_snapshot_invalid", "reason": "malformed"}
+
+
 def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     """Cheaply (re)persist the plan-review attestation for an ALREADY-COMPUTED, still-valid
     PASS verdict — WITHOUT re-running the multi-pass LLM review.
@@ -121,6 +151,20 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             "ticket_id": ticket_id,
             "verdict": recorded_verdict,
             "reason": f"plan review generation could not be collected: {exc}",
+        }
+
+    children, child_state_error = _generation_child_states(initial_generation)
+    if child_state_error:
+        return {
+            "ok": False,
+            "signed": False,
+            "ticket_id": ticket_id,
+            "verdict": "INDETERMINATE",
+            "reason": (
+                "the review generation lacks a complete direct-child state snapshot; "
+                "run `rebar review-plan` to re-review and sign"
+            ),
+            "child_impact_state_error": child_state_error,
         }
 
     # STALENESS GUARD: the plan/material must not have changed since the review. Recompute the
@@ -265,6 +309,7 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
                 review_phase=phase_metadata["phase"],
                 priority_floor=phase_metadata["priority_floor"],
                 initial_generation=initial_generation,
+                children=children,
                 repo_root=repo_root,
             )
     except Exception as exc:  # noqa: BLE001 — public recovery path returns structured refusal

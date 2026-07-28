@@ -31,7 +31,15 @@ def _snapshot(ticket_id: str):
     PlanRelationSnapshot, pins = _api()
     return PlanRelationSnapshot(
         subject_state={"ticket_id": ticket_id},
-        ticket_states_by_id={ticket_id: {"ticket_id": ticket_id}},
+        ticket_states_by_id={
+            ticket_id: {"ticket_id": ticket_id},
+            pins[0].canonical_id: {
+                "ticket_id": pins[0].canonical_id,
+                "status": "open",
+                "file_impact": [{"path": "child.py"}],
+                "file_impact_scope": "paths",
+            },
+        },
         child_ids=(pins[0].canonical_id,),
         prerequisite_ids=(pins[1].canonical_id,),
         related_material=pins,
@@ -106,7 +114,11 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
         "coverage": {},
     }
     monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
-    generation = SimpleNamespace(own_material=payload["material_fingerprint"], phase="planning")
+    generation = SimpleNamespace(
+        own_material=payload["material_fingerprint"],
+        phase="planning",
+        relation_snapshot=_snapshot(ticket_id),
+    )
     monkeypatch.setattr("rebar.llm.plan_review.generation.collect", lambda *a, **k: generation)
     seen = {}
 
@@ -119,6 +131,56 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
     result = resign.resign_plan_review(ticket_id)
     assert result["ok"] is True
     assert seen == {"ticket_id": ticket_id, "generation": generation}
+
+
+@pytest.mark.parametrize("snapshot_kind", ["missing", "mismatched-child"])
+def test_public_resign_refuses_inconsistent_child_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_kind: str,
+) -> None:
+    ticket_id = "1111-2222-3333-4444"
+    payload = {
+        "verdict": "PASS",
+        "ticket_id": ticket_id,
+        "material_fingerprint": "1111111111111111",
+        "coverage": {},
+    }
+    monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
+    if snapshot_kind == "missing":
+        generation = SimpleNamespace(
+            own_material=payload["material_fingerprint"],
+            phase="planning",
+        )
+    else:
+        snapshot = SimpleNamespace(
+            child_ids=("aaaa-bbbb-cccc-dddd",),
+            ticket_states_by_id={
+                "aaaa-bbbb-cccc-dddd": {
+                    "ticket_id": "eeee-ffff-aaaa-bbbb",
+                    "status": "open",
+                    "file_impact": [],
+                    "file_impact_scope": "none",
+                }
+            },
+        )
+        generation = SimpleNamespace(
+            own_material=payload["material_fingerprint"],
+            phase="planning",
+            relation_snapshot=snapshot,
+        )
+    monkeypatch.setattr(
+        "rebar.llm.plan_review.generation.collect",
+        lambda *a, **k: generation,
+    )
+
+    result = resign.resign_plan_review(ticket_id)
+
+    assert result["ok"] is False
+    assert result["signed"] is False
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["child_impact_state_error"]["event"] == (
+        "plan_review_child_impact_snapshot_invalid"
+    )
 
 
 def test_public_resign_preserves_authenticated_none_scope(
@@ -171,4 +233,165 @@ def test_public_resign_preserves_authenticated_none_scope(
 
     assert result["ok"] is result["signed"] is True
     assert verified["verified"] is True
+    assert attest.manifest_file_scope(verified["manifest"]) == "none"
+
+
+def test_public_resign_preserves_mixed_child_scope_and_validity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@e.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "initial"),
+    ):
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+    (repo / "child.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "child.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add child path"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+    parent = rebar.create_ticket("story", "mixed child scope", repo_root=str(repo))
+    path_child = rebar.create_ticket("task", "path child", parent=parent, repo_root=str(repo))
+    none_child = rebar.create_ticket("task", "none child", parent=parent, repo_root=str(repo))
+    rebar.set_file_impact(
+        path_child,
+        [{"path": "child.py", "reason": "declared child behavior"}],
+        repo_root=str(repo),
+    )
+    rebar.declare_no_file_impact(
+        none_child,
+        "coordination only",
+        repo_root=str(repo),
+    )
+
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review import generation
+
+    initial_generation = generation.collect(parent, repo_root=str(repo))
+    payload = {
+        "verdict": "PASS",
+        "ticket_id": parent,
+        "ticket_type": "story",
+        "material_fingerprint": initial_generation.own_material,
+        "coverage": {},
+    }
+    monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", lambda *a, **k: object())
+    monkeypatch.setattr(gate_source, "gate_read_root", lambda *a, **k: contextlib.nullcontext())
+    code_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+
+    result = resign.resign_plan_review(parent, repo_root=str(repo))
+    verified = signing.verify_signature(parent, kind="plan-review", repo_root=str(repo))
+    parent_state = rebar.show_ticket(parent, repo_root=str(repo))
+
+    assert result["ok"] and result["signed"] is True
+    assert verified["verified"] is True
+    assert set(attest.manifest_deps(verified["manifest"])) == {"child.py"}
+
+    (repo / "unrelated.py").write_text("UNRELATED = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "unrelated.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "unrelated drift"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    unrelated = attest.compute_validity(
+        verified,
+        parent_state,
+        "plan-review",
+        repo_root=str(repo),
+    )
+    assert unrelated["valid"] is True
+
+    (repo / "child.py").write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "child.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "declared path drift"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    declared = attest.compute_validity(
+        verified,
+        parent_state,
+        "plan-review",
+        repo_root=str(repo),
+    )
+    assert declared["valid"] is False
+    assert declared["verdict"] == "stale-code"
+
+
+def test_public_resign_promotes_all_none_container_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@e.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "initial"),
+    ):
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+    parent = rebar.create_ticket("story", "all-none child scope", repo_root=str(repo))
+    for title in ("none child one", "none child two"):
+        child = rebar.create_ticket(
+            "task",
+            title,
+            parent=parent,
+            repo_root=str(repo),
+        )
+        rebar.declare_no_file_impact(child, "coordination only", repo_root=str(repo))
+
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review import generation
+
+    initial_generation = generation.collect(parent, repo_root=str(repo))
+    payload = {
+        "verdict": "PASS",
+        "ticket_id": parent,
+        "ticket_type": "story",
+        "material_fingerprint": initial_generation.own_material,
+        "coverage": {},
+    }
+    monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", lambda *a, **k: object())
+    monkeypatch.setattr(gate_source, "gate_read_root", lambda *a, **k: contextlib.nullcontext())
+    code_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+
+    result = resign.resign_plan_review(parent, repo_root=str(repo))
+    verified = signing.verify_signature(parent, kind="plan-review", repo_root=str(repo))
+
+    assert result["ok"] and result["signed"] is True
+    assert verified["verified"] is True
+    assert attest.manifest_deps(verified["manifest"]) == {}
     assert attest.manifest_file_scope(verified["manifest"]) == "none"
