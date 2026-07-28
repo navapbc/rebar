@@ -101,6 +101,35 @@ Gerrit change description is exactly what the author committed (ticket
 `gargantuan-illhumored-drongo`). Wrap prose at the column; leave code blocks, trailers,
 and URLs unwrapped even when they exceed it.
 
+This is **enforced locally at commit time** by the `commit-message-wrap` hook
+(`scripts/check_commit_message_wrap.py`), installed by `make install` / `make hooks`.
+Like the other gates it is check-only — it never rewrites your message, it names the
+lines to wrap:
+
+```
+commit message does not follow the 50/72 rule:
+  - line 3 is 222 chars (limit 72): 'Eval fixtures now emit one Acceptance Criteria…'
+```
+
+Exempt, because wrapping them would break them: trailers (`rebar-ticket:`,
+`Change-Id:`, `Signed-off-by:`), `TAG=` lines, fenced code blocks, indented literal
+blocks, table rows, and any line whose length comes from a single unsplittable token
+(a URL, path, or long identifier). Comment lines and the `git commit --verbose` diff
+are ignored.
+
+Two notes on the hook:
+
+- It runs at git's **`commit-msg`** stage, not `pre-commit` — the message does not exist
+  yet when `pre-commit` hooks run. `default_install_hook_types` in
+  `.pre-commit-config.yaml` installs both stages.
+- Gerrit's own `commit-msg` hook (the one that stamps `Change-Id`) shares that slot.
+  pre-commit installs in **migration mode**, preserving it as `commit-msg.legacy` and
+  running both, and `make hooks` verifies the `Change-Id` chain survived. **Never run
+  `pre-commit install -f`** here: it would drop Gerrit's hook and every push would be
+  rejected for a missing `Change-Id`.
+- It is a local guardrail, bypassable with `git commit --no-verify`, not an enforcement
+  boundary — CI does not check wrapping.
+
 ### 2b. Push for review
 Push to the magic `refs/for/main` ref — this creates (or updates) a Gerrit **change**,
 it does **not** touch `main`:
