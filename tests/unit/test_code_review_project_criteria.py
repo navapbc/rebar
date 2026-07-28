@@ -348,6 +348,7 @@ class _ProductionRecordingRunner:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.requests = []
 
     def preflight(self) -> None:
         return None
@@ -355,6 +356,7 @@ class _ProductionRecordingRunner:
     def run(self, req):
         prompt_id = req.reviewers[0]
         self.calls.append(prompt_id)
+        self.requests.append(req)
         if prompt_id == "code-review-base":
             return {
                 "findings": [],
@@ -579,6 +581,8 @@ def test_project_criterion_fan_in_executes_once_through_production_two_round_gat
     assert verdict["verdict"] == "PASS"
     assert runner.calls.count(_PROJECT_PROMPT) == 1
     assert "code-review-tests" in runner.calls
+    project_request = next(req for req in runner.requests if req.reviewers == [_PROJECT_PROMPT])
+    assert "Find project foo violations in the supplied change." in (project_request.system_prompt)
     findings = verdict["advisory"] + verdict["blocking"]
     project = next(f for f in findings if f.get("reviewer_id") == _PROJECT_PROMPT)
     assert project["criteria"] == ["existing-tag", _PROJECT_ID]

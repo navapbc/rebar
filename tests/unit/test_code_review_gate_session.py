@@ -225,6 +225,153 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
     )
 
 
+def test_code_review_gate_threads_attested_root_into_project_criteria(
+    repo_with_origin, tmp_path, monkeypatch
+):
+    repo, _tid = repo_with_origin
+    criterion_id = "project.snapshot-policy"
+    prompt_id = "code-review-project-snapshot-policy"
+    prompt_dir = repo / ".rebar" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / f"{prompt_id}.md").write_text(
+        """\
+---
+schema_version: 1
+title: Snapshot policy
+description: Project criterion committed only in the pinned review tree.
+outputs: code_review_findings
+execution_mode: single_turn
+category: code-review-pass
+dimension: snapshot-policy
+---
+Review the change against the pinned project policy.
+""",
+        encoding="utf-8",
+    )
+    routing_path = repo / ".rebar" / "criteria_routing.json"
+    routing_path.write_text(
+        json.dumps(
+            {
+                "code_review": {
+                    criterion_id: {
+                        "exec": "1-TURN",
+                        "default_posture": "advisory",
+                        "block_threshold": 0.9,
+                        "blocking_enabled": False,
+                        "applies_to": [],
+                    }
+                },
+                "activate": {criterion_id: ["code_review"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".rebar")
+    _git(repo, "commit", "-q", "-m", "add snapshot project policy")
+    _git(repo, "push", "-q", "origin", "main")
+    pinned_sha = _git(repo, "rev-parse", "HEAD")
+
+    # The mutable checkout deliberately disagrees with the pinned commit. An attested review
+    # must still discover and validate the criterion from the immutable snapshot.
+    routing_path.write_text(
+        json.dumps({"code_review": {}, "activate": {}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-store"))
+    monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    seen: dict = {}
+
+    def _spy(doc, inputs, **kw):
+        root = kw.get("repo_root")
+        batch_runner = kw["batch_runner"]
+        seen["root"] = root
+        seen["criteria"] = batch_runner._validated_project_criteria(root)
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+    gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head=pinned_sha,
+            source="attested",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+
+    assert seen["criteria"] == ({"criterion_id": criterion_id, "prompt": prompt_id},)
+    assert seen["root"] != str(repo)
+    assert Path(seen["root"], ".rebar", "prompts", f"{prompt_id}.md").is_file()
+
+
+def test_code_review_gate_local_aligns_agent_config_with_execution_root(
+    repo_with_origin, tmp_path, monkeypatch
+):
+    repo, _tid = repo_with_origin
+    conflicting_root = tmp_path / "configured-elsewhere"
+    conflicting_root.mkdir()
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    seen: dict = {}
+
+    def _spy(doc, inputs, **kw):
+        seen["workflow_root"] = kw.get("repo_root")
+        seen["agent_root"] = kw["agent_runner"]._config.repo_path
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+            outputs: dict = {}
+            steps: dict = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+    gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig(repo_path=str(conflicting_root)),
+            head="HEAD",
+            source="local",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+
+    assert seen == {"workflow_root": str(repo), "agent_root": str(repo)}
+
+
 # ── local session persistence (story paradoxal-balsamic-bubblefish) ───────────────────────────
 def _stub_workflow(monkeypatch, verdict: dict) -> None:
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)

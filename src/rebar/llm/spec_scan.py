@@ -91,7 +91,8 @@ def _scan_epics_inner(
     runner: Runner | None,
 ) -> dict:
     tickets = _fetch_epics(epics, repo_root)
-    reviewer = prompts.get_prompt(reviewer_id, repo_root=repo_root)
+    prompt_root = cfg.repo_path or repo_root
+    reviewer = prompts.get_prompt(reviewer_id, repo_root=prompt_root)
     selected = get_runner(cfg, override=runner)
     # Probe runner readiness up front (import-only, no model call) so a missing
     # ``agents`` extra (or a misconfigured runner) degrades cleanly even when there
@@ -109,7 +110,9 @@ def _scan_epics_inner(
             "epics": "\n\n".join(_render_epic(t) for t in batch),
             "repo_path": cfg.repo_path or "",
         }
-        system_prompt, lf_prompt = prompts.resolve_prompt(reviewer, variables, cfg.langfuse)
+        system_prompt, lf_prompt = prompts.resolve_prompt(
+            reviewer, variables, cfg.langfuse, repo_root=prompt_root
+        )
         instructions = (
             "Evaluate each epic in this batch against the spec: flag coverage gaps "
             "(spec points no epic covers), conflicts/contradictions, and scope "

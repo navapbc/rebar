@@ -130,6 +130,50 @@ def _ctx(step: dict, inputs: dict) -> StepContext:
     )
 
 
+def test_runner_agent_step_resolves_prompt_from_active_snapshot(
+    tmp_path,
+) -> None:
+    from rebar.llm.config import use_code_root
+
+    prompt_id = "code-review-project-snapshot"
+    live_root = tmp_path / "live"
+    snapshot_root = tmp_path / "snapshot"
+    for root, sentinel, execution_mode, dimension in (
+        (live_root, "LIVE-CHECKOUT-PROMPT", "agentic", "live-checkout-dimension"),
+        (snapshot_root, "ATTESTED-SNAPSHOT-PROMPT", "single_turn", "snapshot-dimension"),
+    ):
+        prompt_dir = root / ".rebar" / "prompts"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / f"{prompt_id}.md").write_text(
+            f"""\
+---
+schema_version: 1
+title: Snapshot project prompt
+description: Proves attested prompt-root selection.
+outputs: code_review_findings
+execution_mode: {execution_mode}
+category: code-review-pass
+dimension: {dimension}
+---
+{sentinel}
+""",
+            encoding="utf-8",
+        )
+
+    runner = _CapturingRunner(structured={"findings": []})
+    step = {"id": "project", "prompt": prompt_id}
+    agent_step = RunnerAgentStep(runner=runner, repo_root=str(live_root))
+
+    with use_code_root(str(snapshot_root)):
+        agent_step.run(_ctx(step, {"ticket_id": "T", "ticket_context": "DIFF"}))
+
+    assert "ATTESTED-SNAPSHOT-PROMPT" in runner.reqs[0].system_prompt
+    assert "LIVE-CHECKOUT-PROMPT" not in runner.reqs[0].system_prompt
+    assert runner.reqs[0].execution_mode == "single_turn"
+    assert "'snapshot-dimension'" in runner.reqs[0].instructions
+    assert "'live-checkout-dimension'" not in runner.reqs[0].instructions
+
+
 def test_verify_step_prefix_is_byte_stable_across_plans() -> None:
     runner = _CapturingRunner(structured={"verifications": []})
     step = {
