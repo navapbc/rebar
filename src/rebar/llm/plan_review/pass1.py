@@ -558,5 +558,11 @@ def material_fingerprint(ctx: PlanContext) -> str:
         "file_impact": ctx.state.get("file_impact") or [],
         "children": sorted(c.get("ticket_id", "") for c in ctx.children),
     }
+    if ctx.state.get("file_impact_scope") == "none":
+        reason = ctx.state.get("no_file_impact_reason")
+        basis["file_impact_scope"] = {
+            "kind": "none",
+            "reason": reason if isinstance(reason, str) else "",
+        }
     blob = json.dumps(basis, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]

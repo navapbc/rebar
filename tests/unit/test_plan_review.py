@@ -772,6 +772,25 @@ def test_manifest_deps_roundtrip_and_backcompat() -> None:
     assert attest.manifest_deps(attest.build_manifest(verdict, material="x")) == {}
 
 
+def test_manifest_file_scope_contract_preserves_legacy_bytes() -> None:
+    verdict = {
+        "verdict": "PASS",
+        "ticket_id": "t1",
+        "model": "m",
+        "runner": "r",
+        "coverage": {"counts": {}},
+    }
+    legacy = attest.build_manifest(verdict, material="x")
+
+    assert attest.build_manifest(verdict, material="x", file_scope="paths") == legacy
+    assert attest.build_manifest(verdict, material="x", file_scope="unscoped") == legacy
+    assert attest.manifest_file_scope(legacy) == "unscoped"
+
+    declared_none = attest.build_manifest(verdict, material="x", file_scope="none")
+    assert declared_none == [*legacy, "file-scope: none"]
+    assert attest.manifest_file_scope(declared_none) == "none"
+
+
 # ── P9 file-impact coverage (ADR 0002) ─────────────────────────────────────────
 def test_p9_warns_on_empty_file_impact_leaf() -> None:
     r = det_floor.p9_file_impact_coverage(_ctx(_GOOD_AC, ttype="task"))
@@ -861,6 +880,40 @@ def test_material_fingerprint_stable_for_same_content() -> None:
     assert orchestrator.material_fingerprint(_ctx(_GOOD_AC)) == orchestrator.material_fingerprint(
         _ctx(_GOOD_AC)
     )
+
+
+def test_material_fingerprint_distinguishes_declared_none_without_legacy_churn() -> None:
+    undeclared = _ctx(
+        _GOOD_AC,
+        state={
+            "file_impact": [],
+            "file_impact_scope": "undeclared",
+            "no_file_impact_reason": "",
+        },
+    )
+    paths = _ctx(
+        _GOOD_AC,
+        state={
+            "file_impact": [{"path": "src/x.py", "reason": "implementation"}],
+            "file_impact_scope": "paths",
+            "no_file_impact_reason": "",
+        },
+    )
+    declared_none = _ctx(
+        _GOOD_AC,
+        state={
+            "file_impact": [],
+            "file_impact_scope": "none",
+            "no_file_impact_reason": "external operator action",
+        },
+    )
+
+    assert orchestrator.material_fingerprint(undeclared) == "8a2b6aa064e50d47"
+    assert orchestrator.material_fingerprint(paths) == "54fd84b5d3512772"
+    assert orchestrator.material_fingerprint(declared_none) not in {
+        "8a2b6aa064e50d47",
+        "54fd84b5d3512772",
+    }
 
 
 # ── sidecar payload ───────────────────────────────────────────────────────────
