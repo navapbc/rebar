@@ -55,9 +55,10 @@ several criteria.
 
 - **Leaf** — does the work itself: needs `## Approach`, `## Scope`, `## Testing` (when it adds
   testable behavior), and `## Acceptance Criteria`.
-- **Container** — delegates to children: needs `## Success Criteria` and a child decomposition
-  where every deliverable is covered by a child and children don't overlap (G3/G4/G5). It
-  **defers testing to its children** — don't write leaf-level tests on a container.
+- **Container** — delegates to children: needs `## Acceptance Criteria` describing the
+  substantive outcomes and a child decomposition that maps every criterion to at least one
+  child without overlapping child responsibilities (G3/G4/G5). It **defers testing to its
+  children** — don't write leaf-level tests on a container.
 
 For an epic, keep the description durable as its decomposition evolves: describe the child
 responsibilities, but do **not** state how many children the epic has. An epic also does
@@ -79,7 +80,8 @@ Testing` (the testing criterion only fires on *new testable behavior*).
   path; for a **cutover/migration**, a live end-to-end check (E5, T-overlays).
 - **`## Acceptance Criteria`** — a `- [ ]` checklist of measurable, in-session-verifiable
   outcomes, each stating **how it's checked** (F1, E1, E6). **Required.**
-- **Containers** additionally: **`## Success Criteria`** + the child decomposition.
+- **Containers** additionally: a child decomposition showing which child delivers each
+  acceptance criterion, with complete coverage and non-overlapping responsibilities.
 
 ## The blocking checklist — your plan MUST…
 

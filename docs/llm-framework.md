@@ -458,7 +458,7 @@ It does **not** recurse into grandchildren and does **not** re-verify a *certifi
 criteria — that child's certified signature **is** the trusted attestation that its criteria were
 validated when it closed. The consequence (and the fix for the count-dependent false-negatives +
 step-budget blowups of bug `a254`): the **LLM evaluator is reached once all children are closed**
-(signed or not) and it judges only the parent's **own** substantive success criteria (the agent,
+(signed or not) and it judges only the parent's **own** substantive acceptance criteria (the agent,
 against the code) — never child closure. The cost of the child check is independent of child count;
 it never re-walks the whole subtree (which is impractical and re-does work the children's own gates
 already did). The **close gate** runs the verifier with `graph=False` for exactly this reason (the

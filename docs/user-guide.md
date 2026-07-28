@@ -216,7 +216,9 @@ These are structural floor checks — a pass means "well-formed enough to dispat
 not "the content is good." The universal requirement is an `## Acceptance Criteria`
 block with `- [ ]` checklist items; add per-type headings (file paths for tasks;
 `## Why` / `## What` / `## Scope` for stories; Reproduction / Expected vs Actual for
-bugs; `## Success Criteria` / `## Context` for epics) to score well.
+bugs; `## Context` for epics) to score well. A container's acceptance criteria must describe
+substantive outcomes, and its child decomposition must show that the children collectively
+deliver every criterion without overlapping responsibilities.
 
 The **review gates** are LLM-backed (they make a live model call and require the
 optional agents extra + an API key):
@@ -227,7 +229,7 @@ rebar verify-completion <id>    # check the ticket's completion criteria are met
 ```
 
 `review-plan` sanity-checks a ticket's plan before it's worked;
-`verify-completion` checks the acceptance/success criteria are demonstrably met.
+`verify-completion` checks the acceptance criteria are demonstrably met.
 Depending on project configuration these can gate claiming and closing — see
 [plan-review-gate.md](plan-review-gate.md) for the full model. `review-plan` **fast-fails
 without running the LLM** when the ticket isn't claimable yet — status `closed`/`idea`/`blocked`,
