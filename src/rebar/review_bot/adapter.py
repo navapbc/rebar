@@ -119,9 +119,14 @@ def _summarize(reason: str, verdict: dict[str, Any]) -> str:
         lines = [f"rebar code review found {len(blocking)} blocking issue(s):"]
         for f in blocking[:10]:
             crit = (f.get("criteria") or ["general"])[0]
-            detail = str(f.get("finding", "")).strip().replace("\n", " ")[:240]
+            full_detail = str(f.get("finding", "")).strip().replace("\n", " ")
+            detail = f"{full_detail[:239]}…" if len(full_detail) > 240 else full_detail
             loc = f" [{f.get('location')}]" if f.get("location") else ""
             lines.append(f"- ({crit}) {detail}{loc}")
+        omitted = len(blocking) - 10
+        if omitted > 0:
+            noun = "finding" if omitted == 1 else "findings"
+            lines.append(f"{omitted} additional blocking {noun} omitted from this summary.")
         return "\n".join(lines)
     # coverage-gap sub-reasons — name the gap; it is infra, not "bad code".
     if reason == "scanner":
