@@ -494,18 +494,32 @@ paths all inherit it (ADR 0005; bug `melancholy-firstborn-shihtzu`). Pre-existin
 (pre-S4b) attestations remain readable. To review-and-sign offline, use the attested source
 with a local ref instead: `--ref HEAD` resolves from the local object DB with no network.
 
-**Containers inherit their children's declared scope.** A container's signed dependency set
-is its own `file_impact` ∪ the review's file citations ∪ the union of its **direct**
-children's declared `file_impact` — so an epic/story attestation is no longer invalidated by
-every unrelated merge merely because containers rarely declare impact themselves. Two rules
-keep this fail-closed: the **poison rule** (any non-closed direct child with an empty
-`file_impact` disables inheritance entirely — a partial union would be fail-open for exactly
-the undeclared scope — and the P9 advisory names the offending children), and **closed
-children neither contribute nor poison** (their delivered files' later churn belongs to other
-tickets, per ADR 0024's completion floor). Inheritance is one level deep by design: the
-container review pins each direct child's material fingerprint (which covers its
-`file_impact`), so a child impact edit invalidates the container attestation and forces the
-union to be recomputed — that self-healing invalidates the **claim** only under
+**Containers inherit their children's declared scope.** File impact is tri-state: a ticket is
+**undeclared** until it records a scope, **paths** when it records one or more `{path, reason}`
+entries, and **none** when it explicitly declares that no repository files change. A
+freshness check treats `undeclared` as unscoped and therefore binds it to the whole HEAD,
+treats `paths` as dependency-scoped to the declared files, and treats an authenticated
+`none` declaration as a scoped empty dependency set.
+
+The container's signed dependency set is
+its own `file_impact` ∪ the review's file citations ∪ the
+union of its **direct** children's live `paths` scopes. Thus a live child with `none` is
+neutral: it contributes no paths and does not make the container unscoped. A live child with an
+**undeclared** scope is poison: inheritance is disabled rather than taking a partial union;
+the P9 advisory names the offending children. **Closed children are ignored** — they neither
+contribute nor poison, because later churn in their delivered files belongs to other tickets
+(ADR 0024's completion floor).
+
+For example, a container with one live child declaring `src/rebar/cli.py`, one live child set
+to `none`, and one closed child declaring `docs/old-guide.md` inherits only
+`src/rebar/cli.py`. Replace the live `none` child with an undeclared child and the whole
+container becomes unscoped. This prevents an explicit no-file-change task from causing the
+same false fail-closed result as a missing declaration.
+
+Inheritance is one level deep by design: the container review pins each direct child's
+**material fingerprint** (including its file-impact state, paths, and no-file-impact reason).
+Changing any of those fields invalidates the container attestation and forces the union to be
+recomputed — that self-healing invalidates the **claim** only under
 `verify.enforce_plan_material_pins = true`, the recommended pairing (this project sets it).
 
 **The currency rule, as one expression.** An attestation is current iff **all** of: it is

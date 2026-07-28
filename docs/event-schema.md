@@ -49,7 +49,7 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 | `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
 | `COMMENT` | `ticket-comment.sh` | Appends `{body, author, timestamp}` to `comments`. |
 | `LINK` / `UNLINK` | `ticket-graph.py` / `ticket-link.sh` | Add / cancel a relation. Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from` (`graph/_links.py:CANONICAL_RELATIONS`). `relates_to` is reciprocal; the rest are directional. Only `blocks`/`depends_on` can create cycles. **Hierarchy promotion:** for `blocks`/`depends_on` only, the recorded endpoints are promoted up the parent hierarchy so the dependency is between comparable levels (epic↔epic, story↔story, task/bug↔task/bug), emitting a `REDIRECT: A→B promoted to …` note; the other (non-blocking) relations are recorded exactly as given. `UNLINK` is pair-scoped (no relation arg) and cancels the most-recent link for an ordered `<source> <target>` pair, one per event — and must target the *promoted (ancestor)* endpoint to cancel a promoted blocking link. A `session_log` endpoint refuses `blocks`/`depends_on` (it never enters the dependency graph) but permits the non-blocking `relates_to`/`discovered_from`. |
-| `FILE_IMPACT` | `set-file-impact` | Records the `{path, reason}` array `next-batch` uses for conflict-aware scheduling. |
+| `FILE_IMPACT` | `set-file-impact` | Records a tri-state file-impact declaration for conflict-aware scheduling: paths, explicit none, or undeclared from an absent or empty non-none declaration. |
 | `VERIFY_COMMANDS` / `PRECONDITIONS` | `set-verify-commands` / preconditions util | Record DD-level verify commands / precondition metadata. |
 | `SIGNATURE` | `sign` (`rebar.signing`) | Records `data.{manifest, algorithm, signature, key_id, head_sha, signed_at}` — an HMAC-SHA256 attestation over a ticket's **manifest of verified steps**, computed with the **environment-specific** signing key (`REBAR_SIGNING_KEY` or the gitignored `.signing-key`). Replayed into `state['signature']` (last-writer-wins, like FILE_IMPACT/VERIFY_COMMANDS). `verify-signature` recomputes the HMAC with the local key and certifies the steps match — `key_id` (a key fingerprint, never the key) lets verification distinguish a tampered manifest from a signature made by a *different* environment. Like FILE_IMPACT/VERIFY_COMMANDS this is last-writer-wins by replay (filename) order, so concurrent signs converge deterministically to the lexicographically-last `{ts}-{uuid}-SIGNATURE.json` (the UUID breaks any timestamp tie) — not to a semantically "best" signature; re-sign to supersede. |
 | `ARCHIVED` | `archive` / lifecycle | Marks the ticket archived (excluded from the default list). |
@@ -65,6 +65,28 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 in-process Python write path (`rebar._commands` leaf/lifecycle writers +
 `rebar._store` append/commit, with `rebar.reducer`/`rebar.graph` for replay/relations).
 It identifies the originating event producer, not a current file path.*
+
+## File-impact declarations (`FILE_IMPACT`)
+
+`FILE_IMPACT` replaces the ticket's file-impact declaration by replay order (last writer wins).
+Every event carries `data.file_impact`; an explicit no-impact declaration also carries
+`data.file_impact_scope: "none"` and `data.no_file_impact_reason`. No event, or an empty
+FILE_IMPACT event without those explicit none fields, is undeclared. Replay exposes all three
+derived fields—`file_impact`, `file_impact_scope`, and `no_file_impact_reason`—in exactly one
+of these states:
+
+- **paths:** a non-empty `file_impact`, `file_impact_scope: "paths"`, and an empty
+  `no_file_impact_reason`.
+- **none:** `file_impact: []`, `file_impact_scope: "none"`, and the substantive
+  `no_file_impact_reason`.
+- **undeclared:** `file_impact: []`, `file_impact_scope: "undeclared"`, and an empty
+  `no_file_impact_reason`.
+
+The state is not additive: a later event supersedes the earlier declaration completely.
+Transitioning to paths clears a prior reason, transitioning to none clears prior paths and sets
+the reason, and transitioning to undeclared clears both. Documentation-only and test-only
+tickets must use **paths** because they do change repository files; `none` is reserved for
+work whose output or evidence lives outside the repository.
 
 ## The session_log ticket type
 
