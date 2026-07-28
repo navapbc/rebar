@@ -330,9 +330,8 @@ def test_cli_dispatch(repo: str) -> None:
     assert set(_json.loads(buf.getvalue())) == {"pending", "claimed", "soaking"}
 
 
-def test_prune_keep1_count(repo: str) -> None:
-    """After a drain, each processed ticket retains EXACTLY ONE queue event (keep=1 prune of
-    the DONE_ENRICH tombstone; superseded ENQUEUE/CLAIM dropped)."""
+def test_drain_preserves_committed_queue_history(repo: str) -> None:
+    """A drain retains the committed queue history so stale clones can merge by UUID union."""
     tid = rebar.create_ticket("task", "T", repo_root=repo)
     Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
     D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
@@ -342,4 +341,8 @@ def test_prune_keep1_count(repo: str) -> None:
         for f in ticket_dir.glob("*.json")
         if any(f.name.endswith(f"-{et}.json") for et in Q.QUEUE_EVENT_TYPES)
     ]
-    assert len(queue_events) == 1
+    assert {f.name.rsplit("-", 1)[-1] for f in queue_events} == {
+        "ENQUEUE_ENRICH.json",
+        "CLAIM_ENRICH.json",
+        "DONE_ENRICH.json",
+    }

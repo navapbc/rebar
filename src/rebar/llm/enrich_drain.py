@@ -6,7 +6,7 @@ daemon, broker, or scheduler. Following the git-gc-auto / npm-update-notifier pa
 cheap ``maybe_drain()`` gate on ordinary invocations no-ops in the common case, else DETACHES
 the enrichment to a child that outlives the command (reusing push.py's POSIX detach). The
 drainer loop claims soaked queue entries (optimistic, per S4), runs enrich (S1), writes the
-digest (S2), marks done, and prunes — bounded per run, self-healing on crash.
+digest (S2), and marks done — bounded per run, self-healing on crash.
 
 **Windows drain is a documented v1 NO-OP:** the store write lock (``_store/lock.py``) imports
 ``fcntl`` unconditionally, so a detached drain child would crash at import on Windows; rather
@@ -158,7 +158,6 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
                 result = enrich(ticket_id=tid, repo_root=repo_root, config=cfg, runner=runner)
                 ds.emit(result["digest"], tid, model=cfg.model, repo_root=repo_root)
                 _queue.mark_done(tid, repo_root=repo_root)
-                _prune_queue_events(tid, tracker)
                 processed += 1
             except Exception:  # noqa: BLE001 — per-item best-effort; failed item re-picked after lease
                 logger.warning(
@@ -167,39 +166,6 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
         return {"processed": processed, "batch": batch}
     finally:
         _release_advisory_lock(tracker, lock_fd)
-
-
-def _prune_queue_events(ticket_id: str, tracker: str) -> None:
-    """Bound queue growth: keep only the latest queue event per ticket (the DONE tombstone),
-    dropping superseded ENQUEUE/CLAIM/older-DONE. Best-effort, git-backed."""
-    from rebar.llm.overlap import queue as _queue
-
-    rid_dir = os.path.join(tracker, _queue._resolve(ticket_id, tracker))
-    try:
-        files = sorted(
-            f
-            for f in os.listdir(rid_dir)
-            if any(f.endswith(f"-{et}.json") for et in _queue.QUEUE_EVENT_TYPES)
-            and not f.startswith(".")
-        )
-    except OSError:
-        return
-    old = files[:-1]  # keep the single newest queue event
-    if not old:
-        return
-    try:
-        from rebar._store.event_append import delete_events
-
-        rid = _queue._resolve(ticket_id, tracker)
-        rels = [f"{rid}/{f}" for f in old]
-        # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
-        # a raw git rm + whole-index commit here races normal store writes — it sweeps a
-        # concurrent locked writer's just-staged event into this prune commit (sweep-and-strand)
-        # and advances HEAD under the writer's ref update. delete_events serializes under the
-        # unified write lock and commits ONLY these paths (pathspec-scoped).
-        delete_events(tracker, rels, f"prune: enrich queue {rid}")
-    except Exception:  # noqa: BLE001 — best-effort prune; never fails the drain
-        logger.warning("enrich queue prune failed; continuing", exc_info=True)
 
 
 def _detach_kwargs() -> dict:

@@ -116,8 +116,8 @@ def test_latest_wins(repo: str) -> None:
     assert payload["digest"]["component_or_area"] == "second"
 
 
-def test_prune_keep1(repo: str) -> None:
-    tid = rebar.create_ticket("task", "Prune", repo_root=repo)
+def test_emit_preserves_append_only_history(repo: str) -> None:
+    tid = rebar.create_ticket("task", "Append-only digests", repo_root=repo)
     _emit(repo, tid)
     _emit(repo, tid)
     _emit(repo, tid)
@@ -125,7 +125,7 @@ def test_prune_keep1(repo: str) -> None:
 
     ticket_dir = Path(tracker_dir(repo)) / tid
     digests = list(ticket_dir.glob("*-TICKET_DIGEST.json"))
-    assert len(digests) == 1, f"expected exactly 1 retained digest, got {len(digests)}"
+    assert len(digests) == 3
 
 
 def test_older_binary_ignores(repo: str) -> None:

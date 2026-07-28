@@ -9,9 +9,9 @@ compaction preserves it. It IS in the write-path allow-list (so it can be emitte
 computed ON READ (fail-closed): a content edit / model change / hash-version bump makes a
 stored digest read as stale without any write.
 
-Growth is bounded by ``prune(keep=1)`` on every ``emit`` — exactly the REVIEW_RESULT
-retention discipline, nothing more. An archived/deleted ticket's digest simply lingers as a
-harmless one-record sidecar; it is never read into a hot path.
+Each emission appends a UUID-named event so independently written tracker histories continue
+to merge by union. An archived/deleted ticket's digests linger harmlessly and are never read
+into a hot path.
 """
 
 from __future__ import annotations
@@ -34,9 +34,6 @@ SCHEMA_SENTINEL = "ticket_digest_v1"
 # The normalization/hash version. Bump ONLY if ``_normalize_text``'s hashed field-set ever
 # changes — a bump invalidates all cached digests deterministically (freshness flips stale).
 DIGEST_HASH_VERSION = 1
-
-# Retention: keep only the single latest digest per ticket (a later emit supersedes it).
-RETAIN_PER_TICKET = 1
 
 
 def _normalize_text(state: dict) -> str:
@@ -97,7 +94,7 @@ def emit(
     model: str,
     repo_root=None,
 ) -> bool:
-    """Append a ``TICKET_DIGEST`` sidecar for ``ticket_id`` and prune to keep=1.
+    """Append a ``TICKET_DIGEST`` sidecar for ``ticket_id``.
 
     ``state`` (the current ticket state) is used to compute the content hash; when omitted
     it is read via the ``rebar.llm`` facade. Best-effort: returns False on any failure (a
@@ -115,36 +112,7 @@ def emit(
     except Exception:  # noqa: BLE001 — best-effort sidecar; broad-but-logged, never fails the caller
         logger.warning("TICKET_DIGEST sidecar emit failed; continuing", exc_info=True)
         return False
-    prune(ticket_id, repo_root=repo_root)
     return True
-
-
-def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> int:
-    """Bound growth: keep the most-recent ``keep`` ``TICKET_DIGEST`` events for a ticket and
-    remove older ones. Returns the count removed. Best-effort and exception-swallowing (the
-    sidecars are reducer-ignored, so removing old ones is safe)."""
-    try:
-        from rebar._store.event_append import delete_events
-
-        tracker = _tracker(None, repo_root)
-        rid = _resolve(ticket_id, tracker)
-        ticket_dir = os.path.join(tracker, rid)
-        files = sorted(
-            f
-            for f in os.listdir(ticket_dir)
-            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
-        )
-        old = files[: max(0, len(files) - keep)]
-        if not old:
-            return 0
-        rels = [f"{rid}/{f}" for f in old]
-        # Delete through the canonical locked write path (bug malevolent-emigratory-umbrette):
-        # a raw git rm + whole-index commit here races normal store writes.
-        delete_events(tracker, rels, f"prune: TICKET_DIGEST sidecar for {rid} (retain {keep})")
-        return len(old)
-    except Exception:  # noqa: BLE001 — best-effort retention; broad-but-logged, never raises
-        logger.warning("TICKET_DIGEST sidecar prune failed; continuing", exc_info=True)
-        return 0
 
 
 def latest_ticket_digest(

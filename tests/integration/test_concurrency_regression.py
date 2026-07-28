@@ -1354,3 +1354,112 @@ def test_parent_cascade_two_clone_offline_race_forks_resolved_independently(two_
     bob_dirs = _dirs_with_blob(tracker_a, '"assignee":"bob"')
     assert parent in bob_dirs, f"loser's parent claim event was rolled back (dirs={bob_dirs})"
     assert child in bob_dirs, f"loser's child claim event was rolled back (dirs={bob_dirs})"
+
+
+def test_enrichment_drain_preserves_two_clone_union(two_clones):
+    """Enrichment must preserve append-only reconvergence across stale clones."""
+    from rebar.llm import enrich_drain
+    from rebar.llm.overlap import digest_sidecar
+    from rebar.llm.overlap import queue as enrich_queue
+
+    class DigestRunner:
+        name = "two-clone-digest"
+
+        def preflight(self) -> None:
+            pass
+
+        def run(self, _request) -> dict:
+            return {
+                "problem_keywords": ["overlap"],
+                "component_or_area": "queue",
+                "key_entities": ["enrich_queue"],
+                "propositions": ["preserve append-only union"],
+                "runner": self.name,
+                "model": None,
+                "trace_id": None,
+            }
+
+    _remote, repo_a, repo_b, ticket_id = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+    now = 40_000_000_000_000
+    runner = DigestRunner()
+
+    # Establish a shared base containing one completed queue cycle.
+    assert enrich_queue.enqueue(ticket_id, soak_min=0, now_ns=now, repo_root=repo_a)
+    base_result = enrich_drain.drain(str(tracker_a), repo_root=repo_a, runner=runner)
+    assert base_result["processed"] == 1
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+
+    # Both clones become stale, then independently enqueue a replacement cycle.
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+    assert enrich_queue.enqueue(ticket_id, soak_min=0, now_ns=now + 100, repo_root=repo_a)
+    assert enrich_queue.enqueue(ticket_id, soak_min=0, now_ns=now + 100, repo_root=repo_b)
+
+    def drain_event_paths(tracker: Path, revision: str = "HEAD") -> set[str]:
+        event_types = {*enrich_queue.QUEUE_EVENT_TYPES, digest_sidecar.EVENT_TYPE}
+        return {
+            path
+            for path in _git(
+                "ls-tree", "-r", "--name-only", revision, cwd=tracker
+            ).stdout.splitlines()
+            if path.startswith(f"{ticket_id}/")
+            and any(path.endswith(f"-{event_type}.json") for event_type in event_types)
+        }
+
+    before_a = drain_event_paths(tracker_a)
+    before_b = drain_event_paths(tracker_b)
+    _git(
+        "fetch",
+        "-q",
+        str(tracker_b),
+        "HEAD:refs/remotes/debug/pre-maintenance-b",
+        cwd=tracker_a,
+    )
+    pre_maintenance_merge = _git(
+        "merge-tree",
+        "--write-tree",
+        "HEAD",
+        "refs/remotes/debug/pre-maintenance-b",
+        cwd=tracker_a,
+        check=False,
+    )
+    assert pre_maintenance_merge.returncode == 0, (
+        pre_maintenance_merge.stdout + pre_maintenance_merge.stderr
+    )
+
+    result_a = enrich_drain.drain(str(tracker_a), repo_root=repo_a, runner=runner)
+    result_b = enrich_drain.drain(str(tracker_b), repo_root=repo_b, runner=runner)
+    assert result_a["processed"] == 1
+    assert result_b["processed"] == 1
+
+    _git(
+        "fetch",
+        "-q",
+        str(tracker_b),
+        "HEAD:refs/remotes/debug/post-maintenance-b",
+        cwd=tracker_a,
+    )
+    post_maintenance_merge = _git(
+        "merge-tree",
+        "--write-tree",
+        "HEAD",
+        "refs/remotes/debug/post-maintenance-b",
+        cwd=tracker_a,
+        check=False,
+    )
+    assert post_maintenance_merge.returncode == 0, (
+        "queue maintenance made independently valid tracker histories conflict:\n"
+        + post_maintenance_merge.stdout
+        + post_maintenance_merge.stderr
+    )
+    after_a = drain_event_paths(tracker_a)
+    after_b = drain_event_paths(tracker_b)
+    assert before_a <= after_a
+    assert before_b <= after_b
+    merge_tree = post_maintenance_merge.stdout.splitlines()[0]
+    assert after_a | after_b <= drain_event_paths(tracker_a, merge_tree)
+    assert _git("status", "--porcelain", cwd=tracker_a).stdout == ""
+    assert _git("status", "--porcelain", cwd=tracker_b).stdout == ""
