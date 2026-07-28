@@ -11,6 +11,7 @@ Pass-4 coaching notes carry an additive `guide_url` deep-link anchored to `#<cri
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -190,6 +191,59 @@ def test_explain_cli_prints_guide(capsys) -> None:
     assert "plan-review gate" in capsys.readouterr().out
     assert main(["explain", "review"]) == 0
     assert "code review" in capsys.readouterr().out.lower()
+
+
+def test_explain_plan_file_impact_tristate_contract(capsys) -> None:
+    """The public plan guide exposes the complete file-impact author contract."""
+    from rebar._cli import main
+
+    assert main(["explain", "plan"]) == 0
+    rendered = capsys.readouterr().out.casefold()
+    stable_contract_markers = (
+        "undeclared",
+        "paths",
+        "none",
+        "set-file-impact",
+        "--none",
+        "no-file-impact",
+        "rebar review-plan",
+    )
+    missing = [marker for marker in stable_contract_markers if marker not in rendered]
+    assert not missing, f"public plan guide is missing contract markers: {missing}"
+
+    normalized = " ".join(rendered.split())
+    sentences = [sentence for sentence in re.split(r"(?<=[.!?])\s+", normalized) if sentence]
+    sentence_tokens = [(sentence, set(re.findall(r"[a-z]+", sentence))) for sentence in sentences]
+
+    def sentence_has(*concepts: tuple[str, ...], phrases: tuple[str, ...] = ()) -> bool:
+        return any(
+            all(phrase in sentence for phrase in phrases)
+            and all(not words.isdisjoint(alternatives) for alternatives in concepts)
+            for sentence, words in sentence_tokens
+        )
+
+    assert sentence_has(("documentation", "docs"), ("paths",))
+    assert sentence_has(("test", "tests"), ("paths",))
+    assert sentence_has(
+        ("none",),
+        ("no", "not", "without", "unchanged"),
+        ("repository", "tracked"),
+        ("file", "files", "artifact", "artifacts"),
+    )
+    assert sentence_has(("advisory", "coaching"), phrases=("no-file-impact",)) or sentence_has(
+        phrases=("no-file-impact", "non-blocking")
+    )
+
+    adjacent_clause_tokens = [
+        set(re.findall(r"[a-z]+", " ".join(sentences[index : index + 2])))
+        for index in range(len(sentences))
+    ]
+    assert any(
+        not words.isdisjoint(("why", "reason"))
+        and not words.isdisjoint(("where", "location", "stored", "attached"))
+        and not words.isdisjoint(("output", "evidence", "deliverable", "report"))
+        for words in adjacent_clause_tokens
+    )
 
 
 def test_explain_mcp_routes_guide() -> None:

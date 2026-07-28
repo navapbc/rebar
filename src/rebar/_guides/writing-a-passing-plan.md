@@ -81,6 +81,28 @@ Testing` (the testing criterion only fires on *new testable behavior*).
   outcomes, each stating **how it's checked** (F1, E1, E6). **Required.**
 - **Containers** additionally: **`## Success Criteria`** + the child decomposition.
 
+## Declare file impact deliberately
+
+Every ticket has one of three file-impact choices: **undeclared** (the default before you
+record anything), **paths** (repository files will change), or **none** (no repository file
+changes). Most implementation, documentation-only, and test-only work uses paths — docs and
+tests are still repository files. Record those paths and why they change:
+
+```sh
+rebar set-file-impact <id> '[{"path":"README","reason":"document the command"}]'
+```
+
+Use `none` only when the work produces no repository file changes at all:
+
+```sh
+rebar set-file-impact <id> --none "Why no repository files change: this is a production access review. Where output or evidence lives: the signed access report is attached to ticket <id>."
+```
+
+The reason must make both facts clear: **Why no repository files change** and **Where output
+or evidence lives**. The `no-file-impact` LLM review is advisory coaching, not a substitute for
+an honest scope declaration. Changing the declaration or its reason is material plan content,
+so re-run `rebar review-plan <id>` before claiming.
+
 ## The blocking checklist — your plan MUST…
 
 These are the criteria that actually block a claim. Fix every one before you claim.
@@ -93,11 +115,12 @@ These are the criteria that actually block a claim. Fix every one before you cla
   observable outcome and how it's verified — not "works correctly".
 - **Be internally consistent (`COH`).** No section contradicts another (testing vs.
   decomposition, sequencing vs. declared dependencies, approach vs. a stated constraint).
-- **Have a grounded edit-set (`G1G2`).** List real paths. **Creating a new file is fine** —
+- **Have a grounded edit-set (`G1G2`).** Choose paths or an explicit `none` declaration. For
+  paths, list real paths. **Creating a new file is fine** —
   a to-be-created path is recognized as new work, not a hallucinated target; only *naming an
   existing symbol/file that doesn't exist* is flagged. Record paths with
-  `rebar set-file-impact <id> '[{"path":"…","reason":"…"}]'` (the file-impact-coverage check
-  nudges a leaf that declares none).
+  `rebar set-file-impact <id> '[{"path":"…","reason":"…"}]'`. Use `--none` only for work
+  with no repository file changes (the file-impact-coverage check nudges an undeclared leaf).
 - **Ground its assumptions and asserted capabilities (`E4`, `asserted-capability`).** If the
   plan relies on something existing (a function, config key, library behavior), **cite the
   concrete evidence** — a `path:line` or a module/symbol name you actually confirmed by

@@ -159,6 +159,24 @@ The convergent delta is carried by the `TAG_DELTA` event — its body, the add-w
 rule, and the forward-compatibility rollout note (older clones preserve-and-ignore an
 unknown event type) are documented in [event-schema.md](event-schema.md).
 
+## File-impact scope
+
+`file_impact` records the repository files a ticket expects to change for conflict-aware
+scheduling and plan-review freshness. It has three persisted states:
+
+| State | Stored fields | Meaning |
+|-------|---------------|---------|
+| **undeclared** | `file_impact: []`, `file_impact_scope: "undeclared"`, empty `no_file_impact_reason` | No scope has been recorded yet. |
+| **paths** | non-empty `file_impact`, `file_impact_scope: "paths"`, empty `no_file_impact_reason` | The listed repository paths may change. |
+| **none** | `file_impact: []`, `file_impact_scope: "none"`, substantive `no_file_impact_reason` | No repository files change; the reason explains why and where the output/evidence lives. |
+
+Use `rebar set-file-impact <id> '[{"path":"docs/guide.md","reason":"document CLI behavior"}]'`
+for documentation-only work and similarly list test paths for test-only work. Those are still
+repository file changes, so they use **paths**, not **none**. Use
+`rebar set-file-impact <id> --none "<reason>"` only when the ticket makes no repository file
+changes at all. See [event-schema.md](event-schema.md) for the event fields and replacement
+semantics.
+
 ## See also
 
 - [event-schema.md](event-schema.md) — the append-only event bodies behind every concept
