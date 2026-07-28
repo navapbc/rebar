@@ -285,7 +285,7 @@ def verify_completion(
     Args:
         ticket_id: the ticket to verify (id, short id, or alias).
         graph: include the ticket's descendants in the context. Default: ``True`` for an
-            epic (its success criteria are met across children), else ``False``.
+            epic (its acceptance criteria are met across children), else ``False``.
         repo_root: rebar repo root (defaults to the resolved root).
         config: an :class:`LLMConfig` (defaults to :meth:`LLMConfig.from_env`).
         runner: an explicit runner (test seam; defaults to the config-selected runner).

@@ -1,0 +1,19 @@
+# Reviewed historical, migration, and permanent-concept exceptions.
+# Format: repository-relative path<TAB>positive occurrence count<TAB>reason
+docs/plan-review-criteria-guide.md	1	generated T2 experiment-language echo
+scripts/migrate_success_criteria.py	7	one-time legacy-heading migration
+src/rebar/llm/review_kernel/verify_models.py	1	definition-of-done concept
+src/rebar/llm/reviewers/plan_review_T2.md	1	permanent experiment-language carve-out
+src/rebar/llm/reviewers/plan_review_verifier.md	1	definition-of-done concept
+src/rebar/llm/reviewers/plan_review_verifier_agentic.md	1	definition-of-done concept
+tests/fixtures/jira/comment_map.json	1	captured Jira record
+tests/fixtures/jira/search.json	1	captured Jira payload
+tests/interfaces/lifecycle/test_criteria_heading_collapse.py	6	legacy-heading negative probe
+tests/interfaces/store/test_canonical_event_bytes.py	1	historical criterion citation
+tests/scripts/test_migrate_success_criteria.py	6	migration positive and edge probes
+tests/scripts/test_migrate_success_criteria_heldout.py	30	migration behavioral probes
+tests/unit/test_code_review_artifact.py	1	historical criterion citation
+tests/unit/test_criteria_vocabulary_reviewers.py	3	permanent carve-out regression test
+tests/unit/test_eval_solver.py	1	legacy-heading negative probe
+tests/unit/test_eval_solver_criteria_heading_heldout.py	3	legacy-heading behavioral probes
+tests/unit/test_registry_version_rotation.py	1	registry-version migration regression

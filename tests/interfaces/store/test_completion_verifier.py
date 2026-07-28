@@ -398,7 +398,7 @@ def test_op_fail_findings_each_have_criterion_and_detail(rebar_repo: Path) -> No
 # ── graph auto-default: epic ⇒ children considered; non-epic ⇒ not (BEHAVIORAL) ─
 def test_graph_auto_default_depends_on_ticket_type(rebar_repo: Path, monkeypatch) -> None:
     """When ``graph`` is left as the default (None), the op resolves it from the ticket type:
-    True for an epic (success criteria span children), False otherwise. Asserted by capturing
+    True for an epic (acceptance criteria span children), False otherwise. Asserted by capturing
     the resolved ``graph`` at the deterministic context-assembly seam — no model needed."""
     from rebar.llm import operations
 
