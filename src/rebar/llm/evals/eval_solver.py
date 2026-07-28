@@ -314,7 +314,7 @@ def run_case(
             ids: list[str] = []
             for i, epic in enumerate(case.get("epics") or []):
                 etext = epic if isinstance(epic, str) else str(epic)
-                edesc = f"## Acceptance Criteria\n- [ ] {etext}\n\n## Success Criteria\n- {etext}"
+                edesc = f"## Acceptance Criteria\n- [ ] {etext}"
                 ids.append(
                     rebar.create_ticket(
                         "epic",
