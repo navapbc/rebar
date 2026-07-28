@@ -20,10 +20,12 @@ from .manifest import (
     _hash_basis,
     _hash_file,
     build_manifest,
+    classify_file_scope,
     dependency_hashes,
     is_plan_review_manifest,
     manifest_deps,
     manifest_disabled_builtins,
+    manifest_file_scope,
     manifest_material,
     manifest_pins,
     manifest_priority_floor,
@@ -70,10 +72,12 @@ __all__ = [
     "_hash_basis",
     "_hash_file",
     "build_manifest",
+    "classify_file_scope",
     "dependency_hashes",
     "is_plan_review_manifest",
     "manifest_deps",
     "manifest_disabled_builtins",
+    "manifest_file_scope",
     "manifest_material",
     "manifest_pins",
     "manifest_rebar_version",
@@ -117,9 +121,7 @@ def sign_plan_review(
     from rebar import signing
     from rebar.llm.config import current_code_sha
 
-    # THE no-null-pin invariant (bug 5128-0856): every NEW attestation must bind a real
-    # verified_at_sha. Enforced at this one seam so every signer inherits it; pre-S4b
-    # attestations remain readable (legacy tolerance is verify-side, not here).
+    # New attestations require an attested snapshot; legacy records remain readable.
     if not current_code_sha():
         raise SigningError(
             "refusing to sign a plan-review attestation with no attested snapshot "
@@ -139,8 +141,15 @@ def sign_plan_review(
         )
     )
 
-    # children = the caller's pre-fetched direct-child states; None → no inheritance (3e4b).
     deps = dependency_hashes(verdict, repo_root=repo_root, children=children)
+    try:
+        import rebar
+
+        own_scope = rebar.get_file_impact_scope(verdict["ticket_id"], repo_root=repo_root).get(
+            "kind", "undeclared"
+        )
+    except Exception:  # noqa: BLE001 — unreadable scope keeps conservative whole-HEAD freshness
+        own_scope = "undeclared"
     # Stamp disabled built-ins authoritatively at the sign boundary.
     disabled = registry.disabled_builtins(repo_root)
     if disabled:
@@ -155,6 +164,7 @@ def sign_plan_review(
         pins=snapshot.related_material,
         review_phase=review_phase,
         priority_floor=priority_floor,
+        file_scope=classify_file_scope(deps.keys(), own_scope),
     )
     if initial_generation is not None:
         from . import generation
@@ -673,20 +683,12 @@ def compute_validity(
 
     if kind == _MANIFEST_PREFIX:  # plan-review
         assert auth_manifest is not None
-        # Every freshness input comes from the authenticated manifest, never its plaintext mirror.
-        # GRANDFATHERED (ADR 0053, amending ADR 0015). ``regver`` hashes the WHOLE effective
-        # routing index, so any criteria edit — a tightened rule and a typo fix alike — rotates
-        # it and would otherwise invalidate every outstanding attestation repo-wide at once.
-        # An attestation certifies that the plan passed the criteria AS THEY STOOD AT SIGNING
-        # TIME; a later registry change does not falsify that. So drift is recorded and
-        # reported, never blocking. The other freshness dimensions below still block.
-        # Read from the AUTHENTICATED manifest only — reporting must not become a channel for
-        # unauthenticated plaintext (ADR 0049).
+        # Registry drift is authenticated, reported, and grandfathered (ADR 0053).
         signed_regver = manifest_regver(auth_manifest)
         current_regver = registry_version(repo_root)
         if signed_regver is None or signed_regver != current_regver:
             registry_drift = {"signed": signed_regver, "current": current_regver}
-        # DEFAULT re-hashes scoped dependencies; unscoped records use whole-HEAD freshness.
+        # DEFAULT re-hashes paths; only an authenticated none scope skips head drift.
         if profile is PlanValidityProfile.DEFAULT:
             deps = manifest_deps(auth_manifest)
             if deps:
@@ -704,7 +706,7 @@ def compute_validity(
                         f"{len(drifted)} dependency file(s) changed ({shown})",
                         "stale-code",
                     )
-            else:
+            elif manifest_file_scope(auth_manifest) != "none":
                 head = signing.head_sha(_config.repo_root(repo_root))
                 signed_head = _authoritative_head(attestation)
                 if head == "unknown" or signed_head != head:
@@ -787,10 +789,7 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
         return None
 
 
-# ── Backward-compat re-export ────────────────────────────────────────────────────────────
-# The claim-gate/delivery surface moved to ``attest_gate`` to keep this module under the
-# 800-LOC cap; re-export here (after every helper it needs is defined, so no import cycle)
-# so historical ``attest.<name>`` imports and monkeypatch sites keep resolving unchanged.
+# Backward-compatible claim-gate/delivery re-exports (after their helper dependencies).
 from .attest_gate import (  # noqa: E402
     _attested_delivered,
     _supersedes_child,

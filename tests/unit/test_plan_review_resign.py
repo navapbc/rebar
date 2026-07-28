@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import rebar
+from rebar import signing
 from rebar.llm.plan_review import attest, resign
 
 
@@ -114,3 +119,56 @@ def test_resign_routes_through_pin_collecting_sign_path(monkeypatch) -> None:
     result = resign.resign_plan_review(ticket_id)
     assert result["ok"] is True
     assert seen == {"ticket_id": ticket_id, "generation": generation}
+
+
+def test_public_resign_preserves_authenticated_none_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "t@e.com"),
+        ("git", "config", "user.name", "t"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "initial"),
+    ):
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+    ticket_id = rebar.create_ticket("task", "recover none scope", repo_root=str(repo))
+    rebar.declare_no_file_impact(
+        ticket_id,
+        "external operator action only",
+        repo_root=str(repo),
+    )
+
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review import generation
+
+    material = generation.collect(ticket_id, repo_root=str(repo)).own_material
+    payload = {
+        "verdict": "PASS",
+        "ticket_id": ticket_id,
+        "ticket_type": "task",
+        "material_fingerprint": material,
+        "coverage": {},
+    }
+    monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", lambda *a, **k: object())
+    monkeypatch.setattr(gate_source, "gate_read_root", lambda *a, **k: contextlib.nullcontext())
+    code_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+
+    result = resign.resign_plan_review(ticket_id, repo_root=str(repo))
+    verified = signing.verify_signature(ticket_id, kind="plan-review", repo_root=str(repo))
+
+    assert result["ok"] is result["signed"] is True
+    assert verified["verified"] is True
+    assert attest.manifest_file_scope(verified["manifest"]) == "none"

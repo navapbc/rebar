@@ -19,7 +19,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ _PIN_PREFIX = "plan-material-pin:"
 _PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
 _REVIEW_PHASE_PREFIX = "review-phase:"
 _PRIORITY_FLOOR_PREFIX = "priority-floor:"
+_FILE_SCOPE_NONE = "file-scope: none"
 
 
 class ManifestFormatError(ValueError):
@@ -305,6 +306,17 @@ def dependency_hashes(
     return {p: _hash_file(p, base=base) for p in sorted(paths)}
 
 
+def classify_file_scope(
+    dependency_paths: Iterable[object], own_scope: object, *, container_all_none: bool = False
+) -> Literal["paths", "none", "unscoped"]:
+    """Classify signed code freshness without weakening legacy empty scopes."""
+    if any(dependency_paths):
+        return "paths"
+    if own_scope == "none" or container_all_none:
+        return "none"
+    return "unscoped"
+
+
 # ── manifest ─────────────────────────────────────────────────────────────────────
 def build_manifest(
     verdict: dict[str, Any],
@@ -317,6 +329,7 @@ def build_manifest(
     pins: Sequence[PlanMaterialPin] = (),
     review_phase: object = "planning",
     priority_floor: object = None,
+    file_scope: object = "unscoped",
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
@@ -372,6 +385,8 @@ def build_manifest(
     # remainder. A per-path map (not a rolled-up root) is the contract Story 2 builds on.
     for path, digest in sorted((deps or {}).items()):
         lines.append(f"{_DEP_PREFIX} {digest} {path}")
+    if file_scope == "none":
+        lines.append(_FILE_SCOPE_NONE)
     return lines
 
 
@@ -418,6 +433,12 @@ def manifest_deps(manifest: list[str] | None) -> dict[str, str]:
             if path:
                 out[path] = digest
     return out
+
+
+def manifest_file_scope(manifest: list[str] | None) -> Literal["none", "unscoped"]:
+    """Read the exact authenticated no-file-impact declaration, if present."""
+    declarations = [str(line) for line in manifest or [] if str(line).startswith("file-scope:")]
+    return "none" if declarations == [_FILE_SCOPE_NONE] else "unscoped"
 
 
 def manifest_regver(manifest: list[str] | None) -> str | None:

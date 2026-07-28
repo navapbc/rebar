@@ -26,6 +26,7 @@ import pytest
 
 import rebar
 from rebar import signing
+from rebar._opcert_signing import verify_opcert_record
 from rebar.llm.plan_review import attest, registry
 from rebar.llm.plan_review.relation_snapshot import PlanMaterialPin
 from rebar.llm.prompting import prompt_library
@@ -320,3 +321,258 @@ def test_deriving_advisory_health_writes_no_ticket_events(
     monkeypatch.setattr("rebar._commands._seam.append_event", lambda *a, **k: writes.append(a))
     attest.derive_plan_material_pin_health((pin,), repo_root="/repo", enforced=False)
     assert writes == []
+
+
+def _tracker_path(store: Path) -> Path:
+    from rebar._commands._seam import tracker_dir
+
+    return Path(tracker_dir(str(store)))
+
+
+def _sign_scope_opcert(
+    store: Path,
+    ticket_id: str,
+    manifest: list[str],
+    *,
+    material: str,
+    commit: str,
+) -> dict:
+    tracker = _tracker_path(store)
+    return signing.sign_opcert_manifest(
+        ticket_id,
+        manifest,
+        material_fingerprint=material,
+        merged_log_commit=commit,
+        key_path=signing.ensure_opcert_key(str(tracker)),
+        principal=signing.opcert_principal(str(tracker)),
+        repo_root=str(store),
+    )
+
+
+def _commit_unrelated_head_move(store: Path) -> tuple[str, str]:
+    before = signing.head_sha(str(store))
+    (store / "unrelated.txt").write_text("unrelated change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "unrelated.txt"], cwd=store, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "unrelated"], cwd=store, check=True, capture_output=True
+    )
+    after = signing.head_sha(str(store))
+    assert before != after
+    return before, after
+
+
+@pytest.mark.parametrize(
+    ("scope_line", "expected_valid", "expected_verdict"),
+    [
+        ("file-scope: none", True, "certified"),
+        (None, False, "stale-head"),
+        ("file-scope: future-scope", False, "stale-head"),
+    ],
+)
+def test_signed_empty_scope_head_drift_contract(
+    store: Path,
+    scope_line: str | None,
+    expected_valid: bool,
+    expected_verdict: str,
+) -> None:
+    ticket_id = rebar.create_ticket("task", "scope freshness", repo_root=str(store))
+    if scope_line == "file-scope: none":
+        rebar.declare_no_file_impact(
+            ticket_id,
+            "external operator action only",
+            repo_root=str(store),
+        )
+    state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert material is not None
+    signed_head = signing.head_sha(str(store))
+    manifest = [
+        "plan-review: PASS",
+        f"material: {material}",
+        f"regver: {attest.registry_version(str(store))}",
+    ]
+    if scope_line is not None:
+        manifest.append(scope_line)
+    record = _sign_scope_opcert(
+        store,
+        ticket_id,
+        manifest,
+        material=material,
+        commit=signed_head,
+    )
+
+    before, after = _commit_unrelated_head_move(store)
+    assert before == signed_head and after != signed_head
+    verified = verify_opcert_record(
+        record,
+        state["ticket_id"],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = attest.compute_validity(
+        verified,
+        state,
+        "plan-review",
+        repo_root=str(store),
+    )
+
+    assert result["valid"] is expected_valid
+    assert result["verdict"] == expected_verdict
+
+
+def test_plaintext_none_scope_cannot_override_authenticated_unscoped_manifest(
+    store: Path,
+) -> None:
+    ticket_id = rebar.create_ticket("task", "scope tamper", repo_root=str(store))
+    state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert material is not None
+    signed_head = signing.head_sha(str(store))
+    signed_manifest = [
+        "plan-review: PASS",
+        f"material: {material}",
+        f"regver: {attest.registry_version(str(store))}",
+    ]
+    record = _sign_scope_opcert(
+        store,
+        ticket_id,
+        signed_manifest,
+        material=material,
+        commit=signed_head,
+    )
+    _commit_unrelated_head_move(store)
+
+    tampered = {**record, "manifest": [*signed_manifest, "file-scope: none"]}
+    verified = verify_opcert_record(
+        tampered,
+        state["ticket_id"],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = attest.compute_validity(
+        verified,
+        state,
+        "plan-review",
+        repo_root=str(store),
+    )
+
+    assert result["valid"] is False
+    assert result["verdict"] == "stale-head"
+
+
+@pytest.mark.parametrize(
+    ("paths", "own_scope", "container_all_none", "expected"),
+    [
+        (["src/a.py"], "none", False, "paths"),
+        ([], "none", False, "none"),
+        ([], "undeclared", False, "unscoped"),
+        ([], "paths", False, "unscoped"),
+        ([], "undeclared", True, "none"),
+    ],
+)
+def test_file_scope_classifier_contract(
+    paths: list[str],
+    own_scope: str,
+    container_all_none: bool,
+    expected: str,
+) -> None:
+    assert (
+        attest.classify_file_scope(
+            paths,
+            own_scope,
+            container_all_none=container_all_none,
+        )
+        == expected
+    )
+
+
+def test_none_reason_edit_invalidates_signed_material(store: Path) -> None:
+    ticket_id = rebar.create_ticket("task", "reason drift", repo_root=str(store))
+    rebar.declare_no_file_impact(ticket_id, "external action alpha", repo_root=str(store))
+    before_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    before_material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert before_material is not None
+    manifest = attest.build_manifest(
+        {
+            "verdict": "PASS",
+            "ticket_id": before_state["ticket_id"],
+            "coverage": {"counts": {}},
+        },
+        material=before_material,
+        regver=attest.registry_version(str(store)),
+        file_scope="none",
+    )
+    record = _sign_scope_opcert(
+        store,
+        ticket_id,
+        manifest,
+        material=before_material,
+        commit=signing.head_sha(str(store)),
+    )
+
+    rebar.declare_no_file_impact(ticket_id, "external action beta", repo_root=str(store))
+    after_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    after_material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert after_material not in (None, before_material)
+    verified = verify_opcert_record(
+        record,
+        after_state["ticket_id"],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = attest.compute_validity(
+        verified,
+        after_state,
+        "plan-review",
+        repo_root=str(store),
+    )
+
+    assert result["valid"] is False
+    assert result["verdict"] == "stale-material"
+
+
+def test_none_to_paths_invalidates_signed_material(store: Path) -> None:
+    ticket_id = rebar.create_ticket("task", "scope drift", repo_root=str(store))
+    rebar.declare_no_file_impact(ticket_id, "external action only", repo_root=str(store))
+    before_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    before_material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert before_material is not None
+    manifest = attest.build_manifest(
+        {
+            "verdict": "PASS",
+            "ticket_id": before_state["ticket_id"],
+            "coverage": {"counts": {}},
+        },
+        material=before_material,
+        regver=attest.registry_version(str(store)),
+        file_scope="none",
+    )
+    record = _sign_scope_opcert(
+        store,
+        ticket_id,
+        manifest,
+        material=before_material,
+        commit=signing.head_sha(str(store)),
+    )
+
+    rebar.set_file_impact(
+        ticket_id,
+        [{"path": "src/changed.py", "reason": "implementation"}],
+        repo_root=str(store),
+    )
+    after_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    verified = verify_opcert_record(
+        record,
+        after_state["ticket_id"],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = attest.compute_validity(
+        verified,
+        after_state,
+        "plan-review",
+        repo_root=str(store),
+    )
+
+    assert result["valid"] is False
+    assert result["verdict"] == "stale-material"
