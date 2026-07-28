@@ -117,7 +117,9 @@ def test_grade_persists_in_sidecar_payload() -> None:
     payload = build_payload(verdict, material="m")
     sa = payload["findings"][0]["verification"]["severity_attributes"]
     assert sa["ac_unverifiable"] == "underspecified_oracle"
-    assert payload["impact_model_version"] == "plan-v3"
+    # plan-v4 after the divergence-kind split rode the same bump (story
+    # doggish-nonorganic-tsetsefly); the oracle-kind grades themselves are unchanged.
+    assert payload["impact_model_version"] == "plan-v4"
 
 
 def test_legacy_plan_v2_sidecar_reads_as_is(rebar_repo: Path) -> None:

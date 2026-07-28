@@ -62,7 +62,8 @@ discriminates across a ticket's findings.
 PLAN-SEVERITY AXES — additionally score these SEVEN axes plus the detection axis for THIS finding.
 They drive the plan-review impact score (severity-first MAX over the axes, a hard-override floor,
 and a detection amplifier); the base attributes above are kept for continuity. Grade each axis
-none|low|medium|high (EXCEPT ac_unverifiable, which uses its own oracle-kind grades below) by how
+none|low|medium|high (EXCEPT ac_unverifiable and divergent_implementation, which each use their own
+closed kind-grade set defined below — do NOT use low/medium/high for those two) by how
 severely THIS finding exhibits it, or leave "none" if it does not apply
 — an axis left "none" contributes NOTHING, so do not inflate. Reserve non-none for a genuine instance.
 - ac_unverifiable — grade by ORACLE KIND (closed set for this axis ONLY, not the ordinal ladder):
@@ -83,8 +84,25 @@ severely THIS finding exhibits it, or leave "none" if it does not apply
 - undecomposed — the plan is a flat, undecomposed unit that should be broken down. Grade ONLY a
   genuine gap: a deterministic signal already suppresses false "flat" findings on tickets that HAVE
   children, so score this only when decomposition is truly absent or insufficient. HARD-OVERRIDE.
-- divergent_implementation — the plan diverges from the implementation or reality it claims to
-  describe (it would build the wrong thing). HARD-OVERRIDE.
+- divergent_implementation — grade by DIVERGENCE KIND (closed set for this axis ONLY, not the
+  ordinal ladder): the plan diverges from the implementation or reality it claims to describe.
+  * contradicts_reality — the plan asserts something about the code or system that is FALSE: a
+    named symbol, file, or behavior does not exist as described, or exists differently.
+    Example: "the plan says `finalize_verdict` already checks the `prerequisite_indeterminate`
+    key, but orchestrator.py:497 checks only `narrowed` — the described behavior does not exist."
+  * omits_required_site — the plan's scope or file list OMITS a site the change provably MUST
+    touch, where leaving it out changes runtime behavior or leaves the stated goal unmet.
+    Example: "adding a third `vector_backend` value, but seed.py:517 and ingest.py:261 branch on
+    the literal 's3vectors' and are absent from the scope — the new value would be treated as a
+    local ephemeral store and re-seeded on every boot."
+  * incomplete_enumeration — a site is omitted, but touching it is OPTIONAL or cosmetic (a doc
+    mention, a comment, a redundant reference) and the stated goal still holds without it.
+    Example: "a README paragraph still names the old flag; the migration works regardless."
+  HARD-OVERRIDE for contradicts_reality and omits_required_site ONLY (auto-high).
+  incomplete_enumeration is a coached refinement: it scores BELOW every blocking threshold and
+  never floors. The test between omits_required_site and incomplete_enumeration is CONSEQUENCE,
+  not count: ask whether the plan's own goal can still be met with the site untouched. If it
+  cannot, that is omits_required_site however small the omission looks.
 - internal_conflict — the plan contradicts itself (two requirements or sections cannot both hold).
 - vague_directive — a load-bearing directive is too vague to act on unambiguously.
 - irreversible_without_rationale — an irreversible or destructive step is taken with no stated

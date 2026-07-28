@@ -96,8 +96,9 @@ def test_enrich_no_ac_unverifiable_still_flags_but_impact_unchanged() -> None:
 
 def test_operator_attested_finding_survives_on_other_axes() -> None:
     """Clearing ac_unverifiable removes ONLY that axis's hard-override contribution — a finding
-    that ALSO scores on another axis (e.g. divergent_implementation=high) still produces impact
-    and survives (the clear is not a blanket drop of the finding)."""
+    that ALSO scores on another axis (here divergent_implementation=contradicts_reality, a
+    plan-v4 floor grade) still produces impact and survives (the clear is not a blanket drop of
+    the finding)."""
     desc = "## Acceptance Criteria\n- [ ] [operator-attested] the deploy is confirmed live\n"
     findings = [
         {
@@ -110,7 +111,7 @@ def test_operator_attested_finding_survives_on_other_axes() -> None:
         0: {
             "severity_attributes": {
                 "ac_unverifiable": "missing_oracle",
-                "divergent_implementation": "high",
+                "divergent_implementation": "contradicts_reality",
             },
             "binary": {},
         }
@@ -119,6 +120,7 @@ def test_operator_attested_finding_survives_on_other_axes() -> None:
     attrs = verifs[0]["severity_attributes"]
     assert attrs.get("operator_attested") is True
     assert attrs.get("ac_unverifiable") == "none"  # the OA axis is cleared
-    assert attrs.get("divergent_implementation") == "high"  # the other axis is untouched
+    # the other axis is untouched — and a floor grade is NEVER cleared by attestation (plan-v4)
+    assert attrs.get("divergent_implementation") == "contradicts_reality"
     # the finding still scores (divergent_implementation is a hard-override axis → floor 0.85)
     assert review_kernel.impact_plan(attrs) >= 0.85

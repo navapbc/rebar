@@ -196,7 +196,7 @@ T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
 
 **The hard-override floor is oracle-graded for `ac_unverifiable` (plan-v3, story
 `large-sleepful-needlefish`).** `impact_plan` floors a finding at 0.85 when
-`dod_uncertifiable` / `undecomposed` / `divergent_implementation` is present at any
+`dod_uncertifiable` / `undecomposed` is present at any
 grade — but `ac_unverifiable` is graded by ORACLE KIND, a closed vocabulary enforced at
 verification-parse time (`review_kernel.verify.PlanSeverityAttrs`): **`missing_oracle`**
 (no verification method exists as phrased) and **`broken_oracle`** (a stated proving
@@ -211,7 +211,43 @@ of a classified sample were specificity demands, not missing oracles. Operator-a
 enrichment clears `missing_oracle`/`underspecified_oracle` (the recorded attestation IS
 the oracle) but never `broken_oracle`. Legacy plan-v2 sidecars keep the old ordinal
 grades and are read as-is — calibration replay segments by `impact_model_version`
-(ADR 0036), which this change bumps to `plan-v3`.
+(ADR 0036), which that change bumped to `plan-v3`.
+
+**`divergent_implementation` is divergence-graded the same way (plan-v4, story
+`doggish-nonorganic-tsetsefly`).** The second override axis to move off the ordinal ladder onto a
+closed kind set: **`contradicts_reality`** (the plan asserts something about the code/system that
+is FALSE — a named symbol/file/behavior does not exist as described) and
+**`omits_required_site`** (the plan's scope omits a site the change provably MUST touch, where
+omitting it changes runtime behavior or leaves the goal unmet) keep the 0.85 floor;
+**`incomplete_enumeration`** (the omitted site is optional/cosmetic — a doc mention, a comment, a
+redundant reference — and the goal still holds) contributes `DIVERGENCE_INCOMPLETE_CONTRIB`
+(0.55, pinned below every blocking threshold) and never floors. The test between the second and
+third grade is **consequence, not count**: can the plan's own goal still be met with the site
+untouched? Operator-attested enrichment clears `incomplete_enumeration` but never either floor
+grade — attesting an outcome neither makes a false claim about the code true nor conjures a
+required site the plan omits.
+
+The grading is grounded in plan-v3 field evidence (18,085 verified findings): the axis fired on
+only 7.72% of findings, and across the 1,307-finding "omitted scope site / unenumerated consumer"
+class it exists to describe it was graded `none` ~90% of the time (1,173) — so a plan that
+provably under-scoped reality scored impact **0.0** and could not block, even at G6's permissive
+0.60 threshold. Grading rather than merely widening the axis follows the calibration-3 lesson: a
+blunt widening would have routed 113 corpus findings into the 0.85 floor at once (4.3% of runs
+flipping PASS→BLOCK), the same over-fire the oracle split had to walk back.
+
+> **Constraint on any future impact change — loop termination.** A rejected alternative was a
+> `prod_impact` floor (lift impact whenever production severity is medium+). It was rejected
+> because it runs counter to the **novelty convergence floor** (`rising_floor_drop`,
+> `novelty_priority_floor = 0.4`), which makes the remediation loop terminate by dropping
+> novel + low-priority findings. 73.7% of plan-v3 findings sit below that 0.4 floor and 47.7% are
+> at priority exactly 0.0 — that population IS the convergence reservoir. The decisive objection
+> is qualitative: a divergence grade describes something the AUTHOR CAN FIX (add the site, and the
+> next review scores it `none`), so the loop still converges; `prod_impact` describes a
+> consequence the author cannot edit away, so a lifted finding can recur at high priority every
+> round with no action that resolves it. **Any future impact change must preserve the property
+> that a lifted finding is author-resolvable.** A `prod_impact` floor at the 0.70 it would need
+> also inverts the deliberate calibration-3 ordering that keeps `UNDERSPECIFIED_ORACLE_CONTRIB`
+> (0.55) below every blocking threshold.
 
 ### The Pass-4 move registry
 

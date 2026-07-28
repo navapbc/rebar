@@ -123,6 +123,12 @@ def enrich_operator_attested(
             # attesting the outcome (story large-sleepful-needlefish).
             if attrs.get("ac_unverifiable") in ("missing_oracle", "underspecified_oracle"):
                 attrs["ac_unverifiable"] = "none"
+            # Same rule on the divergence axis (story doggish-nonorganic-tsetsefly, plan-v4): an
+            # attestation clears a merely-cosmetic incomplete_enumeration, but NEVER a
+            # contradicts_reality or omits_required_site — attesting an outcome does not make a
+            # false claim about the code true, nor conjure a required site the plan omits.
+            if attrs.get("divergent_implementation") == "incomplete_enumeration":
+                attrs["divergent_implementation"] = "none"
 
 
 @register_step(
