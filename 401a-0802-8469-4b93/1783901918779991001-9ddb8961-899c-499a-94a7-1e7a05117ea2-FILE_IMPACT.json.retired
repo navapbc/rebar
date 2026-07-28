@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","author_email":"joeoakhart+bot@navapbc.com","data":{"file_impact":[{"path":"src/rebar/_commands/identity.py","reason":"reject_private_key_material guard + create/key-add call sites"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783901918779991001,"uuid":"9ddb8961-899c-499a-94a7-1e7a05117ea2"}

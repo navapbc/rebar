@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"AGENTS.md","reason":"throwaway spike verifying @import loads this file"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1784231062413232001,"uuid":"da1cfbc5-95ef-41b2-bb99-dd2208a6c2fc"}

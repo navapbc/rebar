@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","author_email":"joeoakhart+bot@navapbc.com","author_id":"594c-9dcf-5ad6-4e6d","data":{"file_impact":[{"path":"docs/experiments/plan-review-gate/","reason":"cross-gate replay driver"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1784144108597242001,"uuid":"b0dc31c3-17d6-4b99-b99e-12491f6bfc95"}
