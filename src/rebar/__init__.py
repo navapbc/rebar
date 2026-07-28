@@ -35,7 +35,9 @@ from rebar._errors import ConcurrencyError, RebarError
 from rebar._lib_gates import (
     check_ac,
     clarity_check,
+    declare_no_file_impact,
     get_file_impact,
+    get_file_impact_scope,
     get_verify_commands,
     grounding_info,
     quality_check,
@@ -183,7 +185,9 @@ __all__ = [
     "quality_check",
     "validate",
     "get_file_impact",
+    "get_file_impact_scope",
     "set_file_impact",
+    "declare_no_file_impact",
     "get_verify_commands",
     "set_verify_commands",
     # code-grounding oracle (epic 8f6c)

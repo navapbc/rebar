@@ -524,12 +524,23 @@ def process_edit(state: dict, data: dict) -> None:
                 add_managed_ref(state, "parent", new_value)
 
 
-def process_file_impact(state: dict, event: dict, data: dict) -> None:
-    """Apply a FILE_IMPACT event: replace state.file_impact (last-writer-wins).
+def _file_impact_scope(data: dict, paths: list) -> tuple[str, str]:
+    """Derive the mutually-exclusive file-impact declaration from one event."""
+    if paths:
+        return "paths", ""
+    if data.get("file_impact_scope") == "none":
+        reason = data.get("no_file_impact_reason")
+        return "none", reason if isinstance(reason, str) else ""
+    return "undeclared", ""
 
-    Uses `or []` to handle both missing key and JSON null values.
-    """
-    state["file_impact"] = data.get("file_impact") or []
+
+def process_file_impact(state: dict, event: dict, data: dict) -> None:
+    """Apply a FILE_IMPACT event: replace the tri-state declaration (LWW)."""
+    paths = data.get("file_impact") or []
+    scope, reason = _file_impact_scope(data, paths)
+    state["file_impact"] = paths
+    state["file_impact_scope"] = scope
+    state["no_file_impact_reason"] = reason
 
 
 def process_verify_commands(state: dict, event: dict, data: dict) -> None:
@@ -678,6 +689,14 @@ def process_snapshot(state: dict, data: dict) -> None:
     compiled_state = data.get("compiled_state", {})
     for key, value in compiled_state.items():
         state[key] = value
+
+    # FILE_IMPACT tri-state migration: a pre-feature snapshot carries only the
+    # legacy array. Derive its conservative state after restoring that array, but
+    # leave every post-feature snapshot's explicitly recorded pair untouched.
+    if "file_impact_scope" not in compiled_state and "no_file_impact_reason" not in compiled_state:
+        scope, reason = _file_impact_scope({}, state.get("file_impact") or [])
+        state["file_impact_scope"] = scope
+        state["no_file_impact_reason"] = reason
 
     if "plan_review_phase" not in compiled_state:
         status = state.get("status")

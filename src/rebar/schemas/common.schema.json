@@ -8,6 +8,10 @@
       "type": "string",
       "enum": ["idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"]
     },
+    "file_impact_scope": {
+      "type": "string",
+      "enum": ["undeclared", "paths", "none"]
+    },
     "ticket_type": {
       "type": "string",
       "enum": ["bug", "epic", "story", "task", "session_log", "code_review", "identity"]

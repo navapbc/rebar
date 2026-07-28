@@ -35,9 +35,6 @@ class _Cmd(NamedTuple):
 # min_args / usage mirror the bash `[ $# -lt N ]` guards in ticket-lib-api.sh.
 _REGISTRY: dict[str, _Cmd] = {
     "comment": _Cmd(leaf.comment, 2, "Usage: ticket comment <ticket_id> <body>"),
-    "set-file-impact": _Cmd(
-        leaf.set_file_impact, 2, "Usage: ticket set-file-impact <ticket_id> <json_array>"
-    ),
     "set-verify-commands": _Cmd(
         leaf.set_verify_commands,
         2,
@@ -48,9 +45,27 @@ _REGISTRY: dict[str, _Cmd] = {
     "archive": _Cmd(leaf.archive, 1, "Usage: ticket archive <ticket_id>", max_args=1),
 }
 
+_SET_FILE_IMPACT_USAGE = (
+    "Usage: rebar set-file-impact <ticket_id> <json_array>\n"
+    '   or: rebar set-file-impact <ticket_id> --none "<reason>"'
+)
+
+
+def _set_file_impact_cli(args: list[str]) -> int:
+    """Parse the two mutually-exclusive file-impact write forms."""
+    if len(args) == 2 and args[1] != "--none":
+        leaf.set_file_impact(args[0], args[1])
+        return 0
+    if len(args) == 3 and args[1] == "--none":
+        leaf.declare_no_file_impact(args[0], args[2])
+        return 0
+    raise CommandError(_SET_FILE_IMPACT_USAGE, returncode=2)
+
+
 # Variadic commands that parse their own full argv (flags, --output) and return an
 # exit code directly — the heavier event-composers (docs/bash-migration.md §4).
 _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
+    "set-file-impact": _set_file_impact_cli,
     "create": composer.create_cli,
     "idea": _idea.idea_cli,
     "edit": composer.edit_cli,

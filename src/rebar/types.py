@@ -19,6 +19,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 # --- shared enums (common.schema.json) ---
 TicketStatus = Literal["idea", "open", "in_progress", "blocked", "closed", "archived", "deleted"]
+FileImpactScope = Literal["undeclared", "paths", "none"]
 TicketType = Literal["bug", "epic", "story", "task", "session_log", "code_review", "identity"]
 Relation = Literal[
     "blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from", "caused_by"
@@ -115,6 +116,8 @@ class TicketState(TypedDict):
     comments: NotRequired[list[Comment]]
     deps: NotRequired[list[Dep]]
     file_impact: NotRequired[list[FileImpactEntry]]
+    file_impact_scope: NotRequired[FileImpactScope]
+    no_file_impact_reason: NotRequired[str]
     plan_review_health: NotRequired[Any | None]
     verify_commands: NotRequired[list[VerifyCommandEntry]]
     bridge_alerts: NotRequired[list[Any]]

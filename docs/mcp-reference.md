@@ -60,6 +60,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `create_idea` | Capture an undesigned idea: create an epic in status 'idea' atomically. |
 | `create_identity` | Create an identity entity: a gate-/graph-exempt ticket recording a |
 | `create_ticket` | Create a ticket; returns {id, alias} (agents get the alias without |
+| `declare_no_file_impact` | Declare that a ticket has no repository-file impact, with a reason. |
 | `edit_ticket` | Edit ticket fields (title/priority/assignee/description/ticket_type). |
 | `link_tickets` | Link two tickets (one of the seven canonical relations: blocks | |
 | `log_session` | Append a verbose entry to the current session_log, creating one on |
@@ -114,4 +115,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_49 tools._
+_50 tools._
