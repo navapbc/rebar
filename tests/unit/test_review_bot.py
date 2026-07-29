@@ -778,6 +778,34 @@ def _client(tmp_path):
     return GerritClient(_cfg(tmp_path))
 
 
+def test_get_change_event_prefers_canonical_change_id(tmp_path, monkeypatch):
+    gc = _client(tmp_path)
+    revision = "d51c056d0b4859d1a5fcb311b311c4e531919078"
+    monkeypatch.setattr(
+        gc,
+        "_get_json",
+        lambda _path: {
+            "id": "rebar~986",
+            "change_id": "I969fce55bf212e539f67009ff42447fb234068df",
+            "_number": 986,
+            "project": "rebar",
+            "current_revision": revision,
+            "revisions": {
+                revision: {
+                    "_number": 1,
+                    "ref": "refs/changes/86/986/1",
+                }
+            },
+        },
+    )
+
+    event = gc.get_change_event("986")
+
+    assert event is not None
+    assert event["change"]["id"] == "I969fce55bf212e539f67009ff42447fb234068df"
+    assert event["patchSet"]["revision"] == revision
+
+
 _SAMPLE_DIFF = (
     "From 0123456789abcdef Mon Sep 17 00:00:00 2001\n"
     "From: Dev <dev@example.com>\n"

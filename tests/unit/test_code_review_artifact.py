@@ -251,6 +251,48 @@ def test_emit_is_idempotent_per_change_revision(store: Path) -> None:
     assert a1 == a2  # same (change_id, revision) reuses the same artifact
 
 
+@pytest.mark.parametrize(
+    "equivalent_change_id",
+    ["rebar~main~Icanonical", "rebar~986"],
+)
+def test_emit_is_idempotent_across_gerrit_change_aliases(
+    store: Path,
+    equivalent_change_id: str,
+) -> None:
+    from rebar.review_bot.voter import emit_code_review_artifact
+
+    root = str(store)
+    first = emit_code_review_artifact(
+        _decision(),
+        change_id="Icanonical",
+        revision="same-revision",
+        commit_message="x",
+        diff_text="d",
+        repo_root=root,
+    )
+    replay = emit_code_review_artifact(
+        _decision(),
+        change_id=equivalent_change_id,
+        revision="same-revision",
+        commit_message="x",
+        diff_text="d",
+        repo_root=root,
+    )
+    next_revision = emit_code_review_artifact(
+        _decision(),
+        change_id=equivalent_change_id,
+        revision="different-revision",
+        commit_message="x",
+        diff_text="d",
+        repo_root=root,
+    )
+
+    artifacts = rebar.list_tickets(ticket_type="code_review", repo_root=root)
+    assert replay == first
+    assert next_revision != first
+    assert len(artifacts) == 2
+
+
 def test_emit_unresolved_trailer_is_nonfatal(store: Path) -> None:
     from rebar.review_bot.voter import emit_code_review_artifact
 
