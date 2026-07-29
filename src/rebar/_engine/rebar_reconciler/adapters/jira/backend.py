@@ -21,6 +21,7 @@ from typing import Any
 from rebar_reconciler import inbound_fields
 from rebar_reconciler._backend_registry import register
 from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound_fields
+from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
 from rebar_reconciler.adapters.jira_family import (
     RELATION_TO_JIRA_LINK,
     JiraIdentityConvention,
@@ -28,23 +29,34 @@ from rebar_reconciler.adapters.jira_family import (
 from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sanitize_label
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
 from rebar_reconciler.adapters.jira_family.identity_model import AccountIdIdentity
+from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
 
 
 def _fit_description(value: str) -> str:
     """Fit to Jira's ADF length limit, then normalize soft wraps.
 
-    Order is load-bearing: ``fit_text_to_adf_limit`` measures the ADF the send path
+    Order is load-bearing: ``fit_outbound`` measures the ADF the send path
     actually serializes, and the body Jira stores is then read back through
-    ``adf_to_text`` — i.e. normalized. Composing them in this order makes the result
-    its own fixed point (both halves are idempotent and normalization only shrinks
-    the ADF), so the send value and every description comparison converge.
+    ``decode_inbound`` — i.e. normalized. Composing them in this order makes the
+    result its own fixed point (both halves are idempotent and normalization only
+    shrinks the ADF), so the send value and every description comparison converge.
+    Reached through the ``RichTextCodec`` contract (story J3) rather than the
+    pinned ``adf`` module directly, so a Data Center backend can supply its own
+    codec without touching this call site.
     """
-    adf = outbound_fields._load_adf()
-    return adf.normalize_description(adf.fit_text_to_adf_limit(value))
+    codec = AdfCodec()
+    return codec.normalize_outbound(codec.fit_outbound(value))
 
 
 class _JiraOutbound:
     """Delegates outbound mapping to ``outbound_fields._map_local_to_jira_fields``."""
+
+    def __init__(self) -> None:
+        # Constructed with Cloud's RichTextCodec (story J3) so exactly one
+        # implementation of ``map_fields_to_remote`` exists in the tree, in
+        # ``adapters/jira_family/outbound_mapper.py`` — the ADF-vs-wiki
+        # difference is a constructor parameter, not a duplicated method.
+        self._mapper = OutboundFieldMapper(AdfCodec())
 
     def map_local_to_remote(
         self,
@@ -64,36 +76,10 @@ class _JiraOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Map a CANONICAL changed-fields dict (local field names → local values) to
-        the vendor-shaped mutation fields, at the emission boundary (ticket 625b).
-
-        Field-name reconciliation (local ``title`` → Jira ``summary``) and value
-        mapping (``status``/``priority`` → the Jira name; ``description`` fitted to
-        Jira's ADF limit) reuse the existing local→Jira maps in ``outbound_fields``.
-        ``assignee``/``parent``/``reporter`` values are already resolved by the core
-        diff and pass through unchanged, as does the ``_assignee_is_account_id``
-        dispatch sentinel."""
-        out: dict[str, Any] = {}
-        for name, value in changed.items():
-            if name == "title":
-                out["summary"] = value
-            elif name == "description":
-                # Soft-wrap normalization runs BEFORE the length fit: the ADF encoder
-                # rejoins hard-wrapped prose into one paragraph, so the normalized form
-                # is what actually lands in Jira (and what a later fetch decodes back).
-                # Fitting the normalized text keeps the send value and every
-                # description comparison that routes through this port — including
-                # ``reconcile_check`` — on the identical, convergent value.
-                out["description"] = _fit_description(value) if isinstance(value, str) else value
-            elif name == "status":
-                out["status"] = outbound_fields._LOCAL_TO_JIRA_STATUS.get(value, "To Do")
-            elif name == "priority":
-                out["priority"] = outbound_fields._LOCAL_TO_JIRA_PRIORITY.get(value, "Medium")
-            else:
-                # assignee / parent / reporter (already resolved) + the
-                # _assignee_is_account_id sentinel pass through by their own name.
-                out[name] = value
-        return out
+        """Delegate to the shared ``jira_family.outbound_mapper.OutboundFieldMapper``
+        (story J3), constructed with Cloud's ``AdfCodec``. See that module for the
+        mapping rules (field-name reconciliation, value maps, rich-text fit)."""
+        return self._mapper.map_fields_to_remote(changed, ticket, binding_store, local_ticket_types)
 
     def resolve_assignee(
         self, local_value: str, remote_identity: dict[str, Any] | None
