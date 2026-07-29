@@ -27,8 +27,7 @@ from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
     _anthropic_cache_settings,
     _anthropic_web_search_capabilities,
-    _build_retrying_anthropic_model,
-    _local_proxy_bypass_base_url,
+    _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
     _pai_model,
 )
 from rebar.llm.config import LLMConfig, infer_provider
@@ -40,6 +39,7 @@ from rebar.llm.errors import (
     StructuredOutputError,
     UnretryableOutputError,
 )
+from rebar.llm.providers import ProviderSession
 
 logger = logging.getLogger(__name__)
 
@@ -267,35 +267,39 @@ class PydanticAIRunner:
                 tools = [*tools, *req.extra_tools]
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
-        model = self._model_override or resolved
-        # Exclude rebar's own agent from a LOCAL Claude-Code payload optimizer (bug
-        # sue-skimp-tear): when ANTHROPIC_BASE_URL points at a loopback proxy (e.g.
-        # headroom on 127.0.0.1), it corrupts our multi-turn AGENTIC tool-loop requests
-        # into an empty provider stream, collapsing the plan-review/completion verifiers to
-        # INDETERMINATE. Pin an Anthropic model to the DIRECT public API so rebar bypasses
-        # the local proxy; real (non-loopback) gateways and the test model_override path are
-        # left untouched, and REBAR_LLM_ALLOW_LOCAL_PROXY=1 opts back in.
-        # The retrying httpx.AsyncClient to close on teardown (story arcticduck); None on the
-        # non-anthropic / model_override paths, which build no client here.
-        _http_client = None
-        if self._model_override is None and resolved.startswith("anthropic"):
-            # ONE unified construction for ANY anthropic model (normal AND loopback-bypass):
-            # both get the retrying transport with SDK max_retries=0. `_direct` (None on the
-            # normal path) only varies the base_url. Before this, the normal path let
-            # pydantic-ai build its own provider with the SDK default retries and no transport.
-            _direct = _local_proxy_bypass_base_url()
-            _name = resolved.split(":", 1)[1] if ":" in resolved else resolved
-            # Per-request READ timeout (story hoopoe): the transport-level bound on a hung
-            # model, reusing cfg.timeout_s. This is authoritative on the anthropic path (our
-            # custom client); non-anthropic providers keep the model_settings['timeout'] below.
-            import httpx as _httpx
+        # Provider resolution is delegated to the per-run ProviderSession seam (story
+        # S1 / one-provider-factory) — the ONE place that answers "how is a Provider
+        # built for provider X", including when the answer is "it isn't":
+        #   - a rebar-registered provider (today, only anthropic) is eagerly built
+        #     through `infer_model(provider_factory=session.provider_factory)`, which
+        #     owns its client's lifecycle via the session;
+        #   - a provider pydantic-ai itself recognizes but rebar does not build
+        #     (openai/google/...) is left as a lazy model STRING for pydantic-ai's own
+        #     `Agent` construction to resolve later, exactly as before this seam
+        #     existed — eagerly building it here would force that provider's OPTIONAL
+        #     package (openai/google are opt-in, never installed by the `agents`
+        #     extra) to be importable just to wire up model_settings below, before any
+        #     real call is made: a regression this seam must not introduce;
+        #   - a name NEITHER side recognizes raises the typed LLMConfigError HERE
+        #     (before any Agent/tool-loop work), so it can never be misclassified by
+        #     the broad `except Exception` further down as a provider OUTAGE — the
+        #     opposite of what a misspelled/unsupported provider name actually is.
+        # `model_override` (the offline TestModel harness) bypasses all of this and
+        # builds no client.
+        provider_session = ProviderSession(cfg)
+        _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
+        if self._model_override is not None:
+            model = self._model_override
+        elif provider_session.supports(_provider_name):
+            from pydantic_ai.models import infer_model
 
-            _http_timeout = _httpx.Timeout(
-                read=float(cfg.timeout_s), connect=10.0, write=30.0, pool=10.0
-            )
-            model, _http_client = _build_retrying_anthropic_model(
-                _name, base_url=_direct, cfg=cfg, http_timeout=_http_timeout
-            )
+            model = infer_model(resolved, provider_factory=provider_session.provider_factory)
+        elif provider_session.is_resolvable(_provider_name):
+            model = resolved
+        else:
+            model = provider_session.provider_factory(
+                _provider_name
+            )  # always raises LLMConfigError
         # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
         # for an injected test model), not the bare config model — so a parity diff sees
         # exactly what ran.
@@ -511,16 +515,9 @@ class PydanticAIRunner:
             )
             raise provider_err from exc
         finally:
-            # Close the per-run retrying httpx.AsyncClient (story arcticduck). aclose() is
-            # async; after run_sync()'s own loop is gone, the stdlib asyncio.run() closes the
-            # pool from this synchronous caller. Best-effort — cleanup never fails the run.
-            if _http_client is not None:
-                import asyncio
-
-                try:
-                    asyncio.run(_http_client.aclose())
-                except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
-                    logger.warning("llm transport client aclose failed on teardown", exc_info=True)
+            # Close whatever the provider seam opened this run (story arcticduck / S1);
+            # ProviderSession.close() is itself best-effort (log, never raise).
+            provider_session.close()
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
             "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
