@@ -228,7 +228,7 @@ Checklist:
 ## G7
 **Leaf-parent containment [agent, leaf]** — exec:AGENT, advisory, facet:leaf
 
-LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal.
+LEAF-with-parent only: is the leaf's declared scope a SUBSET of its parent's plan? The parent's plan is the containing contract; the leaf may deliver PART of it (consistent narrowing), but it may NOT step outside it. This criterion maps its severity onto the existing `divergent_implementation` plan axis — a leaf diverging from its parent IS exactly that signal. That axis is graded by DIVERGENCE KIND (plan-v4), so map onto the grade that matches the divergence: a leaf that steps OUTSIDE the parent's contract (delivering work the parent's plan does not contain) is `contradicts_reality`; a leaf whose scope omits part of the parent's contract that must be delivered for the parent's goal to hold is `omits_required_site`; a merely cosmetic mismatch in wording or an optional mention is `incomplete_enumeration` (coached, never auto-blocking). Do NOT grade this axis `low`/`medium`/`high` — those are not valid values for it.
 
 FETCH THE PARENT. The parent's id (`parent_id`) is provided in the ticket-graph context. Call `show_ticket(<parent_id>)` to read the parent's plan (its What/Scope/Acceptance Criteria). Optionally also read the grandparent (`show_ticket(<grandparent_id>)`) when the parent is thin and the real contract lives one level up.
 
