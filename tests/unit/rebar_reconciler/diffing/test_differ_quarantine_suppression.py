@@ -35,10 +35,24 @@ MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
+    # Return the module that is ACTUALLY registered under ``name``.
+    #
+    # Five test files load rebar_reconciler/mutation.py by path under the shared
+    # key "mutation". The previous ``setdefault`` + ``return mod`` returned the
+    # freshly-created module even when another file had already registered a
+    # different one — so this fixture handed back a class that was NOT the class
+    # ``differ._load_mutation()`` resolves out of ``sys.modules``, and every
+    # ``isinstance(m, mutation_mod.Mutation)`` assertion failed. It only bites
+    # when collection order puts another registrant first, which is why it
+    # surfaced on macOS CI and not on Linux. Mirrors the cache-first lookup
+    # ``differ._load_mutation()`` already does.
+    cached = sys.modules.get(name)
+    if cached is not None and hasattr(cached, "__file__") and cached.__file__ == str(path):
+        return cached
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault(name, mod)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
