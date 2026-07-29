@@ -27,6 +27,7 @@ from rebar_reconciler.adapters.jira_family import (
 )
 from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sanitize_label
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
+from rebar_reconciler.adapters.jira_family.identity_model import AccountIdIdentity
 
 
 def _fit_description(value: str) -> str:
@@ -99,40 +100,22 @@ class _JiraOutbound:
     ) -> tuple[Any, bool, bool]:
         """Re-home the assignee resolver fast-path (ticket 625b; 264f semantics).
 
-        Returns ``(value, authoritative, is_account_id)``:
-
-        * empty/None ``local_value`` → ``("", False, False)`` (nothing to resolve —
-          non-authoritative, no live account search);
-        * no injected resolver (fixture path) → ``(local_value, False, False)`` so the
-          caller keeps the legacy permissive string match;
-        * authoritative + the resolved account matches the remote identity's
-          ``account_id`` → ``(None, True, …)`` (the CONVERGED signal — caller emits
-          nothing);
-        * authoritative + unmappable (no account) → ``("", True, False)`` (desired
-          unassigned);
-        * authoritative accountId fast-path → ``(account_id, True, True)`` (caller
-          emits the accountId and sets ``_assignee_is_account_id``);
-        * authoritative resolvable-but-mismatched → ``(local_value, True, False)``.
+        Delegates to :class:`AccountIdIdentity` (story J4; ADR 0035 §(d)
+        canonical-comparison corollary), Cloud's ``UserIdentityModel``, so the
+        3-state state machine lives once in ``adapters/jira_family/identity_model``
+        rather than being copied per backend (the mistake PR #120 made). Behaviour
+        is verbatim-unchanged from before this delegation — see
+        ``AccountIdIdentity.resolve``'s docstring for the full state table.
 
         The live account-search resolver is threaded in by ``compute_outbound_mutations``
         as ``self._assignee_resolver`` (a ``local_value -> (account|None, authoritative,
-        is_account_id)`` callable bound to the current remote key)."""
-        if not local_value:
-            return ("", False, False)
+        is_account_id)`` callable bound to the current remote key). Reading it via
+        ``getattr`` here is the Cloud-side boundary adapter to that PRE-EXISTING
+        core attribute-injection (``outbound_field_diff.py``); removing the
+        attribute-injection in favour of an explicit parameter is out of scope for
+        this story (ticket 65d7)."""
         resolver = getattr(self, "_assignee_resolver", None)
-        if resolver is None:
-            return (local_value, False, False)
-        acct, authoritative, is_account_id = resolver(local_value)
-        if not authoritative:
-            return (local_value, False, is_account_id)
-        remote_acct = (remote_identity or {}).get("account_id")
-        if (acct or None) == (remote_acct or None):
-            return (None, True, is_account_id)  # converged
-        if acct is None:
-            return ("", True, False)  # unmappable → desired unassigned
-        if is_account_id:
-            return (acct, True, True)  # accountId fast-path
-        return (local_value, True, False)  # resolvable but mismatched → emit local string
+        return AccountIdIdentity(resolver=resolver).resolve(local_value, remote_identity)
 
 
 class _JiraInbound:
