@@ -199,7 +199,9 @@ class GerritClient:
         return {
             "type": "manual-rerun",
             "change": {
-                "id": d.get("id") or change_id,
+                # ChangeInfo.id is a REST lookup id (often project-qualified);
+                # change_id is Gerrit's canonical, stable Change-Id.
+                "id": d.get("change_id") or d.get("id") or change_id,
                 "number": d.get("_number"),
                 "project": d.get("project"),
             },

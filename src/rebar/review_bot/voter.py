@@ -287,11 +287,16 @@ def emit_code_review_artifact(
         change_fp = sidecar.change_fingerprint(change_id, revision, changed_files, diff_text or "")
         title = f"code-review: {change_id} @ {revision}"
 
-        # Idempotency per (change_id, revision): reuse an existing artifact with the same title.
+        # Gerrit exposes one immutable revision under several equivalent
+        # change identifiers. Reuse the revision's artifact across ingress
+        # aliases while retaining the first readable Gerrit id in its title.
         artifact_id: str | None = None
         try:
             for t in rebar.list_tickets(ticket_type="code_review", repo_root=repo_root) or []:
-                if str(t.get("title") or "") == title:
+                existing_title = str(t.get("title") or "")
+                if existing_title.startswith("code-review: ") and existing_title.endswith(
+                    f" @ {revision}"
+                ):
                     artifact_id = str(t.get("ticket_id") or t.get("id") or "") or None
                     break
         except Exception:  # noqa: BLE001 — a lookup failure just means we create a fresh artifact
