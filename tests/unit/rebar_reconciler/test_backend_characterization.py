@@ -13,6 +13,8 @@ the delegation is faithful, not a spec the implementer codes against.
 
 from __future__ import annotations
 
+import pytest
+
 from rebar_reconciler.adapters.jira.backend import JiraBackend
 
 from .backend_support import FakeTransport
@@ -108,3 +110,262 @@ def test_sanitize_short_values_pass_through_unchanged():
     b = _backend()
     assert b.sanitizer.sanitize_summary("Fine") == "Fine"
     assert b.sanitizer.sanitize_comment("hello") == "hello"
+
+
+# ---------------------------------------------------------------------------
+# J1 (rebar-ticket acb2-1823-2f0d-415b) — extraction oracles.
+#
+# The pins below freeze the CURRENT output of every unit that the Jira-family
+# extraction (J2) either relocates to ``adapters/jira_family/`` or re-points at a
+# ``jira_family`` contract. They are golden-value assertions on purpose: their whole
+# job is to fail if a byte of observable output changes during a move that is
+# supposed to change nothing. Values were captured from this checkout's
+# ``adapters/jira/`` before any code moved.
+# ---------------------------------------------------------------------------
+
+
+# --- map_fields_to_remote: every branch, including both value-map defaults --------
+
+
+def test_map_fields_to_remote_renames_title_to_summary():
+    assert _backend().outbound.map_fields_to_remote({"title": "New title"}) == {
+        "summary": "New title"
+    }
+
+
+def test_map_fields_to_remote_maps_every_status_plus_unmapped_default():
+    b = _backend()
+    for local_status, jira_state in {
+        "idea": "IDEA",
+        "open": "To Do",
+        "in_progress": "In Progress",
+        "closed": "Done",
+        "blocked": "In Progress",
+        "cancelled": "Done",
+    }.items():
+        assert b.outbound.map_fields_to_remote({"status": local_status}) == {"status": jira_state}
+    # The default branch an extraction is most likely to drop.
+    assert b.outbound.map_fields_to_remote({"status": "no_such_status"}) == {"status": "To Do"}
+
+
+def test_map_fields_to_remote_maps_every_priority_plus_unmapped_default():
+    b = _backend()
+    for local_priority, jira_name in {
+        0: "Highest",
+        1: "High",
+        2: "Medium",
+        3: "Low",
+        4: "Lowest",
+    }.items():
+        assert b.outbound.map_fields_to_remote({"priority": local_priority}) == {
+            "priority": jira_name
+        }
+    assert b.outbound.map_fields_to_remote({"priority": 99}) == {"priority": "Medium"}
+
+
+def test_map_fields_to_remote_normalizes_and_fits_description():
+    # A short description round-trips through fit_text_to_adf_limit + normalize_description
+    # unchanged — pinning that the ADF composition stays a fixed point for simple prose.
+    assert _backend().outbound.map_fields_to_remote({"description": "Body text"}) == {
+        "description": "Body text"
+    }
+
+
+def test_map_fields_to_remote_passes_non_string_description_through_untouched():
+    # The ``isinstance(value, str)`` guard: a None description must NOT reach the ADF
+    # encoder. Pinned because an extraction that drops the guard raises instead.
+    assert _backend().outbound.map_fields_to_remote({"description": None}) == {"description": None}
+
+
+def test_map_fields_to_remote_passes_resolved_fields_through_by_own_name():
+    assert _backend().outbound.map_fields_to_remote(
+        {
+            "assignee": "6270abc",
+            "parent": "REB-1",
+            "reporter": "someone",
+            "_assignee_is_account_id": True,
+        }
+    ) == {
+        "assignee": "6270abc",
+        "parent": "REB-1",
+        "reporter": "someone",
+        "_assignee_is_account_id": True,
+    }
+
+
+def test_map_fields_to_remote_on_empty_changed_dict_is_empty():
+    assert _backend().outbound.map_fields_to_remote({}) == {}
+
+
+# --- sanitizers: at, below, and above the limits, plus the invalid-label raises ----
+
+
+def test_sanitize_summary_at_inclusive_limit_is_untruncated():
+    # 254 is the INCLUSIVE max (Jira rejects 255) — the off-by-one the source
+    # documents, and the exact boundary an extraction could shift.
+    out = _backend().sanitizer.sanitize_summary("x" * 254)
+    assert out == "x" * 254
+    assert not out.endswith(" [truncated]")
+
+
+def test_sanitize_summary_one_over_limit_truncates():
+    out = _backend().sanitizer.sanitize_summary("x" * 255)
+    assert len(out) == 254
+    assert out.endswith(" [truncated]")
+
+
+def test_sanitize_label_at_inclusive_limit_passes():
+    # Label's inclusive max is 255 (not-more-than), deliberately one different
+    # from summary's 254.
+    label = "y" * 255
+    assert _backend().sanitizer.sanitize_label(label) == label
+
+
+def test_sanitize_label_raises_on_every_rejection_reason():
+    b = _backend()
+    for bad in (
+        "with space",  # internal whitespace
+        "has,comma",  # comma
+        "   ",  # empty after strip
+        "z" * 256,  # one over the 255 inclusive limit
+    ):
+        with pytest.raises(ValueError):
+            b.sanitizer.sanitize_label(bad)
+
+
+def test_sanitize_comment_at_inclusive_limit_is_untruncated():
+    body = "c" * 32767
+    out = _backend().sanitizer.sanitize_comment(body)
+    assert out == body
+
+
+def test_sanitize_comment_one_over_limit_truncates_with_marker():
+    out = _backend().sanitizer.sanitize_comment("c" * 32768)
+    assert len(out) == 32767
+    assert out.endswith(" … [truncated by reconciler]")
+
+
+def test_sanitize_description_short_value_passes_through():
+    assert _backend().sanitizer.sanitize_description("Body text") == "Body text"
+
+
+# --- identity convention: format / parse / predicate, incl. the legacy form -------
+
+
+def test_identity_format_label_uses_canonical_colon_form():
+    assert _backend().identity.format_label("abc1-2345-6789-0abc") == "rebar-id:abc1-2345-6789-0abc"
+
+
+def test_identity_parse_label_accepts_colon_and_legacy_hyphen_forms():
+    ident = _backend().identity
+    assert ident.parse_label("rebar-id:abc1-2345") == "abc1-2345"
+    # The legacy hyphen read form must keep working — dropping it silently orphans
+    # every binding written before the canonical form.
+    assert ident.parse_label("rebar-id-abc1-2345") == "abc1-2345"
+
+
+def test_identity_parse_label_rejects_non_identity_and_empty_remainder():
+    ident = _backend().identity
+    assert ident.parse_label("sprint-42") is None
+    assert ident.parse_label("rebar-id:") is None
+    assert ident.parse_label("rebar-id:   ") is None
+
+
+def test_identity_is_identity_label_tracks_parse():
+    ident = _backend().identity
+    assert ident.is_identity_label("rebar-id:abc1") is True
+    assert ident.is_identity_label("rebar-id-abc1") is True
+    assert ident.is_identity_label("rebar-id:") is False
+    assert ident.is_identity_label("other") is False
+
+
+# --- probe classifier: every branch it dispatches on ------------------------------
+
+
+def test_classify_probe_response_pins_every_branch():
+    from rebar_reconciler.adapters.jira.probe import classify_probe_response
+    from rebar_reconciler.inbound_probe import ProbeBranch
+
+    def _branch(status_code: int, payload: dict | None = None):
+        return classify_probe_response("REB-1", status_code, payload or {})
+
+    # archived/moved: 404, 410, 403
+    for code in (404, 410, 403):
+        result = _branch(code)
+        assert result.branch is ProbeBranch.ARCHIVED_OR_MOVED
+        assert result.detail == {"status_code": code}
+
+    # unreachable: 401 and any 5xx
+    for code in (401, 500, 503):
+        assert _branch(code).branch is ProbeBranch.UNREACHABLE
+
+    # 200 + a resolved status name
+    for status_name in ("Resolved", "Done", "Cancelled"):
+        result = _branch(200, {"fields": {"status": {"name": status_name}}})
+        assert result.branch is ProbeBranch.PRESENT_RESOLVED
+        assert result.detail == {"status": status_name}
+
+    # 200 + a non-resolved status name == present but filtered out of the query
+    result = _branch(200, {"fields": {"status": {"name": "In Progress"}}})
+    assert result.branch is ProbeBranch.PRESENT_FILTERED
+    assert result.detail == {"status": "In Progress"}
+
+    # 200 with no status at all still classifies (empty name), not raises
+    assert _branch(200, {}).branch is ProbeBranch.PRESENT_FILTERED
+    assert _branch(200, {}).detail == {"status": ""}
+
+    # unknown code falls through to unreachable AND flags itself
+    result = _branch(302)
+    assert result.branch is ProbeBranch.UNREACHABLE
+    assert result.detail == {"status_code": 302, "unknown": True}
+
+
+def test_probe_resolved_status_names_pinned():
+    from rebar_reconciler.adapters.jira.probe import RESOLVED_STATUS_NAMES
+
+    assert RESOLVED_STATUS_NAMES == frozenset({"Resolved", "Done", "Cancelled"})
+
+
+# --- link relation vocabulary + inbound direction, for every relation -------------
+
+
+def test_relation_to_jira_link_vocabulary_pinned():
+    from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK
+
+    assert _RELATION_TO_JIRA_LINK == {
+        "blocks": ("Blocks", False),
+        "depends_on": ("Blocks", True),
+        "relates_to": ("Relates", False),
+    }
+    # Relations with no reliable Jira link type stay ABSENT (the differ skips them).
+    for absent in ("duplicates", "supersedes", "discovered_from"):
+        assert absent not in _RELATION_TO_JIRA_LINK
+
+
+def test_resolve_inbound_link_pins_direction_for_every_relation():
+    from rebar_reconciler.link_direction import resolve_inbound_link
+
+    # outward Blocks == X blocks Y
+    assert resolve_inbound_link({"type": {"name": "Blocks"}, "outwardIssue": {"key": "REB-2"}}) == (
+        "REB-2",
+        "blocks",
+    )
+    # inward Blocks == X is blocked by Y -> the INVERSE relation
+    assert resolve_inbound_link({"type": {"name": "Blocks"}, "inwardIssue": {"key": "REB-3"}}) == (
+        "REB-3",
+        "depends_on",
+    )
+    # Relates is symmetric: same relation from either side
+    assert resolve_inbound_link(
+        {"type": {"name": "Relates"}, "outwardIssue": {"key": "REB-4"}}
+    ) == ("REB-4", "relates_to")
+    assert resolve_inbound_link({"type": {"name": "Relates"}, "inwardIssue": {"key": "REB-5"}}) == (
+        "REB-5",
+        "relates_to",
+    )
+    # unmapped link type and malformed entries both yield (None, None)
+    assert resolve_inbound_link(
+        {"type": {"name": "Duplicate"}, "outwardIssue": {"key": "REB-6"}}
+    ) == (None, None)
+    assert resolve_inbound_link({"type": {"name": "Blocks"}}) == (None, None)
+    assert resolve_inbound_link({}) == (None, None)
