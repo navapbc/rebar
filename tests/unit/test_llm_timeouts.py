@@ -29,8 +29,8 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
+from rebar.llm.anthropic_model import _build_retrying_anthropic_model
 from rebar.llm.config import DEFAULT_LLM_TOOL_TIMEOUT_S, LLMConfig
-from rebar.llm.runner import _build_retrying_anthropic_model
 
 pytestmark = pytest.mark.unit
 

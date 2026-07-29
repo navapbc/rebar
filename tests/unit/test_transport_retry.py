@@ -19,13 +19,13 @@ pytest.importorskip("tenacity")
 import pydantic_ai.models
 from pydantic_ai import Agent
 
+from rebar.llm.anthropic_model import _build_retrying_anthropic_model
 from rebar.llm.config import (
     DEFAULT_LLM_RETRY_MAX_ATTEMPTS,
     DEFAULT_LLM_RETRY_MAX_WAIT_S,
     LLMConfig,
 )
 from rebar.llm.errors import LLMConfigError
-from rebar.llm.runner import _build_retrying_anthropic_model
 
 pytestmark = pytest.mark.unit
 
