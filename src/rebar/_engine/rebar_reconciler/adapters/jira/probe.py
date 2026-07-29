@@ -14,6 +14,14 @@ the 4 :class:`~rebar_reconciler.inbound_probe.ProbeBranch` branches:
 
 GET-only invariant: every Request uses get_method() == 'GET'. POST/PUT/DELETE
 would be a contract violation.
+
+Story J2 (epic e369) relocated the pure classifier to ``adapters/jira_family/probe.py``
+(Jira-family-general logic), taking the resolved-status set as a parameter instead of
+reading a module-level constant. ``RESOLVED_STATUS_NAMES`` below is Cloud/DIG's
+*configured value* (a self-hosted Data Center workflow can name its resolved states
+anything), so it stays defined here, and ``classify_probe_response`` below is a
+Cloud-side BOUND function — not a bare re-export — that delegates to the shared
+classifier with this module's frozenset bound in.
 """
 
 from __future__ import annotations
@@ -23,6 +31,9 @@ import json
 import urllib.error
 import urllib.request
 
+from rebar_reconciler.adapters.jira_family import (
+    classify_probe_response as _classify_probe_response,
+)
 from rebar_reconciler.inbound_probe import ProbeBranch, ProbeConfigError, ProbeResult
 
 RESOLVED_STATUS_NAMES = frozenset({"Resolved", "Done", "Cancelled"})
@@ -58,19 +69,11 @@ def _resolve_env() -> tuple[str, str, str]:
 
 
 def classify_probe_response(issue_key: str, status_code: int, payload: dict) -> ProbeResult:
-    """Pure classifier — used by both real probe and tests."""
-    if status_code in (404, 410, 403):
-        return ProbeResult(ProbeBranch.ARCHIVED_OR_MOVED, issue_key, {"status_code": status_code})
-    if status_code >= 500 or status_code == 401:
-        return ProbeResult(ProbeBranch.UNREACHABLE, issue_key, {"status_code": status_code})
-    if status_code == 200:
-        status_name = (payload.get("fields", {}).get("status") or {}).get("name", "")
-        if status_name in RESOLVED_STATUS_NAMES:
-            return ProbeResult(ProbeBranch.PRESENT_RESOLVED, issue_key, {"status": status_name})
-        return ProbeResult(ProbeBranch.PRESENT_FILTERED, issue_key, {"status": status_name})
-    # Unknown status code — treat as unreachable
-    return ProbeResult(
-        ProbeBranch.UNREACHABLE, issue_key, {"status_code": status_code, "unknown": True}
+    """Cloud-bound classifier — delegates to the shared ``jira_family`` classifier,
+    binding this module's ``RESOLVED_STATUS_NAMES`` as the resolved-status set. Used
+    by both the real probe and tests."""
+    return _classify_probe_response(
+        issue_key, status_code, payload, resolved_statuses=RESOLVED_STATUS_NAMES
     )
 
 

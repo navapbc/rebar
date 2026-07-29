@@ -24,6 +24,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Story J2 (epic e369) de-duplicated the local<->Jira priority/status maps against
+# the drifted copy that used to live in ``adapters/jira/jira_fields.py`` —
+# ``adapters/jira_family/value_maps.py`` is now the SOLE definition site under
+# ``adapters/`` for both maps. Imported (not re-declared) so this module and the
+# ACLI transport resolve to the identical object; kept under the historical local
+# names so this module's own call sites below need no further change. Absolute
+# import: this module is loaded via ``spec_from_file_location`` with no package
+# context in several tests, where a relative import would raise ImportError.
+from rebar_reconciler.adapters.jira_family import LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY
+from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL_TO_JIRA_STATUS
+
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
     """Read ``REBAR_<name>`` from the environment."""
@@ -79,28 +90,6 @@ _LOCAL_TO_JIRA_TYPE: dict[str, str] = {
     "story": "Story",
     "task": "Task",
     "epic": "Epic",
-}
-
-_LOCAL_TO_JIRA_PRIORITY: dict[int, str] = {
-    0: "Highest",
-    1: "High",
-    2: "Medium",
-    3: "Low",
-    4: "Lowest",
-}
-
-_LOCAL_TO_JIRA_STATUS: dict[str, str] = {
-    "idea": "IDEA",
-    "open": "To Do",
-    "in_progress": "In Progress",
-    # blocked/cancelled have no direct equivalent in the live DIG workflow
-    # ({To Do, In Progress, In Review, Done} only). Map to the nearest live
-    # state; lossless information is preserved via rebar-status: annotation
-    # labels emitted/removed by status logic (see _status_annotation_labels).
-    "blocked": "In Progress",
-    "closed": "Done",
-    "cancelled": "Done",
-    "deleted": "Done",
 }
 
 

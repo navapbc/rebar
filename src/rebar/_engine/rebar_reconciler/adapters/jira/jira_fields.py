@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""Jira field sanitization + local↔Jira value maps.
+"""Cloud-side Jira contract construction (story J2, epic e369).
 
-Pure, dependency-light field helpers shared by the ACLI client core
-(``acli.py``), the module-level CLI ops (``acli_cli_ops.py``), and the graph
-mixin (``acli_graph.py``): label/summary/comment sanitizers that defend against
-Jira's hard limits and malformed input, plus the local→Jira priority and status
-value maps.
+The Jira-family-general sanitizers and value maps that used to live here have
+relocated to ``adapters/jira_family/`` under public names (story J2), so a second
+Jira-family backend (Data Center) consumes one implementation instead of forking
+Cloud's. This module SURVIVES as the thin Cloud-side site that constructs the two
+contract-parameterized sanitizers by binding Cloud's vendor dependencies:
 
-No external dependencies beyond the shared ``comment_limits`` helper — stdlib
-only.
+* ``_sanitize_description`` binds ``jira_family.sanitize_description`` to Cloud's
+  ``adf.fit_text_to_adf_limit`` (the rich-text seam J3 formalizes into the full
+  ``RichTextCodec``; here it is the minimal ``Callable[[str], str]`` form).
+* ``_sanitize_comment`` binds ``jira_family.sanitize_comment`` to Cloud's
+  ``comment_limits.truncate_comment_body`` / ``_JIRA_COMMENT_MAX_CHARS``.
+
+Both stay one-arg functions so the existing ACLI call sites (``acli.py``,
+``acli_cli_ops.py``) keep working unchanged. No other symbol is re-exported here —
+callers of the pure sanitizers / value maps / link vocabulary import
+``adapters.jira_family`` directly.
 """
 
 from __future__ import annotations
-
-import logging
 
 from rebar_reconciler.adapters.jira.adf import (
     fit_text_to_adf_limit as _fit_description_to_adf_limit,
@@ -24,135 +30,10 @@ from rebar_reconciler.adapters.jira.comment_limits import (  # shared send/diff 
 from rebar_reconciler.adapters.jira.comment_limits import (
     truncate_comment_body as _truncate_comment_body,
 )
-
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Value maps
-# ---------------------------------------------------------------------------
-
-# Local priority integer (0-4) → Jira priority name.
-_LOCAL_PRIORITY_TO_JIRA: dict[int, str] = {
-    0: "Highest",
-    1: "High",
-    2: "Medium",
-    3: "Low",
-    4: "Lowest",
-}
-
-# Jira hard limits we defend against (verified against Jira Cloud REST API 2026).
-# Note the deliberate off-by-one divergence between the two constants:
-#   - Summary: Jira's error is "Summary must be less than 255 characters"
-#     (strict less-than), so the INCLUSIVE max is 254. A 255-char title is
-#     REJECTED. Sources: Atlassian Community thread 989632 + GitHub
-#     tenable/integration-jira-cloud issue #322 + GitHub-prior-art audit
-#     (2026-05-24, run a52143da).
-#   - Label: Jira's error is "Labels can't have spaces or be more than 255
-#     characters" (not-more-than), so the INCLUSIVE max is 255. Source:
-#     Forge custom-field community thread 55277.
-_JIRA_SUMMARY_MAX_CHARS: int = 254
-_JIRA_LABEL_MAX_CHARS: int = 255
-
-# Local status string → Jira workflow state name.
-# status.capitalize() produces "In_progress" for snake_case inputs; this mapping
-# ensures correct Jira state names are used in ACLI transition commands.
-# ticket 929a: blocked/cancelled map to the nearest live DIG workflow state
-# ({To Do, In Progress, In Review, Done} only); lossless information is
-# preserved via rebar-status: annotation labels managed by outbound_differ.
-_LOCAL_STATUS_TO_JIRA: dict[str, str] = {
-    "idea": "IDEA",
-    "open": "To Do",
-    "in_progress": "In Progress",
-    "closed": "Done",
-    "blocked": "In Progress",
-    "cancelled": "Done",
-}
-
-
-# rebar relation -> (Jira link type, swap_endpoints). This is Jira-specific link
-# vocabulary, single-sourced here in the vendor adapter (ticket 4af8 relocated it
-# out of the backend-neutral ``outbound_links`` core, which now reads it from here).
-# ``swap_endpoints`` records that "A relation B" maps to a Jira link with the
-# endpoints reversed: "A depends_on B" == "B blocks A". Relations with no reliable
-# Jira link type (duplicates / supersedes / discovered_from) are intentionally ABSENT
-# and SKIPPED by the differ.
-_RELATION_TO_JIRA_LINK: dict[str, tuple[str, bool]] = {
-    "blocks": ("Blocks", False),
-    "depends_on": ("Blocks", True),  # A depends_on B == B blocks A
-    "relates_to": ("Relates", False),
-}
-
-
-# ---------------------------------------------------------------------------
-# Sanitizers
-# ---------------------------------------------------------------------------
-
-
-class InvalidLabelError(ValueError):
-    """A label value would be rejected by Jira (whitespace, comma, empty, oversize)."""
-
-
-def _sanitize_label(label: str) -> str:
-    """Validate a Jira label, raising InvalidLabelError on rejection.
-
-    Jira labels are single tokens — no whitespace, no commas, non-empty, length
-    <= 255 chars. ACLI does not validate client-side; sending an invalid label
-    surfaces as a confusing server-side error or (worse) silently corrupts the
-    label set. We sanitize here so the reconciler fails fast with a clear
-    message instead of issuing a malformed mutation against live Jira.
-
-    Whitespace is stripped from the input before validation. A label that
-    contains internal whitespace (e.g., "with space") is REJECTED rather than
-    silently mangled — the reconciler should never invent a label name that
-    differs from what the caller asked for.
-    """
-    if not isinstance(label, str):
-        raise InvalidLabelError(f"Label must be str, got {type(label).__name__}: {label!r}")
-    stripped = label.strip()
-    if not stripped:
-        raise InvalidLabelError(f"Label is empty after strip: {label!r}")
-    if any(c.isspace() for c in stripped):
-        raise InvalidLabelError(
-            f"Label contains internal whitespace (not allowed by Jira): {label!r}"
-        )
-    if "," in stripped:
-        raise InvalidLabelError(f"Label contains comma (not allowed by Jira): {label!r}")
-    if len(stripped) > _JIRA_LABEL_MAX_CHARS:
-        raise InvalidLabelError(
-            f"Label exceeds Jira's {_JIRA_LABEL_MAX_CHARS}-char limit "
-            f"({len(stripped)} chars): {label!r}"
-        )
-    return stripped
-
-
-def _sanitize_summary(summary: str) -> str:
-    """Validate and truncate a Jira summary string.
-
-    Jira's REST API rejects summaries > 255 chars with a confusing error.
-    We truncate with a visible '... [truncated]' suffix so the reconciler
-    can complete the mutation rather than crashing the pass on a single
-    oversize ticket. Truncation is reversible (an operator can update the
-    ticket later); reconciler crashes are not.
-
-    A truncation warning is emitted so the operator can investigate.
-    """
-    if not isinstance(summary, str):
-        raise ValueError(f"Summary must be str, got {type(summary).__name__}: {summary!r}")
-    stripped = summary.strip()
-    if not stripped:
-        raise ValueError(f"Summary is empty after strip: {summary!r}")
-    if len(stripped) <= _JIRA_SUMMARY_MAX_CHARS:
-        return stripped
-    suffix = " [truncated]"
-    keep = _JIRA_SUMMARY_MAX_CHARS - len(suffix)
-    truncated = stripped[:keep] + suffix
-    logger.warning(
-        "Summary exceeded Jira's %d-char limit (%d chars); truncated to %d chars",
-        _JIRA_SUMMARY_MAX_CHARS,
-        len(stripped),
-        len(truncated),
-    )
-    return truncated
+from rebar_reconciler.adapters.jira_family import sanitize_comment as _shared_sanitize_comment
+from rebar_reconciler.adapters.jira_family import (
+    sanitize_description as _shared_sanitize_description,
+)
 
 
 def _sanitize_description(description: str) -> str:
@@ -161,24 +42,13 @@ def _sanitize_description(description: str) -> str:
     Jira enforces the description limit on the ADF document, not the plain text, and
     ACLI surfaces an over-length ADF as a create/edit failure that aborts the WHOLE
     reconciler pass (bug 626d follow-up — a 46k-char epic, whose ADF was ~50k, killed
-    a live cutover pass). Fit via the shared ``adf.fit_text_to_adf_limit`` so the
+    a live cutover pass). Fits via the shared ``adf.fit_text_to_adf_limit``, injected
+    into ``jira_family.sanitize_description`` as Cloud's rich-text contract, so the
     differ's description comparison applies the IDENTICAL transform and the diff
     converges. Send-side only — the local store is never mutated; a warning is
     emitted so an operator can investigate.
     """
-    if not isinstance(description, str):
-        raise ValueError(
-            f"Description must be str, got {type(description).__name__}: {description!r}"
-        )
-    fitted = _fit_description_to_adf_limit(description)
-    if len(fitted) != len(description):
-        logger.warning(
-            "Description ADF exceeded Jira's limit (%d plain chars); truncated to %d "
-            "chars so its ADF representation fits",
-            len(description),
-            len(fitted),
-        )
-    return fitted
+    return _shared_sanitize_description(description, fit=_fit_description_to_adf_limit)
 
 
 def _sanitize_comment(body: str) -> str:
@@ -188,23 +58,16 @@ def _sanitize_comment(body: str) -> str:
     but ``acli ... comment create`` exits 0 on the rejection; ``_check_mutation_
     failure`` then raises ``AcliMutationError`` and the comment never lands —
     driving the outbound comment-sync loop (re-emitted every pass). Truncating
-    here (mirroring ``_sanitize_summary``) lets the comment land.
+    here lets the comment land.
 
-    The actual truncation rule lives in the shared ``rebar_reconciler.comment_
-    limits.truncate_comment_body`` helper so the differ's comparison path
-    (``outbound_differ._diff_comments``) applies the IDENTICAL transform and the
-    diff converges. A truncation warning is emitted so an operator can
-    investigate; the local ticket store is never mutated (truncation is
-    in-memory, send-side only).
+    The actual truncation rule lives in the shared ``rebar_reconciler.adapters.jira.
+    comment_limits.truncate_comment_body`` helper, injected into ``jira_family.
+    sanitize_comment`` as Cloud's comment-limit contract, so the differ's comparison
+    path (``outbound_differ._diff_comments``) applies the IDENTICAL transform and the
+    diff converges. A truncation warning is emitted so an operator can investigate;
+    the local ticket store is never mutated (truncation is in-memory, send-side
+    only).
     """
-    if not isinstance(body, str):
-        raise ValueError(f"Comment body must be str, got {type(body).__name__}: {body!r}")
-    truncated = _truncate_comment_body(body)
-    if truncated is not body and len(truncated) != len(body):
-        logger.warning(
-            "Comment exceeded Jira's %d-char limit (%d chars); truncated to %d chars",
-            _JIRA_COMMENT_MAX_CHARS,
-            len(body),
-            len(truncated),
-        )
-    return truncated
+    return _shared_sanitize_comment(
+        body, truncate=_truncate_comment_body, max_chars=_JIRA_COMMENT_MAX_CHARS
+    )

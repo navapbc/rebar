@@ -330,7 +330,9 @@ def test_probe_resolved_status_names_pinned():
 
 
 def test_relation_to_jira_link_vocabulary_pinned():
-    from rebar_reconciler.adapters.jira.jira_fields import _RELATION_TO_JIRA_LINK
+    from rebar_reconciler.adapters.jira_family import (
+        RELATION_TO_JIRA_LINK as _RELATION_TO_JIRA_LINK,
+    )
 
     assert _RELATION_TO_JIRA_LINK == {
         "blocks": ("Blocks", False),

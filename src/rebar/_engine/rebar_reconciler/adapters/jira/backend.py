@@ -21,8 +21,12 @@ from typing import Any
 from rebar_reconciler import inbound_fields
 from rebar_reconciler._backend_registry import register
 from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound_fields
-
-from .identity import JiraIdentityConvention
+from rebar_reconciler.adapters.jira_family import (
+    RELATION_TO_JIRA_LINK,
+    JiraIdentityConvention,
+)
+from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sanitize_label
+from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
 
 
 def _fit_description(value: str) -> str:
@@ -146,10 +150,10 @@ class _JiraSanitizer:
     """Delegates each sanitizer to the corresponding ``jira_fields._sanitize_*``."""
 
     def sanitize_label(self, label: str) -> str:
-        return jira_fields._sanitize_label(label)
+        return _shared_sanitize_label(label)
 
     def sanitize_summary(self, summary: str) -> str:
-        return jira_fields._sanitize_summary(summary)
+        return _shared_sanitize_summary(summary)
 
     def sanitize_description(self, description: str) -> str:
         return jira_fields._sanitize_description(description)
@@ -272,7 +276,7 @@ class JiraBackend:
     def link_payload_for_relation(self, relation: str) -> tuple[str, bool] | None:
         """``(Jira link type, swap_endpoints)`` for a canonical relation, or ``None``
         for a relation with no reliable Jira link type (ticket eefd)."""
-        return jira_fields._RELATION_TO_JIRA_LINK.get(relation)
+        return RELATION_TO_JIRA_LINK.get(relation)
 
     # --- capability: SupportsComments (delegates to transport) ---
     def add_comment(self, remote_id: str, body: str) -> dict[str, Any]:

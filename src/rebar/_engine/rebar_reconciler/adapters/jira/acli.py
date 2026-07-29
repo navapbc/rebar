@@ -64,16 +64,20 @@ from rebar_reconciler.adapters.jira.adf import text_to_adf as _text_to_adf  # ca
 # so ``acli.<name>`` keeps resolving for callers and the characterization suites
 # (point-of-use read access).
 from rebar_reconciler.adapters.jira.jira_fields import (
-    _JIRA_LABEL_MAX_CHARS,
-    _JIRA_SUMMARY_MAX_CHARS,
-    _LOCAL_PRIORITY_TO_JIRA,
-    _LOCAL_STATUS_TO_JIRA,
-    InvalidLabelError,
     _sanitize_comment,
     _sanitize_description,
-    _sanitize_label,
-    _sanitize_summary,
 )
+from rebar_reconciler.adapters.jira_family import JIRA_LABEL_MAX_CHARS as _JIRA_LABEL_MAX_CHARS
+from rebar_reconciler.adapters.jira_family import JIRA_SUMMARY_MAX_CHARS as _JIRA_SUMMARY_MAX_CHARS
+from rebar_reconciler.adapters.jira_family import (
+    LOCAL_PRIORITY_TO_JIRA as _LOCAL_PRIORITY_TO_JIRA,
+)
+from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL_STATUS_TO_JIRA
+from rebar_reconciler.adapters.jira_family import (
+    InvalidLabelError,
+)
+from rebar_reconciler.adapters.jira_family import sanitize_label as _sanitize_label
+from rebar_reconciler.adapters.jira_family import sanitize_summary as _sanitize_summary
 
 # Re-export facade. These names are imported from the sibling acli_* modules and
 # the Jira vendor adapter (adapters/jira/jira_fields) solely so ``acli.<name>``

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.adapters.jira.identity import JiraIdentityConvention
+from rebar_reconciler.adapters.jira_family import JiraIdentityConvention
 
 
 @pytest.fixture

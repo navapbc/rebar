@@ -1,5 +1,9 @@
 """JiraIdentityConvention — the ``rebar-id:`` back-pointer label convention (S2).
 
+Relocated whole from ``adapters/jira/identity.py`` by story J2 (epic e369): the
+convention is Jira-family-general (Cloud and Data Center share it verbatim), so it
+now lives in the shared layer rather than one concrete backend.
+
 The convention reproduces the previously-inlined behaviour EXACTLY (see
 ``binding_walk._has_rebar_id_label`` and the ``f"rebar-id:{local_id}"`` write sites):
 
