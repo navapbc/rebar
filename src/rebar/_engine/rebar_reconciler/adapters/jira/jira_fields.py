@@ -8,8 +8,8 @@ Cloud's. This module SURVIVES as the thin Cloud-side site that constructs the tw
 contract-parameterized sanitizers by binding Cloud's vendor dependencies:
 
 * ``_sanitize_description`` binds ``jira_family.sanitize_description`` to Cloud's
-  ``adf.fit_text_to_adf_limit`` (the rich-text seam J3 formalizes into the full
-  ``RichTextCodec``; here it is the minimal ``Callable[[str], str]`` form).
+  ``AdfCodec.fit_outbound`` (the rich-text seam story J3 formalized into the full
+  ``RichTextCodec``; here it is used in its minimal ``Callable[[str], str]`` form).
 * ``_sanitize_comment`` binds ``jira_family.sanitize_comment`` to Cloud's
   ``comment_limits.truncate_comment_body`` / ``_JIRA_COMMENT_MAX_CHARS``.
 
@@ -21,15 +21,13 @@ callers of the pure sanitizers / value maps / link vocabulary import
 
 from __future__ import annotations
 
-from rebar_reconciler.adapters.jira.adf import (
-    fit_text_to_adf_limit as _fit_description_to_adf_limit,
-)
 from rebar_reconciler.adapters.jira.comment_limits import (  # shared send/diff truncation
     _JIRA_COMMENT_MAX_CHARS,
 )
 from rebar_reconciler.adapters.jira.comment_limits import (
     truncate_comment_body as _truncate_comment_body,
 )
+from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
 from rebar_reconciler.adapters.jira_family import sanitize_comment as _shared_sanitize_comment
 from rebar_reconciler.adapters.jira_family import (
     sanitize_description as _shared_sanitize_description,
@@ -42,13 +40,17 @@ def _sanitize_description(description: str) -> str:
     Jira enforces the description limit on the ADF document, not the plain text, and
     ACLI surfaces an over-length ADF as a create/edit failure that aborts the WHOLE
     reconciler pass (bug 626d follow-up — a 46k-char epic, whose ADF was ~50k, killed
-    a live cutover pass). Fits via the shared ``adf.fit_text_to_adf_limit``, injected
-    into ``jira_family.sanitize_description`` as Cloud's rich-text contract, so the
-    differ's description comparison applies the IDENTICAL transform and the diff
-    converges. Send-side only — the local store is never mutated; a warning is
-    emitted so an operator can investigate.
+    a live cutover pass). Fits via ``AdfCodec.fit_outbound`` (story J3's
+    ``RichTextCodec`` contract — the same underlying ADF-limit logic, now reached
+    through the codec rather than imported directly), injected into
+    ``jira_family.sanitize_description`` as Cloud's rich-text contract — FIT ONLY,
+    no normalization, so this stays the distinct primitive the send path's
+    ``_fit_description`` composes with normalization on top of. The differ's
+    description comparison applies the IDENTICAL transform and the diff converges.
+    Send-side only — the local store is never mutated; a warning is emitted so an
+    operator can investigate.
     """
-    return _shared_sanitize_description(description, fit=_fit_description_to_adf_limit)
+    return _shared_sanitize_description(description, fit=AdfCodec().fit_outbound)
 
 
 def _sanitize_comment(body: str) -> str:
