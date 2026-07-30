@@ -105,7 +105,7 @@ Two consequences of the hierarchy that you will hit in practice:
 - **The open-children guard on close.** A parent cannot be closed while it has open
   children (this holds even for `idea → closed`). Close subtrees bottom-up.
 
-## Linking (the seven relations + hierarchy promotion)
+## Linking (the seven relations + hierarchy escalation)
 
 `link <id1> <id2> <relation>` **requires** a relation. There are seven:
 
@@ -127,15 +127,23 @@ trail lives in the store.
 the **most-recently-created** link between that ordered pair, one per call. If a pair has
 multiple links, call `unlink` repeatedly.
 
-**Hierarchy promotion (blocking links only).** For `blocks` / `depends_on`, rebar promotes
-the link endpoints up the parent hierarchy so the dependency lands between tickets at a
-comparable level (epic ↔ epic, story ↔ story, task/bug ↔ task/bug), emitting a
-`REDIRECT: A→B promoted to …` note when it does. This is why a blocking link you point at a
-child ticket can land on its epic. The non-blocking relations
+**Hierarchy escalation (blocking links only).** For `blocks` / `depends_on`, rebar requires
+the two endpoints to be **siblings** — to share a parent. Comparability is *structural*: it
+depends only on where the tickets sit in the parent hierarchy, never on their `ticket_type`,
+so a `task` and a `story` that are both children of one epic hold a dependency directly.
+
+When the endpoints do **not** share a parent, rebar escalates each one up to its own ancestor
+that is a child of the two tickets' **nearest common ancestor**, and emits a
+`REDIRECT: A→B promoted to …` note. So a dependency between two tasks in different stories
+under one epic is recorded between those two stories. Tickets with **no parent** count as
+siblings of each other, which means two roots link directly while a deep ticket linked across
+trees escalates to its own root. A ticket can never block its own ancestor or descendant: such
+a pair has no valid escalation and is rejected as a redundant link, since the hierarchy edge
+already expresses the relationship. The non-blocking relations
 (`relates_to` / `duplicates` / `supersedes` / `discovered_from` / `caused_by`) are recorded exactly as
-given, with **no** promotion. One consequence: because a blocking link may be promoted to an
-ancestor, `unlink` must target the **promoted (ancestor)** endpoint to remove it. The
-promotion rule and the underlying `LINK` / `UNLINK` events are described in
+given, with **no** escalation. One consequence: because a blocking link may be escalated to an
+ancestor, `unlink` must target the **escalated (ancestor)** endpoint to remove it. The
+escalation rule and the underlying `LINK` / `UNLINK` events are described in
 [event-schema.md](event-schema.md).
 
 ## Tags (convergent add/remove deltas)

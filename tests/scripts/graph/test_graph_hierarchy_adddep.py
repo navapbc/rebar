@@ -422,3 +422,117 @@ def test_add_dependency_accepts_all_canonical_relations(
                 f"add_dependency raised ValueError for canonical relation {relation!r}: {exc}\n"
                 "Fix: only reject non-canonical relations, not canonical ones."
             )
+
+
+# ---------------------------------------------------------------------------
+# Structural comparability end-to-end (story affe-2b42-4ee4-4e12): the edge that
+# actually reaches the store, for bugs 1803-df54-18bb-4881 and jira-reb-1582.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_add_dependency_task_to_sibling_story_writes_the_requested_edge(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bug 1803 repro, end to end: the requested edge is written and the epic is clean.
+
+    The original report had two halves: the epic wrongly gained `depends_on` on its
+    own child, AND the task-to-story edge the caller asked for was silently never
+    recorded. Both are asserted here.
+    """
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-e", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-s", parent_id="epic-e", ticket_type="story")
+    _write_ticket(tracker_dir, "task-t1", parent_id="epic-e", ticket_type="task")
+
+    graph.add_dependency("task-t1", "story-s", str(tracker_dir), relation="depends_on")
+
+    assert graph._is_active_link("task-t1", "story-s", "depends_on", str(tracker_dir)), (
+        "the requested task→story dependency must be recorded"
+    )
+    assert not graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker_dir)), (
+        "the epic must not gain a dependency on its own child"
+    )
+    assert "redirected" not in capsys.readouterr().out, (
+        "a sibling pair must not emit a redirect record"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+@pytest.mark.parametrize("relation", ["blocks", "depends_on"])
+def test_add_dependency_rejects_grandparent_pair(
+    graph: ModuleType, tmp_path: Path, relation: str
+) -> None:
+    """add_dependency refuses an ancestor/descendant blocking pair, not just a parent."""
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-root", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-mid", parent_id="epic-root", ticket_type="story")
+    _write_ticket(tracker_dir, "task-leaf", parent_id="story-mid", ticket_type="task")
+
+    with pytest.raises(ValueError, match="redundant"):
+        graph.add_dependency("epic-root", "task-leaf", str(tracker_dir), relation=relation)
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_add_dependency_rejects_pair_that_only_resolves_to_an_ancestor(
+    graph: ModuleType, tmp_path: Path
+) -> None:
+    """The guard sees the RESOLVED pair, catching what the pre-escalation check missed.
+
+    `task-leaf` and `epic-other` are unrelated as given — neither is an ancestor of
+    the other, so a guard reading only the original pair passes them. Escalation
+    resolves the source up to `epic-other`'s own child, producing an
+    ancestor/descendant edge that must still be refused.
+    """
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-other", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-mid", parent_id="epic-other", ticket_type="story")
+    _write_ticket(tracker_dir, "task-leaf", parent_id="story-mid", ticket_type="task")
+
+    # Sanity: as written, neither endpoint is the other's direct parent.
+    assert not graph._is_active_link("task-leaf", "epic-other", "depends_on", str(tracker_dir))
+
+    with pytest.raises(ValueError, match="redundant"):
+        graph.add_dependency("task-leaf", "epic-other", str(tracker_dir), relation="depends_on")
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_link_dry_run_reports_ancestor_descendant_rejection(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """`link --dry-run` must preview the ancestor-descendant refusal, not "Would create".
+
+    The dry-run preview reads the same resolver as the real write, so a pair the
+    real command refuses has to be reported as a rejection here too — otherwise the
+    preview contradicts the command it previews.
+    """
+    from rebar._commands import composer
+
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-root", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-mid", parent_id="epic-root", ticket_type="story")
+    _write_ticket(tracker_dir, "task-leaf", parent_id="story-mid", ticket_type="task")
+
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker_dir)
+    monkeypatch.setattr(composer, "resolve_ticket_id", lambda raw, _tracker: raw)
+
+    rc = composer._link_dry_run("epic-root", "task-leaf", "depends_on")
+    out = capsys.readouterr().out
+
+    assert rc == 0, rc
+    assert "[DRY RUN] Would reject" in out, out
+    assert "ancestor-descendant" in out, out
+    assert "Would create" not in out, out
+    assert "no event written" in out, out

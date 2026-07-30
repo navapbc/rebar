@@ -179,8 +179,8 @@ def add_dependency(
 
     if hierarchy_result.get("is_redundant"):
         msg = (
-            f"ERROR: redundant link — {source_id} and {target_id} are in a direct "
-            "parent-child relationship"
+            f"ERROR: redundant link — {source_id} and {target_id} are in an "
+            "ancestor-descendant relationship; the hierarchy already expresses it"
         )
         logger.error(msg)
         raise ValueError(msg)

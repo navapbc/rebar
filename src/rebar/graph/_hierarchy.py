@@ -13,36 +13,27 @@ from ._relations import _BLOCKING_RELATIONS
 # ticket_graph._relations). Only these are subject to hierarchy promotion — see
 # resolve_hierarchy_link's docstring for rationale.
 
-# Type-tier mapping defining "comparable level" in the hierarchy. Higher number
-# == higher tier. epic (top) > story (mid) > task/bug (leaf, SAME tier).
-#   - epic  -> 2
-#   - story -> 1
-#   - task  -> 0   (leaf)
-#   - bug   -> 0   (leaf — bugs are leaf work items, comparable to tasks)
-#   - session_log -> 0  (leaf; additionally REFUSED from blocking links below, so
-#                        it never participates in promotion at all)
-# Anything unrecognized is treated as a leaf (tier 0) so it never spuriously
-# out-ranks an epic/story and never gets promoted ABOVE its real ancestors.
-_TYPE_TIER: dict[str, int] = {
-    "epic": 2,
-    "story": 1,
-    "task": 0,
-    "bug": 0,
-    "session_log": 0,
-    "code_review": 0,
-}
+# Sentinel parent shared by every root ticket. jira-reb-1582 specifies that
+# "tickets with no parent are considered siblings for this purpose", so the
+# ancestor walk terminates every chain with this: a nearest common ancestor then
+# ALWAYS exists and the disjoint-tree case needs no separate branch. It is never a
+# resolved endpoint — resolution returns the element PRECEDING the common ancestor.
+# The \x00 prefix keeps it disjoint from any real ticket id.
+_VIRTUAL_ROOT = "\x00virtual-root"
 
 
-def _tier_of(ticket_type: str | None) -> int:
-    """Return the hierarchy tier for a ticket type (leaf=0 for unknown/None)."""
-    return _TYPE_TIER.get((ticket_type or "").lower(), 0)
+def _get_ancestors(ticket_id: str, tracker_dir: str) -> list[str]:
+    """Return ticket_id's ancestor chain, self first, terminated by _VIRTUAL_ROOT.
 
-
-def _get_ancestors(ticket_id: str, tracker_dir: str, max_hops: int = 2) -> list[str]:
-    """Return the ancestor chain for ticket_id up to max_hops hops."""
+    Walks all the way to the real root. There is deliberately no hop cap: the
+    former ``max_hops=2`` truncated any chain deeper than epic→story→task, which
+    made resolution fall back to the wrong ancestor (bug 1803-df54-18bb-4881).
+    The ``seen`` set makes a malformed parent cycle terminate instead of looping.
+    """
     chain: list[str] = [ticket_id]
+    seen: set[str] = {ticket_id}
     current = ticket_id
-    for _ in range(max_hops):
+    while True:
         ticket_dir = os.path.join(tracker_dir, current)
         if not os.path.isdir(ticket_dir):
             break
@@ -53,46 +44,55 @@ def _get_ancestors(ticket_id: str, tracker_dir: str, max_hops: int = 2) -> list[
         if state is None:
             break
         parent_id = state.get("parent_id")
-        if not parent_id:
+        if not parent_id or parent_id in seen:
             break
         chain.append(parent_id)
+        seen.add(parent_id)
         current = parent_id
+    chain.append(_VIRTUAL_ROOT)
     return chain
 
 
-def _tier_of_ticket(ticket_id: str, tracker_dir: str) -> int:
-    """Return the tier of a ticket id by reducing it (leaf=0 if unreadable)."""
-    ticket_dir = os.path.join(tracker_dir, ticket_id)
-    if not os.path.isdir(ticket_dir):
-        return 0
-    try:
-        state = reduce_ticket(ticket_dir)
-    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket counts as zero children
-        state = None
-    if state is None:
-        return 0
-    return _tier_of(state.get("ticket_type"))
+def _resolve_blocking_endpoints(
+    source_chain: list[str], target_chain: list[str]
+) -> tuple[str, str, bool]:
+    """Resolve a blocking pair to comparable endpoints via their nearest common ancestor.
 
+    Both arguments are ``_get_ancestors`` output, so both terminate in
+    ``_VIRTUAL_ROOT`` and a common ancestor is guaranteed to exist.
 
-def _promote_to_tier(chain: list[str], target_tier: int, tracker_dir: str) -> tuple[str, bool]:
-    """Promote the head of ``chain`` UP to the nearest ancestor whose tier matches
-    ``target_tier``.
+    Returns ``(resolved_source, resolved_target, is_ancestor_pair)``:
 
-    ``chain`` is [self, parent, grandparent, ...] (output of _get_ancestors).
-    Returns ``(resolved_id, was_promoted)``:
-      - If the head already sits at target_tier, returns it unchanged.
-      - Otherwise walks UP the chain for the first ancestor at exactly target_tier.
-      - Fallback: if no ancestor matches the target tier, returns the highest
-        available ancestor (chain root) — preserving the historical chain-root
-        behavior — and reports was_promoted if that differs from the head.
+      - When the common ancestor IS one of the endpoints, that endpoint is an
+        ancestor of the other. There is no valid escalation — a ticket must never
+        block its own subtree — so the pair comes back unchanged with
+        ``is_ancestor_pair`` True and the caller rejects it.
+      - Otherwise each endpoint escalates to its own ancestor sitting directly below
+        the common ancestor: the element immediately preceding it in that chain. An
+        endpoint already at that level is returned unchanged, so two children of one
+        parent link exactly as requested.
+
+    The two escalated endpoints are always distinct, and always siblings rather than
+    an ancestor pair: if both escalated to the same child of the common ancestor,
+    that child would itself appear in both chains ahead of it, contradicting it
+    being the NEAREST common ancestor.
     """
-    head = chain[0]
-    for ancestor in chain:
-        if _tier_of_ticket(ancestor, tracker_dir) == target_tier:
-            return ancestor, ancestor != head
-    # No comparable-tier ancestor: fall back to the chain root (highest ancestor).
-    root = chain[-1]
-    return root, root != head
+    target_index = {tid: i for i, tid in enumerate(target_chain)}
+    source_id, target_id = source_chain[0], target_chain[0]
+
+    # A self-loop is NOT an ancestor pair — a ticket is not its own ancestor. Pass
+    # it through untouched so add_dependency's cycle guard still raises
+    # CyclicDependencyError for it rather than the redundant-link ValueError.
+    if source_id == target_id:
+        return source_id, target_id, False
+
+    nca_source_index = next(i for i, tid in enumerate(source_chain) if tid in target_index)
+    nca = source_chain[nca_source_index]
+
+    if nca in (source_id, target_id):
+        return source_id, target_id, True
+
+    return source_chain[nca_source_index - 1], target_chain[target_index[nca] - 1], False
 
 
 def resolve_hierarchy_link(
@@ -112,12 +112,14 @@ def resolve_hierarchy_link(
         always False.
 
       * Blocking dependencies must connect tickets at a COMPARABLE LEVEL, defined
-        by ticket TYPE TIER: epic(2) > story(1) > task/bug(0). When the two
-        endpoints differ in tier, the LOWER-tier endpoint is promoted UP its
-        parent chain to the nearest ancestor whose tier matches the HIGHER-tier
-        endpoint, so the resulting link is epic↔epic, story↔story or
-        task/bug↔task/bug. If no comparable-tier ancestor exists, fall back to
-        the chain root (highest ancestor) and still report was_redirected.
+        STRUCTURALLY — by position in the parent hierarchy, never by ticket type.
+        Any two tickets sharing a parent may hold a dependency and are linked as
+        given; otherwise each endpoint is escalated to its own ancestor that is a
+        child of the two endpoints' nearest common ancestor. Tickets with no
+        parent count as siblings of each other (see ``_VIRTUAL_ROOT``), so two
+        roots link unchanged while a deep leaf linked across trees escalates to
+        its own root. An endpoint that is an ancestor of the other cannot be
+        escalated at all and is reported via ``is_redundant``.
 
     ``relation`` defaults to ``"blocks"`` so the standalone ``resolve-hierarchy-link``
     CLI subcommand (which carries no relation) still exercises the promotion path.
@@ -195,36 +197,30 @@ def resolve_hierarchy_link(
             "ticket_id": target_id,
         }
 
-    # ── Blocking relations: enforce type-tier comparability. ──────────────────
-    # Promote the lower-tier endpoint up to the higher-tier endpoint's tier so
-    # the resulting blocking link is between comparable levels.
-    source_chain = _get_ancestors(source_id, tracker_dir, max_hops=2)
-    target_chain = _get_ancestors(target_id, tracker_dir, max_hops=2)
+    # ── Blocking relations: enforce STRUCTURAL comparability. ─────────────────
+    # Escalate each endpoint to the nearest common ancestor's children, so the
+    # recorded dependency is between siblings. Replaces the former type-tier rule,
+    # under which a task and a story that were both children of one epic could not
+    # link directly and the escalation instead landed on the epic — leaving it
+    # blocked by its own child (bug 1803-df54-18bb-4881, story affe-2b42-4ee4-4e12).
+    source_chain = _get_ancestors(source_id, tracker_dir)
+    target_chain = _get_ancestors(target_id, tracker_dir)
 
-    source_tier = _tier_of(source_state.get("ticket_type"))
-    target_tier = _tier_of(target_state.get("ticket_type"))
+    resolved_source, resolved_target, is_ancestor_pair = _resolve_blocking_endpoints(
+        source_chain, target_chain
+    )
 
-    resolved_source = source_id
-    resolved_target = target_id
-
-    if source_tier == target_tier:
-        # Same tier already comparable — link as-is (e.g. task↔task siblings,
-        # cousins, or unrelated leaves: no promotion).
-        pass
-    elif source_tier < target_tier:
-        # Source is lower: promote it up to the target's (higher) tier.
-        resolved_source, _ = _promote_to_tier(source_chain, target_tier, tracker_dir)
-    else:
-        # Target is lower: promote it up to the source's (higher) tier.
-        resolved_target, _ = _promote_to_tier(target_chain, source_tier, tracker_dir)
-
-    was_redirected = (resolved_source != source_id) or (resolved_target != target_id)
-
+    # is_redundant is RECOMPUTED from the RESOLVED pair. The original-pair value
+    # above still serves the non-blocking early return, whose semantics are
+    # unchanged; but for a blocking link what matters is the edge actually
+    # WRITTEN, so an escalation landing on an ancestor of the other endpoint is
+    # caught here rather than slipping past a guard that only saw the
+    # pre-escalation pair (the second half of bug 1803-df54-18bb-4881).
     return {
         "resolved_source": resolved_source,
         "resolved_target": resolved_target,
-        "was_redirected": was_redirected,
-        "is_redundant": is_redundant,
+        "was_redirected": (resolved_source != source_id) or (resolved_target != target_id),
+        "is_redundant": is_ancestor_pair,
     }
 
 
