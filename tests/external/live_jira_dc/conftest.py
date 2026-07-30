@@ -171,6 +171,18 @@ def track_issue() -> Iterator[Callable[[str], None]]:
 
     Teardown asserts each DELETE's HTTP status, then polls the issue's direct
     ``/rest/api/2/issue/{key}`` endpoint until 404 — never search.
+
+    **A 404 on the DELETE counts as success**, because the project teardown
+    legitimately gets there first. ``jira_dc_project`` DEPENDS on this fixture, so
+    pytest finalizes this one LAST — after the project is gone — and deleting a
+    Jira project cascades to its issues. The contract this fixture owes is
+    "the issue no longer exists", and 404 already satisfies it; demanding 204
+    would fail on a correct cascade (observed live: ``deleting issue RBJSQZH-1
+    failed: 404 Issue Does Not Exist``).
+
+    This is not a weakened assertion: the ``_poll_until_404`` below still runs
+    unconditionally, so absence is positively confirmed either way. What changed
+    is only that "already absent" is accepted as a way of being absent.
     """
     keys: list[str] = []
 
@@ -181,7 +193,12 @@ def track_issue() -> Iterator[Callable[[str], None]]:
 
     for key in keys:
         status, body = _request(f"/rest/api/2/issue/{key}", method="DELETE")
-        assert status in (204, 200), f"deleting issue {key} failed: {status} {body}"
+        assert status in (204, 200, 404), (
+            f"deleting issue {key} failed: {status} {body} — expected 204/200 "
+            f"(deleted) or 404 (already gone via the project cascade)"
+        )
+        # Runs for every branch, INCLUDING the 404 one: the postcondition is
+        # absence, confirmed against the direct endpoint, never the search index.
         _poll_until_404(f"/rest/api/2/issue/{key}", what=f"issue {key}")
 
 
