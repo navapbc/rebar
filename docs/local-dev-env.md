@@ -155,6 +155,24 @@ above remains the recommended day-to-day setup. Note this path installs nothing,
 **not** wire the commit gate — if you intend to commit from this checkout, run `make hooks`
 once (see above).
 
+## Claude Code: keep MCP tool schemas resident (`ENABLE_TOOL_SEARCH`)
+
+The tracked `.claude/settings.json` sets `env.ENABLE_TOOL_SEARCH = "false"`, which keeps
+every connected MCP server's tool schemas loaded up front instead of deferring them behind
+a `ToolSearch` round-trip. This repo's guidance directs agents to prefer Serena's symbol
+tools (`find_referencing_symbols` etc.) over `grep`, but deferral adds an extra step only to
+those tools, not to `grep` via Bash — that friction gradient pushes agents to `grep`
+regardless of what the docs say, so we remove it. Measured on the authoring host (a trivial
+headless `claude -p` run, prompt-prefix tokens = input + cache_read + cache_creation): with
+all 4 connected MCP servers, deferral OFF costs 100,813 tokens vs 36,961 with it ON — a
+**+63,852** token tax per fresh prefix; the floor (Serena alone) is **+25,454**. The exact
+tax scales with how many MCP servers are connected. The lever is all-or-nothing — there is
+no per-server or per-tool control, so you cannot keep just Serena's three navigation tools
+resident and defer the rest. To **revert**, delete the
+`ENABLE_TOOL_SEARCH` key from `.claude/settings.json`. Project settings resolve to the main
+checkout and are shared by worktrees, so this takes effect starting the next session in
+the repo.
+
 ## Day-to-day gates
 
 ```sh
