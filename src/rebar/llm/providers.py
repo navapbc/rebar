@@ -103,6 +103,15 @@ class ProviderSession:
         self._builders: dict[str, Callable[[str], Any]] = {
             "anthropic": self._build_anthropic,
         }
+        # The `openai` builder is registered ONLY when `cfg.base_url` is set (story S4):
+        # with no base_url, rebar has nothing to contribute (no endpoint to inject, no key
+        # to place, no profile to override), so it must NOT interpose — the model stays a
+        # lazy STRING on the deferred path `is_resolvable()` already provides, exactly as
+        # before this story. Registering it unconditionally would also break the existing
+        # parameterized `openai:gpt-4o` case in test_pydantic_ai_runner.py, which stubs
+        # `_pai_structured` so no provider is ever constructed there.
+        if cfg.base_url:
+            self._builders["openai"] = self._build_openai
 
     def supports(self, provider_name: str) -> bool:
         """True if ``provider_name`` has a rebar builder registered on this session."""
@@ -203,6 +212,61 @@ class ProviderSession:
         )
         self._closeables.append(client)
         return model.provider
+
+    def _build_openai(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
+        """Build an OpenAI-COMPATIBLE provider for ``cfg.base_url`` (story S4) — the seam
+        that makes the ``docs/llm-framework.md`` local-server recipe (LMStudio/Ollama/vLLM/a
+        LiteLLM proxy) real instead of a documented-but-refused promise. Sends a placeholder
+        key (``"not-needed"``) when ``cfg.api_key`` is unset so construction succeeds against
+        a no-auth local server — a real hosted endpoint still answers with its own 401.
+        ``pydantic-ai-slim[openai]`` is optional (kept out of the lean default install; see
+        pyproject.toml); imported HERE so an absent extra surfaces as a named
+        :class:`LLMConfigError`, not a bare ``ModuleNotFoundError`` deep in pydantic-ai."""
+        try:
+            import dataclasses
+
+            import httpx
+            from pydantic_ai.profiles.openai import openai_model_profile
+            from pydantic_ai.providers.openai import OpenAIProvider
+        except ImportError as exc:
+            raise LLMConfigError(
+                "an OpenAI-compatible base_url is configured but the optional openai "
+                "provider package is not installed: pip install 'pydantic-ai-slim[openai]'"
+            ) from exc
+
+        class _RebarOpenAICompatibleProvider(OpenAIProvider):  # type: ignore[misc]
+            """Withdraws ONLY ``supports_json_schema_output`` from upstream's OpenAI profile
+            (story S4 AC5) — nothing else about the profile is touched. An opaque
+            OpenAI-*compatible* endpoint has no obligation to implement strict ``json_schema``
+            decoding, but ``openai_model_profile(...)`` describes OpenAI's HOSTED API
+            (``True``), which would otherwise steer ``capabilities_for()`` (story S2) onto
+            ``NativeOutput`` and fail opaquely. Rides the Provider, not a model argument:
+            ``OpenAIChatModel.__init__`` resolves ``profile=profile or provider.model_profile``
+            — this factory hands ``infer_model`` a Provider, never a Model, so overriding this
+            staticmethod is the only reachable seam. Verified against the pinned pydantic-ai:
+            survives the ``OpenAIModelProfile(...).update()`` applied afterwards, leaving
+            ``supports_tools`` untouched."""
+
+            @staticmethod
+            def model_profile(model_name: str):
+                base = openai_model_profile(model_name)
+                return dataclasses.replace(base, supports_json_schema_output=False)
+
+        cfg = self._cfg
+        # Build our OWN client wrapping `httpx.AsyncHTTPTransport()` explicitly: pydantic-ai's
+        # `create_async_http_client()` (used when no `http_client=` is passed) builds a bare
+        # `httpx.AsyncClient(...)`, so httpx picks its default transport WITHOUT going through
+        # the `httpx.AsyncHTTPTransport` module attribute — unreachable by the same
+        # `monkeypatch.setattr(httpx, "AsyncHTTPTransport", ...)` seam
+        # `_build_retrying_anthropic_model` relies on for its own tests. Also gives the same
+        # bounded per-request timeout (`cfg.timeout_s`) local-server config already promises.
+        http_client = httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(), timeout=httpx.Timeout(float(cfg.timeout_s))
+        )
+        self._closeables.append(http_client)
+        return _RebarOpenAICompatibleProvider(
+            base_url=cfg.base_url, api_key=cfg.api_key or "not-needed", http_client=http_client
+        )
 
     def close(self) -> None:
         """Close every client a builder opened this run (story arcticduck).
