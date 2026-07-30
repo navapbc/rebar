@@ -256,7 +256,11 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
 
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
-    single, agent = orchestrator.route_criteria(pctx)
+    # gate_log: every deterministic-gate skip (ticket 4ee2) as {criterion_id: rule_name},
+    # merged below into routing.det_gated — the sidecar's coverage.routing carries it, so
+    # a criterion skipped on total vocabulary absence (zero LLM routing) stays observable.
+    gate_log: dict[str, str] = {}
+    single, agent = orchestrator.route_criteria(pctx, gate_log=gate_log)
     # The EFFECTIVE vocabulary = canonical built-ins ∪ activated PROJECT criteria (from the
     # `.rebar/criteria_routing.json` overlay), resolved against the SAME root route_criteria
     # loaded (pctx.repo_root) so the vocab and the loaded criteria never diverge. ISF is fed
@@ -301,6 +305,7 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
     out["routing"] = {
         "single_turn": [c["id"] for c in single if c["id"] in included],
         "agent_tier": [c["id"] for c in agent if c["id"] in included],
+        "det_gated": gate_log,
     }
     if probe:
         out["routing"]["probe_criteria"] = sorted(included)
