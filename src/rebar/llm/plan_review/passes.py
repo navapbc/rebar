@@ -301,10 +301,12 @@ def pass1_chunk(
     chunk: list[dict[str, Any]],
     agentic: bool = False,
     extra_context: str = "",
-) -> list[dict[str, Any]]:
-    """Run one Pass-1 finder call over a chunk of criteria. Returns the findings
-    (each tagged with the criteria it maps to). Single-turn unless ``agentic``
-    (the code-grounding tier).
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run one Pass-1 finder call over a chunk of criteria. Returns
+    ``(findings, usage)`` — the findings (each tagged with the criteria it maps
+    to) plus the call's ``_usage`` dict (``{}`` when the runner attaches none,
+    e.g. the ``FakeRunner`` — a zero contribution, never an error). Single-turn
+    unless ``agentic`` (the code-grounding tier).
 
     ``extra_context`` is authoritative, store-derived context prepended to the rubric
     instructions (currently the G5 DECOMPOSITION STATE block — see
@@ -357,7 +359,7 @@ def pass1_chunk(
                 "cohort": sorted(ids),
             }
         )
-    return out
+    return out, dict(result.get("_usage") or {})
 
 
 def pass1_container(
@@ -368,7 +370,7 @@ def pass1_container(
     children: list[dict[str, Any]],
     criteria: list[dict[str, Any]],
     sibling_roster: str,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run ALL container criteria (G3/G4/decomp-shape — the ``CONTAINER_CRITERIA`` set) for a
     parent + a BIN of one-or-more WHOLE children in a SINGLE agentic call (stories 98c6 merge +
     1762 bin-packing). The container prompt describes the audits over the shared
@@ -386,7 +388,10 @@ def pass1_container(
     children: a single-child bin falls back to its sole child; a multi-child finding the
     model left unattributed is kept as bin-level (``_container_child=None``) rather than
     mis-assigned. Per-child sections + the required per-child output preserve per-child
-    attention so packing does not dilute it."""
+    attention so packing does not dilute it.
+
+    Returns ``(findings, usage)`` — the call's ``_usage`` dict rides along (``{}`` when
+    the runner attaches none; zero contribution)."""
     valid_ids = [c["id"] for c in criteria]
     bin_ids = [c.get("ticket_id", "?") for c in children]
     multi = len(children) > 1
@@ -465,7 +470,7 @@ def pass1_container(
                 "cohort": sorted(valid_ids),
             }
         )
-    return out
+    return out, dict(result.get("_usage") or {})
 
 
 def pass1_isf(
@@ -476,12 +481,13 @@ def pass1_isf(
     session_log_text: str,
     ticket_graph: str = "",
     summarized: bool = False,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The Intent-Source-Fidelity finder (child 681b). Fed the plan + the linked
     SESSION LOG + the PRE-RESOLVED TICKET GRAPH as context (single-turn, NOT agentic —
     the design forbids the tool loop here; the graph is resolved by the orchestrator
     and injected, not fetched by the model). When the log was summarized to fit the
-    window, each finding is tagged ``_reduced_confidence``."""
+    window, each finding is tagged ``_reduced_confidence``. Returns
+    ``(findings, usage)`` — the call's ``_usage`` dict (``{}`` when absent)."""
     graph_block = (
         f"## Ticket graph (pre-resolved — parent / children / dependency links)\n{ticket_graph}\n\n"
         if ticket_graph
@@ -524,13 +530,18 @@ def pass1_isf(
                 "cohort": ["ISF"],
             }
         )
-    return out
+    return out, dict(result.get("_usage") or {})
 
 
-def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
+def summarize_for_isf(
+    runner: Runner, cfg: LLMConfig, *, log_text: str
+) -> tuple[str, dict[str, Any]]:
     """Compress an oversized session log to fit the ISF context window (a single
     text call). Used only when the log exceeds the budget — the PLAN is never
-    summarized, only this supporting context."""
+    summarized, only this supporting context. Returns ``(text, usage)`` — the
+    summary plus the call's ``_usage`` dict (``{}`` when absent); the sole caller
+    (the ISF oversized-log path in ``pass1``) records the usage as an ISF-attributed
+    call record."""
     from rebar.llm.prompting import prompts
 
     prompt = prompts.get_prompt("plan-review-isf-summarizer", repo_root=cfg.repo_path)
@@ -543,7 +554,8 @@ def summarize_for_isf(runner: Runner, cfg: LLMConfig, *, log_text: str) -> str:
         mode="text",
         execution_mode="single_turn",
     )
-    return str(runner.run(req).get("text", ""))
+    result = runner.run(req)
+    return str(result.get("text", "")), dict(result.get("_usage") or {})
 
 
 # ── Pass 2: verify ───────────────────────────────────────────────────────────────

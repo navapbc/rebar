@@ -488,6 +488,24 @@ def parse_reviewed_related_material(raw: object) -> tuple[PlanMaterialPin, ...] 
     return tuple(pins)
 
 
+def _coverage_with_usage(coverage: dict[str, Any]) -> dict[str, Any]:
+    """The sidecar's coverage record, with the Pass-1/prerequisite USAGE (story d52a)
+    normalized to exactly ``coverage.usage = {"per_call": [call records],
+    "per_criterion": {id: map}}`` — the keys offline analysis joins on. A verdict whose
+    coverage carries no ``usage`` (legacy, or a path that never ran the batch finder)
+    is passed through unchanged — the key is then simply absent, never fabricated."""
+    usage = coverage.get("usage")
+    if not isinstance(usage, dict):
+        return coverage
+    return {
+        **coverage,
+        "usage": {
+            "per_call": list(usage.get("per_call") or []),
+            "per_criterion": dict(usage.get("per_criterion") or {}),
+        },
+    }
+
+
 def build_payload(
     verdict: dict[str, Any],
     *,
@@ -613,7 +631,7 @@ def build_payload(
         # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage for
         # easy offline join (det_ms / llm_ms / total_ms / llm_calls / claim_path).
         "metrics": (verdict.get("coverage", {}) or {}).get("metrics", {}),
-        "coverage": verdict.get("coverage", {}),
+        "coverage": _coverage_with_usage(verdict.get("coverage", {}) or {}),
         "findings": [_slim(f) for f in all_findings],
         # Persist the FULL pass-4 coaching record (story a3db) — move_name, subject, and the
         # rendered coaching prose, not just {move_id, finding_refs} — so an audit UI can

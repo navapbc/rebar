@@ -230,7 +230,7 @@ def test_largest_window_exhaustion_emits_indeterminate(monkeypatch) -> None:
         lambda blocks, **kwargs: ([], [oversized]),
     )
 
-    records, findings = prerequisites.run_focused_finder(
+    records, findings, _usage = prerequisites.run_focused_finder(
         runner=object(),
         cfg=LLMConfig(runner="fake"),
         subject_plan="subject",

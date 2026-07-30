@@ -342,7 +342,10 @@ def _run_inline_finder(
         "default_posture": routing.get("default_posture", "advisory"),
     }
     cfg = resolve_gate_config(repo_root)
-    return list(passes.pass1_chunk(runner, cfg, plan=plan, chunk=[desc], agentic=exec_v == "AGENT"))
+    findings, _usage = passes.pass1_chunk(
+        runner, cfg, plan=plan, chunk=[desc], agentic=exec_v == "AGENT"
+    )
+    return list(findings)
 
 
 # ── DET path ─────────────────────────────────────────────────────────────────────

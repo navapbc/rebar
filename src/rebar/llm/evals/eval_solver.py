@@ -117,7 +117,7 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
         # A fixture may pin a roster verbatim; otherwise use the ONE shared builder so
         # eval fixtures see the same roster shape production does.
         roster = case.get("sibling_roster") or build_sibling_roster(children)
-        findings = passes.pass1_container(
+        findings, _usage = passes.pass1_container(
             runner,
             cfg,
             parent_plan=case.get("input") or "",
@@ -134,7 +134,7 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
             "not runnable over an inline eval fixture"
         )
     plan = case.get("input") or ""
-    findings = passes.pass1_chunk(
+    findings, _usage = passes.pass1_chunk(
         runner, cfg, plan=plan, chunk=[desc], agentic=registry.exec_tier(desc) == "AGENT"
     )
     return {"findings": list(findings)}

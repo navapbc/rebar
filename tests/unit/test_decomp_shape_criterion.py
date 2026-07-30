@@ -98,7 +98,7 @@ def test_eval_solver_runs_container_criterion_via_pass1_container(monkeypatch):
         captured["children"] = children
         captured["criteria_ids"] = [c["id"] for c in criteria]
         captured["roster"] = sibling_roster
-        return [{"finding": "layer-cake", "criteria": [_CID], "location": "child c1"}]
+        return [{"finding": "layer-cake", "criteria": [_CID], "location": "child c1"}], {}
 
     # resolve_gate_config touches config, not the model — stub it to a sentinel.
     monkeypatch.setattr(

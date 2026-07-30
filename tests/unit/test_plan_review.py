@@ -414,7 +414,7 @@ def test_pass1_drops_findings_mapped_outside_the_chunk() -> None:
             ],
         }
     )
-    out = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
+    out, _usage = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
     assert [f["finding"] for f in out] == ["in chunk"]
     assert all(f["criteria"] == ["E2"] for f in out)
 
@@ -1142,7 +1142,7 @@ def test_size_ladder_batch_falls_back_to_one_per_call() -> None:
         ]
     )
     events: list = []
-    out = orchestrator._pass1_with_ladder(
+    out, _calls = orchestrator._pass1_with_ladder(
         runner, _fake_cfg(), "plan", [{"id": "E2"}, {"id": "E5"}], False, events
     )
     assert sorted(f["finding"] for f in out) == ["a", "b"]
@@ -1153,7 +1153,7 @@ def test_size_ladder_too_big_emits_blocking_failure_finding() -> None:
     # A single criterion that context-limits at EVERY model → a too-big failure finding.
     runner = _SeqRunner([Exception("maximum context length exceeded")])
     events: list = []
-    out = orchestrator._pass1_with_ladder(
+    out, _calls = orchestrator._pass1_with_ladder(
         runner, _fake_cfg(), "plan", [{"id": "E2"}], False, events
     )
     assert len(out) == 1 and out[0]["_too_big"] is True and out[0]["criteria"] == ["E2"]
@@ -1301,7 +1301,7 @@ def test_pass1_finding_carries_coaching_spec_fields() -> None:
             ],
         }
     )
-    out = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
+    out, _usage = passes.pass1_chunk(fr, _fake_cfg(), plan="p", chunk=[{"id": "E2", "name": "x"}])
     assert out[0]["location"] and out[0]["checklist_item"] and out[0]["suggested_fix"]
 
 
@@ -1318,7 +1318,7 @@ def test_container_loop_per_child_and_too_big_pairing() -> None:
     )
     g3 = registry.by_id()["G3"]
     cov: dict = {}
-    out = orchestrator._run_container(ctx, _fake_cfg(), fr, [g3], cov)
+    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), fr, [g3], cov)
     # c1 pairing fits → a per-child finding tagged with the child; c2 is too-big → a
     # failure finding citing the oversized pairing.
     assert any(f.get("_container_child") == "c1" for f in out)
@@ -1415,7 +1415,7 @@ def test_container_warm_then_fan_out_runs_each_pairing_once() -> None:
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner()
     cov: dict = {}
-    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 3  # 1 warm + 2 fanned-out, each pairing once
     assert len([f for f in out if f.get("_container_child")]) == 3
     assert cov["container"]["warmed"] is True
@@ -1430,7 +1430,7 @@ def test_container_skips_warm_below_cache_floor() -> None:
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner()
     cov: dict = {}
-    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 3
     assert cov["container"]["warmed"] is False
     assert len([f for f in out if f.get("_container_child")]) == 3
@@ -1456,7 +1456,7 @@ def test_container_warm_nonsystemic_failure_degrades_to_direct_fan_out() -> None
     g3 = registry.by_id()["G3"]
     runner = _PairingRunner(fail_first="nonsystemic")
     cov: dict = {}
-    out = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
+    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), runner, [g3], cov)
     assert runner.calls == 4  # 1 failed warm + 3 in the pool (the failed pairing re-runs)
     assert cov["container"]["warmed"] is False
     assert len([f for f in out if f.get("_container_child")]) == 3  # no pairing dropped
@@ -1492,7 +1492,7 @@ def test_container_attribution_is_self_reported_and_validated() -> None:
         }
     )
     g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
-    out = passes.pass1_container(
+    out, _usage = passes.pass1_container(
         fr,
         _fake_cfg(),
         parent_plan="PARENT",
@@ -1541,7 +1541,7 @@ def test_container_attributes_findings_per_child_in_a_packed_bin() -> None:
         }
     )
     g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
-    out = passes.pass1_container(
+    out, _usage = passes.pass1_container(
         fr,
         _fake_cfg(),
         parent_plan="PARENT",
@@ -1574,7 +1574,7 @@ def test_container_attribution_is_prefix_collision_safe() -> None:
         }
     )
     g3, g4 = registry.by_id()["G3"], registry.by_id()["G4"]
-    out = passes.pass1_container(
+    out, _usage = passes.pass1_container(
         fr,
         _fake_cfg(),
         parent_plan="PARENT",
@@ -1604,7 +1604,7 @@ def test_container_oversized_child_keeps_too_big_finding() -> None:
     )
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     cov: dict = {}
-    out = orchestrator._run_container(ctx, _fake_cfg(), _PairingRunner(), container, cov)
+    out, _calls = orchestrator._run_container(ctx, _fake_cfg(), _PairingRunner(), container, cov)
     assert any("too big" in f["finding"].lower() and "big" in f["finding"] for f in out)
     assert cov["container"]["bins"] == 1  # only the small child's bin runs
 
@@ -1671,7 +1671,7 @@ def test_pass1_isf_is_fed_the_ticket_graph() -> None:
     fr = FakeRunner(structured={"analysis": "", "findings": []})
     # No assertion on output beyond no-crash; the graph is rendered into instructions
     # (covered by _ticket_graph_blob above). Confirms the param is accepted + wired.
-    out = passes.pass1_isf(
+    out, _usage = passes.pass1_isf(
         fr, _fake_cfg(), plan="p", session_log_text="log", ticket_graph="parent: x"
     )
     assert out == []
@@ -1683,7 +1683,7 @@ def test_pass1_isf_tags_findings_and_reduced_confidence() -> None:
     fr = FakeRunner(
         structured={"analysis": "", "findings": [{"finding": "dropped req X", "criteria": ["ISF"]}]}
     )
-    out = passes.pass1_isf(
+    out, _usage = passes.pass1_isf(
         fr, _fake_cfg(), plan="plan", session_log_text="log: must do X", summarized=True
     )
     assert out and out[0]["criteria"] == ["ISF"] and out[0]["_reduced_confidence"] is True

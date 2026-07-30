@@ -164,7 +164,7 @@ def test_cohort_stamped_by_finder_paths() -> None:
     from rebar.llm.runner import FakeRunner
 
     cfg = LLMConfig()
-    ch = passes.pass1_chunk(
+    ch, _usage = passes.pass1_chunk(
         FakeRunner(findings=[{"finding": "x", "criteria": ["G3"], "location": "L"}]),
         cfg,
         plan="P",
@@ -172,7 +172,7 @@ def test_cohort_stamped_by_finder_paths() -> None:
     )
     assert ch and ch[0]["cohort"] == ["F1", "G3"]
 
-    isf = passes.pass1_isf(
+    isf, _usage = passes.pass1_isf(
         FakeRunner(findings=[{"finding": "y", "criteria": ["ISF"], "location": "L"}]),
         cfg,
         plan="P",
@@ -180,7 +180,7 @@ def test_cohort_stamped_by_finder_paths() -> None:
     )
     assert isf and isf[0]["cohort"] == ["ISF"]
 
-    cont = passes.pass1_container(
+    cont, _usage = passes.pass1_container(
         FakeRunner(findings=[{"finding": "z", "criteria": ["G3"], "location": ""}]),
         cfg,
         parent_plan="P",

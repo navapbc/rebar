@@ -166,7 +166,12 @@ def run_focused_finder(
     blocks: list[dict[str, Any]],
     ticket_id: str = "",
 ):
-    """Run prerequisite-only Pass 1 over stable whole-block bins."""
+    """Run prerequisite-only Pass 1 over stable whole-block bins.
+
+    Returns ``(records, findings, usage)`` where ``usage`` is the SUM over every
+    ``runner.run`` call the recursive ``run_bin`` makes (each call's ``_usage`` is
+    accumulated; a call that attaches no ``_usage`` — or raises — contributes zero):
+    ``{requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}``."""
     from rebar.llm.prompting import prompts
     from rebar.llm.runner import RunRequest
 
@@ -185,6 +190,14 @@ def run_focused_finder(
         _indeterminate(block.canonical_id, "evaluation-error", "input-too-large")
         for block in oversized
     ]
+
+    usage_total: dict[str, int] = {
+        "requests": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
 
     # prerequisite_id -> (model that produced the record, number of model attempts). A ladder
     # escalation re-runs a bin on a HIGHER model, so the producing model is not always cfg.model;
@@ -222,6 +235,10 @@ def run_focused_finder(
                     execution_mode="single_turn",
                 )
             )
+            call_usage = raw.get("_usage") if isinstance(raw, dict) else None
+            if isinstance(call_usage, dict):
+                for field in usage_total:
+                    usage_total[field] += int(call_usage.get(field, 0) or 0)
             return _from(model, normalize_coverage_records(raw, ids))
         except Exception as exc:  # noqa: BLE001 - unresolved provider output is indeterminate
             if not sizing.is_context_limit_error(exc):
@@ -260,4 +277,4 @@ def run_focused_finder(
                 bin_size=len(blocks),
             )
     findings = [finding for record in records for finding in record.get("findings", [])]
-    return records, findings
+    return records, findings, usage_total

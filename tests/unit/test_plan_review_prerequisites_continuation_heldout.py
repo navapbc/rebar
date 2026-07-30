@@ -110,7 +110,7 @@ def test_prerequisite_spot_eval_runs_singleton_and_packed_focused_finder(monkeyp
                         "findings": [],
                     }
                 )
-        return records, findings
+        return records, findings, {"requests": 0}
 
     monkeypatch.setattr(
         "rebar.llm.plan_review.prerequisites.run_focused_finder",

@@ -156,7 +156,7 @@ def test_reaches_pass1_and_attributes() -> None:
         "## Out of Scope\n"
         "- src/keeper.py keeps matching P\n"
     )
-    out = passes.pass1_chunk(_Capturing(), _fake_cfg(), plan=plan, chunk=[crit])
+    out, _usage = passes.pass1_chunk(_Capturing(), _fake_cfg(), plan=plan, chunk=[crit])
 
     # The rubric was actually presented to the finder.
     assert CRITERION in captured["instructions"]
