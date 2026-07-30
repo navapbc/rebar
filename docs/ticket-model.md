@@ -146,10 +146,10 @@ ancestor, `unlink` must target the **escalated (ancestor)** endpoint to remove i
 escalation rule and the underlying `LINK` / `UNLINK` events are described in
 [event-schema.md](event-schema.md).
 
-**Auditing links written under an older rule (`rebar link-audit`).** A `LINK` event is
+**Auditing links written under an older rule (`rebar doctor`).** A `LINK` event is
 durable and nothing re-resolves it on read, so a blocking edge recorded before the
 escalation rule changed stays on disk exactly as written — and keeps feeding `ready`,
-`next-batch` and the claim cascade. `rebar link-audit` scans every net-active blocking
+`next-batch` and the claim cascade. `rebar doctor` scans every net-active blocking
 edge and asks the *current* resolver what it should be, reporting three kinds:
 
 | kind | meaning | what `--repair` does |
@@ -160,7 +160,7 @@ edge and asks the *current* resolver what it should be, reporting three kinds:
 
 It is read-only by default and exits **1** while any finding is outstanding, so it can
 gate CI. `--repair` takes the write lock, refuses to run while a reconciler pass is in
-flight, and force-writes the tag `pre-link-audit-repair` at the tracker's pre-run OID.
+flight, and force-writes the tag `pre-doctor-repair` at the tracker's pre-run OID.
 
 Two safety properties are worth knowing before you run it. It writes the replacement
 link **before** removing the stale one, so an interruption leaves *both* edges — a

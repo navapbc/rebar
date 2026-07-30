@@ -1,8 +1,0 @@
-Usage: rebar link-audit [--repair] [--dry-run] [--output json]
-  Scan every net-active blocking link (blocks/depends_on) and report edges that
-  disagree with the current structural rule: ancestor-blocking (a ticket blocking
-  its own ancestor/descendant) and mis-escalated (recorded endpoints differ from
-  what the resolver returns). Read-only by default; exits 1 if anything is found.
-  --repair    write the fixes (replacement link first, then the stale unlink);
-              tags the tracker's pre-run state as pre-link-audit-repair
-  --dry-run   with --repair, preview without writing any event

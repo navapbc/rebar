@@ -1,4 +1,4 @@
-"""``link-audit`` — classification, repair ordering, and the fail-safe paths.
+"""``doctor`` — classification, repair ordering, and the fail-safe paths.
 
 The command finds blocking edges that predate the structural link rule (ticket
 7ab3-9df0-7a90-4ffd) and optionally repairs them. The properties worth pinning are
@@ -39,7 +39,7 @@ def _event_count(tracker: Path) -> int:
 @pytest.mark.scripts
 def test_scan_reports_nothing_for_a_clean_store(graph: ModuleType, tmp_path: Path) -> None:
     """Sibling edges agree with the resolver, so nothing is reported."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "story-parent", ticket_type="story")
@@ -47,7 +47,7 @@ def test_scan_reports_nothing_for_a_clean_store(graph: ModuleType, tmp_path: Pat
     _write_ticket(tracker, "task-b", parent_id="story-parent", ticket_type="task")
     graph.add_dependency("task-a", "task-b", str(tracker), relation="depends_on")
 
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
@@ -56,12 +56,12 @@ def test_scan_reports_nothing_when_there_are_no_blocking_edges(
     graph: ModuleType, tmp_path: Path
 ) -> None:
     """An empty dependency graph is clean, not an error."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "lonely", ticket_type="task")
 
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
@@ -70,14 +70,14 @@ def test_scan_classifies_an_epic_blocked_by_its_own_child(
     graph: ModuleType, tmp_path: Path
 ) -> None:
     """The bug 1803 shape on disk: an epic depending on its own child."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
     _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
 
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
 
     assert len(findings) == 1, findings
     assert findings[0]["kind"] == "ancestor-blocking", findings[0]
@@ -89,10 +89,10 @@ def test_scan_classifies_an_epic_blocked_by_its_own_child(
 @pytest.mark.scripts
 def test_scan_classifies_a_cousin_edge_as_mis_escalated(graph: ModuleType, tmp_path: Path) -> None:
     """A cousin edge recorded under the old rule now resolves to the parents."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _cousin_store(tmp_path)
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
 
     assert len(findings) == 1, findings
     assert findings[0]["kind"] == "mis-escalated", findings[0]
@@ -104,7 +104,7 @@ def test_scan_classifies_a_cousin_edge_as_mis_escalated(graph: ModuleType, tmp_p
 @pytest.mark.scripts
 def test_scan_ignores_non_blocking_relations(graph: ModuleType, tmp_path: Path) -> None:
     """Only blocks/depends_on are audited; the soft relations are never touched."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
@@ -114,14 +114,14 @@ def test_scan_ignores_non_blocking_relations(graph: ModuleType, tmp_path: Path) 
     # is_redundant is computed from the original pair before the non-blocking return.
     _seed_link(tracker, "epic-e", "story-s", "relates_to")
 
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_scan_classifies_an_unreadable_endpoint(graph: ModuleType, tmp_path: Path) -> None:
     """An edge pointing at a ticket that no longer exists is reported, not raised."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "task-a", ticket_type="task")
@@ -132,7 +132,7 @@ def test_scan_classifies_an_unreadable_endpoint(graph: ModuleType, tmp_path: Pat
 
     shutil.rmtree(tracker / "task-b")
 
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
     assert len(findings) == 1, findings
     assert findings[0]["kind"] == "unreadable", findings[0]
 
@@ -146,35 +146,35 @@ def test_scan_classifies_an_unreadable_endpoint(graph: ModuleType, tmp_path: Pat
 @pytest.mark.scripts
 def test_repair_removes_an_ancestor_blocking_edge(graph: ModuleType, tmp_path: Path) -> None:
     """Repair unlinks the bad edge, and a second scan comes back clean."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
     _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
 
-    findings = link_audit.scan(str(tracker))
-    link_audit.repair_finding(findings[0], str(tracker))
+    findings = doctor.scan(str(tracker))
+    doctor.repair_finding(findings[0], str(tracker))
 
     assert findings[0]["repair_status"] == "repaired", findings[0]
     assert not graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker))
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_repair_replaces_a_mis_escalated_edge(graph: ModuleType, tmp_path: Path) -> None:
     """Repair writes the resolved pair and removes the stale one."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _cousin_store(tmp_path)
-    findings = link_audit.scan(str(tracker))
-    link_audit.repair_finding(findings[0], str(tracker))
+    findings = doctor.scan(str(tracker))
+    doctor.repair_finding(findings[0], str(tracker))
 
     assert findings[0]["repair_status"] == "repaired", findings[0]
     assert graph._is_active_link("story-a", "story-b", "depends_on", str(tracker))
     assert not graph._is_active_link("leaf-a", "leaf-b", "depends_on", str(tracker))
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
@@ -188,16 +188,16 @@ def test_repair_writes_the_replacement_before_removing_the_stale_edge(
     link-first, the same failure leaves a SUPERSET — both edges present — which the
     next scan converges. This forces the unlink to raise and asserts nothing is lost.
     """
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _cousin_store(tmp_path)
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
 
     def _boom(*_a, **_k):
         raise ValueError("unlink exploded")
 
-    monkeypatch.setattr(link_audit, "_unlink_edge", _boom)
-    link_audit.repair_finding(findings[0], str(tracker))
+    monkeypatch.setattr(doctor, "_unlink_edge", _boom)
+    doctor.repair_finding(findings[0], str(tracker))
 
     assert findings[0]["repair_status"] == "unrepairable", findings[0]
     assert graph._is_active_link("story-a", "story-b", "depends_on", str(tracker)), (
@@ -214,27 +214,27 @@ def test_repair_is_resumable_from_the_superset_state(
     graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Re-running repair over the interrupted superset converges to the replacement."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _cousin_store(tmp_path)
 
     def _boom(*_a, **_k):
         raise ValueError("unlink exploded")
 
-    original_unlink = link_audit._unlink_edge
-    monkeypatch.setattr(link_audit, "_unlink_edge", _boom)
-    link_audit.repair_finding(link_audit.scan(str(tracker))[0], str(tracker))
+    original_unlink = doctor._unlink_edge
+    monkeypatch.setattr(doctor, "_unlink_edge", _boom)
+    doctor.repair_finding(doctor.scan(str(tracker))[0], str(tracker))
 
     # Restore by re-patching, NOT via monkeypatch.undo(): undo() reverts every patch
     # made through this fixture instance — including the git isolation conftest
     # installs — which would point the store at an uninitialized location.
-    monkeypatch.setattr(link_audit, "_unlink_edge", original_unlink)
-    for finding in link_audit.scan(str(tracker)):
-        link_audit.repair_finding(finding, str(tracker))
+    monkeypatch.setattr(doctor, "_unlink_edge", original_unlink)
+    for finding in doctor.scan(str(tracker)):
+        doctor.repair_finding(finding, str(tracker))
 
     assert graph._is_active_link("story-a", "story-b", "depends_on", str(tracker))
     assert not graph._is_active_link("leaf-a", "leaf-b", "depends_on", str(tracker))
-    assert link_audit.scan(str(tracker)) == []
+    assert doctor.scan(str(tracker)) == []
 
 
 @pytest.mark.unit
@@ -247,7 +247,7 @@ def test_repair_declines_a_pair_whose_unlink_would_cancel_another_relation(
     The pair carries a blocking edge AND a newer relates_to. Unlinking would cancel
     the relates_to, so repair must refuse and leave both links intact.
     """
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
@@ -255,9 +255,9 @@ def test_repair_declines_a_pair_whose_unlink_would_cancel_another_relation(
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
     _seed_link(tracker, "epic-e", "story-s", "relates_to", suffix="2")
 
-    findings = [f for f in link_audit.scan(str(tracker)) if f["kind"] == "ancestor-blocking"]
+    findings = [f for f in doctor.scan(str(tracker)) if f["kind"] == "ancestor-blocking"]
     assert findings, "the blocking edge should still be classified"
-    link_audit.repair_finding(findings[0], str(tracker))
+    doctor.repair_finding(findings[0], str(tracker))
 
     assert findings[0]["repair_status"] == "unrepairable", findings[0]
     assert "ambiguous-pair" in findings[0]["repair_reason"], findings[0]
@@ -269,7 +269,7 @@ def test_repair_declines_a_pair_whose_unlink_would_cancel_another_relation(
 @pytest.mark.scripts
 def test_repair_never_touches_an_unreadable_finding(graph: ModuleType, tmp_path: Path) -> None:
     """An unreadable edge is reported and left exactly as it was."""
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "task-a", ticket_type="task")
@@ -280,9 +280,9 @@ def test_repair_never_touches_an_unreadable_finding(graph: ModuleType, tmp_path:
 
     shutil.rmtree(tracker / "task-b")
 
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
     before = _event_count(tracker)
-    link_audit.repair_finding(findings[0], str(tracker))
+    doctor.repair_finding(findings[0], str(tracker))
 
     assert findings[0]["repair_status"] == "unrepairable", findings[0]
     assert findings[0]["repair_reason"] == "unreadable-endpoint"
@@ -348,7 +348,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     and never tags — which would make every assertion here compare "" to "" and pass
     vacuously.
     """
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
     from rebar._store.gitutil import run_git
 
     tracker = _tracker(tmp_path)
@@ -366,13 +366,13 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
         cp = run_git(str(tracker), *args, check=False)
         assert cp.returncode == 0, (args, cp.stderr)
 
-    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
 
     def _tag_oid() -> str:
         # `git rev-parse <unknown-ref>` echoes the ref name to stdout and exits
         # non-zero, so the return code — not the output — is what says "absent".
         cp = run_git(
-            str(tracker), "rev-parse", "--verify", "-q", link_audit.PRE_REPAIR_TAG, check=False
+            str(tracker), "rev-parse", "--verify", "-q", doctor.PRE_REPAIR_TAG, check=False
         )
         return cp.stdout.strip() if cp.returncode == 0 else ""
 
@@ -383,7 +383,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     assert not _tag_oid(), "the tag must not exist before any repair run"
 
     pre_oid_1 = _head()
-    _f1, reported_1 = link_audit.run_repair(link_audit.scan(str(tracker)), str(tracker))
+    _f1, reported_1 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker))
     assert reported_1 == pre_oid_1, (reported_1, pre_oid_1)
     assert _tag_oid() == pre_oid_1, "tag must be written at the pre-run OID"
 
@@ -395,7 +395,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     assert pre_oid_2 != pre_oid_1, "fixture precondition: HEAD must move between runs"
 
     _seed_link(tracker, "epic-e", "story-s", "depends_on", suffix="9")
-    _f2, reported_2 = link_audit.run_repair(link_audit.scan(str(tracker)), str(tracker))
+    _f2, reported_2 = doctor.run_repair(doctor.scan(str(tracker)), str(tracker))
     assert reported_2 == pre_oid_2, (reported_2, pre_oid_2)
     assert _tag_oid() == pre_oid_2, "a second run must RE-POINT the tag, not fail"
 
@@ -406,12 +406,12 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
     "rest,expect_init_only",
     [([], True), (["--repair"], False)],
 )
-def test_link_audit_arm_reconverges_only_for_repair(
+def test_doctor_arm_reconverges_only_for_repair(
     monkeypatch: pytest.MonkeyPatch, rest: list[str], expect_init_only: bool
 ) -> None:
-    """A plain `link-audit` must not reconverge the store; only `--repair` may.
+    """A plain `doctor` must not reconverge the store; only `--repair` may.
 
-    `link-audit` deliberately does NOT join `_WRITES_FULL`, whose arms reconverge on
+    `doctor` deliberately does NOT join `_WRITES_FULL`, whose arms reconverge on
     every invocation — that would make a read-only audit mutate/​sync the store. Its
     own arm passes ``init_only=True`` unless ``--repair`` is present.
     """
@@ -421,9 +421,9 @@ def test_link_audit_arm_reconverges_only_for_repair(
     monkeypatch.setattr(
         _cli, "ensure_initialized", lambda *_a, **kw: seen.append(kw.get("init_only"))
     )
-    monkeypatch.setattr("rebar._commands.link_audit.link_audit_cli", lambda *_a, **_k: 0)
+    monkeypatch.setattr("rebar._commands.doctor.doctor_cli", lambda *_a, **_k: 0)
 
-    _cli._dispatch("link-audit", rest)
+    _cli._dispatch("doctor", rest)
 
     assert seen == [expect_init_only], (rest, seen)
 
@@ -464,7 +464,7 @@ def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     Against the pre-fix implementation this test fails twice over: the finding comes
     back `unrepairable` carrying a flock timeout, and the call takes ~60s per item.
     """
-    from rebar._commands import link_audit
+    from rebar._commands import doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
@@ -472,13 +472,13 @@ def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
     _git_backed(tracker)
 
-    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
 
-    findings = link_audit.scan(str(tracker))
+    findings = doctor.scan(str(tracker))
     assert len(findings) == 1, findings
 
     started = time.monotonic()
-    link_audit.run_repair(findings, str(tracker))
+    doctor.run_repair(findings, str(tracker))
     elapsed = time.monotonic() - started
 
     assert findings[0]["repair_status"] == "repaired", findings[0]
@@ -500,7 +500,7 @@ def test_json_output_carries_the_documented_finding_fields(
     findings array is empty and the per-finding fields are never actually exercised.
     This asserts on real parsed keys and values.
     """
-    from rebar._commands import composer, link_audit
+    from rebar._commands import composer, doctor
 
     tracker = _tracker(tmp_path)
     _write_ticket(tracker, "epic-e", ticket_type="epic")
@@ -508,12 +508,12 @@ def test_json_output_carries_the_documented_finding_fields(
     _seed_link(tracker, "epic-e", "story-s", "depends_on")
     _git_backed(tracker)
 
-    monkeypatch.setattr(link_audit, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
     monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
-    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
 
     # ── read-only pass ────────────────────────────────────────────────────────
-    rc = link_audit.link_audit_cli(["--output", "json"])
+    rc = doctor.doctor_cli(["--output", "json"])
     payload = json.loads(capsys.readouterr().out)
 
     assert rc == 1, "exit 1 while findings are outstanding"
@@ -530,7 +530,7 @@ def test_json_output_carries_the_documented_finding_fields(
     assert "repair_status" not in finding, "a read-only pass must not report a repair"
 
     # ── repair pass ───────────────────────────────────────────────────────────
-    rc = link_audit.link_audit_cli(["--repair", "--output", "json"])
+    rc = doctor.doctor_cli(["--repair", "--output", "json"])
     repaired = json.loads(capsys.readouterr().out)
 
     assert rc == 0, "exit 0 once nothing is outstanding"
