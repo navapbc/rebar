@@ -513,8 +513,25 @@ and caps each evidence call at 40 iterations and 4,096 output tokens. Recovery
 appends the bug verifier's deterministic “actually resolved” core criterion;
 non-bug tickets without explicit checklist criteria cannot be exhaustively
 enumerated and fail closed before recovery calls. Recovery
-accepts at most 32 criteria, 4,000 characters per criterion, 32,000 criterion
-characters in total, and 24,000 characters of ticket context. Each compact
+accepts at most 32 criteria, 4,000 characters per criterion, and 32,000 criterion
+characters in total. Ticket context is capped at **100,000 characters**, and that cap
+must never be smaller than the 32,000-character criteria budget: criteria are extracted
+from the description and the description is embedded in the context, so a smaller
+context cap would refuse criteria sets the criteria bounds had just accepted (the
+32,000-vs-24,000 incoherence fixed in `d59e`). 100,000 covers the largest real tickets
+observed — 41,595 and 34,282 characters — with roughly 2.4× headroom, while still
+bounding the per-criterion re-send, since recovery sends the whole context once per
+criterion (worst case: 32 criteria × this cap).
+
+**Nothing is ever elided.** An over-cap context is refused, not trimmed. Trimming was
+implemented and then withdrawn as a signed-false-PASS vector: on an epic the gate
+assembles one block per ticket (`assemble_context(graph=True)`), each with its own
+`#### Comments` heading, so "drop the oldest comment history" silently deleted whole
+child tickets — including their unmet acceptance criteria — while reporting only that
+comments had been removed. Elision is unsafe in both directions: dropping evidence that
+a criterion *is* met causes a false FAIL, and dropping evidence that it is *not* causes
+a false PASS. A refusal is a visible false-block; a bad elision is an invisible signed
+false PASS, and this gate signs its verdict. Each compact
 evidence record is limited to 12,000 characters, all evidence is limited to
 96,000 characters, and the complete finalizer input is limited to 132,000
 characters. These deterministic bounds are checked before the corresponding
