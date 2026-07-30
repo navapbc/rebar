@@ -430,12 +430,22 @@ jobs:
         # real vCPU count (ubuntu-latest = 4, macos arm = 3), NOT `-n auto` (which
         # over-subscribes on larger local hosts). Coverage combines correctly only
         # because `parallel = true` is set in [tool.coverage.run] (pyproject.toml).
+        #
+        # COVERAGE IS COLLECTED ON THE UBUNTU CELLS ONLY. The macOS cell exists for
+        # platform-compat coverage (flock/mkdir lock, gtimeout), not for a coverage
+        # number: `fail_under` is enforced identically by the three ubuntu cells over
+        # the byte-identical `-m` selection, so tracing the macOS run too was pure
+        # duplicate work. It was also the EXPENSIVE duplicate — the macOS default-suite
+        # step is the single longest job in the Verified gate (15.4m of an 18.6m job on
+        # run #1823) AND it holds one of the scarce macOS runner slots (peak 4 observed
+        # concurrent; changes deep in a burst queued 6.7-8.4m behind it). The SAME 7856
+        # tests still run here; only the tracing is dropped. Ticket f3d4.
         run: >-
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
           -q -p no:cacheprovider --durations=25
           --basetemp="${{ runner.temp }}/rebar-basetemp"
-          --cov=rebar --cov-report=term-missing:skip-covered
+          ${{ !startsWith(matrix.os, 'macos') && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI

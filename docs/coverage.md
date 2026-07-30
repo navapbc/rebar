@@ -47,6 +47,22 @@ pytest -m "not integration and not external" -n 4 --dist worksteal \
   --cov=rebar --cov-report=term-missing:skip-covered -q
 ```
 
+### CI collects coverage on the **ubuntu** cells only
+
+The `test` matrix in `.github/workflows/_build-and-test.yml` passes `--cov` on the
+three ubuntu cells and **omits it on macOS**. The macOS cell runs the byte-identical
+`-m "not integration and not external"` selection — the same tests, no coverage loss —
+but is not traced, because nothing consumes a macOS coverage number: `fail_under` is
+enforced three times over on ubuntu against the same selection.
+
+The reason to skip it there specifically is cost. The macOS default-suite step is the
+longest job in the Gerrit Verified gate (15.4m of an 18.6m job on run #1823, against
+~5-6m for the same tests on ubuntu), so it sets the gate's critical path. It also holds
+one of a small number of concurrently-available macOS runners — peak 4 concurrent macOS
+jobs were observed across 25 sampled jobs, with changes dispatched later in a burst
+queueing 6.7-8.4m for a slot. Shortening that job therefore helps twice: once on its own
+run, and again for every other change waiting behind it.
+
 ## Measured baseline
 
 | Date       | Scope                                   | In-process total |
