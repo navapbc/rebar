@@ -233,7 +233,8 @@ Usage: rebar init [--silent]
 ```
 Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)
   relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from | caused_by
-  blocking deps (blocks/depends_on) are promoted to a comparable hierarchy level
+  blocking deps (blocks/depends_on) link tickets that share a parent; across
+  sub-trees they escalate to the nearest common ancestor's children
 ```
 
 ### `list`

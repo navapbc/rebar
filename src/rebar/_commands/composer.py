@@ -634,7 +634,7 @@ def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) 
     if res.get("is_redundant"):
         print(
             f"[DRY RUN] Would reject: {src_id} {relation} {tgt_id} — "
-            "redundant link (direct child) (no event written)"
+            "redundant link (ancestor-descendant) (no event written)"
         )
     elif res.get("was_redirected"):
         rs = res.get("resolved_source", src_id)

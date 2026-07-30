@@ -165,8 +165,9 @@ rebar link <a> <b> blocks                          # a blocks b
 ```
 
 Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
-`discovered_from`. Blocking links (`blocks` / `depends_on`) are promoted to a
-comparable hierarchy level automatically. Remove a link with `rebar unlink <a> <b>`
+`discovered_from`. Blocking links (`blocks` / `depends_on`) connect tickets that
+share a parent; across sub-trees they escalate automatically to the children of
+the two tickets' nearest common ancestor. Remove a link with `rebar unlink <a> <b>`
 (no relation argument; removes the most-recent link for that pair).
 
 **Tag** and **untag** for lightweight labels; `rebar edit` changes fields:
