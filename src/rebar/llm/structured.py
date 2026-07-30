@@ -37,30 +37,25 @@ from typing import Any
 
 from rebar.llm.errors import StructuredOutputError, UnretryableOutputError
 
-# Providers whose Pydantic AI profile offers provider-enforced constrained decoding
-# (strict json_schema / native Structured Outputs). Anthropic shipped a strict path in
-# early 2026 but Pydantic AI may still route it through ToolOutput per the model
-# profile — so we keep Anthropic on the safe PromptedOutput path (which, with the
-# tolerant parse below, is reliable) until the profile is confirmed. This is a small
-# capability map, NOT per-provider behaviour code.
-_NATIVE_OUTPUT_PROVIDERS = frozenset({"openai", "google-gla", "google-vertex", "groq"})
-
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
-def output_mode(model_cls, model_str: str, *, thinking: bool = False):
+def output_mode(model_cls, caps, *, thinking: bool = False):
     """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
 
-    NativeOutput for providers that enforce a strict json_schema; PromptedOutput for
-    everyone else (the broadest, and — crucially — not a constrained/native output mode,
-    so it stays compatible with Claude extended thinking, which pydantic_ai's default
-    ToolOutput mode is not). ``thinking`` forces PromptedOutput regardless of provider:
-    pairing extended thinking with a native/forced output constraint is the documented
-    Anthropic 400, so the prompted mode is the only thinking-compatible choice."""
+    NativeOutput when ``caps.native_structured_output`` (a :class:`rebar.llm.capabilities.
+    ModelCapabilities`, read from the model's PROFILE — never a provider-name string, story
+    S2); PromptedOutput for everyone else (the broadest, and — crucially — not a
+    constrained/native output mode, so it stays compatible with Claude extended thinking,
+    which pydantic_ai's default ToolOutput mode is not). ``thinking`` forces PromptedOutput
+    regardless of capability: pairing extended thinking with a native/forced output
+    constraint is the documented Anthropic 400, so the prompted mode is the only
+    thinking-compatible choice. This deliberately does NOT read ``caps.supports_thinking`` —
+    the 400 is a property of the CALL, so the caller's ``thinking`` argument is authoritative;
+    ``supports_thinking`` exists for signed provenance, not for this branch."""
     from pydantic_ai import NativeOutput, PromptedOutput
 
-    provider = model_str.split(":", 1)[0] if ":" in model_str else ""
-    if not thinking and provider in _NATIVE_OUTPUT_PROVIDERS:
+    if not thinking and caps.native_structured_output:
         return NativeOutput(model_cls)
     return PromptedOutput(model_cls)
 
