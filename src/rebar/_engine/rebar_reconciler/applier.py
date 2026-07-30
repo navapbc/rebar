@@ -757,6 +757,10 @@ def _apply_one(mutation: dict, ctx: BatchApplyContext, mutations_with_outcomes: 
         # Control-flow / fail-fast contracts — re-raise (see record_backstop_failure):
         # HeadDriftError (drift-abort), RescheduleError (rebase-retry exhausted), HTTPError
         # (404 soft-failed in the handler; non-404 deliberately propagates fail-fast).
+        # Bug 449f-f9bf-be90-47fe: that 404 clause held for `update` ONLY — create/delete
+        # wrapped their leaf in nothing, so a 404 from either escaped here and aborted the
+        # pass (1 of 30 mutations applied, GHA run 30465914822). All three handlers now
+        # share the soft-fail, so the invariant this arm asserts holds for every action.
         raise
     except Exception as exc:  # noqa: BLE001 — per-mutation failure backstop (records + continues)
         result = record_backstop_failure(mutation, exc, action, ctx)

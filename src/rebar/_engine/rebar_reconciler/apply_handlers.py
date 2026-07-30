@@ -8,12 +8,17 @@ that wraps the ``batch_dispatch`` Jira-call primitives, one handler per
 
     - ``handle_create`` — REST-budget counting + swallowed-comment surfacing
       around ``create_one``.
-    - ``handle_update`` — the 404 / assignee-unresolved per-mutation soft-fails,
-      the sub-op (labels/comments/links) telemetry, the bug-3f04 silent-no-op
+    - ``handle_update`` — the assignee-unresolved per-mutation soft-fail, the
+      sub-op (labels/comments/links) telemetry, the bug-3f04 silent-no-op
       canary, and set-valued-field provenance, around ``update_one``.
     - ``handle_delete`` — ``delete_one`` (already-gone tolerance lives in the
       primitive).
     - ``handle_unknown`` — the legacy unrecognised-action error outcome.
+
+All three dispatching handlers share ONE stale-binding-404 soft-fail
+(``_soft_fail_stale_binding_404``, bug 449f-f9bf-be90-47fe): a Jira ``404`` on any
+outbound mutation is per-mutation, never pass-fatal; every other ``HTTPError``
+still propagates fail-fast to ``applier._apply_one``.
 
 Each handler takes the per-pass :class:`BatchApplyContext` plus a single mutation
 dict and returns a :class:`HandlerResult` the sequencer appends to the manifest.
@@ -93,6 +98,39 @@ class HandlerResult:
     soft_failed: bool = False
 
 
+def _soft_fail_stale_binding_404(
+    mutation: dict, exc: urllib.error.HTTPError, action: str
+) -> HandlerResult:
+    """Record a Jira ``404`` on one mutation as a PER-MUTATION soft failure.
+
+    Single source of truth for the stale-binding-404 contract, shared by all three
+    outbound handlers (bug 449f-f9bf-be90-47fe). A 404 on a mutation's target means
+    that Jira issue is gone (the 1e08 stale-binding class): the mutation itself
+    failed, but the *pass* is still perfectly valid, so we record the failure and let
+    the sequencer dispatch the rest of the batch. Only ``handle_update`` used to own
+    this logic (bug tan-coin-atone / 6614-43cd-3a48-4f63); ``handle_create`` and
+    ``handle_delete`` had NO try/except at all, so a 404 from either leaf escaped
+    ``applier._apply_one`` and aborted the whole pass — GHA run 30465914822 applied
+    1 of 30 planned mutations and silently skipped 29, violating bug
+    e534-5154-2401-40fb's "no valid mutation is silently skipped" contract.
+
+    Callers re-raise non-404 ``HTTPError``s themselves: 5xx and friends keep the
+    fail-fast behavior that ``applier._apply_one``'s re-raise arm depends on.
+    """
+    key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
+    logger.warning(
+        "outbound %s skipped: Jira issue %s gone (HTTP 404) "
+        "— stale binding (1e08); recording per-mutation failure "
+        "and continuing the pass",
+        action,
+        key,
+    )
+    outcome = dict(mutation)
+    outcome["result"] = None
+    outcome["error"] = f"stale-binding-404: {exc!s}"
+    return HandlerResult(outcome, soft_failed=True)
+
+
 def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     """Dispatch an outbound CREATE via ``create_one`` and assemble its outcome."""
     outcome = dict(mutation)
@@ -101,16 +139,26 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     # outcome rather than reporting a clean error=None, mirroring the update-path
     # handling below (bug 6afc).
     comment_errors: list[str] = []
-    result = create_one(
-        mutation,
-        ctx.client,
-        rest_calls=ctx.rest_calls,
-        deferred_creates=ctx.deferred_creates,
-        events_list=ctx.events_list,
-        repo_root=ctx.repo_root,
-        binding_store=ctx.binding_store,
-        comment_errors=comment_errors,
-    )
+    try:
+        result = create_one(
+            mutation,
+            ctx.client,
+            rest_calls=ctx.rest_calls,
+            deferred_creates=ctx.deferred_creates,
+            events_list=ctx.events_list,
+            repo_root=ctx.repo_root,
+            binding_store=ctx.binding_store,
+            comment_errors=comment_errors,
+        )
+    except urllib.error.HTTPError as exc:
+        # Bug 449f-f9bf-be90-47fe: a 404 from the create leaf (e.g. a POST against a
+        # project/parent that has been deleted, or a sub-call against a stale
+        # binding) is a per-mutation failure, not a pass-fatal one. Return BEFORE the
+        # rest_calls accounting below so a failed create never consumes REST budget.
+        # Non-404 (5xx, 4xx-other) still propagates fail-fast, unchanged.
+        if exc.code != 404:
+            raise
+        return _soft_fail_stale_binding_404(mutation, exc, "create")
     # Only count REST call on actual create (not dedup-skipped, not deferred)
     if result is not None and result.get("status") != "dedup-create-skipped":
         ctx.rest_calls += 1
@@ -170,18 +218,13 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         # tolerance and the AssigneeNotFoundError soft-fail below). Positive-404
         # evidence feeds the binding-GC design in
         # docs/designs/sync-hardening-proposal.md Item 4b.
+        # Bug 449f-f9bf-be90-47fe: the recording itself now lives in the shared
+        # _soft_fail_stale_binding_404 helper so create/update/delete cannot drift
+        # apart — the log line and the "stale-binding-404: …" error string are
+        # byte-identical to what this arm emitted before the extraction.
         if exc.code != 404:
             raise
-        _outcome_key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
-        logger.warning(
-            "outbound update skipped: Jira issue %s gone (HTTP 404) "
-            "— stale binding (1e08); recording per-mutation failure "
-            "and continuing the pass",
-            _outcome_key,
-        )
-        outcome["result"] = None
-        outcome["error"] = f"stale-binding-404: {exc!s}"
-        return HandlerResult(outcome, soft_failed=True)
+        return _soft_fail_stale_binding_404(mutation, exc, "update")
     except BackendAssigneeNotFoundError as exc:
         alert_store = _load_alert_store()
         alert_store.append(
@@ -269,7 +312,17 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
 def handle_delete(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     """Dispatch an outbound DELETE via ``delete_one`` (already-gone tolerated)."""
     outcome = dict(mutation)
-    delete_one(mutation, ctx.client)
+    try:
+        delete_one(mutation, ctx.client)
+    except urllib.error.HTTPError as exc:
+        # Bug 449f-f9bf-be90-47fe: delete_one tolerates the already-gone case it can
+        # SEE, but a raw urllib 404 from a REST sub-call escapes it — and with no
+        # try/except here it escaped _apply_one too and killed the pass. A 404 on a
+        # delete is the most benign failure there is (the target is already gone), so
+        # record it per-mutation and continue; non-404 still propagates fail-fast.
+        if exc.code != 404:
+            raise
+        return _soft_fail_stale_binding_404(mutation, exc, "delete")
     outcome["result"] = None
     return HandlerResult(outcome)
 
@@ -311,8 +364,10 @@ def record_backstop_failure(
     ``bridge_alerts`` entry + an outcome carrying an ``"error"`` key, which counts as
     a ``mutation_failure`` in reconcile's manifest tally) instead of propagating and
     aborting the whole pass. The caller re-raises the control-flow / fail-fast
-    contracts (HeadDriftError / RescheduleError / non-404 HTTPError) before reaching
-    here, so only genuine per-mutation failures land in this backstop.
+    contracts (HeadDriftError / RescheduleError / HTTPError) before reaching here, so
+    only genuine per-mutation failures land in this backstop. Since bug
+    449f-f9bf-be90-47fe every handler soft-fails a 404 itself, so the HTTPError that
+    reaches the caller's re-raise arm is always a non-404 one.
     """
     key = mutation.get("key") or mutation.get("local_id") or "<unknown>"
     _load_alert_store().append(

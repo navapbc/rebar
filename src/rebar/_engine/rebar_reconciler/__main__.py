@@ -327,7 +327,9 @@ def run_pass(
     """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
 
     Returns 0 on converged state, EXIT_RESCHEDULE (75) when applier signals a
-    reschedule (rebase_retry exhausted), 1 on any other unrecoverable error.
+    reschedule (rebase_retry exhausted) OR when the pass lock's lease is lost
+    mid-pass (bug 449f-f9bf-be90-47fe — see the ReconcileLockLost arm below), and
+    1 on any other unrecoverable error.
 
     When *pass_id* is None (legacy entry-point), one is generated here so the
     helper remains usable in isolation. Production callers should pass the
@@ -355,6 +357,15 @@ def run_pass(
         pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     reschedule_error_cls = getattr(applier, "RescheduleError", None) if applier else None
     exit_reschedule = getattr(applier, "EXIT_RESCHEDULE", 75) if applier else 75
+    # Bug 449f-f9bf-be90-47fe: resolve ReconcileLockLost the same defensive way as
+    # RescheduleError above — it lives in the _advisory_lock sibling (loaded under the
+    # dotted key so a test-seeded stub is reused), and a stub without the attribute (or
+    # a deployment without the file) must degrade to "not classifiable", not blow up.
+    try:
+        _advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
+    except ImportError:
+        _advisory = None
+    lock_lost_cls = getattr(_advisory, "ReconcileLockLost", None) if _advisory else None
 
     try:
         result = reconcile.reconcile_once(
@@ -368,6 +379,22 @@ def run_pass(
         if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
             print(
                 f"RESCHEDULE: reconcile_once signalled reschedule: {exc}",
+                file=sys.stderr,
+            )
+            return exit_reschedule
+        if lock_lost_cls is not None and isinstance(exc, lock_lost_cls):
+            # Bug 449f-f9bf-be90-47fe: losing the pass-lock lease mid-pass is the
+            # DESIGNED outcome of ADR 0031 (docs/adr/0031-reconciler-ref-lock.md,
+            # ticket 2711): the heartbeat noticed another holder, so this pass aborts,
+            # the finally-release no-ops (the ref already moved), and a re-run is
+            # idempotent. That is exactly EXIT_RESCHEDULE's meaning ("the next
+            # scheduled run will retry"), and it matches the exit 3 the SAME condition
+            # gets when detected BEFORE the pass starts. It used to fall through to
+            # exit 1, which .github/workflows/reconcile-bridge.yml (whitelist 0/75/3)
+            # turned into a red run for a benign, expected race. Benign is not silent:
+            # the exception text (which names the lease loss) still goes to stderr.
+            print(
+                f"RESCHEDULE: pass lock lease lost mid-pass: {exc}",
                 file=sys.stderr,
             )
             return exit_reschedule
