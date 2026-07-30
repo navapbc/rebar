@@ -21,6 +21,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,12 @@ ENV_VAR = "REBAR_USAGE_LOG"
 
 #: The integer token fields ``_extract_usage()`` reports (runner.py); summed by summarize().
 _FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "requests")
+
+#: The four billable token fields genai-prices consumes (``requests`` is not billable).
+_TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+
+#: The cost footer when the optional ``pricing`` extra is not installed.
+_PRICING_UNAVAILABLE = "unavailable (install rebar[pricing])"
 _FAILURE_MESSAGE_SINK: ContextVar[list[object] | None] = ContextVar(
     "rebar_failure_message_sink", default=None
 )
@@ -104,8 +111,12 @@ def failure_usage(
     }
 
 
-def record(usage: dict, *, op: str) -> None:
+def record(usage: dict, *, op: str, model: str | None = None, provider: str | None = None) -> None:
     """Append one usage record for a single LLM call to ``$REBAR_USAGE_LOG`` (JSONL).
+
+    ``model``/``provider`` (when known) and a UTC ISO-8601 timestamp — stamped here, not
+    by the caller — make the row priceable later by :func:`summarize`'s optional
+    genai-prices integration (historical prices are looked up by timestamp).
 
     No-op when the env var is unset (the default) or ``usage`` is empty. Best-effort: a
     telemetry sink must never break the LLM call path, so any write error is logged and
@@ -119,6 +130,11 @@ def record(usage: dict, *, op: str) -> None:
     if not path or not usage:
         return
     row: dict[str, object] = {"op": op}
+    if model:
+        row["model"] = model
+    if provider:
+        row["provider"] = provider
+    row["timestamp"] = datetime.now(timezone.utc).isoformat()
     for field in _FIELDS:
         row[field] = int(usage.get(field, 0) or 0)
     try:
@@ -146,8 +162,60 @@ def _read(path: str) -> list[dict]:
     return rows
 
 
+def usage_kwargs(row: dict) -> dict[str, int]:
+    """Adapter: a stored JSONL row -> genai-prices ``Usage`` kwargs.
+
+    Maps the four billable token fields one-to-one; an absent or null field defaults to
+    0. Pure dict-to-kwargs — no dependence on live pydantic-ai usage objects, so rows
+    written by any past run remain priceable.
+    """
+    return {field: int(row.get(field, 0) or 0) for field in _TOKEN_FIELDS}
+
+
+def _pricing_module():
+    """Return the ``genai_prices`` module, or None when the extra is not installed."""
+    try:
+        import genai_prices
+    except ImportError:
+        return None
+    return genai_prices
+
+
+def _price_row(pricing, row: dict) -> float | None:
+    """Est. USD cost for one row, or None (= unpriced). Pricing must never break
+    summarize: LookupError (genai-prices' unknown-model signal) and a missing model are
+    silently unpriced; anything else logs a WARNING and is unpriced."""
+    model = row.get("model")
+    if not model:
+        return None
+    try:
+        raw_ts = row.get("timestamp")
+        timestamp = datetime.fromisoformat(str(raw_ts)) if raw_ts else None
+        price = pricing.calc_price(
+            pricing.Usage(**usage_kwargs(row)),
+            model_ref=str(model),
+            provider_id=row.get("provider") or None,
+            genai_request_timestamp=timestamp,
+        )
+        return float(price.total_price)
+    except LookupError:
+        return None
+    except Exception as exc:  # noqa: BLE001 — pricing is best-effort telemetry, never a hard error
+        logger.warning("usage-log: pricing failed for model=%s: %s", model, exc)
+        return None
+
+
+def _cost_cell(cost: float, priced: int) -> str:
+    return f"${cost:.4f}" if priced else "—"
+
+
 def summarize(path: str) -> str:
     """Return a Markdown summary (per-op breakdown + totals) of the JSONL at ``path``.
+
+    When the optional ``pricing`` extra (genai-prices) is installed, each row is priced
+    from its own model/provider/timestamp and the table gains an "est. cost" column plus
+    a per-model rollup; unpriceable rows are excluded from cost (never guessed). Without
+    the extra, token totals still print and the cost line reads "unavailable".
 
     A missing or empty file yields exactly ``No LLM calls recorded.`` so a run that made
     zero LLM calls still prints an honest, valid line.
@@ -155,9 +223,15 @@ def summarize(path: str) -> str:
     rows = _read(path)
     if not rows:
         return "No LLM calls recorded."
+    pricing = _pricing_module()
     per_op: dict[str, dict[str, int]] = {}
+    op_cost: dict[str, float] = {}
+    op_priced: dict[str, int] = {}
+    per_model: dict[str, dict[str, float]] = {}
     totals = {field: 0 for field in _FIELDS}
     calls = 0
+    unpriced = 0
+    total_cost = 0.0
     for row in rows:
         calls += 1
         op = str(row.get("op", "?"))
@@ -167,23 +241,62 @@ def summarize(path: str) -> str:
             value = int(row.get(field, 0) or 0)
             agg[field] += value
             totals[field] += value
+        if pricing is not None:
+            cost = _price_row(pricing, row)
+            if cost is None:
+                unpriced += 1
+            else:
+                op_cost[op] = op_cost.get(op, 0.0) + cost
+                op_priced[op] = op_priced.get(op, 0) + 1
+                total_cost += cost
+                model = str(row.get("model"))
+                rollup = per_model.setdefault(model, {"calls": 0, "cost": 0.0})
+                rollup["calls"] += 1
+                rollup["cost"] += cost
+    cost_header = " est. cost |" if pricing is not None else ""
     lines = [
         "### LLM token usage",
         "",
-        "| op | calls | input | output | cache_read | cache_write | requests |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"| op | calls | input | output | cache_read | cache_write | requests |{cost_header}",
+        f"| --- | ---: | ---: | ---: | ---: | ---: | ---: |{' ---: |' if cost_header else ''}",
     ]
     for op in sorted(per_op):
         agg = per_op[op]
+        cost_col = (
+            f" {_cost_cell(op_cost.get(op, 0.0), op_priced.get(op, 0))} |"
+            if pricing is not None
+            else ""
+        )
         lines.append(
             f"| {op} | {agg['calls']} | {agg['input_tokens']} | {agg['output_tokens']} | "
             f"{agg['cache_read_tokens']} | {agg['cache_write_tokens']} | {agg['requests']} |"
+            f"{cost_col}"
         )
+    total_cost_col = (
+        f" **{_cost_cell(total_cost, calls - unpriced)}** |" if pricing is not None else ""
+    )
     lines.append(
         f"| **total** | **{calls}** | **{totals['input_tokens']}** | **{totals['output_tokens']}** "
         f"| **{totals['cache_read_tokens']}** | **{totals['cache_write_tokens']}** "
-        f"| **{totals['requests']}** |"
+        f"| **{totals['requests']}** |{total_cost_col}"
     )
+    if pricing is None:
+        lines += ["", f"est. cost: {_PRICING_UNAVAILABLE}"]
+    else:
+        if unpriced:
+            plural = "s" if unpriced != 1 else ""
+            lines += ["", f"est. cost excludes {unpriced} unpriced call{plural}."]
+        if per_model:
+            lines += [
+                "",
+                "#### Est. cost by model",
+                "",
+                "| model | calls | est. cost |",
+                "| --- | ---: | ---: |",
+            ]
+            for model in sorted(per_model):
+                rollup = per_model[model]
+                lines.append(f"| {model} | {int(rollup['calls'])} | ${rollup['cost']:.4f} |")
     return "\n".join(lines)
 
 

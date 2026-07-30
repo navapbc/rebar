@@ -276,6 +276,26 @@ MCP: the `review_ticket` tool is exposed but **disabled unless
 `REBAR_MCP_ALLOW_LLM=1`** (it has cost/network side-effects). It returns a plain
 dict (the `review_result` shape) and advertises no `outputSchema` by design.
 
+## Usage log (token spend + optional cost accounting)
+
+`rebar.llm.usage_log` is the opt-in per-call spend sink for the billable CI jobs: when
+`REBAR_USAGE_LOG` names a path, the runner appends one JSON object per LLM call (JSONL)
+with the op label, the four token fields + request count, the provider-qualified
+**model** actually invoked, the inferred **provider**, and a UTC ISO-8601 **timestamp**
+(stamped inside `record()`). `python -m rebar.llm.usage_log summarize <path>` folds the
+file into a Markdown table (per-op breakdown + totals) for `$GITHUB_STEP_SUMMARY`.
+
+**Est. cost is an optional add-in**: install the `pricing` extra
+(`pip install 'nava-rebar[pricing]'` → [genai-prices](https://github.com/pydantic/genai-prices),
+pydantic's offline price data with cache read/write tiers and historical prices by
+timestamp). With it installed, `summarize` prices each row from that row's own
+model/provider/timestamp (multi-model ops sum correctly row by row) and adds an
+"est. cost" column plus a per-model rollup table. Pricing never breaks the summary and
+never guesses: rows genai-prices cannot price (unknown model → its typed `LookupError`,
+rows from the pre-metadata format, or any pricing crash — logged at WARNING) are
+excluded and the summary notes "excludes N unpriced calls". Without the extra, token
+totals still print and the cost line reads `unavailable (install rebar[pricing])`.
+
 ## External-integration suite (live validation)
 
 Tests that hit third-party services live in **`tests/external/`** and are marked

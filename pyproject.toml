@@ -127,6 +127,13 @@ agents = [
 eval = [
     "inspect-ai>=0.3.221",
 ]
+# Optional est.-cost accounting for `usage_log.summarize` (ticket 41be): pydantic's
+# genai-prices bundles offline price data (cache tiers, historical prices by timestamp)
+# and raises a typed LookupError for unknown models. Imported lazily; when absent the
+# summary prints token totals with cost "unavailable (install rebar[pricing])".
+pricing = [
+    "genai-prices",
+]
 # OTLP trace sink (epic a88f / WS-J). Net-new extra. WRITE-ONLY by rule —
 # OpenTelemetry is a sink, never read back into a rebar decision (oracle
 # discipline). Imported lazily behind guard_import(..., extra="tracing").

@@ -30,7 +30,7 @@ from rebar.llm.anthropic_model import (
     _local_proxy_bypass_base_url,
     _pai_model,
 )
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
@@ -544,7 +544,7 @@ class PydanticAIRunner:
         # Durable, opt-in spend record for the weekly billable CI jobs (no-op unless
         # REBAR_USAGE_LOG is set) — the runner is the one chokepoint shared by both the
         # external tier and the live prompt-eval, so a single sink covers both.
-        usage_log.record(usage, op=_call_label)
+        usage_log.record(usage, op=_call_label, model=ran_model, provider=infer_provider(ran_model))
         return result
 
 
