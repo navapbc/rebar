@@ -672,3 +672,78 @@ def test_unrepairable_finding_leaves_its_edge_and_the_run_continues(
     )
 
     assert rc == 1, "outstanding findings remain, so the exit status must say so"
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_no_flag_run_writes_no_events(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """A bare `rebar doctor` is a diagnostic and must not mutate the store.
+
+    Asserted through `doctor_cli` rather than `scan()`, because the CLI is what a
+    user actually invokes and the repair branch lives there — testing `scan()`
+    alone would leave the flag routing unpinned.
+    """
+    from rebar._commands import composer, doctor
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+    _git_backed(tracker)
+
+    monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    before = _event_count(tracker)
+    rc = doctor.doctor_cli([])
+    capsys.readouterr()
+
+    assert _event_count(tracker) == before, "a no-flags run must write no events"
+    assert rc == 1, "the finding is still outstanding"
+    assert graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker)), (
+        "a diagnostic run must leave the offending edge in place"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_non_blocking_only_store_is_untouched_by_repair(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """A store whose only links are non-blocking reports nothing and survives `--repair`.
+
+    The ancestor pair here WOULD be reported were the relation blocking, so this
+    pins that the relation filter — not the hierarchy — is what excludes it.
+    Compares the event-file LISTING, not just the count, so a same-count
+    rewrite could not pass.
+    """
+    from rebar._commands import composer, doctor
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    for i, relation in enumerate(("relates_to", "supersedes", "discovered_from"), start=1):
+        _seed_link(tracker, "epic-e", "story-s", relation, suffix=str(i))
+    _git_backed(tracker)
+
+    monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    def _listing() -> list[str]:
+        return sorted(
+            str(p.relative_to(tracker))
+            for p in tracker.glob("*/*.json")
+            if not p.name.startswith(".")
+        )
+
+    before = _listing()
+    rc = doctor.doctor_cli(["--repair", "--output", "json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["finding_count"] == 0, payload
+    assert rc == 0, "a clean store exits 0"
+    assert _listing() == before, "--repair must not touch a store with no blocking edges"
