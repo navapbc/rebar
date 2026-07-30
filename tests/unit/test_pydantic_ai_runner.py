@@ -8,13 +8,13 @@ from __future__ import annotations
 import pytest
 
 from rebar.llm import pai_tools
+from rebar.llm.capabilities import cache_settings_for, capabilities_for
 from rebar.llm.config import RUNNERS, LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMRunnerError
 from rebar.llm.runner import (
     FakeRunner,
     PydanticAIRunner,
     RunRequest,
-    _anthropic_cache_settings,
     _extract_usage,
     _pai_model,
     get_runner,
@@ -310,13 +310,15 @@ def test_preflight_ok_with_extra_installed():
 def test_cache_settings_enabled_only_for_anthropic():
     # Anthropic-qualified resolved strings get BOTH cache flags; every other provider
     # gets None (the keys error on openai/gemini), so the call is unchanged there.
-    s = _anthropic_cache_settings("anthropic:claude-opus-4-8")
+    s = cache_settings_for(capabilities_for("anthropic:claude-opus-4-8"))
     assert s is not None
     assert s["anthropic_cache_instructions"] is True
     assert s["anthropic_cache_tool_definitions"] is True
-    assert _anthropic_cache_settings("openai:gpt-4o") is None
-    assert _anthropic_cache_settings("google-gla:gemini-2.5-flash") is None
-    assert _anthropic_cache_settings("") is None  # the model_override (test) sentinel
+    assert cache_settings_for(capabilities_for("openai:gpt-4o")) is None
+    assert cache_settings_for(capabilities_for("google-gla:gemini-2.5-flash")) is None
+    # "" resolves to no known provider prefix -> the conservative record -> no cache settings
+    # (mirrors the old model_override (test) sentinel behavior).
+    assert cache_settings_for(capabilities_for("")) is None
 
 
 def test_extract_usage_reads_normalized_cache_tokens():
@@ -352,15 +354,18 @@ def test_extract_usage_is_defensive_on_missing_usage():
 
 
 @pytest.mark.parametrize(
-    "resolved,expect_cache",
-    [("anthropic:claude-opus-4-8", True), ("openai:gpt-4o", False)],
+    "resolved",
+    ["anthropic:claude-opus-4-8", "openai:gpt-4o"],
 )
-def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved, expect_cache):
+def test_cache_model_settings_attached_only_for_anthropic(monkeypatch, resolved):
     # The wiring proof: run() must attach the cache model_settings to the Agent kwargs
-    # ONLY when the resolved provider is anthropic. We stub the structured path to
-    # capture the kwargs run() assembled — pydantic-ai's own request mapper then places
-    # the cache_control breakpoint on the system-prompt block (anthropic.py:1611-1616).
+    # ONLY when the resolved model's CAPABILITY (story S2), not its provider-name string,
+    # says anthropic-style caching. We stub the structured path to capture the kwargs
+    # run() assembled — pydantic-ai's own request mapper then places the cache_control
+    # breakpoint on the system-prompt block (anthropic.py:1611-1616).
     from rebar.llm import runner as runner_mod
+
+    expect_cache = capabilities_for(resolved).prompt_cache_style == "anthropic"
 
     captured: dict = {}
 
