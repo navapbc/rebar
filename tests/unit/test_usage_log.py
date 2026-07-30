@@ -97,6 +97,208 @@ def test_cli_summarize(tmp_path, capsys):
     assert "LLM token usage" in capsys.readouterr().out
 
 
+# ── record() metadata: model / provider / timestamp ───────────────────────────
+def test_record_writes_model_provider_timestamp(tmp_path, monkeypatch):
+    target = tmp_path / "usage.jsonl"
+    monkeypatch.setenv(usage_log.ENV_VAR, str(target))
+    usage_log.record(
+        {"input_tokens": 5, "requests": 1},
+        op="plan-reviewer",
+        model="anthropic:claude-opus-4-8",
+        provider="anthropic",
+    )
+    row = json.loads(target.read_text().splitlines()[0])
+    assert row["model"] == "anthropic:claude-opus-4-8"
+    assert row["provider"] == "anthropic"
+    # UTC ISO-8601, parseable, and explicitly offset-aware.
+    from datetime import datetime, timezone
+
+    ts = datetime.fromisoformat(row["timestamp"])
+    assert ts.tzinfo is not None
+    assert ts.utcoffset() == timezone.utc.utcoffset(None)
+
+
+def test_record_defaults_omit_model_provider(tmp_path, monkeypatch):
+    target = tmp_path / "usage.jsonl"
+    monkeypatch.setenv(usage_log.ENV_VAR, str(target))
+    usage_log.record({"input_tokens": 1}, op="x")
+    row = json.loads(target.read_text().splitlines()[0])
+    assert "model" not in row
+    assert "provider" not in row
+    assert "timestamp" in row
+
+
+# ── the dict-to-kwargs pricing adapter ────────────────────────────────────────
+def test_usage_kwargs_maps_all_four_token_fields():
+    row = {
+        "op": "a",
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "cache_read_tokens": 7,
+        "cache_write_tokens": 3,
+        "requests": 1,
+        "model": "m",
+    }
+    kwargs = usage_log.usage_kwargs(row)
+    assert kwargs == {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "cache_read_tokens": 7,
+        "cache_write_tokens": 3,
+    }
+
+
+def test_usage_kwargs_defaults_missing_fields_to_zero():
+    assert usage_log.usage_kwargs({"input_tokens": 4}) == {
+        "input_tokens": 4,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    assert usage_log.usage_kwargs({"output_tokens": None}) == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+
+
+# ── summarize() pricing (stubbed genai_prices; never a hard test dependency) ──
+def _stub_pricing_module(monkeypatch, calc_price):
+    """Install a fake ``genai_prices`` module exposing Usage + calc_price."""
+    import sys
+    import types
+
+    stub = types.ModuleType("genai_prices")
+
+    class Usage:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    stub.Usage = Usage
+    stub.calc_price = calc_price
+    monkeypatch.setitem(sys.modules, "genai_prices", stub)
+    return stub
+
+
+class _Price:
+    def __init__(self, total):
+        self.total_price = total
+
+
+def test_summarize_prices_known_rows(tmp_path, monkeypatch):
+    def calc_price(usage, model_ref, provider_id=None, genai_request_timestamp=None):
+        assert usage.kwargs["input_tokens"] in (1000, 2000)
+        assert model_ref == "claude-opus-4-8"
+        assert provider_id == "anthropic"
+        assert genai_request_timestamp is not None
+        return _Price(0.05)
+
+    _stub_pricing_module(monkeypatch, calc_price)
+    path = tmp_path / "usage.jsonl"
+    ts = "2026-07-30T00:00:00+00:00"
+    path.write_text(
+        json.dumps(
+            {
+                "op": "a",
+                "input_tokens": 1000,
+                "requests": 1,
+                "model": "claude-opus-4-8",
+                "provider": "anthropic",
+                "timestamp": ts,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "op": "a",
+                "input_tokens": 2000,
+                "requests": 1,
+                "model": "claude-opus-4-8",
+                "provider": "anthropic",
+                "timestamp": ts,
+            }
+        )
+        + "\n"
+    )
+    out = usage_log.summarize(str(path))
+    assert "est. cost" in out
+    assert "$0.1000" in out  # per-op + total: 2 rows x 0.05
+    # per-model rollup table
+    assert "cost by model" in out
+    assert "claude-opus-4-8" in out
+    assert "unpriced" not in out
+
+
+def test_summarize_marks_unknown_model_unpriced(tmp_path, monkeypatch, caplog):
+    def calc_price(usage, model_ref, provider_id=None, genai_request_timestamp=None):
+        if model_ref == "mystery-model":
+            raise LookupError("unknown model")
+        return _Price(0.01)
+
+    _stub_pricing_module(monkeypatch, calc_price)
+    path = tmp_path / "usage.jsonl"
+    path.write_text(
+        json.dumps({"op": "a", "input_tokens": 1, "model": "known", "requests": 1})
+        + "\n"
+        + json.dumps({"op": "a", "input_tokens": 1, "model": "mystery-model", "requests": 1})
+        + "\n"
+    )
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.usage_log"):
+        out = usage_log.summarize(str(path))
+    assert "excludes 1 unpriced call" in out
+    assert "$0.0100" in out
+    # LookupError is the expected unknown-model signal: no WARNING for it.
+    assert not caplog.records
+
+
+def test_summarize_pricing_crash_warns_and_marks_unpriced(tmp_path, monkeypatch, caplog):
+    def calc_price(usage, model_ref, provider_id=None, genai_request_timestamp=None):
+        raise ValueError("boom")
+
+    _stub_pricing_module(monkeypatch, calc_price)
+    path = tmp_path / "usage.jsonl"
+    path.write_text(json.dumps({"op": "a", "input_tokens": 1, "model": "m", "requests": 1}) + "\n")
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.usage_log"):
+        out = usage_log.summarize(str(path))
+    assert "excludes 1 unpriced call" in out
+    assert any("boom" in r.getMessage() for r in caplog.records)
+
+
+def test_summarize_without_genai_prices_prints_unavailable(tmp_path, monkeypatch, capsys):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "genai_prices", None)  # forces ImportError
+    path = tmp_path / "usage.jsonl"
+    path.write_text(
+        json.dumps({"op": "a", "input_tokens": 4, "output_tokens": 1, "requests": 1}) + "\n"
+    )
+    out = usage_log.summarize(str(path))
+    assert "unavailable (install rebar[pricing])" in out
+    assert "| a | 1 | 4 | 1 |" in out  # token totals still printed
+    # exits 0 via the CLI too
+    assert usage_log.main(["summarize", str(path)]) == 0
+
+
+def test_summarize_old_format_rows_still_summarize(tmp_path, monkeypatch):
+    def calc_price(usage, model_ref, provider_id=None, genai_request_timestamp=None):
+        return _Price(0.01)
+
+    _stub_pricing_module(monkeypatch, calc_price)
+    path = tmp_path / "usage.jsonl"
+    # Pre-pricing rows: no model/provider/timestamp.
+    path.write_text(
+        json.dumps({"op": "a", "input_tokens": 10, "output_tokens": 2, "requests": 1}) + "\n"
+    )
+    out = usage_log.summarize(str(path))
+    assert "| a | 1 | 10 | 2 |" in out
+    assert "excludes 1 unpriced call" in out
+
+
 # ── the runner records at the _usage seam (offline FunctionModel) ─────────────
 def test_runner_records_usage_at_seam(tmp_path, monkeypatch):
     pytest.importorskip("pydantic_ai")
@@ -123,3 +325,7 @@ def test_runner_records_usage_at_seam(tmp_path, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["op"] == "v"  # _call_label = reviewers joined
     assert set(usage_log._FIELDS).issubset(rows[0])
+    # The runner call site passes model + inferred provider; record() stamps the time.
+    assert rows[0]["model"] == "test:FunctionModel"
+    assert rows[0]["provider"] == "test"  # infer_provider: provider:model prefix
+    assert "timestamp" in rows[0]
