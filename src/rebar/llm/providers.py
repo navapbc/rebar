@@ -77,7 +77,7 @@ class ProviderSession:
     ``provider_factory`` is the callable to hand ``pydantic_ai.models.infer_model``
     (or ``Agent``, which forwards to it): the ONE place that answers "how is a
     Provider built for provider X", including when the answer is "it isn't". A
-    rebar-registered provider (today: only ``"anthropic"``) is built by rebar's own
+    rebar-registered provider (``"anthropic"``/``"bedrock"``) is built by rebar's own
     builder; any other name pydantic-ai itself recognizes is delegated to its
     default resolution (``pydantic_ai.providers.infer_provider``) unchanged from
     before this seam existed; a name neither side recognizes raises the typed
@@ -102,6 +102,7 @@ class ProviderSession:
         self._closeables: list[Any] = []
         self._builders: dict[str, Callable[[str], Any]] = {
             "anthropic": self._build_anthropic,
+            "bedrock": self._build_bedrock,
         }
         # The `openai` builder is registered ONLY when `cfg.base_url` is set (story S4):
         # with no base_url, rebar has nothing to contribute (no endpoint to inject, no key
@@ -131,8 +132,8 @@ class ProviderSession:
         The one place that answers "how is a Provider built for provider X",
         including when the answer is "it isn't". Three steps:
 
-        1. ``provider_name`` has a rebar builder registered (today: only
-           ``"anthropic"``) -> run it.
+        1. ``provider_name`` has a rebar builder registered (``"anthropic"``/
+           ``"bedrock"``) -> run it.
         2. Otherwise, if pydantic-ai itself recognizes the name (``is_resolvable``),
            delegate to its OWN default resolution (``pydantic_ai.providers.infer_provider``
            — the same function ``infer_model``'s ``provider_factory`` parameter
@@ -212,6 +213,15 @@ class ProviderSession:
         )
         self._closeables.append(client)
         return model.provider
+
+    def _build_bedrock(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
+        """One-line delegation to the ``bedrock_model`` leaf builder (story S3/2932) — the
+        construction logic lives THERE, not here, because this file sits at 289/300 LOC
+        against the module-size cap ATTESTED by a closed story; only the registry entry
+        belongs in ``ProviderSession``."""
+        from rebar.llm.bedrock_model import build_bedrock_provider
+
+        return build_bedrock_provider(self._cfg)
 
     def _build_openai(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
         """Build an OpenAI-COMPATIBLE provider for ``cfg.base_url`` (story S4) — the seam

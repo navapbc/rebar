@@ -1,0 +1,417 @@
+"""First-class Bedrock provider: capabilities, cache observability, and error translation (S3).
+
+Every fact asserted here was MEASURED against real AWS (us-east-2) before it was written, not
+inferred from documentation. The measurements are recorded on ticket 2932; the load-bearing
+ones:
+
+- ``us.anthropic.claude-sonnet-4-6`` caches (cache_write=4017 then cache_read=4017).
+- ``us.`` AND ``global.`` opus-4-5 report cache_read=0 AND cache_write=0 while billing the full
+  4029 input tokens — caching fails SILENTLY and is model-dependent, not prefix-dependent.
+- ``us.anthropic.claude-opus-4-7`` + ``temperature=0`` returns 400 "temperature is deprecated
+  for this model"; the identical call without it succeeds. pydantic-ai's
+  ``_drop_unsupported_sampling_settings`` exists only in its Anthropic adapter, NOT its Bedrock
+  one, so the direct path degrades with a warning and Bedrock hard-fails.
+
+Most of these tests need NO ``boto3``: capability derivation, the cache-zero warning and the
+error translation all work off profile stubs and plain exceptions. Only construction needs the
+optional extra, and those are marked.
+"""
+
+from __future__ import annotations
+
+import logging
+from types import SimpleNamespace
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from rebar.llm.errors import LLMConfigError, LLMUnavailableError
+
+pytestmark = pytest.mark.unit
+
+# The model ids below are exactly those measured; see the module docstring.
+_TEMP_FATAL = "us.anthropic.claude-opus-4-7"
+_TEMP_OK = "us.anthropic.claude-sonnet-4-6"
+
+
+def _bedrock_profile(*, variant="anthropic", json_schema=True, thinking=True):
+    """A Bedrock profile stub carrying the capability FIELDS the real one exposes.
+
+    Field VALUES mirror the real ``BedrockProvider.model_profile(...)``, which story f184 pins
+    with a boto3-gated verified-fake test — so this stub cannot drift unnoticed."""
+    return SimpleNamespace(
+        supports_json_schema_output=json_schema,
+        supports_thinking=thinking,
+        bedrock_supports_prompt_caching=True,
+        bedrock_supports_tool_caching=True,
+        bedrock_thinking_variant=variant,
+    )
+
+
+# ── §A given: capability derivation for Bedrock ─────────────────────────────────────────
+
+
+def test_bedrock_claude_keeps_prompt_caching_and_prompted_output():
+    """The motivating defect: Bedrock-hosted Claude must get cache style "bedrock" and stay
+    PROMPTED (it is still Claude). f184 already ships this; S3 must not regress it."""
+    from rebar.llm.capabilities import capabilities_for
+
+    caps = capabilities_for(SimpleNamespace(profile=_bedrock_profile()))
+    assert caps.prompt_cache_style == "bedrock"
+    assert caps.native_structured_output is False
+
+
+def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
+    """Decision C. `temperature` is fatal on some Bedrock models and fine on others, so a
+    blanket withdrawal would strip greedy Pass-2 determinism from the measured-good default.
+
+    This is the contrast case that proves the exact-id table DISCRIMINATES."""
+    from rebar.llm.capabilities import capabilities_for
+
+    fatal = capabilities_for(SimpleNamespace(profile=_bedrock_profile(), model_name=_TEMP_FATAL))
+    ok = capabilities_for(SimpleNamespace(profile=_bedrock_profile(), model_name=_TEMP_OK))
+
+    assert fatal.supports_temperature is False, f"{_TEMP_FATAL} 400s on temperature (measured)"
+    assert ok.supports_temperature is True, (
+        f"{_TEMP_OK} accepts temperature (measured) — a blanket withdrawal would destroy the "
+        "greedy Pass-2 determinism that keeps verification stable"
+    )
+
+
+def test_supports_temperature_defaults_true_for_everything_else():
+    """The denylist must not leak: an unlisted model keeps temperature. Chosen over an
+    allowlist deliberately — an unknown-but-affected model then fails LOUDLY rather than
+    silently resampling verdicts."""
+    from rebar.llm.capabilities import capabilities_for
+
+    assert capabilities_for("anthropic:claude-opus-4-8").supports_temperature is True
+    assert capabilities_for("openai:gpt-4o").supports_temperature is True
+
+
+# ── §B held out from the implementer ────────────────────────────────────────────────────
+
+
+def test_f184_predicate_contract_is_untouched():
+    """f184 is CLOSED with a signed attestation defining its override predicates as taking a
+    single ``ModelProfile``. This story adds a SEPARATE exact-id table rather than widening
+    that signature — a leaf must not silently redefine a signed upstream contract."""
+    import inspect
+
+    from rebar.llm import capabilities as caps_mod
+
+    for predicate, _overrides in caps_mod._REBAR_OVERRIDES:
+        params = list(inspect.signature(predicate).parameters)
+        assert len(params) == 1, (
+            f"f184's override predicate {predicate.__name__} must still take exactly one "
+            f"argument (the profile); got {params}"
+        )
+
+
+def test_capabilities_module_still_has_no_provider_name_prefix_matching():
+    """f184's attested criterion. The exact-id table must use set/dict membership, never
+    prefix matching — which also keeps it from speculating about unmeasured models."""
+    import ast
+    import pathlib
+
+    import rebar.llm.capabilities as caps_mod
+
+    tree = ast.parse(pathlib.Path(caps_mod.__file__).read_text())
+    calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in {"startswith", "endswith"}
+    ]
+    assert not calls, (
+        "capabilities.py must not prefix-match provider names (asserted on real calls, not on "
+        f"text — a comment naming the banned pattern is fine): {[n.lineno for n in calls]}"
+    )
+
+
+def test_conservative_fallback_is_unchanged_when_no_model_id_is_available(caplog):
+    """Adding a second table must not perturb the third path. An unrecognized input still
+    degrades conservatively and still logs exactly once — never raises."""
+    from rebar.llm.capabilities import capabilities_for
+
+    with caplog.at_level(logging.WARNING):
+        caps = capabilities_for(object())
+
+    assert caps.native_structured_output is False
+    assert caps.prompt_cache_style == "none"
+    assert caps.supports_temperature is True, (
+        "the conservative record must not withdraw temperature — that would silently disable "
+        "greedy determinism for every unknown model"
+    )
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
+
+
+def test_exact_id_override_beats_the_profile_shaped_one():
+    """Ordering: profile-derived fields, then f184's shape overrides, THEN the exact-id table.
+    A model matching both must take the exact-id value."""
+    from rebar.llm.capabilities import capabilities_for
+
+    caps = capabilities_for(SimpleNamespace(profile=_bedrock_profile(), model_name=_TEMP_FATAL))
+    # _is_claude (shape) still applies...
+    assert caps.native_structured_output is False
+    # ...and the exact-id entry applies on top.
+    assert caps.supports_temperature is False
+
+
+def test_warns_when_caching_was_requested_but_both_counters_are_zero(caplog):
+    """Decision B — the silent-failure guard.
+
+    MEASURED: opus-4-5 bills the full input on every call with cache_read=0 AND cache_write=0
+    and no error. The existing ``_warn_if_zeroed_usage`` CANNOT catch this: it fires on
+    input_tokens==0, and here input_tokens is a healthy 4029. Without a distinct predicate an
+    operator pays full price forever with no signal."""
+    from rebar.llm.structured_run import warn_if_cache_ineffective
+
+    usage = {
+        "input_tokens": 4029,
+        "output_tokens": 4,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    with caplog.at_level(logging.WARNING):
+        warn_if_cache_ineffective(
+            usage, caching_requested=True, model="us.anthropic.claude-opus-4-5"
+        )
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert "us.anthropic.claude-opus-4-5" in warnings[0].getMessage(), (
+        "the warning must name the model so the operator can switch to a caching one"
+    )
+
+
+def test_no_cache_warning_when_caching_worked_or_was_not_requested(caplog):
+    """Contrast case: the guard must not cry wolf."""
+    from rebar.llm.structured_run import warn_if_cache_ineffective
+
+    with caplog.at_level(logging.WARNING):
+        # caching worked
+        warn_if_cache_ineffective(
+            {"input_tokens": 13, "cache_read_tokens": 4017, "cache_write_tokens": 0},
+            caching_requested=True,
+            model=_TEMP_OK,
+        )
+        # caching never requested (a non-caching provider)
+        warn_if_cache_ineffective(
+            {"input_tokens": 4029, "cache_read_tokens": 0, "cache_write_tokens": 0},
+            caching_requested=False,
+            model="openai:gpt-4o",
+        )
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_sampling_parameter_rejection_becomes_an_actionable_config_error():
+    """The drift mitigation. An unlisted-but-affected model must not surface as an opaque
+    outage — the operator has to learn WHAT TO CHANGE.
+
+    The error text is the MEASURED one, not invented."""
+    from rebar.llm.failure import translate_sampling_parameter_rejection
+
+    # pydantic-ai surfaces this as ModelHTTPError, which carries status_code as an ATTRIBUTE —
+    # model that faithfully rather than only putting "status_code: 400" in the text, or the
+    # fixture tests a shape the runtime never produces.
+    class _ModelHTTPErrorLike(Exception):
+        status_code = 400
+
+    via_pydantic_ai = _ModelHTTPErrorLike(
+        "model_name: us.anthropic.claude-opus-4-7, body: {'Error': {'Message': \"The model "
+        "returned the following errors: 'temperature' is deprecated for this model.\"}}"
+    )
+    # boto3 raises the same failure with ValidationException in the text and no status_code.
+    via_boto3 = Exception(
+        "An error occurred (ValidationException) when calling the Converse operation: The "
+        "model returned the following errors: 'temperature' is deprecated for this model."
+    )
+
+    for exc in (via_pydantic_ai, via_boto3):
+        err = translate_sampling_parameter_rejection(exc, _TEMP_FATAL)
+        assert isinstance(err, LLMConfigError), f"not translated: {exc}"
+        message = str(err)
+        assert _TEMP_FATAL in message, "must name the model id the operator has to act on"
+        assert "temperature" in message, "must name the offending parameter"
+
+
+def test_unrelated_provider_failures_are_not_swallowed_by_the_translation():
+    """Contrast case, and the reason the predicate needs all three conjuncts: a 400 that is
+    NOT about a sampling parameter must keep its existing classification, or this translation
+    becomes a catch-all that hides real outages."""
+    from rebar.llm.failure import translate_sampling_parameter_rejection
+
+    class _Rejection400(Exception):
+        status_code = 400
+
+    for unrelated in (
+        # THE discriminating case: passes conjuncts 1 and 2 (a real 400 that names
+        # `temperature`) but is a VALUE error, not a capability rejection. The operator must
+        # fix the value, not add the model to the denylist — so this must NOT translate.
+        # Without this case the rejection-word conjunct is never exercised: every other
+        # example below already fails conjunct 1, so dropping conjunct 3 would go unnoticed.
+        _Rejection400("ValidationException: temperature must be between 0.0 and 1.0, got 2.5"),
+        Exception("status_code: 400, body: {'Error': {'Message': 'malformed request'}}"),
+        Exception("status_code: 500, body: {'Error': {'Message': 'internal failure'}}"),
+        Exception("Connection reset by peer"),
+        LLMUnavailableError("the LLM provider call failed: throttled"),
+    ):
+        assert translate_sampling_parameter_rejection(unrelated, _TEMP_FATAL) is None, (
+            f"must not translate an unrelated failure: {unrelated}"
+        )
+
+
+def test_failure_module_has_no_provider_name_branch():
+    """The translation keys on error CONTENT, never on a provider name — the epic's criterion
+    forbids provider-name branching, and any provider could reject a sampling parameter."""
+    import pathlib
+
+    import rebar.llm.failure as failure_mod
+
+    source = pathlib.Path(failure_mod.__file__).read_text().lower()
+    for banned in ('== "bedrock"', "== 'bedrock'", 'startswith("bedrock")'):
+        assert banned not in source, f"provider-name branch in failure.py: {banned}"
+
+
+# ── §C construction (needs the optional [bedrock] extra) ────────────────────────────────
+
+
+def test_bedrock_builder_sets_exactly_the_two_parity_cache_keys():
+    """PARITY, not maximalism: the direct-Anthropic path sets instructions + tool_definitions
+    and leaves ``*_cache_messages`` unset, so Bedrock does the same. Enabling a third key would
+    make Bedrock cache MORE than Anthropic — a different behaviour with its own cost profile,
+    and story 0d76 measures the parity bar against exactly these two."""
+    pytest.importorskip("boto3")
+    from rebar.llm.capabilities import cache_settings_for, capabilities_for
+
+    caps = capabilities_for(SimpleNamespace(profile=_bedrock_profile(), model_name=_TEMP_OK))
+    settings = cache_settings_for(caps)
+    assert settings is not None
+    assert settings["bedrock_cache_instructions"] is True
+    assert settings["bedrock_cache_tool_definitions"] is True
+    assert "bedrock_cache_messages" not in settings, (
+        "message caching is deliberately NOT enabled — parity with the Anthropic path"
+    )
+
+
+def test_missing_bedrock_extra_raises_naming_the_install_command(monkeypatch):
+    """An absent optional extra must be actionable, not an opaque ImportError from deep inside
+    pydantic-ai."""
+    import sys
+
+    from rebar.llm.providers import ProviderSession
+
+    monkeypatch.setitem(sys.modules, "pydantic_ai.providers.bedrock", None)
+    from rebar.llm.config import LLMConfig
+
+    cfg = LLMConfig(repo_path=".", model=_TEMP_OK, model_provider="bedrock")
+    with ProviderSession(cfg) as session:
+        with pytest.raises(LLMConfigError) as excinfo:
+            session.provider_factory("bedrock")
+    assert "bedrock" in str(excinfo.value)
+
+
+# ── §D runner-level behaviour (the capability must actually change the request) ──────────
+
+
+def _model_settings_for(model_string: str) -> dict | None:
+    """The model_settings the runner assembles for ``model_string``, captured at the Agent
+    boundary. Mirrors tests/unit/test_llm_temperature.py's helper — a capability record is
+    only useful if it changes what leaves the process."""
+    import pydantic_ai.models
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from rebar.llm import runner as runner_mod
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+    captured: dict = {}
+    real_import = runner_mod._import_pydantic_ai
+
+    def _spy_import():
+        real_agent = real_import()
+
+        class _SpyAgent(real_agent):  # type: ignore[misc,valid-type]
+            def __init__(self, *a, **kw):
+                captured["model_settings"] = kw.get("model_settings")
+                super().__init__(*a, **kw)
+
+        return _SpyAgent
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
+    pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+    cfg = LLMConfig(repo_path=".", model=model_string, temperature=0.0)
+    try:
+        PydanticAIRunner(
+            cfg, model_override=FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("hi")]))
+        ).run(
+            RunRequest(
+                system_prompt="s", instructions="i", config=cfg, reviewers=["v"], mode="text"
+            )
+        )
+    finally:
+        mp.undo()
+    return captured["model_settings"]
+
+
+def test_runner_omits_temperature_for_a_model_that_rejects_it():
+    """The capability is only worth having if the RUNNER acts on it. Deriving
+    supports_temperature=False changes nothing unless `temperature` actually stops being sent
+    — MEASURED: sending it to this model returns 400 'deprecated for this model'."""
+    ms = _model_settings_for(f"bedrock:{_TEMP_FATAL}") or {}
+    assert "temperature" not in ms, (
+        f"temperature must NOT be sent to {_TEMP_FATAL}; model_settings={ms!r}"
+    )
+
+
+def test_runner_still_sends_temperature_for_a_model_that_accepts_it():
+    """The contrast case, and the reason a blanket Bedrock withdrawal was rejected: the
+    measured-good default must KEEP temperature, or Pass-2 verification loses the greedy
+    determinism that stops a re-verified finding from resampling."""
+    ms = _model_settings_for(f"bedrock:{_TEMP_OK}") or {}
+    assert ms.get("temperature") == 0.0, (
+        f"temperature must still be sent to {_TEMP_OK}; model_settings={ms!r}"
+    )
+
+
+def test_translation_names_both_remedies_not_just_the_problem():
+    """An actionable error names the FIX. Telling an operator a parameter was rejected without
+    saying what to change leaves them exactly as stuck as an opaque 400 would."""
+    from rebar.llm.failure import translate_sampling_parameter_rejection
+
+    class _E(Exception):
+        status_code = 400
+
+    err = translate_sampling_parameter_rejection(
+        _E("'temperature' is deprecated for this model"), _TEMP_FATAL
+    )
+    assert err is not None
+    message = str(err)
+    assert "_MODEL_ID_CAPABILITY_OVERRIDES" in message, "remedy 1: the override table"
+    assert "TEMPERATURE" in message.upper(), "remedy 2: unset the temperature config"
+
+
+def test_unrelated_provider_failure_still_surfaces_as_llm_unavailable_at_the_runner():
+    """End of the contrast: the translation must not change how an UNRELATED failure is
+    classified. Asserted through the runner, not just the helper, because that classification
+    is what a caller actually sees."""
+    import pydantic_ai.models
+    from pydantic_ai.models.function import FunctionModel
+
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+    def _boom(messages, info):
+        raise RuntimeError("status_code: 500, body: {'Error': {'Message': 'internal failure'}}")
+
+    pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+    cfg = LLMConfig(repo_path=".", model=f"bedrock:{_TEMP_OK}")
+    with pytest.raises(LLMUnavailableError):
+        PydanticAIRunner(cfg, model_override=FunctionModel(_boom)).run(
+            RunRequest(
+                system_prompt="s", instructions="i", config=cfg, reviewers=["v"], mode="text"
+            )
+        )

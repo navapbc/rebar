@@ -44,9 +44,14 @@ from rebar.llm.structured_run import (
     _warn_if_zeroed_usage,
     effective_max_iterations,
     effective_max_tokens,
+    warn_if_cache_ineffective,
 )
 
 logger = logging.getLogger(__name__)
+
+# Dedup set (story S3/2932) so the "temperature withdrawn" INFO line logs ONCE per resolved
+# model string, not once per call — mirrors `_TOOL_CAPABILITY_CHECKED` below.
+_TEMPERATURE_WITHDRAWN_LOGGED: set[str] = set()
 
 
 @dataclass
@@ -401,7 +406,21 @@ class PydanticAIRunner:
         if temperature is None:
             temperature = cfg.temperature
         if temperature is not None:
-            model_settings["temperature"] = float(temperature)
+            # Withdraw `temperature` for a model MEASURED to reject it (story S3/2932: e.g.
+            # `us.anthropic.claude-opus-4-7` 400s "temperature is deprecated for this model").
+            # `caps` (resolved once, above) already carries this per-model fact, so this is a
+            # capability check, never a provider-name branch. Logged once (not per-call) via
+            # the resolved-model dedup set below.
+            if not caps.supports_temperature:
+                if resolved not in _TEMPERATURE_WITHDRAWN_LOGGED:
+                    _TEMPERATURE_WITHDRAWN_LOGGED.add(resolved)
+                    logger.info(
+                        "llm: omitting temperature for model=%s — measured to reject it "
+                        "(capabilities.supports_temperature is False)",
+                        resolved,
+                    )
+            else:
+                model_settings["temperature"] = float(temperature)
         if model_settings:
             kwargs["model_settings"] = model_settings
         # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).
@@ -467,6 +486,14 @@ class PydanticAIRunner:
             # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
             if self._model_override is None:
                 _warn_if_zeroed_usage(usage)
+                # Cache-effectiveness telemetry (story S3/2932): caching can fail SILENTLY on
+                # some Bedrock models (MEASURED: cache_read=0 AND cache_write=0 while billing
+                # full input tokens, no error) — this is the signal an operator otherwise never
+                # sees. `cache_settings is not None` is the existing local for "caching was
+                # requested this call" (set above from `cache_settings_for(caps)`).
+                warn_if_cache_ineffective(
+                    usage, caching_requested=cache_settings is not None, model=ran_model
+                )
         except UsageLimitExceeded as exc:
             budget_diag = usage_log.failure_usage(
                 run_messages, request_limit=req_limit, tool_calls_limit=max(8, eff_max_iter)
@@ -502,6 +529,22 @@ class PydanticAIRunner:
             # key / connection / rate-limit). Unify into the provider-agnostic
             # LLMUnavailableError so every prompt-using client gets ONE recognizable
             # "LLM couldn't run" signal — never a swallowed empty result (fuel-posse-ball).
+            # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g.
+            # Bedrock's "temperature is deprecated for this model" on a model NOT in the
+            # capabilities.py denylist) must fail LOUDLY and ACTIONABLY, not be misclassified
+            # as an opaque outage by the broad LLMUnavailableError path below. Only when this
+            # returns None (not a sampling-parameter rejection) does the existing path run,
+            # unchanged.
+            from rebar.llm.failure import translate_sampling_parameter_rejection
+
+            sampling_err = translate_sampling_parameter_rejection(exc, ran_model)
+            if sampling_err is not None:
+                sampling_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+                    run_messages,
+                    request_limit=req_limit,
+                    tool_calls_limit=max(8, eff_max_iter),
+                )
+                raise sampling_err from exc
             logger.warning(
                 "llm call [%s] mode=%s model=%s FAILED in %.1fs: %s",
                 _call_label,

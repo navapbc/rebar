@@ -121,6 +121,14 @@ agents = [
 # Additional model providers are opt-in (keep the default extra lean):
 #   pip install 'pydantic-ai-slim[google]'   # Gemini
 #
+# First-class AWS Bedrock provider (story S3, ticket 2932). OPT-IN, same precedent as the
+# `[openai]` extra below (dc0d) — pulling in boto3 for every install would defeat the lean
+# default. `rebar.llm.bedrock_model.build_bedrock_provider` imports `pydantic_ai.providers.bedrock`
+# lazily and raises a named LLMConfigError (naming this extra) if it is absent.
+bedrock = [
+    "pydantic-ai-slim[bedrock]>=1,<2",
+]
+#
 # Prompt evaluation (epic a88f / WS-G). Net-new extra: Inspect AI is the eval
 # substrate; promptfoo interop is via the generated JUnit/config (no pip dep).
 # Imported lazily behind `rebar._optional.guard_import(..., extra="eval")`.
@@ -220,6 +228,11 @@ dev = [
     # install stays lean) but present here so its tests RUN in CI rather than
     # skipping — the same precedent as `mcp` above, itself an optional runtime extra.
     "pydantic-ai-slim[openai]>=1,<2",
+    # Bedrock provider support (story S3, ticket 2932). Opt-in at runtime (kept OUT of the
+    # `agents` extra — `pip install nava-rebar[agents]` must still install without boto3) but
+    # present here so `tests/unit/test_bedrock_provider.py`'s construction-path tests RUN in
+    # CI rather than skipping — the same `[openai]` precedent immediately above.
+    "pydantic-ai-slim[bedrock]>=1,<2",
 ]
 
 [project.scripts]
