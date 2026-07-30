@@ -15,9 +15,14 @@ full rationale, reproduced here only where it differs):
 * the module-level ``_live_jira_ready`` sentinel below is what makes
   ``tests/external/conftest.py`` attach the ``jira_live`` marker and enrol this
   module in the all-skip canary;
-* absent harness / missing ``[jira-datacenter]`` extra ⇒ SKIP with an actionable
-  message, never a hard failure — the ``external`` CI job runs with no Docker and
-  no Jira at all;
+* absent harness ⇒ SKIP with an actionable message, never a hard failure — the
+  ``external`` CI job runs with no Docker and no Jira at all. A missing
+  ``[jira-datacenter]`` extra is a skip ONLY when the harness is absent too; when
+  the harness IS reachable, a missing extra is a LOUD FAILURE, because in that
+  environment this module is the acceptance evidence for the DC transport and a
+  skip would let the job report green having validated nothing (the all-skip canary
+  cannot catch it — ``test_harness_smoke.py``'s tests execute in the same session
+  and mask it);
 * every test here sets ``allow_insecure=true`` explicitly (the harness serves
   plain ``http://localhost:2990/jira``), so the loopback path exercises the
   config's TLS-override branch rather than bypassing the validator (epic AC13).
@@ -155,12 +160,30 @@ def test_create_get_update_transition_roundtrip(
     updated = dc_transport.update_issue(key, summary="rebar J6 live — updated")
     assert updated["fields"]["summary"] == "rebar J6 live — updated"
 
+    # A transition's NAME is not its destination STATUS name: Jira's classic
+    # workflow offers "Start Progress" -> status "In Progress", "Resolve Issue" ->
+    # "Resolved". Asserting the status equals the transition name therefore fails
+    # against a real instance. The transitions payload declares the destination in
+    # `to.name`, so drive by name (the transport's contract) and assert the
+    # postcondition against the destination the server itself declared.
     transitions = dc_transport._client.transitions(key)
-    target = next((t["name"] for t in transitions if isinstance(t, dict) and t.get("name")), None)
-    assert target is not None, f"no transitions available for {key}"
-    dc_transport.transition_issue_by_name(key, target)
+    target = next(
+        (
+            t
+            for t in transitions
+            if isinstance(t, dict)
+            and t.get("name")
+            and isinstance(t.get("to"), dict)
+            and t["to"].get("name")
+        ),
+        None,
+    )
+    assert target is not None, (
+        f"no transition declaring a destination status is available for {key}; got {transitions!r}"
+    )
+    dc_transport.transition_issue_by_name(key, target["name"])
     after = dc_transport.get_issue(key)
-    assert after["fields"]["status"]["name"] == target
+    assert after["fields"]["status"]["name"] == target["to"]["name"]
 
 
 @_skip
