@@ -647,7 +647,14 @@ def drift_refresh(
     from . import generation
 
     try:
-        initial_generation = generation.collect(ctx.ticket_id, repo_root=repo_root)
+        # Ignore UNTRACKED shared-tracker files (bug d7cb-22ae): this READ fingerprints
+        # the COMMITTED tracker head, which an untracked path cannot change. Concurrent
+        # sessions share one tracker and leave transient in-flight temp files there; under
+        # the strict check this except-branch silently forced a full LLM re-review. Tracked
+        # dirty state still fails.
+        initial_generation = generation.collect(
+            ctx.ticket_id, repo_root=repo_root, ignore_untracked=True
+        )
     except Exception:  # noqa: BLE001 - unstable generation falls back to a full review
         return None
     current = attest._rehash(cand["deps"].keys(), repo_root=repo_root)

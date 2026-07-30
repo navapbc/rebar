@@ -137,7 +137,7 @@ def sign_plan_review(
         if initial_generation is not None
         else relation_snapshot
         or relation_snapshot_module.collect_plan_relation_snapshot(
-            verdict["ticket_id"], repo_root=repo_root
+            verdict["ticket_id"], repo_root=repo_root, ignore_untracked=True
         )
     )
 
@@ -397,13 +397,14 @@ def refresh_attestation(
     prior signed paths (authoritative) rather than re-deriving the set."""
     from rebar import signing
 
-    from . import registry, relation_snapshot
+    from . import registry
+    from .relation_snapshot import collect_plan_relation_snapshot
 
     snapshot = (
         initial_generation.relation_snapshot
         if initial_generation is not None
         else relation_snapshot_value
-        or relation_snapshot.collect_plan_relation_snapshot(ticket_id, repo_root=repo_root)
+        or collect_plan_relation_snapshot(ticket_id, repo_root=repo_root, ignore_untracked=True)
     )
 
     fields: dict[str, Any] = {
