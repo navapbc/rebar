@@ -422,11 +422,13 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
         threshold_for=lambda criteria: registry.threshold_for(criteria, routing),
         impact_fn=review_kernel.impact_code,
     )
-    # Nit-suppression (story grusome-uncheerful-nematode): an ADVISORY finding whose criteria are
-    # ALL flagged nit_suppressed in the routing (docs / llm-prompts) is demoted from surfaced to
-    # dropped so it adds no coaching noise. POST-pass3: partition-only — validity/impact/priority
-    # and every BLOCK decision are untouched; a finding that ALSO maps to a non-suppressed
-    # criterion still surfaces (all-criteria rule).
+    # Nit-suppression (story grusome-uncheerful-nematode; impact-aware per bug 2dfe): an
+    # ADVISORY finding whose criteria are ALL flagged nit_suppressed in the routing
+    # (docs / llm-prompts) is demoted from surfaced to dropped ONLY when its deterministic
+    # impact is 0 — a verified finding with impact > 0 surfaces as an advisory (blanket
+    # suppression made 100% of the docs overlay's valid output unsurfaceable). POST-pass3:
+    # partition-only — validity/impact/priority and every BLOCK decision are untouched; a
+    # finding that ALSO maps to a non-suppressed criterion still surfaces (all-criteria rule).
     nit_suppressed = registry.nit_suppressed_criteria(routing)
     buckets: dict[str, list[dict[str, Any]]] = {
         "blocking": [],
@@ -440,7 +442,11 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
             buckets["blocking"].append(f)
         elif decision == "advisory":
             crit = f.get("criteria") or []
-            if crit and all(c in nit_suppressed for c in crit):
+            try:
+                impact = float(f.get("impact") or 0.0)
+            except (TypeError, ValueError):
+                impact = 0.0
+            if crit and impact <= 0.0 and all(c in nit_suppressed for c in crit):
                 f["decision"] = "dropped"
                 f["reason"] = "nit-suppressed"
                 buckets["dropped"].append(f)
