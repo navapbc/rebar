@@ -205,18 +205,15 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "det_coverage": det_cov,
     }
 
-    # P1/P5/P8 reconcile with bespoke run_review (story B5): the bespoke gate STOPS before
-    # the LLM tier ONLY when P8 says the plan is too big to review at all (any LLM review
-    # would see a plan that doesn't fit). A P1/P5 DET block does NOT stop the LLM — bespoke
-    # still runs the four-pass review and MERGES the DET blocks at decide-time. So:
-    #   * P8-too-big  → short-circuit (ELSE arm): a BLOCK verdict from the DET blocks, no LLM.
-    #   * any other DET block (P1/P5) → run the LLM (THEN arm); det_blocking flows into
-    #     plan_review_decide, which merges it via partition_findings → a BLOCK verdict that
-    #     ALSO carries the LLM advisories + coaching (matching run_review).
-    p8_too_big = any(
-        getattr(r, "id", None) == "P8" and getattr(r, "blocked", False) for r in det_results
-    )
-    if p8_too_big:
+    # DET-floor short-circuit (story 228b, widening the B5 P8-only branch): ANY DET gate
+    # producing a blocking finding stops the review BEFORE the LLM tier. A DET block
+    # guarantees a BLOCK verdict, so running the four-pass LLM review first only spends
+    # tokens on a foregone conclusion. The short-circuit reuses the same
+    # partition_findings/finalize_verdict path, so the BLOCK verdict carries every DET
+    # blocking finding (plus DET advisories) with coverage.llm_ran=False. A DET-passing
+    # plan runs the LLM tier unchanged (THEN arm). gate_dispatch's outage path
+    # (_degraded_plan_review_verdict) already passes ALL det_blocks the same way.
+    if det_blocks:
         from rebar.llm.config import resolve_gate_config
 
         cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved cfg (veiny-trout-brink)
