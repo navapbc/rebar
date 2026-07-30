@@ -173,20 +173,33 @@ def test_output_mode_native_for_enforcing_providers():
     pytest.importorskip("pydantic_ai")
     from pydantic_ai import NativeOutput, PromptedOutput
 
-    assert isinstance(structured.output_mode(_Verdict, "openai:gpt-4o"), NativeOutput)
-    assert isinstance(structured.output_mode(_Verdict, "google-gla:gemini-2.5-flash"), NativeOutput)
+    from rebar.llm.capabilities import capabilities_for
+
+    assert isinstance(
+        structured.output_mode(_Verdict, capabilities_for("openai:gpt-4o")), NativeOutput
+    )
+    assert isinstance(
+        structured.output_mode(_Verdict, capabilities_for("google-gla:gemini-2.5-flash")),
+        NativeOutput,
+    )
     # Anthropic (and unknown providers) -> PromptedOutput (safe, thinking-compatible).
-    assert isinstance(structured.output_mode(_Verdict, "anthropic:claude-opus-4-8"), PromptedOutput)
+    assert isinstance(
+        structured.output_mode(_Verdict, capabilities_for("anthropic:claude-opus-4-8")),
+        PromptedOutput,
+    )
 
 
 def test_output_mode_forces_prompted_under_thinking():
     pytest.importorskip("pydantic_ai")
     from pydantic_ai import PromptedOutput
 
+    from rebar.llm.capabilities import capabilities_for
+
     # Even a native-capable provider must NOT use forced/native constraint with extended
     # thinking (the documented Anthropic 400 / provider incompatibility).
     assert isinstance(
-        structured.output_mode(_Verdict, "openai:gpt-4o", thinking=True), PromptedOutput
+        structured.output_mode(_Verdict, capabilities_for("openai:gpt-4o"), thinking=True),
+        PromptedOutput,
     )
 
 
