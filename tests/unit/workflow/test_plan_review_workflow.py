@@ -444,23 +444,25 @@ def test_review_run_emits_lossless_v2_sidecar_via_real_emit_path(monkeypatch, tm
         assert sf.get("blocking_enabled") is not None, "LLM finding lost its blocking_enabled"
 
 
-# ── P1/P5 DET block does NOT short-circuit: LLM runs, DET block merged → BLOCK ─
-def test_p1_det_block_still_runs_llm_and_blocks(monkeypatch):
-    # Reconciled with bespoke run_review (story B5): a P1 DET block (here, NO
-    # `## Acceptance Criteria`) does NOT short-circuit the LLM — bespoke run_review only
-    # stops before the LLM on a P8-too-big plan. So the four-pass review RUNS and the DET
-    # block is merged at decide-time → a BLOCK verdict carrying the P1 block (+ any LLM
-    # advisories), NOT a no-LLM deterministic short-circuit.
+# ── any DET block short-circuits BEFORE the LLM: no finder calls, BLOCK verdict ─
+def test_p1_det_block_short_circuits_before_llm(monkeypatch):
+    # Inverted by story 228b (formerly test_p1_det_block_still_runs_llm_and_blocks, which
+    # asserted the pre-228b behavior of running the LLM anyway): a P1 DET block (here, NO
+    # `## Acceptance Criteria`) now short-circuits the review BEFORE any LLM pass — a DET
+    # block guarantees a BLOCK verdict, so the four-pass review would only spend tokens on
+    # a foregone conclusion. The verdict is a BLOCK carrying the P1 block with
+    # coverage.llm_ran False and ZERO finder invocations.
     state = _state(description="Just a body, no acceptance criteria at all here.")
     finder = _CountingFinder(structured={"analysis": "", "findings": []})
     canned = _CannedAgent()
     rec, res = _run(monkeypatch, state, finder=finder, agent=canned)
 
     assert res.status == "succeeded", res.error
-    assert finder.calls > 0, "a P1 block does NOT short-circuit — the LLM still runs (parity)"
+    assert finder.calls == 0, "a DET block must short-circuit — no LLM pass runs"
     verdict = _terminal_verdict(rec)
     assert verdict is not None
     assert verdict["verdict"] == "BLOCK"
+    assert verdict["coverage"]["llm_ran"] is False
     assert verdict["blocking"], "a DET block must itemize the failing check"
     assert any("P1" in (f.get("criteria") or []) for f in verdict["blocking"])
 
