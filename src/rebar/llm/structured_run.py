@@ -162,6 +162,40 @@ def _extract_usage(run_result) -> dict[str, int]:
     }
 
 
+def warn_if_cache_ineffective(usage: dict, *, caching_requested: bool, model: str) -> None:
+    """Telemetry-only WARNING (never a block) when prompt caching was REQUESTED but reports
+    ZERO effect (story S3/2932).
+
+    MEASURED against real AWS: ``us.`` AND ``global.`` opus-4-5 both report cache_read=0 AND
+    cache_write=0 while billing the FULL input tokens (4029 in the measured run) — no error,
+    no warning from the provider. Caching is MODEL-dependent, not profile-prefix-dependent (a
+    controlled same-model `us.` vs `global.` comparison proved the prefix is not the variable).
+    Without this warning an operator silently pays full price on every call, forever, with no
+    signal anything is wrong.
+
+    This is DELIBERATELY a separate predicate from ``_warn_if_zeroed_usage`` above: that one
+    fires on ``input_tokens == 0`` (a request that plausibly never happened), whereas here
+    ``input_tokens`` is healthy/nonzero (a REAL request was billed) — the existing predicate
+    would never fire for this case. An ineffective cache is a COST problem, not a correctness
+    one, so this is WARNING-level observability only and never raises/blocks."""
+    if (
+        caching_requested
+        and usage.get("cache_read_tokens", 0) == 0
+        and usage.get("cache_write_tokens", 0) == 0
+        and usage.get("input_tokens", 0) > 0
+    ):
+        logger.warning(
+            "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
+            "cache_write=%s) despite input_tokens=%s — caching is model-dependent and can "
+            "fail silently (no error from the provider); the operator is paying full input "
+            "price on every call",
+            model,
+            usage.get("cache_read_tokens", 0),
+            usage.get("cache_write_tokens", 0),
+            usage.get("input_tokens", 0),
+        )
+
+
 def _warn_if_zeroed_usage(usage: dict) -> None:
     """Telemetry-only WARNING (never a block) when a REAL run reports all-zero token usage
     despite having made a request — the #5360 zeroed-adapter signal. Observability, not

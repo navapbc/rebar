@@ -16,6 +16,10 @@ Environment variables (all optional; sensible defaults):
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (Pydantic AI MCP toolset shape)
+  REBAR_LLM_BEDROCK_REGION    AWS region for the Bedrock provider (default: boto3's own
+                              region resolution — AWS_REGION/AWS_DEFAULT_REGION/profile).
+  REBAR_LLM_BEDROCK_MODEL_ID  Bedrock model id (default: the measured-working inference-
+                              profile id, ``us.anthropic.claude-sonnet-4-6``).
   ANTHROPIC_API_KEY       model credentials (required to actually run an operation)
   LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST   tracing + prompts (optional)
 """
@@ -39,6 +43,15 @@ DEFAULT_MODEL = "claude-opus-4-8"
 # judgement, so a cheaper/faster model is sufficient; an explicit operator model still wins.
 # Single source of truth — imported by both completion.py and plan_review (no duplication).
 VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
+
+# The documented default Bedrock model id (story S3/2932) — an INFERENCE-PROFILE id (the
+# `us.` prefix), never a bare on-demand id: MEASURED against real AWS, a plain
+# `anthropic.claude-sonnet-4-6` 400s with "Invocation of model ID ... with on-demand
+# throughput isn't supported"; only the inference-profile form is invokable. Duplicated as a
+# literal (not imported) from `rebar.llm.bedrock_model.DEFAULT_BEDROCK_MODEL_ID` to avoid a
+# circular import (that module imports `LLMConfig` from here); kept in sync by hand — both
+# are one-line literals next to a docstring citing the same measurement.
+DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 # The active code read-root for the running gate (epic raze-vet-ditch S3). When a gate
 # runs in `attested` mode it materializes a snapshot at the client-pinned SHA and sets
@@ -501,6 +514,11 @@ class LLMConfig:
     model_provider: str | None = None
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
+    # Bedrock (story S3/2932). NO rebar-managed key: Bedrock authenticates through the
+    # AMBIENT AWS credential chain (instance role / AWS_PROFILE / boto3's own default chain),
+    # so unlike `api_key` above there is no Bedrock credential field here at all.
+    bedrock_region_name: str | None = None  # None -> boto3's own region resolution
+    bedrock_model_id: str = DEFAULT_BEDROCK_MODEL_ID
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     timeout_s: int = DEFAULT_TIMEOUT_S
@@ -609,6 +627,16 @@ class LLMConfig:
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),
             model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
             base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
+            bedrock_region_name=_llm_str(
+                table, cli, "REBAR_LLM_BEDROCK_REGION", "bedrock_region_name", None
+            ),
+            bedrock_model_id=_llm_str(
+                table,
+                cli,
+                "REBAR_LLM_BEDROCK_MODEL_ID",
+                "bedrock_model_id",
+                DEFAULT_BEDROCK_MODEL_ID,
+            ),
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
             max_tokens=_llm_int(
                 table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", DEFAULT_MAX_TOKENS

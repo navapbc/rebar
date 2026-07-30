@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from rebar.llm.errors import LLMConfigError
+
 # `httpx` + `pydantic_ai` are [agents]-extra deps, NOT core. They are imported LAZILY
 # (call-boundary) inside `_map` / `_base_diagnostic` so this boundary module imports
 # cleanly under a no-extras core install — the optionality contract, enforced by
@@ -352,6 +354,61 @@ def resolution_fields(outcome: LLMOutcome | None) -> dict:
         "retryable": outcome.retryable,
         "diagnostic": outcome.diagnostic,
     }
+
+
+# ── Sampling-parameter rejection translation (story S3/2932) ────────────────────
+# The `_MODEL_ID_CAPABILITY_OVERRIDES` denylist in capabilities.py will drift as AWS
+# deprecates sampling params on more models than the ones rebar has MEASURED. An unlisted-but-
+# affected model must fail LOUDLY and ACTIONABLY (name the model, the parameter, both
+# remedies) rather than as an opaque provider outage classified LLMUnavailableError. This is
+# rebar's existing failure-classification seam, not the Bedrock leaf — no provider-name branch
+# enters `runner.py` for this; `runner.run()` tries this FIRST in its broad except, falling
+# back to the existing classify_llm_failure/LLMUnavailableError path only when it returns None.
+_SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
+_REJECTION_WORDS: tuple[str, ...] = ("deprecated", "not supported", "unsupported")
+
+
+def translate_sampling_parameter_rejection(
+    exc: BaseException, model_id: str
+) -> LLMConfigError | None:
+    """Return an :class:`LLMConfigError` if ``exc`` looks like a provider rejecting a sampling
+    parameter (e.g. Bedrock's "temperature is deprecated for this model"), else ``None``.
+
+    ALL THREE conjuncts are required, checked on ``exc`` or its ``__cause__`` (a provider SDK
+    error is often wrapped):
+
+    1. looks like a client rejection: ``status_code == 400`` OR ``"ValidationException"`` in
+       ``str(exc)``;
+    2. names a sampling parameter rebar can send: ``temperature``, ``top_p``, or ``top_k``;
+    3. carries a rejection word: ``deprecated``, ``not supported``, or ``unsupported``.
+
+    All three are required so an UNRELATED 400 (a malformed request, a bad model id) is not
+    swallowed by this translation and keeps its existing ``LLMUnavailableError``
+    classification — only a genuine sampling-parameter rejection is redirected here.
+    """
+    for candidate in (exc, getattr(exc, "__cause__", None)):
+        if candidate is None:
+            continue
+        status_code = getattr(candidate, "status_code", None)
+        text = str(candidate)
+        looks_like_rejection = status_code == 400 or "ValidationException" in text
+        if not looks_like_rejection:
+            continue
+        low = text.lower()
+        named_param = next((p for p in _SAMPLING_PARAMS if p in low), None)
+        if named_param is None:
+            continue
+        if not any(word in low for word in _REJECTION_WORDS):
+            continue
+        return LLMConfigError(
+            f"model {model_id!r} rejected the {named_param!r} sampling parameter: {text}. "
+            f"Fix by either (1) adding {model_id!r} to "
+            "rebar.llm.capabilities._MODEL_ID_CAPABILITY_OVERRIDES with "
+            f"{{'supports_{named_param}': False}} (if such a field exists — today only "
+            "'supports_temperature' is tracked), or (2) unsetting the corresponding "
+            f"config (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} is never sent."
+        )
+    return None
 
 
 def outcome_of(error: object) -> LLMOutcome | None:

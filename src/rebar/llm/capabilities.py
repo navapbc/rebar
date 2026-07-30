@@ -19,6 +19,7 @@ top, so ``import rebar.llm`` stays stdlib-only. This module imports NOTHING from
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,12 +28,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ModelCapabilities:
-    """The three capability facts rebar's LLM stack branches on — derived from a Pydantic AI
+    """The capability facts rebar's LLM stack branches on — derived from a Pydantic AI
     ``ModelProfile``, never guessed from a provider-name string."""
 
     native_structured_output: bool
     prompt_cache_style: str  # "none" | "anthropic" | "bedrock"
     supports_thinking: bool
+    # Whether `temperature` may be sent to this model (story S3/2932). Defaults True — the
+    # denylist below withdraws it only for the EXACT ids MEASURED to 400 on it, so an unlisted
+    # model keeps sending temperature and fails LOUDLY if it turns out to be affected, rather
+    # than silently losing Pass-2 greedy determinism for every model as a blanket withdrawal
+    # would.
+    supports_temperature: bool = True
 
 
 def _is_claude(profile: Any) -> bool:
@@ -70,7 +77,26 @@ _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
 )
 
 
-def _capabilities_from_profile(profile: Any) -> ModelCapabilities:
+# Exact-model-id capability overrides (story S3/2932) — a SEPARATE table from
+# `_REBAR_OVERRIDES` above, not a widening of it: that table's predicate is
+# `Callable[[ModelProfile], bool]`, a SIGNED contract of the closed S2 story, and a leaf must
+# not redefine a signed upstream contract. Keyed on the EXACT model id — never prefix
+# matching (this module must contain no prefix-match call, an attested S2 criterion), so
+# this table also cannot speculate about an unmeasured model's behavior. Applied AFTER
+# `_REBAR_OVERRIDES` so an id-specific MEASURED fact always wins over the family-level default.
+#
+# MEASURED (ticket 2932, real AWS us-east-2): `us.anthropic.claude-opus-4-7` + `temperature=0`
+# returns HTTP 400 "temperature is deprecated for this model"; the IDENTICAL call without
+# temperature succeeds. pydantic-ai's `_drop_unsupported_sampling_settings` exists only in its
+# Anthropic adapter, not its Bedrock one, so the direct-Anthropic path degrades with a warning
+# but Bedrock hard-fails — and rebar's Pass-2 verifiers deliberately send `temperature=0`, so
+# leaving this model at the default would break Bedrock gate runs on it.
+_MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
+    "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
+}
+
+
+def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapabilities:
     native_structured_output = bool(getattr(profile, "supports_json_schema_output", False))
     supports_thinking = bool(getattr(profile, "supports_thinking", False))
 
@@ -88,15 +114,23 @@ def _capabilities_from_profile(profile: Any) -> ModelCapabilities:
         "native_structured_output": native_structured_output,
         "prompt_cache_style": prompt_cache_style,
         "supports_thinking": supports_thinking,
+        "supports_temperature": True,
     }
     for predicate, overrides in _REBAR_OVERRIDES:
         if predicate(profile):
             caps.update(overrides)
             break
+    # Exact-id override on top (story S3) — a MISSING/None model_id (path 3: no id could be
+    # resolved) applies no override, leaving the profile/`_REBAR_OVERRIDES`-derived record as-is.
+    if model_id is not None:
+        id_overrides = _MODEL_ID_CAPABILITY_OVERRIDES.get(model_id)
+        if id_overrides is not None:
+            caps.update(id_overrides)
     return ModelCapabilities(
         native_structured_output=bool(caps["native_structured_output"]),
         prompt_cache_style=str(caps["prompt_cache_style"]),
         supports_thinking=bool(caps["supports_thinking"]),
+        supports_temperature=bool(caps["supports_temperature"]),
     )
 
 
@@ -155,21 +189,25 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
 
     Accepts EITHER form (story S1's ``run()`` does not always hold a model object):
 
-    1. an object exposing ``.profile`` -> read that profile;
+    1. an object exposing ``.profile`` -> read that profile; its ``.model_name`` (if any) is
+       the exact id :data:`_MODEL_ID_CAPABILITY_OVERRIDES` matches against (story S3);
     2. a provider-qualified model STRING (e.g. ``"openai:gpt-4o"``) -> resolve the vendor
-       profile via :data:`_PROFILE_RESOLVERS` WITHOUT constructing a provider;
+       profile via :data:`_PROFILE_RESOLVERS` WITHOUT constructing a provider; the bare model
+       name from the SAME ``partition(":")`` already used to pick the resolver is the exact id;
     3. anything else (unknown provider prefix, malformed string, ...) -> the conservative
-       record, logged as exactly ONE warning per call (never raises)."""
+       record, UNCHANGED (no id is known, so no exact-id override can apply), logged as
+       exactly ONE warning per call (never raises)."""
     profile = getattr(model_or_model_string, "profile", None)
     if profile is not None:
-        return _capabilities_from_profile(profile)
+        model_id = getattr(model_or_model_string, "model_name", None)
+        return _capabilities_from_profile(profile, model_id)
 
     if isinstance(model_or_model_string, str) and ":" in model_or_model_string:
         provider, _, model_name = model_or_model_string.partition(":")
         resolver = _PROFILE_RESOLVERS.get(provider)
         if resolver is not None:
             try:
-                return _capabilities_from_profile(resolver(model_name))
+                return _capabilities_from_profile(resolver(model_name), model_name)
             except Exception:  # noqa: BLE001 — any resolver failure degrades conservatively
                 pass
 
