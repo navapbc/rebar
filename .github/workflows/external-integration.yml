@@ -276,10 +276,21 @@ jobs:
           cache: 'pip'
           cache-dependency-path: pyproject.toml
 
+      # `[jira-datacenter]` is NOT implied by `[dev]` (which self-references only
+      # `[agents,metrics]`), and it is what supplies `pycontribs/jira` — the library
+      # the DC transport is built on. Without it EVERY test in
+      # tests/external/live_jira_dc/test_transport.py skips on its `_skip_no_extra`
+      # guard while test_harness_smoke.py's tests still execute, so the all-skip
+      # canary (which counts collected-vs-executed GLOBALLY per session) stays
+      # silent and the job goes green having validated no transport code at all.
+      # That is precisely the "silently-all-skipped run reads as green" failure the
+      # external tier is built to prevent, so the extra is installed here and
+      # test_transport.py additionally HARD-FAILS if it is ever missing while the
+      # harness is reachable.
       - name: Install rebar (test-only; this harness needs no LLM API key)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,jira-datacenter]'
 
       # Builds ./Dockerfile locally (never references pycontribs/jira-test-image, which is
       # NOT published to any registry — see the Dockerfile's own header). platform:
