@@ -30,6 +30,25 @@ logger = logging.getLogger(__name__)
 __all__ = ["idempotent_reuse", "verdict_reuse"]
 
 
+def _type_changed(stored_type: Any, ctx) -> bool:
+    """True when the ticket's type has changed since the stored verdict was computed.
+
+    Type is NOT cosmetic to a review: it selects which criteria apply at all
+    (``orchestrator.py:364`` and ``:642``, ``workflow_ops.py:167`` and ``:183``), so a
+    PASS earned as a ``bug`` — exempt from several criteria — must not be replayed for
+    a ``task``, which is not exempt.
+
+    FAILS OPEN by design: both sides must be truthy to report a change. A sidecar
+    written before this check existed carries no usable type, and invalidating every
+    such attestation would force a fresh review of every already-certified ticket. Those
+    re-earn their type binding the next time the plan changes, which is the deliberate
+    trade — see the "Rejected" note on ticket 6e4f-cad1-aa39-446a for why the material
+    fingerprint was left alone instead.
+    """
+    current_type = getattr(ctx, "ticket_type", "")
+    return bool(stored_type) and bool(current_type) and stored_type != current_type
+
+
 def idempotent_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
     """Idempotence short-circuit (feature b3e5): reuse an existing, still-valid plan-review
     attestation INSTEAD of re-running the billable multi-pass LLM review, when the ticket is
@@ -53,6 +72,23 @@ def idempotent_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None
         sig = signing.verify_signature(ticket_id, kind=attest._MANIFEST_PREFIX, repo_root=repo_root)
     except Exception:  # noqa: BLE001 — cannot read the attestation record → run a full review
         return None
+    # claim_gate_check owns every other validity question; it binds the material
+    # fingerprint, the reviewed code SHA and the registry stamp, none of which move
+    # when only the ticket's type changes. The stored type lives on the sidecar.
+    try:
+        prior = sidecar.latest_review_result(ticket_id, repo_root=repo_root) or {}
+    except Exception:  # noqa: BLE001 — cannot read the sidecar → fail open, keep reusing
+        prior = {}
+    if _type_changed(prior.get("ticket_type"), ctx):
+        logger.info(
+            "plan review NOT reused for %s: ticket type changed %r -> %r since the "
+            "stored verdict; re-running under the criteria now in force",
+            ticket_id,
+            prior.get("ticket_type"),
+            getattr(ctx, "ticket_type", ""),
+        )
+        return None
+
     material = attest.current_material_fingerprint(ticket_id, repo_root=repo_root)
     verdict: dict[str, Any] = {
         "verdict": "PASS",
@@ -112,6 +148,8 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
         base_sha = prior.get("verified_at_sha")
         if not base_material or not base_sha:
             return None
+        if _type_changed(prior.get("ticket_type"), ctx):
+            return None  # the ticket's type changed → different criteria → re-review
         if base_material != attest.current_material_fingerprint(ticket_id, repo_root=repo_root):
             return None  # the plan was revised → re-review
         if base_sha != sidecar.review_code_sha(repo_root):
