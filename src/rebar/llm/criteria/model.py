@@ -190,4 +190,9 @@ def build_descriptor(
         "routing": routing_entry.get("routing"),
         "trigger": routing_entry.get("trigger"),
         "overlay_routing": routing_entry.get("overlay_routing"),
+        # Server-side web-search opt-in (bug ff64): an AGENT criterion whose routing
+        # entry declares ``"web": true`` (T1 initially) has its Pass-1 request carry the
+        # provider's server-side web-search tool (anthropic-gated in the runner).
+        # Normalized to a bool so the descriptor never carries a truthy junk value.
+        "web": bool(routing_entry.get("web", False)),
     }

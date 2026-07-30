@@ -329,6 +329,8 @@ def pass1_chunk(
         mode="structured",
         output_schema="plan_review_findings",
         execution_mode="agentic" if agentic else "single_turn",
+        # ff64: routing `"web": true` rides AGENT chunks only (anthropic-gated in runner).
+        web=agentic and any(bool(c.get("web")) for c in chunk),
     )
     result = runner.run(req)
     out: list[dict[str, Any]] = []

@@ -601,7 +601,8 @@
     ],
     "routing": "overlay",
     "trigger": "any of the 6 bright-lines: external integration / unfamiliar dependency / security-auth / novel pattern / perf-scalability / migration (deterministic prior + agent-judgment)",
-    "overlay_routing": "deterministic"
+    "overlay_routing": "deterministic",
+    "web": true
   },
   "T6": {
     "exec": "1-TURN",
