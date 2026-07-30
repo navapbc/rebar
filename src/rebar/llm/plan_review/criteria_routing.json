@@ -1130,7 +1130,7 @@
     ],
     "routing": "overlay",
     "overlay_routing": "llm",
-    "trigger": "plan NEWLY FORBIDS a previously-permitted action (LLM-routed — a lexical prohibition trigger over-fires on descriptive prose; the LLM router decides applicability, PASS not-applicable is cheap)"
+    "trigger": "plan NEWLY FORBIDS a previously-permitted action. Deterministically PRE-GATED (ticket 4ee2, ADR 0034 amendment): skipped only on total absence of mechanism-of-enforcement vocabulary (rule mechanism-of-enforcement in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority (PASS not-applicable is cheap)"
   },
   "T14": {
     "exec": "AGENT",
@@ -1158,7 +1158,7 @@
     ],
     "routing": "overlay",
     "overlay_routing": "llm",
-    "trigger": "plan introduces a new git ref pattern / event source / schedule, or new release-time-exercised infra (LLM-routed — deterministic ref/CI keywords over-fire on prose; the LLM router distinguishes a real trigger change)"
+    "trigger": "plan introduces a new git ref pattern / event source / schedule, or new release-time-exercised infra. Deterministically PRE-GATED (ticket 4ee2, ADR 0034 amendment): skipped only on total absence of scheduler/release/CI-surface vocabulary AND no CI/build-surface file_impact path (rule ci-trigger-surface in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority"
   },
   "removal-rationale": {
     "exec": "AGENT",
@@ -1183,7 +1183,8 @@
         "check": "Only when gated in: the plan supplies a concrete TRIGGERING SCENARIO where the removed behavior/guard mattered, GROUNDED in a comment/test/blame/linked-ticket (verify with tools, not invented), plus evidence the reason no longer applies. A fabricated/ungrounded justification is no (low validity). Coach via move 6 (specification-by-example)."
       }
     ],
-    "routing": "leaf"
+    "routing": "leaf",
+    "trigger": "deterministically PRE-GATED (ticket 4ee2): runs only when removal/weakening vocabulary is present in the plan text, or a file_impact reason/path carries a removal marker (rule removal-vocabulary in det_gate_rules.py); a fired plan is still LLM-gated by its checklist GATE"
   },
   "asserted-capability": {
     "exec": "AGENT",
@@ -1208,7 +1209,8 @@
         "check": "Only when gated in: the capability claim MATCHES the code, verified with Grep/Read (and resolve_symbol for installed deps). FIRE when refuted — (A) M exists but LACKS C (dc58: completion.py has no sign helper; db7b: compaction never absorbs reducer-ignored REVIEW_RESULT), or (B) M already PROVIDES C the plan says must be built (5886: fetcher.py already emits the unmapped-status alert). ABSTAIN-with-coverage on a claim about an EXTERNAL fact the repo tools cannot settle. Distinct from E4 (broad existence, blocking): here the named module EXISTS, so E4 passes; this probes the finer capability surface. Advisory — never blocks."
       }
     ],
-    "routing": "leaf"
+    "routing": "leaf",
+    "trigger": "deterministically PRE-GATED (ticket 4ee2): runs only when BOTH a module reference AND a capability verb are present (rule module-capability-conjunction in det_gate_rules.py); a fired plan is still LLM-gated by its checklist GATE"
   },
   "decomp-shape": {
     "exec": "AGENT",
