@@ -9,7 +9,8 @@ convention and does not apply here); a finding blocks when its criterion is
 blocking-postured and its priority crosses the threshold — no per-class mechanism.
 
 These tests pin:
-* the routing posture: T3 and T10 carry default_posture=blocking @ 0.90;
+* the routing posture: T3 and T10 (ticket bfa8) and T5c (ticket c97a) carry
+  default_posture=blocking @ 0.90;
 * Pass-3 behavior: a T3/T10 finding at priority 0.92 BLOCKS, one at 0.85 stays
   ADVISORY, through the plan-review ``pass3_over_findings`` wrapper;
 * the T10 DET overlay gate (audit: 28% fire rate, 100% strong-finding recall):
@@ -88,7 +89,7 @@ def _decided(cid: str, priority: float, monkeypatch: pytest.MonkeyPatch) -> dict
 
 
 # ── routing posture: blocking @ 0.90 ──────────────────────────────────────────
-@pytest.mark.parametrize("cid", ["T3", "T10"])
+@pytest.mark.parametrize("cid", ["T3", "T10", "T5c"])
 def test_routing_posture_blocking_at_090(cid: str) -> None:
     entry = registry.by_id()[cid]
     assert entry["default_posture"] == "blocking"
@@ -99,7 +100,7 @@ def test_routing_posture_blocking_at_090(cid: str) -> None:
 
 
 # ── Pass-3: above the bar blocks, below stays advisory ────────────────────────
-@pytest.mark.parametrize("cid", ["T3", "T10"])
+@pytest.mark.parametrize("cid", ["T3", "T10", "T5c"])
 def test_priority_092_blocks_through_pass3(cid: str, monkeypatch: pytest.MonkeyPatch) -> None:
     d = _decided(cid, 0.92, monkeypatch)
     assert d["priority"] == 0.92
@@ -108,7 +109,7 @@ def test_priority_092_blocks_through_pass3(cid: str, monkeypatch: pytest.MonkeyP
     assert d["blocking_enabled"] is True
 
 
-@pytest.mark.parametrize("cid", ["T3", "T10"])
+@pytest.mark.parametrize("cid", ["T3", "T10", "T5c"])
 def test_priority_085_stays_advisory_through_pass3(
     cid: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

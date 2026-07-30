@@ -16,6 +16,10 @@ Amended by ticket bfa8 (operator-approved blocking pilot):
   - T3 and T10 promoted to blocking @ 0.90 (conservative pilot; the zero-LLM
     criterion-effectiveness recorder monitors outcomes for a later 0.85 revisit).
 
+Amended by ticket c97a (T5c grounded-security rewrite, operator-approved):
+  - T5c promoted to blocking @ 0.90 alongside the bfa8 pilot pair; the rubric's
+    two-HIGH-class severity scoping keeps lesser findings below the bar.
+
 Proving command:
     .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
 """
@@ -31,8 +35,9 @@ LOWERED = {"COH", "E2", "F1", "G5", "G6"}
 CAL3_DEMOTED = {"T5e"}
 # The FOUR promoted to default_posture=blocking, with their new thresholds.
 PROMOTED = {"G1G2": 0.70, "T1": 0.70, "T8": 0.70, "E4": 0.75}
-# The ticket-bfa8 blocking pilot: T3 + T10 promoted to blocking @ 0.90.
-PILOT_BLOCKING = {"T3": 0.90, "T10": 0.90}
+# The ticket-bfa8 blocking pilot (T3 + T10) and the ticket-c97a T5c grounded-security
+# rewrite: promoted to blocking @ 0.90.
+PILOT_BLOCKING = {"T3": 0.90, "T10": 0.90, "T5c": 0.90}
 
 # AC4: the COMPLETE expected routing, pinned INLINE (no separate snapshot file). Any unintended
 # change to ANY criterion's (block_threshold, default_posture) fails the assertion below.
@@ -65,7 +70,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "T4": (0.7, "blocking"),
     "T5a": (0.95, "advisory"),
     "T5b": (0.95, "advisory"),
-    "T5c": (0.95, "advisory"),
+    "T5c": (0.9, "blocking"),
     "T5d": (0.95, "advisory"),
     "T5e": (0.95, "advisory"),
     "T6": (0.95, "advisory"),
