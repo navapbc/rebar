@@ -434,7 +434,7 @@ class TestApplierInboundCreateParent:
         )
         assert mut_mod is not None and mut_mod.loader is not None
         mm = importlib.util.module_from_spec(mut_mod)
-        sys.modules.setdefault("mutation_parent_test", mm)
+        sys.modules["mutation_parent_test"] = mm
         mut_mod.loader.exec_module(mm)  # type: ignore[union-attr]
 
         tracker_dir = tmp_path / ".tickets-tracker"
@@ -507,7 +507,7 @@ class TestApplierInboundUpdateParent:
         )
         assert mut_mod_spec is not None and mut_mod_spec.loader is not None
         mm = importlib.util.module_from_spec(mut_mod_spec)
-        sys.modules.setdefault("mutation_parent_upd_test", mm)
+        sys.modules["mutation_parent_upd_test"] = mm
         mut_mod_spec.loader.exec_module(mm)  # type: ignore[union-attr]
 
         tracker_dir = tmp_path / ".tickets-tracker"
@@ -593,7 +593,7 @@ class TestApplierOutboundSetParent:
         )
         assert mut_mod_spec is not None and mut_mod_spec.loader is not None
         mm = importlib.util.module_from_spec(mut_mod_spec)
-        sys.modules.setdefault("mutation_ob_parent_test", mm)
+        sys.modules["mutation_ob_parent_test"] = mm
         mut_mod_spec.loader.exec_module(mm)  # type: ignore[union-attr]
 
         client = StubClient()

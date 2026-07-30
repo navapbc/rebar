@@ -122,7 +122,7 @@ def _load_outbound_differ():
     )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("outbound_differ_code_review", mod)
+    sys.modules["outbound_differ_code_review"] = mod
     spec.loader.exec_module(mod)
     return mod
 

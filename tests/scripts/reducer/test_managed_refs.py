@@ -43,7 +43,7 @@ def outbound_differ() -> ModuleType:
     spec = importlib.util.spec_from_file_location("outbound_differ_mr", _OUTBOUND_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("outbound_differ_mr", mod)
+    sys.modules["outbound_differ_mr"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 

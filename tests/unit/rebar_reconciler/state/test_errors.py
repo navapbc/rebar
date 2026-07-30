@@ -42,7 +42,7 @@ def _load_applier():
     # the annotation strings for ApplyResult's slots=True dataclass.
     spec = importlib.util.spec_from_file_location("applier", APPLIER_PATH)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("applier", mod)
+    sys.modules["applier"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 

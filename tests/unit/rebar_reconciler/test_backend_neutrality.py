@@ -248,7 +248,7 @@ def _load_by_path(name: str, filename: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, _REC / filename)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault(name, mod)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
