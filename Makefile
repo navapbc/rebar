@@ -27,7 +27,7 @@ ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin
 
-.PHONY: help install hooks worktree format lint typecheck config-check check test vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -176,6 +176,12 @@ check: lint typecheck  ## Run every check-only gate (no mutation).
 
 test:  ## Run the default test suite (excludes integration + external).
 	pytest -m "not integration and not external" -q
+
+jira-dc-up:  ## Build + start the Jira DC verification harness (fresh instance; see tests/external/live_jira_dc/README.md).
+	cd tests/external/live_jira_dc && docker compose up -d --build --force-recreate
+
+jira-dc-down:  ## Stop + remove the Jira DC verification harness.
+	cd tests/external/live_jira_dc && docker compose down -v
 
 changelog:  ## Prepend the unreleased CHANGELOG.md section for a release: make changelog VERSION=vX.Y.Z (generate-then-curate; never a full regen).
 	@command -v git-cliff >/dev/null 2>&1 || { echo "error: git-cliff not installed — run: pipx install git-cliff==$(GIT_CLIFF_VERSION)"; exit 1; }

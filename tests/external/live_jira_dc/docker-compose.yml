@@ -1,0 +1,47 @@
+# Jira Data Center verification harness (story J5 / epic e369).
+#
+# Brings up a real Jira 8.17.1 Data Center instance at http://localhost:2990/jira
+# with default admin/admin credentials, built from the vendored ./Dockerfile (NOT
+# pulled from any registry — see that file's header for why). See README.md for
+# the full operational contract (readiness timing, egress requirement, arch
+# requirement).
+#
+#   make jira-dc-up      # build + start (fresh instance; --force-recreate)
+#   make jira-dc-down     # stop + remove
+#
+# Then, in another shell:
+#
+#   REBAR_RUN_EXTERNAL=1 pytest tests/external/live_jira_dc/ -q
+
+services:
+  jira-dc:
+    build: .
+    # The base image is linux/amd64 ONLY. Setting this explicitly makes the
+    # behavior deterministic instead of depending on the host's default platform
+    # resolution: on an arm64 host (Apple Silicon, some ARM CI runners) this runs
+    # under emulation and starts materially slower than upstream's quoted
+    # "~3-5 minutes" — sometimes not at all within an hour (see README.md). A
+    # native amd64 runner (e.g. GitHub's ubuntu-latest) is strongly preferred.
+    platform: linux/amd64
+    # AMPS (the Atlassian Maven Plugin Suite) exits immediately without a
+    # controlling TTY — `atlas-run` needs the equivalent of `docker run -dit`.
+    # A plain service block (no tty/stdin_open) is NOT sufficient; the container
+    # exits right after start with no useful log.
+    tty: true
+    stdin_open: true
+    ports:
+      # LOOPBACK-SCOPED, not the bare "2990:2990". This instance ships with
+      # well-known admin/admin credentials and no other auth is configured, so a
+      # 0.0.0.0 bind would expose it to the whole network. Bare "2990:2990"
+      # binds to 0.0.0.0 by default in Docker — that is exactly the mistake this
+      # pins against.
+      - "127.0.0.1:2990:2990"
+    volumes:
+      # `atlas-run` downloads Jira (~917 Maven artifacts, ~900MB+) from
+      # maven.atlassian.com on EVERY cold start when there is no cache. This
+      # persistent volume survives `down` (without `-v`) so repeat starts reuse
+      # the cache instead of re-fetching the whole artifact set each time.
+      - jira-dc-m2-cache:/root/.m2
+
+volumes:
+  jira-dc-m2-cache:

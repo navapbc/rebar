@@ -137,8 +137,18 @@ jobs:
           REBAR_USAGE_LOG: ${{ runner.temp }}/usage.jsonl
         # -p no:cacheprovider + a runner-temp basetemp mirror the main workflow.
         # The Langfuse trace test skips here (no LANGFUSE_HOST) — see langfuse-trace.
+        # --ignore=tests/external/live_jira_dc: this job has no Docker/Jira DC harness, so
+        # those 4 tests would collect and all-skip here too. The jira_live canary counts
+        # collected/executed GLOBALLY per session (tests/external/conftest.py), and this
+        # job's live-Cloud Jira tests DO execute — so without this ignore, the DC tests'
+        # all-skip would be silently MASKED by the Cloud tests executing, and the canary
+        # would lose the ability to detect "every DC test skipped" (measured: with the DC
+        # tests included and no harness, the canary stays silent; the two tiers must stay
+        # independent so each job's canary means what it says). The dedicated jira-dc-harness
+        # job below covers tests/external/live_jira_dc/ with its own canary.
         run: >-
           pytest -m external tests/external -q
+          --ignore=tests/external/live_jira_dc
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Summarize LLM token usage → job summary
@@ -249,3 +259,66 @@ jobs:
       - name: Tear down the Langfuse stack
         if: always()
         run: docker compose -f docker-compose.langfuse.yml down -v
+
+  jira-dc-harness:
+    name: jira DC harness smoke (real Jira Data Center, ephemeral)
+    # Native amd64 is a HARD requirement: the harness's base image is linux/amd64, and on an
+    # emulated arm64 host Jira does not finish booting within an hour even with the Cargo
+    # start-timeout override lifted (measured; see tests/external/live_jira_dc/README.md).
+    # ubuntu-latest is native x86_64, which is the whole reason this job can produce
+    # acceptance evidence that an Apple-Silicon workstation cannot.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Install rebar (test-only; this harness needs no LLM API key)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      # Builds ./Dockerfile locally (never references pycontribs/jira-test-image, which is
+      # NOT published to any registry — see the Dockerfile's own header). platform:
+      # linux/amd64 in docker-compose.yml is a no-op restatement of this runner's own arch.
+      - name: Build and start the Jira DC harness
+        working-directory: tests/external/live_jira_dc
+        run: docker compose up -d --build
+
+      # atlas-run downloads Jira 8.17.1 (~917 Maven artifacts) from maven.atlassian.com on
+      # first start, so readiness is dominated by that download, not JVM boot — the budget
+      # here is generous (~20 minutes) and mirrors conftest.py's own default.
+      - name: Wait for Jira DC to become ready
+        run: |
+          ok=
+          for i in $(seq 1 240); do
+            if curl -fsS http://localhost:2990/jira/rest/api/2/serverInfo >/dev/null 2>&1; then
+              echo "Jira DC ready after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Jira DC harness never became ready (see tests/external/live_jira_dc/README.md)"
+            (cd tests/external/live_jira_dc && docker compose logs --tail=200)
+            exit 1
+          fi
+
+      - name: Run the Jira DC harness smoke tests
+        env:
+          # This tier is inert unless opted in (tests/external/conftest.py's
+          # _require_external_opt_in guard) — see AGENTS.md's leak-guard note.
+          REBAR_RUN_EXTERNAL: "1"
+        run: >-
+          pytest -m external tests/external/live_jira_dc -q
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Jira DC container logs on failure
+        if: failure()
+        run: cd tests/external/live_jira_dc && docker compose logs --tail=200
+
+      - name: Tear down the Jira DC harness
+        if: always()
+        run: cd tests/external/live_jira_dc && docker compose down -v
