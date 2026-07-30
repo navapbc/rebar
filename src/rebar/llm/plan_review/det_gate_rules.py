@@ -85,8 +85,8 @@ class DetGateRule:
         return False
 
 
-# ── deterministic OVERLAY triggers (low-FP where deterministic; T13/T14 pre-filters) ──
-# The rest of the overlays (T6/T5b/T9 + the agent-tier T1/T3/T5c/T8/T10/T11) are
+# ── deterministic OVERLAY triggers (low-FP where deterministic; T13/T14/T10 pre-filters) ──
+# The rest of the overlays (T6/T5b/T9 + the agent-tier T1/T3/T5c/T8/T11) are
 # LLM-routed at Pass-1 (a keyword trigger is high-FP for them), so they are NOT listed.
 _DET_OVERLAY_RULES: dict[str, DetGateRule] = {
     "T5a": DetGateRule(
@@ -110,6 +110,14 @@ _DET_OVERLAY_RULES: dict[str, DetGateRule] = {
         "mechanism-of-enforcement",
         (
             r"\b(?:block\w*|reject\w*|refus\w*|enforc\w*|den(?:y|ies|ied)\b|forbid\w*|prohibit\w*|disallow\w*|outlaw\w*|must (?:pass|not)\b|cannot (?:merge|close|claim|submit|land|push)|fail(?:s|ing)? (?:the )?(?:build|ci|check|gate)|gate[sd]? (?:on|behind)|require\w*[^.\n]{0,60}\bbefore\b|no longer (?:allowed|permitted|accepts?)|restrict\w*|bounce\w*|veto\w*|\bbar(?:s|red|ring)\b|exit(?:s|ing)?\s+(?:code\s+)?(?:non-?zero|[0-9]+)|\bnon-?zero\b|raises?\s+\w*(?:Error|Exception)|\bunless\b|prerequisite\w*|precondition\w*|hard\s+(?:requirement|stop|fail)|only\s+[^.\n]{0,40}\b(?:may|can|are\s+allowed)\b|now\s+(?:needs|requires)|turns?\s+(?:the\s+)?(?:run|build|ci)\s+red|goes\s+red|\bgate\w*\b|\bhook\w*\b)",  # noqa: E501 — audit-verbatim trigger regex (ticket 696a); do not rewrap
+        ),
+    ),
+    # T10 infra/IaC: the audited infra-vocabulary pre-filter (ticket bfa8; measured
+    # 28% fire rate with 100% strong-finding recall). Text-only — no file_impact arms.
+    "T10": DetGateRule(
+        "infra-vocabulary",
+        (
+            r"\b(?:terraform|cloudformation|pulumi|ansible|kubernetes|helm|k8s|iac|aws|ec2|s3|iam|ssm|cloudwatch|vpc|sns|lambda|rds|ebs|docker|compose|infra/|provision\w*|systemd|launchagent|user_data|cloudfront|api gateway|oidc|\.github/workflows|github actions|workflow_dispatch|pull_request_target|secrets\.[A-Z_]+)\b",  # noqa: E501 — audit-verbatim trigger regex (ticket bfa8); do not rewrap
         ),
     ),
     # T14 CI-trigger / release-infra: scheduler/release vocabulary + a structured

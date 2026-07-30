@@ -470,8 +470,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.9,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "technical_feasibility",
@@ -944,8 +944,8 @@
         "bug"
       ]
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.9,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "state",
@@ -981,7 +981,7 @@
       }
     ],
     "routing": "overlay",
-    "trigger": "infrastructure/IaC intent (LLM-routed for plans — deterministic IaC keywords over-fire on prose; on a code DIFF use the *.tf/Dockerfile/k8s file-glob triggers from the 9da1 IaC catalog instead)",
+    "trigger": "infrastructure/IaC intent. Deterministically PRE-GATED (ticket bfa8; audited fire rate 28%, strong-finding recall 100%): skipped only on total absence of infra vocabulary (rule infra-vocabulary in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority. On a code DIFF use the *.tf/Dockerfile/k8s file-glob triggers from the 9da1 IaC catalog instead",
     "overlay_routing": "llm"
   },
   "T11": {
