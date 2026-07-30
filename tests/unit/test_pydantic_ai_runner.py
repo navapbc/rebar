@@ -253,13 +253,15 @@ def test_search_files_skips_vendored_noise(tmp_path):
 
 
 def test_unsupported_config_is_a_loud_error():
-    # base_url / api_key are dropped by this runner; surfacing them must FAIL, not
-    # silently ignore (they would otherwise be a silent capability gap).
+    # story S4: base_url/api_key are no longer refused outright — a valid base_url is now
+    # a real, honoured OpenAI-compatible endpoint (see test_openai_compatible_provider.py).
+    # `_pai_check_config` VALIDATES instead: a well-formed base_url alone passes preflight...
     runner = PydanticAIRunner(_cfg(base_url="http://localhost:1234/v1"))
-    with pytest.raises(LLMConfigError, match="base_url"):
-        runner.preflight()
+    runner.preflight()
+    # ...but api_key WITHOUT base_url is still a loud, actionable error (ambiguous — the
+    # direct-OpenAI path instead reads the vendor SDK's own OPENAI_API_KEY env var).
     runner2 = PydanticAIRunner(_cfg(api_key="sk-local"))
-    with pytest.raises(LLMConfigError, match="api_key"):
+    with pytest.raises(LLMConfigError, match="base_url"):
         runner2.run(
             RunRequest(
                 system_prompt="x",
@@ -269,6 +271,10 @@ def test_unsupported_config_is_a_loud_error():
                 mode="text",
             )
         )
+    # ...and a malformed (non-absolute) base_url is still a loud, actionable error.
+    runner3 = PydanticAIRunner(_cfg(base_url="not-a-url"))
+    with pytest.raises(LLMConfigError, match="base_url"):
+        runner3.preflight()
 
 
 def test_rebar_tools_are_least_privilege():
