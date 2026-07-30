@@ -27,7 +27,13 @@ def _tracker(tmp_path: Path) -> Path:
 
 
 def _event_count(tracker: Path) -> int:
-    return len(list(tracker.glob("*/*.json")))
+    """Count EVENT files only.
+
+    Reducing a ticket writes a `.cache.json` beside its events, so a plain
+    `*/*.json` glob counts cache writes as if they were events and makes any
+    "this wrote nothing" assertion fire on a read-only pass.
+    """
+    return len([p for p in tracker.glob("*/*.json") if not p.name.startswith(".")])
 
 
 # ---------------------------------------------------------------------------
@@ -536,3 +542,40 @@ def test_json_output_carries_the_documented_finding_fields(
     assert rc == 0, "exit 0 once nothing is outstanding"
     assert repaired["findings"][0]["repair_status"] == "repaired", repaired
     assert repaired["pre_repair_tag_oid"], "a repair pass records the rollback anchor"
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_repair_dry_run_reports_findings_but_writes_nothing(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """`--repair --dry-run` must still REPORT what it would fix, while writing nothing.
+
+    The two halves matter independently: a dry run that silently reported nothing
+    would look identical to a clean store, and one that wrote events would defeat
+    the point of the flag.
+    """
+    from rebar._commands import composer, doctor
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+    _git_backed(tracker)
+
+    monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    before = _event_count(tracker)
+    rc = doctor.doctor_cli(["--repair", "--dry-run", "--output", "json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert _event_count(tracker) == before, "a dry run must write no events"
+    assert rc == 1, "findings are still outstanding after a dry run"
+    assert payload["finding_count"] == 1, payload
+    assert payload["findings"][0]["kind"] == "ancestor-blocking", payload
+    assert "repair_status" not in payload["findings"][0], "nothing was actually repaired"
+    assert graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker)), (
+        "the offending edge must survive a dry run untouched"
+    )
