@@ -36,7 +36,11 @@ import urllib.request
 from typing import Any
 
 import pytest
-from _jira_shape_contract import assert_comment_map_shape, assert_search_shape
+from _jira_shape_contract import (
+    assert_comment_map_shape,
+    assert_issuelinks_map_shape,
+    assert_search_shape,
+)
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 # Mirrors conftest.py's own constant: the harness image's built-in admin account,
@@ -328,3 +332,71 @@ def test_select_backend_resolves_after_importing_adapters() -> None:
     from rebar_reconciler._backend_registry import _REGISTRY
 
     assert "jira-datacenter" in _REGISTRY
+
+
+@_skip
+@_skip_no_extra
+def test_add_label_and_the_links_surface_against_a_real_instance(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any
+) -> None:
+    """The methods AC(a) names that no other live test reaches.
+
+    A completion-verification run on this ticket correctly found that
+    ``add_label`` and the whole ``SupportsLinks`` surface had NO live coverage —
+    the earlier "11 passed" run exercised create/read/update/transition/comment/
+    search/probe and nothing else. AC(a) says EVERY method, so this closes that
+    gap rather than restating what already passes.
+
+    Link assertions read the DIRECT issue endpoint, never search: ADR 0037's
+    eventual-consistency discipline (and this harness's own conftest) note that
+    Jira's search index lags writes by an unbounded interval, so asserting a
+    freshly-created link via search would be flaky by construction. The
+    search-backed ``get_issuelinks_map`` is therefore held to its SHAPE contract
+    only — which tolerates an empty map — while the link's CONTENT is proven
+    through ``get_issue``.
+    """
+    from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
+
+    dc_transport.project = jira_dc_project
+    blocker = dc_transport.create_issue(
+        {"summary": "rebar J6 live — blocker", "issuetype": "Task"}
+    )["key"]
+    track_issue(blocker)
+    blocked = dc_transport.create_issue(
+        {"summary": "rebar J6 live — blocked", "issuetype": "Task"}
+    )["key"]
+    track_issue(blocked)
+
+    # --- TicketTransport.add_label -------------------------------------------------
+    dc_transport.add_label(blocker, "rebar-j6-live")
+    labels = dc_transport.get_issue(blocker)["fields"].get("labels") or []
+    assert "rebar-j6-live" in labels, (
+        f"add_label did not reach the server: {blocker} carries {labels!r}"
+    )
+
+    # --- SupportsLinks.set_relationship + get_issuelinks_map ------------------------
+    dc_transport.set_relationship(blocker, blocked, "Blocks")
+    linked_fields = dc_transport.get_issue(blocker)["fields"]
+    issuelinks = linked_fields.get("issuelinks") or []
+    assert issuelinks, f"set_relationship left no issuelinks on {blocker}"
+
+    assert_issuelinks_map_shape(dc_transport.get_issuelinks_map(jira_dc_project))
+
+    # --- SupportsLinks.map_remote_links, over the REAL server payload ---------------
+    # Driving the canonicalizer with a live `issuelinks` payload is the point: a
+    # hand-written fixture would only prove it handles the shape we imagined.
+    backend = JiraDataCenterBackend(transport=dc_transport, client=dc_transport._client)
+    mapped = backend.map_remote_links(linked_fields)
+    assert any(remote_key == blocked for _relation, remote_key, _vendor in mapped), (
+        f"map_remote_links did not canonicalize the live link to {blocked}: {mapped!r}"
+    )
+    assert all(vendor_type for _relation, _remote_key, vendor_type in mapped), (
+        f"map_remote_links dropped the vendor link type: {mapped!r}"
+    )
+
+    # --- SupportsLinks.link_payload_for_relation ------------------------------------
+    assert backend.link_payload_for_relation("blocks") == ("Blocks", False)
+    assert backend.link_payload_for_relation("depends_on") == ("Blocks", True), (
+        "depends_on must invert the Blocks direction"
+    )
+    assert backend.link_payload_for_relation("not-a-relation") is None
