@@ -1,7 +1,12 @@
 name: Optional-Dependency Isolation (reusable)
 
-# Reusable (workflow_call) form of the optionality contract — the lean-runtime,
-# clean-core-wheel, per-extra, and union checks. Invoked from TWO callers:
+# Reusable (workflow_call) form of the optionality contract — the clean-core-wheel,
+# per-extra, and union checks. (The lean-runtime/AST half — tests/unit/test_core_optionality.py
+# and tests/unit/test_optional.py — had a dedicated `import-linter` job here; it was deleted as
+# redundant because those unmarked tests already run in every `test` matrix cell off the same
+# `.[dev]` install. `test_optionality_suite_still_runs_in_the_default_selection` in
+# tests/unit/test_ci_workflow_parity.py guards that they stay in the default selection.)
+# Invoked from TWO callers:
 #   * optionality.yml       — push / pull_request (branch-head checkout).
 #   * gerrit-verify.yaml     — the Verified gate (checks out the EXACT Gerrit patchset),
 #     so a clean-wheel / packaging regression BLOCKS the Verified vote pre-merge instead
@@ -38,33 +43,6 @@ permissions:
   contents: read
 
 jobs:
-  import-linter:
-    name: import-linter (no module-scope heavy imports)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout branch head (push/PR lane)
-        if: inputs.gerrit-refspec == ''
-        uses: actions/checkout@v7
-      - name: Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback)
-        if: inputs.gerrit-refspec != ''
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
-        with:
-          gerrit-refspec: ${{ inputs.gerrit-refspec }}
-          gerrit-project: ${{ inputs.gerrit-project }}
-          gerrit-url: ${{ inputs.gerrit-url }}
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install (dev)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
-      - name: Static optionality guard (AST + lean-runtime)
-        run: |
-          python -m pytest -q tests/unit/test_core_optionality.py tests/unit/test_optional.py
-
   clean-core-wheel:
     name: clean core wheel (no extras → heavy deps absent)
     runs-on: ubuntu-latest
