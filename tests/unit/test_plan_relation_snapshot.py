@@ -341,3 +341,155 @@ def test_sign_manifest_fence_tolerates_unrelated_untracked_tracker_files(
     assert isinstance(signature, dict)
     assert signature.get("algorithm"), f"attestation not signed: {signature}"
     assert signature.get("ticket_id") == subject_id
+
+
+def _resign_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A repo whose latest REVIEW_RESULT is a signable PASS, ready for ``resign_plan_review``.
+
+    Mirrors the end-to-end setup in ``test_plan_review_resign.py`` (real repo + real store;
+    only the sidecar read, the gate handle and the code sha are stubbed) so the assertion
+    below exercises the REAL resign path rather than a mock of it.
+    """
+    import contextlib
+
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review import resign
+
+    root = tmp_path / "resignrepo"
+    root.mkdir()
+    for args in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "test@example.com"),
+        ("git", "config", "user.name", "Test"),
+        ("git", "commit", "-q", "--allow-empty", "-m", "initial"),
+    ):
+        subprocess.run(args, cwd=root, check=True, capture_output=True)
+    monkeypatch.setenv("REBAR_ROOT", str(root))
+    rebar.init_repo(repo_root=str(root))
+    ticket_id = rebar.create_ticket("task", "resign subject", repo_root=str(root))
+    rebar.declare_no_file_impact(ticket_id, "external operator action only", repo_root=str(root))
+
+    material = generation.collect(ticket_id, repo_root=str(root)).own_material
+    payload = {
+        "verdict": "PASS",
+        "ticket_id": ticket_id,
+        "ticket_type": "task",
+        "material_fingerprint": material,
+        "coverage": {},
+    }
+    monkeypatch.setattr(resign.sidecar, "latest_review_result", lambda *a, **k: payload)
+    monkeypatch.setattr(gate_source, "resolve_gate_handle", lambda *a, **k: object())
+    monkeypatch.setattr(gate_source, "gate_read_root", lambda *a, **k: contextlib.nullcontext())
+    code_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    monkeypatch.setattr("rebar.llm.config.current_code_sha", lambda: code_head)
+    monkeypatch.setenv("REBAR_SIGNING_KEY", "test-signing-key-c083")
+    return resign, ticket_id, str(root)
+
+
+def test_resign_tolerates_unrelated_untracked_tracker_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (bug c083): ``rebar sign-review`` must not abort because a crashed process
+    left an UNRELATED untracked artifact in the SHARED tickets-tracker.
+
+    This is the third site of the class bug ``d7cb-22ae`` fixed: that fix taught the review
+    preflight (``__init__.py``) and the signing fence (``generation.py``) to pass
+    ``ignore_untracked=True``, but missed ``resign.py``'s ``generation.collect`` — so the
+    sanctioned recovery for an unsigned PASS still collapsed to ``store-read-failure``.
+
+    The snapshot fingerprints the COMMITTED head, which an untracked file cannot change, and
+    the authoritative under-lock re-check already ignores them (``generation.py``'s
+    ``tracker_head_sha(..., ignore_untracked=True)``). ``.tickets-tracker`` is symlinked into
+    every session, so one stray artifact otherwise blocks signing machine-wide.
+    """
+    resign, ticket_id, root = _resign_fixture(tmp_path, monkeypatch)
+    tracker = Path(config.tracker_dir(root))
+
+    # CONTROL: a clean tracker signs. Proves the fixture is valid, so a failure below is the
+    # untracked file and not a broken setup.
+    clean = resign.resign_plan_review(ticket_id, repo_root=root)
+    assert clean["ok"] is True and clean["signed"] is True, f"clean-tracker control failed: {clean}"
+
+    # A crashed process left an artifact for a COMPLETELY UNRELATED ticket. Deliberately NOT
+    # named `.tmp-event-*`: the defect is the `git status --porcelain` untracked check, which
+    # is content- and name-agnostic, so any untracked path reproduces it.
+    (tracker / "zzz-unrelated-crash-artifact.json").write_text("{}", encoding="utf-8")
+
+    dirty = resign.resign_plan_review(ticket_id, repo_root=root)
+    assert "store-read-failure" not in str(dirty.get("reason") or ""), (
+        "an unrelated untracked tracker file collapsed sign-review to store-read-failure "
+        f"(shared-tracker blast radius not contained): {dirty}"
+    )
+    assert dirty["ok"] is True and dirty["signed"] is True, f"resign refused: {dirty}"
+
+
+def test_resign_still_refuses_on_tracked_dirty_tracker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The c083 fix must NOT weaken the real guarantee: TRACKED dirty state in the tracker
+    (a modified/staged committed file — which CAN change the fingerprinted head) must still
+    refuse to sign. Only UNTRACKED files are tolerated."""
+    resign, ticket_id, root = _resign_fixture(tmp_path, monkeypatch)
+    tracker = Path(config.tracker_dir(root))
+
+    tracked = next(iter(sorted(p for p in tracker.rglob("*.json") if p.is_file())), None)
+    assert tracked is not None, "expected a committed tracker file to dirty"
+    tracked.write_text(tracked.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    result = resign.resign_plan_review(ticket_id, repo_root=root)
+    assert result["signed"] is False, f"tracked-dirty tracker must not sign: {result}"
+
+
+def test_resign_tolerates_a_concurrent_writer_churning_tracker_temp_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (bug c083, concurrency model): this machine runs MANY sessions against ONE
+    shared ``.tickets-tracker`` (it is symlinked into every session), so untracked paths are
+    not merely crash debris — they are the NORMAL transient state of another session's
+    in-flight atomic write (write ``.tmp-event-<rand>``, then rename).
+
+    With the strict check, signing was therefore a RACE: any session that signed while another
+    was mid-write failed with ``store-read-failure``, and the failure rate scaled with
+    concurrency. Tolerating untracked paths removes the race outright.
+
+    NOTE a deliberate non-goal: the fix must NEVER clean up stray temp files. Deleting one is
+    unsafe under this model — it could destroy another session's in-flight write. Tolerate,
+    never tidy.
+    """
+    import threading
+
+    resign, ticket_id, root = _resign_fixture(tmp_path, monkeypatch)
+    tracker = Path(config.tracker_dir(root))
+
+    # A steady-state artifact guarantees the pre-fix RED is deterministic rather than
+    # dependent on winning a race with the churn thread below.
+    (tracker / ".tmp-event-steadystate").write_text('{"partial":', encoding="utf-8")
+
+    stop = threading.Event()
+
+    def churn() -> None:
+        i = 0
+        while not stop.is_set():
+            p = tracker / f".tmp-event-churn{i % 4}"
+            try:
+                p.write_text('{"in":"flight"', encoding="utf-8")
+                p.unlink()
+            except OSError:
+                pass
+            i += 1
+
+    writer = threading.Thread(target=churn, daemon=True)
+    writer.start()
+    try:
+        result = resign.resign_plan_review(ticket_id, repo_root=root)
+    finally:
+        stop.set()
+        writer.join(timeout=5)
+
+    assert "store-read-failure" not in str(result.get("reason") or ""), (
+        "a concurrent session's in-flight temp writes collapsed sign-review to "
+        f"store-read-failure — signing races other sessions: {result}"
+    )
+    assert result["ok"] is True and result["signed"] is True, f"resign refused: {result}"

@@ -143,7 +143,20 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     try:
         from . import generation
 
-        initial_generation = generation.collect(ticket_id, repo_root=repo_root)
+        # Ignore UNTRACKED files in the SHARED tickets-tracker (same rule as the review
+        # preflight, bug d7cb-22ae): this is a READ that fingerprints the COMMITTED
+        # tracker head, and an untracked path cannot change that head — so it cannot
+        # change the answer. This machine runs many concurrent sessions against ONE
+        # tracker symlinked into each of them, where an untracked `.tmp-event-*` is the
+        # NORMAL transient state of another session's in-flight atomic write (write temp,
+        # then rename) — not crash debris. Under the strict check, signing raced those
+        # sessions and failed with store-read-failure at a rate that scaled with
+        # concurrency. The authoritative under-lock re-check already tolerates them (see
+        # generation.py's tracker_head_sha(..., ignore_untracked=True)); tracked dirty
+        # state (modified/staged/unmerged) still fails, as it must.
+        initial_generation = generation.collect(
+            ticket_id, repo_root=repo_root, ignore_untracked=True
+        )
     except Exception as exc:  # noqa: BLE001 - recovery remains a structured no-throw API
         return {
             "ok": False,
