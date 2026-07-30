@@ -579,3 +579,41 @@ def test_repair_dry_run_reports_findings_but_writes_nothing(
     assert graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker)), (
         "the offending edge must survive a dry run untouched"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_repair_refuses_while_a_reconciler_pass_is_in_flight(
+    graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--repair` must refuse to write while a reconciler pass holds the pass lock.
+
+    The reconciler rewrites ticket events itself, so repairing underneath a live
+    pass risks interleaving two writers over the same edges. The guard fails
+    CLOSED — an indeterminate lock state also refuses — so the assertion here is
+    that nothing is written and the refusal is explicit, not that it merely
+    returns.
+    """
+    from rebar._commands import doctor
+    from rebar._commands._seam import CommandError
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+    _git_backed(tracker)
+
+    monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: True)
+
+    findings = doctor.scan(str(tracker))
+    assert len(findings) == 1, findings
+    before = _event_count(tracker)
+
+    with pytest.raises(CommandError, match="reconciler pass is in flight"):
+        doctor.run_repair(findings, str(tracker))
+
+    assert _event_count(tracker) == before, "a refused repair must write no events"
+    assert graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker)), (
+        "the offending edge must be untouched when the repair is refused"
+    )
+    assert "repair_status" not in findings[0], "no finding may be marked repaired"
