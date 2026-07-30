@@ -10,6 +10,7 @@ relation-precisely must be declined rather than guessed at.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -328,3 +329,160 @@ def _seed_link(tracker: Path, source: str, target: str, relation: str, suffix: s
     }
     path = tracker / source / f"{2000 + int(suffix)}-link-{source}-{target}-{suffix}-LINK.json"
     path.write_text(json.dumps(event), encoding="utf-8")
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
+    graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--repair` pre-tags the pre-run OID, and a SECOND run RE-POINTS the tag.
+
+    The tag is the run's rollback anchor, so it must be written before the first
+    write. It is force-written (``git tag -f``) precisely so a resumed or repeated
+    repair re-anchors to that run's starting state instead of failing because the
+    tag already exists.
+
+    This fixture builds a REAL git-backed tracker. The shared synthetic tracker is
+    not a git repo, so ``rev-parse HEAD`` returns empty, ``_pre_tag`` short-circuits
+    and never tags — which would make every assertion here compare "" to "" and pass
+    vacuously.
+    """
+    from rebar._commands import link_audit
+    from rebar._store.gitutil import run_git
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "t@example.invalid"),
+        ("config", "user.name", "T"),
+        ("add", "-A"),
+        ("commit", "-q", "-m", "seed"),
+    ):
+        cp = run_git(str(tracker), *args, check=False)
+        assert cp.returncode == 0, (args, cp.stderr)
+
+    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    def _tag_oid() -> str:
+        # `git rev-parse <unknown-ref>` echoes the ref name to stdout and exits
+        # non-zero, so the return code — not the output — is what says "absent".
+        cp = run_git(
+            str(tracker), "rev-parse", "--verify", "-q", link_audit.PRE_REPAIR_TAG, check=False
+        )
+        return cp.stdout.strip() if cp.returncode == 0 else ""
+
+    def _head() -> str:
+        return run_git(str(tracker), "rev-parse", "HEAD", check=False).stdout.strip()
+
+    assert _head(), "fixture precondition: the tracker must be a real git repo"
+    assert not _tag_oid(), "the tag must not exist before any repair run"
+
+    pre_oid_1 = _head()
+    _f1, reported_1 = link_audit.run_repair(link_audit.scan(str(tracker)), str(tracker))
+    assert reported_1 == pre_oid_1, (reported_1, pre_oid_1)
+    assert _tag_oid() == pre_oid_1, "tag must be written at the pre-run OID"
+
+    # Advance HEAD, so a non-forcing `git tag` would leave the tag stale and the
+    # re-point assertion below is not a tautology.
+    cp = run_git(str(tracker), "commit", "-q", "--allow-empty", "-m", "advance", check=False)
+    assert cp.returncode == 0, cp.stderr
+    pre_oid_2 = _head()
+    assert pre_oid_2 != pre_oid_1, "fixture precondition: HEAD must move between runs"
+
+    _seed_link(tracker, "epic-e", "story-s", "depends_on", suffix="9")
+    _f2, reported_2 = link_audit.run_repair(link_audit.scan(str(tracker)), str(tracker))
+    assert reported_2 == pre_oid_2, (reported_2, pre_oid_2)
+    assert _tag_oid() == pre_oid_2, "a second run must RE-POINT the tag, not fail"
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+@pytest.mark.parametrize(
+    "rest,expect_init_only",
+    [([], True), (["--repair"], False)],
+)
+def test_link_audit_arm_reconverges_only_for_repair(
+    monkeypatch: pytest.MonkeyPatch, rest: list[str], expect_init_only: bool
+) -> None:
+    """A plain `link-audit` must not reconverge the store; only `--repair` may.
+
+    `link-audit` deliberately does NOT join `_WRITES_FULL`, whose arms reconverge on
+    every invocation — that would make a read-only audit mutate/​sync the store. Its
+    own arm passes ``init_only=True`` unless ``--repair`` is present.
+    """
+    from rebar import _cli
+
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        _cli, "ensure_initialized", lambda *_a, **kw: seen.append(kw.get("init_only"))
+    )
+    monkeypatch.setattr("rebar._commands.link_audit.link_audit_cli", lambda *_a, **_k: 0)
+
+    _cli._dispatch("link-audit", rest)
+
+    assert seen == [expect_init_only], (rest, seen)
+
+
+def _git_backed(tracker: Path) -> None:
+    """Make `tracker` a real git repo so the store write path actually locks.
+
+    Without this the synthetic tracker is not a git repo, `stage_and_commit` bails
+    before taking the write lock, and any test about locking passes vacuously.
+    """
+    from rebar._store.gitutil import run_git
+
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "t@example.invalid"),
+        ("config", "user.name", "T"),
+        ("add", "-A"),
+        ("commit", "-q", "-m", "seed"),
+    ):
+        cp = run_git(str(tracker), *args, check=False)
+        assert cp.returncode == 0, (args, cp.stderr)
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
+    graph: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run_repair` must not hold the tracker write lock across its own writes.
+
+    Every event write takes that lock for itself
+    (append_event -> write_and_push -> stage_and_commit -> write_lock), and it is
+    NOT re-entrant. An outer hold made each inner acquisition block for its full
+    60s timeout and then fail, so a pass repaired NOTHING while serialising the
+    tracker for every other writer — the observed production symptom was 18
+    findings and zero progress in ten minutes.
+
+    Against the pre-fix implementation this test fails twice over: the finding comes
+    back `unrepairable` carrying a flock timeout, and the call takes ~60s per item.
+    """
+    from rebar._commands import link_audit
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+    _git_backed(tracker)
+
+    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    findings = link_audit.scan(str(tracker))
+    assert len(findings) == 1, findings
+
+    started = time.monotonic()
+    link_audit.run_repair(findings, str(tracker))
+    elapsed = time.monotonic() - started
+
+    assert findings[0]["repair_status"] == "repaired", findings[0]
+    assert "flock" not in str(findings[0].get("repair_reason") or ""), findings[0]
+    # The pre-fix code spent a full 60s lock timeout here before failing.
+    assert elapsed < 30, f"run_repair took {elapsed:.1f}s — it is contending with itself"
+    assert not graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker))
