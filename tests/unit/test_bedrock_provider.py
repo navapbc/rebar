@@ -415,3 +415,65 @@ def test_unrelated_provider_failure_still_surfaces_as_llm_unavailable_at_the_run
                 system_prompt="s", instructions="i", config=cfg, reviewers=["v"], mode="text"
             )
         )
+
+
+# ── 281f: the inert REBAR_LLM_BEDROCK_MODEL_ID knob is REMOVED ────────────────────────────
+def test_bedrock_model_id_config_field_is_gone(monkeypatch) -> None:
+    """281f (happy path): `REBAR_LLM_BEDROCK_MODEL_ID` was parsed onto `LLMConfig` but read by
+    NOTHING, so an operator who set it got silence — no model change, no warning, no error.
+
+    The knob is deleted rather than wired: `cfg.model` ALREADY carries the Bedrock id as the
+    provider-prefixed `bedrock:<inference-profile-id>` string (the path S3's tests exercise), so
+    wiring a second source would require precedence rules for two ways to say one value. This
+    asserts the ATTRIBUTE is gone, so a future reintroduction of an unread field fails here."""
+    from rebar.llm.config import LLMConfig
+
+    monkeypatch.setenv("REBAR_LLM_BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-8")
+    cfg = LLMConfig.from_env()
+    assert not hasattr(cfg, "bedrock_model_id"), (
+        "LLMConfig still exposes `bedrock_model_id`; setting REBAR_LLM_BEDROCK_MODEL_ID must "
+        "have no config surface at all, since nothing reads it"
+    )
+
+
+def test_bedrock_provider_prefixed_model_still_resolves(monkeypatch) -> None:
+    """281f collateral invariant (HELD OUT): removing the inert knob must not disturb the
+    WORKING path. The Bedrock model id travels on `cfg.model` as `bedrock:<profile-id>`, and
+    `infer_provider` splits the prefix. If a fix over-deletes and takes the real path with it,
+    this bites."""
+    from rebar.llm.config import LLMConfig, infer_provider
+
+    monkeypatch.setenv("REBAR_LLM_MODEL", "bedrock:us.anthropic.claude-sonnet-4-6")
+    cfg = LLMConfig.from_env()
+    assert cfg.model == "bedrock:us.anthropic.claude-sonnet-4-6"
+    assert infer_provider(cfg.model) == "bedrock"
+
+
+def test_bedrock_region_knob_is_untouched(monkeypatch) -> None:
+    """281f collateral invariant (HELD OUT): `REBAR_LLM_BEDROCK_REGION` is a SIBLING setting that
+    IS genuinely read (`build_bedrock_provider` threads `cfg.bedrock_region_name` into
+    `BedrockProvider`). Deleting the inert model-id knob must not delete its live neighbour —
+    an easy over-deletion given the adjacent lines. This matters more since a574: a missing
+    region raises NoRegionError at client construction."""
+    from rebar.llm.config import LLMConfig
+
+    monkeypatch.setenv("REBAR_LLM_BEDROCK_REGION", "us-east-1")
+    cfg = LLMConfig.from_env()
+    assert cfg.bedrock_region_name == "us-east-1"
+
+
+def test_env_registry_no_longer_documents_the_removed_knob() -> None:
+    """281f (HELD OUT): docs/env-vars.md is GENERATED from the env reads in src/rebar and a CI
+    drift gate fails the build when it is stale. Removing the config read without regenerating
+    leaves the docs advertising a knob that no longer exists — the same 'documented but inert'
+    defect this ticket exists to remove, just inverted."""
+    from pathlib import Path
+
+    registry = Path(__file__).resolve().parents[2] / "docs" / "env-vars.md"
+    text = registry.read_text(encoding="utf-8")
+    assert "REBAR_LLM_BEDROCK_MODEL_ID" not in text, (
+        "docs/env-vars.md still lists REBAR_LLM_BEDROCK_MODEL_ID after its config read was removed"
+    )
+    assert "REBAR_LLM_BEDROCK_REGION" in text, (
+        "the live sibling REBAR_LLM_BEDROCK_REGION disappeared from the registry — over-deletion"
+    )
