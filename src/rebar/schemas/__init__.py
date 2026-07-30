@@ -57,7 +57,7 @@ __all__ = [
     "GATE_RESULT",
     "SUMMARY",
     "FSCK",
-    "LINK_AUDIT",
+    "DOCTOR",
     "REVIEW_RESULT",
     "COMPLETION_VERDICT",
     "TICKET_DIGEST",
@@ -101,9 +101,9 @@ DELETE_RESULT = "delete_result"
 GATE_RESULT = "gate_result"
 SUMMARY = "summary"
 FSCK = "fsck"
-# graph — output of `rebar link-audit`: blocking edges that disagree with the
+# graph — output of `rebar doctor`: blocking edges that disagree with the
 # structural link rule, plus their repair disposition after a `--repair` pass.
-LINK_AUDIT = "link_audit"
+DOCTOR = "doctor"
 # rebar.llm — output of an LLM review operation (`rebar review`). The MCP tool is
 # exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
 # is pinned to this schema via the "review" key below.
@@ -299,7 +299,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "audit": AUDIT_TRAIL,
     "metrics": METRICS,
     "fsck": FSCK,
-    "link_audit": LINK_AUDIT,
+    "doctor": DOCTOR,
     "review": REVIEW_RESULT,
     # completion-verification op: like `review`, no CLI help arm (so the --output
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;

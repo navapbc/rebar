@@ -320,14 +320,14 @@ def _dispatch(sub: str, rest: list[str]) -> int:
             return _io_cli.import_cli(rest)
         ensure_initialized(init_only=True)
         return _io_cli.export_cli(rest)
-    if sub == "link-audit":
+    if sub == "doctor":
         # Read-only by default, so it must NOT join _WRITES_FULL — that arm
         # reconverges the store on EVERY invocation. Only --repair writes, and only
         # it needs the full init (same conditional shape as the import/export arm).
         ensure_initialized(init_only="--repair" not in rest)
-        from rebar._commands import link_audit as _link_audit
+        from rebar._commands import doctor as _doctor
 
-        return _link_audit.link_audit_cli(rest)
+        return _doctor.doctor_cli(rest)
     if sub == "fsck":
         ensure_initialized(init_only=False)
         from rebar._commands import fsck as _fsck
