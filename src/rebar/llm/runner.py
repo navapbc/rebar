@@ -345,12 +345,13 @@ class PydanticAIRunner:
         # keys) and `cache_settings_for` dispatches on the resulting `prompt_cache_style`;
         # each style's keys are provider-specific and would error on an unrelated provider, so
         # they are applied at THIS shared seam only — no RunRequest content-list change, so the
-        # structured-output retry path is untouched. A test model_override skips capability
-        # resolution entirely (preserving the old no-cache-settings behavior for a test double,
-        # and avoiding a spurious conservative-fallback warning on the override sentinel).
-        cache_settings = (
-            None if self._model_override else cache_settings_for(capabilities_for(resolved))
-        )
+        # structured-output retry path is untouched.
+        # Resolved ONCE, threaded into `_pai_structured` below (never disagree): `model` (a real
+        # object, whose PROFILE may carry a provider override, S4) for a real run, but `resolved`
+        # (the config STRING) for `model_override` — its profile is irrelevant/misleading there,
+        # and every model_override test pins the string behavior; cache_settings stays None then.
+        caps = capabilities_for(resolved if self._model_override is not None else model)
+        cache_settings = None if self._model_override else cache_settings_for(caps)
         # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
         # above (an injected test model never gets a provider server tool). Attached as a
         # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
@@ -454,7 +455,7 @@ class PydanticAIRunner:
             else:
                 with usage_log.collect_failure_messages(run_messages):
                     structured, usage = _pai_structured(
-                        Agent, model, resolved, req, kwargs, usage_limits
+                        Agent, model, caps, req, kwargs, usage_limits
                     )
                 outcome = {"structured_response": structured}
             # Agent-build invariant (story anole): telemetry warning on a REAL run whose
@@ -601,7 +602,7 @@ def _import_pydantic_ai():
 _FAULTY_OUTPUT_SNIPPET_CHARS = 2000
 
 
-def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, usage_limits):
+def _pai_structured(Agent, model, caps, req: RunRequest, kwargs: dict, usage_limits):
     """Obtain a validated structured object via the reliability stack (1268).
 
     NATIVE path: where the provider enforces a strict json_schema (output_mode ->
@@ -611,13 +612,16 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     Pydantic validators, with a single bounded retry that feeds the validation error
     back to the SAME model (NOT a second interpreter LLM). Returns
     ``(validated_model_instance, usage_dict)`` — the usage of the run that produced the
-    accepted output (story 0250 cache-token observability)."""
+    accepted output (story 0250 cache-token observability).
+
+    ``caps`` is resolved ONCE by the caller (``run()``) and threaded through rather than
+    re-derived here — see its ``caps =`` assignment for why a real run reads the model
+    OBJECT's profile but a ``model_override`` run reads the config-resolved STRING instead."""
     from pydantic_ai import NativeOutput
 
     from rebar.llm import contracts, structured
 
     model_cls = contracts.response_model_for(req.output_schema)
-    caps = capabilities_for(resolved)
     mode_obj = structured.output_mode(model_cls, caps, thinking=req.thinking)
     if isinstance(mode_obj, NativeOutput):
         agent = Agent(
@@ -728,18 +732,27 @@ def _extract_usage(run_result) -> dict[str, int]:
 
 
 def _pai_check_config(cfg: LLMConfig) -> None:
-    """Refuse, LOUDLY, config this runner does not yet honour rather than silently
-    dropping it. The Pydantic AI runner picks the model purely from the model string,
-    so an explicit ``base_url`` / ``api_key`` (OpenAI-compatible local servers) would
-    be silently ignored — a real capability gap. Fail with a clear message until it is
-    wired through a Pydantic AI provider object."""
-    unsupported = [k for k in ("base_url", "api_key") if getattr(cfg, k, None)]
-    if unsupported:
+    """VALIDATE ``base_url``/``api_key`` rather than refuse them outright (story S4): this
+    used to raise for ANY ``base_url``/``api_key``, making the OpenAI-compatible local-server
+    recipe ``docs/llm-framework.md`` documents a false promise. ``rebar.llm.providers`` now
+    builds a real provider for a configured ``base_url``; this only rejects ambiguous/
+    malformed config, still LOUDLY: ``api_key`` WITHOUT ``base_url`` (direct-OpenAI instead
+    reads the vendor SDK's own ``OPENAI_API_KEY``), or a ``base_url`` missing a scheme/host."""
+    if cfg.api_key and not cfg.base_url:
         raise LLMConfigError(
-            f"the pydantic_ai runner does not yet support {unsupported} "
-            f"(OpenAI-compatible local-server config); omit these settings. "
-            f"Not silently ignored."
+            "REBAR_LLM_API_KEY (api_key) is set without base_url — ambiguous: the direct "
+            "provider path reads the vendor SDK's own env var (e.g. OPENAI_API_KEY) instead. "
+            "Set base_url too (an OpenAI-compatible endpoint) or unset api_key."
         )
+    if cfg.base_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(cfg.base_url)
+        if not (parsed.scheme and parsed.netloc):
+            raise LLMConfigError(
+                f"base_url (REBAR_LLM_BASE_URL) is not an absolute URL: {cfg.base_url!r} — "
+                "expected e.g. 'http://localhost:1234/v1'"
+            )
 
 
 # Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,

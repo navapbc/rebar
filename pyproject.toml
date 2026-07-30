@@ -215,6 +215,11 @@ dev = [
     # RUN in CI rather than skipping. Self-referential extras stay here, not in
     # core, so `pip install nava-rebar` remains lean.
     "nava-rebar[agents,metrics]",
+    # OpenAI-compatible endpoint support (story S4, `rebar.llm.providers`'s `openai`
+    # builder). Opt-in at runtime (kept OUT of the `agents` extra so the default
+    # install stays lean) but present here so its tests RUN in CI rather than
+    # skipping — the same precedent as `mcp` above, itself an optional runtime extra.
+    "pydantic-ai-slim[openai]>=1,<2",
 ]
 
 [project.scripts]
