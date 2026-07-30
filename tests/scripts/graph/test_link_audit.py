@@ -486,3 +486,53 @@ def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     # The pre-fix code spent a full 60s lock timeout here before failing.
     assert elapsed < 30, f"run_repair took {elapsed:.1f}s — it is contending with itself"
     assert not graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker))
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_json_output_carries_the_documented_finding_fields(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """`--output json` findings carry kind/source/target/relation, and repair_status
+    after a `--repair` pass.
+
+    The schema-coverage guard drives this command against a CLEAN store, so its
+    findings array is empty and the per-finding fields are never actually exercised.
+    This asserts on real parsed keys and values.
+    """
+    from rebar._commands import composer, link_audit
+
+    tracker = _tracker(tmp_path)
+    _write_ticket(tracker, "epic-e", ticket_type="epic")
+    _write_ticket(tracker, "story-s", parent_id="epic-e", ticket_type="story")
+    _seed_link(tracker, "epic-e", "story-s", "depends_on")
+    _git_backed(tracker)
+
+    monkeypatch.setattr(link_audit, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker)
+    monkeypatch.setattr(link_audit, "_reconciler_in_flight", lambda *_a, **_k: False)
+
+    # ── read-only pass ────────────────────────────────────────────────────────
+    rc = link_audit.link_audit_cli(["--output", "json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1, "exit 1 while findings are outstanding"
+    assert payload["finding_count"] == 1, payload
+    assert set(payload) >= {"findings", "finding_count", "pre_repair_tag_oid"}, payload
+
+    finding = payload["findings"][0]
+    assert set(finding) >= {"kind", "source", "target", "relation"}, finding
+    assert finding["kind"] in {"ancestor-blocking", "mis-escalated", "unreadable"}, finding
+    assert finding["kind"] == "ancestor-blocking", finding
+    assert finding["source"] == "epic-e", finding
+    assert finding["target"] == "story-s", finding
+    assert finding["relation"] == "depends_on", finding
+    assert "repair_status" not in finding, "a read-only pass must not report a repair"
+
+    # ── repair pass ───────────────────────────────────────────────────────────
+    rc = link_audit.link_audit_cli(["--repair", "--output", "json"])
+    repaired = json.loads(capsys.readouterr().out)
+
+    assert rc == 0, "exit 0 once nothing is outstanding"
+    assert repaired["findings"][0]["repair_status"] == "repaired", repaired
+    assert repaired["pre_repair_tag_oid"], "a repair pass records the rollback anchor"
