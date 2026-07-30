@@ -1,4 +1,4 @@
-"""``link-audit`` — find (and optionally repair) blocking edges that predate the
+"""``doctor`` — find (and optionally repair) blocking edges that predate the
 structural link rule.
 
 Blocking-link comparability used to be decided by ticket TYPE TIER; ticket
@@ -45,7 +45,7 @@ from rebar.graph._relations import _BLOCKING_RELATIONS
 # Mirrors fsck --repair's ``pre-a3-remediation`` (fsck_repair.py), including the
 # ``-f``: a resumed or repeated repair re-points the tag at THAT run's starting
 # state rather than failing because the tag already exists.
-PRE_REPAIR_TAG = "pre-link-audit-repair"
+PRE_REPAIR_TAG = "pre-doctor-repair"
 
 _KIND_ANCESTOR = "ancestor-blocking"
 _KIND_MIS_ESCALATED = "mis-escalated"
@@ -246,7 +246,7 @@ def run_repair(
 
 def _print_text(findings: list[dict[str, Any]], pre_oid: str, *, repaired: bool) -> None:
     if pre_oid:
-        print(f"link-audit: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")  # noqa: T201
+        print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")  # noqa: T201
     for f in findings:
         status = f.get("repair_status")
         suffix = f" [{status}: {f.get('repair_reason', '')}]" if status else ""
@@ -255,10 +255,10 @@ def _print_text(findings: list[dict[str, Any]], pre_oid: str, *, repaired: bool)
         )
     outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
     verb = "outstanding" if repaired else "finding(s)"
-    print(f"link-audit: {len(findings)} finding(s), {outstanding} {verb}")  # noqa: T201
+    print(f"doctor: {len(findings)} finding(s), {outstanding} {verb}")  # noqa: T201
 
 
-def link_audit_cli(argv: list[str], *, repo_root=None) -> int:
+def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI entry: scan by default; ``--repair`` converts findings in place."""
     try:
         fmt, rest = parse_output(argv, allowed=("text", "json"), default="text")
@@ -271,7 +271,7 @@ def link_audit_cli(argv: list[str], *, repo_root=None) -> int:
     unknown = [a for a in rest if a not in ("--repair", "--dry-run")]
     if unknown:
         print(  # noqa: T201
-            f"Usage: rebar link-audit [--repair] [--dry-run] [--output json]\n"
+            f"Usage: rebar doctor [--repair] [--dry-run] [--output json]\n"
             f"  unexpected argument(s): {' '.join(unknown)}",
             file=sys.stderr,
         )
