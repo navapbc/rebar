@@ -236,7 +236,21 @@ class JiraDataCenterTransport:
         _with_connection_retry(lambda: self._client.transition_issue(remote_id, match["id"]))
 
     def add_label(self, remote_id: str, label: str) -> None:
-        _with_connection_retry(lambda: self._client.add_field_value(remote_id, "labels", label))
+        """Append ``label`` without resetting the issue's existing labels.
+
+        ``add_field_value`` lives on the ISSUE resource, not on the client:
+        ``jira.JIRA`` has no such attribute (verified against jira 3.10.5), so the
+        earlier client-level call raised ``AttributeError`` on every invocation —
+        this method could never have worked. It shipped because it had no test at
+        any tier; the live test that now covers it caught the bug on its first
+        real execution. ``Issue.add_field_value(field, value)`` is documented as
+        "add a value to a field that supports multiple values, without resetting
+        the existing values ... should work with: labels", which is exactly the
+        append semantics this method's callers expect (a read-modify-write of the
+        whole ``labels`` list would clobber concurrent edits).
+        """
+        issue = _with_connection_retry(lambda: self._client.issue(remote_id))
+        _with_connection_retry(lambda: issue.add_field_value("labels", label))
 
     def search_issues(
         self, jql: str, start_at: int = 0, max_results: int = 50

@@ -40,6 +40,23 @@ class _LibIssue:
         self.fields = type("Fields", (), dict(fields))()
         self.raw = {"key": key, "fields": dict(fields)}
 
+    def add_field_value(self, field: str, value: str) -> None:
+        """Mirrors ``jira.resources.Issue.add_field_value(field, value)``.
+
+        Deliberately modelled on the ISSUE resource with its real TWO-argument
+        signature: ``jira.JIRA`` has no ``add_field_value`` at all (verified
+        against jira 3.10.5). The transport previously called it on the CLIENT
+        with three arguments, so ``add_label`` raised AttributeError on every
+        invocation — a bug that survived because the method had no test at any
+        tier and this fake exposed no such attribute to contradict it. Keeping
+        the fake's surface faithful to the real object is what makes it a
+        verified fake rather than a rubber stamp.
+        """
+        current = list(self.raw["fields"].get(field) or [])
+        current.append(value)
+        self.raw["fields"][field] = current
+        setattr(self.fields, field, current)
+
 
 class _LibComment:
     def __init__(self, cid: str, body: str) -> None:
@@ -161,4 +178,26 @@ def test_missing_extra_raises_naming_the_install_command(monkeypatch) -> None:
     message = str(caught.value)
     assert "pip install 'nava-rebar[jira-datacenter]'" in message, (
         "the error must name the exact install command an operator can copy; got: " + message
+    )
+
+
+def test_add_label_appends_without_clobbering_existing_labels(transport) -> None:
+    """``add_label`` must APPEND, and must go through the Issue resource.
+
+    Regression for a bug the live tier caught on its first real execution: the
+    transport called ``self._client.add_field_value(...)``, but ``jira.JIRA``
+    has no such attribute — only ``jira.resources.Issue`` does, with a
+    two-argument signature. The method could therefore never have worked. This
+    pins both halves: the call reaches the issue resource, and the semantics are
+    append (a read-modify-write of the whole list would clobber a concurrent
+    edit).
+    """
+    issue = transport._client.issues["DC-1"]
+    issue.raw["fields"]["labels"] = ["pre-existing"]
+
+    transport.add_label("DC-1", "rebar-added")
+
+    labels = transport.get_issue("DC-1")["fields"]["labels"]
+    assert labels == ["pre-existing", "rebar-added"], (
+        f"add_label must append without resetting existing labels; got {labels!r}"
     )
