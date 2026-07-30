@@ -38,7 +38,31 @@ _EVIDENCE_CHARS = 12_000
 _MAX_CRITERIA = 32
 _MAX_CRITERION_CHARS = 4_000
 _MAX_TOTAL_CRITERIA_CHARS = 32_000
-_MAX_CONTEXT_CHARS = 24_000
+# Criteria are extracted from the ticket DESCRIPTION and the description is embedded in
+# the context, so criteria ⊂ description ⊂ context. A context budget SMALLER than the
+# criteria budget therefore refuses criteria sets the criteria bounds just accepted,
+# making the top of the advertised criteria budget structurally unreachable. The context
+# budget must therefore never be SMALLER than the criteria budget (asserted by test); the
+# headroom covers the ticket header, the ``## Acceptance Criteria`` heading and the
+# checkbox prefixes.
+#
+# The budget is RAISED rather than made elastic, and nothing is ever elided. An earlier
+# attempt at this fix compacted an over-budget context by dropping comment history
+# oldest-first; that was WITHDRAWN because it is a signed-false-PASS vector. On an epic the
+# gate assembles one block PER TICKET (``operations.assemble_context(graph=True)``), each
+# with its own ``#### Comments`` heading, so "drop the comment history" silently deleted
+# whole CHILD tickets — including their unmet acceptance criteria — while reporting only
+# that comments were removed. Elision is dangerous in both directions: dropping evidence
+# that a criterion IS met causes a false FAIL, and dropping evidence that it is NOT causes
+# a false PASS. A refusal is a visible false-block; a bad elision is an invisible signed
+# false PASS, and this gate SIGNS its verdict.
+#
+# 100,000 covers the largest real ticket observed (41,595 chars, ticket 2932 via db1c) with
+# ~2.4x headroom, and the ticket that motivated this work (9fd4, 34,282) with ~2.9x. It also
+# bounds the per-criterion re-send: recovery sends the context once per criterion, so the
+# worst case is _MAX_CRITERIA (32) x this budget, which stays a bounded spend rather than an
+# open-ended one.
+_MAX_CONTEXT_CHARS = 100_000
 _MAX_TOTAL_EVIDENCE_CHARS = 96_000
 _MAX_FINALIZER_INPUT_CHARS = 132_000
 _FINALIZER_OUTPUT_TOKENS = 8_000

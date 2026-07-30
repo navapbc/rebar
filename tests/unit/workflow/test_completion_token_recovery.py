@@ -292,7 +292,7 @@ def test_unbounded_ticket_context_fails_before_any_recovery_call(monkeypatch) ->
         config=LLMConfig(runner="fake"),
     )
     ctx = _ctx()
-    ctx.inputs["context"] = "x" * 24_001
+    ctx.inputs["context"] = "x" * 100_001
 
     with pytest.raises(CompletionRecoveryError, match="context.*bound"):
         step.run(ctx)
