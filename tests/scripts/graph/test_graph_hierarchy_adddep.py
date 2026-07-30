@@ -536,3 +536,118 @@ def test_link_dry_run_reports_ancestor_descendant_rejection(
     assert "ancestor-descendant" in out, out
     assert "Would create" not in out, out
     assert "no event written" in out, out
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_add_dependency_returns_the_redirect_record_when_it_escalates(
+    graph: ModuleType, tmp_path: Path
+) -> None:
+    """The record travels back as a VALUE, not only to stdout.
+
+    stdout is unreachable for library and MCP callers — `link_core(quiet=True)`
+    suppresses it so rebar-mcp's stdio JSON-RPC stream stays intact — so a returned
+    record is the only way they can learn a different edge was recorded.
+    """
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-a", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-a", parent_id="epic-a", ticket_type="story")
+    _write_ticket(tracker_dir, "leaf-a", parent_id="story-a", ticket_type="task")
+    _write_ticket(tracker_dir, "epic-b", ticket_type="epic")
+
+    record = graph.add_dependency("leaf-a", "epic-b", str(tracker_dir), relation="depends_on")
+
+    assert record is not None, "an escalated link must return its redirect record"
+    assert record["original"] == {"source": "leaf-a", "target": "epic-b"}, record
+    assert record["resolved"]["source"] == "epic-a", record
+    assert record["resolved"]["target"] == "epic-b", record
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_add_dependency_returns_none_when_nothing_was_escalated(
+    graph: ModuleType, tmp_path: Path
+) -> None:
+    """A sibling link records exactly what was asked for, so there is nothing to report."""
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "story-parent", ticket_type="story")
+    _write_ticket(tracker_dir, "task-a", parent_id="story-parent", ticket_type="task")
+    _write_ticket(tracker_dir, "task-b", parent_id="story-parent", ticket_type="task")
+
+    record = graph.add_dependency("task-a", "task-b", str(tracker_dir), relation="depends_on")
+
+    assert record is None, record
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_quiet_link_core_returns_the_record_while_writing_nothing_to_stdout(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """The suppression must SURVIVE this fix — it is what protects the MCP stream.
+
+    rebar-mcp speaks MCP-over-stdio, so a print inside a tool call would inject a bare
+    JSON object into the JSON-RPC stream. The escalation is reported by RETURNING the
+    record, never by relaxing `quiet`. Asserting both halves together is the point: a
+    future "just print it" change would satisfy the return assertion alone.
+    """
+    from rebar._commands import composer
+
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-a", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-a", parent_id="epic-a", ticket_type="story")
+    _write_ticket(tracker_dir, "leaf-a", parent_id="story-a", ticket_type="task")
+    _write_ticket(tracker_dir, "epic-b", ticket_type="epic")
+
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker_dir)
+    monkeypatch.setattr(composer, "resolve_ticket_id", lambda raw, _tracker: raw)
+    capsys.readouterr()  # drop fixture noise
+
+    record = composer.link_core("leaf-a", "epic-b", "depends_on", quiet=True)
+    captured = capsys.readouterr()
+
+    assert record is not None, "the escalation must still be reported, as a value"
+    assert record["resolved"]["source"] == "epic-a", record
+    assert captured.out == "", f"quiet must swallow stdout, got {captured.out!r}"
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_rebar_link_carries_the_record_through_the_whole_library_chain(
+    graph: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
+) -> None:
+    """The record must survive EVERY layer of the library facade, not just the graph.
+
+    `rebar.link()` -> `_python_leaf` -> `_link` -> `link_core` -> `add_dependency`.
+    Three of those links previously discarded the value, and a test that stubs
+    `rebar.link` itself cannot see that — it has to run the real chain. This is the
+    test that fails if any one of them stops returning.
+    """
+    import rebar
+    from rebar._commands import composer
+
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "epic-a", ticket_type="epic")
+    _write_ticket(tracker_dir, "story-a", parent_id="epic-a", ticket_type="story")
+    _write_ticket(tracker_dir, "leaf-a", parent_id="story-a", ticket_type="task")
+    _write_ticket(tracker_dir, "epic-b", ticket_type="epic")
+
+    monkeypatch.setattr(composer, "tracker_dir", lambda _repo_root=None: tracker_dir)
+    monkeypatch.setattr(composer, "resolve_ticket_id", lambda raw, _tracker: raw)
+    capsys.readouterr()
+
+    record = rebar.link("leaf-a", "epic-b", "depends_on")
+    captured = capsys.readouterr()
+
+    assert record is not None, "the record must reach rebar.link()'s caller"
+    assert record["original"] == {"source": "leaf-a", "target": "epic-b"}, record
+    assert record["resolved"]["source"] == "epic-a", record
+    assert captured.out == "", "the library path must stay silent on stdout"
