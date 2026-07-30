@@ -321,13 +321,13 @@ def _completion_precheck(
             repo_root=repo_root,
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
+        from rebar.llm import failure as _failure
+
         # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
         # to the raised LLM error through to the process exit code. A retryable outage (429/5xx)
         # → exit 11 ("transient — retry"), else the existing fail-closed exit 1. CommandError
         # already carries `returncode` and transition.py returns it, so exit 11 propagates with
         # no plumbing change. The sanitized diagnostic is also written to the session log.
-        from rebar.llm import failure as _failure
-
         _outcome = _failure.outcome_of(exc)
         _failure.log_degrade(_outcome, gate="completion-verify", ticket_id=ticket_id)
         _rc = 11 if (_outcome and _outcome.retryable) else 1
@@ -336,12 +336,17 @@ def _completion_precheck(
             _msg = _failure.message_for(_outcome.resolution_class.value)
             if _msg:
                 _hint = f" [{_outcome.resolution_class.value}: {_msg}]"
+        # A bounded-recovery failure is not an unavailable runtime, so its remedy differs:
+        # point at the size/stage cause and the sidecar, not at installing the extra.
+        _remedy = _failure.recovery_failure_cause(exc) or (
+            "The completion-verification gate is enabled "
+            "(verify.require_completion_verification_for_close); install the 'agents' extra "
+            "and set a model API key."
+        )
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run "
-            f"({exc}).{_hint} "
-            "The completion-verification gate is enabled "
-            "(verify.require_completion_verification_for_close); install the 'agents' extra and "
-            'set a model API key, or override with --force-close="<reason>".',
+            f"({exc}).{_hint} {_remedy} "
+            'Override with --force-close="<reason>".',
             returncode=_rc,
         ) from None
 

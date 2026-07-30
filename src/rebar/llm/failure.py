@@ -381,3 +381,43 @@ def log_degrade(outcome: LLMOutcome | None, *, gate: str, ticket_id: str | None 
         )
     except Exception:  # noqa: BLE001 — telemetry is strictly best-effort; never fail the gate
         pass
+
+
+def recovery_failure_cause(exc: object) -> str | None:
+    """Why a bounded-completion-recovery failure happened, or ``None`` if ``exc`` isn't one.
+
+    Returns a sentence fragment for a caller to embed, the same shape :func:`message_for`
+    returns — the caller owns its own command phrasing; this owns the explanation.
+
+    It belongs beside :func:`message_for` and :func:`outcome_of` because it answers their
+    question ("what should the operator be told about this failure?") for the one failure
+    class they structurally cannot: ``CompletionRecoveryError`` is raised inside the
+    recovery module and never crosses the runner seams that attach an ``.outcome``, so
+    :func:`outcome_of` returns ``None`` and :func:`message_for` has nothing to look up.
+    Without this, such a failure silently inherits whatever default the caller uses for an
+    unavailable runtime.
+
+    The size claim is deliberately CONDITIONAL: recovery raises this error at several
+    stages and only the bound checks carry ``context_chars``/``context_char_limit``.
+    Reading them unconditionally yields "context (None chars) exceeds the limit (None
+    chars)" for, say, an exhaustion at criterion 7 — relocating the misdiagnosis instead
+    of removing it.
+    """
+    from rebar.llm.errors import CompletionRecoveryError
+
+    if not isinstance(exc, CompletionRecoveryError):
+        return None
+    diag = getattr(exc, "diagnostic", None) or {}
+    chars, limit = diag.get("context_chars"), diag.get("context_char_limit")
+    if isinstance(chars, int) and isinstance(limit, int):
+        return (
+            f"The ticket's context ({chars:,} chars) exceeds the bounded completion-recovery "
+            f"limit ({limit:,} chars), so the recovery pass was refused before it ran — "
+            f"shorten the ticket's description/comments. Its gate_error_v1 sidecar holds "
+            f"the full diagnostic."
+        )
+    return (
+        "Bounded completion recovery could not finish for this ticket; the recovery bounds "
+        "are deliberate safeguards, not a transient fault. Its gate_error_v1 sidecar holds "
+        "the full diagnostic."
+    )
