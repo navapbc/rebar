@@ -337,11 +337,21 @@ def mint_finding_id(finding: dict[str, Any]) -> str:
 
 
 # ── routing ──────────────────────────────────────────────────────────────────────
-def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
+def route_criteria(
+    ctx: PlanContext, gate_log: dict[str, str] | None = None
+) -> tuple[list[dict], list[dict]]:
     """Filter + split the LLM criteria into (single-turn/2-step, agent-tier),
-    applying proportionate scrutiny and overlay triggering. Returns the two lists."""
+    applying proportionate scrutiny and the deterministic criterion pre-gates
+    (overlay + leaf, ticket 4ee2). Returns the two lists.
+
+    ``gate_log`` (optional, caller-owned) records every deterministic-gate SKIP as
+    ``{criterion_id: rule_name}`` — the assemble step merges it into the sidecar
+    coverage as ``coverage.routing.det_gated`` so a not-fired gate (which performs
+    zero LLM routing for that criterion) is always observable."""
     plan = ctx.plan_text
-    triggers = registry.overlay_triggers(plan)
+    file_impact = ctx.state.get("file_impact") or []
+    triggers = registry.overlay_triggers(plan, file_impact=file_impact)
+    leaf_gates = registry.leaf_gate_triggers(plan, file_impact=file_impact)
     single, agent = [], []
     # BUG REVIEW TIER (epic 6982 / R4): a bug gets a LIGHT ADVISORY tier — the DET floor plus a
     # restricted, advisory criteria set (registry.BUG_TIER_CRITERIA), never the full suite and
@@ -390,6 +400,17 @@ def route_criteria(ctx: PlanContext) -> tuple[list[dict], list[dict]]:
         # (those absent from the deterministic trigger map) always enter the finder,
         # which decides applicability (PASS not-applicable is cheap).
         if registry.is_overlay(cid) and cid in triggers and not triggers[cid]:
+            if gate_log is not None:
+                gate_log[cid] = registry._DET_OVERLAY_RULES[cid].name
+            continue
+        # LEAF-routed deterministic gates (ticket 4ee2): removal-rationale and
+        # asserted-capability are NOT overlays, so the is_overlay guard above cannot
+        # serve them — this parallel block gates them on the same pre-filter contract
+        # (skip only on total subject-vocabulary absence; a fired plan routes to the
+        # LLM exactly as before). See the ADR 0034 amendment note.
+        if cid in leaf_gates and not leaf_gates[cid]:
+            if gate_log is not None:
+                gate_log[cid] = registry._DET_LEAF_GATE_RULES[cid].name
             continue
         if registry.exec_tier(c) == "AGENT":
             agent.append(c)

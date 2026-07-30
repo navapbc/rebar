@@ -57,3 +57,27 @@ call site.
 - The gap-report labels ("G-5"/"G-10") remain the human/eval vocabulary (the eval cases and tests
   are named `g5_prohibition` / `g10_citrigger`); the registry ids are `T13`/`T14`.
 - No orchestrator change: the two overlays ride the existing LLM-routed overlay path.
+
+## Amendment (2026-07 — deterministic pre-filters for T13/T14; ticket 4ee2)
+
+T13 and T14 each produced **zero findings in 1,939 agentic runs** (and the leaf-routed
+`removal-rationale` / `asserted-capability` criteria showed the same zero-findings pattern over
+1,722 / 409 runs). Each now has a **conservative deterministic PRE-FILTER**
+(`DetGateRule` in `det_gate_rules.py`, evaluated by `route_criteria`) in front of the
+**unchanged** LLM router.
+
+This does NOT reinstate the lexical applicability judgment this ADR rejected. The pre-filter
+contract:
+
+- a plan **skips** the criterion only on **total subject-vocabulary absence** — no
+  mechanism-of-enforcement language for T13; no scheduler/release/CI-surface language AND no
+  CI/build-surface `file_impact` path for T14;
+- a **fired** plan still goes through exactly the ADR-0034 LLM routing — the LLM router remains
+  the applicability authority for fired plans;
+- every skip is recorded in the sidecar coverage under `routing.det_gated` (criterion id →
+  rule name), so a gated criterion performs zero LLM routing yet stays observable.
+
+Evidence for the conservatism: zero findings over the criteria's entire agentic history means
+zero findings would have been lost to the gate; the audit-amended triggers still fire on
+84.0% / 61.6% (T13/T14) of 743 reviewed non-bug tickets, so the gate only sheds the
+vocabulary-absent tail. Trigger provenance: the adversarial false-negative audit on ticket 696a.

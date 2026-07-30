@@ -256,7 +256,12 @@ def _project_criteria(ctx, exclude: set[str]) -> tuple[list[dict], list[dict]]:
     Caveat (documented follow-up): under PROBE MODE (drift-refresh) the built-in set is the tiny
     probe allowlist, but route_criteria has no probe notion, so an activated project criterion is
     also evaluated during a probe. Harmless (the drift comparison keys off E4/G1G2), but a future
-    change should thread the probe allowlist here to suppress it."""
+    change should thread the probe allowlist here to suppress it.
+
+    No ``gate_log`` is passed (ticket 4ee2): this re-routes the same ticket the assemble
+    step already routed, so recording its deterministic-gate skips here would duplicate
+    the assemble step's ``coverage.routing.det_gated`` record — skips are captured once,
+    at the assemble step's ``route_criteria`` call."""
     single, agent = route_criteria(ctx)
     proj_single = [
         c for c in single if str(c["id"]).startswith(_PROJECT_PREFIX) and c["id"] not in exclude

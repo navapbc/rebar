@@ -20,8 +20,9 @@ This registry provides the generic routing the orchestrator needs:
 * :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into chunks of
   ``base_chunk(model) × size_factor(ticket)`` (the RUBRIC is the lever that fits a
   context window — the ticket content is NEVER chunked).
-* :func:`overlay_triggers` — deterministic low-FP overlay triggers (T5a/T5d/T7/T12),
-  the rest are LLM-routed at Pass-1.
+* :func:`overlay_triggers` / :func:`leaf_gate_triggers` — deterministic criterion
+  pre-gates (T5a/T5d/T7/T12 + the ticket-4ee2 T13/T14 and leaf-criterion pre-filters,
+  tables in :mod:`.det_gate_rules`); the rest are LLM-routed at Pass-1.
 * :func:`check_registry_coverage` — the completeness guard (every criterion in the
   canonical v4 §5 registry must have a loadable library prompt + routing entry).
 
@@ -51,6 +52,15 @@ from typing import Any
 
 from rebar.llm import criteria as _criteria
 from rebar.llm.criteria import overlay as _overlay_core
+
+from .det_gate_rules import _DET_LEAF_GATE_RULES as _DET_LEAF_GATE_RULES
+from .det_gate_rules import _DET_OVERLAY_RULES as _DET_OVERLAY_RULES
+
+# The deterministic criterion pre-gates (ticket 4ee2) — re-exported so this registry
+# stays the routing seam every call site imports (see the overlay-triggering section).
+from .det_gate_rules import DetGateRule as DetGateRule
+from .det_gate_rules import leaf_gate_triggers as leaf_gate_triggers
+from .det_gate_rules import overlay_triggers as overlay_triggers
 
 # The gate error is the SHARED criteria error (story 5065): plan-review re-exports it as
 # ``RegistryError`` so every existing ``except RegistryError`` / ``pytest.raises`` keeps
@@ -451,15 +461,13 @@ def chunk_by_facet(
 
 
 # ── overlay triggering (deterministic where low-FP; else LLM-routed) ────────────
-# Deterministic, low-false-positive triggers only (validated round 4). The rest of
-# the overlays (T6/T5b/T9 + the agent-tier T1/T3/T5c/T8/T10/T11) are LLM-routed at
-# Pass-1 (a keyword trigger is high-FP for them), so they are NOT listed here.
-_DET_OVERLAY_RULES = {
-    "T5a": r"\b(latency|throughput|performance|scal\w*|n\+1|batch|cache|memory|hot[- ]?path)\b",
-    "T5d": r"\b(ui|button|form|screen|page|modal|wcag|aria|accessib\w*|keyboard|contrast)\b",
-    "T7": r"\b(\bdocs?\b|readme|claude\.md|adr|guide|documentation)\b",
-    "T12": r"\b(deploy|rollout|canary|feature flag|production traffic|rollback|blue.green)\b",
-}
+# The deterministic criterion pre-gates (the DetGateRule schema, the overlay table —
+# T5a/T5d/T7/T12 plus the ticket-4ee2 T13/T14 pre-filters — and the parallel LEAF-gate
+# table for removal-rationale/asserted-capability) live in det_gate_rules.py: the
+# verbatim audit trigger vocabularies would push this module past the 800-LOC cap.
+# Re-exported (imported at the top of this module) so this registry stays the routing
+# seam every call site imports: ``registry.overlay_triggers`` / ``registry.leaf_gate_triggers``
+# / ``registry._DET_OVERLAY_RULES`` / ``registry._DET_LEAF_GATE_RULES`` / ``registry.DetGateRule``.
 
 # T8's finder is deliberately broad once it runs: its job is to discover subtle structural
 # gaps in an LLM/agent contract.  Applicability itself therefore cannot safely be delegated to
@@ -491,13 +499,6 @@ def t8_llm_surface_applies(plan: str) -> bool:
     mention schemas, enums, or value objects.
     """
     return bool(_T8_LLM_SURFACE_RE.search(plan or ""))
-
-
-def overlay_triggers(plan: str) -> dict[str, bool]:
-    """Deterministic overlay triggers (low-FP set only). Returns ``{overlay_id:
-    fired}``. The remaining overlays are LLM-routed and absent from this map."""
-    p = plan or ""
-    return {ov: bool(re.search(rx, p, re.IGNORECASE)) for ov, rx in _DET_OVERLAY_RULES.items()}
 
 
 # Overlay criterion ids (everything Txx). The orchestrator runs an overlay when it
