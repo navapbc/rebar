@@ -457,57 +457,6 @@ def review_plan(
     return gate_source.annotate_result(verdict, handle)
 
 
-def _idempotent_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
-    """Idempotence short-circuit (feature b3e5): reuse an existing, still-valid plan-review
-    attestation INSTEAD of re-running the billable multi-pass LLM review, when the ticket is
-    UNCHANGED. Returns a well-formed PASS ``plan_review_verdict`` (``coverage.llm_ran=False``,
-    ``coverage.idempotent_skip=True``, ``signature`` mirroring the current attestation) when
-    reuse is safe, else ``None`` (→ a full review runs).
-
-    Validity is decided by :func:`claim_gate_check` — the EXACT check the ``claim`` gate
-    consumes (a certified plan-review attestation that binds the current material fingerprint,
-    whose reviewed code has not drifted, whose criteria-registry stamp still matches, and which
-    post-dates any reopen). So the skip fires precisely when a claim would already pass, and it
-    cannot weaken the gate. No LLM / no network beyond the same local reads the claim gate does;
-    it never re-signs and never re-emits a sidecar (the attestation is already current)."""
-    from rebar import signing
-    from rebar.llm import findings
-
-    gate = claim_gate_check(ticket_id, repo_root=repo_root)
-    if not gate.get("ok"):
-        return None
-    try:
-        sig = signing.verify_signature(ticket_id, kind=attest._MANIFEST_PREFIX, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — cannot read the attestation record → run a full review
-        return None
-    material = attest.current_material_fingerprint(ticket_id, repo_root=repo_root)
-    verdict: dict[str, Any] = {
-        "verdict": "PASS",
-        "ticket_id": getattr(ctx, "ticket_id", ticket_id),
-        "ticket_type": getattr(ctx, "ticket_type", ""),
-        "blocking": [],
-        "advisory": [],
-        "coaching": [],
-        "indeterminate": [],
-        "material_fingerprint": material,
-        "coverage": {"llm_ran": False, "idempotent_skip": True},
-        "signature": {
-            "signed": True,
-            "key_id": sig.get("key_id"),
-            "head_sha": sig.get("head_sha"),
-        },
-        "runner": "reused",
-        "model": None,
-        "sidecar_emitted": False,
-    }
-    logger.info(
-        "plan review reused (ticket unchanged; attestation current) for %s "
-        "— pass --force to re-run",
-        ticket_id,
-    )
-    return findings.validate_structured(verdict, "plan_review_verdict")
-
-
 def _run_plan_review(
     ticket_id: str,
     *,
@@ -584,10 +533,22 @@ def _run_plan_review(
     # drift-refresh check below (a fully-valid attestation beats a needs-refresh one), and
     # only on the signing path (a --no-sign / readonly review has no attestation to reuse).
     # ``force`` bypasses BOTH this skip and the drift-refresh, forcing a full re-review.
+    from . import reuse
+
     if sign and not force:
-        reused = _idempotent_reuse(ticket_id, ctx, repo_root=repo_root)
+        reused = reuse.idempotent_reuse(ticket_id, ctx, repo_root=repo_root)
         if reused is not None:
             return reused
+    # BLOCK verdict-reuse (bug 7e77): the sibling short-circuit for the path the attestation
+    # skip above can never cover — a BLOCK never signs, so an unrevised blocked plan re-paid
+    # the full review on every retry. When the latest REVIEW_RESULT sidecar's BLOCK still
+    # matches the current material fingerprint AND review code sha, reuse the stored verdict
+    # (zero LLM calls, no new sidecar). Not sign-gated: reuse neither signs nor emits, so a
+    # --no-sign / readonly review benefits identically. ``force`` bypasses it like the others.
+    if not force:
+        block_reused = reuse.verdict_reuse(ticket_id, ctx, repo_root=repo_root)
+        if block_reused is not None:
+            return block_reused
     # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
     # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
     # plan still matches the code, refresh the attestation instead of a full re-review.

@@ -592,6 +592,14 @@ def _render_plan_review_text(result: dict) -> None:
             "  reused: existing attestation is still current — no LLM re-run "
             "(pass --force to re-review)\n"
         )
+    # BLOCK verdict-reuse (bug 7e77): the stored BLOCK verdict was rendered back because the
+    # plan and the reviewed code are both unchanged since it was recorded — no LLM re-run.
+    # The JSON carries coverage.verdict_reuse / runner="reused"; exit code stays the BLOCK 1.
+    if (result.get("coverage", {}) or {}).get("verdict_reuse"):
+        sys.stdout.write(
+            "  reused: stored BLOCK verdict is still current (plan and code unchanged) — "
+            "no LLM re-run (pass --force to re-review)\n"
+        )
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
     overflow = counts.get("advisory_overflow", 0)
     sys.stdout.write(
