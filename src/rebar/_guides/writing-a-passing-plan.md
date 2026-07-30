@@ -148,6 +148,92 @@ never block on their own (they're scored and coached, capped at the top ~20 per 
 - **Don't hedge (`hedge`).** "Should probably" / "might want to" in a requirement reads as an
   undecided choice — commit or drop it.
 
+When a finding arrives with a coaching line ("Pin down X with a concrete worked example…"),
+that line names a **registered move** — look the technique up in
+[Responding to coaching moves](#responding-to-coaching-moves) below.
+
+## Responding to coaching moves
+
+The reviewer's Pass-4 coaching renders from a fixed registry of **moves**
+(`src/rebar/llm/plan_review/coach_moves.py`); each coaching line is a move applied to a
+`{subject}` from your plan. The five below are the ones that show up in practice by far the
+most often (in field-frequency order); apply the technique, don't just paraphrase the line.
+
+### specification by example
+
+*"Pin down {subject} with a concrete worked example."* An abstract requirement leaves the
+executor to invent the details; a worked example — real input, real expected output — pins the
+behavior so precisely that disagreement becomes visible before code is written. Add one
+concrete input/output pair (or a short fenced transcript) to the section the finding cites.
+
+- **Before:** "The exporter escapes problematic characters in titles."
+- **After:** "The exporter escapes control characters: title `"a\x07b"` exports as
+  `"a\\u0007b"` (checked by `test_exporter_escapes_control_chars`)."
+
+### plan the verification
+
+*"Plan how {subject} will be verified in-session — restate any deferred or unobservable
+success target as an observable proxy."* Every success target must be checkable **in this
+session**, and when the real outcome is deferred or unobservable (adoption, prod behavior, a
+future migration), the **observable-proxy rule** applies: restate it as something you *can*
+observe now — a passing test, a command's exit code, a measurable artifact — and name that
+proxy in the AC.
+
+- **Before:** "- [ ] Agents adopt the new claim flow."
+- **After:** "- [ ] The new claim flow is the documented default; proxy: `rebar explain plan`
+  shows it and `test_claim_flow_default` passes (adoption itself is post-session)."
+
+### riskiest-assumption test
+
+*"Test the riskiest assumption behind {subject} first."* Every plan rests on assumptions;
+order the work so the one most likely to sink the plan is tested **first**, before you build
+on top of it. Name the assumption, state the cheapest check that would falsify it, and put
+that check at the top of the sequencing.
+
+- **Before:** "Build the adapter, then wire it to the vendor API."
+- **After:** "Riskiest assumption: the vendor API returns stable ids. Step 1 is a five-line
+  probe asserting id stability across two fetches; only then build the adapter on it."
+
+### state attestation evidence
+
+*"State the concrete attestation evidence the [operator-attested] {subject} will require (a
+change id / vote outcome / timestamp), recorded on the ticket."* When an AC's "done" evidence
+lives **outside the codebase** (a deploy, a live drill, an access review), tag the criterion
+`[operator-attested]` and name the concrete evidence — a change id, a vote outcome, a
+timestamp — that will be recorded on the ticket. The completion verifier accepts that recorded
+attestation in place of an in-session proof.
+
+- **Before:** "- [ ] The new LaunchAgent is running in production."
+- **After:** "- [ ] [operator-attested] The new LaunchAgent is running: the operator records
+  `launchctl print` output and its timestamp as a ticket comment."
+
+### propagate to children
+
+*"Propagate the revision for {subject} to the child tickets."* A fix applied only to the
+reviewed ticket leaves its children carrying the stale plan — and a child changing later
+invalidates the parent's review. When a finding changes a decision that children inherit
+(scope, interface, sequencing), edit the affected child descriptions in the same revision
+round, then re-review in dependency order.
+
+- **Before:** "Renamed the config key in this epic's approach section."
+- **After:** "Renamed the config key in the epic **and** in children 12ab/34cd, which cited
+  the old name; their plans now match before any of them is reviewed."
+
+### The remaining registered moves (one-liners)
+
+- **spike** — de-risk the subject with a short throwaway experiment before committing.
+- **prior-art research** — search existing/OSS solutions before building it custom.
+- **pre-mortem** — ask "how could this plan fail?" and patch the answers in.
+- **weigh alternatives** — name at least one structural alternative and why it lost.
+- **thin vertical slice** — prove the path end-to-end minimally before widening.
+- **ADR / one-way-door** — record hard-to-reverse decisions as an ADR.
+- **foundation/enhancement split** — ship the functional goal with existing machinery now;
+  route the ideal version to a dependent follow-on ticket.
+- **generalize the finding** — apply the same fix everywhere the pattern occurs.
+- **realign to parent plan** — the parent wins on conflict; fix the parent first if it's wrong.
+- **sample, not the population** — enumerate the whole population the flagged instance samples,
+  plus a machine-checkable criterion that fails while any instance remains.
+
 ## Citing a prerequisite's symbol (`[rebar:<id>]`)
 
 If your plan relies on a file, module, class, function, or config key that a **prerequisite
