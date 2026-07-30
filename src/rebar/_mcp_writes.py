@@ -209,9 +209,22 @@ def register_write_tools(mcp, ctx) -> None:
     def link_tickets(id1: str, id2: str, relation: str) -> str:
         """Link two tickets (one of the seven canonical relations: blocks |
         depends_on | relates_to | duplicates | supersedes | discovered_from |
-        caused_by)."""
-        rebar.link(id1, id2, relation)
-        return "ok"
+        caused_by).
+
+        Blocking relations are escalated to comparable endpoints when the two tickets
+        do not share a parent, so the RECORDED edge may differ from the requested one.
+        When that happens the return value names both pairs — otherwise the caller
+        would be told "ok" for an edge that was never written.
+        """
+        record = rebar.link(id1, id2, relation)
+        if not record:
+            return "ok"
+        original = record.get("original") or {}
+        resolved = record.get("resolved") or {}
+        return (
+            f"ok (escalated: {original.get('source')}->{original.get('target')} "
+            f"recorded as {resolved.get('source')}->{resolved.get('target')})"
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def unlink_tickets(id1: str, id2: str) -> str:

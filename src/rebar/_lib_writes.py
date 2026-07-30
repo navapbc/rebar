@@ -9,7 +9,7 @@ here too and is re-exported as ``rebar._python_leaf``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from rebar import config
 from rebar._errors import ConcurrencyError, RebarError
@@ -480,7 +480,7 @@ def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
     return transition(ticket_id, "closed", "open", repo_root=repo_root)
 
 
-def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> None:
+def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> Any:
     """Run a Tier B leaf write in-process — the sole path since the cutover.
 
     Tier B retired its kill-switch after the soak (docs/bash-migration.md §4); the
@@ -488,11 +488,18 @@ def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> None:
     failure is mapped onto RebarError so the exit-code contract is unchanged.
     Extra keyword arguments are forwarded verbatim to ``fn`` (e.g. ``source=`` for
     comment provenance).
+
+    Returns whatever ``fn`` returns. Most leaf writes return None and their callers
+    ignore this, so widening it is additive; ``link`` relies on it to carry the
+    hierarchy-escalation record back out (bug fec5-d8bb-86cd-453e). Forking a
+    separate helper for that one caller would have duplicated the
+    ``CommandError -> RebarError`` mapping below, which is the single thing keeping
+    the library's exit-code contract uniform.
     """
     from rebar._commands._seam import CommandError
 
     try:
-        fn(*args, repo_root=repo_root, **kwargs)
+        return fn(*args, repo_root=repo_root, **kwargs)
     except CommandError as exc:
         raise RebarError(
             f"rebar {what} failed (exit {exc.returncode}): {exc.message}",
@@ -603,18 +610,24 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
     )
 
 
-def link(id1: str, id2: str, relation: str, *, repo_root=None) -> None:
+def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:
     """Link two tickets.
 
     ``relation`` must be one of the seven canonical relations: blocks, depends_on,
     relates_to, duplicates, supersedes, discovered_from, caused_by.
+
+    Returns the REDIRECT record when hierarchy escalation recorded a DIFFERENT pair
+    than the one asked for, else None. The CLI prints that record; this path cannot
+    (stdout is suppressed so rebar-mcp's stdio JSON-RPC stream stays intact), so
+    returning it is how a library or MCP caller learns the substitution happened
+    instead of believing the requested edge was written (bug 1803-df54-18bb-4881).
     """
     from rebar._commands import composer
 
     def _link(i, j, rel, *, repo_root):
-        composer.link_core(i, j, rel, repo_root=repo_root, quiet=True)
+        return composer.link_core(i, j, rel, repo_root=repo_root, quiet=True)
 
-    _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
+    return _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
 
 
 def unlink(id1: str, id2: str, *, repo_root=None) -> None:

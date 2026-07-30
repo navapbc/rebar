@@ -154,7 +154,7 @@ def add_dependency(
     target_id: str,
     tracker_dir: str,
     relation: str = "blocks",
-) -> None:
+) -> dict | None:
     """Add a dependency from source_id to target_id with cycle check.
 
     Raises CyclicDependencyError if adding this dependency would create a cycle.
@@ -163,6 +163,13 @@ def add_dependency(
     Idempotent: if a net-active LINK with the same (target_id, relation) already exists,
     this is a no-op (exits cleanly without writing a duplicate event).
     For relates_to: also writes a reciprocal LINK event in target_id's directory.
+
+    Returns the REDIRECT record when hierarchy escalation moved either endpoint, else
+    None. stdout is NOT the only channel any more: the CLI still gets the printed
+    record, but the library facade suppresses stdout (composer.link_core(quiet=True))
+    because rebar-mcp speaks MCP-over-stdio and a stray print would corrupt the
+    JSON-RPC stream. Returning it lets those callers report the substitution instead
+    of silently recording a different edge (bug 1803-df54-18bb-4881).
     """
     # Step 0: Validate relation grammar before touching disk
     if relation not in CANONICAL_RELATIONS:
@@ -267,7 +274,7 @@ def add_dependency(
         # Idempotent no-op: the link already exists. Nothing durable to protect, so
         # surface the redirect record (parity with the pre-fix behavior) and return.
         _emit_redirect()
-        return
+        return redirect_record
 
     _write_link_event(source_id, target_id, relation, tracker_dir)
 
@@ -280,3 +287,4 @@ def add_dependency(
     # stdout. A BrokenPipeError here propagates loudly (exit non-zero) but the link
     # is already persisted, satisfying the write-or-fail-loudly invariant.
     _emit_redirect()
+    return redirect_record

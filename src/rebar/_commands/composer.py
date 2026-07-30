@@ -601,7 +601,7 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
 
 def link_core(
     src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False
-) -> None:
+) -> dict | None:
     """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
     non-dry-run path → ticket-graph.py --link → add_dependency).
 
@@ -626,10 +626,12 @@ def link_core(
     sink = io.StringIO()
     try:
         if quiet:
+            # The sink stays: rebar-mcp speaks MCP-over-stdio, so a stray print inside
+            # a tool call would corrupt the JSON-RPC stream. The record travels back as
+            # a RETURN VALUE instead.
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                add_dependency(src_id, tgt_id, str(tracker), relation)
-        else:
-            add_dependency(src_id, tgt_id, str(tracker), relation)
+                return add_dependency(src_id, tgt_id, str(tracker), relation)
+        return add_dependency(src_id, tgt_id, str(tracker), relation)
     except (CyclicDependencyError, ValueError) as exc:
         raise CommandError(f"Error: {exc}") from None
 
