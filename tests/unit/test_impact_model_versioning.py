@@ -106,8 +106,10 @@ def test_code_review_approved_blocking_criteria_set() -> None:
 # Calibration 3 (task relishable-ammonitic-hoverfly) demoted T5e to advisory: the plan-v2
 # segmented replay classed it FP-PRONE (validity 0.391, 59% verifier-drop, surviving p90
 # priority 0.27) — see docs/experiments/plan-review-threshold-calibration.md "Calibration 3".
+# Ticket bfa8 (operator-approved blocking pilot) added T3 + T10 at block_threshold 0.90 —
+# the deliberate re-approval this pin exists to force.
 _PLAN_REVIEW_APPROVED_BLOCKING = frozenset(
-    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "T1", "T4", "T8"}
+    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "T1", "T3", "T4", "T8", "T10"}
 )
 
 

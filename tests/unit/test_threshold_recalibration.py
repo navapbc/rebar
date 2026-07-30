@@ -12,6 +12,10 @@ Amended by calibration 3 (task relishable-ammonitic-hoverfly, plan-v2 segmented 
     calibration-2 thresholds; see docs/experiments/plan-review-threshold-calibration.md
     "Calibration 3".
 
+Amended by ticket bfa8 (operator-approved blocking pilot):
+  - T3 and T10 promoted to blocking @ 0.90 (conservative pilot; the zero-LLM
+    criterion-effectiveness recorder monitors outcomes for a later 0.85 revisit).
+
 Proving command:
     .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
 """
@@ -27,6 +31,8 @@ LOWERED = {"COH", "E2", "F1", "G5", "G6"}
 CAL3_DEMOTED = {"T5e"}
 # The FOUR promoted to default_posture=blocking, with their new thresholds.
 PROMOTED = {"G1G2": 0.70, "T1": 0.70, "T8": 0.70, "E4": 0.75}
+# The ticket-bfa8 blocking pilot: T3 + T10 promoted to blocking @ 0.90.
+PILOT_BLOCKING = {"T3": 0.90, "T10": 0.90}
 
 # AC4: the COMPLETE expected routing, pinned INLINE (no separate snapshot file). Any unintended
 # change to ANY criterion's (block_threshold, default_posture) fails the assertion below.
@@ -49,13 +55,13 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "G7": (0.95, "advisory"),
     "ISF": (0.95, "advisory"),
     "T1": (0.7, "blocking"),
-    "T10": (0.95, "advisory"),
+    "T10": (0.9, "blocking"),
     "T11": (0.95, "advisory"),
     "T12": (0.95, "advisory"),
     "T13": (0.95, "advisory"),
     "T14": (0.95, "advisory"),
     "T2": (0.95, "advisory"),
-    "T3": (0.95, "advisory"),
+    "T3": (0.9, "blocking"),
     "T4": (0.7, "blocking"),
     "T5a": (0.95, "advisory"),
     "T5b": (0.95, "advisory"),
@@ -144,8 +150,10 @@ def test_full_routing_table_matches_pinned_expectation() -> None:
 
 
 def test_only_the_approved_and_prerequisite_criteria_are_blocking() -> None:
-    # The blocking set is exactly the calibrated criteria plus the dedicated
-    # prerequisite criterion; nothing else silently flipped posture.
+    # The blocking set is exactly the calibrated criteria plus the ticket-bfa8 pilot
+    # pair plus the dedicated prerequisite criterion; nothing else silently flipped
+    # posture.
     r = _routing()
     blocking = {cid for cid, v in r.items() if v.get("default_posture") == "blocking"}
-    assert blocking == LOWERED | set(PROMOTED) | {"T4", "prerequisite-consistency"}
+    expected = LOWERED | set(PROMOTED) | set(PILOT_BLOCKING) | {"T4", "prerequisite-consistency"}
+    assert blocking == expected
