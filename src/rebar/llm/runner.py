@@ -26,6 +26,7 @@ from rebar.llm import usage_log
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
     _anthropic_cache_settings,
+    _anthropic_web_search_capabilities,
     _build_retrying_anthropic_model,
     _local_proxy_bypass_base_url,
     _pai_model,
@@ -88,6 +89,11 @@ class RunRequest:
     # Remove all tools after this pydantic-ai run step, leaving a final turn
     # that can summarize gathered evidence as text.
     tool_step_limit: int | None = None
+    # Server-side web-search flag (bug ff64), set by the plan-review routing seam for a
+    # criterion whose routing entry declares ``"web": true`` (T1 initially). Honored ONLY
+    # on an anthropic-resolved model (the server-side ``web_search`` capability); every
+    # other provider and every unflagged request is byte-identical. DEFAULTED False.
+    web: bool = False
 
 
 @runtime_checkable
@@ -335,6 +341,15 @@ class PydanticAIRunner:
         # RunRequest content-list change, so the structured-output retry path is
         # untouched. A test model_override is non-anthropic, so caching is off there.
         cache_settings = _anthropic_cache_settings(resolved if not self._model_override else "")
+        # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
+        # above (an injected test model never gets a provider server tool). Attached as a
+        # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
+        # (no ``capabilities`` key).
+        web_caps = _anthropic_web_search_capabilities(
+            resolved if not self._model_override else "", web=req.web
+        )
+        if web_caps is not None:
+            kwargs["capabilities"] = web_caps
         # Wire the configured OUTPUT cap into the call. cfg.max_tokens was previously DROPPED
         # (only the cache flags were sent as model_settings), so pydantic-ai fell back to its
         # max_tokens=4096 default — far too small for a multi-child container review, whose

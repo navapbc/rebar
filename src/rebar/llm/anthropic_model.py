@@ -53,6 +53,25 @@ def _anthropic_cache_settings(resolved: str):
     )
 
 
+def _anthropic_web_search_capabilities(resolved: str, *, web: bool):
+    """Anthropic-GATED server-side web-search capability list, or ``None`` for every
+    other case (bug ff64 — the T1 prior-art criterion mandates web grounding but the
+    in-process toolset has no web access). Emitted ONLY when the request is flagged
+    (``web=True``, set by the routing seam for a criterion whose routing entry declares
+    ``"web": true``) AND the resolved model string is anthropic-qualified. The tool is
+    Anthropic's SERVER-SIDE ``web_search`` — executed provider-side, no homegrown HTTP
+    fetch tool — attached via pydantic-ai's supported capability mechanism
+    (``Agent(capabilities=[WebSearch()])``, the successor of the deprecated
+    ``builtin_tools``). ``local=None`` (the default) means NO local fallback: on any
+    non-anthropic provider the request is byte-identical to today (``None`` here, no
+    capabilities kwarg), matching the cache-settings gating above."""
+    if not web or not resolved.startswith("anthropic"):
+        return None
+    from pydantic_ai.capabilities import WebSearch
+
+    return [WebSearch()]
+
+
 _DIRECT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
 
