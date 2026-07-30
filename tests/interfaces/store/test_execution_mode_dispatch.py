@@ -85,9 +85,13 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
         return {"verdict": "PASS", "findings": [], "summary": "s"}, {}
 
     monkeypatch.setattr(runner_mod, "_pai_structured", _fake_structured)
-    # Caching is orthogonal here; stub it off so we don't import the real anthropic
-    # settings module (pydantic_ai is stubbed empty below).
-    monkeypatch.setattr(runner_mod, "_anthropic_cache_settings", lambda resolved: None)
+    # Caching is orthogonal here; stub it off at the capabilities seam so we don't import
+    # the real anthropic settings module (pydantic_ai is stubbed empty below). Story S2
+    # replaced the provider-name-string cache-settings helper with the
+    # capability-based `capabilities_for`/`cache_settings_for` pair; stub the latter,
+    # mirroring how `ProviderSession` is stubbed below rather than reaching into the
+    # (SDK-free) profile-resolution internals.
+    monkeypatch.setattr(runner_mod, "cache_settings_for", lambda caps: None)
     monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
     monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: "anthropic:fake")
     # Env-independence: the loopback-proxy bypass (commit 4b9e49a57) fires inside run()

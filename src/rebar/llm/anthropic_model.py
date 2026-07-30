@@ -5,9 +5,12 @@ model purely from a provider-qualified model string. This module holds that
 resolution cluster (``_pai_model`` + the ``_PAI_PROVIDER_PREFIX`` map) together
 with the Anthropic-specific construction path the runner funnels through on the
 ``anthropic:…`` provider: the retrying transport client
-(``_build_retrying_anthropic_model``), the loopback-proxy bypass
-(``_local_proxy_bypass_base_url``), and the prompt-cache settings
-(``_anthropic_cache_settings``).
+(``_build_retrying_anthropic_model``) and the loopback-proxy bypass
+(``_local_proxy_bypass_base_url``). Prompt-cache settings live in
+``rebar.llm.capabilities`` (story S2) — that module reads capability FIELDS off a
+``ModelProfile`` rather than string-matching a provider name, which this module's old
+the removed anthropic-only cache-settings helper (``startswith`` gated) did not: it
+silently disabled caching for Bedrock-hosted Claude.
 
 Heavy libraries (httpx, anthropic, pydantic-ai, tenacity, urllib) are imported
 **inside** the functions that need them, never at module top, so this module
@@ -34,23 +37,6 @@ _PAI_PROVIDER_PREFIX = {
     "google_genai": "google-gla",
     "google": "google-gla",
 }
-
-
-def _anthropic_cache_settings(resolved: str):
-    """Anthropic-GATED prompt-cache model settings, or ``None`` for any other provider
-    (story 0250). ``anthropic_cache_instructions`` puts a ``cache_control`` breakpoint on
-    the system-prompt block (the byte-stable parent plan); ``anthropic_cache_tool_definitions``
-    caches the tool surface on agentic calls. Both keys live on ``AnthropicModelSettings``
-    and error on openai/gemini, so they are emitted ONLY when the resolved model string is
-    anthropic-qualified — on every other provider the call is unchanged (no cache_* sent)."""
-    if not resolved.startswith("anthropic"):
-        return None
-    from pydantic_ai.models.anthropic import AnthropicModelSettings
-
-    return AnthropicModelSettings(
-        anthropic_cache_instructions=True,
-        anthropic_cache_tool_definitions=True,
-    )
 
 
 def _anthropic_web_search_capabilities(resolved: str, *, web: bool):
