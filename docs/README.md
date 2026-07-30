@@ -131,6 +131,9 @@ Developing rebar itself — architecture, internals, and the dev workflow.
   you know what you can depend on today and how changes are communicated.
 - **[local-dev-env.md](local-dev-env.md)** — running the **repo checkout's** rebar (not
   a stale global build) when developing or running the gates.
+- **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)** —
+  real `review-plan` runs for the project-only `project.symbol-reference-completeness`
+  criterion, and the overlay-vs-coach-selection boundary they establish.
 - **[code-navigation.md](code-navigation.md)** — why Serena (LSP) and `grep` are both
   load-bearing: the string-literal blind spot, the line-number caveat, and the reproductions
   behind `AGENTS.md`'s division-of-labour table.

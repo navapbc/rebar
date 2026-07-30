@@ -137,10 +137,14 @@ def test_production_fan_in(tmp_path, monkeypatch):
         src / ".rebar" / "criteria_routing.json",
         tmp_path / ".rebar" / "criteria_routing.json",
     )
-    shutil.copy(
-        src / ".rebar" / "prompts" / f"{PID}.md",
-        tmp_path / ".rebar" / "prompts" / f"{PID}.md",
-    )
+    # Copy EVERY committed rubric, not just this criterion's. The sandbox gets the whole
+    # shipped routing file, so it activates every project criterion the overlay activates —
+    # and loading criteria resolves each activated id's prompt eagerly. Copying one rubric
+    # would make this test fail the moment the project gains a second project criterion
+    # (which is what happened: `project.symbol-reference-completeness`), for a reason that
+    # has nothing to do with portability.
+    for rubric in (src / ".rebar" / "prompts").glob("*.md"):
+        shutil.copy(rubric, tmp_path / ".rebar" / "prompts" / rubric.name)
 
     # Overlay discovery keys off config.repo_root() inside the runner's context builder.
     monkeypatch.setattr(_config, "repo_root", lambda *a, **k: tmp_path)
@@ -180,7 +184,9 @@ def test_production_fan_in(tmp_path, monkeypatch):
     )
     result = ProductionBatchRunner(runner=fake).run(req, None)
 
-    assert result.outputs["batch_plan"]["batch_resolution"]["project"] == [CRITERION]
+    # Membership, not equality: this test proves THIS criterion is fanned in, and the shipped
+    # overlay now activates more than one project criterion.
+    assert CRITERION in result.outputs["batch_plan"]["batch_resolution"]["project"]
     surfaced = [f for f in result.outputs["findings"] if CRITERION in (f.get("criteria") or [])]
     assert surfaced, (
         f"expected the project criterion to surface a finding; got {result.outputs['findings']}"

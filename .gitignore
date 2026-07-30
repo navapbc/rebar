@@ -31,6 +31,7 @@ docs/experiments/plan-review-gate/runs/criterion_firings.jsonl
 .rebar/prompts/*
 !.rebar/prompts/plan-review-project-portability.md
 !.rebar/prompts/code-review-project-review-phase-boundaries.md
+!.rebar/prompts/plan-review-project-symbol-reference-completeness.md
 !.rebar/evals/
 .rebar/evals/*
 !.rebar/evals/plan-review-project-portability.eval.yaml

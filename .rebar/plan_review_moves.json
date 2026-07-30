@@ -3,5 +3,10 @@
     "name": "restore rebar portability",
     "template": "Rework {subject} so it remains portable across supported rebar client shapes; keep project-specific behavior in project configuration or an explicit extension boundary.",
     "applies_when": ["project.portability"]
+  },
+  "project-symbol-reference-completeness": {
+    "name": "re-derive the reference inventory with Serena",
+    "template": "Re-derive {subject}'s affected-file/call-site inventory with Serena's find_referencing_symbols instead of hand enumeration, and grep the codebase for each renamed/removed symbol's name as a string (e.g. in monkeypatch.setattr, getattr, or importlib calls) to catch references the LSP cannot resolve.",
+    "applies_when": ["project.symbol-reference-completeness", "G1G2", "G6"]
   }
 }
