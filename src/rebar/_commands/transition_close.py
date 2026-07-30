@@ -321,13 +321,20 @@ def _completion_precheck(
             repo_root=repo_root,
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
+        from rebar.llm import failure as _failure
+
+        # A bounded-recovery failure is not an unavailable runtime, so it must not inherit
+        # the generic install-the-extra remedy below; returncode stays 1 because the bounds
+        # re-apply every attempt (not exit 11's retryable class — see docs/exit-codes.md).
+        _recovery_msg = _failure.recovery_close_message(ticket_id, exc)
+        if _recovery_msg is not None:
+            raise CommandError(_recovery_msg, returncode=1) from None
+
         # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
         # to the raised LLM error through to the process exit code. A retryable outage (429/5xx)
         # → exit 11 ("transient — retry"), else the existing fail-closed exit 1. CommandError
         # already carries `returncode` and transition.py returns it, so exit 11 propagates with
         # no plumbing change. The sanitized diagnostic is also written to the session log.
-        from rebar.llm import failure as _failure
-
         _outcome = _failure.outcome_of(exc)
         _failure.log_degrade(_outcome, gate="completion-verify", ticket_id=ticket_id)
         _rc = 11 if (_outcome and _outcome.retryable) else 1

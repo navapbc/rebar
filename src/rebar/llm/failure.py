@@ -381,3 +381,44 @@ def log_degrade(outcome: LLMOutcome | None, *, gate: str, ticket_id: str | None 
         )
     except Exception:  # noqa: BLE001 — telemetry is strictly best-effort; never fail the gate
         pass
+
+
+def recovery_close_message(ticket_id: str, exc: object) -> str | None:
+    """The close-gate error for a bounded-recovery failure, or ``None`` if ``exc`` isn't one.
+
+    Lives here beside :func:`message_for` and :func:`outcome_of` because it answers the
+    same question they do — "what should the operator be told about this failure?" — and
+    because ``CompletionRecoveryError`` is the one failure class those two cannot speak
+    for: it is raised inside the recovery module, never through the runner seams that
+    attach an ``.outcome``, so :func:`outcome_of` returns ``None`` for it and the caller
+    would otherwise fall back to a generic "the LLM runtime is unavailable" remedy that
+    is simply false (the extra and key are present and working).
+
+    The size claim is deliberately CONDITIONAL. ``CompletionRecoveryError`` is raised at
+    several recovery stages and only the bound checks carry ``context_chars`` /
+    ``context_char_limit``; reading them unconditionally renders "context (None chars)
+    exceeds the limit (None chars)" for, say, an exhaustion at criterion 7 — which would
+    relocate the misdiagnosis rather than remove it.
+    """
+    from rebar.llm.errors import CompletionRecoveryError
+
+    if not isinstance(exc, CompletionRecoveryError):
+        return None
+    diag = getattr(exc, "diagnostic", None) or {}
+    chars, limit = diag.get("context_chars"), diag.get("context_char_limit")
+    if isinstance(chars, int) and isinstance(limit, int):
+        cause = (
+            f"The ticket's context ({chars:,} chars) exceeds the bounded "
+            f"completion-recovery limit ({limit:,} chars), so the recovery pass was "
+            f"refused before it ran — shorten the ticket's description/comments."
+        )
+    else:
+        cause = (
+            "Bounded completion recovery could not finish for this ticket; the recovery "
+            "bounds are deliberate safeguards, not a transient fault."
+        )
+    return (
+        f"Error: cannot close {ticket_id}: completion verification could not run "
+        f"({exc}). {cause} The ticket's gate_error_v1 sidecar holds the full "
+        'diagnostic. Override with --force-close="<reason>" if warranted.'
+    )
