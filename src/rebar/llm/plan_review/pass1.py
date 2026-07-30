@@ -486,9 +486,21 @@ def run_pass1(
         return out, calls
 
     max_workers = max(1, min(6, len(chunks) + len(agent)))
+    # WARM-THEN-FAN-OUT gate (story 25fa; ported from the container path above): a naive
+    # concurrent fan-out makes the first ~max_workers calls each MISS+WRITE the
+    # byte-identical plan-bearing system prefix. Only worth warming when that prefix is
+    # large enough to cache (>= the cache floor) AND there is more than one Pass-1 call
+    # to amortize it over AND a single-turn chunk exists to serve as the warm call.
+    warm = (
+        bool(chunks)
+        and det_floor.est_tokens(plan) >= CACHE_MIN_PREFIX_TOKENS
+        and len(chunks) + len(agent) >= 2
+    )
+    warmed = False
     # Observability: record + log how Pass-1 criteria were batched across the tiers
-    # (single-turn chunks + agent criteria run CONCURRENTLY in the pool; container
-    # criteria then run as a PARALLEL warm-then-fan-out afterward — see _run_container).
+    # (single-turn chunks + agent criteria run CONCURRENTLY in the pool, optionally
+    # behind a serial cache-warming chunk; container criteria then run as a PARALLEL
+    # warm-then-fan-out afterward — see _run_container).
     # Quiet by default; enable with REBAR_LOG_LEVEL=INFO. Always recorded into coverage.
     coverage["batch_plan"] = {
         "single_turn_chunks": len(chunks),
@@ -497,20 +509,47 @@ def run_pass1(
         "shed_criteria": [c["id"] for c in shed] if shed else [],
         "children": len(ctx.children) if ctx.has_children else 0,
         "max_workers": max_workers,
+        "warm": warm,
     }
     logger.info(
         "plan-review pass1 batch: %d single-turn chunk(s) + %d agent criterion(s) "
-        "concurrently (max_workers=%d); %d container criterion(s) parallel "
+        "concurrently (max_workers=%d, warm=%s); %d container criterion(s) parallel "
         "(warm-then-fan-out) over %d child(ren); %d criterion(s) shed to budget",
         len(chunks),
         len(agent),
         max_workers,
+        warm,
         len(container) if container else 0,
         len(ctx.children) if ctx.has_children else 0,
         len(shed) if shed else 0,
     )
+    pool_chunks = chunks
+    if warm:
+        # Run the FIRST single-turn chunk serially to completion so its completed call
+        # WRITES the shared plan-bearing cache prefix; the remainder then fans out and
+        # READS it. A SYSTEMIC LLMUnavailableError propagates from _chunk (the ladder
+        # re-raises it) and aborts here rather than fanning out N-1 doomed calls —
+        # exactly what the pool's own handler would do (run_review turns it into an
+        # INDETERMINATE, unsigned verdict). A NON-systemic warm failure is swallowed by
+        # the ladder (it returns no completed call records, dropping that chunk's
+        # findings exactly as today's direct fan-out would) — the cache prefix may not
+        # be written, so degrade: fan the remainder out directly, never hang or abort.
+        # A checkpoint-served warm chunk likewise made no call → nothing warmed.
+        warm_findings, warm_calls = _chunk(chunks[0], False)
+        findings.extend(warm_findings or [])
+        call_records.extend(warm_calls or [])
+        pool_chunks = chunks[1:]
+        warmed = bool(warm_calls)
+        if warmed:
+            logger.info("pass1 warm chunk done: %d finding(s) (cache warmed)", len(warm_findings))
+        else:
+            logger.warning(
+                "pass1 warm chunk completed no LLM call (failed or checkpoint-served); "
+                "degrading to direct fan-out of the remainder"
+            )
+    coverage["batch_plan"]["warmed"] = warmed
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        st_futs = [_submit_ctx(ex, _chunk, ch, False) for ch in chunks]
+        st_futs = [_submit_ctx(ex, _chunk, ch, False) for ch in pool_chunks]
         ag_futs = [_submit_ctx(ex, _chunk, [c], True) for c in agent]
         for fu in st_futs + ag_futs:
             try:
