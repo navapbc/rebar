@@ -132,3 +132,33 @@ def test_description_is_plain_text_not_an_adf_document(transport: Any) -> None:
     assert description is None or isinstance(description, str), (
         f"DC descriptions must be plain text, got {type(description)}"
     )
+
+
+def test_missing_extra_raises_naming_the_install_command(monkeypatch) -> None:
+    """A missing ``[jira-datacenter]`` extra must name the exact install command.
+
+    This is the "clear install-naming error" the story promised, mirroring
+    ``rebar.llm.runner._import_pydantic_ai``. It had no test: the message existed
+    in ``transport.py`` but nothing pinned it, so a reword could silently leave an
+    operator with an ImportError that does not say what to install. A completion
+    verification run on ticket 9fd4 flagged exactly that gap.
+
+    ``monkeypatch.setitem`` on ``sys.modules`` is used rather than
+    ``setdefault``: binding the key to ``None`` makes ``import jira`` raise
+    ImportError, and monkeypatch restores the previous value (including absence)
+    at teardown, so this cannot leak into a sibling test — the failure mode
+    recorded on ticket 2bc7.
+    """
+    import sys
+
+    from rebar_reconciler.adapters.jira_datacenter import transport as _t
+
+    monkeypatch.setitem(sys.modules, "jira", None)
+
+    with pytest.raises(ImportError) as caught:
+        _t._jira_client_class()
+
+    message = str(caught.value)
+    assert "pip install 'nava-rebar[jira-datacenter]'" in message, (
+        "the error must name the exact install command an operator can copy; got: " + message
+    )
