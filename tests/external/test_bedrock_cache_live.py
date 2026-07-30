@@ -46,7 +46,8 @@ _CACHE_PADDING = (
 
 
 def _cfg(repo: Path):
-    from rebar.llm.config import DEFAULT_BEDROCK_MODEL_ID, LLMConfig
+    from rebar.llm.bedrock_model import DEFAULT_BEDROCK_MODEL_ID
+    from rebar.llm.config import LLMConfig
 
     return LLMConfig(
         model=f"bedrock:{DEFAULT_BEDROCK_MODEL_ID}",

@@ -53,7 +53,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_BEDROCK_MODEL_ID` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config.py` |  |
@@ -145,7 +144,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_135 variables._
+_134 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -171,10 +170,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:279` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:286` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:396` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:425` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:440` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:460` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:385` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:414` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:429` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:449` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
