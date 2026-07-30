@@ -17,9 +17,24 @@ coercion/unknown-key warnings are byte-identical to before the split.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any
 
+from rebar._config_coercion import (  # noqa: F401 — re-exported for callers
+    ConfigError,
+    _as_bool,
+    _as_choice,
+    _as_float,
+    _as_git_ref,
+    _as_git_remote,
+    _as_int,
+    _as_str,
+    _as_str_dict,
+    _as_str_list,
+    _as_str_tuple,
+    _as_tracker_dir,
+    _src,
+)
 from rebar._deprecations import raise_or_warn_cfg_key, warn_deprecated
 
 logger = logging.getLogger("rebar.config")
@@ -36,172 +51,6 @@ logger = logging.getLogger("rebar.config")
 # user > defaults) and routing the existing reads through this are subsequent
 # tasks; ``llm.*`` keys live in the optional ``rebar.llm`` layer (not here) so the
 # stdlib core never depends on the agents extra. See docs/config.md.
-
-
-class ConfigError(ValueError):
-    """A config value is invalid. Raised at load time so problems fail fast at one
-    site rather than surfacing deep in unrelated logic."""
-
-
-_TRUE = {"true", "1", "yes", "on"}
-_FALSE = {"false", "0", "no", "off", ""}
-
-
-def _src(source: str) -> str:
-    return f" ({source})" if source else ""
-
-
-def _as_bool(v: Any, key: str) -> bool:
-    if isinstance(v, bool):
-        return v
-    s = str(v).strip().lower()
-    if s in _TRUE:
-        return True
-    if s in _FALSE:
-        return False
-    raise ConfigError(f"{key}: expected a boolean, got {v!r}")
-
-
-def _as_int(v: Any, key: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
-    if isinstance(v, bool):  # bool is an int subclass — reject to catch e.g. true→1
-        raise ConfigError(f"{key}: expected an integer, got boolean {v!r}")
-    try:
-        i = int(v)
-    except (TypeError, ValueError):
-        raise ConfigError(f"{key}: expected an integer, got {v!r}") from None
-    if minimum is not None and i < minimum:
-        raise ConfigError(f"{key}: must be >= {minimum}, got {i}")
-    if maximum is not None and i > maximum:
-        raise ConfigError(f"{key}: must be <= {maximum}, got {i}")
-    return i
-
-
-def _as_float(
-    v: Any, key: str, *, minimum: float | None = None, maximum: float | None = None
-) -> float:
-    if isinstance(v, bool):
-        raise ConfigError(f"{key}: expected a number, got boolean {v!r}")
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        raise ConfigError(f"{key}: expected a number, got {v!r}") from None
-    if minimum is not None and f < minimum:
-        raise ConfigError(f"{key}: must be >= {minimum}, got {f}")
-    if maximum is not None and f > maximum:
-        raise ConfigError(f"{key}: must be <= {maximum}, got {f}")
-    return f
-
-
-def _as_str(v: Any, key: str) -> str:
-    if isinstance(v, (dict, list)):
-        raise ConfigError(f"{key}: expected a string, got {type(v).__name__}")
-    return str(v)
-
-
-def _as_str_tuple(v: Any, key: str) -> tuple[str, ...]:
-    """A tuple of non-empty, trimmed strings from either a TOML array or a comma-separated
-    string, so both ``key = ["T5c", "T10"]`` and ``key = "T5c, T10"`` parse. Empty entries are
-    dropped; a non-list/non-str value is rejected. Used for config-backed id sets (e.g.
-    ``verify.completion_preserve_criteria``)."""
-    if isinstance(v, (list, tuple)):
-        items = [str(x).strip() for x in v]
-    elif isinstance(v, str):
-        items = [p.strip() for p in v.split(",")]
-    else:
-        raise ConfigError(
-            f"{key}: expected a list or comma-separated string, got {type(v).__name__}"
-        )
-    return tuple(x for x in items if x)
-
-
-def _as_str_list(v: Any, key: str) -> list[str]:
-    """A list of strings from a TOML array or comma-separated CLI override."""
-    return list(_as_str_tuple(v, key))
-
-
-def _as_str_dict(v: Any, key: str) -> dict[str, str]:
-    """A string mapping from a TOML table or JSON-object CLI override."""
-    if isinstance(v, str):
-        import json
-
-        try:
-            v = json.loads(v)
-        except json.JSONDecodeError:
-            raise ConfigError(f"{key}: expected a JSON object, got {v!r}") from None
-    if not isinstance(v, dict):
-        raise ConfigError(f"{key}: expected a table or JSON object, got {type(v).__name__}")
-    return {str(name): _as_str(value, key) for name, value in v.items()}
-
-
-def _as_choice(v: Any, key: str, choices: set[str]) -> str:
-    s = str(v).strip().lower()
-    if s not in choices:
-        raise ConfigError(f"{key}: expected one of {sorted(choices)}, got {v!r}")
-    return s
-
-
-# Characters git's check-ref-format forbids anywhere in a ref component.
-_BAD_REF_CHARS = set(" ~^:?*[\\\x7f") | {chr(c) for c in range(0x20)}
-
-
-def _as_git_ref(v: Any, key: str) -> str:
-    """Validate a single-level git branch name against a `git check-ref-format`-style
-    rule set (the subset that matters for a branch): reject empty, whitespace, `..`,
-    a leading `-` or `.`, any of ``~^:?*[\\`` / control / DEL chars, an ``@{`` sequence,
-    a bare ``@``, a trailing ``/`` / ``.lock`` / ``.``, a leading/trailing/double slash,
-    and a component beginning with ``.``. Keeps the tracker branch a valid, pushable ref."""
-    s = _as_str(v, key).strip()
-    if not s:
-        raise ConfigError(f"{key}: branch name must not be empty")
-    if s == "@" or "@{" in s or ".." in s:
-        raise ConfigError(f"{key}: invalid branch name {s!r} (contains '@', '@{{', or '..')")
-    if s.startswith("-") or s.startswith("/") or s.endswith("/") or "//" in s:
-        raise ConfigError(f"{key}: invalid branch name {s!r} (bad slash placement or leading '-')")
-    if s.endswith("."):  # per-component '.lock' is caught by the loop below
-        raise ConfigError(f"{key}: invalid branch name {s!r} (ends with '.')")
-    bad = sorted(_BAD_REF_CHARS & set(s))
-    if bad:
-        raise ConfigError(f"{key}: invalid branch name {s!r} (forbidden char(s) {bad})")
-    for comp in s.split("/"):
-        if not comp or comp.startswith(".") or comp.endswith(".lock"):
-            raise ConfigError(f"{key}: invalid branch name {s!r} (bad path component {comp!r})")
-    return s
-
-
-def _as_git_remote(v: Any, key: str) -> str:
-    """Validate a git REMOTE NAME (e.g. ``origin``, ``gerrit``, ``github``). Distinct from
-    :func:`_as_git_ref` (a branch name): a remote name is a single-level token that becomes
-    a path component under ``refs/remotes/<name>/`` and is passed as a positional to
-    ``git push``/``fetch``. Reject empty/whitespace, a leading ``-`` (would parse as a
-    flag), any ``/`` (remote names are single-level), ``..``, and the
-    check-ref-format-forbidden chars (space, ``~^:?*[\\``, control, DEL). Dots and
-    (non-leading) hyphens are allowed, so ``my-remote`` / ``gerrit.example`` pass."""
-    s = _as_str(v, key).strip()
-    if not s:
-        raise ConfigError(f"{key}: git remote name must not be empty")
-    if s.startswith("-") or "/" in s or ".." in s:
-        raise ConfigError(f"{key}: invalid git remote name {s!r} (leading '-', '/', or '..')")
-    bad = sorted(_BAD_REF_CHARS & set(s))
-    if bad:
-        raise ConfigError(f"{key}: invalid git remote name {s!r} (forbidden char(s) {bad})")
-    return s
-
-
-def _as_tracker_dir(v: Any, key: str) -> str:
-    """Validate the tracker store dir. Allows a bare relative name (the common case,
-    e.g. ``.tickets-tracker`` — used as the repo-root symlink name + gitignore entry)
-    AND an absolute path (the supported relocated/decoupled store, EV-3b, set via
-    ``REBAR_TRACKER_DIR``). Rejects empty/whitespace, any ``..`` traversal component,
-    and control chars — values that would break the symlink/exclude or escape the repo."""
-    s = _as_str(v, key).strip()
-    if not s:
-        raise ConfigError(f"{key}: tracker dir must not be empty")
-    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in s):
-        raise ConfigError(f"{key}: tracker dir {s!r} contains control characters")
-    parts = s.replace("\\", "/").split("/")
-    if ".." in parts:
-        raise ConfigError(f"{key}: tracker dir {s!r} must not contain a '..' traversal component")
-    return s
 
 
 def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = False) -> None:
@@ -224,6 +73,42 @@ def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = F
             section,
             k,
         )
+
+
+def _validate_reconciler_tls(base_url: str, allow_insecure: bool) -> None:
+    """Reject a non-``https`` ``reconciler.base_url`` unless ``allow_insecure`` is
+    set (story J6, epic e369 — the Data Center transport's connection settings).
+
+    Applies uniformly to ANY non-``https`` scheme, including ``http://localhost``
+    — there is no loopback special case, because the J5 live-harness tests are
+    REQUIRED to set ``allow_insecure = true`` explicitly precisely so their
+    loopback DC instance exercises this override path rather than silently
+    bypassing the validator (see ``tests/external/live_jira_dc/``). An empty
+    ``base_url`` (the unset default) is not validated — nothing to check yet.
+
+    ``allow_insecure`` affects ONLY this URL-scheme check; it never relaxes TLS
+    CERTIFICATE verification (that is ``reconciler.ca_bundle`` / the transport's
+    ``options["verify"]``, entirely independent of this flag).
+    """
+    if not base_url:
+        return
+    scheme = urllib.parse.urlsplit(base_url).scheme.lower()
+    if scheme == "https":
+        return
+    if not allow_insecure:
+        raise ConfigError(
+            f"reconciler.base_url: {base_url!r} uses scheme {scheme!r}, not 'https' — "
+            "a cleartext connection risks exposing credentials (e.g. a Jira PAT) in "
+            "transit. Set reconciler.allow_insecure = true to override (only for a "
+            "trusted network, e.g. a loopback Data Center test harness)."
+        )
+    logger.warning(
+        "reconciler.base_url %r uses a non-https scheme; reconciler.allow_insecure=true "
+        "overrides the TLS requirement — this connection is NOT encrypted and is "
+        "vulnerable to interception. This does not relax certificate verification "
+        "(see reconciler.ca_bundle).",
+        base_url,
+    )
 
 
 @dataclass
@@ -518,6 +403,29 @@ class ReconcilerConfig:
     # (baseline_dual_write / baseline_consumer_swap) ran clean in prod and were
     # removed — the always-on behavior is hardcoded, no config surface remains.
 
+    # --- Data Center connection settings (story J6, epic e369) ---
+    # Vendor-neutral (not Cloud's ACLI-driven ``[tool.rebar.jira]``): a future
+    # non-Jira backend could reuse the same shape. ``base_url`` is TLS-validated
+    # at construction time (``_validate_reconciler_tls``, below) — a non-https
+    # scheme raises ``ConfigError`` unless ``allow_insecure`` is set.
+    base_url: str = ""
+    # Overrides ONLY the base_url scheme check above; never relaxes certificate
+    # verification (that is ca_bundle / the transport's options["verify"]).
+    allow_insecure: bool = False
+    # Path to an internal/self-signed CA bundle, passed as the DC transport's
+    # options["verify"] value (never a bare False — see transport.py's
+    # build_client_from_settings). Empty means "use the library's TLS default".
+    ca_bundle: str = ""
+    # Workflow status names the DC absence-probe treats as "resolved / out of the
+    # working set". Defaults to Cloud/DIG's own configured names, since a
+    # self-hosted DC workflow can name its resolved states anything and sharing
+    # Cloud's hardcoded classifier names verbatim would misclassify a resolved
+    # DC issue as PRESENT_FILTERED.
+    resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
+
+    def __post_init__(self) -> None:
+        _validate_reconciler_tls(self.base_url, self.allow_insecure)
+
 
 @dataclass
 class JiraConfig:
@@ -699,6 +607,10 @@ _SECTIONS: dict[str, dict] = {
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
         "max_acting_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
+        "base_url": lambda v, k: _as_str(v, k),
+        "allow_insecure": lambda v, k: _as_bool(v, k),
+        "ca_bundle": lambda v, k: _as_str(v, k),
+        "resolved_statuses": lambda v, k: _as_str_list(v, k),
     },
     "jira": {
         "url": lambda v, k: _as_str(v, k),

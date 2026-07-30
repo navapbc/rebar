@@ -157,6 +157,17 @@ metrics = ["lizard>=1.23"]
 # The opt-in T2 semantic-resolution backend (epic 850f, ADR 0030): a self-contained
 # pyright the oracle shells out to. Absent it, the T2 tier abstains (no_tool) — it is
 # never on a deterministic blocking path, so a non-adopting client pays nothing.
+# The opt-in Jira Data Center reconciler backend (story J6, epic e369): built on
+# pycontribs/jira, the maintained Python Jira client, imported lazily so a
+# non-adopting client (Cloud-only, or no reconciler at all) pays nothing —
+# `import rebar` stays dependency-free. `>=3.8,<4` is a compatible-release floor:
+# 3.8 is the first release with Server/DC Personal Access Token (bearer
+# `token_auth=`) support — the DC 8.14+ auth mode this transport uses — and the
+# `<4` ceiling avoids an unreviewed major-version jump changing the client's
+# object-model shape out from under the transport's `.raw`-unwrapping boundary.
+jira-datacenter = [
+    "jira>=3.8,<4",
+]
 grounding-t2 = [
     "pyright>=1.1",
 ]
