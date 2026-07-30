@@ -73,6 +73,17 @@ def _rebar_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
             # gate default (tests/conftest.py) can resolve a snapshot: an unborn HEAD
             # fails ref resolution before any gate op reaches its subject under test.
             _git("commit", "--allow-empty", "-q", "-m", "init", cwd=repo)
+            # The template must be VIRGIN, asserted HERE rather than only in a test.
+            # Several tests assert on emptiness (session-log counts in
+            # queries/test_recent_session_logs.py and lifecycle/test_session_log_capture.py)
+            # and hold only because nothing seeds the template; pre-warming it with
+            # tickets — the obvious next optimisation — would silently invert them.
+            # At construction this fires once per worker before any test runs and covers
+            # every consumer, whereas a test-level check protects only runs that select
+            # that test (a narrowed `pytest tests/interfaces/store` would have none).
+            # It must sit INSIDE this context: it needs REBAR_ROOT and cwd pinned at the
+            # template, and the post-build assertions below run after the context exits.
+            assert rebar.list_tickets() == [], "template must be built with no tickets"
         finally:
             _cfg.reset_config_cache()
 
