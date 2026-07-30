@@ -247,7 +247,7 @@ def test_degraded_verdict_threads_hierarchy_incomplete_from_ctx() -> None:
         ticket_id="T-1",
         ticket_type="task",
         title="t",
-        description="## Acceptance Criteria\n- [ ] x\n",
+        description="## Acceptance Criteria\n- [ ] x passes `pytest -q`\n",
         hierarchy_incomplete=True,
         hierarchy_incomplete_detail=["enumeration"],
     )
