@@ -421,3 +421,53 @@ def recovery_failure_cause(exc: object) -> str | None:
         "are deliberate safeguards, not a transient fault. Its gate_error_v1 sidecar holds "
         "the full diagnostic."
     )
+
+
+UNAVAILABLE_REMEDY = (
+    "The completion-verification gate is enabled "
+    "(verify.require_completion_verification_for_close); install the 'agents' extra "
+    "and set a model API key."
+)
+
+
+def _is_unavailable_runtime(exc: object, outcome: LLMOutcome | None) -> bool:
+    """True only when the verifier could not RUN — a missing extra/credential/setting."""
+
+    if outcome is not None and outcome.resolution_class is ResolutionClass.CHANGE_SETTINGS:
+        return True
+    if isinstance(exc, ImportError):  # the [agents] extra is not installed at all
+        return True
+    from rebar.llm.errors import LLMUnavailableError
+
+    return isinstance(exc, LLMUnavailableError)
+
+
+def close_gate_remedy(exc: object, outcome: LLMOutcome | None = None) -> str:
+    """The remedy sentence the close gate prints for a completion-verifier failure.
+
+    Three dispositions, because they need three different operator actions:
+
+    * a bounded-recovery breach -> :func:`recovery_failure_cause` (size/stage + sidecar);
+    * a genuine UNAVAILABILITY (no ``[agents]`` extra, no API key, or any classified
+      ``CHANGE_SETTINGS`` outcome) -> :data:`UNAVAILABLE_REMEDY`, which is correct there;
+    * anything else -> the failure's OWN remedy. A verifier that spent minutes making real
+      model calls and then exhausted its step budget is not an uninstalled extra, and
+      telling the operator to install one sends them to a dead end while burying the
+      actionable ``REBAR_LLM_MAX_STEPS`` guidance the exception already carries.
+    """
+
+    cause = recovery_failure_cause(exc)
+    if cause:
+        return cause
+    if _is_unavailable_runtime(exc, outcome):
+        return UNAVAILABLE_REMEDY
+    detail = str(exc).strip()
+    if detail:
+        return (
+            "The completion verifier ran and then failed, so this is not a missing install "
+            f"or credential — act on its own reported remedy: {detail}"
+        )
+    return (
+        "The completion verifier ran and then failed without a remedy of its own; inspect "
+        "the session log's sanitized diagnostic."
+    )

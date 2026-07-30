@@ -513,8 +513,18 @@ and caps each evidence call at 40 iterations and 4,096 output tokens. Recovery
 appends the bug verifier's deterministic “actually resolved” core criterion;
 non-bug tickets without explicit checklist criteria cannot be exhaustively
 enumerated and fail closed before recovery calls. Recovery
-accepts at most 32 criteria, 4,000 characters per criterion, 32,000 criterion
-characters in total, and 24,000 characters of ticket context. Each compact
+accepts at most 32 criteria, 4,000 characters per criterion, and 32,000 criterion
+characters in total. Ticket context is capped at **40,000 characters per recovery
+request** — deliberately the 32,000-character criteria budget plus 8,000 characters
+of headroom, because criteria are extracted from the description and the description
+is embedded in the context, so a smaller context cap would refuse criteria sets the
+criteria bounds just accepted. A larger context is **compacted, not refused**:
+comments are the sanctioned completion-evidence channel and the store is append-only,
+so "shorten the ticket" is not an available action. Compaction drops the oldest
+comment history first, then non-criteria description lines, always preserves the
+acceptance-criteria text, and marks every elision in-band. Only a degenerate payload
+above **400,000 characters** is still refused before any billable recovery call.
+Each compact
 evidence record is limited to 12,000 characters, all evidence is limited to
 96,000 characters, and the complete finalizer input is limited to 132,000
 characters. These deterministic bounds are checked before the corresponding

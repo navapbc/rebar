@@ -38,7 +38,23 @@ _EVIDENCE_CHARS = 12_000
 _MAX_CRITERIA = 32
 _MAX_CRITERION_CHARS = 4_000
 _MAX_TOTAL_CRITERIA_CHARS = 32_000
-_MAX_CONTEXT_CHARS = 24_000
+# Criteria are extracted from the ticket DESCRIPTION and the description is embedded in
+# the context, so criteria ⊂ description ⊂ context. A context budget SMALLER than the
+# criteria budget therefore refuses criteria sets the criteria bounds just accepted,
+# making the top of the advertised criteria budget structurally unreachable. The context
+# budget is DERIVED from the criteria budget so the two can never drift apart again; the
+# headroom covers the ticket header, the ``## Acceptance Criteria`` heading, the checkbox
+# prefixes and any elision markers this module inserts.
+_CONTEXT_HEADROOM_CHARS = 8_000
+_MAX_CONTEXT_CHARS = _MAX_TOTAL_CRITERIA_CHARS + _CONTEXT_HEADROOM_CHARS
+# A context LARGER than the per-request budget is COMPACTED (see
+# :func:`compact_recovery_context`), not refused: ticket comments are rebar's sanctioned
+# completion-evidence channel and the store is append-only, so "shorten the ticket" is not
+# an action an operator can actually take. The budget above still caps what any single
+# recovery request puts on the wire. This second, far larger bound is the hostile-input
+# guard: a degenerate multi-megabyte payload is not worth compacting and buys zero
+# billable recovery calls.
+_MAX_RAW_CONTEXT_CHARS = 400_000
 _MAX_TOTAL_EVIDENCE_CHARS = 96_000
 _MAX_FINALIZER_INPUT_CHARS = 132_000
 _FINALIZER_OUTPUT_TOKENS = 8_000
@@ -142,15 +158,142 @@ def _validate_recovery_inputs(criteria: list[str], context: str) -> None:
                 "criteria_completed": 0,
             },
         )
-    if len(context) > _MAX_CONTEXT_CHARS:
+    if len(context) > _MAX_RAW_CONTEXT_CHARS:
         raise CompletionRecoveryError(
             "completion recovery context bound exceeded",
             diagnostic={
                 "context_chars": len(context),
-                "context_char_limit": _MAX_CONTEXT_CHARS,
+                "context_char_limit": _MAX_RAW_CONTEXT_CHARS,
                 "criteria_completed": 0,
             },
         )
+
+
+_COMMENTS_HEADING = "#### Comments"
+_HEADER_LINES = 8
+
+
+def _split_comment_block(context: str) -> tuple[list[str], list[str]]:
+    """Split rendered ticket context into (everything up to the comments heading, comments)."""
+
+    lines = context.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() == _COMMENTS_HEADING:
+            return lines[: index + 1], lines[index + 1 :]
+    return lines, []
+
+
+def _group_comment_entries(lines: list[str]) -> list[list[str]]:
+    """Group rendered comment lines into whole comments (oldest first).
+
+    ``_format_ticket`` renders one comment as ``- <body>``; a multi-line body continues on
+    following lines. Dropping half a comment would be worse than dropping none, so the
+    elision unit is the whole entry.
+    """
+
+    entries: list[list[str]] = []
+    for line in lines:
+        if line.startswith("- ") or not entries:
+            entries.append([line])
+        else:
+            entries[-1].append(line)
+    return entries
+
+
+_COMMENT_MARKER = (
+    "- [… {dropped} earlier comment(s) elided to fit the bounded completion-recovery "
+    "context budget; they were NOT reviewed …]"
+)
+# Reserve room for the marker when estimating (the count is at most 6 digits in practice).
+_COMMENT_MARKER_CHARS = len(_COMMENT_MARKER) + 8
+
+
+def _render(head: list[str], entries: list[list[str]], dropped: int) -> str:
+    body: list[str] = []
+    if dropped:
+        body.append(_COMMENT_MARKER.format(dropped=dropped))
+    for entry in entries:
+        body.extend(entry)
+    return "\n".join(head + body)
+
+
+def _is_essential(line: str, criteria: list[str]) -> bool:
+    """True for lines recovery must never elide: the criteria it is asked to verify."""
+
+    if _AC_HEADING.match(line) or _CHECKBOX.match(line):
+        return True
+    return any(criterion and criterion in line for criterion in criteria)
+
+
+def compact_recovery_context(
+    context: str,
+    criteria: list[str],
+    *,
+    budget: int = _MAX_CONTEXT_CHARS,
+) -> str:
+    """Return ``context`` shrunk to at most ``budget`` characters.
+
+    A ticket that outgrows the per-request budget is a LEGITIMATE ticket — comments are
+    the sanctioned completion-evidence channel and the event store is append-only — so
+    recovery compacts instead of refusing. The acceptance-criteria text is preserved (it
+    is exactly what recovery verifies); the least decision-relevant material goes first
+    (oldest comment history, then non-criteria description lines), and every elision is
+    marked in-band so the model is not misled into believing it saw the whole ticket.
+    """
+
+    if len(context) <= budget:
+        return context
+
+    head, comment_lines = _split_comment_block(context)
+    entries = _group_comment_entries(comment_lines)
+    # Estimate how much comment history has to go with prefix sums (one pass) so a ticket
+    # with thousands of comments does not re-render the whole context per dropped entry;
+    # the exact loop below then corrects any off-by-a-separator estimate.
+    sizes = [sum(len(line) + 1 for line in entry) for entry in entries]
+    budget_after_head = budget - sum(len(line) + 1 for line in head) - _COMMENT_MARKER_CHARS
+    remaining = sum(sizes)
+    dropped = 0
+    while dropped < len(entries) and remaining > budget_after_head:
+        remaining -= sizes[dropped]
+        dropped += 1
+    del entries[:dropped]
+    while entries and len(_render(head, entries, dropped)) > budget:
+        entries.pop(0)
+        dropped += 1
+    text = _render(head, entries, dropped)
+    if len(text) <= budget:
+        return text
+
+    # Comment history is exhausted: elide description lines that carry no criterion,
+    # newest-to-oldest, keeping the ticket header and every criterion line.
+    lines = text.splitlines()
+    keep = [True] * len(lines)
+    optional = [
+        index
+        for index, line in enumerate(lines)
+        if index >= _HEADER_LINES and line.strip() and not _is_essential(line, criteria)
+    ]
+    marker = (
+        "[… ticket detail elided to fit the bounded completion-recovery context budget; "
+        "acceptance criteria are preserved in full …]"
+    )
+    running = len(text) + len(marker) + 1
+    for index in reversed(optional):
+        if running <= budget:
+            break
+        keep[index] = False
+        running -= len(lines[index]) + 1
+    kept = [lines[i] for i in range(len(lines)) if keep[i]]
+    first_dropped = next((i for i in range(len(lines)) if not keep[i]), None)
+    if first_dropped is not None:
+        offset = sum(1 for i in range(first_dropped) if keep[i])
+        kept.insert(offset, marker)
+    text = "\n".join(kept)
+    if len(text) > budget:
+        # Unreachable while the criteria bounds hold (criteria total <= budget minus
+        # headroom); a hard slice keeps the module's payload guarantee absolute.
+        text = text[: max(0, budget - len(marker) - 1)] + "\n" + marker
+    return text
 
 
 def _normalized_finish_reason(exc: BaseException) -> str:
@@ -425,6 +568,10 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         try:
             expected = explicit_completion_criteria(ticket)
             _validate_recovery_inputs(expected, ticket_context)
+            # The full context is re-sent on EVERY per-criterion call, so it is the
+            # dominant cost multiplier — compact it once, up front, to the declared
+            # per-request budget rather than refusing an otherwise legitimate ticket.
+            ticket_context = compact_recovery_context(ticket_context, expected)
             recovery_started = True
             for index, criterion in enumerate(expected):
                 instructions = (
@@ -534,6 +681,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
 
 __all__ = [
     "CompletionAgentStep",
+    "compact_recovery_context",
     "explicit_completion_criteria",
     "raise_completion_workflow_failure",
 ]

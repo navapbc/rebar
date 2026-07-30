@@ -336,13 +336,10 @@ def _completion_precheck(
             _msg = _failure.message_for(_outcome.resolution_class.value)
             if _msg:
                 _hint = f" [{_outcome.resolution_class.value}: {_msg}]"
-        # A bounded-recovery failure is not an unavailable runtime, so its remedy differs:
-        # point at the size/stage cause and the sidecar, not at installing the extra.
-        _remedy = _failure.recovery_failure_cause(exc) or (
-            "The completion-verification gate is enabled "
-            "(verify.require_completion_verification_for_close); install the 'agents' extra "
-            "and set a model API key."
-        )
+        # Neither a bounded-recovery failure nor a mid-run verifier failure (e.g. a step-budget
+        # exhaustion after minutes of real model calls) is an unavailable runtime, so the
+        # "install the extra / set a key" remedy is reserved for actual unavailability.
+        _remedy = _failure.close_gate_remedy(exc, _outcome)
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run "
             f"({exc}).{_hint} {_remedy} "
