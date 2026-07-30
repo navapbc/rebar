@@ -321,6 +321,44 @@ def _completion_precheck(
             repo_root=repo_root,
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
+        # A bounded-recovery failure is NOT an unavailable runtime, so it must not inherit
+        # the generic "install the 'agents' extra / set a model API key" remedy below: that
+        # advice is false here (the extra and key are present and working — the same close
+        # retried can return a real verdict), and it sends the operator to reinstall
+        # dependencies for what is actually a size or exhaustion problem. The error already
+        # carries the explanation in `.diagnostic`, which docs/llm-framework.md
+        # ("Bounded completion recovery") names as the surface to inspect first.
+        from rebar.llm.errors import CompletionRecoveryError
+
+        if isinstance(exc, CompletionRecoveryError):
+            diag = exc.diagnostic or {}
+            chars, limit = diag.get("context_chars"), diag.get("context_char_limit")
+            # Only ASSERT a size breach when the bound checks actually reported one.
+            # `CompletionRecoveryError` is raised at several recovery stages and only the
+            # bound checks carry these keys; claiming "context (None chars) exceeds the
+            # limit (None chars)" for, say, an exhaustion at criterion 7 would just relocate
+            # the misdiagnosis this branch exists to remove.
+            if isinstance(chars, int) and isinstance(limit, int):
+                _cause = (
+                    f" The ticket's context ({chars:,} chars) exceeds the bounded "
+                    f"completion-recovery limit ({limit:,} chars), so the recovery pass was "
+                    f"refused before it ran — shorten the ticket's description/comments."
+                )
+            else:
+                _cause = (
+                    " Bounded completion recovery could not finish for this ticket; the "
+                    "recovery bounds are deliberate safeguards, not a transient fault."
+                )
+            raise CommandError(
+                f"Error: cannot close {ticket_id}: completion verification could not run "
+                f"({exc}).{_cause} The ticket's gate_error_v1 sidecar holds the full "
+                'diagnostic. Override with --force-close="<reason>" if that is warranted.',
+                # Deterministic: the same bounds re-apply on every attempt, so this is not
+                # the retryable class exit 11 advertises (docs/exit-codes.md) — an agent
+                # auto-retrying on 11 would loop.
+                returncode=1,
+            ) from None
+
         # Shape B (story blackbear): thread the classifier disposition mamba/preflight attached
         # to the raised LLM error through to the process exit code. A retryable outage (429/5xx)
         # → exit 11 ("transient — retry"), else the existing fail-closed exit 1. CommandError
