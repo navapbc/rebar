@@ -126,10 +126,15 @@ def wait_for_jira_dc_ready(timeout: float | None = None) -> None:
     raise RuntimeError(message)
 
 
+# Every scratch project this harness creates carries this prefix, which is what
+# makes leftover state from an interrupted run identifiable at session start.
+_PROJECT_KEY_PREFIX = "RBJ"
+
+
 def _random_project_key() -> str:
     # Jira project keys: 2-10 uppercase letters/digits, must start with a letter.
     suffix = "".join(random.choices(string.ascii_uppercase, k=4))
-    return f"RBJ{suffix}"
+    return f"{_PROJECT_KEY_PREFIX}{suffix}"
 
 
 def _poll_until_404(path: str, *, what: str) -> None:
@@ -151,9 +156,33 @@ def _poll_until_404(path: str, *, what: str) -> None:
     )
 
 
+def _leaked_scratch_projects() -> list[str]:
+    """Scratch projects left behind by an earlier, interrupted run.
+
+    Every project this harness creates is keyed ``RBJ`` + 4 letters (see
+    ``_random_project_key``), and a completed run deletes its own. So any ``RBJ``
+    project still present at session start is residue from a run whose teardown
+    did not finish — exactly the stale state that must not silently leak forward.
+
+    Read from ``/rest/api/2/project``, the direct project list, NOT the search
+    index (ADR 0037 §3: the index lags both creates and deletes, so it could
+    equally hide real residue or invent phantom residue).
+    """
+    status, body = _request("/rest/api/2/project")
+    if status != 200 or not isinstance(body, list):
+        # Cannot enumerate: do not invent a failure, but do not claim cleanliness
+        # either — the readiness wait below is still authoritative for usability.
+        return []
+    return sorted(
+        str(p.get("key"))
+        for p in body
+        if isinstance(p, dict) and str(p.get("key", "")).startswith(_PROJECT_KEY_PREFIX)
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _jira_dc_harness_ready() -> None:
-    """Wait for the harness before any fixture below talks REST to it.
+    """Wait for the harness, then REFUSE a harness carrying leaked state.
 
     ``test_harness_smoke.py``'s own module-level ``_live_jira_ready()`` sentinel
     already gates collection with a quick single check, so by the time this
@@ -161,8 +190,29 @@ def _jira_dc_harness_ready() -> None:
     the defensive, spec-mandated readiness wait (20 min default budget) for the
     case where it answered once at collection time but is still settling, or a
     caller invokes fixtures directly.
+
+    **Then the freshness half.** ``make jira-dc-up`` passes ``--force-recreate``,
+    but that only guarantees a fresh container when the harness is started THAT
+    way. Nothing stops a run against a container left over from an interrupted
+    session, whose teardown never completed — and stale projects/issues from a
+    previous run are precisely the state that makes a later run's assertions
+    lie. Rather than trying to prove provenance of the container (which
+    ``--force-recreate`` cannot be observed after the fact), this asserts the
+    property that actually matters: **no residue from a prior run is present.**
+    On finding residue it fails loudly with the exact recovery command instead of
+    silently testing against dirty state.
     """
     wait_for_jira_dc_ready()
+
+    leaked = _leaked_scratch_projects()
+    if leaked:
+        raise RuntimeError(
+            f"the Jira DC harness is carrying state from an interrupted previous run: "
+            f"scratch project(s) {leaked} still exist. A run against dirty state can "
+            f"pass or fail for reasons that have nothing to do with the code under "
+            f"test, so this refuses to continue. Reset it with:\n"
+            f"    make jira-dc-down && make jira-dc-up"
+        )
 
 
 @pytest.fixture
