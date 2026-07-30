@@ -61,7 +61,15 @@ BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/co
 # change does not advance main, so autodeploy no-ops on it — that path is operator-driven.)
 SECRETS_PATHS='infra/scripts/fetch-secrets.sh infra/terraform/ssm.tf'
 # config paths are DETECT-ONLY in v1 (signalled, never auto-applied).
-CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh'
+# infra/compose/gerrit.config is in this list, NOT in a re-materializing trigger, on
+# purpose: compose-up.sh DOES re-seed it into the site etc dir, but only when compose-up
+# runs, and this loop deliberately never touches the Gerrit container (BOT_SERVICE is
+# "NEVER 'gerrit'"). Gerrit also reads gerrit.config once at injector-creation time, so
+# applying it means RESTARTING Gerrit — an operator judgement call on a live review gate,
+# not something the unattended loop may do. Before it was listed here a gerrit.config
+# change reached /opt/rebar and then silently did nothing, with no signal at all
+# (bug 1630-0279-85ba-4e15); detect-only at least makes that visible.
+CONFIG_PATHS='infra/gerrit/replication.config infra/gerrit/project.config infra/gerrit/gerrit_to_platform.ini.template infra/gerrit/materialize-g2p-config.sh infra/compose/gerrit.config'
 # host observability probe: re-materialized (idempotent installer) on a source change.
 # Its installed copy at /usr/local/bin lives OUTSIDE the compose build context, so a probe
 # change reaches no trigger above and would otherwise never be refreshed on the box.
@@ -179,7 +187,7 @@ log "main advanced $DEPLOYED -> $TARGET; computing component deltas"
 
 # ── config refs (replication/g2p/meta): DETECT-ONLY (v1 boundary) ─────────────
 if changed "$CONFIG_PATHS"; then
-  err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta need a MANUAL operator apply (auto-apply is a v2 follow-up)"
+  err config_manual "infra config changed in $TARGET — replication/g2p/refs-meta/gerrit.config need a MANUAL operator apply (auto-apply is a v2 follow-up)"
   log "infra config change detected + signalled (not auto-applied in v1)"
 fi
 
