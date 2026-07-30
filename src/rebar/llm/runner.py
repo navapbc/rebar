@@ -25,11 +25,11 @@ from rebar.llm import findings as _findings
 from rebar.llm import usage_log
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
-    _anthropic_cache_settings,
     _anthropic_web_search_capabilities,
     _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
     _pai_model,
 )
+from rebar.llm.capabilities import cache_settings_for, capabilities_for
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import (
     LLMConfigError,
@@ -334,17 +334,23 @@ class PydanticAIRunner:
             # can't interrupt a blocking call — those are bounded by the derived step caps).
             "tool_timeout": float(cfg.llm_tool_timeout_s),
         }
-        # Prompt caching (story 0250) — anthropic-GATED. The stable bytes re-sent across
-        # the container fan-out (the WHOLE parent plan) live in `system_prompt`;
-        # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
-        # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system
-        # prompt block directly), and `anthropic_cache_tool_definitions` caches the tool
-        # surface on agentic calls (a no-op on single_turn `tools=[]`). These keys are
-        # anthropic-only and would error on openai/gemini, so they are gated to the
-        # resolved anthropic provider and applied at THIS shared seam only — no
-        # RunRequest content-list change, so the structured-output retry path is
-        # untouched. A test model_override is non-anthropic, so caching is off there.
-        cache_settings = _anthropic_cache_settings(resolved if not self._model_override else "")
+        # Prompt caching (story 0250; capability-based since story S2). The stable bytes
+        # re-sent across the container fan-out (the WHOLE parent plan) live in
+        # `system_prompt`; `anthropic_cache_instructions` puts a `cache_control` breakpoint
+        # on that block (anthropic.py:1611-1616, the no-instruction-parts branch caches the
+        # system prompt block directly), and `anthropic_cache_tool_definitions` caches the
+        # tool surface on agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for`
+        # reads the resolved model's PROFILE (never a provider-name string, so Bedrock-hosted
+        # Claude — whose model string says `bedrock`, not `anthropic` — still gets its cache
+        # keys) and `cache_settings_for` dispatches on the resulting `prompt_cache_style`;
+        # each style's keys are provider-specific and would error on an unrelated provider, so
+        # they are applied at THIS shared seam only — no RunRequest content-list change, so the
+        # structured-output retry path is untouched. A test model_override skips capability
+        # resolution entirely (preserving the old no-cache-settings behavior for a test double,
+        # and avoiding a spurious conservative-fallback warning on the override sentinel).
+        cache_settings = (
+            None if self._model_override else cache_settings_for(capabilities_for(resolved))
+        )
         # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
         # above (an injected test model never gets a provider server tool). Attached as a
         # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
@@ -611,7 +617,8 @@ def _pai_structured(Agent, model, resolved: str, req: RunRequest, kwargs: dict, 
     from rebar.llm import contracts, structured
 
     model_cls = contracts.response_model_for(req.output_schema)
-    mode_obj = structured.output_mode(model_cls, resolved, thinking=req.thinking)
+    caps = capabilities_for(resolved)
+    mode_obj = structured.output_mode(model_cls, caps, thinking=req.thinking)
     if isinstance(mode_obj, NativeOutput):
         agent = Agent(
             model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
