@@ -108,9 +108,10 @@ def test_code_review_approved_blocking_criteria_set() -> None:
 # priority 0.27) — see docs/experiments/plan-review-threshold-calibration.md "Calibration 3".
 # Ticket bfa8 (operator-approved blocking pilot) added T3 + T10 at block_threshold 0.90 —
 # the deliberate re-approval this pin exists to force. Ticket c97a (T5c grounded-security
-# rewrite, operator-approved) added T5c at the same 0.90 pilot threshold.
+# rewrite, operator-approved) added T5c at the same 0.90 pilot threshold. Ticket 28d5 added
+# G7 @ 0.85 (FP-verified on ticket 696a; plan-v4 floor-grade kind scoping).
 _PLAN_REVIEW_APPROVED_BLOCKING = frozenset(
-    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "T1", "T3", "T4", "T5c", "T8", "T10"}
+    {"COH", "E2", "E4", "F1", "G1G2", "G5", "G6", "G7", "T1", "T3", "T4", "T5c", "T8", "T10"}
 )
 
 
