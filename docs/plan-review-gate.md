@@ -81,13 +81,39 @@ signature — exactly like the completion verifier.
 
 The gate has **two layers**:
 
-* **Layer 1 — the deterministic floor (P1–P8)** — `det_floor.py`. The *only* tier
+* **Layer 1 — the deterministic floor (P1–P11)** — `det_floor.py`. The *only* tier
   that blocks **by default**. Frozen, deterministic, polyglot, fail-open. The
   sound, unambiguous blockers are **P1** (missing `## Acceptance Criteria`
-  checklist), **P5** (a dependency *cycle* among children), and **P8** (the ticket
-  is too big to review in full even one criterion at a time → "reduce/decompose").
+  checklist), **P5** (a dependency *cycle* among children), **P8** (the ticket
+  is too big to review in full even one criterion at a time → "reduce/decompose"),
+  **P10** (verification-presence), and **P11** (AC vagueness).
   P2/P3 (file/package resolution via the grounding oracle) are coverage-only;
   P4/P6/P7 (oversize / AC-quality / destructive-op sniff) are advisory.
+
+  **Clarity floor P10 + P11 (ticket 49b8; `det_clarity.py`, the same module-size
+  seam as `det_lint`).** Two BLOCKING checks added after backtests over the 7-day
+  population and a 200-ticket extended set, operator-approved for blocking; P6
+  stays advisory and monolithic, so they are separate checks with their own
+  coverage entries:
+
+  * **P10 verification-presence** — a *leaf* plan must state how it is verified:
+    a `## Testing` or `## Verification` H2 section, OR at least one `- [ ]`/`- [x]`
+    acceptance-criteria item that contains an inline code span (a backtick-fenced
+    token) or matches the exhaustive verification vocabulary (pytest / `test_*` /
+    `make …` / `rebar …` / `git …` / grep / assert\* / `checked:` / verify-family
+    words / "exit code" — nothing else qualifies). A container is a natural pass
+    (its children carry the verification detail).
+  * **P11 AC vagueness** — the boundary-**fixed** vague lexicon scanned over AC
+    item lines only (`det_operator_attested.ac_item_lines`). The old P6 rule
+    matched word *prefixes* with no trailing boundary, so `clean` fired on
+    "cleanly" / "lint clean"; the fixed rule uses BOTH word boundaries, drops
+    `clean`, and keeps `etc.` with a code-span-proximity exemption — span
+    positions are recorded on the ORIGINAL line before spans are blanked for
+    matching, a hit inside a span never fires, and an `etc.` starting within 30
+    characters after a span's end is exempt (a non-exhaustive enumeration of
+    already-concrete examples). Measured 0 false positives across 304 passed
+    plans. P6's advisory lexicon shares the same fixed matcher so the two
+    surfaces agree.
 
   **Operator-attested evidence-kind lint (P6 family; ticket b080, ADR-0043 ×
   ADR-0016).** `p6_ac_quality` additionally runs an ADVISORY, prompt-less lexicon
@@ -192,7 +218,7 @@ demoted **T5e to advisory** — FP-PRONE on the segmented corpus (validity 0.391
 verifier-drop rate, surviving p90 priority 0.27) — and kept the other ten tiers. Every
 other LLM criterion stays advisory (`0.95`), including the false-positive-prone
 T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
-(P1/P5/P8) still blocks unconditionally.
+(P1/P5/P8/P10/P11) still blocks unconditionally.
 
 **The hard-override floor is oracle-graded for `ac_unverifiable` (plan-v3, story
 `large-sleepful-needlefish`).** `impact_plan` floors a finding at 0.85 when
@@ -912,7 +938,7 @@ from criteria that are wrong.)
   the check `abstain`s (records a reason) and is treated as PASS. The recorded
   abstain set *is* the coverage.
 * **LLM unavailable** (missing `[agents]` extra / no API key) → `review_plan`
-  degrades to a **DET-only** review (the floor still blocks on P1/P5/P8; advisory
+  degrades to a **DET-only** review (the floor still blocks on P1/P5/P8/P10/P11; advisory
   LLM findings are simply absent). The error is recorded in coverage.
 * **A broken individual check** abstains rather than aborting the floor.
 * **Pass-2 verify failed but Pass-1 ran** (e.g. the agentic verifier exhausted its step
@@ -1173,7 +1199,7 @@ real findings die (or false ones survive):
 | Pass-1 finder | **surface** (over-report) | recall first; a severity-free finder floods, the verifier filters |
 | Pass-2 verifier | **the author** (charitable) | drops a finding whose evidence doesn't entail it under a charitable reading |
 | Pass-3 decide | **drop** below 0.5 validity | arithmetic, not a second skepticism pass |
-| DET floor (P1–P9) | **fail-open** | a check that cannot run abstains (recorded coverage) and is treated as PASS |
+| DET floor (P1–P11) | **fail-open** | a check that cannot run abstains (recorded coverage) and is treated as PASS |
 | Claim gate | **fail-closed** | a missing/stale plan-review attestation BLOCKS the claim |
 | Novelty / completion floors | **KEEP** | when unsure whether a finding is novel / a criterion met, keep the finding / do not certify |
 
@@ -1182,7 +1208,7 @@ real findings die (or false ones survive):
   cutoff double-counts skepticism — real findings die).
 - A new blocking-eligible criterion must be in-session-closable and fail-open on what it cannot
   ground (mirror the DET floor); reserve fail-closed for the claim gate.
-- A new DET check blocks ONLY when it is sound + unambiguous (P1 / P5-cycle / P8); everything else
+- A new DET check blocks ONLY when it is sound + unambiguous (P1 / P5-cycle / P8 / P10 / P11); everything else
   is advisory or coverage-only.
 - Adding a Pass-2 graded sub-answer? Default it to `na` (excluded until answered) so old sidecars
   stay comparable (ADR 0032) — do not silently shift the validity denominator.

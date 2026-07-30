@@ -72,7 +72,7 @@ def _ctx() -> PlanContext:
         title="Build X",
         description=(
             "## Why\nneed X\n\n## What\nbuild X in src/x.py\n\n## Scope\njust X\n\n"
-            "## Acceptance Criteria\n- [ ] X persists\n- [ ] seam calls X\n"
+            "## Acceptance Criteria\n- [ ] X persists\n- [ ] seam calls X (`pytest -q`)\n"
         ),
     )
 

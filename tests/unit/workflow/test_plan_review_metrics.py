@@ -28,7 +28,8 @@ _TARGET = "T-1"
 _GOOD_AC = (
     "## Why\nthe system needs X.\n\n## What\nbuild X in `src/rebar/x.py`.\n\n"
     "## Scope\njust X.\n\n## Acceptance Criteria\n"
-    "- [ ] X is observably true\n- [ ] another check\n"
+    "- [ ] X is observably true\n- [ ] another check\n\n"
+    "## Testing\nRun `pytest tests/unit/test_x.py -q`.\n"
 )
 
 

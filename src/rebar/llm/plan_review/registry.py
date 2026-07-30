@@ -90,8 +90,9 @@ AGENT_TIER = frozenset(
 )
 
 # The canonical v4 §5 registry — the completeness guard's authority. The DET floor
-# P1–P9 live in det_floor.py; BROAD is the orchestrator's bounded open-ended pass.
-CANONICAL_DET = ("P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9")
+# P1–P11 live in det_floor.py (P10/P11 in det_clarity.py); BROAD is the
+# orchestrator's bounded open-ended pass.
+CANONICAL_DET = ("P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11")
 CANONICAL_LLM = frozenset(
     {
         # Layer-2 judgment

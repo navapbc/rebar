@@ -115,7 +115,7 @@ def test_plan_review_outage_writes_gate_error_and_still_degrades(store):
     tid = rebar.create_ticket(
         "task",
         "work ticket",
-        description="A well-formed ticket.\n\n## Acceptance Criteria\n- [ ] x",
+        description="A well-formed ticket.\n\n## Acceptance Criteria\n- [ ] x passes `pytest -q`",
         repo_root=store,
     )
 

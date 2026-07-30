@@ -362,7 +362,7 @@ def _plan_ctx(root: str):
         title="A task",
         description=(
             "## Acceptance Criteria\n- [ ] the widget is observably correct\n"
-            "- [ ] unit tests cover it\n\nImplement the widget in src/rebar/foo.py."
+            "- [ ] unit tests cover it (`pytest -q`)\n\nImplement the widget in src/rebar/foo.py."
         ),
         repo_root=root,
         tickets_root=root,
