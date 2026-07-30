@@ -95,7 +95,7 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
     single-criterion finder does not). Fire ⇔ non-empty findings (story 55b8)."""
     from rebar.llm.config import resolve_gate_config
     from rebar.llm.plan_review import passes, registry
-    from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA
+    from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA, build_sibling_roster
 
     desc = registry.by_id(repo_root).get(cid)
     if desc is None:  # pragma: no cover — guarded by _criterion_id
@@ -114,9 +114,9 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
                 f"container criterion {cid!r} needs a non-empty `children` list in the eval "
                 "fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
             )
-        roster = case.get("sibling_roster") or "\n".join(
-            f"- {c.get('ticket_id', '?')}: {c.get('title', '')}" for c in children
-        )
+        # A fixture may pin a roster verbatim; otherwise use the ONE shared builder so
+        # eval fixtures see the same roster shape production does.
+        roster = case.get("sibling_roster") or build_sibling_roster(children)
         findings = passes.pass1_container(
             runner,
             cfg,

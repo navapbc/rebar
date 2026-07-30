@@ -72,6 +72,9 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "asserted-capability": (0.95, "advisory"),
     "decomp-shape": (0.95, "advisory"),
     "necessity": (0.95, "advisory"),
+    # Joint AC satisfiability (bug creamy-cocksure-elkhound) ships ADVISORY: promoting it to
+    # blocking needs replay calibration evidence, which this change does not yet have.
+    "ac-satisfiability": (0.95, "advisory"),
     "prerequisite-consistency": (0.6, "blocking"),
 }
 

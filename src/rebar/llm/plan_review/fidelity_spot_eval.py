@@ -37,7 +37,7 @@ from rebar.llm.parity import ItemRecord
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
-from . import passes, prerequisites, registry
+from . import pass1, passes, prerequisites, registry
 
 # The gate prompts S2 relocated (their `<!--volatile-->`-split prefix must cache while the
 # moved ticket/diff data rides in the user message). The completion-verifier (the close
@@ -216,7 +216,10 @@ def packing_spot_eval(
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     handle = gate_source.resolve_gate_handle(None, source, repo_root)
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
-    roster = "\n".join(f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in children)
+    # The ONE shared builder (pass1.build_sibling_roster) — a local copy would send
+    # title-only rosters here while production sends AC-bearing ones, making spot-eval
+    # results incomparable to the behaviour they are meant to measure.
+    roster = pass1.build_sibling_roster(children)
 
     def _records(findings_by_child: dict[str | None, list[dict]]) -> list[ItemRecord]:
         recs: list[ItemRecord] = []

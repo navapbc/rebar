@@ -23,6 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from rebar._plan_clarity import evaluate_plan_clarity
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
@@ -92,6 +93,26 @@ def _too_big_finding(
     }
 
 
+def build_sibling_roster(children: list[dict[str, Any]]) -> str:
+    """The COMPLETE sibling roster fed to the container pass (G3/G4) — the SINGLE source
+    for every ``passes.pass1_container`` caller (this module, ``fidelity_spot_eval``, and
+    ``evals.eval_solver``), so the production path and the eval harnesses cannot diverge.
+
+    One block per child: its ``- <ticket_id>: <title>`` line, then that child's acceptance
+    criteria indented two spaces beneath it. G3's rubric instructs the reviewer to discharge
+    its "flag an absence only if NO sibling covers it" test against those items — a burden a
+    title-only roster could never discharge, which is why G3 could not fire on an uncovered
+    parent criterion (bug creamy-cocksure-elkhound). A child with no parseable
+    ``## Acceptance Criteria`` keeps its bare line, so the roster degrades to the historical
+    title-only shape rather than dropping the child."""
+    lines: list[str] = []
+    for child in children:
+        lines.append(f"- {child.get('ticket_id')}: {child.get('title', '')}")
+        for item in evaluate_plan_clarity(child.get("description") or "").ac_items:
+            lines.append(f"  {item}")
+    return "\n".join(lines)
+
+
 def _timed_pairing(
     runner: Runner,
     cfg: LLMConfig,
@@ -151,9 +172,12 @@ def _run_container(
     to cache, run ONE pairing to completion FIRST to warm the cache, then fan the rest
     out so they READ the warmed prefix. The aggregate finding set equals the sequential
     baseline — each in-budget pairing runs exactly once (no dup/drop)."""
-    roster = "\n".join(f"- {c.get('ticket_id')}: {c.get('title', '')}" for c in ctx.children)
+    roster = build_sibling_roster(ctx.children)
     budget = sizing.container_budget(ctx.largest_window_tokens)
-    parent_tokens = det_floor.est_tokens(ctx.plan_text)
+    # The roster rides the CACHED PREFIX (passes.pass1_container puts it in the system
+    # prompt), so it is part of every pairing's prefix: count it here or pack_container_bins
+    # under-estimates the prefix and can pack a bin over the window budget.
+    parent_tokens = det_floor.est_tokens(ctx.plan_text) + det_floor.est_tokens(roster)
     out: list[dict[str, Any]] = []
     pairing_records: list[dict[str, Any]] = []
     container_t0 = time.monotonic()

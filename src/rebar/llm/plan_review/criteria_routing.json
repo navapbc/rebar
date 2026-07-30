@@ -1257,5 +1257,40 @@
       }
     ],
     "routing": "leaf"
+  },
+  "ac-satisfiability": {
+    "exec": "1-TURN",
+    "facet": "coherence",
+    "applies_at": {
+      "suppress_types": [
+        "bug",
+        "session_log"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "jointly_satisfiable",
+        "check": "Every acceptance criterion and the declared Scope / Out-of-Scope can ALL be true in one end state — no two commitments are mutually exclusive."
+      },
+      {
+        "key": "universal_vs_carve_out",
+        "check": "No criterion quantifies over a set (universally or by count) that this ticket's Scope, an Out-of-Scope/deferred clause, or another of its own criteria keeps a member of in the violating state."
+      },
+      {
+        "key": "derived_artifact_closure",
+        "check": "A property asserted of a generated/derived artifact is also asserted of the source it is generated from — regenerating from a source containing X cannot yield an artifact free of X."
+      },
+      {
+        "key": "snapshot_cardinality",
+        "check": "No criterion pins a literal count or fixed enumeration of a set the plan says is discovered or recomputed at execution time."
+      },
+      {
+        "key": "quoted_intra_document",
+        "check": "ANTI-FP: fire only when both halves are quotable from THIS description; cross-ticket coverage is G3/G4 and parent containment is G7. A criterion's own stated exception is satisfiable, not a finding."
+      }
+    ],
+    "routing": "base"
   }
 }
