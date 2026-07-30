@@ -146,6 +146,32 @@ ancestor, `unlink` must target the **escalated (ancestor)** endpoint to remove i
 escalation rule and the underlying `LINK` / `UNLINK` events are described in
 [event-schema.md](event-schema.md).
 
+**Auditing links written under an older rule (`rebar link-audit`).** A `LINK` event is
+durable and nothing re-resolves it on read, so a blocking edge recorded before the
+escalation rule changed stays on disk exactly as written — and keeps feeding `ready`,
+`next-batch` and the claim cascade. `rebar link-audit` scans every net-active blocking
+edge and asks the *current* resolver what it should be, reporting three kinds:
+
+| kind | meaning | what `--repair` does |
+| --- | --- | --- |
+| `ancestor-blocking` | one endpoint is an ancestor of the other | unlinks it — the hierarchy edge already expresses the relationship, so there is no correct replacement |
+| `mis-escalated` | the resolver returns a different pair than the one recorded | replaces it with the resolved pair |
+| `unreadable` | an endpoint could not be reduced | reports only; never repaired |
+
+It is read-only by default and exits **1** while any finding is outstanding, so it can
+gate CI. `--repair` takes the write lock, refuses to run while a reconciler pass is in
+flight, and force-writes the tag `pre-link-audit-repair` at the tracker's pre-run OID.
+
+Two safety properties are worth knowing before you run it. It writes the replacement
+link **before** removing the stale one, so an interruption leaves *both* edges — a
+superset the next run converges — rather than losing a dependency. And because `unlink`
+is pair-scoped (it takes no relation argument), a pair whose `unlink` would cancel a
+*different* relation is reported `unrepairable` and left alone rather than guessed at.
+
+Re-resolving an already-escalated edge is a best-effort reconstruction: the recorded
+event does not preserve the author's original endpoints. Individual intent is not
+recoverable — the pre-repair tag is what makes a run reversible as a whole.
+
 ## Tags (convergent add/remove deltas)
 
 Tags mutate via **add/remove deltas**, so two clones adding different tags both survive (no

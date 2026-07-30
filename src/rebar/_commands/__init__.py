@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 from rebar._commands import composer, leaf
 from rebar._commands import idea as _idea
+from rebar._commands import link_audit as _link_audit
 from rebar._commands import session_log as _session_log
 from rebar._commands import unlink as _unlink
 from rebar._commands._seam import CommandError
@@ -71,6 +72,7 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "edit": composer.edit_cli,
     "link": composer.link_cli,
     "unlink": _unlink.unlink_cli,
+    "link-audit": _link_audit.link_audit_cli,
     "revert": composer.revert_cli,
     "session-log": _session_log.session_log_cli,
 }
