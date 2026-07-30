@@ -173,6 +173,12 @@ resident and defer the rest. To **revert**, delete the
 checkout and are shared by worktrees, so this takes effect starting the next session in
 the repo.
 
+The other half of this story: a `PreToolUse` hook
+(`scripts/hooks/serena_grep_reminder.py`, wired in the same `.claude/settings.json`) reminds
+an agent about Serena's symbol tools whenever a `Bash` command invokes `grep`/`rg`/`egrep`/
+`fgrep`, since launch-time guidance decays over a session. See `docs/code-navigation.md` for
+the rationale.
+
 ## Day-to-day gates
 
 ```sh
