@@ -185,6 +185,65 @@ def track_issue() -> Iterator[Callable[[str], None]]:
         _poll_until_404(f"/rest/api/2/issue/{key}", what=f"issue {key}")
 
 
+def _discover_project_templates() -> list[str]:
+    """Ask the instance which project templates it actually has.
+
+    Hardcoding a template key does not survive contact with a real instance: the
+    first attempt used ``com.pyxis.greenhopper.jira:gh-simplified-kanban-classic``
+    — a plausible, widely-cited Software key — and this image rejected it with
+    ``400 The project template specified does not exist``. Which templates exist
+    depends on the bundled applications and version, so the instance is the only
+    authority. Discovery also means a future image bump does not silently break
+    the fixture on a key that quietly disappeared.
+
+    Returns an empty list if the endpoint is unavailable, in which case the caller
+    falls back to creating without a template.
+    """
+    status, body = _request("/rest/project-templates/latest/templates")
+    if status != 200 or not isinstance(body, dict):
+        return []
+    keys: list[str] = []
+    for group in body.values():
+        if not isinstance(group, list):
+            continue
+        for template in group:
+            if isinstance(template, dict) and template.get("projectTemplateModuleCompleteKey"):
+                keys.append(str(template["projectTemplateModuleCompleteKey"]))
+    return keys
+
+
+def _create_scratch_project(key: str) -> tuple[int, Any]:
+    """Create the scratch project, trying discovered templates then no template.
+
+    Returns the first ``201`` outcome, or the LAST failure with every attempt
+    named — so a future breakage reports what was tried rather than just "400".
+    """
+    base = {
+        "key": key,
+        "name": f"rebar J5 harness scratch {key}",
+        "lead": _ADMIN_USER,
+        "description": "Scratch project from tests/external/live_jira_dc — safe to delete.",
+    }
+    # Discovered templates first (most specific), then a bare software project,
+    # then a bare project with no type at all — each is a real create attempt, so
+    # whichever the instance supports wins without us having to know in advance.
+    candidates: list[dict[str, Any]] = [
+        {**base, "projectTypeKey": "software", "projectTemplateKey": template}
+        for template in _discover_project_templates()
+    ]
+    candidates.append({**base, "projectTypeKey": "software"})
+    candidates.append(dict(base))
+
+    attempts: list[str] = []
+    status, body = 0, None
+    for payload in candidates:
+        status, body = _request("/rest/api/2/project", method="POST", payload=payload)
+        if status == 201:
+            return status, body
+        attempts.append(f"{payload.get('projectTemplateKey', '<no template>')} -> {status}")
+    return status, f"{body} (tried: {'; '.join(attempts)})"
+
+
 @pytest.fixture
 def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
     """A scratch Jira project, provisioned via REST and torn down after the test.
@@ -194,22 +253,7 @@ def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
     the project itself is deleted.
     """
     key = _random_project_key()
-    status, created = _request(
-        "/rest/api/2/project",
-        method="POST",
-        payload={
-            "key": key,
-            "name": f"rebar J5 harness scratch {key}",
-            # This harness's base image is Jira SOFTWARE standalone, so a
-            # software-type project (a classic, non-next-gen Kanban board) is
-            # what is guaranteed licensed/available — a Core/Business template
-            # is not a safe assumption on this image.
-            "projectTypeKey": "software",
-            "projectTemplateKey": "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic",
-            "lead": _ADMIN_USER,
-            "description": "Scratch project from tests/external/live_jira_dc — safe to delete.",
-        },
-    )
+    status, created = _create_scratch_project(key)
     assert status == 201, f"scratch project creation failed: {status} {created}"
 
     yield key
