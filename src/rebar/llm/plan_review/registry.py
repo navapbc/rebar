@@ -114,6 +114,11 @@ CANONICAL_LLM = frozenset(
         # Cheap 1-TURN provenance finder (epic cite-stone-sea / WS2) — hedged-requirement
         # signal feeding Pass-2's committed_work_relies_on_unbacked_claim. See ADR 0033.
         "hedge",
+        # Cheap 1-TURN joint-satisfiability finder (bug creamy-cocksure-elkhound): can the
+        # ticket's own acceptance criteria and declared scope ALL hold at once? Feeds Pass-2's
+        # existing `internal_conflict` axis. COH owns cross-SECTION contradiction and disclaims
+        # within-section; E1 owns criterion<->description mapping; neither asks this.
+        "ac-satisfiability",
         # Triggered overlays
         "T1",
         "T2",

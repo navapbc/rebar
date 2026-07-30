@@ -408,11 +408,16 @@ def pass1_container(
             "id(s) the finding addresses."
         )
     req = RunRequest(
-        system_prompt=_resolve_system(PASS_CONTAINER, parent_plan, cfg),
+        # The roster is BYTE-IDENTICAL across a review's pairings, so it rides the cached
+        # prefix; in `instructions` (after the per-pairing `children_block`) it would be
+        # re-sent per pairing — quadratic in child count once it carries each child's AC.
+        system_prompt=(
+            _resolve_system(PASS_CONTAINER, parent_plan, cfg)
+            + f"\n\n## Complete sibling roster (for absence cross-check)\n{sibling_roster}\n"
+        ),
         instructions=(
             f"## Container criteria for this pass (ids: {', '.join(valid_ids)})\n{rubric}\n\n"
             f"## Child/children under review (whole)\n{children_block}\n\n"
-            f"## Complete sibling roster (for absence cross-check)\n{sibling_roster}\n\n"
             f"{attribution} An absence is a finding only if NO sibling in the roster covers "
             "it. A clean pairing returns an empty findings list."
         ),
