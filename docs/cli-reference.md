@@ -6,7 +6,7 @@ The `rebar` CLI has two command families. **Help-backed subcommands** are the di
 
 ## Help-backed subcommands
 
-The 52 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 53 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
@@ -235,6 +235,19 @@ Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)
   relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from | caused_by
   blocking deps (blocks/depends_on) link tickets that share a parent; across
   sub-trees they escalate to the nearest common ancestor's children
+```
+
+### `link-audit`
+
+```
+Usage: rebar link-audit [--repair] [--dry-run] [--output json]
+  Scan every net-active blocking link (blocks/depends_on) and report edges that
+  disagree with the current structural rule: ancestor-blocking (a ticket blocking
+  its own ancestor/descendant) and mis-escalated (recorded endpoints differ from
+  what the resolver returns). Read-only by default; exits 1 if anything is found.
+  --repair    write the fixes (replacement link first, then the stale unlink);
+              tags the tracker's pre-run state as pre-link-audit-repair
+  --dry-run   with --repair, preview without writing any event
 ```
 
 ### `list`
