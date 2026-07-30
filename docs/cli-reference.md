@@ -237,6 +237,41 @@ Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)
   sub-trees they escalate to the nearest common ancestor's children
 ```
 
+### `link-audit`
+
+```
+Usage: rebar link-audit [--repair] [--dry-run] [--output json]
+  --repair    write the fixes (replacement link first, then the stale unlink)
+  --dry-run   with --repair, preview without writing any event
+```
+
+Finds net-active blocking links (`blocks` / `depends_on`) that disagree with the
+current structural rule — edges written before comparability became structural do
+not self-heal, because a `LINK` event is durable and nothing re-resolves it on read.
+Each finding carries a `kind`:
+
+| kind | meaning | repair |
+| --- | --- | --- |
+| `ancestor-blocking` | one endpoint is an ancestor of the other | unlink it — the hierarchy edge already expresses the relationship, so there is no correct replacement |
+| `mis-escalated` | the resolver returns a different pair than the one recorded | replace with the resolved pair |
+| `unreadable` | an endpoint could not be reduced | reported only, never repaired |
+
+Read-only by default (it takes no lock and writes nothing); exits **1** while any
+finding is outstanding, **0** when clean — so it can gate CI.
+
+`--repair` takes the tickets write lock, refuses to run while a reconciler pass is in
+flight, and force-writes the tag `pre-link-audit-repair` at the tracker's pre-run OID
+so the whole run can be inspected against — or reset to — the state it started from.
+It writes the replacement link **before** removing the stale one: a failure in between
+then leaves both edges rather than losing the dependency, and re-running converges.
+An edge it cannot safely fix (a cyclic or closed-ticket replacement, or a pair whose
+pair-scoped `unlink` would cancel a different relation) is reported `unrepairable`
+with its original left in place, and the run continues.
+
+Re-resolving an already-escalated edge is a best-effort reconstruction: the recorded
+event does not preserve the author's original endpoints. Individual intent is not
+recoverable — the pre-repair tag is what makes the run as a whole reversible.
+
 ### `list`
 
 ```

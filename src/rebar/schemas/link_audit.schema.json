@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/link_audit.schema.json",
+  "title": "LinkAudit",
+  "description": "Result of `rebar link-audit --output json`: {findings, finding_count, pre_repair_tag_oid}. Each finding is a net-active blocking edge that disagrees with the structural link rule — `kind` is `ancestor-blocking` (an endpoint is an ancestor of the other), `mis-escalated` (the resolver returns a different pair than the one recorded, in which case resolved_source/resolved_target carry it), or `unreadable` (an endpoint could not be reduced). After a `--repair` pass each finding also carries `repair_status` (`repaired` or `unrepairable`) and, when unrepairable, a `repair_reason`. `pre_repair_tag_oid` is the tracker OID tagged `pre-link-audit-repair` before the first write, empty on a read-only run. Exit 0 = nothing outstanding, 1 = findings remain.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["findings", "finding_count", "pre_repair_tag_oid"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind", "source", "target", "relation", "detail"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["ancestor-blocking", "mis-escalated", "unreadable"]
+          },
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "relation": { "type": "string", "enum": ["blocks", "depends_on"] },
+          "resolved_source": { "type": "string" },
+          "resolved_target": { "type": "string" },
+          "detail": { "type": "string" },
+          "repair_status": { "type": "string", "enum": ["repaired", "unrepairable"] },
+          "repair_reason": { "type": "string" }
+        }
+      }
+    },
+    "finding_count": { "type": "integer", "minimum": 0 },
+    "pre_repair_tag_oid": { "type": "string" }
+  }
+}
