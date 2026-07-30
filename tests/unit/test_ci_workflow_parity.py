@@ -162,6 +162,69 @@ def test_optionality_contract_gates_the_verified_path() -> None:
     )
 
 
+# The optionality suite that used to have its OWN dedicated CI job (`import-linter` in
+# _optionality.yml). That job was deleted as redundant: it installed `-e .[dev]` — byte-identical
+# to the reusable's install — and ran exactly these files, which carry no marker and therefore
+# already run in every `test` matrix cell (3.11/3.12/3.13 + macOS), strictly more coverage than
+# one ubuntu/3.12 run. The deletion is safe ONLY while these files stay in the default selection,
+# and NOTHING else in the repo can see that: the parity checks above read caller-level wiring
+# strings and `scripts/check_verify_gate_parity.py` reads caller job keys — neither looks inside
+# `_optionality.yml`. So the guard below is what replaces the deleted job (ticket
+# `hominoid-awestruck-goshawk`): adding a `@pytest.mark.integration`, moving the files, or
+# marking them from a conftest would otherwise silently drop the optionality contract on a
+# fully GREEN build. Bump this count when a test is legitimately added to either file.
+_OPTIONALITY_SUITE = ("tests/unit/test_core_optionality.py", "tests/unit/test_optional.py")
+_OPTIONALITY_SUITE_ITEM_COUNT = 9
+# The default suite selection, verbatim from the reusable `_build-and-test.yml` test step.
+_DEFAULT_SELECTION = "not integration and not external"
+
+
+def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
+    """Node ids pytest actually collects for `paths` under `-m selection`.
+
+    Runs the REAL selection in a subprocess rather than grepping the files for marker text:
+    that is what makes this see a mark applied anywhere — a file-level ``pytestmark``, a
+    per-test decorator, or one applied from a ``conftest.py`` hook.
+    """
+    import subprocess
+    import sys
+
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", selection, *paths],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    # rc 0 = items collected; rc 5 = nothing collected (a full exclusion) — both are outcomes
+    # this guard must be able to report on, so only an unexpected rc is an error.
+    assert proc.returncode in (0, 5), (
+        f"pytest collection failed (rc={proc.returncode}) for {list(paths)}:\n"
+        f"{proc.stdout}\n{proc.stderr}"
+    )
+    return [line.strip() for line in proc.stdout.splitlines() if "::" in line]
+
+
+def test_optionality_suite_still_runs_in_the_default_selection() -> None:
+    """The replacement guard for the deleted `import-linter` job: the optionality tests must
+    remain collected by the default suite selection, which is now their ONLY CI home."""
+    node_ids = _collect_node_ids(_OPTIONALITY_SUITE, _DEFAULT_SELECTION)
+    missing = [p for p in _OPTIONALITY_SUITE if not any(n.startswith(p) for n in node_ids)]
+    assert not missing, (
+        f"optionality test file(s) {missing} collect NOTHING under the default selection "
+        f'-m "{_DEFAULT_SELECTION}". These files no longer have a dedicated CI job — the default '
+        "suite is the only thing running them, so excluding them (a marker, a move, a rename) "
+        "silently deletes the lean-runtime / optionality contract on a green build. Either keep "
+        "them in the default selection or give them back a dedicated gate."
+    )
+    assert len(node_ids) == _OPTIONALITY_SUITE_ITEM_COUNT, (
+        f"expected {_OPTIONALITY_SUITE_ITEM_COUNT} optionality tests in the default selection, "
+        f"collected {len(node_ids)}: {node_ids}. If a test was legitimately added or removed, "
+        "update _OPTIONALITY_SUITE_ITEM_COUNT; if it was DESELECTED by a marker, that drops the "
+        "optionality contract from CI entirely — see the deleted `import-linter` job."
+    )
+
+
 def _precommit_config_hook_ids() -> set[str]:
     """The set of hook ids declared in .pre-commit-config.yaml."""
     import yaml
