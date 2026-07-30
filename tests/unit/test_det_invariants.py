@@ -205,8 +205,20 @@ def test_run_det_floor_adds_zero_without_project_criterion(tmp_path):
 
     root = _make_repo(tmp_path, overlay=None)  # no overlay
     results = run_det_floor(_ctx(root))
-    assert len(results) == len(DET_CHECKS)  # exactly P1–P9, nothing appended
-    assert [r.id for r in results] == ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"]
+    assert len(results) == len(DET_CHECKS)  # exactly P1–P11, nothing appended
+    assert [r.id for r in results] == [
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+        "P5",
+        "P6",
+        "P7",
+        "P8",
+        "P9",
+        "P10",
+        "P11",
+    ]
 
 
 # ── (f) a project DET match on a declared file yields a blocking DetResult ────────
@@ -324,9 +336,10 @@ def test_verify_command_lint():
     assert res.coverage["verify_lint_abstained"] == 1
 
 
-def test_verify_command_lint_keeps_det_checks_p1_to_p9():
-    """The lint EXTENDS p6 — it must not add a P10; DET_CHECKS stays exactly P1-P9."""
+def test_verify_command_lint_keeps_det_checks_p1_to_p11():
+    """The lint EXTENDS p6 — it adds no check of its own; DET_CHECKS is exactly P1-P11
+    (P10/P11 are the separate ticket-49b8 clarity checks, not this lint)."""
     from rebar.llm.plan_review.det_floor import DET_CHECKS
 
     ids = [c.__name__ if callable(c) else c for c in DET_CHECKS]
-    assert len(DET_CHECKS) == 9, f"DET_CHECKS must stay P1-P9, got {len(DET_CHECKS)}: {ids}"
+    assert len(DET_CHECKS) == 11, f"DET_CHECKS must stay P1-P11, got {len(DET_CHECKS)}: {ids}"

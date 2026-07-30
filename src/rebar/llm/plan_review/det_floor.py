@@ -1,4 +1,4 @@
-"""Layer-1 deterministic floor (P1–P9) for the plan-review gate (child 012e).
+"""Layer-1 deterministic floor (P1–P11) for the plan-review gate (child 012e).
 
 The DET floor is the ONLY tier that blocks **by default** in v1 (every LLM-tier
 criterion is advisory unless a project opts it into blocking via its
@@ -38,10 +38,17 @@ The checks
   gate (ADR 0002) cannot scope the attestation: a LEAF with empty ``file_impact``, or
   a CONTAINER whose child-impact inheritance is poisoned (ticket 3e4b). Lives in
   :mod:`det_lint` (module-size seam); re-exported here.
+* **P10 verification-presence** — a leaf plan must state its verification: a
+  ``## Testing``/``## Verification`` section or >=1 AC item with a code span /
+  verification-vocabulary match. **BLOCKS.** (ticket 49b8; :mod:`det_clarity`.)
+* **P11 AC vagueness** — the boundary-fixed vague lexicon (``clean`` dropped,
+  both word boundaries, code-span aware) over AC item lines only. **BLOCKS.**
+  (ticket 49b8; :mod:`det_clarity`; P6's advisory lexicon shares the matcher.)
 
-The only sound, unambiguous blockers are therefore **P1, P5 (cycle), and P8**.
-Everything else is advisory or coverage-only, consistent with "the DET floor
-blocks only on sound, unambiguous checks and fails open on everything else".
+The only sound, unambiguous blockers are therefore **P1, P5 (cycle), P8, P10,
+and P11**. Everything else is advisory or coverage-only, consistent with "the
+DET floor blocks only on sound, unambiguous checks and fails open on everything
+else".
 """
 
 from __future__ import annotations
@@ -53,6 +60,11 @@ from typing import Any
 
 from rebar._plan_clarity import evaluate_plan_clarity
 
+from .det_clarity import (
+    p10_verification_presence,  # noqa: F401 — DET_CHECKS entry; lives in det_clarity (800-LOC cap)
+    p11_ac_vagueness,  # noqa: F401 — DET_CHECKS entry; lives in det_clarity (800-LOC cap)
+    vague_hits_in_line,
+)
 from .det_lint import (
     _file_interference,
     _find_cycle,
@@ -88,7 +100,7 @@ class DetResult:
 
     ``status`` is ``pass`` (check ran, clean), ``fail`` (check ran, found a
     defect), or ``abstain`` (check could not run — fail-open, treated as pass).
-    ``blocking`` is True only for a *blocking* fail (P1/P5-cycle/P8). ``finding``
+    ``blocking`` is True only for a *blocking* fail (P1/P5-cycle/P8/P10/P11). ``finding``
     carries the structured defect on a fail. ``coverage`` records whether the
     check actually ran and why (so the attestation can report completeness)."""
 
@@ -455,28 +467,6 @@ def p5_task_dag(ctx: PlanContext) -> DetResult:
 
 
 # ── P6 AC/DD quality (lexical, advisory) ───────────────────────────────────────
-_VAGUE_LEXICON = (
-    "better",
-    "improved",
-    "improve",
-    "sufficient",
-    "robust",
-    "robustly",
-    "appropriate",
-    "appropriately",
-    "properly",
-    "reasonable",
-    "as needed",
-    "etc.",
-    "and so on",
-    "good",
-    "clean",
-    "nice",
-    "optimal",
-    "efficient",
-)
-
-
 def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
@@ -497,7 +487,10 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
             "(split so each is independently verifiable)."
         )
     low = ctx.plan_text.lower()
-    vague_hits = sorted({w for w in _VAGUE_LEXICON if re.search(rf"\b{re.escape(w)}", low)})
+    # Same FIXED matching as the blocking P11 (det_clarity: both word boundaries,
+    # `clean` dropped, code-span aware) so the two surfaces agree — but P6 stays
+    # advisory and scans the WHOLE plan text, not just AC items.
+    vague_hits = sorted({t for ln in ctx.plan_text.split("\n") for t in vague_hits_in_line(ln)})
     if vague_hits:
         issues.append(f"vague/subjective terms present: {', '.join(vague_hits[:8])}")
     has_verify = bool(ctx.state.get("verify_commands")) or "verif" in low or "test" in low
@@ -676,13 +669,15 @@ DET_CHECKS = (
     p7_destructive,
     p8_reviewability,
     p9_file_impact_coverage,
+    p10_verification_presence,
+    p11_ac_vagueness,
 )
 
 
 def run_det_floor(ctx: PlanContext) -> list[DetResult]:
     """Run the two-phase deterministic floor, fail-open per check:
 
-    1. the STATIC built-in floor (P1–P9, :data:`DET_CHECKS`) — the frozen, polyglot readiness
+    1. the STATIC built-in floor (P1–P11, :data:`DET_CHECKS`) — the frozen, polyglot readiness
        floor, in order;
     2. the DYNAMIC project-invariant phase (:func:`det_invariants.run_project_det_checks`) — the
        activated ``exec: "DET"`` project criteria from the ``.rebar/`` overlay (empty ⇒ zero
@@ -728,7 +723,7 @@ def det_finding_has_subject(finding: dict) -> bool:
 
 
 def det_blocking_findings(results: list[DetResult]) -> list[dict]:
-    """The blocking findings from a DET run (P1/P5-cycle/P8), each tagged with its
+    """The blocking findings from a DET run (P1/P5-cycle/P8/P10/P11), each tagged with its
     criterion id — the orchestrator surfaces these as the gate's hard blocks. Subject-less
     DET findings are dropped by the hygiene backstop (:func:`det_finding_has_subject`)."""
     out = []

@@ -100,7 +100,7 @@ _DESC = (
     "Body with enough length to be a real plan, describing the change in detail so the gate has "
     "something to review and the clarity heuristic is satisfied across the board here.\n\n"
     "## Acceptance Criteria\n- [ ] a thing is observably true\n- [ ] another verifiable check\n\n"
-    "## Why\nx\n## What\ny\n## Scope\nz\n"
+    "## Why\nx\n## What\ny\n## Scope\nz\n## Testing\nRun `pytest -q`.\n"
 )
 
 
@@ -235,7 +235,7 @@ def test_transition_to_in_progress_bug_is_exempt(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     bug_desc = (
         "A real bug body of sufficient length.\n\n## Reproduction Steps\n1. do x\n\n"
-        "Expected: a; Actual: b\n\n## Acceptance Criteria\n- [ ] fixed\n"
+        "Expected: a; Actual: b\n\n## Acceptance Criteria\n- [ ] fixed (checked: `pytest -q`)\n"
     )
     tid = _make(rebar_repo, "bug", desc=bug_desc)
     rebar.transition(tid, "open", "in_progress", repo_root=str(rebar_repo))  # exempt
@@ -494,7 +494,7 @@ def test_bug_is_exempt_from_claim_gate(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     bug_desc = (
         "A real bug body of sufficient length.\n\n## Reproduction Steps\n1. do x\n\n"
-        "Expected: a; Actual: b\n\n## Acceptance Criteria\n- [ ] fixed\n"
+        "Expected: a; Actual: b\n\n## Acceptance Criteria\n- [ ] fixed (checked: `pytest -q`)\n"
     )
     tid = _make(rebar_repo, "bug", desc=bug_desc)
     rebar.claim(tid, repo_root=str(rebar_repo))  # no attestation needed — bugs are exempt
@@ -1236,7 +1236,7 @@ _PLAN_WITH_TP_SYMBOL = (
     "something to review and the clarity heuristic is satisfied across the board here. The plan "
     f"parses config by calling `{_TP_SYMBOL}` on the untrusted input stream.\n\n"
     "## Acceptance Criteria\n- [ ] config is parsed safely\n- [ ] another verifiable check\n\n"
-    "## Why\nx\n## What\ny\n## Scope\nz\n"
+    "## Why\nx\n## What\ny\n## Scope\nz\n## Testing\nRun `pytest -q`.\n"
 )
 
 

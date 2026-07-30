@@ -135,15 +135,16 @@ def test_p6_clean_when_operational_ac_tagged() -> None:
     assert p6_ac_quality(ctx).coverage["operator_attested_gaps"] == 0
 
 
-def test_det_checks_stay_p1_to_p9() -> None:
-    """The lint EXTENDS p6 (like the verify-command lint) — it must NOT add a P10."""
-    assert len(DET_CHECKS) == 9
+def test_det_checks_stay_p1_to_p11() -> None:
+    """The lint EXTENDS p6 (like the verify-command lint) — it adds no check of its own.
+    The floor is P1–P11 (P10/P11 are the ticket-49b8 clarity checks, not this lint)."""
+    assert len(DET_CHECKS) == 11
 
 
-def test_canonical_det_unchanged_and_no_routing_orphan() -> None:
+def test_canonical_det_matches_floor_and_no_routing_orphan() -> None:
     """DET floor checks are not routed through criteria_routing.json; the packaged-routing CI
     gate must stay clean (no ORPHAN) — i.e. no DET entry was added to the routing index."""
-    assert list(registry.CANONICAL_DET) == [f"P{i}" for i in range(1, 10)]
+    assert list(registry.CANONICAL_DET) == [f"P{i}" for i in range(1, 12)]
     assert registry.validate_packaged_routing() == []
 
 

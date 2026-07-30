@@ -19,6 +19,7 @@ _DESCRIPTION = (
     "## Acceptance Criteria\n- [ ] the public transition is observable\n"
     "- [ ] failures preserve the prior ticket status\n\n"
     "## Why\nDogfood the policy.\n## What\nExercise the real CLI.\n## Scope\nOne fixture.\n"
+    "## Testing\nRun `pytest tests/interfaces/lifecycle -q`.\n"
 )
 
 
