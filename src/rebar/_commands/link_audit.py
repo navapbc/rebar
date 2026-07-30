@@ -34,7 +34,6 @@ from typing import Any
 
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._store import lock
 from rebar._store.gitutil import run_git
 from rebar.graph._hierarchy import resolve_hierarchy_link
 from rebar.graph._links import CyclicDependencyError, add_dependency
@@ -230,17 +229,17 @@ def run_repair(
             "unreadable) — refusing to repair; retry once the pass completes"
         )
 
-    try:
-        handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
-    except lock.LockTimeout as exc:
-        raise CommandError(f"Error: could not acquire the tickets write lock: {exc}") from None
-
-    try:
-        pre_oid = _pre_tag(tracker)
-        for finding in findings:
-            repair_finding(finding, tracker, repo_root=repo_root)
-    finally:
-        handle.release()
+    # NO outer write lock. Every event write already takes the tracker write lock
+    # for itself (append_event -> write_and_push -> stage_and_commit -> write_lock),
+    # and that lock is NOT re-entrant: an outer hold made each inner acquisition
+    # block until its 60s timeout and fail, so a repair pass completed nothing while
+    # serialising the tracker for every other writer. Repair is resumable by design
+    # (the replacement link is written before the stale unlink), so it needs no
+    # cross-item atomicity — per-write locking is both correct and the only thing
+    # that works.
+    pre_oid = _pre_tag(tracker)
+    for finding in findings:
+        repair_finding(finding, tracker, repo_root=repo_root)
 
     return findings, pre_oid
 
