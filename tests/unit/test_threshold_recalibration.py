@@ -20,6 +20,12 @@ Amended by ticket c97a (T5c grounded-security rewrite, operator-approved):
   - T5c promoted to blocking @ 0.90 alongside the bfa8 pilot pair; the rubric's
     two-HIGH-class severity scoping keeps lesser findings below the bar.
 
+Amended by ticket 28d5 (G7 blocking enablement, FP-verified on ticket 696a):
+  - G7 promoted to blocking @ 0.85 (0 clearly-incorrect findings at priority >=
+    0.85 over all 348 historical G7 findings; the 0.80-0.85 band is empty). Kind
+    scoping comes from the plan-v4 divergence grading (ADR 0054): only the two
+    floor-grade kinds can reach the bar; incomplete_enumeration never floors.
+
 Proving command:
     .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
 """
@@ -38,6 +44,9 @@ PROMOTED = {"G1G2": 0.70, "T1": 0.70, "T8": 0.70, "E4": 0.75}
 # The ticket-bfa8 blocking pilot (T3 + T10) and the ticket-c97a T5c grounded-security
 # rewrite: promoted to blocking @ 0.90.
 PILOT_BLOCKING = {"T3": 0.90, "T10": 0.90, "T5c": 0.90}
+# The ticket-28d5 G7 enablement: blocking @ 0.85 (kept OUT of PILOT_BLOCKING — the
+# parametrized 0.90 posture test iterates that dict).
+G7_BLOCKING = {"G7": 0.85}
 
 # AC4: the COMPLETE expected routing, pinned INLINE (no separate snapshot file). Any unintended
 # change to ANY criterion's (block_threshold, default_posture) fails the assertion below.
@@ -57,7 +66,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "G4": (0.95, "advisory"),
     "G5": (0.6, "blocking"),
     "G6": (0.6, "blocking"),
-    "G7": (0.95, "advisory"),
+    "G7": (0.85, "blocking"),
     "ISF": (0.95, "advisory"),
     "T1": (0.7, "blocking"),
     "T10": (0.9, "blocking"),
@@ -160,5 +169,11 @@ def test_only_the_approved_and_prerequisite_criteria_are_blocking() -> None:
     # posture.
     r = _routing()
     blocking = {cid for cid, v in r.items() if v.get("default_posture") == "blocking"}
-    expected = LOWERED | set(PROMOTED) | set(PILOT_BLOCKING) | {"T4", "prerequisite-consistency"}
+    expected = (
+        LOWERED
+        | set(PROMOTED)
+        | set(PILOT_BLOCKING)
+        | set(G7_BLOCKING)
+        | {"T4", "prerequisite-consistency"}
+    )
     assert blocking == expected

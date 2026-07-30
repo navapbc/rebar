@@ -17,4 +17,12 @@ FIRE A FINDING when the leaf is NOT a subset of the parent — specifically when
 - (c) redefines a deliverable the parent specifies differently.
 Consistent NARROWING — a leaf that does PART of what the parent describes, faithfully and without contradiction — is NOT a finding.
 
+FLOOR-KIND GUIDANCE (blocking scope — ticket 28d5): ONLY a genuine contract contradiction or a provably required omission is a floor kind. Grade `contradicts_reality` only when the leaf demonstrably steps OUTSIDE the parent's contract, contradicts a parent acceptance criterion, or redefines a parent deliverable; grade `omits_required_site` only when the parent's goal provably CANNOT hold without the omitted scope AND no sibling ticket covers it. A cosmetic or wording-level mismatch, an optional mention, or an omission whose absence leaves the parent's goal intact is `incomplete_enumeration` — coached, never auto-blocked.
+
+CLOSED PARENT: when the parent is CLOSED, check the leaf against the parent's FINAL (as-closed) state — its contract as it actually ended, including any recorded scope decisions — not against an earlier draft of it. Scope the parent explicitly handed to sibling tickets is NOT a leaf violation: a leaf omitting work the parent assigned elsewhere is consistent narrowing, not divergence.
+
+DEDUP-AT-SOURCE: emit at most ONE finding per contradicted parent clause. When several leaf statements collide with the SAME parent clause, fold the additional manifestations into that single finding's evidence rather than emitting one finding each; distinct findings are justified only by DISTINCT contradicted parent clauses.
+
+FAIL-OPEN (abstain-with-coverage): if the parent cannot be resolved — `show_ticket(<parent_id>)` errors, returns nothing, or the parent's plan is unreadable — ABSTAIN: record the parent as covered-but-unverified and emit NO finding. An unresolvable parent is a tooling/visibility gap, never evidence of divergence — it is never a finding. Fail open, never fail closed on an unresolvable parent.
+
 CONFLICT RULE — the PARENT WINS. On any conflict between the leaf and the parent, the parent's plan is authoritative. The productive move is to realign the leaf to the parent. If you believe the parent is genuinely wrong, do NOT silently diverge the leaf — instead update the parent first (which stales the parent's own plan-review attestation and forces its re-review), and only then re-review the leaf against the corrected parent. Realigning the leaf to a subset of the parent, or updating the parent, are the only acceptable resolutions.

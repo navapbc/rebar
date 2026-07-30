@@ -28,10 +28,13 @@ def test_g7_registered_agent_tier_not_codebase_grounded() -> None:
     assert registry.exec_tier(_g7()) == "AGENT"
 
 
-def test_g7_posture_is_advisory_at_0_95() -> None:
+def test_g7_posture_is_blocking_at_0_85() -> None:
+    # Ticket 28d5: promoted from advisory @ 0.95 (FP-verified on ticket 696a; kind
+    # scoping via the plan-v4 divergence grading — see tests/unit/plan_review/
+    # test_g7_blocking.py for the Pass-3 decision pins).
     g7 = _g7()
-    assert g7["default_posture"] == "advisory"
-    assert g7["block_threshold"] == 0.95
+    assert g7["default_posture"] == "blocking"
+    assert g7["block_threshold"] == 0.85
 
 
 def test_g7_routing_fires_on_leaf_with_parent_only() -> None:

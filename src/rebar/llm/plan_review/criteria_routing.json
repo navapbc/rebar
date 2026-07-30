@@ -926,8 +926,8 @@
       ],
       "require_parent_id": true
     },
-    "block_threshold": 0.95,
-    "default_posture": "advisory",
+    "block_threshold": 0.85,
+    "default_posture": "blocking",
     "checklist": [
       {
         "key": "scope_subset",
