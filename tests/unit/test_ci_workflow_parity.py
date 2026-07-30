@@ -23,6 +23,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 _OPTIONALITY_YML = _ROOT / ".github" / "workflows" / "optionality.yml"
+_OPTIONALITY_REUSABLE_YML = _ROOT / ".github" / "workflows" / "_optionality.yml"
+# The job that replaced the 5-cell `per-extra` matrix + the `union` job with one venv loop
+# (6 concurrent slots -> 1, under the org-wide 20-job ceiling).
+_OPTIONALITY_LOOP_JOB = "optional-extras"
 _BAT_YML = _ROOT / ".github" / "workflows" / "_build-and-test.yml"
 _PRECOMMIT_CONFIG = _ROOT / ".pre-commit-config.yaml"
 _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
@@ -159,6 +163,79 @@ def test_optionality_contract_gates_the_verified_path() -> None:
     assert _REUSABLE_OPTIONALITY in optionality_yml, (
         "optionality.yml (push/PR lane) must delegate to the same reusable workflow so its checks "
         "cannot drift from the Verified-lane checks."
+    )
+
+
+def _optionality_loop_step_run() -> str:
+    """The `run:` text of the venv-loop step that installs every optional extra."""
+    import yaml
+
+    wf = yaml.safe_load(_read(_OPTIONALITY_REUSABLE_YML))
+    job = (wf.get("jobs") or {}).get(_OPTIONALITY_LOOP_JOB)
+    assert job, (
+        f"_optionality.yml has no {_OPTIONALITY_LOOP_JOB!r} job — the per-extra/union venv loop "
+        "was renamed or removed. Update _OPTIONALITY_LOOP_JOB (and "
+        "infra/github/main-protection.snapshot.json, which names the job's check context)."
+    )
+    steps = [s.get("run") or "" for s in (job.get("steps") or [])]
+    runs = [run for run in steps if "specs=" in run]
+    assert len(runs) == 1, (
+        f"expected exactly one venv-loop step (a `specs=` list) in the {_OPTIONALITY_LOOP_JOB!r} "
+        f"job, found {len(runs)} — this guard's anchor is stale."
+    )
+    return runs[0]
+
+
+def test_optionality_loop_aggregates_failures_and_never_activates() -> None:
+    """The venv loop replaced a `fail-fast: false` matrix, so it must keep BOTH properties the
+    matrix gave for free, each of which fails SILENTLY if dropped:
+
+    * failure aggregation — Actions runs `run:` under `bash -e`, so a naive loop dies on the
+      first bad extra (losing the other extras' diagnostics), while `|| true` / `set +e` without
+      an accumulator makes the whole contract a no-op that ALWAYS passes. The `rc` accumulator
+      (`continue` per failure, `exit $rc` at the end) is what keeps it honest.
+    * no `activate` — venv activations STACK across loop iterations, so PATH (not the loop
+      variable) would decide which interpreter runs and every later iteration could silently
+      re-test the FIRST extra while reporting its own name. Absolute `"$v/bin/..."` only.
+    """
+    run = _optionality_loop_step_run()
+    for shape in ("rc=0", "rc=1", "continue", "exit $rc"):
+        assert shape in run, (
+            f"_optionality.yml {_OPTIONALITY_LOOP_JOB!r}: the venv loop no longer contains "
+            f"{shape!r}. Without the full `rc` accumulator shape a failing extra either aborts "
+            "the loop (losing the other extras' diagnostics) or is swallowed entirely, making "
+            "this whole contract a check that can never fail."
+        )
+    assert "activate" not in run, (
+        f"_optionality.yml {_OPTIONALITY_LOOP_JOB!r}: the venv loop sources an `activate` script. "
+        "Activations stack across iterations, so PATH decides which interpreter runs and later "
+        'iterations can silently re-test the first extra. Invoke by absolute "$v/bin/..." path.'
+    )
+
+
+def test_optionality_loop_covers_every_declared_extra() -> None:
+    """Every key of ``rebar._optional.EXTRAS`` must appear in the loop's extra list, so a newly
+    declared extra cannot ship with ZERO CI. The old hand-maintained matrix list had drifted
+    exactly this way: it ran `mcp` (which is not in EXTRAS) but never `metrics` (which is)."""
+    import re
+
+    from rebar import _optional
+
+    run = _optionality_loop_step_run()
+    # Entries are "<label>:<pip extras>"; the union entry's label is not an extra name.
+    labels = {m.group(1) for m in re.finditer(r'"([a-z_]+):([a-z_,]+)"', run)}
+    missing = set(_optional.EXTRAS) - labels
+    assert not missing, (
+        f"optional extra(s) {sorted(missing)} are declared in rebar._optional.EXTRAS but are not "
+        f"installed by the {_OPTIONALITY_LOOP_JOB!r} venv loop in _optionality.yml — they would "
+        "ship with no CI proving the extra installs and is detected. Add them to `specs`."
+    )
+    # `mcp` has no _optional probe but is still a shipped extra, and the joint UNION install is
+    # the only iteration that can surface a `ResolutionImpossible` no single extra reaches.
+    assert {"mcp", "union"} <= labels, (
+        f"the {_OPTIONALITY_LOOP_JOB!r} venv loop must keep the `mcp` iteration (server transport "
+        "+ its `rebar-mcp --help` boot check) and the joint `union` iteration (joint dependency "
+        "resolution); one of them is missing."
     )
 
 
