@@ -1,0 +1,13 @@
+Usage: rebar doctor [--repair] [--dry-run] [--output json]
+  Diagnose the store and, where it is unambiguous and reversible, heal it.
+  Read-only by default; exits 1 if any finding is outstanding, so it can gate CI.
+
+  Checks currently implemented:
+    dependency-graph  blocking links (blocks/depends_on) that disagree with the
+                      structural rule — ancestor-blocking (a ticket blocking its
+                      own ancestor/descendant) and mis-escalated (recorded
+                      endpoints differ from what the resolver returns)
+
+  --repair    write the fixes (replacement link first, then the stale unlink);
+              tags the tracker's pre-run state as pre-doctor-repair
+  --dry-run   with --repair, preview without writing any event
