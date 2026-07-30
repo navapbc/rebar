@@ -166,13 +166,19 @@ fails CI).
 ## Navigating the codebase (when editing rebar itself)
 
 This checkout has the **Serena** MCP server configured (LSP-backed, Pyright over `src/rebar`)
-for *semantic* code navigation. **Prefer its symbol tools over `grep`** when finding or
-following references — `find_symbol`, `find_referencing_symbols`, `get_symbols_overview`, and
-symbol-precise edits (`replace_symbol_body`, `insert_after_symbol`). It resolves "who calls /
-imports this?" reliably (definitions + references, not text matches), which cross-cutting
-refactors need. Serena's tools load at session start; if absent, verify with
-`claude mcp get serena`. `grep`/the search tools remain the fallback when Serena is
-unavailable or for non-symbol (text/comment/string) searches.
+for *semantic* navigation — `find_symbol`, `find_referencing_symbols`, `get_symbols_overview`,
+and symbol-precise edits (`replace_symbol_body`, `insert_after_symbol`). Serena and `grep` fail
+in **opposite** directions, so this is a division of labour, not a preference:
+
+| Need | Tool |
+|---|---|
+| who calls / imports a symbol | Serena `find_referencing_symbols` — semantic, no comment false positives |
+| symbol named as a **string**: `monkeypatch.setattr`, `getattr`, `importlib` | `grep` — the LSP cannot resolve these, so Serena silently omits the site |
+| a current line number | `grep` on the working tree — Serena's numbering is offset and its index can lag edits |
+
+Cross-cutting change → do **both**: Serena for the reference set, then one `grep` for the
+symbol's name **as a string**. Skipping that second step is what broke epic `061c` S1. Evidence
+and reproductions: `docs/code-navigation.md`; if Serena is absent, `claude mcp get serena`.
 
 ## Git workflow — land changes THROUGH GERRIT, not GitHub PRs
 
