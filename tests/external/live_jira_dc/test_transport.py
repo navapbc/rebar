@@ -34,6 +34,9 @@ import pytest
 from _jira_shape_contract import assert_comment_map_shape, assert_search_shape
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
+# Mirrors conftest.py's own constant: the harness image's built-in admin account,
+# which is the one user guaranteed to exist for the live user-search assertions.
+_ADMIN_USER = os.environ.get("JIRA_DC_ADMIN", "admin")
 
 
 def _live_jira_ready() -> bool:
@@ -63,11 +66,38 @@ _skip = pytest.mark.skipif(
         f"{_BASE} — start it with `make jira-dc-up` and run with REBAR_RUN_EXTERNAL=1"
     ),
 )
+# A missing extra is a legitimate SKIP only when there is no harness to test
+# against either (a plain dev checkout). When the harness IS reachable, this module
+# is the acceptance evidence for the DC transport, and skipping it would let a
+# green run certify code that never executed — the CI job installs the extra
+# (external-integration.yml), so its absence here is a broken environment, not a
+# tier that does not apply. The all-skip canary cannot catch this on its own:
+# it counts collected-vs-executed globally per session, and test_harness_smoke.py's
+# tests DO execute in the same job, masking an all-skip of this module.
+_extra_missing_but_harness_up = _live_jira_ready() and not _jira_extra_installed()
+
 _skip_no_extra = pytest.mark.skipif(
-    not _jira_extra_installed(),
+    not _jira_extra_installed() and not _extra_missing_but_harness_up,
     reason="the 'jira-datacenter' extra (pycontribs/jira) is not installed — "
     "pip install 'nava-rebar[jira-datacenter]'",
 )
+
+
+@pytest.fixture(autouse=True)
+def _fail_if_extra_missing_while_harness_is_up() -> None:
+    """Turn "harness reachable but extra absent" into a LOUD failure.
+
+    Without this, that combination silently skips every test below and the job
+    reports green — the exact false-negative the external tier exists to prevent.
+    """
+    if _extra_missing_but_harness_up:
+        pytest.fail(
+            "the Jira DC harness is reachable at "
+            f"{_BASE} but the 'jira-datacenter' extra (pycontribs/jira) is NOT "
+            "installed, so the DC transport tests would silently skip and this run "
+            "would report green having validated nothing. Install it with: "
+            "pip install -e '.[dev,jira-datacenter]'"
+        )
 
 
 @pytest.fixture
@@ -186,6 +216,82 @@ def test_probe_remote_classifies_a_deleted_issue_as_archived_or_moved(
 
     result = dc_transport.probe_remote(key)
     assert result.branch == ProbeBranch.ARCHIVED_OR_MOVED
+
+
+@_skip
+@_skip_no_extra
+def test_name_identity_user_search_resolves_a_real_user_authoritatively(
+    dc_transport: Any,
+) -> None:
+    """The live half of the ``NameIdentity`` wire J4 left dangling.
+
+    J4 shipped ``NameIdentity`` taking its resolver as an EXPLICIT constructor
+    parameter so this story could supply a REAL lookup; a resolver that is absent
+    (or silently non-authoritative) makes the outbound diff re-emit an assignee
+    change it can never converge — the churn class J4's anti-churn oracle exists
+    to prevent. Asserting it against a fake would prove nothing about DC's
+    ``user/search`` endpoint, which is why this lives in the live tier.
+    """
+    from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
+    from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
+
+    resolved, authoritative, is_account_id = _search_users_by_username(
+        dc_transport._client, _ADMIN_USER
+    )
+    assert resolved == _ADMIN_USER
+    assert authoritative is True, (
+        "the live user search IS the authoritative path — a False here is the "
+        "permanently-non-authoritative assignee that causes unconvergeable churn"
+    )
+    assert is_account_id is False, "Data Center has no accountId concept at all"
+
+    # …and the same lookup driving the real identity model: a resolved-but-
+    # mismatched DC name emits the freshly resolved username (DC's `name` IS the
+    # identity, so `trust_resolved_on_mismatch` is True for NameIdentity).
+    model = NameIdentity(resolver=lambda n: _search_users_by_username(dc_transport._client, n))
+    assert model.resolve(_ADMIN_USER, {"name": "somebody-else"}) == (_ADMIN_USER, True, False)
+    # Converged: the resolved value already matches the remote identity.
+    assert model.resolve(_ADMIN_USER, {"name": _ADMIN_USER}) == (None, True, False)
+
+
+@_skip
+@_skip_no_extra
+def test_assigning_an_unknown_user_raises_backend_assignee_not_found(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any
+) -> None:
+    """An assignee that resolves to no DC user surfaces as the VENDOR-NEUTRAL
+    ``BackendAssigneeNotFoundError``, not a bare ``JIRAError``.
+
+    This is the other half of the AC. Note the deliberate division of labour,
+    confirmed live here rather than assumed:
+
+    * the RESOLVER reports an unknown user as ``(None, True, False)`` — the
+      "authoritative but unmappable" state, which ``NameIdentity``/``_resolve``
+      maps to ``("", True, False)`` (desired-unassigned). It does not raise,
+      because raising inside the resolver would break that state machine;
+    * the APPLY path (``transport._assign``) is where an unknown user becomes an
+      error, raised as ``BackendAssigneeNotFoundError`` so core ``except``
+      clauses catch it without importing anything DC-specific.
+    """
+    from rebar_reconciler._backend import BackendAssigneeNotFoundError
+    from rebar_reconciler.adapters.jira_datacenter.backend import _search_users_by_username
+
+    unknown = "definitely-not-a-real-dc-user-9fd4"
+
+    resolved, authoritative, is_account_id = _search_users_by_username(
+        dc_transport._client, unknown
+    )
+    assert (resolved, authoritative, is_account_id) == (None, True, False)
+
+    dc_transport.project = jira_dc_project
+    created = dc_transport.create_issue(
+        {"summary": "rebar J6 live — unknown assignee", "issuetype": "Task"}
+    )
+    key = created["key"]
+    track_issue(key)
+
+    with pytest.raises(BackendAssigneeNotFoundError):
+        dc_transport.update_issue(key, assignee=unknown)
 
 
 @_skip
