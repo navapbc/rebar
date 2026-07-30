@@ -198,3 +198,50 @@ resource "aws_iam_role_policy" "gha_terraform_plan_kms" {
   role   = aws_iam_role.gha_terraform_plan.id
   policy = data.aws_iam_policy_document.gha_terraform_plan_kms.json
 }
+
+# Bedrock — the review bot's LLM path (story S7 / ticket 9249). Scoped to ANTHROPIC Claude
+# models only, so a call to any other vendor's model is denied (the least-privilege oracle).
+#
+# ACTION NAME: `bedrock:InvokeModel` — NOT `bedrock:Converse`. This is counter-intuitive and
+# was got WRONG once, so the evidence is recorded here rather than left to memory.
+#
+# rebar reaches Bedrock through pydantic-ai's BedrockProvider, which calls the **Converse**
+# API. `bedrock:Converse` does exist as a distinct, simulatable IAM action — which is why
+# `aws iam simulate-custom-policy` reports implicitDeny for it under an InvokeModel-only
+# grant, and why that simulation LOOKED like proof that Converse was the action to grant.
+#
+# It is not. The Converse API AUTHORIZES against `bedrock:InvokeModel`. Proven at runtime
+# from the instance itself (SSM AWS-RunShellScript on i-00880b2c7f13527c5, running as
+# assumed-role/rebar-gerrit-instance-role):
+#
+#   AccessDeniedException ... is not authorized to perform: bedrock:InvokeModel on resource:
+#   arn:aws:bedrock:us-east-1:...:inference-profile/us.anthropic.claude-sonnet-4-6
+#   because no identity-based policy allows the bedrock:InvokeModel action
+#
+# i.e. the policy SIMULATOR answers "what does the policy language permit for the action you
+# named", NOT "which action does the service actually check". Only the from-instance call
+# distinguishes them. Grant InvokeModel; re-verify from the instance, never from simulation
+# alone and never from an operator identity holding bedrock:*.
+#
+# BOTH resource shapes are required for a cross-region inference profile: the profile ARN AND
+# the underlying foundation models in every region the profile can route to. The region field
+# is wildcarded; the MODEL is not.
+data "aws_iam_policy_document" "bedrock_converse" {
+  statement {
+    sid = "ConverseAnthropicClaudeOnly"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream",
+    ]
+    resources = [
+      "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*.anthropic.claude-*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "bedrock_converse" {
+  name   = "rebar-gerrit-bedrock-converse"
+  role   = aws_iam_role.gerrit_instance.id
+  policy = data.aws_iam_policy_document.bedrock_converse.json
+}
