@@ -426,7 +426,7 @@ class _PerChunkFailingRunner:
 def _ladder(runner):
     from rebar.llm.plan_review import registry, sizing
 
-    return sizing.pass1_with_ladder(
+    findings, _calls = sizing.pass1_with_ladder(
         runner,
         _cfg(),
         plan="Implement the widget.",
@@ -434,6 +434,7 @@ def _ladder(runner):
         agentic=False,
         events=[],
     )
+    return findings
 
 
 def test_pass1_ladder_reraises_systemic_failure():

@@ -410,6 +410,7 @@ def test_focused_runner_consumes_preloaded_relation_snapshot_without_store_rerea
                 }
             ],
             [],
+            {"requests": 0, "input_tokens": 0, "output_tokens": 0},
         )
 
     monkeypatch.setattr(

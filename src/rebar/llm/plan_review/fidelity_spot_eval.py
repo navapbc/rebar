@@ -245,7 +245,7 @@ def packing_spot_eval(
         # Baseline: one bin per child (the pre-S5 path).
         base_by_child: dict[str | None, list[dict]] = {}
         for c in children:
-            base_by_child[str(c.get("ticket_id"))] = passes.pass1_container(
+            base_findings, _usage = passes.pass1_container(
                 sel,
                 gcfg,
                 parent_plan=parent_plan,
@@ -253,8 +253,9 @@ def packing_spot_eval(
                 criteria=container,
                 sibling_roster=roster,
             )
+            base_by_child[str(c.get("ticket_id"))] = base_findings
         # Candidate: all children packed into ONE bin (the shipped S5 path).
-        packed = passes.pass1_container(
+        packed, _usage = passes.pass1_container(
             sel,
             gcfg,
             parent_plan=parent_plan,
@@ -341,7 +342,7 @@ def _run_prerequisite_mode(*, packed: bool, cfg: LLMConfig, runner: Runner) -> l
             calls = [scenario["blocks"]] if packed else [[block] for block in scenario["blocks"]]
         observed: dict[str, dict[str, Any]] = {}
         for blocks in calls:
-            coverage, _findings = prerequisites.run_focused_finder(
+            coverage, _findings, _usage = prerequisites.run_focused_finder(
                 runner,
                 cfg,
                 subject_plan=scenario["subject_plan"],

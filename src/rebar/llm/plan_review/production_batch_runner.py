@@ -45,9 +45,9 @@ from rebar.llm.workflow.runners import (
     BatchRunResult,
 )
 
-from . import registry
+from . import registry, sizing
 from .orchestrator import assemble_context, route_criteria
-from .pass1 import run_pass1
+from .pass1 import aggregate_usage, run_pass1
 from .registry import _PROJECT_PREFIX, _PROMPT_ID_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -156,15 +156,26 @@ class ProductionBatchRunner(BatchRunner):
         else:
             blocks = list(snapshot_value or req.with_inputs.get("prerequisites") or [])
         if blocks:
-            from .prerequisites import run_focused_finder
+            from .prerequisites import PREREQUISITE_CRITERION, run_focused_finder
 
-            prerequisite_coverage, prerequisite_findings = run_focused_finder(
+            prerequisite_coverage, prerequisite_findings, prerequisite_usage = run_focused_finder(
                 runner,
                 cfg,
                 subject_plan=str(req.with_inputs.get("subject_plan", ctx.plan_text)),
                 blocks=blocks,
                 ticket_id=str(req.target_ticket or ""),
             )
+            # Merge the prerequisite finder's summed usage into the Pass-1 aggregate
+            # (story d52a): one call record attributed to the prerequisite criterion,
+            # appended to run_pass1's per-call records, then re-aggregated. Skipped when
+            # zero (no runner.run made it to usage — e.g. every bin oversized).
+            if any(prerequisite_usage.values()):
+                usage = coverage.get("usage") or aggregate_usage([])
+                per_call = [
+                    *usage.get("per_call", []),
+                    sizing.usage_record([PREREQUISITE_CRITERION], prerequisite_usage),
+                ]
+                coverage["usage"] = aggregate_usage(per_call)
         return BatchRunResult(
             outputs={
                 "findings": findings,
@@ -173,6 +184,10 @@ class ProductionBatchRunner(BatchRunner):
                 "has_prerequisites": bool(prerequisite_coverage),
                 "criteria_count": len(req.criteria),
                 "batch_plan": coverage,
+                # The Pass-1 + prerequisite usage aggregate (story d52a): raw per-call
+                # records, the derived per-criterion map, and the totals — the payload
+                # _attach_plan_review_metrics folds into coverage.metrics/coverage.usage.
+                "_usage": coverage.get("usage") or aggregate_usage([]),
             }
         )
 

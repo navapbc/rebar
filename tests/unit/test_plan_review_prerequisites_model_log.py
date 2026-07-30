@@ -55,7 +55,7 @@ def test_indeterminate_log_reports_escalated_model_not_cfg_model(monkeypatch, ca
     runner = _EscalatingRunner()
 
     with caplog.at_level(logging.WARNING, logger="rebar.llm.plan_review.prerequisites"):
-        records, _findings = prerequisites.run_focused_finder(
+        records, _findings, _usage = prerequisites.run_focused_finder(
             runner=runner,
             cfg=cfg,
             subject_plan="subject",

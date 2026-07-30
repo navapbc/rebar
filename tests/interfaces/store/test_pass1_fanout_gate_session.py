@@ -83,7 +83,7 @@ def test_container_fanout_preserves_gate_session(tmp_path):
     coverage: dict = {}
 
     with gate_session():
-        out = pass1._run_container(ctx, cfg, runner, _CRITERIA, coverage)
+        out, _calls = pass1._run_container(ctx, cfg, runner, _CRITERIA, coverage)
 
     agentic_seen = [seen for mode, seen in runner.calls if mode != "single_turn"]
     assert agentic_seen, "expected at least one agentic container pairing call"

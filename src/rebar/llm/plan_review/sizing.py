@@ -258,6 +258,38 @@ def pack_prerequisite_verifier_bins(
     return bins, oversized
 
 
+# ── per-call usage records (story d52a) ────────────────────────────────────────────
+# The token fields a per-call usage record carries (mirrors runner._extract_usage minus
+# `requests`, which is recorded separately).
+USAGE_TOKEN_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+)
+
+
+def usage_record(criteria: list[str], usage: dict[str, Any] | None) -> dict[str, Any]:
+    """Build one per-CALL usage record from a runner result's ``_usage`` dict:
+    ``{criteria, requests, input_tokens, output_tokens, cache_read_tokens,
+    cache_write_tokens}``. One record IS one completed call — there is deliberately
+    NO ``llm_calls`` field on a record; the per-criterion ``llm_calls`` value is
+    DERIVED downstream as the count of records covering that criterion (see
+    :func:`rebar.llm.plan_review.pass1.aggregate_usage`).
+
+    A missing/empty ``usage`` (a runner that attaches no ``_usage``, e.g. the
+    ``FakeRunner``) degrades to all-zero fields — a zero contribution, never an
+    error. An attempt that RAISES returns no result dict at all, so its usage is
+    unrecoverable from the runner API — raising attempts get NO record (callers
+    simply never mint one)."""
+    u = usage or {}
+    return {
+        "criteria": list(criteria),
+        "requests": int(u.get("requests", 0) or 0),
+        **{f: int(u.get(f, 0) or 0) for f in USAGE_TOKEN_FIELDS},
+    }
+
+
 def is_context_limit_error(exc: Exception) -> bool:
     """Heuristic: does ``exc`` look like a provider context-window/too-many-tokens
     error (vs an unrelated failure)? Matches common phrasings across providers."""
@@ -296,7 +328,7 @@ def pass1_with_ladder(
     agentic: bool,
     events: list[str],
     extra_context: str = "",
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a Pass-1 finder call with the SIZE-HANDLING LADDER (ca03 AC4/AC6):
 
     1. run the criteria BATCH (chunk) at the configured model;
@@ -311,16 +343,25 @@ def pass1_with_ladder(
 
     ``extra_context`` is authoritative store-derived context (e.g. the G5 DECOMPOSITION
     STATE block) threaded verbatim to :func:`passes.pass1_chunk` at every ladder rung so
-    the injected fact survives batch→single-criterion fallback and model escalation."""
+    the injected fact survives batch→single-criterion fallback and model escalation.
+
+    Returns ``(findings, call_records)`` — every COMPLETED ladder attempt appends its own
+    :func:`usage_record` (all carrying the attempt's criteria list); an attempt that
+    RAISES (e.g. the context-limit error that triggers escalation) contributes nothing
+    (see :func:`usage_record`)."""
+    calls: list[dict[str, Any]] = []
+    ids = [c["id"] for c in chunk]
     try:
-        return passes.pass1_chunk(
+        findings, usage = passes.pass1_chunk(
             runner, cfg, plan=plan, chunk=chunk, agentic=agentic, extra_context=extra_context
         )
+        calls.append(usage_record(ids, usage))
+        return findings, calls
     except LLMUnavailableError:
         raise  # SYSTEMIC failure (deps/key/auth/connection) — surface, never drop (fuel-posse-ball)
     except Exception as exc:  # noqa: BLE001 — broad to inspect is_context_limit_error(exc); a non-context failure drops findings, a context error falls through to the size-ladder
         if not is_context_limit_error(exc):
-            return []  # unrelated failure → drop this unit's findings (never abort)
+            return [], calls  # unrelated failure → drop this unit's findings (never abort)
 
     if len(chunk) > 1:
         events.append(f"batch of {len(chunk)} hit the context limit → one-criterion-per-call")
@@ -329,16 +370,16 @@ def pass1_with_ladder(
         produced = False
         for model in models_at_or_above(cfg.model):
             try:
-                out.extend(
-                    passes.pass1_chunk(
-                        runner,
-                        replace(cfg, model=model),
-                        plan=plan,
-                        chunk=[crit],
-                        agentic=agentic,
-                        extra_context=extra_context,
-                    )
+                crit_findings, usage = passes.pass1_chunk(
+                    runner,
+                    replace(cfg, model=model),
+                    plan=plan,
+                    chunk=[crit],
+                    agentic=agentic,
+                    extra_context=extra_context,
                 )
+                out.extend(crit_findings)
+                calls.append(usage_record([crit["id"]], usage))
                 if model != cfg.model:
                     events.append(f"{crit['id']}: escalated to {model}")
                 produced = True
@@ -372,7 +413,7 @@ def pass1_with_ladder(
                     "cohort": [crit["id"]],
                 }
             )
-    return out
+    return out, calls
 
 
 def shed_to_budget(
@@ -511,6 +552,8 @@ __all__ = [
     "container_budget",
     "pack_container_bins",
     "largest_window_tokens",
+    "USAGE_TOKEN_FIELDS",
+    "usage_record",
     "is_context_limit_error",
     "models_at_or_above",
     "pass1_with_ladder",

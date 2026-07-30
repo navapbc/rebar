@@ -263,6 +263,10 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     - ``claim_path``— the structural marker (the fast claim check is a local HMAC verify,
                       LLM/network-free).
 
+    Story d52a: a batch step's ``_usage`` output (the Pass-1 + prerequisite per-call usage
+    aggregate the ProductionBatchRunner emits) is folded in — token totals into these
+    metrics, the raw records + per-criterion derivation as ``coverage['usage']``.
+
     ``det_ms + llm_ms`` deliberately does NOT equal ``total_ms``: the scripted prep/decision
     steps (``assemble`` / ``grounding`` / ``verify_inputs`` / ``decide`` / ``coach_inputs`` /
     ``coach``) are non-LLM overhead, counted into neither tier — absorbed only into ``total_ms``
@@ -277,6 +281,7 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     finder_criteria = 0
     agent_calls = 0
     verify_requests = 0  # Pass-2 verifier model-request count — step usage vs its budget (bug 59bc)
+    usage_per_call: list[dict[str, Any]] = []  # d52a: per-call records off the batch `_usage`
     for s in rec.steps:
         if not isinstance(s, dict) or s.get("status") != "succeeded":
             continue
@@ -290,6 +295,10 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
                 llm_ms += dur
         if kind == "batch":
             finder_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
+            step_usage = (s.get("outputs") or {}).get("_usage")
+            if isinstance(step_usage, dict):
+                per_call = step_usage.get("per_call") or []
+                usage_per_call += [r for r in per_call if isinstance(r, dict)]
         elif kind == "agent":
             agent_calls += 1
             if step_id == STEP_VERIFY:
@@ -310,6 +319,18 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     if not isinstance(coverage, dict):
         coverage = {}
         verdict["coverage"] = coverage
+    if usage_per_call:
+        # d52a: fold the Pass-1/prerequisite token totals into the metrics and attach the
+        # raw records + per-criterion derivation for the sidecar (coverage.usage).
+        from rebar.llm.plan_review.pass1 import aggregate_usage
+
+        usage_agg = aggregate_usage(usage_per_call)
+        for field in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
+            metrics[field] = usage_agg["totals"][field]
+        coverage["usage"] = {
+            "per_call": usage_agg["per_call"],
+            "per_criterion": usage_agg["per_criterion"],
+        }
     coverage["metrics"] = metrics
 
 

@@ -128,12 +128,18 @@ def _timed_pairing(
     failure on the warming call aborts; every other failure just drops that pairing's
     findings, matching the sequential baseline). Safe to run in the fan-out pool — each
     call builds its own agent + event loop (the Pass-1 pool already drives ``runner.run``
-    concurrently across threads)."""
+    concurrently across threads).
+
+    The call's ``_usage`` dict is embedded as ``pairing_record["usage"]`` (``{}`` on a
+    raising call — a raising attempt's usage is unrecoverable, see
+    :func:`sizing.usage_record`), so the observability record and the usage accumulator
+    read ONE field."""
     t0 = time.monotonic()
     exc: Exception | None = None
     findings: list[dict[str, Any]] = []
+    usage: dict[str, Any] = {}
     try:
-        findings = passes.pass1_container(
+        findings, usage = passes.pass1_container(
             runner,
             cfg,
             parent_plan=ctx.plan_text,
@@ -150,6 +156,7 @@ def _timed_pairing(
         "seconds": round(dt, 1),
         "findings": len(findings),
         "error": type(exc).__name__ if exc else None,
+        "usage": usage,
     }
     return findings, record, exc
 
@@ -160,9 +167,12 @@ def _run_container(
     runner: Runner,
     container: list[dict],
     coverage: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run the container criteria (G3/G4) as (parent + ONE child) pairings, both whole,
-    CONCURRENTLY, and aggregate. A pairing too big for the largest window is a failure
+    CONCURRENTLY, and aggregate. Returns ``(findings, call_records)`` — one
+    :func:`sizing.usage_record` per COMPLETED pairing (a failed pairing contributes
+    nothing; the too-big failure finding makes no LLM call, so it contributes nothing).
+    A pairing too big for the largest window is a failure
     finding (reduce the ticket), not a skip. The complete sibling roster is fed so
     absence findings can be cross-checked against ALL siblings before they stand.
 
@@ -180,6 +190,7 @@ def _run_container(
     parent_tokens = det_floor.est_tokens(ctx.plan_text) + det_floor.est_tokens(roster)
     out: list[dict[str, Any]] = []
     pairing_records: list[dict[str, Any]] = []
+    call_records: list[dict[str, Any]] = []
     container_t0 = time.monotonic()
 
     # BIN-PACK the children into merged pairings (stories 98c6 merge + 1762 bin-pack): all
@@ -239,6 +250,7 @@ def _run_container(
             warmed = True
             out.extend(findings)
             pairing_records.append(record)
+            call_records.append(sizing.usage_record(record["criteria"], record["usage"]))
             logger.info(
                 "container warm bin %s: %d finding(s) in %.1fs (cache warmed)",
                 record["children"],
@@ -274,6 +286,7 @@ def _run_container(
                         record["error"],
                     )
                 else:
+                    call_records.append(sizing.usage_record(record["criteria"], record["usage"]))
                     logger.info(
                         "container bin %s: %d finding(s) in %.1fs",
                         record["children"],
@@ -299,7 +312,7 @@ def _run_container(
         container_dt,
         warmed,
     )
-    return out
+    return out, call_records
 
 
 def _ticket_graph_blob(ctx: PlanContext) -> str:
@@ -326,11 +339,17 @@ def _ticket_graph_blob(ctx: PlanContext) -> str:
     return "\n".join(lines)
 
 
-def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str | None, bool]:
+def _linked_session_log(
+    ctx: PlanContext, cfg: LLMConfig, runner, usage_records: list[dict[str, Any]] | None = None
+) -> tuple[str | None, bool]:
     """The text of the ticket's linked SESSION LOG(s) for the ISF criterion, and
     whether it was summarized to fit the window. Returns ``(None, False)`` when no
     session log is linked (ISF then does not run). Best-effort: any read error →
-    ``(None, False)`` (ISF is skipped, never crashes the review)."""
+    ``(None, False)`` (ISF is skipped, never crashes the review).
+
+    When the oversized-log SUMMARIZER runs, its call usage is appended to
+    ``usage_records`` as an ISF-attributed record (``criteria=["ISF"]``) — the
+    summarizer is an LLM call made solely in service of the ISF criterion."""
     from rebar import _reads
 
     bodies: list[str] = []
@@ -360,7 +379,10 @@ def _linked_session_log(ctx: PlanContext, cfg: LLMConfig, runner) -> tuple[str |
         return (text, False)
     # Oversized: summarize (the supporting context only — never the plan).
     try:
-        return (passes.summarize_for_isf(runner, cfg, log_text=text), True)
+        summary, usage = passes.summarize_for_isf(runner, cfg, log_text=text)
+        if usage_records is not None:
+            usage_records.append(sizing.usage_record(["ISF"], usage))
+        return (summary, True)
     except Exception:  # noqa: BLE001 — ISF summarization is best-effort; broad-but-logged below, ISF skipped
         # Summarization failure → ISF runs without the oversized log; log it (floor).
         logger.warning("ISF summarization failed; skipping ISF", exc_info=True)
@@ -434,6 +456,7 @@ def run_pass1(
     ]
 
     findings: list[dict[str, Any]] = list(budget_indeterminate)
+    call_records: list[dict[str, Any]] = []
     ladder_events: list[str] = []
     # Chunk-atomic CHECKPOINTING: resume completed Pass-1 chunks from a prior run
     # (keyed by the ticket's MATERIAL fingerprint, so an edit invalidates the cache),
@@ -441,12 +464,15 @@ def run_pass1(
     material = material_fingerprint(ctx)
     resumed = 0
 
-    def _chunk(chunk: list[dict], agentic: bool) -> list[dict[str, Any]]:
+    def _chunk(
+        chunk: list[dict], agentic: bool
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         nonlocal resumed
         cached = sizing.load_checkpoint(ctx, material, chunk, cfg.model, agentic)
         if cached is not None:
             resumed += 1
-            return cached
+            # A checkpoint-served chunk made NO LLM call this run — zero usage records.
+            return cached, []
         # These criterion-scoped contexts compose in a stable order when G5 and
         # no-file-impact share a facet chunk: child-state first, declaration second.
         context_parts: list[str] = []
@@ -455,9 +481,9 @@ def run_pass1(
         if any(c.get("id") == "no-file-impact" for c in chunk):
             context_parts.append(_no_file_impact_context(ctx))
         extra = "\n\n".join(context_parts)
-        out = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
+        out, calls = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
         sizing.save_checkpoint(ctx, material, chunk, cfg.model, agentic, out)
-        return out
+        return out, calls
 
     max_workers = max(1, min(6, len(chunks) + len(agent)))
     # Observability: record + log how Pass-1 criteria were batched across the tiers
@@ -488,7 +514,10 @@ def run_pass1(
         ag_futs = [_submit_ctx(ex, _chunk, [c], True) for c in agent]
         for fu in st_futs + ag_futs:
             try:
-                findings.extend(fu.result() or [])
+                # Each future resolves to a (findings, usage_records) pair.
+                chunk_findings, chunk_calls = fu.result()
+                findings.extend(chunk_findings or [])
+                call_records.extend(chunk_calls or [])
             except LLMUnavailableError:
                 # SYSTEMIC failure (auth / missing key / connection / rate-limit) affects
                 # the whole tier — surface it, never silently drop (fuel-posse-ball). The
@@ -509,25 +538,27 @@ def run_pass1(
     # (reduce the ticket), not a silent skip. Absence findings are cross-checked
     # against the COMPLETE sibling roster (fed to the finder + re-verified in Pass-2).
     if container and ctx.has_children:
-        findings.extend(_run_container(ctx, cfg, runner, container, coverage))
+        container_findings, container_calls = _run_container(ctx, cfg, runner, container, coverage)
+        findings.extend(container_findings)
+        call_records.extend(container_calls)
 
     # ISF (child 681b): fed the LINKED SESSION LOG (not a rubric chunk), single-turn,
     # fires ONLY when a session log is linked. Oversized logs fall back to a SUMMARY
     # (recorded; findings carry reduced confidence). The plan is never summarized.
-    log_text, summarized = _linked_session_log(ctx, cfg, runner)
+    log_text, summarized = _linked_session_log(ctx, cfg, runner, call_records)
     if log_text:
         coverage["isf"] = {"ran": True, "summarized": summarized}
         try:
-            findings.extend(
-                passes.pass1_isf(
-                    runner,
-                    cfg,
-                    plan=plan,
-                    session_log_text=log_text,
-                    ticket_graph=_ticket_graph_blob(ctx),
-                    summarized=summarized,
-                )
+            isf_findings, isf_usage = passes.pass1_isf(
+                runner,
+                cfg,
+                plan=plan,
+                session_log_text=log_text,
+                ticket_graph=_ticket_graph_blob(ctx),
+                summarized=summarized,
             )
+            findings.extend(isf_findings)
+            call_records.append(sizing.usage_record(["ISF"], isf_usage))
         except Exception as exc:  # noqa: BLE001 — ISF pass is best-effort; broad-but-logged + recorded in coverage, never blocks the verdict
             # ISF (in-session-failure) pass is best-effort; record in-band + log (floor).
             logger.warning("ISF pass failed; verdict emitted without ISF findings", exc_info=True)
@@ -584,7 +615,62 @@ def run_pass1(
             len(ctx.children),
         )
 
+    # Per-call usage aggregation (story d52a): the raw call records + the derived
+    # per-criterion map + the totals, recorded into coverage so the batch runner can
+    # emit them (and merge the prerequisite finder's usage) as outputs["_usage"].
+    coverage["usage"] = aggregate_usage(call_records)
+
     return findings
+
+
+def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate Pass-1 per-CALL usage records (story d52a) into
+    ``{"per_call": [...], "per_criterion": {...}, "totals": {...}}``.
+
+    Each input record is one COMPLETED LLM call (:func:`sizing.usage_record`):
+    ``{criteria, requests, input_tokens, output_tokens, cache_read_tokens,
+    cache_write_tokens}`` — deliberately with NO per-record ``llm_calls`` field (one
+    record IS one call). The per-criterion ``llm_calls`` is DERIVED here as the count
+    of records covering that criterion.
+
+    Attribution rule: an AGENT call (single criterion) attributes wholly to that
+    criterion; a multi-criterion single-turn chunk divides its TOKEN fields equally
+    across its covered criteria — a documented approximation (the sidecar retains the
+    raw per-call records, so exact attribution is always reconstructable) — while the
+    ``requests`` field and the derived ``llm_calls`` count IN FULL for each covered
+    criterion.
+
+    Known limitation (documented, out of scope to fix): an attempt that RAISES (e.g.
+    the context-limit error that triggers the size-ladder escalation) returns no
+    result dict, so its usage is not recoverable from the current runner API — such
+    attempts appear in no record and contribute nothing. Likewise a checkpoint-served
+    chunk made no call this run and contributes nothing."""
+    totals: dict[str, Any] = {
+        "llm_calls": len(per_call),
+        "requests": 0,
+        **{f: 0 for f in sizing.USAGE_TOKEN_FIELDS},
+    }
+    per_criterion: dict[str, dict[str, Any]] = {}
+    for rec in per_call:
+        totals["requests"] += int(rec.get("requests", 0) or 0)
+        for f in sizing.USAGE_TOKEN_FIELDS:
+            totals[f] += int(rec.get(f, 0) or 0)
+        crits = [str(c) for c in (rec.get("criteria") or [])]
+        n = len(crits)
+        for cid in crits:
+            slot = per_criterion.setdefault(
+                cid,
+                {"llm_calls": 0, "requests": 0, **{f: 0 for f in sizing.USAGE_TOKEN_FIELDS}},
+            )
+            slot["llm_calls"] += 1  # derived: the count of covering call records
+            slot["requests"] += int(rec.get("requests", 0) or 0)
+            for f in sizing.USAGE_TOKEN_FIELDS:
+                slot[f] += int(rec.get(f, 0) or 0) / n  # equal split across criteria
+    return {
+        "per_call": [dict(r) for r in per_call],
+        "per_criterion": per_criterion,
+        "totals": totals,
+    }
 
 
 def material_fingerprint(ctx: PlanContext) -> str:
