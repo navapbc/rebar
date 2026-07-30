@@ -24,7 +24,16 @@ import sys
 from collections.abc import Mapping
 from typing import Any, cast
 
-__all__ = ["close_plan_review_gate_check", "gate_enabled", "plan_review_precheck"]
+__all__ = [
+    "close_plan_review_gate_check",
+    "gate_enabled",
+    "plan_review_precheck",
+]
+
+#: Ticket types exempt from the plan-review start-work gate. Single-sourced here so
+#: :func:`plan_review_precheck` and `claim --review`'s stage-1 sensing (story a114)
+#: cannot drift.
+_PLAN_REVIEW_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +142,25 @@ def close_plan_review_gate_check(
         }
 
 
+def _plan_review_gate_applies(cfg_root: str, ticket_type: str, *, ticket_id: str) -> bool:
+    """Whether the plan-review START-WORK gate applies to this ticket at all: the
+    ``verify.require_plan_review_for_claim`` flag is on (fail-OPEN on an unreadable
+    config, via :func:`gate_enabled`) AND the ticket type is not exempt.
+
+    Shared by :func:`plan_review_precheck` and ``claim --review``'s stage-1
+    applicability sensing (story a114) so the two cannot drift. This is pure config +
+    type logic — no attestation/currency check (that is stage 2:
+    ``llm.claim_gate_check``)."""
+    if not gate_enabled(
+        cfg_root,
+        "require_plan_review_for_claim",
+        ticket_id=ticket_id,
+        gate_label="the plan-review start-work gate",
+    ):
+        return False
+    return ticket_type not in _PLAN_REVIEW_EXEMPT_TYPES
+
+
 def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:
     """The plan-review gate guarding the START of work on a ticket — the single
     method both ``claim`` and ``transition open -> in_progress`` call.
@@ -156,19 +184,14 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     from rebar.reducer import reduce_ticket as _reduce
 
     # Shared resolution + fail-OPEN-on-unreadable-config posture (see gate_enabled),
-    # mirroring the completion close gate so the two can't drift.
-    if not gate_enabled(
-        cfg_root,
-        "require_plan_review_for_claim",
-        ticket_id=ticket_id,
-        gate_label="the plan-review start-work gate",
-    ):
-        return None
+    # mirroring the completion close gate so the two can't drift. Applicability
+    # (flag on + non-exempt type) is single-sourced in _plan_review_gate_applies,
+    # which `claim --review` also senses (story a114).
     ticket_type = (_reduce(os.path.join(str(config.tracker_dir(repo_root)), ticket_id)) or {}).get(
         "ticket_type", ""
     )
-    if ticket_type in ("bug", "session_log", "code_review", "identity"):
-        return None  # exempt from the plan-review gate
+    if not _plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
+        return None
     if force_reason:
         # Audit the bypass (best-effort) so a forced start is a durable signal.
         try:

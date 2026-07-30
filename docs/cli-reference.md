@@ -48,7 +48,8 @@ Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHE
 ### `claim`
 
 ```
-Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses any enabled start-work gate, e.g. plan-review)
+Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses any enabled start-work gate, e.g. plan-review)
+Review: --review senses the plan-review gate first; when it applies and the attestation is stale/missing it runs the signed review (`review-plan`) BEFORE claiming — the claim proceeds only on PASS (BLOCK/INDETERMINATE/retryable exit 1/2/11 without claiming; gate disabled or exempt type prints a notice and claims). Not propagated to a cascaded parent claim. Review-then-claim is not atomic against concurrent store reconvergence — check currency cheaply with `rebar review-plan <id> --status`.
 ```
 
 ### `clarity-check`
@@ -97,9 +98,10 @@ Usage: rebar deps <ticket_id> [--include-archived] [--no-pull]
 ### `edit`
 
 ```
-Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]
+Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]
 Title: --title must be non-empty after trimming whitespace (a whitespace-only value is rejected); surrounding whitespace around real content is kept verbatim (not trimmed).
 Tags: --add-tag/--remove-tag add/remove; --set-tags replaces (compiled to a convergent delta, add-wins). --set-tags="" clears only the tags THIS clone has observed (not an authoritative reset).
+Review: --review (valueless) re-runs the signed plan review (`review-plan`) AFTER the edit commits and exits with the review disposition (0 PASS / 1 BLOCK / 2 INDETERMINATE / 11 retryable). The edit stays committed whatever the verdict. Edit-then-review is not atomic against concurrent store reconvergence — check attestation currency cheaply with `rebar review-plan <id> --status`.
 ```
 
 ### `exists`

@@ -323,7 +323,7 @@ _EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "
 _EDIT_USAGE = (
     "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
     "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
-    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2]"
+    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]"
 )
 
 
@@ -510,6 +510,12 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         print(_EDIT_USAGE, file=sys.stderr)
         return 1
     ticket_id, rest = argv[0], argv[1:]
+    # --review (story a114) is the one VALUELESS flag: pop it BEFORE the
+    # --key=value field loop below (which would otherwise consume the next token
+    # as its value). Handled after edit_core commits — see the tail of this function.
+    review = "--review" in rest
+    if review:
+        rest = [a for a in rest if a != "--review"]
     fields: dict = {}
     tag_add: list[str] = []
     tag_remove: list[str] = []
@@ -571,6 +577,25 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    if review:
+        # --review (story a114): re-run the signed plan review strictly AFTER the
+        # EDIT event committed (and its short-lived store lock was released) — the
+        # edit stays committed whatever the verdict, and no store flock is held
+        # while the (possibly multi-minute) review runs. A raising review_plan
+        # propagates via the standard CLI error path. NOT atomic against
+        # concurrent store reconvergence — `rebar review-plan <id> --status` is
+        # the cheap currency check.
+        from rebar import llm  # LAZY — preserves optionality
+
+        resolved = resolve_ticket_id(ticket_id, str(tracker_dir(repo_root))) or ticket_id
+        result = llm.review_plan(resolved, sign=True, repo_root=repo_root)
+        # Lazy in-function import of the _cli helper from a _commands module — the
+        # established pattern (see the lazy `from rebar._cli import _help` in
+        # _commands/transition.py's reopen_cli).
+        from rebar._cli._llm_commands import _disposition_exit_code, _render_plan_review_text
+
+        _render_plan_review_text(result)
+        return _disposition_exit_code(result, indeterminate_code=2)
     return 0
 
 

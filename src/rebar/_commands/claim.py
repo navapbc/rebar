@@ -21,7 +21,7 @@ from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 
 _CLAIM_USAGE = (
-    "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]]\n"
+    "Usage: ticket claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review]\n"
     "  Claims an OPEN ticket (-> in_progress) and sets its assignee atomically.\n"
     "  Exits 10 if the ticket is not open (someone else already claimed it).\n"
     "  Parent-first: if the ticket has an OPEN parent, the parent is claimed first\n"
@@ -29,6 +29,9 @@ _CLAIM_USAGE = (
     "  error names the parent.\n"
     "  --force bypasses any enabled start-work gate (e.g. plan-review today, and any gate "
     "added in the future) with an audit note.\n"
+    "  --review: when the plan-review gate applies and the attestation is stale/missing,\n"
+    "  run `review-plan` (signed) first; claim only on PASS (BLOCK/INDETERMINATE/retryable\n"
+    "  exit 1/2/11 without claiming). Not propagated to a cascaded parent claim.\n"
 )
 
 
@@ -80,11 +83,55 @@ def _config_default_assignee(tracker: str) -> str:
         return ""
 
 
+def _review_before_claim(ticket_id: str, tracker: str, repo_root) -> None:
+    """The ``claim --review`` pre-claim review (story a114): two-stage sensing.
+
+    Stage 1 asks the shared :func:`gates._plan_review_gate_applies` (gate flag on +
+    non-exempt type); when the gate does NOT apply, a one-line notice is printed and
+    the claim proceeds — never a silent no-op. Stage 2 asks ``llm.claim_gate_check``
+    (fast, local) for currency; only a stale/missing attestation triggers the full
+    ``review_plan(sign=True)``. A non-PASS disposition raises :class:`CommandError`
+    with the ADR-0040 exit mapping (1 BLOCK / 2 INDETERMINATE / 11 retryable) so the
+    claim core is never invoked; a raising ``review_plan`` propagates unhandled
+    (standard CLI error path — the claim is never attempted).
+
+    Runs with NO store flock held: the claim's own event append takes its usual
+    short-lived lock later, and ``review_plan`` takes the lock itself only for the
+    brief under-lock re-check at signing."""
+    from rebar.reducer import reduce_ticket
+
+    cfg_root = os.path.dirname(tracker)
+    ticket_type = (reduce_ticket(os.path.join(tracker, ticket_id)) or {}).get("ticket_type", "")
+    if not gates._plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
+        sys.stderr.write("plan-review gate not enabled for this ticket; --review skipped\n")
+        return
+    from rebar import llm  # LAZY — preserves optionality, mirrors plan_review_precheck
+
+    if llm.claim_gate_check(ticket_id, repo_root=repo_root).get("ok"):
+        return  # attestation already current — nothing to review
+    result = llm.review_plan(ticket_id, sign=True, repo_root=repo_root)
+    # Lazy in-function import of the _cli helper from a _commands module — the
+    # established pattern (see the lazy `from rebar._cli import _help` in
+    # _commands/transition.py's reopen_cli).
+    from rebar._cli._llm_commands import _disposition_exit_code, _render_plan_review_text
+
+    _render_plan_review_text(result)
+    code = _disposition_exit_code(result, indeterminate_code=2)
+    if code != 0:
+        raise CommandError(
+            f"Error: claim of {ticket_id} not attempted: the plan review did not PASS "
+            "(summary above). Revise the plan and re-run, or check currency with "
+            f"`rebar review-plan {ticket_id} --status`.",
+            returncode=code,
+        )
+
+
 def claim_compute(
     ticket_id: str,
     *,
     assignee: str | None = None,
     force_plan_review: str = "",
+    review: bool = False,
     repo_root=None,
     _cascade_seen: frozenset[str] | None = None,
 ) -> dict:
@@ -123,6 +170,13 @@ def claim_compute(
     # (advisory f7ca28). An explicit "" (clear) is left untouched and never falls back.
     if assignee is None:
         assignee = _config_default_assignee(tracker)
+
+    # `claim --review` (story a114): sense the gate and, when the attestation is
+    # stale/missing, run the signed review BEFORE anything else — a non-PASS raises
+    # and the claim core is never invoked. NOT propagated through the parent-first
+    # cascade below (the recursive call omits it). No store flock is held here.
+    if review:
+        _review_before_claim(ticket_id, tracker, repo_root)
 
     # Plan-review start-work gate (opt-in; runs OUTSIDE the lock — a fast LOCAL HMAC
     # verify, no LLM/network). Blocks (fail-closed) on a missing/stale/wrong
@@ -241,6 +295,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
     force_plan_review = _parse_force(rest[1:])
+    review = "--review" in rest[1:]
 
     tracker = str(config.tracker_dir(repo_root))
     ticket_id = _resolve_id_or_report(raw_id, tracker, fmt)
@@ -249,7 +304,11 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
 
     try:
         result = claim_compute(
-            ticket_id, assignee=assignee, force_plan_review=force_plan_review, repo_root=repo_root
+            ticket_id,
+            assignee=assignee,
+            force_plan_review=force_plan_review,
+            review=review,
+            repo_root=repo_root,
         )
     except ConcurrencyMismatch as exc:
         sys.stderr.write(exc.message + "\n")

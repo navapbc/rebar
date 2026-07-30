@@ -182,3 +182,26 @@ degraded verdict; `.outcome` on a raised completion error) — into its own code
   existing INDETERMINATE exit (`2` for review-plan, `1` for the close gate). The
   verdicts' optional `coverage.resolution_class` / `retryable` fields are ignored
   by readers — no data migration.
+
+### The `--review` flag on `edit` and `claim` (2026-07 window, story `a114-8f96-ff2d-461d`)
+
+`rebar edit <id> ... --review` and `rebar claim <id> --review` fuse the common
+"mutate, then re-run the plan review" loop into the consuming verb. **These codes
+apply ONLY when the flag is passed; the flagless `edit` and `claim` contracts in
+the tables above are unchanged.**
+
+- **`edit --review`**: the EDIT event commits first (and stays committed whatever
+  the verdict); the process then exits with the review's disposition mapping —
+  `0` PASS, `1` BLOCK, `2` INDETERMINATE (non-retryable), `11` retryable degrade
+  (the same ADR-0040 mapping `review-plan` itself uses). An edit-side failure
+  before the review still exits with edit's own codes (`1`).
+- **`claim --review`**: when the plan-review gate applies and the attestation is
+  stale/missing, the signed review runs BEFORE the claim. The claim proceeds only
+  on a PASS (then the normal codes apply: `0`, or `10` on a concurrency loss);
+  on BLOCK / INDETERMINATE / retryable degrade the claim core is **never
+  invoked** and the exit is `1` / `2` / `11` respectively, with the review
+  summary printed. When the gate is disabled or the ticket type is exempt, a
+  one-line notice is printed and the claim proceeds normally.
+- Neither flag holds the store write lock while the review runs, and neither is
+  atomic against concurrent store reconvergence — check attestation currency
+  cheaply with `rebar review-plan <id> --status` (exit `0` current / `12` not).
