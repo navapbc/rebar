@@ -1,5 +1,18 @@
 {
   "env": {
     "ENABLE_TOOL_SEARCH": "false"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "scripts/hooks/serena_grep_reminder.py"
+          }
+        ]
+      }
+    ]
   }
 }
