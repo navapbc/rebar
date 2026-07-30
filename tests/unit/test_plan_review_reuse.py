@@ -9,15 +9,20 @@ its ``material_fingerprint`` AND ``verified_at_sha`` both still match the curren
 plan/code, and ``--force`` bypasses it. A reused BLOCK exits 1, renders the stored
 findings with a "reused" marker, and emits NO new sidecar.
 
-Offline end-to-end: a DET-floor BLOCK (missing Acceptance Criteria fails P1
-unconditionally) with a schema-aware counting fake runner, so no model/network —
-mirrors tests/interfaces/lifecycle/test_block_loop_remediation.py.
+Offline end-to-end: an LLM-tier BLOCK (the counting fake emits an F1 finding —
+blocking posture, threshold 0.60 — verified full-yes at high severity) with a
+schema-aware counting fake runner, so no model/network. The fixture plan PASSES
+the deterministic floor on purpose: story 228b short-circuits any DET-blocked
+plan BEFORE the LLM tier with zero finder calls, so a DET-floor BLOCK (the old
+fixture) can no longer serve as this file's oracle that the finder re-ran under
+``--force`` / after code drift.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -27,10 +32,22 @@ import rebar.llm
 from rebar.llm.plan_review import sidecar
 from rebar.llm.runner import FakeRunner
 
+# The blocking LLM criterion the fake pins its finding to: F1 has default_posture
+# "blocking" at block_threshold 0.60 in the packaged routing, routes 1-TURN, and
+# applies to a leaf task — so a verified full-yes finding on it decides "block".
+_BLOCK_CRITERION = "F1"
+
 
 class _CountingGateFake(FakeRunner):
     """Shape-valid offline runner for the plan-review passes (mirrors the lifecycle gate
-    tests' fake) that COUNTS invocations — the oracle for "reuse ran zero LLM calls"."""
+    tests' fake) that COUNTS invocations — the oracle for "reuse ran zero LLM calls".
+
+    Unlike the lifecycle fake it MANUFACTURES a BLOCK from the LLM tier: the finder
+    chunk that carries ``_BLOCK_CRITERION`` returns one finding tagged with it, and the
+    verifier answers every graded binary "yes" at high severity, so Pass-3 decides
+    "block" (priority 1.0 ≥ the 0.60 threshold). The plan itself passes the DET floor
+    — a DET block would short-circuit with zero finder calls (story 228b) and defeat
+    the "the finder re-ran" oracles below."""
 
     name = "fake"
 
@@ -40,28 +57,68 @@ class _CountingGateFake(FakeRunner):
 
     def run(self, req) -> dict:  # type: ignore[override]
         from rebar.llm import findings as _f
+        from rebar.llm.plan_review import passes
 
         self.calls += 1
         schema = req.output_schema
+        instructions = req.instructions or ""
         if req.mode == "text":
             return {"text": "[fake summary]", "runner": self.name, "model": None, "trace_id": None}
         if schema == "plan_review_verification":
-            idxs = [int(x) for x in re.findall(r"finding index (\d+)", req.instructions or "")]
-            payload = {"verifications": [{"index": i} for i in idxs]}
+            idxs = [int(x) for x in re.findall(r"finding index (\d+)", instructions)]
+            payload = {
+                "verifications": [
+                    {
+                        "index": i,
+                        "binary": {
+                            **{q: "yes" for q in passes.GRADED_BINARY},
+                            "cited_reference_accurate": "na",
+                        },
+                        "severity_attributes": {"vague_directive": "high"},
+                    }
+                    for i in idxs
+                ]
+            }
         elif schema == "plan_review_coach":
             payload = {"notes": []}
+        elif schema == "plan_review_findings":
+            # Pass-1 keeps only findings whose criteria are in the CHUNK's id set
+            # (out-of-set findings are dropped, never re-attributed) — so emit the
+            # blocking finding only in the chunk that carries _BLOCK_CRITERION.
+            m = re.search(r"\(ids: ([^)]*)\)", instructions)
+            ids = [s.strip() for s in (m.group(1).split(",") if m else [])]
+            found = (
+                [
+                    {
+                        "finding": "The stated change is too vague to execute as written.",
+                        "criteria": [_BLOCK_CRITERION],
+                        "location": "## What",
+                        "evidence": ["change a thing in `src/thing.py`."],
+                        "impact": "An executor cannot tell what done looks like.",
+                        "suggested_fix": "Name the exact behavior change and its call sites.",
+                    }
+                ]
+                if _BLOCK_CRITERION in ids
+                else []
+            )
+            payload = {"analysis": "", "findings": found}
         else:
             payload = {"analysis": "", "findings": []}
         payload = _f.validate_structured(dict(payload), schema)
         return {**payload, "runner": self.name, "model": None, "trace_id": None}
 
 
-# No "## Acceptance Criteria" block → the DET floor's P1 readiness-shape check BLOCKS
-# unconditionally, so every review of this plan is a deterministic BLOCK.
+# The plan PASSES the DET floor (proper `## Acceptance Criteria` checklist, no sentinel
+# values) so the multi-pass LLM review actually runs; the BLOCK comes from the fake's
+# F1 finding above. A DET-blocked plan would short-circuit at zero LLM calls (228b).
 _BLOCKING_DESC = (
-    "A long-enough plan body that still fails the deterministic readiness floor because it "
-    "carries no Acceptance Criteria checklist at all, exercising the unrevised-BLOCK-retry "
-    "regime the verdict-reuse path exists for.\n\n## What\nchange a thing\n## Why\nbecause\n"
+    "A plan body that clears the deterministic readiness floor so the LLM tier runs, "
+    "exercising the unrevised-BLOCK-retry regime the verdict-reuse path exists for.\n\n"
+    "## What\nchange a thing in `src/thing.py`.\n\n"
+    "## Why\nbecause the current behavior is wrong.\n\n"
+    "## Acceptance Criteria\n"
+    "- [ ] the thing is observably changed\n"
+    "- [ ] `pytest tests/unit` proves the change\n"
 )
 
 
@@ -79,6 +136,12 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         subprocess.run(args, cwd=repo, check=True, capture_output=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.chdir(repo)
+    # Ambient-env isolation (xdist worksteal moves tests between workers, so every test
+    # must be self-contained): an operator-set REBAR_USAGE_LOG would make all tests append
+    # to ONE shared telemetry file, and REBAR_PLAN_REVIEW_BUDGET changes which criteria are
+    # shed — both would couple the review's observable call pattern to the ambient shell.
+    monkeypatch.delenv("REBAR_USAGE_LOG", raising=False)
+    monkeypatch.delenv("REBAR_PLAN_REVIEW_BUDGET", raising=False)
     rebar.init_repo(repo_root=str(repo))
     # Give the CODE branch a root commit so the suite-wide gate default can resolve a ref.
     subprocess.run(
@@ -91,9 +154,18 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _make_blocked(repo: Path) -> str:
-    return rebar.create_ticket(
-        "task", "blocked plan", description=_BLOCKING_DESC, repo_root=str(repo)
-    )
+    """Create the LLM-blocked fixture ticket with PER-TEST-UNIQUE plan material.
+
+    Pass-1 chunk checkpoints (`.rebar/cache/plan-review/<ticket_id>/`) are keyed by the
+    ticket's MATERIAL fingerprint; today that fingerprint includes the ticket id and the
+    cache dir lives under the per-test repo, but two tests sharing byte-identical fixture
+    material would be one fingerprint-derivation change away from reading each other's
+    cached chunks (and a cached chunk makes ZERO finder calls, silently breaking this
+    file's call-count oracles). A per-ticket nonce paragraph makes the material unique by
+    construction, so no cache — present or future — can serve one test's chunks to
+    another regardless of xdist worker placement."""
+    desc = _BLOCKING_DESC + f"\nMaterial nonce (test isolation): {uuid.uuid4().hex}.\n"
+    return rebar.create_ticket("task", "blocked plan", description=desc, repo_root=str(repo))
 
 
 def _sidecar_count(repo: Path, tid: str) -> int:
@@ -108,7 +180,7 @@ def test_unchanged_block_reuses_verdict_with_zero_llm_calls(repo: Path) -> None:
 
     v1 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))
     assert v1["verdict"] == "BLOCK"
-    assert v1["blocking"]  # the DET P1 block is a stored, surfaced finding
+    assert v1["blocking"]  # the LLM-tier F1 block is a stored, surfaced finding
     first_calls = runner.calls
     sidecars_after_first = _sidecar_count(repo, tid)
     assert sidecars_after_first >= 1  # the first review persisted its REVIEW_RESULT
@@ -198,7 +270,11 @@ def test_material_change_reruns_full_review(repo: Path) -> None:
 
     rebar.edit_ticket(
         tid,
-        description=_BLOCKING_DESC + "\nAn edited paragraph — the remediation attempt.\n",
+        # A fresh nonce keeps the EDITED material per-test-unique too (same checkpoint
+        # cross-read discipline as _make_blocked), while still being a material change.
+        description=_BLOCKING_DESC
+        + f"\nMaterial nonce (test isolation): {uuid.uuid4().hex}.\n"
+        + "\nAn edited paragraph — the remediation attempt.\n",
         repo_root=str(repo),
     )
     v2 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))
