@@ -83,6 +83,11 @@ class CodeReviewBatchRunner(BatchRunner):
                 inputs={
                     "ticket_context": self._context_overrides.get(prompt_id, self._context),
                     "ticket_id": "(code review)",
+                    # Model-max output budget (bug 30a2): every Round-A/Round-B overlay
+                    # finder (incl. project criteria) rides at the resolved model's
+                    # maximum output capacity — the shared review-kernel rule, honored
+                    # by RunnerAgentStep's `output_budget` input.
+                    "output_budget": "model_max",
                 },
                 workflow=req.workflow,
                 target_ticket=req.target_ticket,

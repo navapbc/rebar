@@ -269,6 +269,50 @@ def resolve_verifier_model(model: str | None, *, default_model: str, verifier_de
     return verifier_default if model == default_model else (model or verifier_default)
 
 
+# ── the model-max output-budget rule (bug 30a2) ────────────────────────────────────────────
+# Shared across EVERY review workflow (plan review, code review, completion verification,
+# review_ticket): each review LLM call runs at the resolved model's MAXIMUM output capacity —
+# the API requires a finite max_tokens, so model-max IS the 'effectively unlimited' setting
+# the operator ruled (review output is bounded by the model's actual findings; any lower
+# finite ceiling re-creates the truncation → UnretryableOutputError → INDETERMINATE class,
+# and unspent budget costs nothing). Values are the providers' published max-output limits
+# for the gate ladder models (Haiku 4.5: 64K; Sonnet 4.6 / Opus 4.8: 128K), matched by
+# substring like the plan-review MODEL_LADDER. The ModelProfile capabilities seam (change
+# 1014, f184) has not landed on main and does not expose max output tokens, so this table
+# is the single source.
+MODEL_MAX_OUTPUT_TOKENS = (
+    ("claude-haiku-4-5", 64_000),
+    ("claude-sonnet-4-6", 128_000),
+    ("claude-opus-4-8", 128_000),
+)
+
+
+def model_max_output_tokens(model: str | None) -> int:
+    """The resolved model's maximum output-token capacity — the 'unlimited' output budget
+    every review request rides at (raised through the runner's ``effective_max_tokens``
+    seam; ``req.output_token_limit`` still clamps down where bounded recovery sets it).
+    Unknown/absent models fall back CONSERVATIVELY to the configured default so an
+    unmapped model never requests an output larger than its provider accepts."""
+    from rebar.llm.config import DEFAULT_MAX_TOKENS
+
+    if model:
+        for name, cap in MODEL_MAX_OUTPUT_TOKENS:
+            if name in model:
+                return cap
+    return DEFAULT_MAX_TOKENS
+
+
+def max_output_cfg(cfg):
+    """Return ``cfg`` (any dataclass carrying ``model`` + ``max_tokens``, i.e. LLMConfig —
+    duck-typed so the kernel stays free of the LLMConfig import) with ``max_tokens``
+    raised to :func:`model_max_output_tokens`. Only ever RAISES — an operator floor
+    above model-max is preserved."""
+    from dataclasses import replace
+
+    cap = model_max_output_tokens(cfg.model)
+    return cfg if cap <= cfg.max_tokens else replace(cfg, max_tokens=cap)
+
+
 # ── the Pass-2 entry: chunk → run → merge → degrade ────────────────────────────────────────
 # The injected per-chunk LLM seam: given the verifier INSTRUCTIONS for one chunk and the domain
 # CONTEXT (plan text / diff), return that chunk's `verifications` list (each item a dict with a

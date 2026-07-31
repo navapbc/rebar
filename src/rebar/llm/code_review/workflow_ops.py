@@ -575,7 +575,8 @@ def score_code_novelty(
                 f"{verify.novelty_instructions(batch)}\n\n"
                 f"## Prior-review findings (context)\n{context}"
             ),
-            config=cfg,
+            # Model-max output budget (bug 30a2) — the shared review-kernel rule.
+            config=verify.max_output_cfg(cfg),
             reviewers=["code-novelty"],
             mode="structured",
             output_schema="code_review_novelty",

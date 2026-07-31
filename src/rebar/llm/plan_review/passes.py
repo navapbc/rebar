@@ -246,6 +246,14 @@ PASS_COMMENT_TRAIL = "plan-review-comment-trail"  # validation: comment-trail co
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
+def _max_output_cfg(cfg: LLMConfig) -> LLMConfig:
+    """Model-max output budget for every plan-review request (bug 30a2) — see
+    :func:`sizing.max_output_cfg`. Lazy import: ``sizing`` imports this module."""
+    from .sizing import max_output_cfg
+
+    return max_output_cfg(cfg)
+
+
 def _criterion_block(c: dict[str, Any]) -> str:
     checks = c.get("checklist") or []
     bullets = "\n".join(f"    - {ck.get('check', ck)}" for ck in checks) if checks else ""
@@ -315,7 +323,7 @@ def pass1_chunk(
             "Surface every grounded finding for these criteria. Return ONLY findings whose "
             "`criteria` are in this id set; an empty list for a clean chunk is correct."
         ),
-        config=cfg,
+        config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-reviewer"],
         mode="structured",
         output_schema="plan_review_findings",
@@ -419,7 +427,7 @@ def pass1_container(
             f"{attribution} An absence is a finding only if NO sibling in the roster covers "
             "it. A clean pairing returns an empty findings list."
         ),
-        config=cfg,
+        config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-container"],
         mode="structured",
         output_schema="plan_review_findings",
@@ -497,7 +505,7 @@ def pass1_isf(
             "the plan silently dropped, narrowed without rationale, or contradicted. A clean "
             "comparison returns an empty findings list."
         ),
-        config=cfg,
+        config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-isf"],
         mode="structured",
         output_schema="plan_review_findings",
@@ -542,7 +550,7 @@ def summarize_for_isf(
     req = RunRequest(
         system_prompt=system,
         instructions=log_text,
-        config=cfg,
+        config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-isf-summarizer"],
         mode="text",
         execution_mode="single_turn",
@@ -654,7 +662,7 @@ def pass2_completion(
             "For EACH finding, by its index, answer the three atomic questions "
             "(attribution / containment / layer). Answer the fail-safe value when unsure."
         ),
-        config=cfg,
+        config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-completion"],
         mode="structured",
         output_schema="plan_review_completion",
@@ -778,7 +786,7 @@ def pass4_coach(
         req = RunRequest(
             system_prompt=_resolve_system(PASS_COACH, plan, cfg),
             instructions=instructions,
-            config=cfg,
+            config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
             reviewers=["plan-coach"],
             mode="structured",
             output_schema="plan_review_coach",

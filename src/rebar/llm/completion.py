@@ -331,6 +331,15 @@ def _verify_completion_inner(
     # choice and wins). Mirrors the step-floor pattern below.
     if cfg.model == DEFAULT_MODEL:
         cfg = replace(cfg, model=_VERIFIER_DEFAULT_MODEL)
+    # Model-max output budget for the PRIMARY verifier call (bug 30a2): the shared
+    # review-kernel rule — the recovery path already raises/clamps its own sub-calls
+    # (completion_recovery's output_token_limit clamps are intentional and untouched;
+    # a request-level clamp always wins over this floor). Applied AFTER the model swap
+    # so the raise matches the model that actually runs; only ever raises, so an
+    # explicit higher operator REBAR_LLM_MAX_TOKENS still wins.
+    from rebar.llm.review_kernel import max_output_cfg
+
+    cfg = max_output_cfg(cfg)
     # Raise the agent step budget to a verification-appropriate floor (an explicit higher
     # REBAR_LLM_MAX_STEPS still wins) so a multi-criteria verification doesn't trip the
     # recursion cap mid-run.

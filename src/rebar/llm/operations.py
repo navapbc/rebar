@@ -174,10 +174,15 @@ def review_ticket(
             repo_root=prompt_repo_root,
         )
 
+        # Model-max output budget (bug 30a2) — the shared review-kernel rule: a review
+        # call's output is bounded by its actual findings, so it rides at the resolved
+        # model's maximum output capacity (the raise-only per-request seam).
+        from rebar.llm.review_kernel import max_output_cfg
+
         req = RunRequest(
             system_prompt=system_prompt,
             instructions=instructions,
-            config=cfg,
+            config=max_output_cfg(cfg),
             reviewers=[rid],
             target={"kind": "ticket_graph" if graph else "ticket", "ticket_ids": ids},
             langfuse_prompt=langfuse_prompt,

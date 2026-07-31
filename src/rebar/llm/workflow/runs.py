@@ -178,6 +178,18 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         if tokens_per_item and isinstance(items, list) and items:
             scaled = min(int(tokens_per_item) * len(items), _MAX_OUTPUT_TOKENS_CEILING)
             cfg = _replace(cfg, max_tokens=max(cfg.max_tokens, scaled))
+        # Model-max output budget (bug 30a2). A `with: {output_budget: model_max}` input
+        # raises this call's output cap to the RESOLVED model's maximum output capacity —
+        # the shared review-kernel rule that every review call runs at 'effectively
+        # unlimited' output (any finite ceiling below model-max re-creates the truncation
+        # → UnretryableOutputError → INDETERMINATE class). Monotone with the per-item
+        # scaling above: both only RAISE, so the final budget is max(configured floor,
+        # per-item scale, model max); on an UNMAPPED model the lookup falls back to the
+        # default and the per-item scaling remains the operative raise.
+        if ctx.inputs.get("output_budget") == "model_max":
+            from rebar.llm.review_kernel import model_max_output_tokens
+
+            cfg = _replace(cfg, max_tokens=max(cfg.max_tokens, model_max_output_tokens(cfg.model)))
         # Per-step sampling temperature (upstream review-code report §2). Carried as a `with:`
         # input (the v3 step schema is closed; `with` is the open extension point, exactly like
         # step_budget_per_item above). The Pass-2 verify steps set `temperature: 0` so a re-run of

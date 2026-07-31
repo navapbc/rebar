@@ -61,13 +61,19 @@ def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
     cfg (the kernel stays free of the LLMConfig plumbing)."""
     from dataclasses import replace
 
-    from rebar.llm.review_kernel import resolve_verifier_model
+    from rebar.llm.review_kernel import max_output_cfg, resolve_verifier_model
 
-    return replace(
-        cfg,
-        model=resolve_verifier_model(
-            cfg.model, default_model=DEFAULT_MODEL, verifier_default=VERIFIER_DEFAULT_MODEL
-        ),
+    # Model-max output budget (bug 30a2): every verifier-cfg consumer (the Pass-2
+    # verify/coach dispatch, the novelty/contradiction/comment-trail sub-calls) rides at
+    # the resolved model's maximum output capacity — applied AFTER the model swap so the
+    # raise matches the model that actually runs.
+    return max_output_cfg(
+        replace(
+            cfg,
+            model=resolve_verifier_model(
+                cfg.model, default_model=DEFAULT_MODEL, verifier_default=VERIFIER_DEFAULT_MODEL
+            ),
+        )
     )
 
 

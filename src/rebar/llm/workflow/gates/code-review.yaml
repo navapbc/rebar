@@ -72,6 +72,9 @@ steps:
     with:
       ticket_id: "(code review)"
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
+      # Model-max output budget — the shared review-kernel rule (bug 30a2): every review
+      # LLM call runs at the resolved model's maximum output capacity.
+      output_budget: model_max
 
   # ── Pass 1b: Round-A overlays (glob-triggered). ─────────────────────────────────────────────
   - id: round_a
@@ -150,6 +153,9 @@ steps:
       instructions: ${{ steps.verify_inputs.outputs.instructions }}
       findings: ${{ steps.merge.outputs.findings }}
       step_budget_per_item: 25
+      # Model-max output budget — the shared review-kernel rule (bug 30a2): every review
+      # LLM call runs at the resolved model's maximum output capacity.
+      output_budget: model_max
       # Greedy Pass-2 verification: re-running the same finding must not resample its narrow
       # yes/no verification and drift impact/validity (upstream review-code report §2).
       temperature: 0
@@ -178,6 +184,9 @@ steps:
     with:
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
       instructions: ${{ steps.coach_inputs.outputs.instructions }}
+      # Model-max output budget — the shared review-kernel rule (bug 30a2): every review
+      # LLM call runs at the resolved model's maximum output capacity.
+      output_budget: model_max
   - id: verdict
     needs: [coach, decide]
     uses: code_review_coach

@@ -223,7 +223,10 @@ def run_focused_finder(
             )
         )
         try:
-            call_cfg = dataclasses.replace(cfg, model=model)
+            # Per-call: the ladder may have escalated `model`, so resolve the model-max
+            # output budget AFTER the model swap (bug 30a2 — model-max is the
+            # 'unlimited' output setting for every plan-review call).
+            call_cfg = passes._max_output_cfg(dataclasses.replace(cfg, model=model))
             raw = runner.run(
                 RunRequest(
                     system_prompt=system,

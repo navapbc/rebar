@@ -146,7 +146,11 @@ def largest_window_tokens(model: str | None) -> int:
     return MODEL_LADDER[-1][1]
 
 
-# ── Pass-2 verify token-budget chunking ────────────────────────────────────────────
+# ── Pass-2 verify token-budget chunking + the model-max output-budget rule ─────────
+# The model-max output-budget rule (bug 30a2) is SHARED across every review workflow, so
+# its single source is the review kernel (`rebar.llm.review_kernel.verify`, beside the
+# analogous cross-gate `resolve_verifier_model` rule); it is re-exported here for the
+# historical `sizing.<name>` call sites, exactly like the chunking constants below.
 # The chunking ALGORITHM + constants are owned by the shared review kernel
 # (`rebar.llm.review_kernel.verify`) as the single source (epic vivid-gang-day WS2). The
 # constants are re-exported here for the historical `sizing.<name>` call sites;
@@ -155,8 +159,11 @@ def largest_window_tokens(model: str | None) -> int:
 # (`det_floor.est_tokens`), the two infra inputs the kernel chunker injects.
 from rebar.llm.review_kernel.verify import (  # noqa: E402,F401
     DEFAULT_VERIFY_WINDOW_HEADROOM,
+    MODEL_MAX_OUTPUT_TOKENS,
     PER_FINDING_VERIFY_TOKENS,
     VERIFY_SYSTEM_RESERVE_TOKENS,
+    max_output_cfg,
+    model_max_output_tokens,
 )
 from rebar.llm.review_kernel.verify import (  # noqa: E402
     verify_request_chunks as _kernel_verify_request_chunks,

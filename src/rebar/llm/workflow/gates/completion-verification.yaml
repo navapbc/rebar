@@ -49,6 +49,11 @@ steps:
         # The graph-aware, fenced ticket context the precheck assembled (epics carry their
         # descendants) — so the verify step's context matches bespoke verify_completion.
         context: ${{ steps.precheck.outputs.context }}
+        # Model-max output budget — the shared review-kernel rule (bug 30a2): the
+        # PRIMARY verifier call runs at the resolved model's maximum output capacity
+        # (the recovery path's intentional output_token_limit clamps are unaffected —
+        # a request-level clamp always wins over this floor).
+        output_budget: model_max
     - id: reconcile
       needs:
       - verify
