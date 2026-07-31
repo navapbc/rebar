@@ -252,6 +252,39 @@ def _model_id_of(model_or_model_string: Any) -> str | None:
     return None
 
 
+def provenance_for(
+    *, provider: str, model: str, base_url: str | None, caps: ModelCapabilities
+) -> dict:
+    """The ``provider_provenance`` record for a signed gate verdict (story S5/343b).
+
+    A verdict used to record only a model STRING, so a run behind an opaque gateway still
+    claimed it came from ``anthropic:claude-opus-4-8``. This assembles the additive record
+    that names the resolved provider/model, the endpoint actually called (``tier`` flips to
+    ``"best_effort"`` once a custom ``base_url`` is set), and the EFFECTIVE capability record
+    that drove the run — carried through from the ``caps`` argument, never recomputed (a
+    second `capabilities_for` resolution here could diverge from the record that actually
+    drove the run, which is exactly the prior regression this must not repeat).
+
+    Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
+    latter retains embedded credentials (``user:secret@host``), and no credential material may
+    appear in a signed record."""
+    from urllib.parse import urlparse
+
+    endpoint_host = urlparse(base_url).hostname if base_url else None
+    return {
+        "provider": provider,
+        "model": model,
+        "endpoint_host": endpoint_host,
+        "tier": "best_effort" if base_url else "first_class",
+        "capabilities": {
+            "native_structured_output": caps.native_structured_output,
+            "prompt_cache_style": caps.prompt_cache_style,
+            "supports_thinking": caps.supports_thinking,
+            "supports_temperature": caps.supports_temperature,
+        },
+    }
+
+
 def cache_settings_for(caps: ModelCapabilities) -> Any:
     """The provider-specific prompt-cache ``ModelSettings`` mapping for ``caps``, or ``None``.
 

@@ -29,7 +29,7 @@ from rebar.llm.anthropic_model import (
     _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
     _pai_model,
 )
-from rebar.llm.capabilities import cache_settings_for, capabilities_for
+from rebar.llm.capabilities import cache_settings_for, capabilities_for, provenance_for
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import (
     LLMConfigError,
@@ -364,6 +364,14 @@ class PydanticAIRunner:
         # and every model_override test pins the string behavior; cache_settings stays None then.
         caps = capabilities_for(resolved if self._model_override is not None else model)
         cache_settings = None if self._model_override else cache_settings_for(caps)
+        # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
+        # provider/model, the endpoint host (None for the first-class/no-custom-base_url
+        # path), and the effective capability record — onto the verdict, additively,
+        # alongside the existing `model` string. Built from the SAME `caps` already
+        # resolved above (never recomputed — see capabilities.provenance_for's docstring).
+        provider_provenance = provenance_for(
+            provider=_provider_name, model=resolved, base_url=cfg.base_url, caps=caps
+        )
         # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
         # above (an injected test model never gets a provider server tool). Attached as a
         # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
@@ -600,6 +608,7 @@ class PydanticAIRunner:
             output_schema=req.output_schema,
             runner=self.name,
             model=ran_model,
+            provider_provenance=provider_provenance,
             trace_id=None,
             target=req.target,
             reviewers=req.reviewers,

@@ -627,6 +627,7 @@ def build_payload(
         # handle; resign treats only an explicit "local" as refusing.
         "source": source,
         "model": verdict.get("model"),
+        "provider_provenance": verdict.get("provider_provenance"),
         "runner": verdict.get("runner"),
         # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage for
         # easy offline join (det_ms / llm_ms / total_ms / llm_calls / claim_path).
