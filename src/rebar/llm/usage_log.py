@@ -77,6 +77,17 @@ def failure_usage(
 
     Prompts, response text, tool arguments, and tool results are deliberately
     excluded so the payload is safe for a durable gate-error record.
+
+    **Repetition signals.** A step-budget exhaustion looks identical in the counters
+    whether the agent did a lot of legitimate work or span in a loop, and the step
+    count provably cannot tell them apart (``request_limit`` is half
+    ``tool_calls_limit``, so a one-tool-call-per-turn loop trips the request ceiling
+    first — exactly like careful sequential work). So each tool call is reduced to a
+    ``(tool_name, sha256(args)[:8])`` SIGNATURE and summarized: a run with many calls
+    but few distinct signatures is looping; one with many distinct signatures is
+    exploring. The arguments are HASHED, never recorded, so the privacy contract above
+    is unchanged — a digest plus the tool name (a fixed vocabulary) carries the signal
+    without the content.
     """
 
     totals = {
@@ -88,6 +99,7 @@ def failure_usage(
         "cache_write_tokens": 0,
     }
     finish_reason: str | None = None
+    signatures: list[str] = []
     for message in messages:
         if type(message).__name__ == "ModelResponse":
             totals["requests"] += 1
@@ -103,11 +115,56 @@ def failure_usage(
         for part in getattr(message, "parts", ()) or ():
             if type(part).__name__ == "ToolCallPart":
                 totals["tool_calls"] += 1
+                signatures.append(_tool_signature(part))
     return {
         **totals,
         "finish_reason": finish_reason,
         "request_limit": request_limit,
         "tool_calls_limit": tool_calls_limit,
+        **_repetition_summary(signatures),
+    }
+
+
+def _tool_signature(part: object) -> str:
+    """``tool_name:args_digest`` — identity WITHOUT the argument content.
+
+    Falls back to the tool name alone when the arguments cannot be canonicalized, so a
+    surprising arg shape degrades the signal rather than raising inside a failure path.
+    """
+
+    import hashlib
+
+    name = str(getattr(part, "tool_name", "") or "?")
+    raw = getattr(part, "args", None)
+    try:
+        canonical = json.dumps(raw, sort_keys=True, default=str) if raw is not None else ""
+    except (TypeError, ValueError):
+        canonical = str(raw)
+    digest = hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{name}:{digest}"
+
+
+def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
+    """Loop-versus-work signal derived from the tool-call signature sequence."""
+
+    if not signatures:
+        return {
+            "tool_calls_distinct": 0,
+            "max_consecutive_repeat": 0,
+            "top_repeated_tool_calls": [],
+        }
+    counts: dict[str, int] = {}
+    for sig in signatures:
+        counts[sig] = counts.get(sig, 0) + 1
+    longest = current = 1
+    for previous, sig in zip(signatures, signatures[1:], strict=False):
+        current = current + 1 if sig == previous else 1
+        longest = max(longest, current)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    return {
+        "tool_calls_distinct": len(counts),
+        "max_consecutive_repeat": longest,
+        "top_repeated_tool_calls": [{"signature": sig, "count": n} for sig, n in ranked if n > 1],
     }
 
 

@@ -452,26 +452,38 @@ class PydanticAIRunner:
             if self._model_override is None:
                 _warn_if_zeroed_usage(usage)
         except UsageLimitExceeded as exc:
+            budget_diag = usage_log.failure_usage(
+                run_messages,
+                request_limit=req_limit,
+                tool_calls_limit=max(8, eff_max_iter),
+            )
+            # Report the REPETITION signals, not just the ceilings. The counters alone
+            # cannot distinguish a long legitimate job from a loop — a one-tool-call-per-
+            # turn loop trips `request_limit` (half `tool_calls_limit`) exactly like
+            # careful sequential work does. `distinct` vs `tool_calls` is what separates
+            # them: many calls over few distinct signatures is a loop.
             logger.warning(
                 "llm call [%s] mode=%s model=%s hit step budget "
-                "(request_limit=%d max_iterations=%d) in %.1fs",
+                "(request_limit=%d max_iterations=%d) in %.1fs "
+                "requests=%s tool_calls=%s distinct=%s max_consecutive_repeat=%s top_repeats=%s",
                 _call_label,
                 req.execution_mode,
                 ran_model,
                 req_limit,
                 eff_max_iter,
                 time.monotonic() - _t0,
+                budget_diag.get("requests"),
+                budget_diag.get("tool_calls"),
+                budget_diag.get("tool_calls_distinct"),
+                budget_diag.get("max_consecutive_repeat"),
+                budget_diag.get("top_repeated_tool_calls"),
             )
             budget_err = LLMRunnerError(
                 f"agent exceeded its step budget (max_iterations={eff_max_iter}; "
                 "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
                 "the task."
             )
-            budget_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-                run_messages,
-                request_limit=req_limit,
-                tool_calls_limit=max(8, eff_max_iter),
-            )
+            budget_err.diagnostic = budget_diag  # type: ignore[attr-defined]
             raise budget_err from exc
         except LLMError as exc:
             # Preserve the typed failure while attaching bounded counters from
