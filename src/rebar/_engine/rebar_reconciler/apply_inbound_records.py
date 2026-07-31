@@ -47,21 +47,67 @@ logger = logging.getLogger(__name__)
 _RECONCILER_MARKER_APPLIER = "<!-- rebar:reconciler-echo -->"
 
 
+def _identity_provider_for(backend) -> str:
+    """The store-facing identity provider / creation channel for a backend (bug 5f48).
+
+    The Backend port's ``vendor`` is per-DEPLOYMENT (Cloud and Data Center carry
+    different vendor strings — see ``adapters/jira*/backend.py``), but the store's
+    identity provider and its ``CREATION_CHANNELS`` vocabulary
+    (``rebar.reducer._version``) are per-FAMILY: only the family name is a member.
+    Using the raw vendor as the creation channel made every DC mint raise
+    ``ValueError`` inside the best-effort ``except`` below — a silently swallowed
+    no-op. Widening ``CREATION_CHANNELS`` was rejected deliberately: it would fork the
+    store vocabulary per deployment and force a migration, and Cloud/DC identities must
+    share ONE provider namespace so a human assigned on one deployment still resolves
+    on the other.
+
+    The family is DECLARED BY THE BACKEND (``identity_family``), not derived here. Two
+    alternatives were rejected. A string transform (family = everything before the
+    first ``-``) keeps this module vendor-neutral but fails OPEN: a future backend
+    registered as ``import-foo`` would silently collapse onto ``import`` — a real
+    member of ``CREATION_CHANNELS`` — and mis-stamp the provenance of every identity it
+    minted, with nothing raising. A literal lookup table here fails closed but puts
+    vendor names back into a CORE module, which is exactly what
+    ``test_backend_neutrality.py`` forbids. Asking the backend keeps this module free of
+    vendor literals AND makes each backend state its own family explicitly.
+
+    Falls back to ``vendor`` when a backend declares no family, so an unrecognized
+    backend is rejected by :func:`validate_creation_channel` rather than quietly
+    mis-attributed — the same fail-closed posture as before.
+    """
+    from rebar.reducer._version import validate_creation_channel
+
+    return validate_creation_channel(getattr(backend, "identity_family", None) or backend.vendor)
+
+
 def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
     """Best-effort: mint/reuse a placeholder identity for an inbound Jira assignee
-    (2f13). When the assignee field carries an ``accountId``, resolve it through
-    :func:`rebar.ensure_identity_for` (provider = the configured backend vendor,
-    keyed on the opaque accountId) so an unmapped inbound user gets a ghost identity
-    that a later
-    outbound pass can key on.
+    (2f13). When the assignee field carries an external id, resolve it through
+    :func:`rebar.ensure_identity_for` (provider = the backend vendor's Jira-family
+    name, keyed on that external id) so an unmapped inbound user gets a ghost
+    identity that a later outbound pass can key on.
+
+    The external id is deployment-shaped (story b4e3's ``UserIdentityModel``, see
+    ``adapters/jira_family/identity_model.py``): Jira Cloud identifies users by the
+    opaque ``accountId`` (username/userkey were removed for GDPR), while Data Center
+    has NO accountId at all and identifies users by ``name``. This function is
+    handed the RAW Jira user object, so it accepts either — ``accountId`` FIRST so
+    Cloud's behavior is byte-for-byte unchanged, falling back to DC's ``name``
+    (bug 5f48: the accountId-only guard meant DC never minted an identity).
 
     ADDITIVE + best-effort: this NEVER changes the human-readable name extraction and
-    NEVER fails the inbound apply — no ``accountId`` or any mint failure is swallowed
-    and the apply continues with the name-only behavior."""
+    NEVER fails the inbound apply — an assignee carrying neither key returns early
+    without minting, and any mint failure is swallowed so the apply continues with
+    the name-only behavior."""
     if not isinstance(assignee, dict):
         return
-    account_id = assignee.get("accountId")
-    if not (isinstance(account_id, str) and account_id.strip()):
+    external_id = ""
+    for key in ("accountId", "name"):  # Cloud key first, then DC's
+        candidate = assignee.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            external_id = candidate
+            break
+    if not external_id:
         return
     display_name = _extract_name(assignee)
     try:
@@ -69,20 +115,22 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
         from rebar.config import load_config
         from rebar_reconciler._backend_registry import select_backend
 
-        # S4: provider identity + creation channel come from the configured backend's
-        # vendor, not a hard-coded provider literal (routes through the Backend port).
-        vendor = select_backend(load_config()).vendor
+        # S4: provider identity + creation channel come from the configured backend
+        # (routes through the Backend port), not a hard-coded provider literal — asked
+        # for its FAMILY, since the store vocabulary is per-family, not per-deployment
+        # (see _identity_provider_for, bug 5f48).
+        provider = _identity_provider_for(select_backend(load_config()))
 
         rebar.ensure_identity_for(
-            vendor,
-            account_id,
-            display_name or account_id,
+            provider,
+            external_id,
+            display_name or external_id,
             repo_root=repo_root,
-            creation_channel=vendor,
+            creation_channel=provider,
         )
     except Exception:  # noqa: BLE001 — best-effort ghost mint; never fail the inbound apply
         logger.debug(
-            "inbound: could not ensure identity for jira accountId %r", account_id, exc_info=True
+            "inbound: could not ensure identity for jira user %r", external_id, exc_info=True
         )
 
 
