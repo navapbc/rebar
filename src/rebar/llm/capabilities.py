@@ -91,8 +91,27 @@ _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
 # Anthropic adapter, not its Bedrock one, so the direct-Anthropic path degrades with a warning
 # but Bedrock hard-fails — and rebar's Pass-2 verifiers deliberately send `temperature=0`, so
 # leaving this model at the default would break Bedrock gate runs on it.
+# MEASURED matrix (ticket 1903, account 896586841071 / us-east-1, boto3 converse, maxTokens 8),
+# recorded so the next reader does not re-derive it:
+#
+#   model id                          temp unset | temp=0.0 | temp=0.5 | temp=1.0 | topP=0.9
+#   us./global. claude-sonnet-4-6     OK         | OK       | OK       | -        | -
+#   us./global. claude-opus-4-8       OK         | 400      | 400      | OK       | 400
+#   us./global. claude-opus-4-7       OK         | 400      | -        | -        | -
+#
+# NOTE the shape: this is NOT "temperature unsupported" — temp=1.0 (the API default) SUCCEEDS on
+# opus-4-8 while 0.0 and 0.5 fail, so what is deprecated is the parameter's TUNABILITY. Withdrawing
+# the parameter is still correct (the model then uses its own default), but the field name
+# understates the mechanism. `top_p` is deprecated on opus-4-8 too; that stays LATENT because rebar
+# never sets it (failure.py's _SAMPLING_PARAMS anticipates it).
+#
+# Keyed on the FULL model id, so each profile prefix needs its OWN entry — a `us.` entry does not
+# cover its `global.` twin. claude-opus-4-8 matters most: it is rebar's DEFAULT_MODEL.
 _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
+    "us.anthropic.claude-opus-4-8": {"supports_temperature": False},
+    "global.anthropic.claude-opus-4-8": {"supports_temperature": False},
     "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
+    "global.anthropic.claude-opus-4-7": {"supports_temperature": False},
 }
 
 
