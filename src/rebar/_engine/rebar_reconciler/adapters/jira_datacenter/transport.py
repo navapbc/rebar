@@ -33,9 +33,10 @@ from __future__ import annotations
 
 import sys
 import time
+from email.message import Message
 from typing import Any
 
-from rebar_reconciler._backend import BackendAssigneeNotFoundError
+from rebar_reconciler._backend import BackendAssigneeNotFoundError, BackendHTTPError
 
 _MISSING = object()
 
@@ -125,6 +126,43 @@ def _connection_retry_exceptions() -> tuple[type[BaseException], ...]:
     return (_req_exc.ConnectionError, _req_exc.Timeout, TimeoutError)
 
 
+def _jira_http_error_types() -> tuple[type[BaseException], ...]:
+    """The library error type that means "the server answered with a 4xx/5xx":
+    ``jira.exceptions.JIRAError``.
+
+    Returned as a tuple (and imported lazily, mirroring
+    :func:`_connection_retry_exceptions`) so a transport built with a FAKE client —
+    the unit tests, with no ``[jira-datacenter]`` extra installed — still works:
+    ``except ()`` matches nothing, and a fake's own error propagates untouched.
+    """
+    try:
+        from jira.exceptions import JIRAError
+    except ImportError:
+        return ()
+    return (JIRAError,)
+
+
+def _as_backend_http_error(exc: BaseException) -> BackendHTTPError:
+    """Translate a library HTTP error into the port's ``BackendHTTPError``.
+
+    THE adapter-boundary translation this transport owes the core: ``JIRAError``
+    carries the status as ``.status_code``, which becomes ``BackendHTTPError.code``
+    (urllib's spelling) so the core's existing ``except urllib.error.HTTPError``
+    clauses classify a DC failure exactly as they classify a Cloud one — e.g. a 404
+    read reaching ``outbound_differ._safe_get_issue`` is seen as ``_DELETED``. A
+    library error with no usable status degrades to ``0``, which no core branch
+    mistakes for a 404/success.
+    """
+    status = getattr(exc, "status_code", None)
+    return BackendHTTPError(
+        getattr(exc, "url", None) or "",
+        int(status) if isinstance(status, int) else 0,
+        str(exc),
+        Message(),
+        None,
+    )
+
+
 class TlsVerificationError(ConnectionError):
     """A TLS certificate verification failure reaching the DC instance.
 
@@ -161,17 +199,25 @@ def _with_connection_retry(fn: Any) -> Any:
     Retries up to 2 times (3 total attempts), 2s then 5s backoff, on a
     connection-level fault (see :func:`_connection_retry_exceptions`).
     ``jira.exceptions.JIRAError`` (any HTTP 4xx/5xx response) is NOT one of
-    those exception types, so it propagates on the FIRST attempt, unretried —
+    those exception types, so it fails on the FIRST attempt, unretried —
     mirroring ``acli_rest._rest_urlopen_with_retry``'s HTTP-vs-connection
     distinction exactly (retrying a mutation on an HTTP error risks
     duplicates).
+
+    This is ALSO the transport's single translation choke point: every method of
+    :class:`JiraDataCenterTransport` routes its library call through here, so
+    converting the unretried HTTP error to :class:`BackendHTTPError` here (rather
+    than per method) is what stops a vendor exception escaping the adapter.
     """
     retryable = _connection_retry_exceptions()
+    http_errors = _jira_http_error_types()
     backoffs = (2, 5)
     last_exc: BaseException | None = None
     for attempt in range(3):
         try:
             return fn()
+        except http_errors as exc:
+            raise _as_backend_http_error(exc) from exc
         except retryable as exc:
             # Checked BEFORE the retry bookkeeping: SSLError is a ConnectionError
             # subclass, so it lands in `retryable` and would otherwise be re-attempted.
@@ -246,12 +292,14 @@ class JiraDataCenterTransport:
     def _assign(self, remote_id: str, assignee: Any) -> None:
         """Assign ``remote_id`` to ``assignee`` (a DC username), raising
         ``AssigneeNotFoundError`` when the library/server reports the user as
-        unresolvable rather than letting a bare ``JIRAError`` escape."""
-        from jira.exceptions import JIRAError
+        unresolvable rather than letting a bare HTTP error escape.
 
+        The HTTP error is caught as the already-translated ``BackendHTTPError``
+        (:func:`_with_connection_retry` converts it), so this behaves exactly as
+        before while needing no vendor import of its own."""
         try:
             _with_connection_retry(lambda: self._client.assign_issue(remote_id, assignee))
-        except JIRAError as exc:
+        except BackendHTTPError as exc:
             raise AssigneeNotFoundError(
                 f"assignee {assignee!r} could not be resolved to a DC user on {remote_id}: {exc}"
             ) from exc
@@ -336,17 +384,18 @@ class JiraDataCenterTransport:
         """Probe ``remote_id`` and classify via the SHARED ``jira_family``
         classifier (bound to this transport's configured ``resolved_statuses`` —
         never Cloud/DIG's hardcoded names, since a self-hosted DC workflow can
-        name its resolved states anything)."""
-        from jira.exceptions import JIRAError
+        name its resolved states anything).
 
+        The failing read is caught as the translated ``BackendHTTPError``, whose
+        ``.code`` carries the same status the raw library error did — so the
+        classification is unchanged."""
         from rebar_reconciler.adapters.jira_family import classify_probe_response
 
         try:
             issue = _with_connection_retry(lambda: self._client.issue(remote_id))
-        except JIRAError as exc:
-            status_code = getattr(exc, "status_code", None) or 0
+        except BackendHTTPError as exc:
             return classify_probe_response(
-                remote_id, status_code, {}, resolved_statuses=self._resolved_statuses
+                remote_id, exc.code or 0, {}, resolved_statuses=self._resolved_statuses
             )
         return classify_probe_response(
             remote_id, 200, _unwrap(issue), resolved_statuses=self._resolved_statuses
