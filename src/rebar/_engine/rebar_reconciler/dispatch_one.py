@@ -340,11 +340,28 @@ def create_one(
             _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
-        except Exception as write_err:  # noqa: BLE001 — rollback handler: delete the issue + write a failure alert, then re-raise the original write_err (never masked)
-            try:
-                client.delete_issue(jira_key)
-            except Exception:  # noqa: BLE001 — best-effort rollback delete; swallow the delete error so the original write_err re-raises
-                pass  # rollback failure must not mask original error
+        except Exception as write_err:  # noqa: BLE001 — RETAIN the issue + write a failure alert, then re-raise the original write_err (never masked)
+            # DO NOT DELETE THE CREATED ISSUE (bug 387d). This used to call
+            # `client.delete_issue(jira_key)`, destroying a successfully-created issue
+            # because LABELLING it failed — inverting the cost, since a
+            # created-but-unlabelled issue is recoverable and a deleted one is not.
+            #
+            # The trigger is ordinary: Jira returns "Field 'x' cannot be set. It is not on
+            # the appropriate screen, or unknown" when the field is off the Create/Edit
+            # screen, when the workflow property jira.permission.createclone.denied is set
+            # (nothing to do with screens), or when a value is malformed on a field that IS
+            # on the screen.
+            #
+            # Retaining is SAFE because the write-ahead above already recorded the key
+            # (`record_pending_key` + `save`), leaving a KEYED-pending binding — exactly the
+            # state `recover_pending_bindings`' keyed branch is built for: it retro-attaches
+            # the label + property and confirms, with NO Jira search, so it is deterministic
+            # and cannot duplicate. The rollback was solving a problem the write-ahead
+            # protocol had already solved, and destroying data to do it.
+            #
+            # It also fixes a second symptom: the rollback never unbound, so the deleted key
+            # stayed in a keyed-pending binding and every later pass retried `add_label`
+            # against a dead issue — stranding the local ticket permanently.
             # Emit BRIDGE_ALERT for identity-write rollback so the event is
             # surfaced in the tickets-tracker for observability.  # tickets-boundary-ok
             try:
@@ -374,7 +391,10 @@ def create_one(
                     "ticket_id": local_id,
                     "jira_key": jira_key,
                     "data": {
-                        "reason": "identity-write failed after create; Jira issue deleted",
+                        "reason": (
+                            "identity-write failed after create; Jira issue RETAINED and "
+                            "left keyed-pending for retro-attach on the next pass"
+                        ),
                         "tag": "create-identity-write-failed",
                     },
                 }

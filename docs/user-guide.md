@@ -358,6 +358,20 @@ environment and is **not** accepted from a committed config file, so the credent
 checked into a repo by accident; the transport never logs it, and a missing `JIRA_PAT` fails
 with an error naming the variable rather than falling back to anonymous access.
 
+**`labels` must be on the project's Create and Edit screens.** rebar writes a `rebar-id:<id>`
+label to correlate a Jira issue with its local ticket, so a project whose screens omit `labels`
+will reject that write. rebar does **not** discover or populate custom required fields — the
+supported answer is to add `labels` to those screens (or reconcile a project that already has
+it), matching the boundary mature Jira integrations draw.
+
+If the write does fail, **the created issue is retained, not deleted**: it is left bound as
+*pending* and the next reconcile pass retro-attaches the label deterministically. Expect an
+issue that exists but is briefly unlabelled, plus a `BRIDGE_ALERT` naming the failure. Jira's
+own message here — *"Field 'x' cannot be set. It is not on the appropriate screen, or
+unknown"* — is misleading roughly half the time: it also appears when the workflow property
+`jira.permission.createclone.denied` is set, and when a value is simply malformed on a field
+that *is* on the screen.
+
 Three further DC-only keys, all under `[tool.rebar.reconciler]`:
 
 | Key | What it does |
