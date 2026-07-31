@@ -18,6 +18,7 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.prompting import prompts as _prompts
 
 pytestmark = pytest.mark.unit
 
@@ -128,7 +129,12 @@ def test_workflow_step_temperature_input_tunes_cfg(monkeypatch):
         step_id="verify",
         kind="agent",
         step={"prompt": "plan-review-verifier", "mode": "structured"},
-        inputs={"ticket_id": "T-1", "plan": "P", "instructions": "i", "temperature": 0},
+        inputs={
+            "ticket_id": "T-1",
+            "shared_prefix": _prompts.shared_plan_prefix("P"),
+            "instructions": "i",
+            "temperature": 0,
+        },
         workflow={},
         target_ticket="T-1",
         repo_root=".",

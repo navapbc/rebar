@@ -35,18 +35,22 @@ def _ctx(step: dict, inputs: dict) -> StepContext:
 
 
 def test_runner_agent_step_resolves_plan_for_verify() -> None:
-    """The workflow plan-review VERIFY prompt uses ``{{plan}}``; RunnerAgentStep must supply
-    it from the step's ``with: {plan: ...}`` so the LIVE path resolves (it raised
-    ``PromptError: undefined variable ['plan']`` before tepid-bus-pomp)."""
+    """The workflow plan-review VERIFY prompt uses ``{{shared_prefix}}`` (story 9374);
+    RunnerAgentStep must supply it from the step's ``with: {shared_prefix: ...}`` so the
+    LIVE path resolves (the pre-9374 analogue raised ``PromptError`` for ``{{plan}}``
+    before tepid-bus-pomp)."""
+    from rebar.llm.prompting import prompts
+
     step = {
         "id": "verify",
         "prompt": "plan-review-verifier",
         "mode": "structured",
         "output_schema": "plan_review_verification",
     }
-    ctx = _ctx(step, {"ticket_id": "T-1", "plan": "## Plan\nBuild X in src/x.py.", "findings": []})
+    prefix = prompts.shared_plan_prefix("## Plan\nBuild X in src/x.py.")
+    ctx = _ctx(step, {"ticket_id": "T-1", "shared_prefix": prefix, "findings": []})
     runner = RunnerAgentStep(runner=FakeRunner(structured={"verifications": []}), repo_root=None)
-    res = runner.run(ctx)  # must NOT raise PromptError — {{plan}} resolved from with.plan
+    res = runner.run(ctx)  # must NOT raise PromptError — {{shared_prefix}} resolved from with
     assert res.status == "succeeded"
 
 

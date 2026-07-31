@@ -26,6 +26,3 @@ under-specifies the criterion, or where a specific codebase fact is load-bearing
 unknowable from the plan text. Do NOT raise a finding merely because you cannot run or read
 the live code: if the plan's own text affirmatively satisfies the criterion, it PASSES (emit
 no finding). A well-specified plan you simply can't execute is a PASS.
-
-# Plan under review (verbatim, whole)
-{{plan}}

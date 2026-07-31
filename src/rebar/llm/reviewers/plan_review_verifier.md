@@ -8,6 +8,7 @@ outputs: plan_review_verification
 execution_mode: single_turn
 category: plan-review-pass
 ---
+{{shared_prefix}}
 You are an INDEPENDENT verifier running PASS 2 of a three-pass review. Each finding below is
 an unproven CLAIM TO TEST — its conclusion is NOT asserted; do not assume it is correct.
 Re-ground in the plan (and, for code-grounded findings, the actual code). For EACH finding,
@@ -169,7 +170,3 @@ Do not require the plan to re-validate a dependency's headline guarantee (that i
 code that isn't ours). EXCEPTION: a SPECIFIC, newer, or not-yet-GA FEATURE of that dependency
 whose support is genuinely uncertain IS a legitimate gap — keep it (library-CONTRACT → drop;
 library-FEATURE-MATURITY → keep).
-
-<!--volatile-->
-# Plan under review (verbatim, whole)
-{{plan}}

@@ -19,6 +19,7 @@ import pytest
 from rebar.llm.config import DEFAULT_MAX_TOKENS, LLMConfig
 from rebar.llm.plan_review import orchestrator
 from rebar.llm.plan_review.det_floor import PlanContext
+from rebar.llm.prompting import prompts
 from rebar.llm.runner import FakeRunner, effective_max_iterations, effective_max_tokens
 from rebar.llm.workflow import gate_dispatch
 from rebar.llm.workflow.executor import StepContext
@@ -55,7 +56,11 @@ def _verify_ctx(inputs: dict) -> StepContext:
             "mode": "structured",
             "output_schema": "plan_review_verification",
         },
-        inputs={"ticket_id": "T-1", "plan": "## Plan\nBuild X in src/x.py.", **inputs},
+        inputs={
+            "ticket_id": "T-1",
+            "shared_prefix": prompts.shared_plan_prefix("## Plan\nBuild X in src/x.py."),
+            **inputs,
+        },
         workflow={"name": "plan-review"},
         target_ticket="T-1",
         repo_root=None,

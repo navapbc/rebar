@@ -617,8 +617,13 @@ this **review-time checklist**:
 - **No bare DO-NOT-only blocks** — never leave a bullet or paragraph whose only content is a
   prohibition with no adjacent affirmative. Don't narrate failure mechanics at length; the
   cross-cutting stance (material-vs-instruction trust boundary, the forward-looking rule) already
-  lives once in the shared preamble (`_SHARED_PREAMBLE` in `src/rebar/llm/plan_review/passes.py`),
-  injected into every pass system prompt by `_resolve_system` — don't re-derive it per prompt.
+  lives once in the shared preamble (`SHARED_STANCE_PREAMBLE` in
+  `src/rebar/llm/prompting/prompts.py`), prepended to every pass system prompt by
+  `_resolve_system` and embedded in the verifier templates via their `{{shared_prefix}}`
+  variable (`shared_plan_prefix`) — don't re-derive it per prompt. The preamble/prefix is
+  single-sourced there; never re-inline it in a template, and never re-introduce a `{{plan}}`
+  variable or a `<!--volatile-->` marker in the verifier templates
+  (`tests/unit/workflow/test_shared_prefix.py` is the canary).
 
 This is enforced deterministically by `tests/unit/test_reviewer_prompt_hygiene.py`
 (`test_no_bare_do_not_only_blocks`), which runs in CI — a re-runnable guard, not a hand checklist.

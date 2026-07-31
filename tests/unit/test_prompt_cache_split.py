@@ -22,14 +22,14 @@ from rebar.llm.workflow.runs import RunnerAgentStep
 pytestmark = pytest.mark.unit
 
 # Every prompt that carries the cache-split marker (its prefix must be var-free).
+# The plan-review verifier prompts are no longer marker-split (story 9374): the plan
+# rides their SYSTEM prefix via `{{shared_prefix}}` — see test_shared_prefix.py.
 _MARKED_PROMPTS = (
     "completion-verifier",
     "code-quality",
     "security",
     "tests",
     "ticket-quality",
-    "plan-review-verifier",
-    "plan-review-verifier-agentic",
     "plan-review-coach",
 )
 
@@ -83,16 +83,17 @@ def test_marked_prompt_prefix_is_variable_free(pid: str) -> None:
 
 def test_bespoke_plan_review_path_strips_marker_and_keeps_plan_in_system() -> None:
     # The plan-review batch/bespoke path (_resolve_system) must NEVER emit the literal
-    # marker into the system prompt, and must keep the plan in system — content-identical
-    # to pre-S2 for the marker-INSERTED (no-reorder) verifier/coach prompts, so adding the
-    # marker is fidelity-neutral on that path (it only splits in RunnerAgentStep).
+    # marker into the system prompt, and must keep the plan in system. Post-9374 the
+    # finder is PLAN-FIRST: its system prompt starts with the shared plan-bearing prefix
+    # (the byte-identical leading segment the verifier stable segments share).
     from rebar.llm.config import LLMConfig
     from rebar.llm.plan_review import passes
 
     cfg = LLMConfig(runner="fake")
-    sys_prompt = passes._resolve_system(passes.PASS_VERIFIER, "PLAN-XYZ-marker-test", cfg)
-    assert prompts.VOLATILE_MARKER not in sys_prompt
+    sys_prompt = passes._resolve_system(passes.PASS_FINDER, "PLAN-XYZ-marker-test", cfg)
+    assert sys_prompt.startswith(prompts.shared_plan_prefix("PLAN-XYZ-marker-test"))
     assert "PLAN-XYZ-marker-test" in sys_prompt  # plan stays in system on the bespoke path
+    assert prompts.VOLATILE_MARKER not in sys_prompt
 
 
 def test_prompt_file_impact_front_matter_parsed() -> None:
@@ -174,7 +175,11 @@ dimension: {dimension}
     assert "'live-checkout-dimension'" not in runner.reqs[0].instructions
 
 
-def test_verify_step_prefix_is_byte_stable_across_plans() -> None:
+def test_verify_step_system_prompt_is_plan_bearing() -> None:
+    # Post-9374 the verifier is PLAN-FIRST: the plan rides the SYSTEM prompt via the
+    # shared prefix (per-ticket cache entry, byte-identical across a review's chunked
+    # verify calls), so two different plans now yield two DIFFERENT system prompts, each
+    # starting with its own shared_plan_prefix; instructions carry only base_instructions.
     runner = _CapturingRunner(structured={"verifications": []})
     step = {
         "id": "verify",
@@ -183,17 +188,17 @@ def test_verify_step_prefix_is_byte_stable_across_plans() -> None:
         "output_schema": "plan_review_verification",
     }
     rs = RunnerAgentStep(runner=runner, repo_root=None)
-    rs.run(_ctx(step, {"ticket_id": "T-1", "plan": "PLAN-ALPHA-aaa", "findings": []}))
-    rs.run(_ctx(step, {"ticket_id": "T-2", "plan": "PLAN-BETA-bbb", "findings": []}))
+    alpha = prompts.shared_plan_prefix("PLAN-ALPHA-aaa")
+    beta = prompts.shared_plan_prefix("PLAN-BETA-bbb")
+    rs.run(_ctx(step, {"ticket_id": "T-1", "shared_prefix": alpha, "findings": []}))
+    rs.run(_ctx(step, {"ticket_id": "T-2", "shared_prefix": beta, "findings": []}))
     r1, r2 = runner.reqs
-    # The cached system prefix is byte-identical across two different plans...
-    assert r1.system_prompt == r2.system_prompt
-    # ...the per-run plan is NOT in the cached prefix...
-    assert "PLAN-ALPHA-aaa" not in r1.system_prompt
-    assert "PLAN-BETA-bbb" not in r2.system_prompt
-    # ...it is relocated into the user-message instructions.
-    assert "PLAN-ALPHA-aaa" in r1.instructions
-    assert "PLAN-BETA-bbb" in r2.instructions
+    assert r1.system_prompt.startswith(alpha)
+    assert r2.system_prompt.startswith(beta)
+    assert "PLAN-ALPHA-aaa" in r1.system_prompt
+    assert r1.system_prompt != r2.system_prompt
+    # The volatile body is gone — the plan is NOT re-sent in the user message.
+    assert "PLAN-ALPHA-aaa" not in r1.instructions
 
 
 def test_completion_verifier_prefix_is_byte_stable_across_tickets() -> None:

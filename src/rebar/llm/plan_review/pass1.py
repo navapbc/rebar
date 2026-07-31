@@ -47,6 +47,18 @@ CONTAINER_CRITERIA = ("G3", "G4", "decomp-shape")
 # Below this the parent-plan system prefix never caches, so WARMING would just add a
 # serialized call for no read benefit — fan out directly instead (story ba7e).
 CACHE_MIN_PREFIX_TOKENS = 4096
+
+
+def _prefix_tokens(plan: str) -> int:
+    """Tokens of the ACTUAL Pass-1 cached prefix — ``shared_plan_prefix(plan)`` (the
+    stance preamble + the whole plan), the bytes the warm gate must measure (story 9374).
+    Measuring the plan alone would under-count by the constant-size preamble and skip
+    warming a prefix that would in fact have cached."""
+    from rebar.llm.prompting import prompts
+
+    return det_floor.est_tokens(prompts.shared_plan_prefix(plan))
+
+
 # Concurrency cap for the container fan-out pool (a NEW pool — the Pass-1 pool is closed
 # by the time the container criteria run).
 _CONTAINER_MAX_WORKERS = 6
@@ -493,7 +505,7 @@ def run_pass1(
     # to amortize it over AND a single-turn chunk exists to serve as the warm call.
     warm = (
         bool(chunks)
-        and det_floor.est_tokens(plan) >= CACHE_MIN_PREFIX_TOKENS
+        and _prefix_tokens(plan) >= CACHE_MIN_PREFIX_TOKENS
         and len(chunks) + len(agent) >= 2
     )
     warmed = False
