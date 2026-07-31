@@ -722,6 +722,43 @@ def clear_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = Non
 # classify as a CAS mismatch (fail-closed).
 _PUSH_REJECT_MARKERS = ("stale info", "rejected", "cannot lock ref")
 
+# The definitive ``--force-with-lease`` signal: git says "stale info" when, and only
+# when, the lease's expected oid did not match. Anything else in the list above is
+# circumstantial.
+_LEASE_MISMATCH_MARKER = "stale info"
+
+# Bug 4afc-33cc-9e4f-4fe2: phrases that PROVE a rejection was not a lease mismatch.
+# ``rejected`` and ``cannot lock ref`` are far broader than the lease: git prints
+# ``! [remote rejected]`` for hook declines, quota/rate-limit rejections and server-side
+# errors, and ``cannot lock ref ... File exists`` for ordinary server-side ref
+# contention. Classifying those as a CAS mismatch made ``renew`` raise LeaseLostError and
+# abort the whole pass with "lease lost/stolen", sending an operator hunting for a
+# competing holder that never existed — and contradicting this module's own promise
+# below that a genuine transport failure is NOT classified as a CAS mismatch.
+_NON_CAS_REJECT_MARKERS = (
+    "file exists",  # server-side ref.lock contention
+    "hook declined",  # pre-receive / update hook
+    "internal server error",
+    "rate limit",
+    "quota",
+    "shallow update not allowed",
+    "permission denied",
+)
+
+
+def _is_cas_mismatch_stderr(stderr: str) -> bool:
+    """Whether *stderr* (lowercased) shows the LEASE moved, not merely a rejection.
+
+    "stale info" is conclusive on its own. A broader rejection marker counts only when
+    nothing in it identifies a non-lease cause — fail-closed on ambiguity, matching the
+    documented posture.
+    """
+    if _LEASE_MISMATCH_MARKER in stderr:
+        return True
+    if any(m in stderr for m in _NON_CAS_REJECT_MARKERS):
+        return False
+    return any(m in stderr for m in _PUSH_REJECT_MARKERS)
+
 
 def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspec: str) -> None:
     """Do a ``--force-with-lease=<ref>:<old>`` push of *refspec* to *remote*.
@@ -740,8 +777,18 @@ def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspe
     if result.returncode == 0:
         return
     stderr = (result.stderr or "").lower()
-    if any(marker in stderr for marker in _PUSH_REJECT_MARKERS):
+    if _is_cas_mismatch_stderr(stderr):
         # Remote-side CAS mismatch — same shape the update-ref discriminator reads.
+        # Bug 4afc: LOG the evidence. This branch aborts a production pass by claiming
+        # the lease was stolen; previously it raised silently while the fail-closed
+        # branch below logged, so the consequential claim was the unfalsifiable one and
+        # a real occurrence could not be diagnosed after the fact.
+        logger.warning(
+            "ref-lock: push to %s %s classified as CAS mismatch (lease moved) — stderr: %s",
+            remote,
+            ref,
+            (result.stderr or "").strip()[:200],
+        )
         raise subprocess.CalledProcessError(128, ["git", "update-ref", ref])
     logger.warning(
         "ref-lock: git push to %s %s failed (exit %s) — fail-closed: %s",
