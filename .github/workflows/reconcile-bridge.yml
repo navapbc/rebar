@@ -283,7 +283,14 @@ jobs:
             git commit -m "chore: sync events from rebar reconciler [run ${{ github.run_id }}]"
           fi
 
-          git fetch origin tickets || true
+          # EXPLICIT refspec is load-bearing — do NOT simplify to `git fetch origin
+          # tickets`. A bare fetch always writes FETCH_HEAD but only writes
+          # refs/remotes/origin/tickets when the configured remote.origin.fetch
+          # refspec covers `tickets`; under a narrow/single-branch fetch config it
+          # exits 0 leaving origin/tickets absent or STALE, so the ahead-count below
+          # (and the merge in the retry loop) reads the wrong snapshot. Matches the
+          # form used in the "Mount tickets branch as a worktree" step above.
+          git fetch origin '+tickets:refs/remotes/origin/tickets' || true
           ahead=$(git rev-list --count origin/tickets..HEAD 2>/dev/null || echo 0)
           if [ "$ahead" -eq 0 ]; then
             echo "Local tickets branch not ahead of origin — nothing to push."
@@ -306,7 +313,10 @@ jobs:
 
             if echo "$push_stderr" | grep -qiE 'non-fast-forward|rejected|fetch first'; then
               printf 'Push rejected (attempt %d):\n%s\n' "$attempt" "$push_stderr" >&2
-              git fetch origin tickets 2>&1 || echo "Fetch failed — retrying with stale remote" >&2
+              # EXPLICIT refspec (see above): a bare fetch leaves origin/tickets
+              # stale under a narrow refspec, so the merge below would re-merge the
+              # same old snapshot and the push would stay rejected every attempt.
+              git fetch origin '+tickets:refs/remotes/origin/tickets' 2>&1 || echo "Fetch failed — retrying with stale remote" >&2
             else
               echo "Push failed (non-retryable, exit $push_exit): $push_stderr" >&2
               exit 1

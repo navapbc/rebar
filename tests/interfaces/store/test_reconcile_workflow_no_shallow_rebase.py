@@ -62,3 +62,35 @@ def test_reconcile_uses_merge_not_rebase(workflow: Path) -> None:
         f"{workflow.name} should reconcile the tickets branch with "
         "'git merge --no-edit origin/tickets'"
     )
+
+
+@pytest.mark.parametrize("workflow", RECONCILE_WORKFLOWS, ids=lambda p: p.name)
+def test_tickets_fetch_always_names_the_destination_ref(workflow: Path) -> None:
+    """Every ``git fetch`` of the tickets branch must name its destination ref (bug 35f7).
+
+    A bare ``git fetch origin tickets`` always writes ``FETCH_HEAD`` but writes
+    ``refs/remotes/origin/tickets`` only OPPORTUNISTICALLY — when the remote's CONFIGURED
+    refspec covers that branch. These workflows consume the result as ``origin/tickets``
+    (``git rev-list origin/tickets..HEAD``, ``git merge --no-edit origin/tickets``), so a
+    configured refspec that does not cover ``tickets`` would leave that consumer reading an
+    absent or STALE ref and the push-retry loop unable to converge at any budget.
+
+    ``actions/checkout`` builds its workspace with ``git remote add``, which installs the
+    wildcard ``+refs/heads/*:refs/remotes/origin/*``, so these workflows are not currently
+    exposed. That is an implementation detail of a third-party action, not a guarantee this
+    repo controls — naming the destination ref makes the fetch correct without depending on
+    it, and matches the form already used to mount the worktree. Same defect class as
+    ``_store/sync.py`` (bug 5546) and ``_store/push.py`` (bug 35f7).
+    """
+    text = workflow.read_text(encoding="utf-8")
+    offenders = [
+        ln.strip()
+        for ln in text.splitlines()
+        if re.search(r"git fetch\s+\S+\s+tickets(\s|$|\s*[|2>])", ln) and "refs/remotes/" not in ln
+    ]
+    assert not offenders, (
+        f"{workflow.name} bare-fetches the tickets branch and then consumes it as "
+        "'origin/tickets'; use the explicit "
+        '"+tickets:refs/remotes/origin/tickets" refspec instead (bug 35f7). Found:\n'
+        + "\n".join(offenders)
+    )
