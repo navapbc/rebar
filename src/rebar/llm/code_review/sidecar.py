@@ -103,6 +103,7 @@ def build_payload(
         "deps": verdict.get("deps") or {},
         "runner": verdict.get("runner"),
         "model": verdict.get("model"),
+        "provider_provenance": verdict.get("provider_provenance"),
         "coverage": verdict.get("coverage", {}),
         "blocking": _with_norm_ids(verdict.get("blocking", [])),
         "advisory": _with_norm_ids(verdict.get("advisory", [])),

@@ -102,6 +102,7 @@ def build_result(
     *,
     runner: str,
     model: str | None = None,
+    provider_provenance: dict | None = None,
     trace_id: str | None = None,
     target: dict | None = None,
     reviewers: list[str] | None = None,
@@ -115,6 +116,11 @@ def build_result(
         "model": model,
         "trace_id": trace_id,
     }
+    # Additive (story S5/343b): a legacy reader ignoring this key still loads a valid
+    # payload — only stamped when the caller resolved one (e.g. the `fake` runner passes
+    # none), never overwriting the existing `model` string.
+    if provider_provenance is not None:
+        result["provider_provenance"] = provider_provenance
     if target is not None:
         result["target"] = target
     if reviewers is not None:
@@ -209,6 +215,7 @@ def finalize_findings(
     *,
     runner: str,
     model: str | None = None,
+    provider_provenance: dict | None = None,
     trace_id: str | None = None,
     target: dict | None = None,
     reviewers: list[str] | None = None,
@@ -223,6 +230,7 @@ def finalize_findings(
         findings,
         runner=runner,
         model=model,
+        provider_provenance=provider_provenance,
         trace_id=trace_id,
         target=target,
         reviewers=reviewers,
@@ -274,6 +282,7 @@ def finalize_outcome(
     output_schema: str | None = None,
     runner: str,
     model: str | None = None,
+    provider_provenance: dict | None = None,
     trace_id: str | None = None,
     target: dict | None = None,
     reviewers: list[str] | None = None,
@@ -288,14 +297,21 @@ def finalize_outcome(
     * ``structured`` — return the agent's structured payload, validated against
       ``output_schema`` when given.
     * ``text`` — return ``{text, runner, model, trace_id}`` from the final message.
+
+    ``provider_provenance`` (story S5/343b) is additive alongside the existing ``model``
+    string on every mode — a caller that resolves none (e.g. the ``fake`` runner) simply
+    omits the key, so a legacy reader is unaffected.
     """
     if mode == "text":
-        return {
+        text_result: dict[str, Any] = {
             "text": _final_text(outcome),
             "runner": runner,
             "model": model,
             "trace_id": trace_id,
         }
+        if provider_provenance is not None:
+            text_result["provider_provenance"] = provider_provenance
+        return text_result
 
     structured = outcome.get("structured_response")
     if structured is None:
@@ -318,13 +334,22 @@ def finalize_outcome(
 
     if mode == "structured":
         payload = validate_structured(data, output_schema)
-        return {**payload, "runner": runner, "model": model, "trace_id": trace_id}
+        structured_result: dict[str, Any] = {
+            **payload,
+            "runner": runner,
+            "model": model,
+            "trace_id": trace_id,
+        }
+        if provider_provenance is not None:
+            structured_result["provider_provenance"] = provider_provenance
+        return structured_result
 
     # mode == "findings"
     return finalize_findings(
         data.get("findings", []),
         runner=runner,
         model=model,
+        provider_provenance=provider_provenance,
         trace_id=trace_id,
         target=target,
         reviewers=reviewers,
