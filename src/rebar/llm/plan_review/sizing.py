@@ -146,6 +146,49 @@ def largest_window_tokens(model: str | None) -> int:
     return MODEL_LADDER[-1][1]
 
 
+# Per-model MAXIMUM output-token capacity (bug 30a2). The operator rule for plan review
+# is "effectively unlimited output" — the API requires a finite max_tokens, so the
+# resolved model's maximum IS the unlimited setting (output is naturally bounded by the
+# model's actual findings; unspent budget costs nothing). Values are the providers'
+# published max-output limits for the ladder models (Haiku 4.5: 64K; Sonnet 4.6 /
+# Opus 4.8: 128K). A hand table beside MODEL_LADDER, matched by substring like
+# largest_window_tokens — the ModelProfile capabilities seam (change 1014, f184) has
+# not landed on main and does not expose max output tokens, so this stays the source.
+MODEL_MAX_OUTPUT_TOKENS = (
+    ("claude-haiku-4-5", 64_000),
+    ("claude-sonnet-4-6", 128_000),
+    ("claude-opus-4-8", 128_000),
+)
+
+
+def model_max_output_tokens(model: str | None) -> int:
+    """The resolved model's maximum output-token capacity — the 'unlimited' output
+    budget every plan-review request rides at (raised through the runner's
+    ``effective_max_tokens`` seam; ``req.output_token_limit`` still clamps down where
+    bounded recovery needs it). Unknown/absent models fall back CONSERVATIVELY to
+    ``DEFAULT_MAX_TOKENS`` so an unmapped model never requests an output larger than
+    its provider accepts (a too-large max_tokens is an API error)."""
+    from rebar.llm.config import DEFAULT_MAX_TOKENS
+
+    if model:
+        for name, cap in MODEL_MAX_OUTPUT_TOKENS:
+            if name in model:
+                return cap
+    return DEFAULT_MAX_TOKENS
+
+
+def max_output_cfg(cfg: LLMConfig) -> LLMConfig:
+    """Return ``cfg`` with ``max_tokens`` raised to the resolved model's maximum output
+    capacity (bug 30a2): plan-review output is bounded by the model's actual findings,
+    so model-max is the 'unlimited' setting — any lower finite ceiling re-creates the
+    truncation → ``UnretryableOutputError`` → INDETERMINATE class this remediates.
+    Rides the per-request seam (``runner.effective_max_tokens`` — a request only RAISES
+    the operator floor, never lowers it; ``req.output_token_limit`` still clamps down
+    where a bounded-recovery caller sets it)."""
+    cap = model_max_output_tokens(cfg.model)
+    return cfg if cap <= cfg.max_tokens else replace(cfg, max_tokens=cap)
+
+
 # ── Pass-2 verify token-budget chunking ────────────────────────────────────────────
 # The chunking ALGORITHM + constants are owned by the shared review kernel
 # (`rebar.llm.review_kernel.verify`) as the single source (epic vivid-gang-day WS2). The
