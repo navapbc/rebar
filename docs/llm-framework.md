@@ -45,8 +45,15 @@ runnable offline.
 The optional surface is three extras, each lazy-imported behind
 `rebar._optional.guard_import(..., extra=…)` (which raises a clear error naming the
 exact `pip install nava-rebar[<extra>]`), and CI-enforced lean by
-`.github/workflows/optionality.yml` (an AST import-linter + a clean-core-wheel job
-that asserts the heavy stack is *not* importable + per-extra and union jobs):
+`.github/workflows/optionality.yml` — two jobs in the reusable it delegates to:
+a **clean-core-wheel** job that installs a built wheel with no extras into a fresh
+venv and asserts the heavy stack is *not* importable, and an **optional-extras**
+job that installs each extra into its own venv (plus one union venv, which is what
+catches a joint `ResolutionImpossible`). The AST import-linter half is no longer a
+dedicated job: `tests/unit/test_core_optionality.py` and `tests/unit/test_optional.py`
+run in the default suite on every matrix cell, and a guard in
+`tests/unit/test_ci_workflow_parity.py` fails the build if either stops being
+collected there:
 
 - **`[agents]`** — the LLM agent runtime (`pydantic-ai-slim[anthropic]` +
   `json-repair`, `pydantic>=2`): agent workflow steps, `review_*`, the workflow
