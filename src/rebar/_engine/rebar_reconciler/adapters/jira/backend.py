@@ -141,6 +141,12 @@ class JiraBackend:
 
     vendor = "jira"
 
+    #: The store-facing FAMILY (bug 5f48). Identical to ``vendor`` for Cloud, which is
+    #: why the distinction was invisible until Data Center arrived with a vendor string
+    #: that is NOT a member of CREATION_CHANNELS. Declared explicitly so the core reads
+    #: a family from the backend rather than deriving one from the vendor string.
+    identity_family = "jira"
+
     def __init__(self, transport: Any) -> None:
         self.transport = transport
         self.outbound = _JiraOutbound()

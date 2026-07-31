@@ -194,6 +194,13 @@ class JiraDataCenterBackend:
 
     vendor = "jira-datacenter"
 
+    #: The store-facing FAMILY this deployment belongs to (bug 5f48). ``vendor`` is
+    #: per-deployment, but the store's identity provider and its CREATION_CHANNELS
+    #: vocabulary are per-family — a human assigned on Cloud and on DC is ONE identity,
+    #: so both mint under ``jira``. The deployment is distinguished by
+    #: ``RemoteRef.instance``, not by forking the store vocabulary.
+    identity_family = "jira"
+
     def __init__(self, transport: Any, client: Any | None = None) -> None:
         self.transport = transport
         self.outbound = _DCOutbound()
