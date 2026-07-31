@@ -72,8 +72,12 @@ acceptance criteria are met.
 
 **CLAIM BEFORE YOU WORK — always.** Every unit of work must have a ticket that YOU hold
 `in_progress` *before* you touch code, run gates, or push a change for it. Run
-`claim <id> --assignee <you>` (which atomically moves `open → in_progress` and sets the
-assignee) as the FIRST step of working a ticket — never edit against an `open` ticket, and
+`claim <id>` (which atomically moves `open → in_progress` and sets the assignee to the
+configured `ticket.default_assignee`) as the FIRST step of working a ticket — **omit
+`--assignee`** so that default applies; only pass one when you mean to override it, and then
+only a **Jira-resolvable** identity (email or accountId) — a **bare handle** like `RebarBotNava`
+cannot be resolved to a Jira user and the next reconcile silently clears it
+(`docs/config.md#ticketdefault_assignee`). Never edit against an `open` ticket, and
 never leave active work under a ticket still marked `open`. Claim at the level you are working
 (the story/task/bug you implement), and when you begin executing an **epic**, move the epic
 itself to `in_progress` too. If you cannot claim (a `ConcurrencyError`/exit 10 means someone
@@ -103,8 +107,11 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    `review-plan` on a ticket that is not yet claimable — status `closed`/`idea`/`blocked`, or
    `open` but still blocked by an unclosed dependency — **fast-fails with no LLM** (unsigned
    `INDETERMINATE`, exit 2) unless you pass `--force`; close the prerequisites, then review.
-2. **Grab work atomically** — `claim <id> --assignee <you>`: moves an **open** ticket to
-   `in_progress` and sets the assignee in one step. If another agent already claimed it you
+2. **Grab work atomically** — `claim <id>`: moves an **open** ticket to
+   `in_progress` and sets the assignee to the configured `ticket.default_assignee` in one step
+   (omit `--assignee`; an explicit one wins over the default, and must be **Jira-resolvable** —
+   email or accountId, never a **bare handle**, which reconcile silently clears —
+   `docs/config.md#ticketdefault_assignee`). If another agent already claimed it you
    get **ConcurrencyError / exit 10** — do not retry the same ticket; pick another. Never
    hand-roll claim as `transition`+`edit` (that races). A **parent-first cascade** pulls a
    still-`open` parent into progress first (see `docs/concurrency.md`).
@@ -241,7 +248,7 @@ auto-commit/auto-push and do NOT go through Gerrit.)
 ```python
 import rebar
 tid = rebar.create_ticket("task", "title", return_alias=True)   # -> {"id","alias"}
-rebar.claim(tid["id"], assignee="me")                            # raises ConcurrencyError if taken
+rebar.claim(tid["id"])                   # uses ticket.default_assignee; ConcurrencyError if taken
 rebar.link(child, parent, "discovered_from")
 rebar.transition(tid["id"], "in_progress", "closed")
 ```
