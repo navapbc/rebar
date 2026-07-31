@@ -722,6 +722,30 @@ def clear_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = Non
 # classify as a CAS mismatch (fail-closed).
 _PUSH_REJECT_MARKERS = ("stale info", "rejected", "cannot lock ref")
 
+# Bug 4afc: only "stale info" is the --force-with-lease signal; ``rejected`` and
+# ``cannot lock ref`` also cover hook declines, rate limits, server errors and
+# ref.lock contention, which are not lease movement.
+_LEASE_MISMATCH_MARKER = "stale info"
+_NON_CAS_REJECT_MARKERS = (
+    "file exists",  # server-side ref.lock contention
+    "hook declined",
+    "internal server error",
+    "rate limit",
+)
+
+
+def _is_cas_mismatch_stderr(stderr: str) -> bool:
+    """Whether *stderr* (lowercased) shows the LEASE moved, not merely a rejection.
+
+    "stale info" is conclusive; a broader marker counts only when nothing names a
+    non-lease cause, so ambiguity fails closed per the documented posture.
+    """
+    if _LEASE_MISMATCH_MARKER in stderr:
+        return True
+    if any(m in stderr for m in _NON_CAS_REJECT_MARKERS):
+        return False
+    return any(m in stderr for m in _PUSH_REJECT_MARKERS)
+
 
 def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspec: str) -> None:
     """Do a ``--force-with-lease=<ref>:<old>`` push of *refspec* to *remote*.
@@ -740,8 +764,16 @@ def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspe
     if result.returncode == 0:
         return
     stderr = (result.stderr or "").lower()
-    if any(marker in stderr for marker in _PUSH_REJECT_MARKERS):
+    if _is_cas_mismatch_stderr(stderr):
         # Remote-side CAS mismatch — same shape the update-ref discriminator reads.
+        # Bug 4afc: LOG the evidence — this branch aborts a pass by claiming the lease
+        # was stolen, and previously raised silently while fail-closed below logged.
+        logger.warning(
+            "ref-lock: push to %s %s classified as CAS mismatch (lease moved) — stderr: %s",
+            remote,
+            ref,
+            (result.stderr or "").strip()[:200],
+        )
         raise subprocess.CalledProcessError(128, ["git", "update-ref", ref])
     logger.warning(
         "ref-lock: git push to %s %s failed (exit %s) — fail-closed: %s",
