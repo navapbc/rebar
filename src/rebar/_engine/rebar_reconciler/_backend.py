@@ -188,7 +188,11 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
     optional capabilities a backend advertises.
 
     **This Protocol must state what the CORE actually requires, not a comfortable
-    subset of it.** It declared six members while the core reached for eighteen;
+    subset of it.** It declared six members while the core reaches for TWENTY-ONE distinct
+    transport members; the eighteen below are the always-required subset, and the
+    remaining four (``set_relationship`` / ``get_issuelinks_map`` /
+    ``add_comment`` / ``get_comment_map``) are the opt-in capability surface, so a
+    links-less transport still conforms. Twelve of the twenty-one were undeclared;
     the twelve it omitted were therefore unchecked by every conformance test, and
     a transport missing all twelve passed ``isinstance``, the backend contract
     suite, and 1600+ unit tests while being unable to complete a single writing
