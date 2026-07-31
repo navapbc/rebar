@@ -222,6 +222,7 @@ class BindingStoreProtocol(Protocol):
 
     def get_jira_key(self, local_id: str) -> str | None: ...
     def is_bound(self, local_id: str) -> bool: ...
+    def is_keyless_pending_within_grace(self, local_id: str) -> bool: ...
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +529,25 @@ def compute_outbound_mutations(
         jira_key = binding_store.get_jira_key(local_id)
 
         if jira_key is None:
+            # DEFER the create while a KEYLESS-PENDING binding is still inside the
+            # index-lag grace window (bug 21fc).
+            #
+            # `get_jira_key` returns None for a keyless-pending entry, so this branch
+            # cannot tell "never created" from "created, then we crashed before recording
+            # the key, and Jira has not indexed it yet". On DC those are very different:
+            # emitting the create sends it to `create_one`, whose JQL dedup search misses
+            # for the SAME eventual-consistency reason, and a SECOND Jira issue is written
+            # for this ticket. That is the only known path where rebar writes wrong data
+            # rather than reading incomplete data.
+            #
+            # Deferring is safe in both directions: if the issue does exist,
+            # `recover_pending_bindings` binds to it once the index catches up; if it truly
+            # never landed, the grace window expires and the create is emitted on a later
+            # pass. A delayed create is recoverable; a duplicate is not.
+            if getattr(binding_store, "is_keyless_pending_within_grace", None) and (
+                binding_store.is_keyless_pending_within_grace(local_id)
+            ):
+                continue
             _compute_outbound_create_mutation(
                 mutations,
                 ticket,
