@@ -295,6 +295,36 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
         ...
 
 
+def assert_transport_conforms(transport: Any, *, vendor: str) -> None:
+    """Fail LOUDLY, at backend CONSTRUCTION, if ``transport`` is missing a
+    required :class:`TicketTransport` member.
+
+    Story J9 exists because a transport missing TWELVE members passed
+    ``isinstance``, the backend contract suite, and 1600+ unit tests, and then
+    crashed mid-writing-pass on ``set_entity_property``. Declaring the members on
+    the port (above) closes the *declaration* half of that gap; this closes the
+    *enforcement* half. Without it the port is a description that nothing checks
+    at the moment a backend is assembled, and the first evidence of a missing
+    member is again a partial pass that has already written to the remote.
+
+    Construction is the right choke point precisely because the call sites are
+    not: seven of those twelve members are invoked from core paths that swallow
+    ``Exception`` at EVERY site, so a missing member there produces no crash and
+    no record. A failure raised here happens before any mutation is applied.
+
+    Raises ``BackendEnvError`` — the same type the factories already raise for a
+    mis-configured environment, which is what a non-conforming transport is.
+    """
+    missing = [m for m in _REQUIRED_TRANSPORT_MEMBERS if not hasattr(transport, m)]
+    if missing:
+        raise BackendEnvError(
+            f"the {vendor!r} backend's transport "
+            f"({type(transport).__module__}.{type(transport).__qualname__}) is missing "
+            f"required TicketTransport member(s): {sorted(missing)}. A reconcile pass "
+            f"would fail partway through — after writing — rather than here."
+        )
+
+
 class OutboundMapper(Protocol):
     """Map a local ticket to the backend's field/value shapes (+ rich text).
 
