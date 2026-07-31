@@ -324,14 +324,28 @@ jobs:
               exit 1
             fi
 
-            if [ "$attempt" -lt "$max_retries" ]; then
-              backoff=$(( (1 << attempt) + RANDOM % 3 ))
-              echo "Waiting ${backoff}s before retry $((attempt + 1))..." >&2
-              sleep "$backoff"
-            fi
+            # Bug 4c4f: NO backoff here, deliberately. By this point we have already
+            # fetched and merged, so HEAD is a valid fast-forward at this instant; the
+            # only thing that can invalidate it is another push landing first. Sleeping
+            # can therefore only forfeit the race the retry exists to win, and the old
+            # exponential sleep (3/6/10/17s) grew precisely as the attempt budget shrank
+            # — every observed remote advance in run 30585738860 landed INSIDE one of
+            # those sleeps. Exponential backoff is right for load-shedding a
+            # rate-limited server; this is an optimistic-concurrency CAS on a hot
+            # append-only ref, where the correct move after a clean merge is to re-push
+            # immediately. This also finally matches the local client path this loop
+            # claims to mirror above: src/rebar/_store/push.py re-pushes on the next
+            # iteration with no delay.
           done
 
-          echo "Push failed after $max_retries retries. Last stderr: $push_stderr" >&2
+          # Bug 4c4f: the loop's final iteration fetched and merged and then fell out of
+          # `while` WITHOUT pushing that merge — paying for a fast-forwardable HEAD and
+          # discarding it. Spend it: one last push before giving up.
+          if push_stderr=$(git push origin HEAD:tickets 2>&1); then
+            echo "Push succeeded (final attempt, after the last merge)."
+            exit 0
+          fi
+          echo "Push failed after $max_retries retries + a final attempt. Last stderr: $push_stderr" >&2
           exit 1
 
       - name: Notify on bridge failure
