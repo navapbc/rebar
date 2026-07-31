@@ -36,6 +36,24 @@ from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: 
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 
+# The plan-review step ids + failure tail (metrics rebuild, coach/verify recoveries,
+# degraded/cancelled verdict builders) live in the plan_review_tail leaf (module-size
+# split); re-imported here so callers/tests keep addressing them as gate_dispatch
+# attributes.
+from .plan_review_tail import (
+    STEP_ASSEMBLE,
+    STEP_COACH,
+    STEP_DECIDE,
+    STEP_FINDERS,
+    STEP_PRECHECK,
+    STEP_VERIFY,
+    _attach_plan_review_metrics,
+    _cancelled_plan_review_verdict,
+    _degraded_plan_review_verdict,
+    _recover_plan_review_coach_failure,
+    _recover_plan_review_verify_failure,
+)
+
 
 def _gate_doc(name: str, repo_root) -> dict[str, Any]:
     """Load a packaged gate workflow (``src/rebar/llm/workflow/gates/<name>.yaml``).
@@ -49,19 +67,10 @@ def _gate_doc(name: str, repo_root) -> dict[str, Any]:
 
 
 # ── plan-review ───────────────────────────────────────────────────────────────────
-# Named step ids for gates/plan-review.yaml. The dispatcher's mid-tail RECOVERY and the metrics
-# reconstruction below key off these ids (a run's succeeded-step partition is looked up by id); a
-# YAML rename that dropped one would make the lookup silently return None, so a recoverable run
-# would degrade to a hollow INDETERMINATE with NO error (the exact silent-failure this centralizes
-# away). Keep the literals here, once, and validate them against the loaded doc at dispatch time
-# (see `_validate_gate_step_ids`) so a rename is caught LOUDLY instead of silently degraded.
-STEP_PRECHECK = "precheck"
-STEP_ASSEMBLE = "assemble"
-STEP_FINDERS = "finders"
-STEP_VERIFY = "verify"
-STEP_DECIDE = "decide"
-STEP_COACH = "coach"
-
+# The named step ids, the mid-tail recovery reconstructions, the metrics rebuild, and the
+# degraded/cancelled verdict builders live in the plan_review_tail leaf (module-size split;
+# no back-import into this dispatcher). Re-exported here so callers/tests keep addressing
+# them as gate_dispatch attributes.
 # The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
 _PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
     {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
@@ -131,9 +140,11 @@ def produce_plan_review_verdict(
     import time
 
     from rebar.llm.config import gate_config
+    from rebar.llm.plan_review import generation
     from rebar.llm.plan_review.orchestrator import (
         assemble_context_cache,
         collect_contract_violations,
+        material_fingerprint,
     )
     from rebar.llm.plan_review.prerequisites import focused_inputs
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
@@ -167,6 +178,7 @@ def produce_plan_review_verdict(
     _validate_gate_step_ids(doc, _PLAN_REVIEW_REQUIRED_STEP_IDS, gate_name="plan-review")
     rec = MemoryRecorder()
     _t_total = time.monotonic()
+    cancel: Any = None
     # One run-scoped assemble_context memo for the whole workflow: the four plan-review ops
     # (precheck / assemble_criteria / verify_inputs / coach_inputs) each call assemble_context
     # with the SAME (ticket_id, repo_root) inside this run, so the cache collapses their N+1
@@ -181,6 +193,13 @@ def produce_plan_review_verdict(
             collect_contract_violations(),
             gate_config(cfg),
             focused_inputs(list(prerequisite_blocks or [])),
+            # Mid-run cancellation (story 2c89): a run-scoped token the seam probes
+            # (plan_review_verify_inputs / plan_review_coach_inputs) and the Pass-1 chunk
+            # funnel read. The baseline is the SAME own-material hash the sign-time
+            # re-check compares (initial_generation.own_material).
+            generation.cancel_scope(
+                ctx.ticket_id, material_fingerprint(ctx), repo_root=repo_root
+            ) as cancel,
         ):
             res = _ex.run_workflow(
                 doc,
@@ -203,7 +222,18 @@ def produce_plan_review_verdict(
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
+    except generation.PlanReviewCancelledStale:
+        # The batch (finders) path propagates step exceptions RAW (interpreter._run_batch
+        # has no try around runner.run), unlike scripted ops (captured in-band) — accept
+        # both routes into the same cancelled verdict.
+        return _cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
     total_ms = round((time.monotonic() - _t_total) * 1000, 1)
+
+    # Mid-run cancellation (story 2c89): checked BEFORE the recovery reconstructions
+    # below — a cancelled run must yield the cancelled INDETERMINATE, never a verdict
+    # "recovered" from the pre-edit passes (which review_plan would sign/sidecar).
+    if cancel is not None and cancel.event.is_set():
+        return _cancelled_plan_review_verdict(ctx, cfg, scope=cancel)
 
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
@@ -238,245 +268,6 @@ def produce_plan_review_verdict(
         error=(res.error or "plan-review workflow LLM tier failed"),
         advisory_cap=advisory_cap,
         runner_name=runner_sel.name,
-    )
-
-
-# Step ids/kinds that partition a plan-review run into its latency tiers (toy-kink-ire).
-_DET_STEP_IDS = frozenset({STEP_PRECHECK})  # the deterministic floor tier
-_LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable LLM tier (finders/verify/coach)
-
-
-def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
-    """Reinstate ``coverage['metrics']`` on the WORKFLOW plan-review path (toy-kink-ire).
-
-    B-RETIRE removed bespoke ``run_review``, the only producer of the per-pass latency/cost
-    metrics (db7b AC5). This reconstructs the equivalent from the workflow run's recorder
-    step timings (added by the interpreter) so the sidecar carries them again for passive
-    latency/cost-target refinement:
-
-    - ``det_ms``    — wall-clock of the deterministic floor (the ``precheck`` step).
-    - ``llm_ms``    — wall-clock of the billable LLM tier (the ``agent``/``batch`` steps:
-                      Pass-1 ``finders``, Pass-2 ``verify``, Pass-4 ``coach_notes``).
-    - ``total_ms``  — the whole run's wall-clock (measured around ``run_workflow``).
-    - ``llm_calls`` — a cost proxy: the Pass-1 finder ``criteria_count`` + one per succeeded
-                      agent step (``verify`` / ``coach_notes``). Mirrors run_review's proxy.
-    - ``claim_path``— the structural marker (the fast claim check is a local HMAC verify,
-                      LLM/network-free).
-
-    Story d52a: a batch step's ``_usage`` output (the Pass-1 + prerequisite per-call usage
-    aggregate the ProductionBatchRunner emits) is folded in — token totals into these
-    metrics, the raw records + per-criterion derivation as ``coverage['usage']``.
-
-    ``det_ms + llm_ms`` deliberately does NOT equal ``total_ms``: the scripted prep/decision
-    steps (``assemble`` / ``grounding`` / ``verify_inputs`` / ``decide`` / ``coach_inputs`` /
-    ``coach``) are non-LLM overhead, counted into neither tier — absorbed only into ``total_ms``
-    (the same split the bespoke ``run_review`` reported).
-
-    Mutates ``verdict['coverage']['metrics']`` in place (only that key; existing coverage is
-    preserved). Tolerant of untimed/partial records (a missing ``duration_ms`` contributes 0)
-    so it never raises inside the gate.
-    """
-    det_ms = 0.0
-    llm_ms = 0.0
-    finder_criteria = 0
-    agent_calls = 0
-    verify_requests = 0  # Pass-2 verifier model-request count — step usage vs its budget (bug 59bc)
-    usage_per_call: list[dict[str, Any]] = []  # d52a: per-call records off the batch `_usage`
-    for s in rec.steps:
-        if not isinstance(s, dict) or s.get("status") != "succeeded":
-            continue
-        step_id = s.get("step_id")
-        kind = s.get("kind")
-        dur = s.get("duration_ms")
-        if isinstance(dur, (int, float)):
-            if step_id in _DET_STEP_IDS:
-                det_ms += dur
-            elif kind in _LLM_STEP_KINDS:
-                llm_ms += dur
-        if kind == "batch":
-            finder_criteria += int((s.get("outputs") or {}).get("criteria_count") or 0)
-            step_usage = (s.get("outputs") or {}).get("_usage")
-            if isinstance(step_usage, dict):
-                per_call = step_usage.get("per_call") or []
-                usage_per_call += [r for r in per_call if isinstance(r, dict)]
-        elif kind == "agent":
-            agent_calls += 1
-            if step_id == STEP_VERIFY:
-                verify_requests += int(
-                    ((s.get("outputs") or {}).get("_usage") or {}).get("requests") or 0
-                )
-    metrics = {
-        "det_ms": round(det_ms, 1),
-        "llm_ms": round(llm_ms, 1),
-        "total_ms": round(total_ms, 1),
-        "llm_calls": finder_criteria + agent_calls,
-        # Pass-2 verify step usage: model requests (~tool-call cycles) the verifier actually
-        # consumed, so headroom vs the per-finding budget (`step_budget_per_item`) is observable.
-        "verify_requests": verify_requests,
-        "claim_path": "no-llm/no-network (structural; the fast claim check is a local HMAC verify)",
-    }
-    coverage = verdict.get("coverage")
-    if not isinstance(coverage, dict):
-        coverage = {}
-        verdict["coverage"] = coverage
-    if usage_per_call:
-        # d52a: fold the Pass-1/prerequisite token totals into the metrics and attach the
-        # raw records + per-criterion derivation for the sidecar (coverage.usage).
-        from rebar.llm.plan_review.pass1 import aggregate_usage
-
-        usage_agg = aggregate_usage(usage_per_call)
-        for field in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
-            metrics[field] = usage_agg["totals"][field]
-        coverage["usage"] = {
-            "per_call": usage_agg["per_call"],
-            "per_criterion": usage_agg["per_criterion"],
-        }
-    coverage["metrics"] = metrics
-
-
-def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | None:
-    """If the only failure was in the Pass-4 coach tail (Pass-3 ``decide`` succeeded),
-    reassemble the verdict from the recorded ``decide`` partition with EMPTY coaching —
-    the same non-fatal-coach result bespoke run_review emits. Returns None if ``decide``
-    did not succeed (then the LLM tier genuinely failed → caller degrades to INDETERMINATE)."""
-    from rebar.llm import findings as _findings
-    from rebar.llm.plan_review import orchestrator
-    from rebar.llm.plan_review.det_floor import PlanContext
-
-    # Latest-wins map of succeeded step outputs by their step id (frame-key tail).
-    succeeded: dict[str, dict] = {}
-    for s in rec.steps:
-        if s.get("status") != "succeeded":
-            continue
-        fk = s.get("frame_key") or s.get("step_id") or ""
-        succeeded[str(fk).rsplit("/", 1)[-1]] = s.get("outputs") or {}
-
-    decide = succeeded.get(STEP_DECIDE)
-    precheck = succeeded.get(STEP_PRECHECK)
-    if not decide or not precheck or "blocking" not in decide:
-        return None  # Pass-3 did not complete → the LLM tier failed, not just the coach
-
-    parts = {
-        k: list(decide.get(k) or [])
-        for k in ("blocking", "surfaced", "overflow", "indeterminate", "dropped")
-    }
-    coverage = {
-        "det": precheck.get("det_coverage") or {},
-        "routing": (succeeded.get(STEP_ASSEMBLE) or {}).get("routing") or {},
-        "llm_ran": True,
-        "coach_error": str(error) if error else "pass-4 coach failed; verdict emitted without it",
-        "hierarchy_incomplete": precheck.get("hierarchy_incomplete", False),
-        "hierarchy_incomplete_detail": precheck.get("hierarchy_incomplete_detail", []),
-    }
-    pctx = PlanContext(
-        ticket_id=str(precheck.get("canonical_id") or ""),
-        ticket_type=str(precheck.get("ticket_type") or ""),
-        title="",
-        description="",
-    )
-    verdict = orchestrator.finalize_verdict(
-        pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
-    )
-    return _findings.validate_structured(verdict, "plan_review_verdict")
-
-
-def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | None:
-    """If Pass-1 ``finders`` SUCCEEDED but Pass-2/3 did not (the verify step failed — e.g. the
-    agentic verifier exhausted its step budget), reassemble the verdict from the Pass-1 findings
-    PRESERVED as unverified → INDETERMINATE, with ``coverage.verify_failed`` (NOT
-    ``llm_unavailable``). ``finalize_verdict`` then fails OPEN unless a preserved finding sits on
-    a blocking-enabled criterion (bug 59bc). Returns None if ``finders`` did not succeed (then the
-    LLM tier genuinely failed → caller degrades to INDETERMINATE)."""
-    from rebar.llm import findings as _findings
-    from rebar.llm.plan_review import orchestrator
-    from rebar.llm.plan_review.det_floor import PlanContext
-
-    succeeded: dict[str, dict] = {}
-    for s in rec.steps:
-        if s.get("status") != "succeeded":
-            continue
-        fk = s.get("frame_key") or s.get("step_id") or ""
-        succeeded[str(fk).rsplit("/", 1)[-1]] = s.get("outputs") or {}
-
-    finders = succeeded.get(STEP_FINDERS)
-    precheck = succeeded.get(STEP_PRECHECK)
-    if not finders or not precheck or STEP_DECIDE in succeeded:
-        # finders did not run (genuine LLM-tier failure), or decide DID run (a different
-        # failure the coach-recovery handles) → not a verify-only failure.
-        return None
-    pass1 = list(finders.get("findings") or [])
-    if not pass1:
-        return None  # no findings to preserve → nothing to recover; let it degrade
-
-    # Route the preserved Pass-1 findings through Pass-3 with EMPTY verifications: each finding
-    # then takes pass3_decide(None) → the kernel's documented no-verification degrade
-    # (decision=indeterminate, validity/impact/priority=0, severity=none, verification=None). This
-    # reuses the existing decision path — the verdict stays schema-valid and NO new decision state
-    # is introduced — rather than hand-stamping a partial finding shape.
-    decided = orchestrator.pass3_over_findings(
-        pass1, {}, execution_review=precheck.get("review_phase", "planning") == "execution"
-    )
-    parts = orchestrator.partition_findings(
-        list(precheck.get("det_blocking") or []),
-        list(precheck.get("det_advisory") or []),
-        decided,
-    )
-    coverage = {
-        "det": precheck.get("det_coverage") or {},
-        "routing": (succeeded.get(STEP_ASSEMBLE) or {}).get("routing") or {},
-        "llm_ran": True,
-        "verify_failed": True,
-        "verify_error": str(error)
-        if error
-        else "pass-2 verify failed; findings preserved unverified",
-        "hierarchy_incomplete": precheck.get("hierarchy_incomplete", False),
-        "hierarchy_incomplete_detail": precheck.get("hierarchy_incomplete_detail", []),
-    }
-    pctx = PlanContext(
-        ticket_id=str(precheck.get("canonical_id") or ""),
-        ticket_type=str(precheck.get("ticket_type") or ""),
-        title="",
-        description="",
-    )
-    verdict = orchestrator.finalize_verdict(
-        pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
-    )
-    return _findings.validate_structured(verdict, "plan_review_verdict")
-
-
-def _degraded_plan_review_verdict(
-    ctx, cfg, *, error, advisory_cap: int, runner_name: str | None
-) -> dict[str, Any]:
-    """The unsigned INDETERMINATE verdict a systemic LLM outage degrades to — the SAME
-    shape ``run_review`` produces (DET floor ran, LLM did not): DET findings partitioned,
-    ``coverage.llm_unavailable=True`` (so ``finalize_verdict`` ⇒ INDETERMINATE and
-    ``review_plan`` never signs it)."""
-    from rebar.llm import failure as _failure
-    from rebar.llm.plan_review import det_floor, orchestrator
-
-    det_results = det_floor.run_det_floor(ctx)
-    det_blocks = det_floor.det_blocking_findings(det_results)
-    det_advisories = det_floor.det_advisory_findings(det_results)
-    # Disposition (story blackbear): when the raised error carries an ``.outcome`` (the genuine
-    # outage paths — preflight / mid-run LLMUnavailableError), persist resolution_class/retryable/
-    # diagnostic onto coverage so the CLI can map a retryable outage → exit 11. A string-error
-    # tail (finders produced nothing) carries no outcome → no disposition → plain INDETERMINATE.
-    outcome = _failure.outcome_of(error)
-    coverage = {
-        "det": det_floor.det_coverage(det_results),
-        "llm_ran": False,
-        "llm_unavailable": True,
-        "llm_error": str(error),
-        **_failure.resolution_fields(outcome),
-        "hierarchy_incomplete": getattr(ctx, "hierarchy_incomplete", False),
-        "hierarchy_incomplete_detail": getattr(ctx, "hierarchy_incomplete_detail", []),
-    }
-    _failure.log_degrade(outcome, gate="plan-review", ticket_id=getattr(ctx, "ticket_id", None))
-    parts = orchestrator.partition_findings(
-        det_blocks, det_advisories, [], advisory_cap=advisory_cap
-    )
-    return orchestrator.finalize_verdict(
-        ctx, parts, coaching=[], coverage=coverage, runner_name=runner_name, model=cfg.model
     )
 
 

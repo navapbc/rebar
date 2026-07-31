@@ -370,8 +370,11 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     from rebar import config as _config
     from rebar.llm.config import resolve_gate_config
 
-    from . import _verifier_cfg, orchestrator, passes, sizing
+    from . import _verifier_cfg, generation, orchestrator, passes, sizing
 
+    # Between-pass cancel probe (story 2c89): after the Pass-1 finders, before the
+    # billable Pass-2 verify. OWN-material only — see generation.probe_cancel.
+    generation.probe_cancel("post-finders")
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     findings = list(ctx.inputs.get("findings") or [])
@@ -416,9 +419,12 @@ def plan_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
     ``findings`` (story 8086) is the coachable union — BLOCKING first, then surviving
     advisory — so blocking findings (the ones an agent must remediate) get coaching too;
     it also drives the coach_gate branch condition (fires when EITHER bucket is non-empty)."""
-    from . import orchestrator, passes
+    from . import generation, orchestrator, passes
     from .prerequisites import current_blocks
 
+    # Between-pass cancel probe (story 2c89): after the deterministic Pass-3 decide,
+    # before the billable Pass-4 coach. OWN-material only — see generation.probe_cancel.
+    generation.probe_cancel("post-decide")
     tid = _ticket_id(ctx)
     pctx = orchestrator.assemble_context(tid, repo_root=ctx.repo_root)
     surviving = list(ctx.inputs.get("surviving") or [])
