@@ -40,6 +40,8 @@ from rebar.llm.errors import (
 from rebar.llm.providers import ProviderSession
 from rebar.llm.structured_run import (
     _extract_usage,
+    _import_pydantic_ai,  # noqa: F401  (re-exported: tests patch it on `runner`)
+    _pai_check_config,  # noqa: F401  (re-exported: tests import it from `runner`)
     _pai_structured,
     _warn_if_zeroed_usage,
     effective_max_iterations,
@@ -634,41 +636,6 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
 
 
 # ── lazy imports + helpers ────────────────────────────────────────────────────
-def _import_pydantic_ai():
-    try:
-        from pydantic_ai import Agent
-    except ImportError as exc:
-        raise LLMConfigError(
-            "the pydantic_ai runner needs the 'agents' extra (pydantic-ai-slim). "
-            "Install it with: pip install 'nava-rebar[agents]'"
-        ) from exc
-    return Agent
-
-
-def _pai_check_config(cfg: LLMConfig) -> None:
-    """VALIDATE ``base_url``/``api_key`` rather than refuse them outright (story S4): this
-    used to raise for ANY ``base_url``/``api_key``, making the OpenAI-compatible local-server
-    recipe ``docs/llm-framework.md`` documents a false promise. ``rebar.llm.providers`` now
-    builds a real provider for a configured ``base_url``; this only rejects ambiguous/
-    malformed config, still LOUDLY: ``api_key`` WITHOUT ``base_url`` (direct-OpenAI instead
-    reads the vendor SDK's own ``OPENAI_API_KEY``), or a ``base_url`` missing a scheme/host."""
-    if cfg.api_key and not cfg.base_url:
-        raise LLMConfigError(
-            "REBAR_LLM_API_KEY (api_key) is set without base_url — ambiguous: the direct "
-            "provider path reads the vendor SDK's own env var (e.g. OPENAI_API_KEY) instead. "
-            "Set base_url too (an OpenAI-compatible endpoint) or unset api_key."
-        )
-    if cfg.base_url:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(cfg.base_url)
-        if not (parsed.scheme and parsed.netloc):
-            raise LLMConfigError(
-                f"base_url (REBAR_LLM_BASE_URL) is not an absolute URL: {cfg.base_url!r} — "
-                "expected e.g. 'http://localhost:1234/v1'"
-            )
-
-
 # Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,
 # never per call.
 _TOOL_CAPABILITY_CHECKED: set[str] = set()
