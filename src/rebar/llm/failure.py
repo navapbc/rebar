@@ -402,6 +402,24 @@ def recovery_failure_cause(exc: object) -> str | None:
     Reading them unconditionally yields "context (None chars) exceeds the limit (None
     chars)" for, say, an exhaustion at criterion 7 — relocating the misdiagnosis instead
     of removing it.
+
+    The size branch deliberately does NOT tell the operator to "shorten the ticket's
+    description/comments" — that remedy reads as actionable but neither half is:
+
+    * **description** — the description is *material*: :func:`rebar.llm.plan_review.pass1
+      .material_fingerprint` hashes it into the plan-review attestation, and its docstring
+      records that a material edit invalidates the signature. Shortening it to clear this
+      close gate would therefore trip the other one (``require_plan_review_for_close``),
+      which then demands the attestation be re-earned. The wording keeps the lever but
+      states that trade, rather than sending the operator into it blind.
+    * **comments** — comments are explicitly NON-material (same docstring), so editing
+      them would be attestation-safe, but the event store is append-only: ``comment()``
+      in ``rebar._lib_writes`` (see the public write surface around line 511) has no
+      delete or redact counterpart. There is no operation that shortens or removes a
+      comment, so advising it names a lever that does not exist.
+
+    What is left is the measurement (which is the real diagnosis) plus the pointer to the
+    ``gate_error_v1`` sidecar — a step the operator can actually take.
     """
     from rebar.llm.errors import CompletionRecoveryError
 
@@ -412,9 +430,11 @@ def recovery_failure_cause(exc: object) -> str | None:
     if isinstance(chars, int) and isinstance(limit, int):
         return (
             f"The ticket's context ({chars:,} chars) exceeds the bounded completion-recovery "
-            f"limit ({limit:,} chars), so the recovery pass was refused before it ran — "
-            f"shorten the ticket's description/comments. Its gate_error_v1 sidecar holds "
-            f"the full diagnostic."
+            f"limit ({limit:,} chars), so the recovery pass was refused before it ran. The "
+            f"context cannot simply be made smaller: its comments are append-only (the store "
+            f"has no redaction operation), and its description is material, so editing it "
+            f"invalidates the plan-review attestation, which would then have to be re-earned. "
+            f"Its gate_error_v1 sidecar holds the full diagnostic."
         )
     return (
         "Bounded completion recovery could not finish for this ticket; the recovery bounds "
