@@ -18,16 +18,138 @@ direction is one-way (``runner`` -> ``structured_run``, never back).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import time
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NoReturn
 
 from rebar.llm import usage_log
-from rebar.llm.errors import LLMConfigError, StructuredOutputError, UnretryableOutputError
+from rebar.llm.errors import (
+    LLMConfigError,
+    LLMError,
+    LLMRunnerError,
+    LLMUnavailableError,
+    StructuredOutputError,
+    UnretryableOutputError,
+)
 
 if TYPE_CHECKING:
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import RunRequest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FailureContext:
+    """The bounded, per-call facts ``interpret_failure`` needs to enrich/classify a raised
+    exception (ADR 0056 decision 3) — everything the three ``except`` arms of
+    ``PydanticAIRunner.run()`` used to close over as locals, threaded explicitly instead."""
+
+    call_label: str
+    execution_mode: str
+    ran_model: str
+    req_limit: int
+    eff_max_iter: int
+    started_at: float  # time.monotonic() at call start; elapsed computed inside
+
+
+def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContext) -> NoReturn:
+    """The ``except`` spine of ``PydanticAIRunner.run()`` (ADR 0056 decision 3), lifted out
+    verbatim as a plain function. ALWAYS raises — never returns.
+
+    Dispatches on the exception type via ``isinstance``, in exactly this order (the order IS
+    the contract — see the ADR and the module-level test):
+
+    1. ``UsageLimitExceeded`` — rebar's own step-budget stop, not a provider outage.
+    2. ``LLMError`` — already typed; enrich in place and re-raise the SAME object.
+    3. anything else — try the sampling-parameter-rejection translation FIRST (a provider
+       rejecting e.g. ``temperature`` must fail loudly/actionably, not be swept into the
+       broad provider-outage bucket below); only if that returns ``None`` does the generic
+       ``LLMUnavailableError`` path run.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    tool_calls_limit = max(8, ctx.eff_max_iter)
+    if isinstance(exc, UsageLimitExceeded):
+        # Computed BEFORE the log line so the repetition summary can be reported alongside the
+        # budget numbers — a runaway that burned its budget on one repeated tool call reads very
+        # differently from one that made steady progress.
+        budget_diag = usage_log.failure_usage(
+            run_messages,
+            request_limit=ctx.req_limit,
+            tool_calls_limit=tool_calls_limit,
+        )
+        logger.warning(
+            "llm call [%s] mode=%s model=%s hit step budget "
+            "(request_limit=%d max_iterations=%d) in %.1fs %s",
+            ctx.call_label,
+            ctx.execution_mode,
+            ctx.ran_model,
+            ctx.req_limit,
+            ctx.eff_max_iter,
+            time.monotonic() - ctx.started_at,
+            usage_log.format_repetition(budget_diag),
+        )
+        budget_err = LLMRunnerError(
+            f"agent exceeded its step budget (max_iterations={ctx.eff_max_iter}; "
+            "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
+            "the task."
+        )
+        budget_err.diagnostic = budget_diag  # type: ignore[attr-defined]
+        raise budget_err from exc
+    if isinstance(exc, LLMError):
+        # Preserve the typed failure while attaching bounded counters from
+        # the failed run (no prompt/tool content).
+        exc.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+            run_messages,
+            request_limit=ctx.req_limit,
+            tool_calls_limit=tool_calls_limit,
+        )
+        raise exc
+    # A SYSTEMIC provider failure (auth / missing key / connection / rate-limit). Unify
+    # into the provider-agnostic LLMUnavailableError so every prompt-using client gets ONE
+    # recognizable "LLM couldn't run" signal — never a swallowed empty result
+    # (fuel-posse-ball).
+    # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g. Bedrock's
+    # "temperature is deprecated for this model" on a model NOT in the capabilities.py
+    # denylist) must fail LOUDLY and ACTIONABLY, not be misclassified as an opaque outage by
+    # the broad LLMUnavailableError path below. Only when this returns None (not a
+    # sampling-parameter rejection) does the existing path run, unchanged.
+    from rebar.llm.failure import translate_sampling_parameter_rejection
+
+    sampling_err = translate_sampling_parameter_rejection(exc, ctx.ran_model)
+    if sampling_err is not None:
+        sampling_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+            run_messages,
+            request_limit=ctx.req_limit,
+            tool_calls_limit=tool_calls_limit,
+        )
+        raise sampling_err from exc
+    logger.warning(
+        "llm call [%s] mode=%s model=%s FAILED in %.1fs: %s",
+        ctx.call_label,
+        ctx.execution_mode,
+        ctx.ran_model,
+        time.monotonic() - ctx.started_at,
+        exc,
+    )
+    provider_err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+    provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
+        run_messages,
+        request_limit=ctx.req_limit,
+        tool_calls_limit=tool_calls_limit,
+    )
+    # Attach the classified disposition as METADATA (story civilized-immediate-mamba). This
+    # does NOT change the raised type — every existing `except LLMUnavailableError` still
+    # catches, and the per-seam wiring + exit-code use is story blackbear's. Kept total
+    # (classify_llm_failure never raises), so enriching the error can't mask it.
+    from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+    provider_err.outcome = classify_llm_failure(  # type: ignore[attr-defined]
+        exc, ClassifyContext(model=ctx.ran_model)
+    )
+    raise provider_err from exc
+
 
 # Max chars of the model's faulty prior reply echoed back in the bounded-retry reask
 # (story drake) — enough to diff a near-miss, bounded so a huge blob can't balloon the prompt.
