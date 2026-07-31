@@ -179,7 +179,20 @@ def push_tickets_branch(base_path: str) -> None:
         # the lock this fetch+merge ran concurrently with a foreground writer's commit,
         # spuriously failing that write against transient MERGE_HEAD/index state — the
         # exact hazard sync.py::reconverge already guards.
-        _git(base_path, "fetch", remote, branch)
+        #
+        # The EXPLICIT refspec is load-bearing — do NOT "simplify" this back to a bare
+        # `git fetch <remote> <branch>`. A bare fetch always writes FETCH_HEAD but only
+        # *opportunistically* writes `refs/remotes/<remote>/<branch>`: it does so when
+        # the remote's CONFIGURED refspec happens to cover that branch. A single-branch
+        # clone configures `+refs/heads/main:refs/remotes/origin/main`, which does not
+        # cover `tickets` — so the bare fetch exits 0 leaving `origin/tickets` absent
+        # (or STALE at an older value), and the `merge {remote_ref}` three lines below
+        # then merges nothing (or the wrong, older snapshot). The push stays rejected
+        # every attempt and the loop burns all _MAX_RETRIES without ever converging,
+        # silently dropping the competing writer's events. Naming the destination ref
+        # makes the remote-tracking ref appear (and advance) regardless of the clone's
+        # configured refspec — same idiom as _store/sync.py::reconverge (bug 5546).
+        _git(base_path, "fetch", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
         from rebar._store import lock as _lock
 
         try:
