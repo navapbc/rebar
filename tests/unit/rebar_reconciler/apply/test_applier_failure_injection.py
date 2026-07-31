@@ -74,8 +74,14 @@ def _make_create_mutation(local_id: str = "tick-fi01") -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_delete_issue_called_with_exact_key_on_set_entity_property_failure(applier, tmp_path):
-    """delete_issue is called with the exact Jira key "DIG-999", not a wildcard."""
+def test_no_delete_is_issued_on_set_entity_property_failure(applier, tmp_path):
+    """NO delete is issued for the created issue when the property write fails.
+
+    This asserted `delete_issue.assert_called_once_with("DIG-999")` — a precision check on
+    a call that should not happen at all. It encoded bug 387d: the created issue is now
+    RETAINED and left keyed-pending so the next pass retro-attaches its identity markers
+    deterministically. The precision that still matters is that NOTHING is deleted.
+    """
     client = _make_mock_client(jira_key="DIG-999")
     client.set_entity_property.side_effect = RuntimeError("property write failed")
     mutation = _make_create_mutation("tick-fi01")
@@ -83,8 +89,7 @@ def test_delete_issue_called_with_exact_key_on_set_entity_property_failure(appli
     with pytest.raises(RuntimeError):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    # Precision check: must be called with the specific key returned by create_issue
-    client.delete_issue.assert_called_once_with("DIG-999")
+    client.delete_issue.assert_not_called()
 
 
 def test_runtime_error_type_preserved_when_set_entity_property_raises(applier, tmp_path):

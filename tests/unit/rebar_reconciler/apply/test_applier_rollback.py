@@ -70,8 +70,18 @@ def _make_create_mutation(local_id: str = "tick-rb01") -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_delete_issue_called_when_set_entity_property_raises(applier, tmp_path):
-    """When set_entity_property raises, delete_issue is called once to roll back."""
+def test_created_issue_is_retained_when_set_entity_property_raises(applier, tmp_path):
+    """The created issue is RETAINED, not rolled back, when the property write fails.
+
+    This test previously asserted `delete_issue` was called once. That assertion encoded
+    bug 387d: destroying a successfully-created issue because LABELLING it failed inverts
+    the cost — a created-but-unlabelled issue is recoverable via the deterministic
+    keyed-pending retro-attach path, a deleted one is not. The trigger is ordinary (a
+    project whose Create/Edit screen omits `labels`), so the rollback destroyed real work.
+
+    The original intent — the failure is handled and the error still propagates — is
+    preserved and asserted below; only the mechanism changed.
+    """
     local_id = "tick-rb01"
     client = _make_mock_client(create_return={"key": "DIG-999"})
     client.add_label.return_value = None
@@ -81,7 +91,7 @@ def test_delete_issue_called_when_set_entity_property_raises(applier, tmp_path):
     with pytest.raises(RuntimeError, match="property write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    client.delete_issue.assert_called_once_with("DIG-999")
+    client.delete_issue.assert_not_called()
 
 
 def test_original_exception_propagates_when_set_entity_property_raises(applier, tmp_path):
@@ -99,8 +109,13 @@ def test_original_exception_propagates_when_set_entity_property_raises(applier, 
     assert exc_info.value is original_error
 
 
-def test_delete_issue_called_when_add_label_raises(applier, tmp_path):
-    """When add_label raises, delete_issue is called once to roll back."""
+def test_created_issue_is_retained_when_add_label_raises(applier, tmp_path):
+    """The created issue is RETAINED when the label write fails (bug 387d).
+
+    Same inversion as above: the prior `delete_issue.assert_called_once_with(...)` pinned
+    the destructive rollback. `labels` missing from a project's Create screen is the most
+    likely trigger, and it is a configuration problem — not a reason to delete the issue.
+    """
     local_id = "tick-rb03"
     client = _make_mock_client(create_return={"key": "DIG-999"})
     label_error = RuntimeError("label write failed")
@@ -110,7 +125,7 @@ def test_delete_issue_called_when_add_label_raises(applier, tmp_path):
     with pytest.raises(RuntimeError, match="label write failed"):
         applier.create_one(mutation, client, rest_calls=0, repo_root=tmp_path)
 
-    client.delete_issue.assert_called_once_with("DIG-999")
+    client.delete_issue.assert_not_called()
 
 
 def test_original_exception_propagates_when_delete_issue_also_raises(applier, tmp_path):
