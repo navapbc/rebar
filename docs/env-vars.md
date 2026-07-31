@@ -54,6 +54,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_FRONTIER_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
@@ -71,8 +74,14 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_WAIT_S` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_STANDARD_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_STANDARD_MODEL` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_STANDARD_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_TRIVIAL_MODEL` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -145,7 +154,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_135 variables._
+_144 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
