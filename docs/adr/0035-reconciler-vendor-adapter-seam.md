@@ -2,6 +2,13 @@
 
 - **Status:** Accepted (Phase 1 landed; Phase 2 in progress under epic `bbf1-82e1-cf9d-494a`,
   which pins the backend interface in §(d))
+- **Amended by:** [`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md) — epic
+  `e369-a449-4773-48fb` landed **Jira Data Center** as the first real second backend, ahead of the
+  GitHub adapter this ADR reserved that role for. ADR 0055 adds a `adapters/jira_family/` layer
+  *inside* the adapter half (two contracts, `RichTextCodec` + `UserIdentityModel`), records the
+  shared-`jira` provenance decision, and **narrows** this ADR's proof-of-seam claim: a contract
+  suite certifies a backend only as far as the port is complete and typed. Read 0055 alongside
+  §(c), §(d), and Decision items 5–6 below.
 - **Context:** Story *Reconciler vendor-adapter seam: ADR + sub-packaging for
   multi-backend* (`44be-2ae1-ba73-46da`, alias `ambery-tweed-grosbeak`; O5 + S5).
   A second reconciler backend (a non-Jira ticket system) is planned. Today the
@@ -108,14 +115,18 @@ rebar_reconciler/
       __init__.py
       jira_fields.py          # ← relocated in Phase 1
       # Phase 2: acli*.py, adf.py, outbound_fields.py, comment_limits.py
-    <backend-x>/              # future second backend
+    jira_family/              # Jira-family SHARED layer (ADR 0055) — added after this ADR
+    jira_datacenter/          # the first real second backend, landed by epic e369 (ADR 0055)
+    <backend-x>/              # any further backend (e.g. GitHub, epic be74)
       __init__.py
       …
 ```
 
 The `adapters/<backend>/` directory **is** the seam: everything under it is one
 backend's concrete implementation of the operations in (b); everything at the root is
-backend-neutral.
+backend-neutral. (One exception was added later: `adapters/jira_family/` is a *shared* layer
+for one vendor family rather than a backend — see
+[`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md) §(a).)
 
 ### (d) Adding a second backend (pinned interface)
 
@@ -201,8 +212,17 @@ duplicated priority/status value-maps; (iii) the `outbound_links` link-relation 
 
 **Proof-of-seam.** Phase 2 proves the interface with a backend-agnostic **contract test suite**
 run against both `JiraBackend` (a thin delegation wrapper over today's Jira modules, zero
-behavior change) and a test-only in-memory `FakeBackend`. The first *real* second backend (a
-GitHub adapter) is out of scope here and is tracked by epic `be74-7832-03a8-48ac`.
+behavior change) and a test-only in-memory `FakeBackend`.
+
+> **SUPERSEDED (see [`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md)).** This ADR
+> originally said the first *real* second backend (a GitHub adapter) was out of scope here and
+> tracked by epic `be74-7832-03a8-48ac`. Epic `e369-a449-4773-48fb` landed a **different** second
+> backend first — **Jira Data Center**, `adapters/jira_datacenter/` — so a real second backend now
+> exists ahead of `be74`, which still owns the GitHub adapter. ADR 0055 also narrows the
+> proof-of-seam claim above: the contract suite certifies a backend only as far as the `Backend`
+> port is **complete and typed**. `TicketTransport` declared six members while the core reached for
+> twenty-one; a DC writing pass crashed at runtime while `isinstance`, the contract suite, and
+> 1600+ unit tests were all green.
 
 To add backend **X**, create `adapters/<x>/` implementing the five role Protocols (and any
 capability Protocols X supports), register it under `config.reconciler.backend = "<x>"`, and
@@ -233,11 +253,16 @@ the neutral core drives it unchanged.
    also update the file-location loader** to discover the new sub-package dir). A thin
    `JiraBackend` and a test-only `FakeBackend`, both exercised by one backend-agnostic
    contract suite, prove the seam.
-6. **The first real second backend is out of scope for this ADR and is tracked separately
-   by epic `be74-7832-03a8-48ac`.** ADR 0035 (through Phase 2) establishes and proves the
-   seam; standing up a concrete non-Jira adapter (e.g. GitHub) against it is that epic's
-   work — enabled by a one-line `config.reconciler.backend` switch once its `adapters/<x>/`
-   package is registered.
+6. **Standing up a concrete second backend is out of scope for this ADR.** This ADR (through
+   Phase 2) establishes and proves the seam; building an adapter against it is a delivery
+   epic's work — enabled by a one-line `config.reconciler.backend` switch once its
+   `adapters/<x>/` package is registered.
+   **AMENDED —** this item originally said "the first real second backend … is tracked
+   separately by epic `be74-7832-03a8-48ac`". That is no longer true: epic
+   `e369-a449-4773-48fb` landed **Jira Data Center** (`reconciler.backend = "jira-datacenter"`)
+   as the first real second backend, ahead of the GitHub adapter `be74` was reserved for and
+   still owns. See [`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md), which also
+   records the `adapters/jira_family/` layer that second backend required.
 
 ## Consequences
 
@@ -251,5 +276,7 @@ the neutral core drives it unchanged.
   in §(d), which the core depends on instead of on `adapters/jira/` concretely.
 - A second backend is added by implementing the §(d) role Protocols under `adapters/<x>/`
   and selecting it via `config.reconciler.backend` — no core rewrite, once Phase 2 routes
-  the core through the interface. Standing up the first such backend is scoped to epic
-  `be74-7832-03a8-48ac`, not this ADR.
+  the core through the interface. Standing up such a backend is a delivery epic's work, not
+  this ADR's; the first one landed is **Jira Data Center** (epic `e369-a449-4773-48fb`, see
+  [`0055-jira-family-sub-seam.md`](0055-jira-family-sub-seam.md)), and the GitHub adapter
+  remains epic `be74-7832-03a8-48ac`.

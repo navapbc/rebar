@@ -321,3 +321,51 @@ re-read and pick up from the current state. See [concurrency.md](concurrency.md)
 If your project syncs to Jira, tickets reconcile bidirectionally through
 `rebar reconcile`. Setting that up is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
+
+### Jira Cloud vs. Jira Data Center
+
+`[tool.rebar.reconciler].backend` chooses which Jira the reconciler drives. `"jira"` (the
+default) is **Jira Cloud**, over the ACLI subprocess — nothing extra to install.
+`"jira-datacenter"` is **self-hosted Jira Server / Data Center** (8.14+), over the
+`pycontribs/jira` client with Personal Access Token auth.
+
+Data Center needs an opt-in extra; a Cloud-only install pulls in no new dependency.
+
+```bash
+pip install 'nava-rebar[jira-datacenter]'
+```
+
+```toml
+[tool.rebar.reconciler]
+backend  = "jira-datacenter"
+base_url = "https://jira.internal.example.gov"   # https is required (see below)
+
+[tool.rebar.jira]
+project = "REB"                                   # env override: JIRA_PROJECT
+```
+
+```bash
+export JIRA_PAT=...        # the Personal Access Token — env-only, never a config key
+rebar reconcile --dry-run  # inspect before enabling live sync
+```
+
+**Least privilege — use a dedicated service account, never an admin token.** Mint the PAT on
+a service account whose permissions are scoped to **only the projects rebar reconciles**, with
+just the rights the reconciler uses: **Browse Projects, Create Issues, Edit Issues, Add
+Comments, Link Issues**. An admin-level token gives a sync bridge far more reach than it needs
+and turns any reconciler defect into an instance-wide one. `JIRA_PAT` is read from the
+environment and is **not** accepted from a committed config file, so the credential cannot be
+checked into a repo by accident; the transport never logs it, and a missing `JIRA_PAT` fails
+with an error naming the variable rather than falling back to anonymous access.
+
+Three further DC-only keys, all under `[tool.rebar.reconciler]`:
+
+| Key | What it does |
+|---|---|
+| `allow_insecure` | **Cleartext only if you must.** `base_url` must be `https`; a non-TLS URL is rejected at config load unless you set `allow_insecure = true`, which logs a warning naming the cleartext risk. It governs the URL **scheme only** — it never relaxes certificate verification. Intended for a loopback test instance, not a production bridge. |
+| `ca_bundle` | Path to a CA bundle for an **internal-CA or self-signed** certificate — the supported answer to a verification failure. Certificate verification is never disabled (the standard `REQUESTS_CA_BUNDLE` env var works too); disabling it would make the `https` requirement theatre. |
+| `resolved_statuses` | The workflow state names that count as resolved, for the absence probe. Defaults to `["Resolved", "Done", "Cancelled"]`. Set it if your self-hosted workflow names its resolved states differently — otherwise a resolved issue is misclassified. |
+
+Design rationale, the shared Jira-family layer, and the Data Center support horizon (DC goes
+read-only on 28 March 2029, so this adapter is a deliberately time-boxed investment) are in
+[ADR 0055](adr/0055-jira-family-sub-seam.md).
