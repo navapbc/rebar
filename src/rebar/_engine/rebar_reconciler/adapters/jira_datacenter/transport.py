@@ -434,8 +434,45 @@ class JiraDataCenterTransport:
         _with_connection_retry(lambda: self._client.create_issue_link(link_type, from_id, to_id))
         return self.get_issue(from_id)
 
+    def _paged_search(
+        self, jql: str, *, fields: str | None = None, page_size: int = 100
+    ) -> list[dict[str, Any]]:
+        """Every issue matching ``jql``, paged to exhaustion — the ONE pager the
+        whole-project readers share.
+
+        Advances by what the server ACTUALLY returned and stops only on an EMPTY page.
+        Jira DC silently truncates ``maxResults`` above ``jira.search.views.default.max``
+        (a common hardening), so a SHORT page is not proof of exhaustion: advancing by the
+        REQUESTED size, or breaking on a short page, reads a truncated FIRST page as the
+        final one. Measured against a client capping pages at 20 while serving 250 issues:
+        20 recovered, 230 silently lost.
+
+        It is a SHARED helper rather than a loop repeated per method for a specific
+        reason: that defect was fixed once, in ``get_parent_map`` alone, and the two
+        siblings here were left behind — plus a third in ``fetcher._iter_pages``. Three
+        hand-rolled copies is what produced this bug (9263), so the correct loop is now
+        the easiest thing to reach for, and a structural test fails the build if a caller
+        takes the ``search_issues`` default again.
+        """
+        out: list[dict[str, Any]] = []
+        start_at = 0
+        while True:
+            results = _call_logged(
+                "_paged_search",
+                jql,
+                lambda offset=start_at: self._client.search_issues(
+                    jql, startAt=offset, maxResults=page_size, fields=fields
+                ),
+            )
+            batch = [_unwrap(issue) for issue in results]
+            if not batch:
+                break
+            out.extend(batch)
+            start_at += len(batch)
+        return out
+
     def get_issuelinks_map(self, project_key: str) -> dict[str, Any]:
-        issues = self.search_issues(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}")
         return {
             issue["key"]: list(issue.get("fields", {}).get("issuelinks") or []) for issue in issues
         }
@@ -449,7 +486,7 @@ class JiraDataCenterTransport:
         return _unwrap(comment)
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
-        issues = self.search_issues(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}")
         out: dict[str, Any] = {}
         for issue in issues:
             key = issue["key"]
@@ -543,39 +580,19 @@ class JiraDataCenterTransport:
         """
         query = jql or f"project = {project_key}"
         out: dict[str, str | None] = {}
-        start_at = 0
-        page_size = 100
         try:
-            while True:
-                results = _call_logged(
-                    "get_parent_map",
-                    project_key,
-                    lambda offset=start_at: self._client.search_issues(
-                        query, startAt=offset, maxResults=page_size, fields="parent"
-                    ),
-                )
-                batch = list(results)
-                for issue in batch:
-                    raw = _unwrap(issue)
-                    if not isinstance(raw, dict):
-                        continue
-                    key = raw.get("key")
-                    if not key:
-                        continue
-                    fields = raw.get("fields")
-                    parent = fields.get("parent") if isinstance(fields, dict) else None
-                    out[key] = parent.get("key") if isinstance(parent, dict) else None
-                # Advance by what the server ACTUALLY returned, and stop only on an
-                # EMPTY page. Jira DC silently truncates ``maxResults`` when it exceeds
-                # ``jira.search.views.default.max`` (a common hardening), so a short page
-                # is NOT proof of exhaustion. Advancing by the REQUESTED page_size — and
-                # breaking on a short page — reads a truncated first page as the final
-                # one and silently returns a PARTIAL parent map; the inbound pass then
-                # treats every unseen issue as parentless. Measured against a client
-                # capping pages at 20: 20 of 250 parents recovered, raising nothing.
-                if not batch:
-                    break
-                start_at += len(batch)
+            # Routed through the SHARED pager (9263). It was correct here first, and
+            # leaving it as a fourth hand-rolled loop would mean the helper exists while
+            # the method that motivated it does not use it — the two would drift.
+            for issue in self._paged_search(query, fields="parent"):
+                if not isinstance(issue, dict):
+                    continue
+                key = issue.get("key")
+                if not key:
+                    continue
+                fields = issue.get("fields")
+                parent = fields.get("parent") if isinstance(fields, dict) else None
+                out[key] = parent.get("key") if isinstance(parent, dict) else None
         except Exception as exc:  # noqa: BLE001 — degradation contract: a parent-map failure must not abort the inbound pass
             logger.warning(
                 "jira-datacenter transport: get_parent_map degraded to {} for project %r: %r",
