@@ -42,20 +42,39 @@ _GOOD_AC = "## Acceptance Criteria\n- [ ] a thing is observably true\n- [ ] anot
 
 # ── verifier model downgrade (WS2 — gawky-koi-grain) ─────────────────────────
 def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
-    """With no explicit operator model (cfg.model == DEFAULT_MODEL), the Pass-2 verify/coach
-    cfg resolves to the non-frontier verifier model (Sonnet) — the verifier_cfg downgrade,
-    now in the workflow path instead of the retired bespoke pass2_verify."""
+    """With nothing configured, the Pass-2 verify/coach cfg resolves to the non-frontier verifier
+    model (Sonnet).
+
+    UPDATED by ticket 172e: the assertion was `== VERIFIER_DEFAULT_MODEL`, i.e. the BARE
+    "claude-sonnet-4-6". The verifier now resolves the `standard` model CLASS, and `resolve_class`
+    always returns a PROVIDER-QUALIFIED id, so the value is "anthropic:claude-sonnet-4-6". Same
+    model, and `infer_provider` maps the bare id to the same provider — but the string is
+    observable in usage logs and in the signed verdict's provider_provenance, so this is a real
+    (small) behaviour change rather than a test that drifted. Qualifying is the deliberate
+    direction: an unqualified id in an attestation is ambiguous about which provider served it."""
     cfg = LLMConfig(model=DEFAULT_MODEL)
-    assert _verifier_cfg(cfg).model == VERIFIER_DEFAULT_MODEL == "claude-sonnet-4-6"
+    resolved = _verifier_cfg(cfg).model
+    assert (
+        resolved.endswith(VERIFIER_DEFAULT_MODEL) and VERIFIER_DEFAULT_MODEL == "claude-sonnet-4-6"
+    )
+    assert resolved == f"anthropic:{VERIFIER_DEFAULT_MODEL}"
 
 
-def test_verifier_cfg_honors_explicit_operator_override() -> None:
-    """An operator who explicitly chose a non-default model keeps it — the downgrade yields
-    to the override (parity with the old passes.verifier_cfg), which a static per-step
-    `model:` could not do (resolve_model precedence is step > workflow > cfg)."""
+def test_verifier_cfg_ignores_cfg_model_and_always_resolves_the_standard_class() -> None:
+    """REPLACES `test_verifier_cfg_honors_explicit_operator_override` (ticket 172e).
+
+    That test pinned the rule this ticket DELIBERATELY REMOVES: "an operator who explicitly chose a
+    non-default model keeps it", implemented as `cfg.model != DEFAULT_MODEL`. MEASURED, that rule
+    read ANY non-default string as an explicit choice — so merely provider-qualifying the same model
+    (`anthropic:claude-opus-4-8`) or naming any Bedrock id silently kept Pass-2/Pass-4 on the
+    frontier model, losing the cost downgrade AND greedy decoding. The operator now steers the
+    verifier by configuring the `standard` class, which is unambiguous, rather than by
+    side-effecting `cfg.model`, which was not.
+
+    This is a contract change, recorded as one — not a test relaxed to match new code."""
     cfg = LLMConfig(model="claude-opus-4-8-custom")
-    assert _verifier_cfg(cfg).model == "claude-opus-4-8-custom"
-    # Other config fields are preserved (only model is tuned).
+    assert _verifier_cfg(cfg).model.endswith(VERIFIER_DEFAULT_MODEL)
+    # Other config fields are still preserved (only model is tuned).
     cfg2 = LLMConfig(model=DEFAULT_MODEL, max_iterations=99)
     assert _verifier_cfg(cfg2).max_iterations == 99
 
