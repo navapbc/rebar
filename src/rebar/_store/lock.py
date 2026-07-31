@@ -21,6 +21,31 @@ mechanism the writer-storm gate depends on (``the mkdir leg is always taken``).
 fcntl-only escape hatch for callers that deliberately want the single kernel leg
 (e.g. a caller certain of a local ``flock``-capable filesystem); it is an opt-out,
 not a migration end-state.
+
+**Host identity is the boot id, not the hostname (bug castoff-tigerseye-ammonite).**
+The mkdir ownership stamp used to be ``<hostname>:<pid>``, and reclamation required
+``host == socket.gethostname()``. Inside a container ``socket.gethostname()`` is the
+*container id*, which the container runtime re-rolls on every recreate — so a lock
+orphaned by the SAME physical host's previous container looked like a foreign-host
+(shared-filesystem) owner and was refused forever, with no age ceiling. Every later
+boot then burned the full lock budget. The stamp is now a colon-free **v2** line::
+
+    rebar-lock v2 host=<host-identity> ns=<pid-ns-id> pid=<pid> start=<start-time>
+
+``host`` is ``boot-<contents of /proc/sys/kernel/random/boot_id>`` when the kernel
+exposes one (stable across container recreates on one boot, distinct across real
+hosts) and ``name-<hostname>`` otherwise (macOS and other non-Linux kernels, where
+the hostname is the best available identity and containers are not the failure mode).
+``ns`` is the pid-namespace inode, ``pid``/``start`` identify the owning process so a
+recycled pid number cannot be mistaken for a live owner. The line deliberately
+contains **no colon**: an older rebar parsing it with the legacy
+``host, sep, pid = stamp.partition(":")`` finds no separator and declines to act,
+rather than mis-deriving "this host + a dead pid" (forward compatibility).
+
+Refusal-without-proof (bug ``yaw-gravel-linen``) is unchanged and deliberate: a stamp
+from a *different* host identity is still never reclaimed. See
+:func:`_mkdir_lock_is_stale` for the full decision table and :func:`_acquire_mkdir`
+for why the held fcntl leg is positive proof of a dead same-host owner.
 """
 
 from __future__ import annotations
@@ -149,9 +174,107 @@ def _acquire_fcntl(lock_path: str, deadline: float) -> int:
             time.sleep(0.05)
 
 
+_STAMP_V2_PREFIX = "rebar-lock v2"
+# Placeholder for a field this platform cannot supply (e.g. no /proc). Explicit so a
+# reader can tell "unknown" apart from "missing/malformed" (bug castoff-tigerseye-ammonite).
+_STAMP_UNKNOWN = "-"
+
+_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+_PID_NS_PATH = "/proc/self/ns/pid"
+
+
+def _read_boot_id() -> str | None:
+    """This kernel boot's id (``/proc/sys/kernel/random/boot_id``), stripped.
+
+    Stable for the life of one booted kernel and shared by every container on it —
+    which is exactly the identity the hostname failed to provide (a container runtime
+    re-rolls the hostname on each recreate; bug castoff-tigerseye-ammonite). Returns
+    ``None`` where the kernel does not expose it (macOS, non-Linux). Never raises."""
+    try:
+        with open(_BOOT_ID_PATH, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except (OSError, ValueError):  # never raise: identity is best-effort
+        return None
+
+
+def _read_pid_namespace_id() -> str | None:
+    """Identifier for this process's pid namespace (the inode of ``/proc/self/ns/pid``).
+
+    Two processes sharing this value can probe each other's pids; across different
+    values ``os.kill(pid, 0)`` is meaningless (the number names a different process, or
+    nothing). Returns ``None`` where unavailable. Never raises."""
+    try:
+        return str(os.stat(_PID_NS_PATH).st_ino)
+    except (OSError, ValueError):  # never raise: identity is best-effort
+        return None
+
+
+def _process_start_time(pid: int) -> str | None:
+    """*pid*'s start time (field 22 of ``/proc/<pid>/stat``), or ``None`` if unknown.
+
+    Qualifies the pid probe: a pid number can be recycled, so "alive" alone does not
+    mean the stamped owner is alive. The comm field (field 2) is parenthesised and may
+    itself contain spaces and parens, so parsing starts after its LAST ``')'``; field 22
+    is then the 20th whitespace-separated field of the remainder. Never raises."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except (OSError, ValueError):  # never raise: identity is best-effort
+        return None
+    close = raw.rfind(")")
+    if close == -1:
+        return None
+    fields = raw[close + 1 :].split()
+    # fields[0] is stat field 3 (state), so stat field 22 is fields[19].
+    if len(fields) < 20:
+        return None
+    return fields[19] or None
+
+
+def _host_identity() -> str:
+    """The identity of the *physical host* this process runs on.
+
+    ``boot-<boot id>`` when the kernel exposes one, else ``name-<hostname>``. The boot
+    id is what makes a container recreate recognisable as the same host (bug
+    castoff-tigerseye-ammonite) while still distinguishing genuinely different hosts
+    sharing a filesystem (bug yaw-gravel-linen). Guaranteed colon-free so the v2 stamp
+    stays unparseable to a legacy reader."""
+    boot_id = _read_boot_id()
+    raw = f"boot-{boot_id}" if boot_id else f"name-{socket.gethostname()}"
+    return raw.replace(":", "_")
+
+
 def _owner_stamp() -> str:
-    """Identity written into a freshly-acquired mkdir lock: ``<hostname>:<pid>``."""
-    return f"{socket.gethostname()}:{os.getpid()}"
+    """Identity written into a freshly-acquired mkdir lock (v2, colon-free)::
+
+        rebar-lock v2 host=<host-identity> ns=<pid-ns-id> pid=<pid> start=<start-time>
+
+    Unknown ``ns``/``start`` are written as ``-``. The absence of any ``:`` is load
+    bearing: an older rebar splits the stamp on ``:``, finds no separator, and refuses
+    to reclaim — instead of decoding a bogus host/pid pair (bug
+    castoff-tigerseye-ammonite)."""
+    pid = os.getpid()
+    ns = _read_pid_namespace_id() or _STAMP_UNKNOWN
+    start = _process_start_time(pid) or _STAMP_UNKNOWN
+    return f"{_STAMP_V2_PREFIX} host={_host_identity()} ns={ns} pid={pid} start={start}"
+
+
+def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:
+    """Parse a v2 owner stamp into its fields, or ``None`` if *stamp* is not v2.
+
+    A v2 stamp missing any required field (a torn mid-write read, say) parses to an
+    empty mapping — distinguishable from ``None`` so the caller refuses rather than
+    falling back to the legacy colon parse."""
+    if not stamp.startswith(_STAMP_V2_PREFIX):
+        return None
+    fields: dict[str, str] = {}
+    for token in stamp[len(_STAMP_V2_PREFIX) :].split():
+        key, sep, value = token.partition("=")
+        if sep and key and value:
+            fields[key] = value
+    if not {"host", "ns", "pid", "start"} <= fields.keys():
+        return {}
+    return fields
 
 
 def _pid_alive(pid: int) -> bool:
@@ -168,18 +291,13 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _mkdir_lock_is_stale(lock_dir: str) -> bool:
-    """A held mkdir lock is reclaimable ONLY when its owner stamp proves a DEAD
-    process on THIS host. An absent/unparseable stamp (a bash-style lock, or one
-    observed in the brief window between mkdir and the stamp write), a foreign-host
-    owner (whose liveness we cannot check — the shared-filesystem case), or a live
-    PID all return False: never reclaim on anything short of proof (bug
-    yaw-gravel-linen)."""
-    try:
-        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
-            stamp = fh.read().strip()
-    except OSError:
-        return False
+def _legacy_stamp_is_stale(stamp: str) -> bool:
+    """Pre-v2 ``<hostname>:<pid>`` stamp: reclaimable only when the hostname matches
+    ours AND the pid parses AND that pid is dead. Every malformed shape (empty, no
+    colon, empty host, empty pid, non-numeric pid, extra colons, a torn mid-write read)
+    and every foreign hostname returns False — never reclaim on anything short of proof
+    (bug yaw-gravel-linen). Unchanged from the original implementation; kept as the
+    fallback so locks stamped by an older rebar are still handled exactly as before."""
     host, sep, pid_s = stamp.partition(":")
     if not sep or host != socket.gethostname():
         return False
@@ -188,6 +306,65 @@ def _mkdir_lock_is_stale(lock_dir: str) -> bool:
     except ValueError:
         return False
     return not _pid_alive(pid)
+
+
+def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
+    """Whether a held mkdir lock is provably orphaned and may be reclaimed.
+
+    Set *fcntl_held* only when the caller already holds the exclusive ``fcntl.flock``
+    leg for this same tracker — see :func:`_acquire_mkdir` for why that is proof rather
+    than a hint. The decision table:
+
+    1. Owner file absent or unreadable → False (a bash-style lock, or one seen in the
+       window between ``mkdir`` and the stamp write).
+    2. Not a v2 stamp → exactly the legacy behaviour (:func:`_legacy_stamp_is_stale`).
+    3. v2 stamp with missing/malformed fields → False.
+    4. v2 stamp from a different :func:`_host_identity` → False, **always**. This is the
+       genuine foreign-host / shared-filesystem case: we cannot observe that host's
+       processes and our own locks prove nothing about its kernel, so no pid, no
+       namespace and no ``fcntl_held`` can license a reclaim (bug yaw-gravel-linen).
+    5. Same host and the pid namespaces are comparable (stamped ``ns`` equals ours,
+       including both being unknown) → probe the pid, qualified by start time. Dead pid
+       ⇒ stale. Live pid whose start time is known on both sides and differs ⇒ the
+       number was recycled by an unrelated process and the true owner is gone ⇒ stale.
+       Anything else ⇒ False: a live owner is NEVER reclaimed.
+    6. Same host, namespaces NOT comparable (different, or exactly one unknown) — the
+       container-recreate case, where the stamped pid is not probeable at all → stale
+       iff *fcntl_held*, else False.
+    """
+    try:
+        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
+            stamp = fh.read().strip()
+    except OSError:
+        return False
+
+    fields = _parse_v2_stamp(stamp)
+    if fields is None:
+        return _legacy_stamp_is_stale(stamp)
+    if not fields:
+        return False
+
+    if fields["host"] != _host_identity():
+        return False
+
+    stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
+    if stamped_ns != _read_pid_namespace_id():
+        # Same host, different (or unknowable) pid namespace: the stamped pid number is
+        # meaningless to us, so the fcntl proof is the only evidence available.
+        return fcntl_held
+
+    try:
+        pid = int(fields["pid"])
+    except ValueError:
+        return False
+    if not _pid_alive(pid):
+        return True
+    stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
+    current_start = _process_start_time(pid)
+    if stamped_start is not None and current_start is not None and stamped_start != current_start:
+        # The pid is live but it is a DIFFERENT process wearing a recycled number.
+        return True
+    return False
 
 
 def _reclaim_mkdir_lock(lock_dir: str) -> None:
@@ -207,9 +384,22 @@ def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
     """Poll ``mkdir`` (atomic on POSIX) until acquired or ``deadline``.
 
     On contention, reclaim a provably-stale lock (see :func:`_mkdir_lock_is_stale`).
-    This is race-safe because :func:`acquire` already holds the fcntl leg before
-    calling here, so no other Python acquirer is between mkdir and release — and a
-    dead owner stamp proves no process holds the lock."""
+
+    **Precondition (load bearing, hence ``fcntl_held=True`` below):** this is only ever
+    reached from :func:`acquire` AFTER the exclusive ``fcntl.flock(LOCK_EX)`` leg on the
+    same tracker's ``.ticket-write.lock`` has been taken, and the dual-window contract
+    holds that leg for the entire lifetime of the mkdir leg (release order is mkdir then
+    fcntl). That makes reclamation race-safe — no other Python acquirer is between mkdir
+    and release — and, for a same-host owner in an unprobeable pid namespace, it is
+    positive proof of death: ``flock`` is kernel-mediated on the inode, so it is shared
+    across pid/mount namespaces on ONE kernel and the kernel drops it when its holder
+    dies. A v2 stamp is only ever written by an acquirer that took the fcntl leg first,
+    and the stamp's boot id says it was the same kernel; if that owner were still alive
+    it would still hold this fcntl lock and we could not be here. This is a STRONGER
+    proof than the pid probe it stands in for, not a weakening of it — and it does not
+    extend to a different boot id, where our hold says nothing about the other kernel,
+    which is why the foreign-host case stays refused (bugs castoff-tigerseye-ammonite,
+    yaw-gravel-linen)."""
     while True:
         try:
             os.mkdir(lock_dir)
@@ -223,14 +413,14 @@ def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
                 pass
             return True
         except FileExistsError:
-            if _mkdir_lock_is_stale(lock_dir):
+            if _mkdir_lock_is_stale(lock_dir, fcntl_held=True):
                 _reclaim_mkdir_lock(lock_dir)
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.1)
         except OSError as exc:  # pragma: no cover - unexpected fs error
             if exc.errno == errno.EEXIST:
-                if _mkdir_lock_is_stale(lock_dir):
+                if _mkdir_lock_is_stale(lock_dir, fcntl_held=True):
                     _reclaim_mkdir_lock(lock_dir)
                 if time.monotonic() >= deadline:
                     return False
