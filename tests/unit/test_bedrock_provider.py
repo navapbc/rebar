@@ -555,3 +555,99 @@ def test_direct_anthropic_opus_also_withdraws_temperature() -> None:
         assert capabilities_for(mid).supports_temperature is False, mid
     # sonnet is unaffected on this path too — the guard must not over-apply
     assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
+
+
+# ── a574: a missing region must fail as a TYPED, actionable rebar error ────────────────────
+# MEASURED in compose-review-bot-1 (896586841071): no AWS_REGION, no AWS_DEFAULT_REGION, and
+# boto3.session.Session().region_name is None, so BedrockProvider raised a bare boto3
+# NoRegionError from deep inside construction. Every earlier probe in this epic passed
+# region_name="us-east-1" EXPLICITLY, which is why ambient resolution was never exercised.
+def _stub_bedrock_provider(monkeypatch):
+    """Replace BedrockProvider with a recorder so these tests never build a real AWS client."""
+    import pydantic_ai.providers.bedrock as bedrock_mod
+
+    seen = {}
+
+    class _Stub:
+        def __init__(self, *, region_name=None, **kw):
+            seen["region_name"] = region_name
+
+    monkeypatch.setattr(bedrock_mod, "BedrockProvider", _Stub)
+    return seen
+
+
+def _no_ambient_region(monkeypatch):
+    """Reproduce the container: no AWS_* region env and boto3 resolving nothing."""
+    import boto3
+
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+
+    class _NoRegionSession:
+        region_name = None
+
+        def __init__(self, *a, **kw):
+            pass
+
+    monkeypatch.setattr(boto3.session, "Session", _NoRegionSession)
+
+
+def test_missing_region_raises_a_typed_error_naming_the_setting(monkeypatch) -> None:
+    """a574 AC3. Asserted POSITIVELY — the error IS an LLMConfigError and its message NAMES the
+    knob an operator has to set. The negative form ('not a NoRegionError') passes vacuously: any
+    unrelated exception, or a boto3 that stopped raising, would satisfy it while leaving the
+    operator with the same unactionable failure."""
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMConfigError
+
+    _stub_bedrock_provider(monkeypatch)
+    _no_ambient_region(monkeypatch)
+    cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
+
+    with pytest.raises(LLMConfigError) as ei:
+        build_bedrock_provider(cfg)
+    assert "REBAR_LLM_BEDROCK_REGION" in str(ei.value)
+
+
+def test_an_explicit_rebar_region_still_builds(monkeypatch) -> None:
+    """Guard against an over-eager check: the knob being SET is the fixed configuration, so it
+    must not trip the new error. Without this, 'always raise' would satisfy the test above."""
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    seen = _stub_bedrock_provider(monkeypatch)
+    _no_ambient_region(monkeypatch)
+    cfg = LLMConfig(
+        repo_path=".",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        bedrock_region_name="us-east-1",
+    )
+
+    build_bedrock_provider(cfg)
+    assert seen["region_name"] == "us-east-1"
+
+
+def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
+    """The local-dev / AWS_PROFILE path must keep working. rebar deliberately does NOT invent a
+    default region, so when boto3 CAN resolve one ambiently the provider is built and rebar passes
+    None through — letting boto3 use what it resolved. An implementation that demanded the rebar
+    knob unconditionally would break every developer using AWS_REGION or a profile."""
+    import boto3
+
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    seen = _stub_bedrock_provider(monkeypatch)
+
+    class _RegionSession:
+        region_name = "eu-west-1"
+
+        def __init__(self, *a, **kw):
+            pass
+
+    monkeypatch.setattr(boto3.session, "Session", _RegionSession)
+    cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
+
+    build_bedrock_provider(cfg)
+    assert "region_name" in seen  # built, not rejected
