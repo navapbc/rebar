@@ -184,6 +184,36 @@ def _envelope(cp: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     raise AssertionError(f"no JSON envelope on reconciler stdout:\n{out}\n--stderr--\n{cp.stderr}")
 
 
+def _assert_converged_writing_pass(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
+    """Assert a WRITING-mode pass converged, reading the shape the reconciler actually emits.
+
+    Writing modes do NOT emit a JSON envelope. ``__main__.py:444`` says so in a comment —
+    "Writing-mode output shape is unchanged (OK line on stdout, no JSON)" — and only the
+    ``no_write`` branch calls ``json.dumps``. An earlier draft of this file used
+    ``_envelope()`` here and could NEVER have passed; the bug was masked because the pass
+    crashed on a missing transport member first and failed the exception assertion instead.
+    """
+    assert "OK:" in cp.stdout, (
+        f"{what}: no OK line on stdout:\n{cp.stdout}\n--stderr--\n{cp.stderr}"
+    )
+
+
+def _assert_wrote_nothing(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
+    """Idempotence, read off the reconciler's own convergence line.
+
+    ``__main__.py:456`` prints "OK: steady-state pass converged — 0 mutations" exactly when
+    ``computed == 0 and applied == 0``; otherwise it prints "applied N of M". So the
+    converged line IS the zero-write assertion — a stronger signal than a parsed count,
+    because it is the program's own verdict.
+    """
+    converged = "steady-state pass converged" in cp.stdout
+    applied_zero = "applied 0 of 0" in cp.stdout
+    assert converged or applied_zero, (
+        f"{what}: the repeated pass did NOT report convergence — it wrote something:\n"
+        f"{cp.stdout}\n--stderr--\n{cp.stderr}"
+    )
+
+
 def _assert_no_unhandled_exception(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
     """Epic AC6: a swallowed exception can still 'converge', so convergence alone is not
     evidence. Assert the run surfaced no traceback and exited cleanly."""
@@ -207,9 +237,12 @@ def test_dc_reconcile_pass_raises_no_unhandled_exception(dc_rebar_repo: Path) ->
     cp = _run_reconcile(dc_rebar_repo, "dry-run")
     _assert_no_unhandled_exception(cp, what="dry-run")
 
+    # dry-run IS a no_write mode, so it DOES emit a JSON envelope (__main__.py:445-452
+    # calls json.dumps only on the no_write branch). Keep the stronger assertion here;
+    # only the WRITING-mode tests below had to change.
     envelope = _envelope(cp)
     assert envelope.get("mutation_failures", 0) == 0, (
-        f"the pass reported mutation failures: {envelope}"
+        f"the dry-run pass reported mutation failures: {envelope}"
     )
 
 
@@ -229,13 +262,7 @@ def test_a_repeated_dc_reconcile_pass_writes_nothing(dc_rebar_repo: Path) -> Non
     second = _run_reconcile(dc_rebar_repo, "bootstrap-strict")
     _assert_no_unhandled_exception(second, what="second pass")
 
-    envelope = _envelope(second)
-    assert envelope.get("mutations_applied", 0) == 0, (
-        f"the repeated pass APPLIED mutations — not idempotent: {envelope}"
-    )
-    assert envelope.get("mutation_failures", 0) == 0, (
-        f"the repeated pass reported failures: {envelope}"
-    )
+    _assert_wrote_nothing(second, what="second pass")
 
 
 # ---------------------------------------------------------------------------
@@ -285,12 +312,11 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
 
     cp = _run_reconcile(dc_rebar_repo, "bootstrap-strict")
     _assert_no_unhandled_exception(cp, what="inbound provenance pass")
+    _assert_converged_writing_pass(cp, what="inbound provenance pass")
 
     tickets = rebar.list_tickets(repo_root=str(dc_rebar_repo))
     matched = [t for t in tickets if remote_key in json.dumps(t)]
-    assert matched, (
-        f"no local ticket was created from DC issue {remote_key}; envelope={_envelope(cp)}"
-    )
+    assert matched, f"no local ticket was created from DC issue {remote_key}; stdout={cp.stdout!r}"
     ticket = matched[0]
     assert ticket.get("creation_channel") == "jira", (
         "a DC-created ticket must carry the SHARED 'jira' creation channel — the "
