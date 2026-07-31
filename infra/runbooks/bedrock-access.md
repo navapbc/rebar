@@ -35,6 +35,11 @@ resource-ARN errors) but **not sufficient** for an authorization contract.
 **Do not check only the positive case.** Without a negative control you have not shown the Claude-only scope
 binds; you have shown the role can call *something*.
 
+**Do not pass `--region` / `region_name=` and call the region question settled.** Every probe in this
+runbook names a region EXPLICITLY, so none of them exercises *ambient* region resolution — which is
+exactly how ticket a574 went unnoticed until the container was tested directly. An explicit region
+proves the grant works; it proves nothing about whether the service can find a region on its own.
+
 ---
 
 ## How to verify — three layers, all required
@@ -144,3 +149,39 @@ Bedrock one, so rebar carries this per-model in
 `rebar.llm.capabilities._MODEL_ID_CAPABILITY_OVERRIDES`. If a new model 400s on a sampling parameter, add its
 exact id there rather than dropping temperature globally — greedy (`temperature=0`) Pass-2 verification depends
 on it.
+
+---
+
+## The region is NOT discovered — set it explicitly
+
+**MEASURED in `compose-review-bot-1` (account 896586841071):**
+
+```
+env | grep '^AWS_'                    -> (nothing: no AWS_REGION, no AWS_DEFAULT_REGION)
+env | grep '^REBAR_LLM_'              -> NO_REBAR_LLM_ENV  (so REBAR_LLM_BEDROCK_REGION is unset)
+boto3.session.Session().region_name   -> None
+boto3.client('bedrock-runtime')       -> NoRegionError: You must specify a region.
+```
+
+**Set `REBAR_LLM_BEDROCK_REGION=us-east-1`** on the bot service. Prefer rebar's own knob over a bare
+`AWS_REGION` so the value is visible to rebar's config layer and is recorded in the verdict's
+`provider_provenance` (ticket 343b) — an `AWS_REGION` set outside rebar authenticates fine but leaves
+no trace in the signed artefact explaining which region produced the verdict.
+
+### IMDS reachability does NOT supply a region
+
+These are **independent** concerns and it is easy to assume otherwise. IMDS is reachable from the
+container — the token `PUT` returns 200 and the instance role resolves (see ticket 9249) — and
+`session.region_name` is STILL `None`. So:
+
+- fixing an IMDS hop-limit problem does **not** supply a region;
+- a working instance role does **not** remove the need to configure one;
+- credential discovery and region discovery fail, and are fixed, separately.
+
+Treat the hop-limit contingency and the region setting as two unrelated items on the cutover
+checklist, never as one.
+
+Since ticket a574, a missing region no longer surfaces as a bare boto3 `NoRegionError` from deep
+inside provider construction: `build_bedrock_provider` pre-checks boto3's own resolution and raises a
+typed `LLMConfigError` naming `REBAR_LLM_BEDROCK_REGION`. rebar deliberately does **not** invent a
+default region — a wrong region is a silent-until-call misconfiguration, not a value to guess.
