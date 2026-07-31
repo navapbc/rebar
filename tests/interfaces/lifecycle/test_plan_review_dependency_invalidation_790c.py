@@ -16,7 +16,8 @@ These pin the CONTRACT (observable ``review_plan`` / ``resign_plan_review`` / CL
 
 * dependency changed since the review  -> BOTH review-plan AND sign-review fail closed
   (sign-review must not re-certify it), and the message NAMES a dependency change.
-* subject's OWN material changed         -> fails closed, message NAMES the own-material change.
+* subject's OWN material changed         -> the run is CANCELLED mid-review (story 2c89):
+  unsigned INDETERMINATE whose finding names the own-material change, no sidecar.
 * only UNRELATED store writes land       -> the PASS still certifies itself, no manual step
   (d70a scoped these out of generation identity).
 * residual message: a genuine material change requires a fresh `rebar review-plan`; only a
@@ -183,9 +184,14 @@ def test_review_plan_dependency_change_fails_closed(rebar_repo: Path) -> None:
     assert "depend" in str(sig.get("error", "")).lower(), sig
 
 
-def test_review_plan_own_material_change_names_the_change(rebar_repo: Path) -> None:
-    """CRITERION 2: the SUBJECT's OWN material changing mid-review fails closed with a message that
-    names the OWN-material change (not a generic 'generation changed')."""
+def test_review_plan_own_material_change_cancels_mid_run(rebar_repo: Path) -> None:
+    """CRITERION 2 (contract updated by story 2c89): the SUBJECT's OWN material changing
+    mid-review now CANCELS the run at the next between-pass seam instead of paying for
+    the remaining passes and only failing at sign time. The result is an UNSIGNED
+    INDETERMINATE whose finding still NAMES the own-material change (the invalidation
+    reason stays observable), with NO sidecar (a sidecar write would advance the store
+    revision). A DEPENDENCY change deliberately does NOT cancel — see the test above,
+    which still completes and fails closed at sign time naming the dependency."""
     epic, _child = _epic_with_child(rebar_repo)
     runner = _MutatingFake(
         edit_ticket=epic, repo=rebar_repo, new_desc=_DESC + "\n- [ ] OWN plan rewritten\n"
@@ -193,10 +199,15 @@ def test_review_plan_own_material_change_names_the_change(rebar_repo: Path) -> N
 
     result = rebar.llm.review_plan(epic, runner=runner, repo_root=str(rebar_repo))
 
-    assert result["verdict"] == "PASS"
+    assert result["verdict"] == "INDETERMINATE"
+    finding = result["indeterminate"][0]
+    assert finding["id"] == "plan-review-cancelled-stale", finding
+    assert "own plan material changed" in str(finding.get("reason", "")).lower(), finding
+    assert result["coverage"]["cancelled"]["seam"] == "post-finders", result["coverage"]
     sig = result["signature"]
     assert sig["signed"] is False, sig
-    assert "own" in str(sig.get("error", "")).lower(), sig
+    assert sig.get("reason") == "cancelled-stale", sig
+    assert result["sidecar_emitted"] is False, result
 
 
 def test_review_plan_unrelated_write_still_certifies(rebar_repo: Path) -> None:
