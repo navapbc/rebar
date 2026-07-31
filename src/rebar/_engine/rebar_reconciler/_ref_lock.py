@@ -769,9 +769,11 @@ def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspe
         # Bug 4afc: LOG the evidence — this branch aborts a pass by claiming the lease
         # was stolen, and previously raised silently while fail-closed below logged.
         logger.warning(
-            "ref-lock: push to %s %s classified as CAS mismatch (lease moved) — stderr: %s",
+            "ref-lock: push to %s %s (expected oid %s) classified as CAS mismatch "
+            "(lease moved) — stderr: %s",
             remote,
             ref,
+            old_oid,
             (result.stderr or "").strip()[:200],
         )
         raise subprocess.CalledProcessError(128, ["git", "update-ref", ref])

@@ -126,3 +126,9 @@ def test_cas_mismatch_logs_the_stderr_that_justified_it(
         "the CAS-mismatch branch must log the git stderr that justified classifying the "
         f"push as a lost lease, so a production occurrence is diagnosable. logged: {logged!r}"
     )
+    assert REF in logged, f"the log must name the ref. logged: {logged!r}"
+    assert OLD in logged, (
+        "the log must name the EXPECTED oid — it is the value you compare against what "
+        "the ref actually holds, which is the whole point of making the claim checkable. "
+        f"logged: {logged!r}"
+    )
