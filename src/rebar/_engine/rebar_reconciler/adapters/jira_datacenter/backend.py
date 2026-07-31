@@ -217,6 +217,60 @@ class JiraDataCenterBackend:
     def project(self) -> str:
         return self.transport.project
 
+    @property
+    def query_project(self) -> str:
+        """Configured read/query project WITHOUT any create-time default — empty
+        when unset so the inbound fetcher fails closed rather than querying every
+        project (bug 626d; ticket 97f2).
+
+        Resolved from settings rather than the transport, mirroring Cloud's
+        ``JiraBackend.query_project``: :attr:`project` answers the transport's
+        write scope, but the read scope must reflect the CONFIGURED value alone.
+        DC has no create-time default to strip — ``resolve_jira_datacenter_settings``
+        returns ``[tool.rebar.jira].project`` (env override ``JIRA_PROJECT``)
+        verbatim, so an unset project stays the empty string.
+        """
+        from rebar_reconciler.adapters.jira_datacenter.settings import (
+            resolve_jira_datacenter_settings,
+        )
+
+        return resolve_jira_datacenter_settings().project
+
+    def assert_env_ready(self) -> None:
+        """Fail-fast when a DC connection essential is missing, BEFORE the
+        transport is used for bootstrap-band execution (ticket 97f2).
+
+        DC's essentials are the base ``url`` (``[tool.rebar.reconciler].base_url``)
+        and the ``JIRA_PAT`` bearer token — the env-only Personal Access Token
+        (Jira 8.14+) that is deliberately never a file-config key. This is the DC
+        analogue of Cloud's JIRA_URL/JIRA_USER/JIRA_API_TOKEN check: DC has no
+        separate user credential, because the PAT identifies the account itself.
+        EVERY missing essential is named in one message, so an operator is not
+        walked through a fix-one-rerun loop. Raises the neutral
+        :class:`BackendEnvError` (subclasses ``RuntimeError``) rather than letting
+        a downstream connection attempt fail cryptically.
+        """
+        from rebar_reconciler._backend import BackendEnvError
+        from rebar_reconciler.adapters.jira_datacenter.settings import (
+            resolve_jira_datacenter_settings,
+        )
+
+        settings = resolve_jira_datacenter_settings()
+        missing = [
+            name
+            for name, value in (
+                ("url", settings.url),
+                ("JIRA_PAT", settings.pat),
+            )
+            if not value
+        ]
+        if missing:
+            raise BackendEnvError(
+                f"missing Jira Data Center configuration: {', '.join(missing)} "
+                "(set url via [tool.rebar.reconciler].base_url; JIRA_PAT is env-only) "
+                "(required to build the backend transport for bootstrap band execution)"
+            )
+
     # --- capability: SupportsLinks (delegates to transport) ---
     def set_relationship(
         self, from_id: str, to_id: str, link_type: str = "Blocks"

@@ -22,6 +22,11 @@ class FakeTransport:
     Records calls so behavioural assertions (e.g. "links synced?") can observe them.
     """
 
+    #: The write/create project scope. ``JiraDataCenterBackend.project`` is a
+    #: property delegating to ``self.transport.project``, so a fake without this
+    #: raises ``AttributeError`` the moment a test reads ``backend.project``.
+    project = "FAKE"
+
     def __init__(self) -> None:
         self.store: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -73,6 +78,16 @@ class FakeTransport:
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         self.calls.append(("get_comment_map", (project_key,)))
         return {}
+
+    # absence-probe surface (JiraDataCenterBackend.probe_remote delegates here).
+    # Returns a REAL ``ProbeResult``, not a bare sentinel: a stub returning None
+    # would let a delegation-via-``calls`` assertion pass while the backend's own
+    # probe_remote hands its caller an unusable value.
+    def probe_remote(self, remote_id: str) -> Any:
+        from rebar_reconciler.inbound_probe import ProbeBranch, ProbeResult
+
+        self.calls.append(("probe_remote", (remote_id,)))
+        return ProbeResult(branch=ProbeBranch.UNREACHABLE, issue_key=remote_id, detail={})
 
 
 # ---------------------------------------------------------------------------

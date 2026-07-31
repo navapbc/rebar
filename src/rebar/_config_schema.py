@@ -601,7 +601,11 @@ _SECTIONS: dict[str, dict] = {
         "enabled": lambda v, k: _as_bool(v, k),
     },
     "reconciler": {
-        "backend": lambda v, k: _as_choice(v, k, {"jira"}),
+        # Keep in step with the `@register(...)` keys in
+        # `rebar_reconciler/adapters/`: a backend that is registered but absent here
+        # is UNREACHABLE — the registry resolves it while config rejects it (the
+        # state `jira-datacenter` was in between stories J6 and J7, epic e369).
+        "backend": lambda v, k: _as_choice(v, k, {"jira", "jira-datacenter"}),
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
         "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
