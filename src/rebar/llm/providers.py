@@ -100,6 +100,9 @@ class ProviderSession:
         # Clients opened by a builder this run, closed in `close()` / `__exit__`.
         # Never shared/mutated across runs or threads, so no lock is needed.
         self._closeables: list[Any] = []
+        # The endpoint of the candidate currently being built (task cc33). Only `model_for`
+        # sets it; it is None for every other path, so the builders behave exactly as before.
+        self._endpoint_override: str | None = None
         self._builders: dict[str, Callable[[str], Any]] = {
             "anthropic": self._build_anthropic,
             "bedrock": self._build_bedrock,
@@ -155,6 +158,10 @@ class ProviderSession:
            failure.
         """
         builder = self._builders.get(provider_name)
+        # A per-candidate endpoint (task cc33) is rebar's to inject, so it registers the
+        # OpenAI-compatible builder for this build even when `cfg.base_url` is unset.
+        if builder is None and provider_name == "openai" and self._endpoint_override:
+            builder = self._build_openai
         if builder is not None:
             return builder(provider_name)
 
@@ -206,7 +213,9 @@ class ProviderSession:
         cfg = self._cfg
         resolved = _pai_model(cfg)
         name = resolved.split(":", 1)[1] if ":" in resolved else resolved
-        direct = _local_proxy_bypass_base_url()
+        # A candidate's own `endpoint` wins over the loopback-bypass default: it was chosen
+        # explicitly (a local proxy backing a hosted primary is the point of a chain).
+        direct = self._endpoint_override or _local_proxy_bypass_base_url()
         http_timeout = httpx.Timeout(read=float(cfg.timeout_s), connect=10.0, write=30.0, pool=10.0)
         model, client = _build_retrying_anthropic_model(
             name, base_url=direct, cfg=cfg, http_timeout=http_timeout
@@ -216,9 +225,9 @@ class ProviderSession:
 
     def _build_bedrock(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
         """One-line delegation to the ``bedrock_model`` leaf builder (story S3/2932) — the
-        construction logic lives THERE, not here, because this file sits at 289/300 LOC
-        against the module-size cap ATTESTED by a closed story; only the registry entry
-        belongs in ``ProviderSession``."""
+        construction logic lives THERE, not here: this file budgets itself well under the
+        module-size cap (story S3/2932 held it at ~289 lines), so only the registry entry —
+        never a provider's construction body — belongs in ``ProviderSession``."""
         from rebar.llm.bedrock_model import build_bedrock_provider
 
         return build_bedrock_provider(self._cfg)
@@ -275,8 +284,27 @@ class ProviderSession:
         )
         self._closeables.append(http_client)
         return _RebarOpenAICompatibleProvider(
-            base_url=cfg.base_url, api_key=cfg.api_key or "not-needed", http_client=http_client
+            base_url=self._endpoint_override or cfg.base_url,
+            api_key=cfg.api_key or "not-needed",
+            http_client=http_client,
         )
+
+    def model_for(self, resolved: str, *, endpoint: str | None = None) -> Any:
+        """Build the pydantic-ai Model for ONE ``provider:model`` candidate, optionally against
+        that candidate's own ``endpoint``, registering anything it opens on THIS session.
+
+        The entry point a fallback chain (task cc33) builds each of its N+1 candidates through,
+        so one session owns every rebar-created transport for the run — a session per candidate
+        would close only its own client and leak the rest. The override is scoped to the single
+        build and restored afterwards, so the session stays reusable for the un-overridden path."""
+        from pydantic_ai.models import infer_model
+
+        previous = self._endpoint_override
+        self._endpoint_override = endpoint
+        try:
+            return infer_model(resolved, provider_factory=self.provider_factory)
+        finally:
+            self._endpoint_override = previous
 
     def close(self) -> None:
         """Close every client a builder opened this run (story arcticduck).
