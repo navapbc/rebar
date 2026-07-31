@@ -163,33 +163,23 @@ def _last_get_pass(binding_store: Any, jira_key: str) -> str:
         return ""
 
 
-def _set_last_get(binding_store: Any, jira_key: str, pass_id: str) -> None:
-    """``binding_store.set_last_get`` no-op when the store predates the method."""
-    fn = getattr(binding_store, "set_last_get", None)
+def _best_effort(binding_store: Any, member: str, *args: Any) -> None:
+    """Call a VOID binding-store bookkeeping method; no-op when the store lacks it.
+
+    One helper for the three bookkeeping calls this module makes
+    (``set_last_get`` / ``note_absent_or_rekey`` / ``clear_absent``), which carried
+    three byte-identical getattr-guarded, exception-swallowing bodies. Bookkeeping
+    must never fail a pass, and a duck-typed store may implement only some members.
+
+    Collapsed under bug 7c26 rather than for tidiness: this module sits at the LOCKED
+    module-size cap, so wiring the move-aware absence path had to buy its lines back
+    from real duplication instead of from comments.
+    """
+    fn = getattr(binding_store, member, None)
     if fn is not None:
         try:
-            fn(jira_key, pass_id)
-        except Exception:  # noqa: BLE001 — fail-open: best-effort set_last_get no-op on failure
-            pass
-
-
-def _note_absent(binding_store: Any, jira_key: str) -> None:
-    """``binding_store.note_absent`` no-op when the store predates the method."""
-    fn = getattr(binding_store, "note_absent", None)
-    if fn is not None:
-        try:
-            fn(jira_key)
-        except Exception:  # noqa: BLE001 — fail-open: best-effort note_absent no-op on failure
-            pass
-
-
-def _clear_absent(binding_store: Any, jira_key: str) -> None:
-    """``binding_store.clear_absent`` no-op when the store predates the method."""
-    fn = getattr(binding_store, "clear_absent", None)
-    if fn is not None:
-        try:
-            fn(jira_key)
-        except Exception:  # noqa: BLE001 — fail-open: best-effort clear_absent no-op on failure
+            fn(*args)
+        except Exception:  # noqa: BLE001 — fail-open: bookkeeping never fails a pass
             pass
 
 
@@ -701,12 +691,14 @@ def _compute_outbound_update_mutation(
 
         fields = _safe_get_issue(client, jira_key)
         # Record the GET regardless of outcome (rotation bookkeeping).
-        _set_last_get(binding_store, jira_key, pass_id)
+        _best_effort(binding_store, "set_last_get", jira_key, pass_id)
 
         if fields is _DELETED:
-            # HTTPError 404 — issue gone. Bump the consecutive-404
-            # counter (may retire at GRACE). Emit nothing.
-            _note_absent(binding_store, jira_key)
+            # HTTPError 404 — gone, OR MOVED to another project and re-keyed
+            # (bug 7c26). The store re-asks by immutable numeric id and re-keys
+            # on a hit; only an unproven absence bumps the consecutive-404
+            # counter (may retire at GRACE). Emit nothing either way.
+            _best_effort(binding_store, "note_absent_or_rekey", jira_key, client)
             return
         if fields is _TRANSPORT_ERROR:
             # Non-404 HTTPError / URLError / timeout — transient.
@@ -721,7 +713,7 @@ def _compute_outbound_update_mutation(
 
         # HTTP 200 — issue is alive (out-of-window). Reset the absence
         # counter and build a one-key overlay so the SAME diff path runs.
-        _clear_absent(binding_store, jira_key)
+        _best_effort(binding_store, "clear_absent", jira_key)
         jira_fields = fields
         comment_snapshot = dict(jira_snapshot)
         comment_snapshot[jira_key] = fields
