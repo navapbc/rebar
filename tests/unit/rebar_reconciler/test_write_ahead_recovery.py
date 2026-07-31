@@ -87,15 +87,40 @@ def test_keyless_pending_found_via_search(binding_store_mod, tmp_path):
 
 
 def test_keyless_pending_miss_unbinds(binding_store_mod, tmp_path):
-    """A keyless-pending record whose label search misses is unbound (create never landed)."""
+    """A keyless-pending record whose label search misses is unbound — but only once
+    absence is CORROBORATED.
+
+    This test previously asserted the unbind after a SINGLE negative search. That
+    assertion encoded bug 21fc: the keyless-pending state is entered exactly when we
+    crashed during create_issue, and Jira DC's Lucene index is eventually consistent
+    (JRASERVER-70423: a 2,991s lag observed), so one empty search is precisely what a
+    LIVE issue looks like — and unbinding on it made the next pass write a DUPLICATE.
+
+    The intent is unchanged and still asserted: a truly-absent issue must not strand its
+    ticket pending forever. What changed is that absence must now be corroborated by
+    repeated misses AND an entry older than the index-lag grace window. This is the
+    sibling of ``test_recover_pending_not_found_in_jira`` in
+    ``state/test_binding_store.py``, which pinned the same defect.
+    """
     store = _new_store(binding_store_mod, tmp_path)
     store.bind_pending("local-C")
 
     client = MagicMock()
     client.search_issues.return_value = []
-    recovered = store.recover_pending_bindings(client)
 
-    assert recovered == 1
+    # ONE miss must NOT unbind — that is the duplicate-issue defect itself.
+    assert store.recover_pending_bindings(client) == 0
+    assert "local-C" in store.pending_bindings()
+
+    # Age the entry past the index-lag grace window; without this the repeated misses
+    # prove nothing, which is the whole point of the fix.
+    store._data["bindings"]["local-C"]["created_at"] = "2000-01-01T00:00:00Z"
+    counts = [store.recover_pending_bindings(client) for _ in range(3)]
+
+    # The unbind lands on the THIRD miss overall (one above + the loop's), then there is
+    # nothing left to resolve — so assert exactly one resolution across the sequence
+    # rather than pinning which call it fell on.
+    assert sum(counts) == 1, f"the corroborated unbind never resolved: {counts}"
     assert store.get_jira_key("local-C") is None
     assert "local-C" not in store.pending_bindings()
 
@@ -133,6 +158,10 @@ def test_write_ahead_orders_pending_before_create_and_key_before_label(dispatch,
     client.add_label.side_effect = lambda *a, **k: order.append("add_label")
 
     store = MagicMock()
+    # A bare MagicMock answers EVERY member with a truthy Mock, including the
+    # keyless-pending grace gate create_one consults (21fc) — which would defer this
+    # create and leave `order` empty. A real store returns False here.
+    store.is_keyless_pending_within_grace.return_value = False
     store.bind_pending.side_effect = lambda *a, **k: order.append("bind_pending")
     store.record_pending_key.side_effect = lambda *a, **k: order.append("record_key")
     store.save.side_effect = lambda *a, **k: order.append("save")
@@ -157,6 +186,9 @@ def test_bind_pending_persist_failure_skips_create(dispatch, tmp_path):
     client.search_issues.return_value = []
 
     store = MagicMock()
+    # See the note above: without this the 21fc grace gate defers the create, so no
+    # bind_pending persist is attempted and BindingPersistError never raises.
+    store.is_keyless_pending_within_grace.return_value = False
     store.save.side_effect = OSError("disk full")  # the pre-create persist fails
 
     mutation = {

@@ -50,6 +50,39 @@ class BindingPersistError(RuntimeError):
     """
 
 
+#: How long a keyless-pending binding is treated as "the create may have landed but is not
+#: indexed yet" (bug 21fc). Jira DC's Lucene index is eventually consistent and
+#: JRASERVER-70423 documents a real-world lag of 2,991 seconds, so this is deliberately
+#: LARGER than that observation: the cost of waiting is a delayed create, the cost of not
+#: waiting is a duplicate Jira issue, and only one of those is reversible.
+_INDEX_LAG_GRACE_SECONDS = 3600.0
+
+#: Consecutive negative searches required before absence is treated as corroborated. A
+#: single miss is exactly what a lagging index produces for an issue that DOES exist.
+_MISSES_BEFORE_UNBIND = 3
+
+
+def _age_seconds(created_at: Any) -> float:
+    """Seconds since an ISO-8601 ``created_at``; ``inf`` when it is absent or unparseable.
+
+    ``inf`` is the SAFE default here and the direction matters: an entry whose age cannot
+    be established is treated as OLD, so it becomes eligible for the ordinary
+    corroborated-unbind path rather than being suppressed forever. A store written before
+    this field existed must not strand its tickets.
+    """
+    if not isinstance(created_at, str) or not created_at:
+        return float("inf")
+    from datetime import datetime, timezone
+
+    try:
+        stamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return float("inf")
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - stamp).total_seconds()
+
+
 def _now_iso() -> str:
     # Canonical Z-suffix UTC (twin of rebar.timeutils.utc_now_iso); retained as the
     # local spelling used across this module's call sites.
@@ -270,6 +303,34 @@ class BindingStore:
     def is_pending(self, local_id: str) -> bool:
         entry = self._data["bindings"].get(local_id)
         return entry is not None and entry.get("state") == "pending"
+
+    def is_keyless_pending_within_grace(self, local_id: str) -> bool:
+        """True while a KEYLESS-pending binding is young enough that a negative Jira
+        search proves nothing — i.e. while the create may have landed but not indexed.
+
+        **This is what the outbound create gate must consult, and it is the half that
+        actually prevents a duplicate.** ``outbound_differ`` gates the create on
+        ``get_jira_key(local_id) is None``, and a keyless-pending entry HAS
+        ``jira_key: None`` — so that branch cannot tell "never created" from "created,
+        then we crashed before recording the key, and Jira has not indexed it yet".
+        Without this signal the create is emitted while recovery is still waiting out the
+        index lag, and ``create_one``'s dedup search misses for the SAME eventual-
+        consistency reason, writing a SECOND Jira issue for the ticket. That is the only
+        known path where rebar writes wrong data rather than reading incomplete data
+        (bug 21fc).
+
+        Deferring is safe in both directions: if the issue does exist,
+        ``recover_pending_bindings`` binds to it once the index catches up; if it truly
+        never landed, the grace window expires and the create is emitted on a later pass.
+        A delayed create is recoverable; a duplicate is not.
+
+        KEYLESS only: a keyed-pending entry is recovered deterministically by retro-attach
+        (no search), so it is already safe and must not be conflated with this state.
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None or entry.get("state") != "pending" or entry.get("jira_key"):
+            return False
+        return _age_seconds(entry.get("created_at")) < _INDEX_LAG_GRACE_SECONDS
 
     def all_bindings(self) -> dict[str, dict]:
         return dict(self._data["bindings"])
@@ -527,9 +588,27 @@ class BindingStore:
                     results = client.search_issues(f'labels = "{hyphen_label}"')
                 if results:
                     self.bind_confirm(local_id, results[0]["key"])
-                else:
+                    recovered += 1
+                    continue
+                # A NEGATIVE SEARCH IS NOT PROOF OF ABSENCE ON DC (bug 21fc). The keyless
+                # state is entered precisely when we crashed during create_issue — i.e.
+                # exactly when the issue may exist but not yet be indexed. Jira DC's Lucene
+                # index is eventually consistent (JRASERVER-70423: a 2,991s lag observed),
+                # and unbinding here makes the NEXT pass create a duplicate. So absence
+                # must be CORROBORATED: repeated misses AND an entry old enough that the
+                # documented lag cannot explain them. Until then the entry stays pending
+                # and is retried — a delayed create is recoverable, a duplicate is not.
+                misses = int(entry.get("search_miss_count") or 0) + 1
+                entry["search_miss_count"] = misses
+                entry["updated_at"] = _now_iso()
+                if (
+                    misses >= _MISSES_BEFORE_UNBIND
+                    and _age_seconds(entry.get("created_at")) >= _INDEX_LAG_GRACE_SECONDS
+                ):
                     self.unbind(local_id)
-                recovered += 1
+                    recovered += 1
+                # else: still pending — deliberately NOT counted as resolved, or the caller
+                # reads "recovered" as "settled".
             except Exception as exc:  # noqa: BLE001 — loud-but-non-fatal: record and continue
                 if failure_sink is not None:
                     failure_sink.append({"local_id": local_id, "reason": repr(exc)})
