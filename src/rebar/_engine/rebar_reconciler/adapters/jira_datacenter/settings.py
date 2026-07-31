@@ -67,11 +67,22 @@ def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
         if reconciler.resolved_statuses
         else DEFAULT_RESOLVED_STATUSES
     )
+    # NOTE — the missing-PAT guard deliberately does NOT live here, and that is not an
+    # oversight. This function is reached from PROPERTIES (`JiraDataCenterBackend.
+    # query_project`), and on Python <= 3.11 `isinstance(x, SomeRuntimeCheckableProtocol)`
+    # evaluates properties via `hasattr`, so a raise here breaks every Protocol conformance
+    # check. (Python 3.12+ switched to `inspect.getattr_static`, which does NOT execute
+    # properties — so this failure is INVISIBLE on a modern local interpreter and only
+    # appears on the CI matrix's 3.11 leg. Measured: two backend-facade tests passed on
+    # 3.14 and failed on 3.11.) Resolution stays total; the guard lives at client
+    # construction — see `build_client_from_settings` (bug cd78).
+    pat = os.environ.get("JIRA_PAT", "")
+
     return JiraDataCenterSettings(
         url=reconciler.base_url,
         project=config.jira.project,
         allow_insecure=reconciler.allow_insecure,
         ca_bundle=reconciler.ca_bundle,
         resolved_statuses=resolved_statuses,
-        pat=os.environ.get("JIRA_PAT", ""),
+        pat=pat,
     )
