@@ -125,6 +125,36 @@ def _connection_retry_exceptions() -> tuple[type[BaseException], ...]:
     return (_req_exc.ConnectionError, _req_exc.Timeout, TimeoutError)
 
 
+class TlsVerificationError(ConnectionError):
+    """A TLS certificate verification failure reaching the DC instance.
+
+    Distinct from the transient connectivity faults :func:`_with_connection_retry`
+    retries, because ``requests.exceptions.SSLError`` SUBCLASSES
+    ``requests.exceptions.ConnectionError`` — so without this it is swallowed by the
+    retry set and re-attempted three times with backoff. A certificate does not
+    become valid on retry: that is seven wasted seconds and a guaranteed failure,
+    ending in an opaque SSL error that never mentions the setting which fixes it.
+    """
+
+
+def _tls_verification_error(exc: BaseException) -> Exception | None:
+    """Return an actionable :class:`TlsVerificationError` for a cert failure, else None."""
+
+    try:
+        from requests.exceptions import SSLError
+    except ImportError:  # no extra installed → no requests → nothing to classify
+        return None
+    if not isinstance(exc, SSLError):
+        return None
+    return TlsVerificationError(
+        f"TLS certificate verification failed for the Data Center instance: {exc}. "
+        "This is NOT retried — a certificate does not become valid on a retry. If this "
+        "deployment presents a certificate from an internal CA, set reconciler.ca_bundle "
+        "to that CA bundle's PATH; certificate verification is never disabled, and "
+        "reconciler.allow_insecure does not affect it (it governs the URL scheme only)."
+    )
+
+
 def _with_connection_retry(fn: Any) -> Any:
     """Run ``fn()`` with the transport's retry policy.
 
@@ -143,6 +173,11 @@ def _with_connection_retry(fn: Any) -> Any:
         try:
             return fn()
         except retryable as exc:
+            # Checked BEFORE the retry bookkeeping: SSLError is a ConnectionError
+            # subclass, so it lands in `retryable` and would otherwise be re-attempted.
+            tls_error = _tls_verification_error(exc)
+            if tls_error is not None:
+                raise tls_error from exc
             last_exc = exc
         if attempt < 2:
             delay = backoffs[attempt]

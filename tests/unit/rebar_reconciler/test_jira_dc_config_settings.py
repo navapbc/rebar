@@ -148,3 +148,81 @@ def test_a_custom_workflow_status_set_reaches_the_probe_classifier() -> None:
     assert transport._resolved_statuses == custom, (
         "the configured set must reach the transport that classifies with it"
     )
+
+
+# --- AC(13) sub-requirements the earlier tests did NOT cover -------------------------------
+#
+# `test_jira_dc_transport_heldout.py` asserts options["verify"] is never False and that a
+# ca_bundle lands as a path. A completion-verification run pointed out that the criterion asks
+# for two MORE things, and it was right: nothing simulated a verification FAILURE, and nothing
+# exercised the `allow_insecure=True` path to show it does not relax certificate verification.
+# (I had classified this criterion as already covered — checking that plausibly-named tests
+# existed rather than checking them against the criterion's full text.)
+
+
+def test_a_tls_verification_failure_names_ca_bundle_and_is_not_retried(monkeypatch) -> None:
+    """A cert failure must be actionable and must NOT be retried.
+
+    ``requests.exceptions.SSLError`` SUBCLASSES ``requests.exceptions.ConnectionError``, so it
+    lands in the transport's retryable set and was re-attempted three times with 2s+5s backoff
+    before surfacing as an opaque SSL error. A certificate does not become valid on a retry:
+    that is seven wasted seconds, a guaranteed failure, and no mention of the setting that
+    fixes it.
+    """
+    pytest.importorskip("requests")
+    from requests.exceptions import SSLError
+
+    from rebar_reconciler.adapters.jira_datacenter import transport as _t
+
+    calls = {"n": 0}
+
+    def _boom():
+        calls["n"] += 1
+        raise SSLError("certificate verify failed: unable to get local issuer certificate")
+
+    with pytest.raises(_t.TlsVerificationError) as caught:
+        _t._with_connection_retry(_boom)
+
+    assert calls["n"] == 1, (
+        f"a TLS verification failure must not be retried; it ran {calls['n']} times"
+    )
+    message = str(caught.value)
+    assert "ca_bundle" in message, f"the error must name the setting that fixes it; got: {message}"
+    assert "allow_insecure" in message, (
+        "and must say allow_insecure does NOT govern certificate verification, since that is "
+        f"the natural wrong guess; got: {message}"
+    )
+
+
+def test_allow_insecure_does_not_relax_certificate_verification(monkeypatch) -> None:
+    """``allow_insecure`` governs the URL SCHEME check only.
+
+    Without this, an operator could reasonably read `allow_insecure = true` as "skip TLS
+    checks" — and nothing asserted otherwise. The live harness sets exactly this flag, so if it
+    did relax verification the harness would be silently exercising an unverified path.
+    """
+    from rebar_reconciler.adapters.jira_datacenter import transport as _t
+    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+
+    captured: dict = {}
+
+    class _Spy:
+        def __init__(self, *a, **k) -> None:
+            captured.update(k)
+
+    settings = JiraDataCenterSettings(
+        url="http://localhost:2990/jira",
+        project="DC",
+        allow_insecure=True,  # the override under test
+        ca_bundle="",
+        resolved_statuses=frozenset({"Done"}),
+        pat="pat-xyz",
+    )
+    monkeypatch.setattr(_t, "_jira_client_class", lambda: _Spy, raising=False)
+    _t.build_client_from_settings(settings)
+
+    options = captured.get("options") or {}
+    assert options.get("verify", True) is not False, (
+        f"allow_insecure must NOT disable certificate verification; got options={options!r}"
+    )
+    assert captured.get("verify") is not False, "and not via a bare kwarg either"
