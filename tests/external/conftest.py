@@ -155,14 +155,29 @@ def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def build_scratch_rebar_repo(repo: Path) -> Path:
+    """Create an initialized rebar repo at *repo* (mirrors the interface tier).
+
+    Extracted from the ``rebar_repo`` fixture so the default-suite guard test
+    (``tests/unit/test_external_tier_gate_ref.py``) can exercise the REAL construction
+    this tier's live tests run on, without the ``external`` marker or live credentials.
+    """
+    repo.mkdir(parents=True, exist_ok=True)
+    _git("init", "-q", cwd=repo)
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    _git("config", "user.name", "Test", cwd=repo)
+    rebar.init_repo(repo_root=str(repo))
+    # Give the CODE branch a root commit so the suite-wide attested/``ref=HEAD``
+    # gate default (tests/conftest.py) can resolve a snapshot: an unborn HEAD
+    # fails ref resolution before any gate op reaches its subject under test.
+    _git("commit", "--allow-empty", "-q", "-m", "init", cwd=repo)
+    return repo
+
+
 @pytest.fixture
 def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """An initialized rebar repo in a temp git dir (mirrors the interface tier)."""
     repo = Path(tmp_path) / "repo"
-    repo.mkdir()
-    _git("init", "-q", cwd=repo)
-    _git("config", "user.email", "test@example.com", cwd=repo)
-    _git("config", "user.name", "Test", cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    rebar.init_repo(repo_root=str(repo))
+    build_scratch_rebar_repo(repo)
     yield repo
