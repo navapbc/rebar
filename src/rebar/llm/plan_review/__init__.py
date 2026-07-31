@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner
 
 from . import attest, drift_floor, orchestrator, sidecar
@@ -44,37 +44,43 @@ __all__ = [
 
 
 def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
-    """The cfg the Pass-2 verify (and Pass-4 coach) steps run under: the decisive non-frontier
-    verifier model (``VERIFIER_DEFAULT_MODEL``) UNLESS the operator EXPLICITLY chose a model
-    (``cfg.model != DEFAULT_MODEL`` — i.e. ``REBAR_LLM_MODEL`` / ``[tool.rebar.llm].model`` was
-    set to a non-default; any other value is an explicit choice and wins). Mirrors
-    :func:`rebar.llm.completion.verify_completion`'s tuning.
+    """The cfg the Pass-2 verify (and Pass-4 coach) steps run under: the STANDARD model class,
+    whatever ``cfg.model`` is (ticket 172e).
 
-    This downgrade lives here (on cfg) rather than as a static per-step ``model:`` in
-    ``gates/plan-review.yaml`` because ``resolve_model`` precedence is ``step > workflow >
-    cfg`` — a literal step model would ALWAYS beat the operator's cfg/env model and so could
-    not honor an override. The Pass-1 finder is unaffected: it runs the YAML ``model_ladder``
-    via the ProductionBatchRunner, not ``cfg.model``.
+    The rule this REPLACES kept the frontier model whenever ``cfg.model != DEFAULT_MODEL``, reading
+    any non-default string as "the operator chose this". MEASURED consequence: provider-qualifying
+    the SAME model (``anthropic:claude-opus-4-8``) — or naming any Bedrock id — silently kept
+    Pass-2/Pass-4 on the frontier model, losing the cost downgrade AND, on a model that rejects
+    sampling parameters, the greedy decoding the verification depends on.
 
-    The non-frontier-default RULE itself is the shared review kernel's
-    (:func:`rebar.llm.review_kernel.resolve_verifier_model`); this wrapper just applies it to
-    cfg (the kernel stays free of the LLMConfig plumbing)."""
+    With no class configured, ``standard`` resolves to ``VERIFIER_DEFAULT_MODEL`` — the SAME
+    MODEL today's rule picks. It is NOT byte-identical: the returned string is now PROVIDER-
+    QUALIFIED (``anthropic:claude-sonnet-4-6`` where today it is the bare ``claude-
+    sonnet-4-6``), because :func:`resolve_class` always qualifies. Functionally equivalent —
+    ``infer_provider`` maps the bare ``claude-*`` id to the same provider — but the string is
+    OBSERVABLE in usage logs and in the signed verdict's ``provider_provenance``, so it is a
+    real, if small, behaviour change. Qualifying is the desirable direction: an unqualified id
+    in an attestation is ambiguous about which provider served it, which is the misattribution
+    this epic exists to remove.
+
+    The class config is now the steering wheel: an operator changes the verifier by configuring the
+    ``standard`` class, not by side-effecting ``cfg.model``.
+
+    Still applied on cfg rather than as a static per-step ``model:`` in ``gates/plan-review.yaml``,
+    because ``resolve_model`` precedence is ``step > workflow > cfg`` — a literal step model would
+    always beat the operator's configuration. The Pass-1 finder is unaffected: it runs the
+    YAML
+    ``model_ladder`` via the ProductionBatchRunner (ticket 7761 expresses those rungs as
+    classes)."""
     from dataclasses import replace
 
-    from rebar.llm.review_kernel import max_output_cfg, resolve_verifier_model
+    from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
+    from rebar.llm.review_kernel import max_output_cfg
 
-    # Model-max output budget (bug 30a2): every verifier-cfg consumer (the Pass-2
-    # verify/coach dispatch, the novelty/contradiction/comment-trail sub-calls) rides at
-    # the resolved model's maximum output capacity — applied AFTER the model swap so the
-    # raise matches the model that actually runs.
-    return max_output_cfg(
-        replace(
-            cfg,
-            model=resolve_verifier_model(
-                cfg.model, default_model=DEFAULT_MODEL, verifier_default=VERIFIER_DEFAULT_MODEL
-            ),
-        )
-    )
+    # Model-max output budget (bug 30a2): every verifier-cfg consumer rides at the resolved
+    # model's maximum output capacity — applied AFTER the model swap so the raise matches the
+    # model that actually runs.
+    return max_output_cfg(replace(cfg, model=resolve_model_string(STANDARD_CLASS)))
 
 
 def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
