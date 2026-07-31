@@ -28,7 +28,7 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
-from . import det_floor, passes, registry, sidecar, sizing
+from . import det_floor, generation, passes, registry, sidecar, sizing
 from .det_floor import PlanContext
 
 logger = logging.getLogger(__name__)
@@ -480,6 +480,14 @@ def run_pass1(
         chunk: list[dict], agentic: bool
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         nonlocal resumed
+        # Mid-run cancellation (story 2c89): once the run is cancelled (the ticket's OWN
+        # material changed), a not-yet-started chunk returns empty WITHOUT a runner call
+        # or checkpoint I/O — everything after the edit is waste (the checkpoints are
+        # fingerprint-keyed and already orphaned). In-flight runner calls are not
+        # interruptible; up to pool-width of them complete as sunk cost. The ContextVar
+        # scope reaches pool workers via _submit_ctx's copy_context().
+        if generation.review_cancelled():
+            return [], []
         cached = sizing.load_checkpoint(ctx, material, chunk, cfg.model, agentic)
         if cached is not None:
             resumed += 1

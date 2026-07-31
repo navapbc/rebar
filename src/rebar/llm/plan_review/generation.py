@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -59,6 +63,113 @@ class PlanReviewGenerationRetryable(PlanReviewGenerationError):
 
 class _UnderLockMismatch(RuntimeError):
     pass
+
+
+# ── mid-run cancellation on OWN-material change (story 2c89) ──────────────────
+#
+# A plan edited mid-review used to run every remaining pass and only fail at the
+# sign-time re-check below — pure waste, since the Pass-1 checkpoints are keyed by
+# the material fingerprint and are already orphaned by the edit. The cancel
+# predicate is scoped EXACTLY like the sign-time one: the subject's OWN material
+# only. It never reads tracker HEAD, the relation snapshot, or related_material —
+# store-wide equality false-cancels on unrelated tickets' writes (commit 7c3c08df8 /
+# bug d70a), and related-material drift keeps reusable checkpoints and is still
+# refused at sign time. Monotone by construction: a cancel can only WITHHOLD an
+# attestation (the cancelled verdict is unsigned INDETERMINATE); a missed cancel
+# degrades to today's sign-time refusal.
+
+
+class PlanReviewCancelledStale(RuntimeError):
+    """Raised at a between-pass seam when the subject's OWN material changed mid-run."""
+
+
+@dataclass
+class _CancelScope:
+    """The run-scoped cancel token: one per ``produce_plan_review_verdict`` run."""
+
+    ticket_id: str
+    baseline_own_material: str | None
+    repo_root: object = None
+    event: threading.Event = field(default_factory=threading.Event)
+    seam: str | None = None  # which probe fired (observability; None until cancelled)
+
+
+_CANCEL_SCOPE: ContextVar[_CancelScope | None] = ContextVar(
+    "plan_review_cancel_scope", default=None
+)
+
+
+@contextmanager
+def cancel_scope(
+    ticket_id: str, baseline_own_material: str | None, *, repo_root=None
+) -> Iterator[_CancelScope]:
+    """Install the run-scoped cancel token. ContextVar-based so the seam probes (workflow
+    ops) and the Pass-1 pool workers (which inherit a ``copy_context()`` via
+    ``pass1._submit_ctx``) all see the same scope without parameter threading."""
+    scope = _CancelScope(
+        ticket_id=ticket_id, baseline_own_material=baseline_own_material, repo_root=repo_root
+    )
+    token = _CANCEL_SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _CANCEL_SCOPE.reset(token)
+
+
+def review_cancelled() -> bool:
+    """Whether the active review run (if any) has been cancelled. Checked at the top of
+    the Pass-1 ``_chunk`` funnel so a not-yet-started chunk never reaches the runner."""
+    scope = _CANCEL_SCOPE.get()
+    return scope is not None and scope.event.is_set()
+
+
+def own_material_changed(ticket_id: str, baseline: str | None, *, repo_root=None) -> bool:
+    """Has the ticket's OWN material fingerprint moved off ``baseline``?
+
+    A single-ticket light read (:func:`attest.current_material_fingerprint`: the ticket +
+    its child ids — no store-wide reduction) wrapped in ``local_read_context`` so the
+    probe never triggers a fetch/reconverge or contends for the sync lock. Fail-open:
+    an unknown fingerprint (read error / deleted) is ``False`` — never cancel on doubt;
+    the sign-time re-check stays authoritative."""
+    if not baseline:
+        return False
+    from rebar._engine_support import reads as ticket_reads
+
+    from . import attest
+
+    with ticket_reads.local_read_context():
+        current = attest.current_material_fingerprint(ticket_id, repo_root=repo_root)
+    return current is not None and current != baseline
+
+
+def probe_cancel(seam: str) -> None:
+    """The between-pass seam probe: no active scope → no-op; a set event or a changed
+    OWN material → set the event and raise :class:`PlanReviewCancelledStale` (the
+    interpreter captures it as a failed step and short-circuits the remaining passes;
+    ``produce_plan_review_verdict`` reads the event and returns the cancelled verdict
+    BEFORE its recovery reconstructions)."""
+    scope = _CANCEL_SCOPE.get()
+    if scope is None:
+        return
+    if scope.event.is_set():
+        raise PlanReviewCancelledStale(
+            f"plan review of {scope.ticket_id} already cancelled (own material changed)"
+        )
+    if own_material_changed(
+        scope.ticket_id, scope.baseline_own_material, repo_root=scope.repo_root
+    ):
+        scope.seam = seam
+        scope.event.set()
+        _log(
+            logging.WARNING,
+            "plan_review_cancelled_stale",
+            ticket_id=scope.ticket_id,
+            seam=seam,
+        )
+        raise PlanReviewCancelledStale(
+            f"the OWN plan material of {scope.ticket_id} changed mid-review "
+            f"(detected at the {seam} seam); the remaining passes are skipped"
+        )
 
 
 def _phase_for_state(state: dict) -> Literal["planning", "execution"]:

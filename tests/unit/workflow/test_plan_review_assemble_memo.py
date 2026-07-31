@@ -112,6 +112,15 @@ def _cfg() -> LLMConfig:
 def _run_gate(monkeypatch, *, children: bool) -> tuple[dict, _ReadSpy]:
     spy = _ReadSpy()
     spy.install(monkeypatch, children=children)
+    # Neutralize the mid-run cancel probes (story 2c89): a probe performs a DELIBERATE
+    # fresh single-ticket read OUTSIDE the assemble memo (it must observe an edit the
+    # memo would hide), which would perturb this test's exact read accounting — and the
+    # hand-built ctx below diverges from the spy store, so an un-neutralized probe would
+    # (correctly, for its own contract) cancel the run. The probe's read behavior is
+    # covered in test_plan_review_cancel.py.
+    monkeypatch.setattr(
+        "rebar.llm.plan_review.generation.own_material_changed", lambda *a, **k: False
+    )
     ctx = PlanContext(ticket_id=_TARGET, ticket_type="story", title="Build X", description=_GOOD_AC)
     verdict = gate_dispatch.produce_plan_review_verdict(
         ctx, _cfg(), runner=_BranchingRunner(), advisory_cap=10, repo_root=None

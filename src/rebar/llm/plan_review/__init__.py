@@ -605,6 +605,14 @@ def _run_plan_review(
         prerequisite_blocks=prerequisite_blocks,
     )
 
+    # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the
+    # review ran — everything after the edit was skipped and nothing reviewed is
+    # signable. Return the cancelled INDETERMINATE verbatim, BEFORE the floors, the
+    # signing attempt, and the sidecar emit (a sidecar write advances the store
+    # revision), mirroring the not-claimable fast-fail early return above.
+    if verdict.get("coverage", {}).get("cancelled"):
+        return verdict
+
     material = initial_generation.own_material
     verdict["material_fingerprint"] = material
 
