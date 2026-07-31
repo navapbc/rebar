@@ -154,12 +154,38 @@ def _emit_mode_manifest(
     if mode == mode_mod.Mode.LIVE:
         # LIVE: no manifest file per contract. Remove the legacy manifest
         # written by _apply_batch.
+        #
+        # Bug c903-42b9-0f17-45cc: read the tally OUT of the manifest before
+        # deleting it, and return that instead of None. Returning None made
+        # `reconcile._persist_and_log` skip its `elif manifest_path is not None`
+        # tally branch entirely, so in LIVE — the only mode production runs —
+        # `mutation_failures` was hardcoded-by-omission to 0 and every computed
+        # mutation counted as applied. That silently defeated three contracts:
+        # e534 ("isolate + fail loud at the END exits non-zero"), 48c8
+        # (REBAR_RECONCILER_FAIL_SILENT_NOOP driving a non-zero exit) and 85a1
+        # (the truthful tally, which printed "applied N of N" while mutations
+        # failed). The file still goes away — the no-manifest-in-LIVE contract is
+        # unchanged; only the counts survive it.
+        tally: dict | None = None
         try:
             if manifest_path is not None and Path(manifest_path).exists():
+                try:
+                    outcomes = (
+                        json.loads(Path(manifest_path).read_text()).get("mutations", []) or []
+                    )
+                    tally = {
+                        "applied_count": sum(1 for o in outcomes if not o.get("error")),
+                        "failed_count": sum(1 for o in outcomes if o.get("error")),
+                    }
+                except (OSError, ValueError, AttributeError):
+                    # Unreadable/malformed manifest: fall through with tally=None so the
+                    # caller keeps its previous conservative default rather than
+                    # inventing counts.
+                    tally = None
                 Path(manifest_path).unlink()
         except OSError:
             pass
-        return ("RETURN", None)
+        return ("RETURN", tally)
 
     if mode == mode_mod.Mode.BOOTSTRAP_THROTTLE:
         rendered = renderer_mod.render_throttle(applied_for_manifest, deferred_for_manifest)

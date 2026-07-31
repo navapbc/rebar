@@ -197,7 +197,15 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
         assert batch_spy.call_count == 1, "outbound batch must run exactly once"
 
     # LIVE must NOT leave a manifest file behind per contract.
-    assert manifest_path is None
+    # Bug c903: LIVE now returns the applied/failed tally read out of the manifest
+    # immediately before unlinking it, instead of None — returning None was what made
+    # `mutation_failures` structurally 0 in production. The contract this test names
+    # (no manifest FILE in LIVE) is unchanged and still asserted below; only the
+    # in-memory return value changed, so assert its shape rather than `is None`.
+    assert isinstance(manifest_path, dict), (
+        f"LIVE must return the applied/failed tally, got {manifest_path!r}"
+    )
+    assert set(manifest_path) == {"applied_count", "failed_count"}
     assert not fake_batch_manifest.exists(), (
         f"LIVE mode must REMOVE the legacy manifest file (found {fake_batch_manifest})"
     )
@@ -314,7 +322,10 @@ def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod
             repo_root=tmp_path,
             mode=mode_mod.Mode.LIVE,
         )
-    assert result is None
+    # Bug c903: LIVE returns the tally (read pre-unlink), not None. The contract this
+    # test names — no manifest FILE — is the assertion below, and is unchanged.
+    assert isinstance(result, dict), f"LIVE must return the tally, got {result!r}"
+    assert set(result) == {"applied_count", "failed_count"}
     assert not fake.exists()
 
 

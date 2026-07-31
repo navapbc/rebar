@@ -121,6 +121,9 @@ class _PassContext:
     unfiltered_count: int = 0
     manifest_path: Any = None
     nowrite_plan: dict | None = None
+    # LIVE applied/failed counts read out of the manifest before it was unlinked
+    # (bug c903) — LIVE leaves no manifest file, so this is the only failure record.
+    apply_tally: dict | None = None
 
 
 def reconcile_once(
@@ -436,6 +439,8 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # both directions.
     manifest_path = None
     nowrite_plan: dict | None = None
+    # Bug c903: LIVE returns its applied/failed tally here instead of a Path.
+    apply_tally: dict | None = None
     apply_exc: BaseException | None = None
     try:
         # Backward compatibility: tests stub applier.apply with a signature
@@ -469,6 +474,14 @@ def _apply_mutations(ctx: _PassContext) -> None:
         if not persist and isinstance(manifest_path, dict):
             nowrite_plan = manifest_path
             manifest_path = None
+        # Bug c903: in LIVE (persist=True) apply() returns the applied/failed tally
+        # read out of the manifest just before it was unlinked, NOT a Path. Route it
+        # to ctx.apply_tally so _persist_and_log can count failures without an
+        # on-disk manifest. Discriminated from the no-write plan dict above by
+        # `persist`, which is False there and True here.
+        elif persist and isinstance(manifest_path, dict):
+            apply_tally = manifest_path
+            manifest_path = None
         # health.record_pass writes a bridge_state/health/<ts>.json file —
         # skip it in no-write mode (ticket yaw-plait-doe).
         if persist:
@@ -501,6 +514,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
     ctx.unfiltered_count = unfiltered_count
     ctx.manifest_path = manifest_path
     ctx.nowrite_plan = nowrite_plan
+    ctx.apply_tally = apply_tally
 
 
 def _advance_baselines(binding_store: Any, curr_snapshot: Mapping[str, Any]) -> int:
@@ -534,6 +548,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     prev_path = ctx.prev_path
     manifest_path = ctx.manifest_path
     nowrite_plan = ctx.nowrite_plan
+    apply_tally = ctx.apply_tally
     mutations = ctx.mutations
     pass_id = ctx.pass_id
     sync_logger = ctx.sync_logger
@@ -621,6 +636,15 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     if nowrite_plan is not None:
         mutations_applied = 0
         mutation_failures = 0
+    elif apply_tally is not None:
+        # Bug c903: LIVE deletes its manifest, so the counts arrive out-of-band from
+        # _emit_mode_manifest (read immediately before the unlink). Without this branch
+        # the tally fell through to the (len(mutations), 0) default below, which made
+        # `mutation_failures` structurally 0 in the only mode production runs — leaving
+        # __main__'s `if failures > 0: return 1` unreachable and printing "applied N of
+        # N" while mutations failed.
+        mutations_applied = int(apply_tally.get("applied_count", 0))
+        mutation_failures = int(apply_tally.get("failed_count", 0))
     elif manifest_path is not None:
         try:
             manifest_data = json.loads(Path(manifest_path).read_text())
