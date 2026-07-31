@@ -1,27 +1,88 @@
-"""The plan-review dispatcher's failure tail (split out of :mod:`.gate_dispatch`).
+"""Plan-review run-record -> verdict reconstruction (ticket 1484).
 
-The named step ids for ``gates/plan-review.yaml`` plus everything the dispatcher runs
-AFTER ``run_workflow`` returns abnormally: the ``coverage['metrics']`` reconstruction,
-the coach/verify mid-tail recovery reconstructions, the systemic-outage degrade, and the
-mid-run-cancelled verdict (story 2c89). A LEAF like :mod:`rebar.llm.code_review.finalize`
-— it never imports :mod:`.gate_dispatch` (which re-exports these names for callers/tests).
+Everything that turns a finished gate run-record — or a FAILED one — back into a
+``plan_review_verdict``: the named step-id vocabulary those lookups key off, the metrics
+reconstruction, the two mid-tail recoveries, and the outage degrade.
 
-The step ids are the recovery/metrics lookup keys: a YAML rename that dropped one would
-make the succeeded-step lookup silently return None and degrade a recoverable run to a
-hollow INDETERMINATE, so `gate_dispatch._validate_gate_step_ids` validates them against
-the loaded doc before every billable run.
+Extracted from ``gate_dispatch`` because that module sat at 799 LOC against the 800-LOC hard cap
+with ONE line of headroom, while three of the five ``orchestrator.finalize_verdict`` call sites
+live in this cluster and story 343b must add an argument at each. ``gate_dispatch`` re-imports
+every name below, so they remain ITS module-globals and the existing attribute-access references
+and monkeypatch targets resolve unchanged — the same zero-test-edit mechanism task 2682 and
+ticket 3a98 used.
+
+STRICT LEAF: imports nothing from ``gate_dispatch`` (which imports this module), and every rebar
+import stays lazy INSIDE the function bodies, so the module level cannot close an import cycle.
+
+Note the orchestrator reference style is load-bearing: these functions do a lazy
+``from rebar.llm.plan_review import orchestrator`` and then ``orchestrator.<name>`` ATTRIBUTE
+access. A lifecycle test monkeypatches ``orchestrator.pass3_over_findings`` and then calls into
+here; flattening those to bare-name imports would bind the original at import time and silently
+defeat the patch.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+# Named step ids for gates/plan-review.yaml. The dispatcher's mid-tail RECOVERY and the metrics
+# reconstruction below key off these ids (a run's succeeded-step partition is looked up by id); a
+# YAML rename that dropped one would make the lookup silently return None, so a recoverable run
+# would degrade to a hollow INDETERMINATE with NO error (the exact silent-failure this centralizes
+# away). Keep the literals here, once, and validate them against the loaded doc at dispatch time
+# (see `_validate_gate_step_ids`) so a rename is caught LOUDLY instead of silently degraded.
 STEP_PRECHECK = "precheck"
 STEP_ASSEMBLE = "assemble"
 STEP_FINDERS = "finders"
 STEP_VERIFY = "verify"
 STEP_DECIDE = "decide"
 STEP_COACH = "coach"
+
+# The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
+_PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
+    {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
+)
+
+
+class GateContractError(RuntimeError):
+    """A loaded gate workflow is missing a step id the dispatcher's recovery/metrics logic
+    references — i.e. a YAML step was renamed/dropped out from under the recovery code. Raised
+    LOUDLY at dispatch (NOT silently degraded to INDETERMINATE) so the break surfaces where it
+    can be fixed instead of quietly discarding real findings."""
+
+
+def _collect_step_ids(node: Any) -> set[str]:
+    """Every step ``id`` in a loaded workflow doc, including ids nested inside ``branch``
+    then/else arms (a recursive walk over the plain dict/list doc structure)."""
+    ids: set[str] = set()
+    if isinstance(node, dict):
+        sid = node.get("id")
+        if isinstance(sid, str):
+            ids.add(sid)
+        for value in node.values():
+            ids |= _collect_step_ids(value)
+    elif isinstance(node, list):
+        for item in node:
+            ids |= _collect_step_ids(item)
+    return ids
+
+
+def _validate_gate_step_ids(doc: dict[str, Any], required: frozenset, *, gate_name: str) -> None:
+    """Fail LOUDLY if the loaded gate doc is missing any step id the dispatcher references.
+
+    A step-id rename in ``gates/<gate_name>.yaml`` would otherwise make the recovery lookups
+    silently return ``None`` and degrade a recoverable run to INDETERMINATE. Called at dispatch
+    time (right after the doc is loaded) so drift is caught here, not swallowed downstream."""
+    present = _collect_step_ids(doc.get("steps"))
+    missing = sorted(required - present)
+    if missing:
+        raise GateContractError(
+            f"gate workflow {gate_name!r} is missing step id(s) {missing} that the dispatcher's "
+            f"recovery/metrics logic references (present step ids: {sorted(present)}). A step was "
+            f"likely renamed in gates/{gate_name}.yaml — update the STEP_* constants in "
+            f"gate_dispatch.py to match, or restore the id."
+        )
+
 
 # Step ids/kinds that partition a plan-review run into its latency tiers (toy-kink-ire).
 _DET_STEP_IDS = frozenset({STEP_PRECHECK})  # the deterministic floor tier

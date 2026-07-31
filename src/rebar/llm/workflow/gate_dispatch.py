@@ -36,22 +36,29 @@ from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: 
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 
-# The plan-review step ids + failure tail (metrics rebuild, coach/verify recoveries,
-# degraded/cancelled verdict builders) live in the plan_review_tail leaf (module-size
-# split); re-imported here so callers/tests keep addressing them as gate_dispatch
-# attributes.
-from .plan_review_tail import (
+# Back-compat re-export (load-bearing): the plan-review recovery cluster lives in the
+# workflow/plan_review_recovery.py strict leaf to buy headroom under the module-size cap. ~15 tests
+# reach these as `gate_dispatch.<name>` attribute access or import them from here; re-importing
+# keeps them module-globals of THIS module, so every existing reference and monkeypatch target
+# resolves unchanged.
+from rebar.llm.workflow.plan_review_recovery import (  # noqa: F401
+    _DET_STEP_IDS,
+    _LLM_STEP_KINDS,
+    _PLAN_REVIEW_REQUIRED_STEP_IDS,
     STEP_ASSEMBLE,
     STEP_COACH,
     STEP_DECIDE,
     STEP_FINDERS,
     STEP_PRECHECK,
     STEP_VERIFY,
+    GateContractError,
     _attach_plan_review_metrics,
     _cancelled_plan_review_verdict,
+    _collect_step_ids,
     _degraded_plan_review_verdict,
     _recover_plan_review_coach_failure,
     _recover_plan_review_verify_failure,
+    _validate_gate_step_ids,
 )
 
 
@@ -67,54 +74,6 @@ def _gate_doc(name: str, repo_root) -> dict[str, Any]:
 
 
 # ── plan-review ───────────────────────────────────────────────────────────────────
-# The named step ids, the mid-tail recovery reconstructions, the metrics rebuild, and the
-# degraded/cancelled verdict builders live in the plan_review_tail leaf (module-size split;
-# no back-import into this dispatcher). Re-exported here so callers/tests keep addressing
-# them as gate_dispatch attributes.
-# The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
-_PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
-    {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
-)
-
-
-class GateContractError(RuntimeError):
-    """A loaded gate workflow is missing a step id the dispatcher's recovery/metrics logic
-    references — i.e. a YAML step was renamed/dropped out from under the recovery code. Raised
-    LOUDLY at dispatch (NOT silently degraded to INDETERMINATE) so the break surfaces where it
-    can be fixed instead of quietly discarding real findings."""
-
-
-def _collect_step_ids(node: Any) -> set[str]:
-    """Every step ``id`` in a loaded workflow doc, including ids nested inside ``branch``
-    then/else arms (a recursive walk over the plain dict/list doc structure)."""
-    ids: set[str] = set()
-    if isinstance(node, dict):
-        sid = node.get("id")
-        if isinstance(sid, str):
-            ids.add(sid)
-        for value in node.values():
-            ids |= _collect_step_ids(value)
-    elif isinstance(node, list):
-        for item in node:
-            ids |= _collect_step_ids(item)
-    return ids
-
-
-def _validate_gate_step_ids(doc: dict[str, Any], required: frozenset, *, gate_name: str) -> None:
-    """Fail LOUDLY if the loaded gate doc is missing any step id the dispatcher references.
-
-    A step-id rename in ``gates/<gate_name>.yaml`` would otherwise make the recovery lookups
-    silently return ``None`` and degrade a recoverable run to INDETERMINATE. Called at dispatch
-    time (right after the doc is loaded) so drift is caught here, not swallowed downstream."""
-    present = _collect_step_ids(doc.get("steps"))
-    missing = sorted(required - present)
-    if missing:
-        raise GateContractError(
-            f"gate workflow {gate_name!r} is missing step id(s) {missing} that the dispatcher's "
-            f"recovery/metrics logic references (present step ids: {sorted(present)}). A step was "
-            f"likely renamed in gates/{gate_name}.yaml — update the STEP_* constants in "
-            f"gate_dispatch.py to match, or restore the id."
-        )
 
 
 def produce_plan_review_verdict(
