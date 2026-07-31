@@ -15,16 +15,19 @@ import pytest
 
 from rebar_reconciler._backend import Backend, FieldSanitizer, RemoteRef
 from rebar_reconciler.adapters.jira.backend import JiraBackend
+from rebar_reconciler.adapters.jira_datacenter.backend import JiraDataCenterBackend
 
 from .backend_support import FakeBackend, FakeTransport
 
 
-@pytest.fixture(params=["fake", "jira"])
+@pytest.fixture(params=["fake", "jira", "jira-datacenter"])
 def backend(request):
-    """One live backend per param — both drive the same contract assertions."""
+    """One live backend per param — all drive the same contract assertions."""
     if request.param == "fake":
         return FakeBackend()
-    return JiraBackend(transport=FakeTransport())
+    if request.param == "jira":
+        return JiraBackend(transport=FakeTransport())
+    return JiraDataCenterBackend(transport=FakeTransport())
 
 
 def test_backend_exposes_the_five_role_protocols(backend):

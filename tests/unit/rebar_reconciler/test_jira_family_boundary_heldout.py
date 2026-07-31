@@ -128,10 +128,16 @@ def _violations(source: str, package: str) -> list[str]:
                     f"adapters/jira_datacenter/ may consume the Jira-family layer."
                 )
 
-    if _is_within(package, _JIRA):
-        for imported in sorted(imports):
-            if _is_within(imported, _DC):
-                problems.append(f"{package} imports sibling adapter package {imported}.")
+    # Sibling adapter packages are mutually sealed, in BOTH directions. J2 could
+    # assert only Cloud -> DC because adapters/jira_datacenter/ did not exist yet;
+    # story J7 closes the reciprocal half. Asymmetry would leave the seam half-open:
+    # the drift this boundary prevents is a concrete backend reaching sideways for
+    # the other's vendor internals instead of sharing through jira_family/.
+    for near, far in ((_JIRA, _DC), (_DC, _JIRA)):
+        if _is_within(package, near):
+            for imported in sorted(imports):
+                if _is_within(imported, far):
+                    problems.append(f"{package} imports sibling adapter package {imported}.")
 
     return problems
 
@@ -198,8 +204,16 @@ def test_checker_flags_a_synthetic_violation() -> None:
     assert _violations("import rebar_reconciler.adapters.jira.comment_limits", _FAMILY)
     # a module outside the two sanctioned backends consuming the shared layer
     assert _violations(f"from {_FAMILY} import sanitize_label", _ROOT_PKG)
-    # sideways edge between sibling adapter packages
+    # sideways edge between sibling adapter packages — BOTH directions.
+    # J2 could only assert Cloud -> DC, because adapters/jira_datacenter/ did not
+    # exist yet; a DC module importing adapters/jira/ passed the checker until J7.
+    # The seam is only real if it is symmetric: the whole point is that neither
+    # concrete backend may reach into the other, sharing ONLY via jira_family/.
     assert _violations(f"from {_DC} import x", _JIRA)
+    assert _violations(f"from {_JIRA} import x", _DC)
+    assert _violations("from rebar_reconciler.adapters.jira.adf import text_to_adf", _DC)
+    assert _violations("import rebar_reconciler.adapters.jira.comment_limits", _DC)
+    assert _violations("from ..jira import adf", _DC)
 
     # negative controls — the permitted direction must NOT be flagged
     assert not _violations(f"from {_FAMILY} import sanitize_label", _JIRA)
