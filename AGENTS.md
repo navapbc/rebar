@@ -174,10 +174,13 @@ in **opposite** directions, so this is a division of labour, not a preference:
 |---|---|
 | who calls / imports a symbol | Serena `find_referencing_symbols` — semantic, no comment false positives |
 | symbol named as a **string**: `monkeypatch.setattr`, `getattr`, `importlib` | `grep` — the LSP cannot resolve these, so Serena silently omits the site |
+| calls on a **receiver** whose static type is `Any` — an unannotated parameter or an explicit `: Any` | `grep` — Pyright cannot bind the attribute, so Serena returns an **empty** result, not an error |
 | a current line number | `grep` on the working tree — Serena's numbering is offset and its index can lag edits |
 
 Cross-cutting change → do **both**: Serena for the reference set, then one `grep` for the
-symbol's name **as a string**. Skipping that second step is what broke epic `061c` S1. Evidence
+symbol's name **as a string**. Skipping that second step is what broke epic `061c` S1. Serena is
+asymmetric — a non-**empty** result is trustworthy, an **empty** one is not unless every
+**receiver** is typed, so confirm it with `grep` before concluding a symbol is unused. Evidence
 and reproductions: `docs/code-navigation.md`; if Serena is absent, `claude mcp get serena`.
 
 ## Git workflow — land changes THROUGH GERRIT, not GitHub PRs
