@@ -37,6 +37,15 @@ _XSSI = ")]}'"
 _LABEL = "LLM-Review"
 _ROBOT_ID = "rebar-review-bot"
 
+#: Wall-clock bound (seconds) on every git subprocess in :meth:`GerritClient.clone_change_ref`.
+#: An unbounded git call blocks the caller forever on a stuck remote or a hung credential
+#: helper (bug 747f measured a ~2.1-hour hang on such a path). 300s rather than the 30s used
+#: by ``src/rebar/_store/push.py`` / ``src/rebar/_store/sync.py``: those bound an INCREMENTAL
+#: ref-sized op against an already-warm clone, whereas this method runs ``git init`` on a
+#: freshly created dest and does a COLD fetch of the change ref — 747f's "legitimately minutes
+#: on a cold clone" profile, for which it adopted the same 300s bound.
+_GIT_TIMEOUT = 300
+
 
 def _strip_xssi(text: str) -> str:
     """Strip Gerrit's ``)]}'`` XSSI prefix (and trailing newline) before JSON parse."""
@@ -44,6 +53,26 @@ def _strip_xssi(text: str) -> str:
     if text.startswith(_XSSI):
         text = text[len(_XSSI) :]
     return text.strip()
+
+
+def _git_op(cmd: Any) -> str:
+    """Best-effort name of the git subcommand in ``cmd`` (e.g. ``fetch``, ``checkout``).
+
+    ``cmd`` is whatever ``subprocess.TimeoutExpired.cmd`` carried, so it may be a list or a
+    string. Skips the ``git`` argv[0] and any leading global option (``-C <dir>``) to reach the
+    subcommand; falls back to ``"git"`` if nothing recognisable is found."""
+    parts = list(cmd) if isinstance(cmd, (list, tuple)) else str(cmd).split()
+    i = 1 if parts and str(parts[0]).endswith("git") else 0
+    while i < len(parts):
+        token = str(parts[i])
+        if token == "-C":  # global option taking a value
+            i += 2
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        return token
+    return "git"
 
 
 class GerritError(RuntimeError):
@@ -299,18 +328,26 @@ class GerritClient:
             (parsed.scheme or "http", netloc, f"/a/{self._cfg.project}", "", "")
         )
         try:
-            subprocess.run(["git", "init", "-q", dest], check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "init", "-q", dest],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_GIT_TIMEOUT,
+            )
             subprocess.run(
                 ["git", "-C", dest, "fetch", "-q", "--depth", "2", repo_url, revision_ref],
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
                 ["git", "-C", dest, "checkout", "-q", "FETCH_HEAD"],
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_GIT_TIMEOUT,
             )
             # Fetch the current tickets-branch HEAD from the shared mirror ALONGSIDE the Gerrit
             # code clone: the rebar ticket store lives on the orphan `tickets` branch, which is NOT
@@ -325,6 +362,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
                 # fmt: off
@@ -343,21 +381,38 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_GIT_TIMEOUT,
             )
+        except subprocess.TimeoutExpired as exc:
+            # A TimeoutExpired is neither an OSError nor a CalledProcessError, so it would
+            # otherwise escape the redacting handler below — and its ``cmd`` carries the
+            # ``user:token@host`` fetch URL. Convert it here, through the SAME redaction.
+            raise GerritError(
+                f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
+                f"git {_git_op(exc.cmd)} timed out after {_GIT_TIMEOUT} seconds: "
+                f"{self._redact(exc.cmd)[:500]}"
+            ) from exc
         except (OSError, subprocess.CalledProcessError) as exc:
             stderr = getattr(exc, "stderr", "") or ""
             # Never let the token leak into a log line via the URL — redact BOTH the
             # raw token AND its percent-encoded form (the token is URL-quoted into the
             # fetch URL, so git's error output would echo the encoded form).
-            tok = self._cfg.gerrit_bot_token
-            redacted = (
-                str(stderr).replace(tok, "***").replace(urllib.parse.quote(tok, safe=""), "***")
-            )
+            redacted = self._redact(stderr)
             raise GerritError(
                 f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
                 f"{redacted[:500]}"
             ) from exc
         return dest
+
+    def _redact(self, text: Any) -> str:
+        """Redact the bot token from ``text`` — BOTH the raw token AND its percent-encoded
+        form (the token is URL-quoted into the fetch URL, so git's error output and a
+        ``TimeoutExpired.cmd`` would echo the encoded form)."""
+        tok = self._cfg.gerrit_bot_token
+        out = str(text)
+        if not tok:
+            return out
+        return out.replace(tok, "***").replace(urllib.parse.quote(tok, safe=""), "***")
 
     @staticmethod
     def _q(change_id: str) -> str:
