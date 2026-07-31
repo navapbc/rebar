@@ -137,6 +137,7 @@ def test_project_criterion_fan_in_runs_in_round_a_with_logical_attribution(tmp_p
     runner = CodeReviewBatchRunner(
         context="DIFF",
         project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
     )
 
     result = runner.run(_batch_request(step_id="round_a", repo_root=str(tmp_path)), agent)
@@ -185,6 +186,7 @@ def test_project_criterion_logical_attribution_is_present_once(
     result = CodeReviewBatchRunner(
         context="DIFF",
         project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
     ).run(
         _batch_request(step_id="round_a", repo_root=str(tmp_path)),
         _AttributionAgent(),
@@ -215,7 +217,11 @@ def test_project_criterion_fan_in_is_round_a_only_and_replay_stable(tmp_path) ->
     prompts.mkdir(parents=True)
     (prompts / f"{_PROJECT_PROMPT}.md").write_text(_PROJECT_RUBRIC, encoding="utf-8")
     agent = _RecordingBatchAgent()
-    runner = CodeReviewBatchRunner(context="DIFF", project_criteria=_project_entries())
+    runner = CodeReviewBatchRunner(
+        context="DIFF",
+        project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
+    )
 
     round_b = runner.run(_batch_request(step_id="round_b", repo_root=str(tmp_path)), agent)
     first = runner.run(_batch_request(step_id="round_a", repo_root=str(tmp_path)), agent)
@@ -228,7 +234,11 @@ def test_project_criterion_fan_in_is_round_a_only_and_replay_stable(tmp_path) ->
 
 
 def test_project_criterion_missing_prompt_raises_located_llm_error(tmp_path) -> None:
-    runner = CodeReviewBatchRunner(context="DIFF", project_criteria=_project_entries())
+    runner = CodeReviewBatchRunner(
+        context="DIFF",
+        project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
+    )
 
     with pytest.raises(
         LLMError,
@@ -250,7 +260,11 @@ def test_project_criterion_wrong_output_contract_raises_located_llm_error(tmp_pa
         ),
         encoding="utf-8",
     )
-    runner = CodeReviewBatchRunner(context="DIFF", project_criteria=_project_entries())
+    runner = CodeReviewBatchRunner(
+        context="DIFF",
+        project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
+    )
 
     with pytest.raises(
         LLMError,

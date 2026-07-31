@@ -31,6 +31,8 @@ from .model import (
     threshold_for,
 )
 from .overlay import (
+    RepoRootMismatchError,
+    check_repo_root_agreement,
     clear_caches,
     disabled_builtins,
     effective_criteria,
@@ -41,7 +43,9 @@ from .overlay import (
 __all__ = [
     "DEFAULT_BLOCK_THRESHOLD",
     "CriteriaError",
+    "RepoRootMismatchError",
     "build_descriptor",
+    "check_repo_root_agreement",
     "threshold_for",
     "clear_caches",
     "disabled_builtins",

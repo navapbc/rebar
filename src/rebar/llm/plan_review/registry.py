@@ -315,6 +315,15 @@ def _descriptor_from_prompt(
         from rebar.llm.criteria.ids import criterion_prompt_id
         from rebar.llm.prompting import prompts
 
+        # Plan-review sits on the SAME discovery/resolution seam as code review: `rr` is
+        # discovery's root (ambient fallback applied) and `root` is what `get_prompt` will
+        # resolve `.rebar/prompts/` against (no fallback — None means packaged only). Today
+        # `build_descriptor` hands `rr` straight back, so they always agree; the check makes
+        # that agreement ENFORCED rather than incidental, so a future change that diverges
+        # them fails loudly instead of reporting a present project rubric as "unknown".
+        _overlay_core.check_repo_root_agreement(
+            rr, root, where=f"plan-review criterion {criterion_id!r}"
+        )
         # Decouple the logical criterion id from the rubric's filesystem-safe prompt id
         # (task stew-kid-motif): a project.<name> id reads plan-review-project-<name>.md, so a
         # net-new project criterion — whose dotted id `_valid_id` forbids as a filename — is
