@@ -47,7 +47,21 @@ BOT_IMAGE="${BOT_IMAGE:-compose-review-bot}"
 GERRIT_CONTAINER="${GERRIT_CONTAINER:-compose-gerrit-1}"
 HEALTH_URL="${HEALTH_URL:-http://localhost:8000/health}"   # review-bot receiver (NOT Gerrit 8080)
 FETCH_TIMEOUT="${FETCH_TIMEOUT:-60}"                  # a hung fetch must not hold the lock
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
+# Readiness deadline for the freshly-deployed review-bot. It MUST outlast the budgets the
+# APPLICATION itself may legitimately spend on a cold start, or the deploy rolls back a
+# container that was only slow. The dominant term is the store write lock taken by
+# `run_ensures()` on the bot's startup path: src/rebar/_store/lock.py `_DEFAULT_TIMEOUT` (30)
+# x `_DEFAULT_ATTEMPTS` (2) = a 60s wait before it logs and continues. The readiness loop below
+# adds up to 5s of granularity (sleep 2 + curl -m 3), so ~65s is the floor and the 30s this
+# defaulted to sat below even the lock budget alone — on 2026-07-31 a ~62s cold start was killed
+# at +30s and rolled back seven consecutive times, each rolled-back container then becoming
+# healthy ~30s later. 120s is 2x the dominant internal budget, leaving headroom for a cold/slow
+# box. A genuinely broken image is still rolled back — just 90s later — and the timer plus the
+# SHA-keyed backoff still bound the retry rate. Keep this ABOVE the app's own budgets if either
+# side changes (tests/scripts/test_autodeploy_health_gate.py asserts the relationship).
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+HEALTH_FAIL_LOG_LINES="${HEALTH_FAIL_LOG_LINES:-100}"   # bounded stderr tail captured on bot-unhealthy
+HEALTH_FAIL_LOG_BYTES="${HEALTH_FAIL_LOG_BYTES:-20000}" # …and a hard byte cap on that tail
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
 BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap (docker builder prune --keep-storage)
 
@@ -107,6 +121,26 @@ mkdir -p "$STATE_DIR"
 now() { date +%s; }
 log() { printf '{"event":"autodeploy","ts":%s,"msg":%s}\n' "$(now)" "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$*")"; }
 err() { printf 'AUTODEPLOY_ERROR %s\n' "$(python3 -c 'import json,sys;print(json.dumps({"ts":int(sys.argv[1]),"reason":sys.argv[2],"detail":sys.argv[3]}))' "$(now)" "$1" "${2:-}")" >&2; }
+
+# Copy a BOUNDED tail of the failing review-bot container's own output into the deploy journal.
+# The rollback below replaces that container immediately, so without this its stderr is
+# recoverable only by host access to a container that no longer exists — which is why the
+# 2026-07-31 journal could not tell "the image is broken" from "the image is fine, just slow",
+# two failures with opposite remediations. Bounded three ways (lines, bytes, wall clock) and
+# strictly best-effort: a capture failure must never alter the rollback that follows.
+# The tail goes through log(), which JSON-encodes it onto ONE stdout line, and the literal
+# AUTODEPLOY_ERROR token is redacted first: observability.sh counts that token in THIS unit's
+# journal to drive the deploy_errors CloudWatch alarm, so echoing captured text unredacted
+# could inflate the alarm.
+capture_bot_logs() {
+  local out
+  out="$( cd "$COMPOSE_DIR" && timeout 15 docker compose logs --no-color \
+            --tail "$HEALTH_FAIL_LOG_LINES" "$BOT_SERVICE" 2>&1 \
+          | tail -c "$HEALTH_FAIL_LOG_BYTES" )" \
+    || out="(could not read $BOT_SERVICE logs)"
+  [ -n "$out" ] || out="(no output from $BOT_SERVICE)"
+  log "bot-unhealthy diagnostics — last $HEALTH_FAIL_LOG_LINES lines of $BOT_SERVICE: ${out//AUTODEPLOY_ERROR/AUTODEPLOY_ERR<redacted>}"
+}
 
 # ── single-flight ─────────────────────────────────────────────────────────────
 exec 9>"$LOCK"
@@ -232,7 +266,9 @@ if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
   ok=0; deadline=$(( $(now) + HEALTH_TIMEOUT ))
   while [ "$(now)" -lt "$deadline" ]; do curl -fsS -m 3 "$HEALTH_URL" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
   if [ "$ok" != 1 ]; then
-    err bot-unhealthy "review-bot failed health check after deploy; ROLLING BACK to :prev"
+    # Capture the evidence BEFORE the rollback replaces the failing container.
+    capture_bot_logs
+    err bot-unhealthy "review-bot failed health check within ${HEALTH_TIMEOUT}s after deploy; ROLLING BACK to :prev (container log tail captured above)"
     if [ "$have_prev" = 1 ]; then docker tag "$BOT_IMAGE:prev" "$BOT_IMAGE:latest"; ( cd "$COMPOSE_DIR" && docker compose up -d "$BOT_SERVICE" ); fi
     record_backoff_failure; exit 1
   fi

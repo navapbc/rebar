@@ -285,6 +285,15 @@ CI config-gate blocks malformed config from reaching main), `materialise-failed`
 `bot-build-failed`, `bot-unhealthy` (health check failed -> **auto-rolled-back to `:prev`**),
 `meta-config-manual` (project.config change needs a manual apply).
 
+**Diagnosing `bot-unhealthy`:** the rollback replaces the failing container immediately, so
+autodeploy captures a bounded tail of its output into the deploy journal first — look for the
+`bot-unhealthy diagnostics — last N lines of review-bot:` line right above the marker. That
+tail is what separates a **broken image** (a traceback / immediate exit) from a container that
+was merely **slow** (startup lines that simply had not finished), which have opposite
+remediations. The readiness deadline is `HEALTH_TIMEOUT` (default 120s), deliberately set above
+the app's own worst-case cold-start budget — chiefly the 60s store write-lock budget
+`run_ensures()` may spend; see the comment on the tunable in `autodeploy.sh`.
+
 **Failure behaviour (fail-safe):** a failed deploy keeps the **last-known-good** review-bot +
 config live (the gate is never frozen by a bad deploy). The loop retries with **capped
 exponential backoff** (60s→15m), keyed to the target SHA — a NEW `main` tip resets the
