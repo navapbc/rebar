@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import pytest
 
@@ -1421,15 +1422,153 @@ def test_lifespan_drain_is_bounded(monkeypatch, tmp_path):
     asyncio.run(asyncio.wait_for(_run(), timeout=5))
 
 
-def test_reviewbot_compose_sets_stop_grace_period():
-    """docker-compose review-bot service declares a stop_grace_period so the drain has time
-    before Docker escalates to SIGKILL."""
+def _compose_stop_grace_seconds() -> float:
+    """The review-bot service's declared stop_grace_period, in seconds."""
     import pathlib
+    import re
 
     yaml = pytest.importorskip("yaml")
     root = pathlib.Path(__file__).resolve().parents[2]
     d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
-    assert d["services"]["review-bot"].get("stop_grace_period")
+    raw = d["services"]["review-bot"].get("stop_grace_period")
+    assert raw, "the review-bot service must declare a stop_grace_period"
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(s|m)?\s*", str(raw))
+    assert match, f"unparseable stop_grace_period {raw!r}"
+    return float(match.group(1)) * (60 if match.group(2) == "m" else 1)
+
+
+def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
+    """The grace period must outlast a shutdown that is still finishing a store write.
+
+    A SIGTERM starts the lifespan drain, which waits for the in-flight review to finish.
+    That review ends in ``emit_code_review_artifact`` -> ``event_append.stage_and_commit``,
+    which holds the store's **mkdir** write lock. Unlike the fcntl leg, that lock dir is NOT
+    released by the kernel when the process dies, so a SIGKILL landing inside that region
+    orphans it — and a lock stamped by one container cannot be reclaimed by the next.
+
+    So the grace period has to cover the drain window PLUS the write that may only be
+    starting as the window closes, and the dominant term in that write is the store write
+    lock's own acquisition budget. Both are read from source here rather than restated as
+    literals, so raising either budget fails this test until the grace period follows.
+    """
+    from rebar._store import lock as _lock
+    from rebar.review_bot.app import DEFAULT_SHUTDOWN_DRAIN_SECONDS
+
+    lock_budget = _lock._DEFAULT_TIMEOUT * _lock._DEFAULT_ATTEMPTS
+    floor = DEFAULT_SHUTDOWN_DRAIN_SECONDS + lock_budget
+    grace = _compose_stop_grace_seconds()
+
+    assert grace >= floor, (
+        f"stop_grace_period is {grace}s but a shutdown can legitimately spend "
+        f"{DEFAULT_SHUTDOWN_DRAIN_SECONDS}s draining the queue and then a further "
+        f"{lock_budget}s acquiring the store write lock for the artifact write "
+        f"({lock_budget}s = lock._DEFAULT_TIMEOUT x _DEFAULT_ATTEMPTS). Sizing the grace "
+        f"period against the drain window alone leaves SIGKILL landing mid-write, which "
+        f"orphans the mkdir lock dir; it must be at least {floor}s."
+    )
+
+
+def test_sigkill_during_a_store_write_orphans_the_mkdir_lock(tmp_path):
+    """The control for the test below, and the reason stop_grace_period is the operative
+    safeguard: nothing in-process can clean up after SIGKILL.
+
+    ``write_lock`` releases from a ``finally`` (``_store/lock.py``), so every graceful exit
+    path — including ``CancelledError`` — releases both legs. SIGKILL runs no ``finally``, and
+    while the fcntl leg is released by the kernel, the mkdir dir simply stays. So the ONLY
+    control over this failure is giving the shutdown enough time to finish the write.
+    """
+    import signal
+    import subprocess
+    import sys
+
+    from rebar._store import lock as _lock
+
+    tracker = tmp_path / "tracker"
+    tracker.mkdir()
+    lock_dir = tracker / _lock.MKDIR_LOCK_NAME
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time\n"
+            "from rebar._store import lock\n"
+            "h = lock.acquire(sys.argv[1], dual_window=True)\n"
+            "print('locked', flush=True)\n"
+            "time.sleep(60)\n",
+            str(tracker),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "locked", "child never took the lock"
+        assert lock_dir.is_dir(), "precondition: the mkdir lock dir must exist while held"
+        child.send_signal(signal.SIGKILL)
+        child.wait(timeout=10)
+    finally:
+        if child.poll() is None:  # pragma: no cover - only on an unexpected hang
+            child.kill()
+            child.wait(timeout=10)
+
+    assert lock_dir.is_dir(), (
+        "SIGKILL must be shown to leave the mkdir lock dir behind — that is the hazard the "
+        "grace period exists to avoid. If this ever stops holding, the lock gained some "
+        "out-of-process reclamation and the grace-period sizing can be revisited."
+    )
+
+
+def test_shutdown_completes_an_in_flight_store_write_and_releases_the_lock(monkeypatch, tmp_path):
+    """AC2: a shutdown that interrupts an in-flight store write must let it finish and
+    release the write lock, leaving no lock dir behind.
+
+    This is what makes the grace period worth having: the shutdown path genuinely drains the
+    write rather than abandoning it, so the only thing that can orphan the lock is running
+    out of grace. Exercised through the real ``lifespan`` shutdown (which is exactly what
+    uvicorn runs on SIGTERM) against the real ``write_lock``.
+    """
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar._store import lock as _lock
+    from rebar.review_bot import app as appmod
+
+    tracker = tmp_path / "tracker"
+    tracker.mkdir()
+    lock_dir = tracker / _lock.MKDIR_LOCK_NAME
+    held: list[bool] = []
+
+    async def _review_that_writes(event, *, config, force=False):
+        # The shape of emit_code_review_artifact: synchronous, lock-held, no await inside.
+        with _lock.write_lock(tracker, dual_window=True):
+            held.append(lock_dir.is_dir())
+            time.sleep(0.3)
+
+    monkeypatch.setattr(appmod._voter, "review_and_vote", _review_that_writes, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            fake_app.state.queue.put_nowait(_event())
+            await asyncio.sleep(0.05)  # let the worker enter the lock-held region
+            # leaving the context = the shutdown uvicorn drives on SIGTERM
+
+    asyncio.run(_run())
+
+    assert held == [True], (
+        f"the fixture must actually have held the mkdir write lock mid-shutdown; got {held}"
+    )
+    assert not lock_dir.exists(), (
+        "the shutdown abandoned an in-flight store write with the mkdir lock dir still "
+        "present. That dir is not kernel-released, and a lock stamped by one container "
+        "cannot be reclaimed by the next, so the next container's ensure sweep burns its "
+        "full lock budget and the deploy health-checks out."
+    )
 
 
 def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():

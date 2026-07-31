@@ -78,11 +78,40 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.reviewbot
     restart: unless-stopped
-    # Give the graceful in-memory-queue drain (app.py lifespan) time to finish before Docker
-    # escalates SIGTERM → SIGKILL on a redeploy/restart, so acknowledged (202) webhooks are not
-    # abandoned. Must exceed SHUTDOWN_DRAIN_SECONDS (default 45s). Default would be 10s (SIGKILL
-    # mid-drain). Anything not drained in the window still falls to the backfill reconciler.
-    stop_grace_period: 60s
+    # Give the graceful shutdown (app.py lifespan) time to finish before Docker escalates
+    # SIGTERM → SIGKILL on a redeploy/restart, so acknowledged (202) webhooks are not abandoned
+    # AND — the reason this must be generous — an in-flight store write is never killed midway.
+    # The drain waits for the running review to finish, and that review ends in
+    # emit_code_review_artifact → event_append.stage_and_commit, which holds the store's MKDIR
+    # write lock. The fcntl leg is kernel-released on death; the mkdir dir is NOT, and a lock
+    # stamped by one container cannot be reclaimed by the next — so a SIGKILL landing inside
+    # that region orphans it and the successor container burns its whole lock budget at boot
+    # (the 2026-07-31 rebar-autodeploy-errors incident).
+    #
+    # Sized from the app's own budgets, not from the drain window alone:
+    #     45s  SHUTDOWN_DRAIN_SECONDS  (app.py DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+    #   + 60s  store write-lock acquisition (_store/lock.py _DEFAULT_TIMEOUT 30 x _ATTEMPTS 2)
+    #   + 45s  the push reconcile's re-taken lock (push.py _PUSH_MERGE_LOCK_TIMEOUT 15
+    #          x _MAX_RETRIES 3)
+    #   = 150s
+    # The previous 60s was sized only against the 45s drain window, which is why a write that
+    # merely STARTED as that window closed had no room left. Docker's own default would be 10s.
+    # Anything not drained in the window still falls to the backfill reconciler.
+    #
+    # HONEST LIMIT: 150s covers the BOUNDED budgets above; it is a large risk reduction, not a
+    # proof. Two unbounded residues remain and are tracked separately, because closing them is
+    # a change to the review path rather than to this file:
+    #   * _store/event_append.py runs the lock-held `git add`/`git commit` via subprocess.run
+    #     with NO timeout= (unlike _store/push.py, which passes _GIT_TIMEOUT), so the critical
+    #     section has no upper bound by construction.
+    #   * voter.py calls the synchronous emit_code_review_artifact directly on the event loop,
+    #     which blocks it — so the lifespan's own `wait_for(queue.join(), 45s)` drain bound
+    #     cannot fire while a store write is running.
+    # Until those are bounded, no constant here is provably sufficient. Tracked as rebar
+    # c2ba-98bf-ca2d-481a (melting-resting-serpent).
+    # tests/unit/test_review_bot.py::test_reviewbot_stop_grace_period_covers_an_in_flight_store_write
+    # asserts the relationship, so raising either budget fails CI until this follows.
+    stop_grace_period: 150s
     env_file:
       - .env
     environment:
