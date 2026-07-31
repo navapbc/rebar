@@ -74,7 +74,11 @@ def _run_chunk_factory():
     prompt = prompts.get_prompt("plan-review-verifier", repo_root=cfg.repo_path)
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
-        system, _meta = prompts.resolve_prompt(prompt, {"plan": context}, repo_root=cfg.repo_path)
+        system, _meta = prompts.resolve_prompt(
+            prompt,
+            {"shared_prefix": prompts.shared_plan_prefix(context)},
+            repo_root=cfg.repo_path,
+        )
         req = RunRequest(
             system_prompt=prompts.strip_volatile_marker(system),
             instructions=instructions,

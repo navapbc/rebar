@@ -42,14 +42,15 @@ from . import pass1, passes, prerequisites, registry
 # The gate prompts S2 relocated (their `<!--volatile-->`-split prefix must cache while the
 # moved ticket/diff data rides in the user message). The completion-verifier (the close
 # gate) and code-quality (code review) are the load-bearing pair; the rest are covered for
-# completeness. Kept in sync with the marker-bearing prompts under reviewers/.
+# completeness. Kept in sync with the marker-bearing prompts under reviewers/. The Pass-2
+# verifier prompts are NOT relocated any more (story 9374): the plan now rides their
+# SYSTEM prefix via `{{shared_prefix}}` and their volatile marker is gone.
 RELOCATED_PROMPTS = (
     "completion-verifier",
     "code-quality",
     "security",
     "tests",
     "ticket-quality",
-    "plan-review-verifier",
     "plan-review-coach",
 )
 

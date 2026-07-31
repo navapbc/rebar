@@ -179,7 +179,7 @@ steps:
           output_schema: plan_review_verification
           with:
             findings: ${{ steps.finders.outputs.findings }}
-            plan: ${{ steps.verify_inputs.outputs.plan }}
+            shared_prefix: ${{ steps.verify_inputs.outputs.shared_prefix }}
             instructions: ${{ steps.verify_inputs.outputs.instructions }}
             # The agentic verifier makes ~1 tool-call cycle per finding; scale this step's budget
             # with the finding count (min = the configured floor) so a finding-rich ticket does
@@ -290,7 +290,7 @@ steps:
           output_schema: plan_review_verification
           with:
             findings: ${{ steps.finders.outputs.findings }}
-            plan: ${{ steps.verify_inputs.outputs.plan }}
+            shared_prefix: ${{ steps.verify_inputs.outputs.shared_prefix }}
             instructions: ${{ steps.verify_inputs.outputs.instructions }}
             # Greedy Pass-2 verification (non-grounded arm): same rationale as the agentic arm —
             # a re-run must not resample the verification and flip the decision (report §2).

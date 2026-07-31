@@ -350,8 +350,10 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     input_schema="plan_review_verify_inputs_input",
     output_schema="plan_review_verify_inputs_output",
     description=(
-        "Emit the {{plan}} text + the Pass-2 verifier INSTRUCTIONS for the verify prompt step. "
-        "`plan` = assemble_context(ticket_id).plan_text. `instructions` is a LIST of per-chunk "
+        "Emit the {{shared_prefix}} text + the Pass-2 verifier INSTRUCTIONS for the verify "
+        "prompt step. `shared_prefix` = prompts.shared_plan_prefix(assemble_context(ticket_id)"
+        ".plan_text) — the byte-identical plan-bearing leading prefix shared with the Pass-1 "
+        "finder system prompt. `instructions` is a LIST of per-chunk "
         "listings (passes.verify_instructions, global indices preserved): ONE element in the "
         "common case (the whole request fits the verifier model window) — byte-identical to a "
         "single aggregate verify — and TOKEN-BUDGETED splits (sizing.verify_request_chunks, no "
@@ -361,7 +363,7 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     ),
 )
 def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
-    """Emit {plan, instructions[]} feeding the workflow's Pass-2 verify prompt step. The
+    """Emit {shared_prefix, instructions[]} feeding the workflow's Pass-2 verify prompt step. The
     `instructions` list has ONE element for the common (fits-the-window) case and is split into
     token-budgeted chunks (global indices preserved) when the request would exceed the verifier
     model's window — encapsulated chunking, not a workflow fan-out (epic solid-timer-unison WS3)."""
@@ -389,7 +391,12 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     # single aggregate call returning an empty `verifications` list — the prior behavior the
     # decide step depends on.
     instructions = [passes.verify_instructions(chunk) for chunk in (chunks or [[]])]
-    return {"plan": pctx.plan_text, "instructions": instructions}
+    from rebar.llm.prompting import prompts
+
+    return {
+        "shared_prefix": prompts.shared_plan_prefix(pctx.plan_text),
+        "instructions": instructions,
+    }
 
 
 @register_step(

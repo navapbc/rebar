@@ -2,16 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/plan_review_verify_inputs_output.schema.json",
   "title": "PlanReviewVerifyInputsOutput",
-  "description": "OUTPUT of `plan_review_verify_inputs`: the prompt-template `plan` text and the Pass-2 verifier `instructions` (header + per-finding listing) fed into the workflow's verify prompt step (its `with: {plan, instructions}`).",
+  "description": "OUTPUT of `plan_review_verify_inputs`: the shared plan-bearing prefix and the Pass-2 verifier `instructions` (header + per-finding listing) fed into the workflow's verify prompt step (its `with: {shared_prefix, instructions}`).",
   "type": "object",
   "properties": {
-    "plan": { "type": "string", "description": "The assembled plan text (PlanContext.plan_text) — resolves the verifier prompt's {{plan}}." },
+    "shared_prefix": { "type": "string", "description": "prompts.shared_plan_prefix(PlanContext.plan_text) — the byte-identical plan-bearing leading prefix shared with the Pass-1 finder system prompt; resolves the verifier prompt's {{shared_prefix}}." },
     "instructions": {
       "type": "array",
       "items": { "type": "string" },
       "description": "The Pass-2 verifier instructions as a LIST of per-chunk per-finding listings (global indices preserved). ONE element in the common case (whole request fits the window); token-budgeted splits only when it would exceed the window. The verify prompt step runs once per element and merges verifications by index."
     }
   },
-  "required": ["plan", "instructions"],
+  "required": ["shared_prefix", "instructions"],
   "additionalProperties": false
 }

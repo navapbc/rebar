@@ -80,10 +80,11 @@ def bare_do_not_only_blocks(text: str) -> list[str]:
 def test_resolve_system_preamble() -> None:
     # AC1: the shared reviewing-stance preamble (injection directive + forward-looking rule) is
     # prepended to EVERY plan-review pass reviewer resolved through _resolve_system.
+    # PASS_VERIFIER is excluded (story 9374): it has no live bespoke caller and embeds the
+    # preamble itself via its leading {{shared_prefix}} — see test_shared_prefix.py.
     cfg = LLMConfig()
     for pid in (
         passes.PASS_FINDER,
-        passes.PASS_VERIFIER,
         passes.PASS_CONTAINER,
         passes.PASS_ISF,
         passes.PASS_COMPLETION,
