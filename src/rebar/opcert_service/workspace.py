@@ -19,6 +19,16 @@ from dataclasses import dataclass
 from rebar import config as _config
 from rebar.opcert_service.config import OpcertServiceConfig
 
+#: Wall-clock bound (seconds) on every git subprocess in this module — :func:`_git` is its only
+#: git seam, so this transitively bounds the two network fetches in :func:`_populate` too. An
+#: unbounded git call blocks the worker forever on a stuck remote or a hung credential helper
+#: (bug 747f measured a ~2.1-hour hang on such a path). 300s rather than the 30s used by
+#: ``src/rebar/_store/push.py`` / ``src/rebar/_store/sync.py``: those bound an INCREMENTAL
+#: ref-sized op against an already-warm clone, whereas this module fetches COLD into a fresh
+#: ``mkdtemp`` and its fetches are not even shallow — 747f's "legitimately minutes on a cold
+#: clone" profile, for which it adopted the same 300s bound.
+_GIT_TIMEOUT = 300
+
 
 class WorkspaceError(Exception):
     """A workspace could not be prepared (a git/clone/fetch failure). Maps to an internal job
@@ -35,7 +45,24 @@ class Workspace:
 
 
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=False)
+    """Run one git command in ``cwd``, bounded by :data:`_GIT_TIMEOUT`.
+
+    A ``subprocess.TimeoutExpired`` is neither an ``OSError`` nor a ``CalledProcessError`` and
+    would bypass :func:`_git_ok`'s ``WorkspaceError`` conversion, so it is converted here — this
+    is the module's only git seam."""
+    try:
+        return subprocess.run(
+            ["git", "-C", cwd, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        op = args[0] if args else "git"
+        raise WorkspaceError(
+            f"git {op} timed out after {_GIT_TIMEOUT} seconds: {' '.join(args)}"
+        ) from exc
 
 
 def _git_ok(cwd: str, *args: str) -> None:
