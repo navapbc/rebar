@@ -92,34 +92,18 @@ def build_client_from_settings(settings: Any) -> Any:
     inside ``ReconcilerConfig`` before this settings object existed
     (``_config_schema.py``); it has no bearing on certificate verification.
     """
-    # FAIL CLOSED on a missing credential, HERE — at the one point an anonymous client
-    # could come into existence (bug cd78).
-    #
-    # `resolve_jira_datacenter_settings` defaulted the PAT to "" and it was handed straight
-    # to `token_auth=`. An empty bearer token constructs fine and then issues every request
-    # ANONYMOUSLY. Two consequences make that worse than a plain error:
-    #
-    #   * it MISATTRIBUTES — Jira answers an anonymous search with "The value 'X' does not
-    #     exist for the field 'project'" (it hides projects the caller cannot browse rather
-    #     than leaking their existence), so an operator who merely forgot the export goes
-    #     hunting project keys and permissions. Observed live, CI run 30652534806.
-    #   * on an instance where anonymous CAN browse there is no error at all: the pass reads
-    #     a partial or empty view and reports a converged, successful run.
-    #
-    # `docs/user-guide.md` promises this as a security property ("a missing JIRA_PAT fails
-    # with an error naming the variable rather than falling back to anonymous access"); this
-    # is the code catching up. `Backend.assert_env_ready` already made the same check, but it
-    # is only reached on the bootstrap-band path (`_attestation.py`), so dry-run and ordinary
-    # reconcile passes went anonymous.
-    #
-    # WHY NOT AT SETTINGS RESOLUTION, which is the more obvious home: that function is
-    # reached from PROPERTIES (`JiraDataCenterBackend.query_project`), and on Python <= 3.11
-    # `isinstance(x, SomeRuntimeCheckableProtocol)` evaluates properties via `hasattr` — so a
-    # raise there breaks every Protocol conformance check. Python 3.12+ uses
-    # `inspect.getattr_static`, which does not execute properties, making the breakage
-    # invisible locally and visible only on the CI matrix's 3.11 leg. Here is strictly
-    # better anyway: it is the last point before the network and it cannot be reached by an
-    # attribute probe.
+    # FAIL CLOSED on a missing credential, HERE — the one point an anonymous client could
+    # come into existence (bug cd78). An empty PAT was handed to `token_auth=`, which
+    # constructs fine and then issues every request ANONYMOUSLY: Jira answers with "The
+    # value 'X' does not exist for the field 'project'" (it hides projects you cannot
+    # browse), so a forgotten export reads as a project error; and where anonymous CAN
+    # browse there is no error at all, just a silently partial pass.
+    # `Backend.assert_env_ready` already checked this but is only reached on the
+    # bootstrap-band path, so dry-run and ordinary passes went anonymous.
+    # NOT at settings resolution: that is reached from a PROPERTY
+    # (`JiraDataCenterBackend.query_project`), and on Python <= 3.11 Protocol `isinstance`
+    # evaluates properties via `hasattr`, so raising there breaks conformance checks on the
+    # 3.11 CI leg while passing on 3.12+ (which uses `inspect.getattr_static`).
     if not (settings.pat or "").strip():
         raise BackendEnvError(
             "JIRA_PAT is not set. The Jira Data Center backend authenticates with a "
@@ -434,8 +418,41 @@ class JiraDataCenterTransport:
         _with_connection_retry(lambda: self._client.create_issue_link(link_type, from_id, to_id))
         return self.get_issue(from_id)
 
+    def _paged_search(
+        self, jql: str, *, fields: str | None = None, page_size: int = 100
+    ) -> list[dict[str, Any]]:
+        """Every issue matching ``jql``, paged to exhaustion — the ONE pager the
+        whole-project readers share.
+
+        Advances by what the server ACTUALLY returned and stops only on an EMPTY page.
+        Jira DC silently truncates ``maxResults`` above ``jira.search.views.default.max``,
+        so a SHORT page is not proof of exhaustion: advancing by the REQUESTED size reads
+        a truncated FIRST page as the final one (measured: 20 of 250 recovered).
+
+        SHARED rather than repeated per method because that defect was fixed once, in
+        ``get_parent_map`` alone, leaving the two siblings here plus a third in
+        ``fetcher._iter_pages``. A structural test now fails the build if any caller takes
+        the ``search_issues`` default again (bug 9263).
+        """
+        out: list[dict[str, Any]] = []
+        start_at = 0
+        while True:
+            results = _call_logged(
+                "_paged_search",
+                jql,
+                lambda offset=start_at: self._client.search_issues(
+                    jql, startAt=offset, maxResults=page_size, fields=fields
+                ),
+            )
+            batch = [_unwrap(issue) for issue in results]
+            if not batch:
+                break
+            out.extend(batch)
+            start_at += len(batch)
+        return out
+
     def get_issuelinks_map(self, project_key: str) -> dict[str, Any]:
-        issues = self.search_issues(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}")
         return {
             issue["key"]: list(issue.get("fields", {}).get("issuelinks") or []) for issue in issues
         }
@@ -449,7 +466,7 @@ class JiraDataCenterTransport:
         return _unwrap(comment)
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
-        issues = self.search_issues(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}")
         out: dict[str, Any] = {}
         for issue in issues:
             key = issue["key"]
@@ -543,39 +560,19 @@ class JiraDataCenterTransport:
         """
         query = jql or f"project = {project_key}"
         out: dict[str, str | None] = {}
-        start_at = 0
-        page_size = 100
         try:
-            while True:
-                results = _call_logged(
-                    "get_parent_map",
-                    project_key,
-                    lambda offset=start_at: self._client.search_issues(
-                        query, startAt=offset, maxResults=page_size, fields="parent"
-                    ),
-                )
-                batch = list(results)
-                for issue in batch:
-                    raw = _unwrap(issue)
-                    if not isinstance(raw, dict):
-                        continue
-                    key = raw.get("key")
-                    if not key:
-                        continue
-                    fields = raw.get("fields")
-                    parent = fields.get("parent") if isinstance(fields, dict) else None
-                    out[key] = parent.get("key") if isinstance(parent, dict) else None
-                # Advance by what the server ACTUALLY returned, and stop only on an
-                # EMPTY page. Jira DC silently truncates ``maxResults`` when it exceeds
-                # ``jira.search.views.default.max`` (a common hardening), so a short page
-                # is NOT proof of exhaustion. Advancing by the REQUESTED page_size — and
-                # breaking on a short page — reads a truncated first page as the final
-                # one and silently returns a PARTIAL parent map; the inbound pass then
-                # treats every unseen issue as parentless. Measured against a client
-                # capping pages at 20: 20 of 250 parents recovered, raising nothing.
-                if not batch:
-                    break
-                start_at += len(batch)
+            # Routed through the SHARED pager (9263). It was correct here first, and
+            # leaving it as a fourth hand-rolled loop would mean the helper exists while
+            # the method that motivated it does not use it — the two would drift.
+            for issue in self._paged_search(query, fields="parent"):
+                if not isinstance(issue, dict):
+                    continue
+                key = issue.get("key")
+                if not key:
+                    continue
+                fields = issue.get("fields")
+                parent = fields.get("parent") if isinstance(fields, dict) else None
+                out[key] = parent.get("key") if isinstance(parent, dict) else None
         except Exception as exc:  # noqa: BLE001 — degradation contract: a parent-map failure must not abort the inbound pass
             logger.warning(
                 "jira-datacenter transport: get_parent_map degraded to {} for project %r: %r",
