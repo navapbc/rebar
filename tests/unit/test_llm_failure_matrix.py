@@ -142,73 +142,73 @@ MATRIX: list[Case] = [
         "429-rate",
         lambda: _raise(ModelHTTPError(429, "m", body={"error": {"type": "rate_limit_error"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 429 rate-limit -> opaque LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 429 rate-limit -> opaque LLMUnavailableError",
     ),
     Case(
         "429-insufficient_quota",
         lambda: _raise(ModelHTTPError(429, "m", body={"error": {"type": "insufficient_quota"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 429 insufficient_quota (body) -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 429 insufficient_quota (body) -> LLMUnavailableError",
     ),
     Case(
         "529-overloaded",
         lambda: _raise(ModelHTTPError(529, "m", body={"error": {"type": "overloaded_error"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 529 overloaded -> LLMUnavailableError (not retried today)",
+        "CURRENT(structured_run.py:131): 529 overloaded -> LLMUnavailableError (not retried today)",
     ),
     Case(
         "500-server-error",
         lambda: _raise(ModelHTTPError(500, "m", body={})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 500 -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 500 -> LLMUnavailableError",
     ),
     Case(
         "503-unavailable",
         lambda: _raise(ModelHTTPError(503, "m", body={})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 503 -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 503 -> LLMUnavailableError",
     ),
     Case(
         "connect-timeout",
         lambda: _raise(httpx.ConnectTimeout("connect timed out")),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): httpx.ConnectTimeout -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): httpx.ConnectTimeout -> LLMUnavailableError",
     ),
     Case(
         "read-timeout",
         lambda: _raise(httpx.ReadTimeout("read timed out")),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): httpx.ReadTimeout -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): httpx.ReadTimeout -> LLMUnavailableError",
     ),
     Case(
         "401-auth",
         lambda: _raise(ModelHTTPError(401, "m", body={"error": {"type": "authentication_error"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 401 auth -> LLMUnavailableError (same class as a 429)",
+        "CURRENT(structured_run.py:131): 401 auth -> LLMUnavailableError (same class as a 429)",
     ),
     Case(
         "403-permission",
         lambda: _raise(ModelHTTPError(403, "m", body={"error": {"type": "permission_error"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 403 permission -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 403 permission -> LLMUnavailableError",
     ),
     Case(
         "400-bad-request",
         lambda: _raise(ModelHTTPError(400, "m", body={"error": {"type": "invalid_request_error"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 400 bad-request -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 400 bad-request -> LLMUnavailableError",
     ),
     Case(
         "400-context-length",
         lambda: _raise(ModelHTTPError(400, "m", body={"error": {"message": "prompt is too long"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 400 context-length -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 400 context-length -> LLMUnavailableError",
     ),
     Case(
         "413-too-large",
         lambda: _raise(ModelHTTPError(413, "m", body={"error": {"type": "request_too_large"}})),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): 413 request-too-large -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): 413 request-too-large -> LLMUnavailableError",
     ),
     Case(
         "content_filter-finish_reason",
@@ -220,7 +220,7 @@ MATRIX: list[Case] = [
         "structured-refusal-exception",
         lambda: _raise(ContentFilterError("the model refused")),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): raised ContentFilterError -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): raised ContentFilterError -> LLMUnavailableError",
     ),
     Case(
         "length-truncation-finish_reason",
@@ -232,19 +232,19 @@ MATRIX: list[Case] = [
         "incomplete-tool-call-exception",
         lambda: _raise(IncompleteToolCall("incomplete tool call")),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): raised IncompleteToolCall -> LLMUnavailableError",
+        "CURRENT(structured_run.py:131): raised IncompleteToolCall -> LLMUnavailableError",
     ),
     Case(
         "unparseable-output",
         lambda: _canned("this is not json at all, no verdict here"),
         StructuredOutputError,
-        "CURRENT(runner.py:352): unparseable output -> StructuredOutputError (passthrough)",
+        "CURRENT(structured_run.py:95): unparseable output -> StructuredOutputError (passthrough)",
     ),
     Case(
         "step-budget-usage-limit",
         lambda: _raise(UsageLimitExceeded("would exceed the request_limit of 3")),
         LLMRunnerError,
-        "CURRENT(runner.py:346): UsageLimitExceeded -> LLMRunnerError (step budget)",
+        "CURRENT(structured_run.py:84): UsageLimitExceeded -> LLMRunnerError (step budget)",
     ),
     Case(
         # DISTINCT failure CLASS from the step-budget row above: a UsageLimitExceeded that
@@ -258,7 +258,7 @@ MATRIX: list[Case] = [
             UsageLimitExceeded("The next request would exceed the tool_calls_limit of 8")
         ),
         LLMRunnerError,
-        "CURRENT(runner.py:390): tool-call-limit UsageLimitExceeded -> LLMRunnerError "
+        "CURRENT(structured_run.py:84): tool-call-limit UsageLimitExceeded -> LLMRunnerError "
         "(same handler as step budget)",
     ),
     Case(
@@ -279,7 +279,7 @@ MATRIX: list[Case] = [
         "unknown-exception",
         lambda: _raise(RuntimeError("some novel provider failure")),
         LLMUnavailableError,
-        "CURRENT(runner.py:365): unknown Exception -> LLMUnavailableError (catch-all)",
+        "CURRENT(structured_run.py:131): unknown Exception -> LLMUnavailableError (catch-all)",
     ),
 ]
 
@@ -301,7 +301,7 @@ def test_text_mode_does_not_read_finish_reason_today():
 
 
 def test_text_mode_still_collapses_provider_error():
-    """CURRENT(runner.py:365): a raised provider error collapses in text mode too."""
+    """CURRENT(structured_run.py:131): a raised provider error collapses in text mode too."""
     with pytest.raises(LLMUnavailableError):
         _run(_raise(ModelHTTPError(429, "m", body={})), mode="text")
 
