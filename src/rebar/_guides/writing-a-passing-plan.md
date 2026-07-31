@@ -74,7 +74,7 @@ purely mechanical change (refactor/rename/config/dep-bump/docs) legitimately has
 Testing` (the testing criterion only fires on *new testable behavior*).
 
 - **`## Context / Problem`** — who has the problem and why now (F4). One or two sentences.
-- **`## Approach`** — how you'll solve it; name the alternative you rejected and why (G6).
+- **`## Approach`** — how you'll solve it, and why that approach fits this problem (G6).
 - **`## Scope`** — the files/modules you expect to touch (the edit-set, G1G2). See below.
 - **`## Testing`** — for a leaf adding behavior: the happy path **and** a failure/edge/empty
   path; for a **cutover/migration**, a live end-to-end check (E5, T-overlays).
@@ -128,7 +128,8 @@ These are the criteria that actually block a claim. Fix every one before you cla
   concrete evidence** — a `path:line` or a module/symbol name you actually confirmed by
   reading the tree (not from memory). Uncited assertions fail closed.
 - **Choose a sound approach (`G6`).** No golden-hammer / cargo-cult / resume-driven /
-  premature-optimization; name why the chosen approach beats the obvious alternative.
+  premature-optimization; state a positive rationale for the chosen approach — why it fits
+  this problem. (One approach only; don't write rejected options into the plan.)
 - **Decompose sensibly if it's a container (`G5`).** Children cover the work, are the right
   size, and are ordered by their real dependencies.
 
@@ -267,7 +268,8 @@ so a nightly export of the store aborts. Fixes the crash for the ops team.
 
 ## Approach
 Encode with `errors="replace"` at the single write site in `exporter.write_line`.
-Rejected: sanitizing on ingest — too broad, and it would rewrite historical events.
+That is the narrowest fix: it contains the change to the one place bytes are emitted
+and leaves stored events untouched.
 
 ## Scope
 - src/rebar/export/exporter.py  (the write site)
@@ -284,8 +286,8 @@ Rejected: sanitizing on ingest — too broad, and it would rewrite historical ev
       round-trip test still passing.
 ```
 
-Note: paths are real, the rejected alternative is named (G6), each criterion says *how* it's
-checked (F1), and there are no `TBD`s (E2). That's what clears the blocking bar.
+Note: paths are real, the single chosen approach states why it fits (G6), each criterion says
+*how* it's checked (F1), and there are no `TBD`s (E2). That's what clears the blocking bar.
 
 ## When you're blocked
 
