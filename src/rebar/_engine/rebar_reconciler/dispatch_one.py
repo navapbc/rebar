@@ -234,6 +234,25 @@ def create_one(
         return None
 
     local_id = mutation.get("local_id", "")
+
+    # DEFER while a KEYLESS-PENDING binding is inside the index-lag grace window (21fc).
+    #
+    # The differ reaches the create branch on `get_jira_key(...) is None`, which is ALSO
+    # true of a keyless-pending entry — the state entered precisely when a previous pass
+    # crashed DURING create_issue. On DC the Lucene index is eventually consistent
+    # (JRASERVER-70423: a 2,991s lag observed), so the dedup search below misses an issue
+    # that really exists and we write a SECOND one. Deferring here rather than at plan
+    # time guards the actual WRITE, and reuses the budget path's existing semantics: the
+    # mutation is deferred, not dropped. Once the index catches up,
+    # `recover_pending_bindings` binds to the existing issue; if the create truly never
+    # landed, the grace window expires and this proceeds normally.
+    if binding_store is not None and local_id:
+        within_grace = getattr(binding_store, "is_keyless_pending_within_grace", None)
+        if within_grace is not None and within_grace(local_id):
+            if deferred_creates is not None:
+                deferred_creates.append(mutation)
+            return None
+
     jql = f'labels = "rebar-id:{local_id}"'
     hits = client.search_issues(jql)
 
