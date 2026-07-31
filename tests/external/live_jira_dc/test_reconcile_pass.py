@@ -314,10 +314,40 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     _assert_no_unhandled_exception(cp, what="inbound provenance pass")
     _assert_converged_writing_pass(cp, what="inbound provenance pass")
 
+    # Match on the DERIVED local id, exactly — NOT `remote_key in json.dumps(ticket)`.
+    #
+    # That substring form could never pass, and it hid this test's real verdict for the
+    # entire life of the epic (bug 23ed). Two independent reasons: `_jira_key_to_local_id`
+    # LOWERCASES (`inbound_translate.py:120-124` — "RBJ…-1" -> "jira-rbj…-1") and the `in`
+    # test is case-sensitive; and the inbound CREATE payload
+    # (`apply_inbound_records.py:183-212`) carries no raw Jira key at all — the key appears
+    # only as a TITLE FALLBACK, unused whenever the issue has a summary, as it does here.
+    # So a perfectly-created ticket produced a red, and a broken one would have too. A blob
+    # scan is also the wrong shape regardless: it can match an incidental occurrence in any
+    # field and assert nothing about correspondence.
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    expected_local_id = _jira_key_to_local_id(remote_key)
     tickets = rebar.list_tickets(repo_root=str(dc_rebar_repo))
-    matched = [t for t in tickets if remote_key in json.dumps(t)]
-    assert matched, f"no local ticket was created from DC issue {remote_key}; stdout={cp.stdout!r}"
+    matched = [t for t in tickets if t.get("ticket_id") == expected_local_id]
+    assert matched, (
+        f"no local ticket was created from DC issue {remote_key} — expected local id "
+        f"{expected_local_id!r}, saw {sorted(t.get('ticket_id') for t in tickets)!r}; "
+        f"stdout={cp.stdout!r}"
+    )
     ticket = matched[0]
+
+    # The BINDING is where the DC<->local correspondence actually lives, and it is what the
+    # epic's headline criterion is really about. Asserting the ticket exists proves a ticket
+    # was created; asserting the binding proves it is bound to THIS DC issue.
+    from rebar_reconciler.binding_store import load_binding_store
+
+    bindings = load_binding_store(dc_rebar_repo)
+    assert bindings.get_jira_key(expected_local_id) == remote_key, (
+        f"local ticket {expected_local_id!r} is not bound to DC issue {remote_key!r} "
+        f"(binding: {bindings.get_jira_key(expected_local_id)!r}) — the ticket exists but "
+        f"the store does not record which DC issue it came from"
+    )
     assert ticket.get("creation_channel") == "jira", (
         "a DC-created ticket must carry the SHARED 'jira' creation channel — the "
         f"deployment is distinguished by RemoteRef.instance, not a new channel: {ticket}"
