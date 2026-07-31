@@ -101,7 +101,7 @@
       },
       "applicabilityExpressionResult": {},
       "submittabilityExpressionResult": {
-        "value": {"expression":{"expressionString":"label:Verified=MAX"},"status":"FAIL","errorMessage":{"value":null},"passingAtoms":[],"failingAtoms":["label:Verified=MAX"],"atomExplanations":{"value":{"label:Verified=MAX":""}}}
+        "value": {"expression":{"expressionString":"label:Verified=MAX"},"status":"PASS","errorMessage":{"value":null},"passingAtoms":["label:Verified=MAX"],"failingAtoms":[],"atomExplanations":{"value":{"label:Verified=MAX":""}}}
       },
       "overrideExpressionResult": {},
       "patchSetCommitId": "86432fe45ec729fbd3219a36c96b5bca8c66e2b8",
