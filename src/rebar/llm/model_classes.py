@@ -3,8 +3,9 @@
 rebar's per-pass model choice used to be inferred from a single ``cfg.model`` scalar,
 which is why a non-default model silently disabled the verifier downgrade. This module
 is the replacement SCHEMA and RESOLVER: three named class slots, each a provider
-target, with an optional ordered fallback chain. The chain is parsed and carried here
-but not yet consumed by the runner — that wiring is task cc33.
+target, with an optional ordered fallback chain. Task cc33 added the chain's runtime
+half at the foot of this module — the ``FallbackModel`` construction, its ``fallback_on``
+predicate, and the context manager that drives the wrapper around a synchronous run.
 
 Configuring nothing must be a no-op: the built-in defaults reproduce today's model
 choices exactly (``DEFAULT_MODEL`` / ``VERIFIER_DEFAULT_MODEL`` from :mod:`rebar.llm.config`,
@@ -14,18 +15,24 @@ so no default hard-codes a provider.
 Precedence per field: ``REBAR_LLM_<CLASS>_<FIELD>`` env var > the parsed config table >
 the built-in default (model only). This is a one-way dependency on
 :mod:`rebar.llm.config` (imports ``infer_provider``, ``DEFAULT_MODEL``,
-``VERIFIER_DEFAULT_MODEL``) — ``config.py`` must never import this module back.
+``VERIFIER_DEFAULT_MODEL``) — ``config.py`` must never import this module back — plus a
+call-time one on :mod:`rebar.llm.failure` for the resolution taxonomy the fallback
+predicate reads.
 """
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, infer_provider
 from rebar.llm.errors import LLMConfigError
+
+logger = logging.getLogger(__name__)
 
 # The plan-review model_ladder's cheapest rung — today's implicit "trivial" choice.
 # Kept here (not in config.py, which has no headroom left) alongside its siblings.
@@ -240,3 +247,106 @@ def resolve_model_string(value: str, repo_root: str | None = None) -> str:
     if value not in CLASS_NAMES:
         return value
     return resolve_class(value, load_class_slots(repo_root))
+
+
+# ── Fallback chains (task cc33) ───────────────────────────────────────────────
+# The runtime half of the schema above: the `fallback` chain parsed into `ClassSlot` is
+# consumed here as pydantic-ai's `FallbackModel(default, *fallbacks, fallback_on=...)`.
+
+
+def should_fall_back(exc: Exception) -> bool:
+    """The ``fallback_on`` predicate: should ``exc`` move the chain to its next candidate?
+
+    Deliberately NARROW. pydantic-ai's own docs warn that provider SDK retry logic can delay
+    failover substantially — a 429 may be retried inside the SDK (and, for rebar's Anthropic
+    path, inside the ``AsyncTenacityTransport``) for up to ~60s before the fallback is ever
+    reached — so switching providers is only worth that latency for the AVAILABILITY classes.
+    Everything else must fail LOUDLY: a credential error (``CHANGE_SETTINGS``) must not be
+    masked by shopping for a provider whose key happens to work; an oversized request
+    (``CHANGE_INPUT``) is the size ladder's problem and another provider will not fix it; and
+    a quota/payment failure (``INCREASE_PROVIDER_LIMITS`` — which is where a 429 carrying
+    ``insufficient_quota`` lands, unlike a plain rate-limit 429) is a SPEND problem, where
+    silently relocating spend is worse than stopping.
+
+    Derived from :mod:`rebar.llm.failure`'s taxonomy at CALL time — the existing ``_RETRYABLE``
+    frozenset (``WAIT_AND_RETRY`` + ``RETRY_NOW``, the latter covering the down-local-endpoint
+    ``httpx.ConnectError`` this feature exists for) plus ``CHANGE_PROVIDER_OR_MODEL`` — rather
+    than a hand-maintained tuple of exception types. That is what keeps the two from drifting:
+    a future taxonomy change reaches failover without editing this function.
+    """
+    from rebar.llm.failure import _RETRYABLE, ResolutionClass, classify_llm_failure
+
+    resolution_class = classify_llm_failure(exc).resolution_class
+    return (
+        resolution_class in _RETRYABLE
+        or resolution_class is ResolutionClass.CHANGE_PROVIDER_OR_MODEL
+    )
+
+
+def fallback_targets_for(
+    resolved: str, slots: Mapping[str, ClassSlot] | None = None
+) -> tuple[FallbackTarget, ...]:
+    """The ordered fallback chain configured for the class whose PRIMARY resolves to
+    ``resolved``, or an empty tuple.
+
+    The runner picks its model as a ``provider:model`` string, so the string is also what
+    identifies the slot that string came from — no new plumbing has to thread a class NAME
+    through every call site for a chain to be honored. Classes are consulted in
+    :data:`CLASS_NAMES` order, so if two slots name the same primary the first wins (their
+    chains would otherwise be ambiguous for one and the same model)."""
+    slots = load_class_slots() if slots is None else slots
+    for name in CLASS_NAMES:
+        slot = slots.get(name)
+        if slot is not None and _resolve_target(slot.model, slot.provider) == resolved:
+            return slot.fallback
+    return ()
+
+
+def build_fallback_model(
+    resolved: str, targets: Sequence[FallbackTarget], *, session: Any
+) -> tuple[Any, list[str]]:
+    """Build the ``FallbackModel`` for primary ``resolved`` plus ``targets``, returning it with
+    the ordered ``provider:model`` candidate strings.
+
+    Every candidate is built as a real Model OBJECT through ``session.model_for`` — the same
+    provider path the primary takes — rather than handed to ``FallbackModel`` as a string:
+    the wrapper's own ``infer_model`` calls carry no ``provider_factory``, so strings would
+    bypass rebar's builders entirely and silently drop each entry's ``endpoint``. Sharing one
+    session is equally load-bearing: it gives the run a single ``_closeables`` list owning all
+    N+1 rebar-created transports, where a session per entry would close only its own."""
+    from pydantic_ai.models.fallback import FallbackModel
+
+    candidates = [resolved, *(_resolve_target(t.model, t.provider) for t in targets)]
+    endpoints: list[str | None] = [None, *(t.endpoint for t in targets)]
+    models = [
+        session.model_for(candidate, endpoint=endpoint)
+        for candidate, endpoint in zip(candidates, endpoints, strict=True)
+    ]
+    return FallbackModel(*models, fallback_on=should_fall_back), candidates
+
+
+@contextmanager
+def entered_fallback_model(model: Any) -> Iterator[Any]:
+    """Drive ``model``'s async context manager around a SYNCHRONOUS run.
+
+    ``FallbackModel.__aenter__`` enters every sub-model "so their providers can manage HTTP
+    client lifecycle" — but ``agent.run_sync`` never enters the model (only ``async with
+    agent`` does), so without this the sub-providers pydantic-ai owns are neither entered nor
+    closed. Uses the SAME loop resolution ``run_sync`` itself performs (``asyncio``'s current
+    loop, created if absent) so the wrapper's lock and the run bind to one loop. Exit is
+    best-effort, matching ``ProviderSession.close``: teardown never raises out over a result."""
+    import asyncio
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:  # no current loop on this thread yet
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(model.__aenter__())
+    try:
+        yield model
+    finally:
+        try:
+            loop.run_until_complete(model.__aexit__(None, None, None))
+        except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
+            logger.warning("llm fallback chain teardown failed", exc_info=True)
