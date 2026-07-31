@@ -35,6 +35,7 @@ class CodeReviewBatchRunner(BatchRunner):
         context: str = "",
         context_overrides: dict[str, str] | None = None,
         project_criteria: Sequence[Mapping[str, str]] = (),
+        project_criteria_root: str | None = None,
     ) -> None:
         self._context = context
         # Per-overlay ticket_context overrides keyed by prompt_id. When an overlay's prompt_id is
@@ -48,6 +49,13 @@ class CodeReviewBatchRunner(BatchRunner):
         # code-review registry. They are additive because the static workflow schema owns the
         # built-in overlay entries; project-owned entries have no YAML slot.
         self._project_criteria = tuple(project_criteria)
+        # The repo root the ``project_criteria`` were DISCOVERED from. Criterion discovery and
+        # prompt resolution use deliberately different root rules (discovery falls back to the
+        # ambient project root; ``get_prompt`` does not), so the two can silently diverge — a
+        # criterion activated from checkout A while its rubric is sought under request root B,
+        # which surfaces as a bogus "unknown prompt". Recording the discovery root lets
+        # ``_validated_project_criteria`` assert the two agree instead of mis-reporting.
+        self._project_criteria_root = project_criteria_root
 
     def run(self, req: BatchRunRequest, agent_runner: Any = None) -> BatchRunResult:
         from rebar.llm.workflow.executor import StepContext
@@ -116,7 +124,14 @@ class CodeReviewBatchRunner(BatchRunner):
         )
 
     def _validated_project_criteria(self, repo_root: str | None) -> tuple[Mapping[str, str], ...]:
-        """Return usable project entries, failing with a located error on bad prompts."""
+        """Return usable project entries, failing with a located error on bad prompts.
+
+        Before resolving each real entry, assert that the root the criteria were DISCOVERED
+        from is the root we are about to RESOLVE their rubrics against. A divergence is a
+        wiring bug, not project-prompt content, so it propagates as
+        :class:`RepoRootMismatchError` rather than being wrapped in an ``LLMError`` that
+        would blame the (perfectly present) rubric."""
+        from rebar.llm.criteria import check_repo_root_agreement
         from rebar.llm.prompting.prompts import PromptError, get_prompt
 
         validated: list[Mapping[str, str]] = []
@@ -125,6 +140,11 @@ class CodeReviewBatchRunner(BatchRunner):
             prompt_id = entry.get("prompt")
             if not isinstance(logical_id, str) or not isinstance(prompt_id, str):
                 continue
+            check_repo_root_agreement(
+                self._project_criteria_root,
+                repo_root,
+                where=f"code-review project criterion {logical_id!r}",
+            )
             expected = Path(".rebar") / "prompts" / f"{prompt_id}.md"
             try:
                 prompt = get_prompt(prompt_id, repo_root=repo_root)

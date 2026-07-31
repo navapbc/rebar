@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -74,10 +75,30 @@ def _spec(gate_key: str) -> _GateSpec:
 
 
 # ── overlay discovery (repo root → `.rebar/criteria_routing.json`) ──────────────────
+class RepoRootMismatchError(CriteriaError):
+    """A criterion was DISCOVERED from one repo root but RESOLVED against another.
+
+    Discovery and prompt resolution deliberately use DIFFERENT root rules (see
+    :func:`_resolve_repo_root`). When a caller threads two different roots through the two
+    halves, the result is a criterion that was activated from root A while its rubric is
+    looked for under root B — which surfaces downstream as a bogus "unknown prompt" (the
+    prompt exists; it was simply never searched for). That is a WIRING bug, so it is raised
+    loudly at the seam rather than mis-reported as missing project content."""
+
+
 def _resolve_repo_root(repo_root: str | None) -> str | None:
-    """Resolve an overlay discovery root: the explicit arg, else the rebar project root
-    (``config.repo_root()`` — the same root ``get_prompt`` resolves ``.rebar/prompts/``
-    overrides against). Returns ``None`` only when there is no resolvable root."""
+    """Resolve an overlay DISCOVERY root: the explicit arg, else the ambient rebar project
+    root (``config.repo_root()``). Returns ``None`` only when there is no resolvable root.
+
+    This is discovery's rule and it is deliberately DIFFERENT from prompt RESOLUTION's:
+    :func:`rebar.llm.prompting.prompts.get_prompt` has NO ambient fallback — a ``None``
+    ``repo_root`` there means "packaged prompts only", so ``.rebar/prompts/`` is not
+    consulted at all. That asymmetry is intentional: an attested gate run re-roots onto a
+    pinned snapshot, and an ambient fallback in ``get_prompt`` would silently load the
+    developer's working-tree prompts while reviewing pinned content. Because the two rules
+    differ, a caller that threads two different roots through discovery and resolution gets
+    a silently inconsistent review — so every seam that does both MUST reconcile them with
+    :func:`check_repo_root_agreement`."""
     if repo_root is not None:
         return str(repo_root)
     try:
@@ -86,6 +107,42 @@ def _resolve_repo_root(repo_root: str | None) -> str | None:
         return str(_config.repo_root())
     except Exception:  # noqa: BLE001 — no repo ⇒ packaged criteria only
         return None
+
+
+def check_repo_root_agreement(
+    discovery_root: str | None, resolution_root: str | None, *, where: str
+) -> None:
+    """Assert that criterion DISCOVERY and prompt RESOLUTION were handed the SAME repo root.
+
+    ``discovery_root`` is interpreted with discovery's rule (:func:`_resolve_repo_root`, so a
+    ``None`` arg means the ambient project root — exactly what discovery actually used);
+    ``resolution_root`` is used RAW, because ``get_prompt`` has no fallback and ``None`` there
+    genuinely means "packaged prompts only". They agree when both are ``None`` or when both
+    name the same directory (compared through ``os.path.realpath``, so a symlinked temp dir —
+    macOS ``/tmp`` → ``/private/tmp`` — is not a false mismatch).
+
+    Raises :class:`RepoRootMismatchError` naming BOTH roots and ``where`` the divergence was
+    detected. Returns ``None`` on agreement."""
+    effective_discovery = _resolve_repo_root(discovery_root)
+
+    def _norm(value: str | None) -> str | None:
+        return None if value is None else os.path.realpath(value)
+
+    if _norm(effective_discovery) == _norm(resolution_root):
+        return
+
+    def _show(value: str | None) -> str:
+        return "None" if value is None else repr(value)
+
+    raise RepoRootMismatchError(
+        f"{where}: criterion discovery and prompt resolution were given DIFFERENT repo roots "
+        f"— discovery root {_show(effective_discovery)}, "
+        f"resolution root {_show(resolution_root)}. "
+        "The criterion was activated from one checkout while its rubric would be looked for "
+        "under another (or not looked for at all, since a None resolution root means packaged "
+        "prompts only), so any 'unknown prompt' below would be misleading. Thread ONE resolved "
+        "repo root through BOTH discovery and resolution at this call site."
+    )
 
 
 def _overlay_path(repo_root: str | None) -> Path | None:

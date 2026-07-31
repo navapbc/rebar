@@ -487,6 +487,10 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                     context=prep.dc.context,
                     context_overrides=prep.context_overrides,
                     project_criteria=_activated_code_review_project_criteria(execution_repo_root),
+                    # Thread the ONE resolved (possibly re-rooted snapshot) root through BOTH
+                    # discovery and rubric resolution, so the runner's agreement check can
+                    # catch a future divergence instead of it surfacing as "unknown prompt".
+                    project_criteria_root=execution_repo_root,
                 ),
                 recorder=prep.rec,
             )

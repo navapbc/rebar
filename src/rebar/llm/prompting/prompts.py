@@ -202,7 +202,14 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
     Resolution order: a PROJECT ``.rebar/prompts/<id>.md`` override wins over the
     built-in packaged ``reviewers/<file>.md``. Front-matter is parsed; ``is_reviewer``
     is EXPLICIT (``category == "review"``). ``text`` is the body (front-matter
-    stripped). Raises :class:`PromptNotFound` for an unknown id."""
+    stripped). Raises :class:`PromptNotFound` for an unknown id.
+
+    ``repo_root=None`` means **packaged prompts only** — there is deliberately NO ambient
+    ``config.repo_root()`` fallback here, because an attested gate run re-roots onto a
+    pinned snapshot and an ambient fallback would silently read the developer's working-tree
+    prompts while reviewing pinned content. Criterion DISCOVERY *does* fall back (see
+    ``rebar.llm.criteria.overlay._resolve_repo_root``); any seam that does both must
+    reconcile the two roots via ``criteria.check_repo_root_agreement``."""
     # Defense-in-depth: a prompt id becomes a filesystem path component below, so a
     # traversal id (``../x``, an absolute/separatored path) must never escape the
     # prompts dir even when read paths are reached over the editor's loopback server.
@@ -223,7 +230,25 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
         if raw is None:
             raw = _catalog_dir().joinpath(fallback_file).read_text(encoding="utf-8")
     if raw is None:
-        raise PromptNotFound(f"unknown prompt '{prompt_id}'; known built-ins: {sorted(packaged)}")
+        # An ACCURATE not-found message. `repo_root=None` legally means "packaged prompts
+        # only" (get_prompt deliberately has NO ambient fallback — see
+        # `criteria.overlay._resolve_repo_root`), so in that case `.rebar/prompts/` was
+        # never consulted and claiming the id is "unknown" would be a lie: it may well
+        # exist in a project the caller simply didn't hand us. Say which of the two
+        # happened, and — when a root WAS supplied — name the exact path searched so the
+        # author can author or fix the file. Either way keep the packaged inventory, which
+        # is the actionable part for a typo'd built-in id.
+        if repo_root:
+            searched = str(Path(repo_root) / ".rebar" / "prompts" / f"{prompt_id}.md")
+            where = f"no project prompt at {searched}"
+        else:
+            where = (
+                "no repo root was supplied, so project prompts under .rebar/prompts were "
+                "not searched"
+            )
+        raise PromptNotFound(
+            f"unknown prompt '{prompt_id}'; {where}; known built-ins: {sorted(packaged)}"
+        )
     meta, body = parse_front_matter(raw)
     category = meta.get("category")
     execution_mode = meta.get("execution_mode")
