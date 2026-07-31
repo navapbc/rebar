@@ -30,6 +30,7 @@ the port is S4, config-driven selection is S3.
 
 from __future__ import annotations
 
+import urllib.error
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -53,6 +54,26 @@ class BackendAssigneeNotFoundError(Exception):
     error type; each adapter's concrete assignee error (Jira:
     ``acli_subprocess.AssigneeNotFoundError``) subclasses it, so existing raises
     are unchanged while core-side ``except`` clauses stay backend-neutral.
+    """
+
+
+class BackendHTTPError(urllib.error.HTTPError):
+    """The transport error contract: what EVERY backend raises for an HTTP failure.
+
+    A backend's underlying client library has its own error type (Cloud's urllib
+    transport raises ``urllib.error.HTTPError`` natively; the Data Center transport's
+    ``pycontribs/jira`` client raises ``jira.exceptions.JIRAError``). The core must
+    never learn one ``except`` clause per vendor, so each adapter **translates at its
+    own boundary** into this single type, carrying the HTTP status through.
+
+    It **subclasses** ``urllib.error.HTTPError`` deliberately, and that is the whole
+    point: the core's existing ``except urllib.error.HTTPError`` clauses
+    (``outbound_differ._safe_get_issue``, which maps ``.code == 404`` to ``_DELETED``;
+    ``dispatch_apply_phases._update_one_apply_reporter``, which degrades softly on a
+    4xx) keep matching with NO edit, ``.code`` keeps reading the status, and the
+    live-validated Cloud path — which keeps raising the plain base type — is untouched.
+
+    Construct it with urllib's own signature, ``(url, code, msg, hdrs, fp)``.
     """
 
 
