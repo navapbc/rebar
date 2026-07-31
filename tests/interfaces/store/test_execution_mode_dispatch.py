@@ -121,6 +121,12 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
         def close(self):
             pass
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+
     monkeypatch.setattr(runner_mod, "ProviderSession", _NoBuildProviderSession)
     # finalize_outcome only needs to pass the payload through for this assertion.
     monkeypatch.setattr(
