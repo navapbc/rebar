@@ -131,7 +131,7 @@ jobs:
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
   optionality:
-    # Run the lean-runtime / clean-core-wheel / per-extra / union contract ON THE PATCHSET,
+    # Run the clean-core-wheel + optional-extras (per-extra venvs + union) contract ON THE PATCHSET,
     # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
     # installs .[dev], so the heavy stack is present there and never exercises the clean wheel).
     # Reuses the SAME jobs the push/PR lane runs (no drift). Passes the Gerrit coordinates as
