@@ -174,7 +174,10 @@ def acquire(
     if source_mode == SOURCE_LOCAL:
         return materialize(source_mode=SOURCE_LOCAL, repo_root=repo_root)
 
-    sha = resolve_ref(ref, repo_root, fetch=fetch)
+    # blobless=False: this resolution is the fetch that BACKS the materialization below
+    # (S1 is then called with fetch=False), so the blobs must come down with the commit in
+    # one RPC — a blob:none fetch here would leave the plumbing to lazy-fetch file by file.
+    sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     root = store_root()
     dest = entry_path(sha, root)
 
