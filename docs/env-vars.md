@@ -139,7 +139,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REVIEW_BOT_PORT` | `src/rebar/review_bot/app.py` |  |
 | `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SCRATCH_BASE_DIR` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_SCRATCH_BASE_DIR` |
-| `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/app.py` |  |
+| `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
@@ -178,5 +178,5 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:84` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:94` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:110` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:120` — `os.environ.get(<non-literal>)`

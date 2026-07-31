@@ -43,7 +43,12 @@ from fastapi.responses import JSONResponse
 
 from rebar.review_bot import reconcile as _reconcile
 from rebar.review_bot import voter as _voter
-from rebar.review_bot.config import ReceiverConfig, configure_logging, review_timeout_seconds
+from rebar.review_bot.config import (
+    ReceiverConfig,
+    configure_logging,
+    review_timeout_seconds,
+    shutdown_drain_seconds,
+)
 
 logger = logging.getLogger("rebar.review_bot")
 
@@ -60,27 +65,10 @@ WORKER_COUNT = 1
 #: live worker (below) AND the backfill reconciler (``reconcile.reconcile_once``) bound a single
 #: review with the SAME value — the reconciler previously had NO timeout, so one hung backfill
 #: review could freeze all backfill (incident 2731 / bug 9d7c is the live-worker analogue).
-
-#: Bounded grace (seconds) to DRAIN the in-memory review queue on shutdown BEFORE the worker is
-#: cancelled, so a routine autodeploy restart doesn't abandon acknowledged (``202``) webhooks.
-#: Anything still queued when the window elapses is left for the backfill reconciler (fail-safe,
-#: never fail-lose). Keep it below the container ``stop_grace_period`` (see docker-compose.yml)
-#: so the drain completes before Docker escalates SIGTERM → SIGKILL.
-DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
-
-
-def _shutdown_drain_seconds() -> float:
-    """Bounded queue-drain window on shutdown from ``SHUTDOWN_DRAIN_SECONDS`` (default
-    ``DEFAULT_SHUTDOWN_DRAIN_SECONDS``); a missing / unparseable / non-positive value falls
-    back to the default."""
-    raw = os.environ.get("SHUTDOWN_DRAIN_SECONDS")
-    if not raw:
-        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
-    try:
-        val = float(raw.strip())
-    except ValueError:
-        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
-    return val if val > 0 else float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+#:
+#: The shutdown drain window (``config.shutdown_drain_seconds()``) lives there for the same
+#: reason, plus one more: the container's ``stop_grace_period`` is sized against it, and the
+#: test asserting that relationship must read it without importing this fastapi-laden module.
 
 
 def _config() -> ReceiverConfig:
@@ -120,12 +108,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Graceful drain (deploy resilience): let the still-running worker finish the QUEUED
         # events before we cancel it, so a routine autodeploy restart does not abandon
         # acknowledged (202 "queued") webhooks (the in-memory queue is otherwise lost on every
-        # restart). Bounded by _shutdown_drain_seconds(); anything still queued when the window
-        # elapses is left for the backfill reconciler — fail-safe, never fail-lose.
+        # restart). Bounded by ``config.shutdown_drain_seconds()``; anything still queued when
+        # the window elapses is left for the backfill reconciler — fail-safe, never fail-lose.
         queue: asyncio.Queue | None = getattr(app.state, "queue", None)
         if queue is not None:
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
-                await asyncio.wait_for(queue.join(), timeout=_shutdown_drain_seconds())
+                await asyncio.wait_for(queue.join(), timeout=shutdown_drain_seconds())
         for task in tasks:
             task.cancel()
         for task in tasks:
