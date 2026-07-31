@@ -91,8 +91,42 @@ _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
 # Anthropic adapter, not its Bedrock one, so the direct-Anthropic path degrades with a warning
 # but Bedrock hard-fails — and rebar's Pass-2 verifiers deliberately send `temperature=0`, so
 # leaving this model at the default would break Bedrock gate runs on it.
+# MEASURED matrix (ticket 1903, account 896586841071 / us-east-1, boto3 converse, maxTokens 8),
+# recorded so the next reader does not re-derive it:
+#
+#   model id                          temp unset | temp=0.0 | temp=0.5 | temp=1.0 | topP=0.9
+#   us./global. claude-sonnet-4-6     OK         | OK       | OK       | -        | -
+#   us./global. claude-opus-4-8       OK         | 400      | 400      | OK       | 400
+#   us./global. claude-opus-4-7       OK         | 400      | -        | -        | -
+#
+# NOTE the shape: this is NOT "temperature unsupported" — temp=1.0 (the API default) SUCCEEDS on
+# opus-4-8 while 0.0 and 0.5 fail, so what is deprecated is the parameter's TUNABILITY. Withdrawing
+# the parameter is still correct (the model then uses its own default), but the field name
+# understates the mechanism. `top_p` is deprecated on opus-4-8 too; that stays LATENT because rebar
+# never sets it (failure.py's _SAMPLING_PARAMS anticipates it).
+#
+# Keyed on the FULL model id, so each profile prefix needs its OWN entry — a `us.` entry does not
+# cover its `global.` twin. claude-opus-4-8 matters most: it is rebar's DEFAULT_MODEL.
 _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
+    # The DIRECT-ANTHROPIC forms. The table keys on the BARE id (`_model_id_of` strips the
+    # provider prefix), so these cover both `anthropic:claude-opus-4-8` and the bare string.
+    # OBSERVED IN PRODUCTION on the code-review bot: pydantic-ai's Anthropic adapter emits
+    # "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'. These settings
+    # will be ignored." on essentially EVERY call (models/anthropic.py:641, via
+    # `_drop_unsupported_sampling_settings`). Its Bedrock adapter has NO such drop, which is why
+    # the same model 400s there and merely warns here — same defect, two symptoms.
+    # The warning is the visible half; the REAL cost is that a pass pinning temperature=0 for
+    # determinism silently does not get it (code-review.yaml pins it on Pass-2 verify so that
+    # re-running a finding cannot resample its verdict, and code review has no verifier downgrade,
+    # so ALL its passes run on this model). Withdrawing the parameter here is wire-identical to
+    # having it dropped downstream, minus the per-call warning and minus the false belief that
+    # greedy decoding is in effect.
+    "claude-opus-4-8": {"supports_temperature": False},
+    "claude-opus-4-7": {"supports_temperature": False},
+    "us.anthropic.claude-opus-4-8": {"supports_temperature": False},
+    "global.anthropic.claude-opus-4-8": {"supports_temperature": False},
     "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
+    "global.anthropic.claude-opus-4-7": {"supports_temperature": False},
 }
 
 

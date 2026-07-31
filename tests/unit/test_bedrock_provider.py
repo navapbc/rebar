@@ -82,10 +82,18 @@ def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
 def test_supports_temperature_defaults_true_for_everything_else():
     """The denylist must not leak: an unlisted model keeps temperature. Chosen over an
     allowlist deliberately — an unknown-but-affected model then fails LOUDLY rather than
-    silently resampling verdicts."""
+    silently resampling verdicts.
+
+    EXEMPLAR UPDATED (ticket 1903): this used `anthropic:claude-opus-4-8` as its "unlisted
+    model" example. That model is now LISTED, because it does not accept temperature on the
+    direct-Anthropic path either — OBSERVED in production, where pydantic-ai's Anthropic adapter
+    logs "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'" on
+    essentially every call. So the old exemplar encoded a disproven fact. The assertion's INTENT
+    and strength are unchanged; only the example moved to models that are genuinely unlisted and
+    MEASURED to accept temperature."""
     from rebar.llm.capabilities import capabilities_for
 
-    assert capabilities_for("anthropic:claude-opus-4-8").supports_temperature is True
+    assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
     assert capabilities_for("openai:gpt-4o").supports_temperature is True
 
 
@@ -477,3 +485,73 @@ def test_env_registry_no_longer_documents_the_removed_knob() -> None:
     assert "REBAR_LLM_BEDROCK_REGION" in text, (
         "the live sibling REBAR_LLM_BEDROCK_REGION disappeared from the registry — over-deletion"
     )
+
+
+# ── 1903: the supports_temperature override table covers the whole affected family ─────────
+def test_default_model_opus_4_8_withdraws_temperature() -> None:
+    """1903 (happy path): `us.anthropic.claude-opus-4-8` REJECTS an explicit temperature, and it
+    is rebar's DEFAULT_MODEL — so it is the most likely Bedrock Pass-1 model and the one the
+    override table most needs to cover. MEASURED (account 896586841071, us-east-1):
+    converse(temperature=0.0) -> ValidationException "`temperature` is deprecated for this
+    model"; the identical call with no temperature succeeds.
+
+    NOTE the PROVIDER-QUALIFIED form: `_model_id_of` returns None for a bare id with no colon,
+    so a bare-string assertion would pass vacuously against the conservative record rather than
+    exercising the override table. Production always passes `provider:model` or a model object."""
+    from rebar.llm.capabilities import capabilities_for
+
+    assert capabilities_for("bedrock:us.anthropic.claude-opus-4-8").supports_temperature is False
+
+
+def test_global_prefix_opus_4_8_also_withdraws_temperature() -> None:
+    """HELD OUT. The table keys on the FULL model id, so the `global.` twin is a separate entry
+    and is unguarded unless listed explicitly. MEASURED: global.anthropic.claude-opus-4-8 +
+    temperature=0.0 -> the same 400."""
+    from rebar.llm.capabilities import capabilities_for
+
+    caps = capabilities_for("bedrock:global.anthropic.claude-opus-4-8")
+    assert caps.supports_temperature is False
+
+
+def test_both_opus_4_7_prefixes_withdraw_temperature() -> None:
+    """HELD OUT. Only the `us.` opus-4-7 entry existed before this change; the `global.` twin was
+    unguarded. MEASURED: both 400 on temperature=0.0."""
+    from rebar.llm.capabilities import capabilities_for
+
+    for mid in ("bedrock:us.anthropic.claude-opus-4-7", "bedrock:global.anthropic.claude-opus-4-7"):
+        assert capabilities_for(mid).supports_temperature is False, mid
+
+
+def test_sonnet_retains_temperature_support() -> None:
+    """HELD OUT — the over-application guard, and the most important test here. Sonnet ACCEPTS
+    temperature (MEASURED: us. and global. claude-sonnet-4-6 both succeed at temperature=0.0 and
+    0.5). A blanket family-level withdrawal would silently strip Pass-2's greedy determinism from
+    the model that actually supports it, which is a worse defect than the one being fixed."""
+    from rebar.llm.capabilities import capabilities_for
+
+    for mid in (
+        "bedrock:us.anthropic.claude-sonnet-4-6",
+        "bedrock:global.anthropic.claude-sonnet-4-6",
+    ):
+        assert capabilities_for(mid).supports_temperature is True, mid
+
+
+def test_direct_anthropic_opus_also_withdraws_temperature() -> None:
+    """1903 (extension): the SAME model rejects temperature on the DIRECT-ANTHROPIC path too.
+
+    OBSERVED IN PRODUCTION on the code-review bot: pydantic-ai's Anthropic adapter logs
+    "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'. These settings
+    will be ignored." on essentially every call. Its Bedrock adapter has no equivalent drop, so
+    the same model 400s there and only warns here — one defect, two symptoms.
+
+    Withdrawing the parameter is wire-identical to having it dropped downstream, but it removes
+    the per-call warning AND the false belief that a pass pinning temperature=0 is decoding
+    greedily. That matters: code review pins temperature=0 on Pass-2 verify so re-running a
+    finding cannot resample its verdict, and code review has no verifier downgrade, so every one
+    of its passes runs on this model."""
+    from rebar.llm.capabilities import capabilities_for
+
+    for mid in ("anthropic:claude-opus-4-8", "anthropic:claude-opus-4-7"):
+        assert capabilities_for(mid).supports_temperature is False, mid
+    # sonnet is unaffected on this path too — the guard must not over-apply
+    assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
