@@ -325,6 +325,15 @@ def create_one(
             if binding_store is not None and local_id:
                 try:
                     binding_store.record_pending_key(local_id, jira_key)
+                    # Capture the IMMUTABLE numeric id in the SAME write (bug 7c26).
+                    # A project move re-keys the issue; the id is the only handle that
+                    # survives it, and this create response is where it is known. A
+                    # separate call so the shared write-ahead signatures stay untouched;
+                    # getattr-guarded so a store predating it is a no-op, not a
+                    # persist-floor failure that would skip the create.
+                    _record_id = getattr(binding_store, "record_jira_id", None)
+                    if _record_id is not None:
+                        _record_id(local_id, result.get("id", ""))
                     binding_store.save()
                 except Exception as persist_err:  # noqa: BLE001 — persist floor: translate to the item-scoped signal
                     raise BindingPersistError(

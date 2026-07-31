@@ -135,6 +135,34 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     return value
 
 
+def _current_key_by_id(client: Any, jira_id: str) -> str:
+    """The issue's CURRENT key, looked up by its immutable numeric id (bug 7c26).
+
+    ``GET /rest/api/{2,3}/issue/{issueIdOrKey}`` accepts an id wherever it accepts a
+    key, on BOTH deployments, so this needs no new transport member and no
+    vendor-specific branch: it reuses ``get_issue_by_rest`` — the same
+    primary-store read the absence probe itself uses, so it is not subject to
+    search-index lag (bug 21fc's hazard does not apply here).
+
+    Returns ``""`` — meaning "no answer, treat the absence as real" — when the client
+    predates the member, when the lookup raises (including the 404 that says the issue
+    is genuinely gone, not moved), or when the payload carries no string key. Every
+    failure mode therefore falls THROUGH to the unchanged absence bookkeeping rather
+    than suppressing it: a recovery that cannot be proven must never mask a deletion.
+    """
+    fn = getattr(client, "get_issue_by_rest", None)
+    if fn is None:
+        return ""
+    try:
+        payload = fn(jira_id)
+    except Exception:  # noqa: BLE001 — fail-closed to "no answer": absence bookkeeping proceeds
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    key = payload.get("key")
+    return key if isinstance(key, str) else ""
+
+
 class BindingStore:
     """Bidirectional local-id ↔ jira-key binding store.
 
@@ -452,6 +480,44 @@ class BindingStore:
                 seeded += 1
         return seeded
 
+    # -- immutable numeric id (bug 7c26) -----------------------------------
+
+    def get_jira_id(self, local_id: str) -> str | None:
+        """The issue's IMMUTABLE numeric Jira id for a binding, or None.
+
+        A Jira issue's KEY changes when the issue is MOVED between projects; its
+        numeric ``id`` never does. None is VALID and means "not captured yet" — every
+        binding written before bug 7c26 has no id, and gets none until the next create
+        re-records one. The absence path degrades to its pre-7c26 behaviour there
+        (see :meth:`note_absent_or_rekey`), so no migration is required.
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            return None
+        jira_id = entry.get("jira_id")
+        return str(jira_id) if jira_id else None
+
+    def record_jira_id(self, local_id: str, jira_id: str) -> None:
+        """Capture the immutable numeric id on an EXISTING binding (bug 7c26).
+
+        Deliberately a separate method rather than a parameter on ``bind_confirm`` /
+        ``record_pending_key``: this store is SHARED WITH CLOUD, and those methods sit
+        on the live Cloud bridge's write-ahead path. Leaving their signatures and
+        semantics untouched keeps the capture purely additive.
+
+        In-memory until :meth:`save` — the caller persists it with the same write that
+        records the key, so the id and the key never disagree on disk. A no-op for an
+        unbound local id, an empty id, or a re-record of the same value (so it never
+        churns ``updated_at``).
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None or not jira_id:
+            return
+        if entry.get("jira_id") == str(jira_id):
+            return
+        entry["jira_id"] = str(jira_id)
+        entry["updated_at"] = _now_iso()
+
     # -- absence lifecycle (bug 1e08) --------------------------------------
 
     def _entry_for_jira_key(self, jira_key: str) -> dict[str, Any] | None:
@@ -482,6 +548,63 @@ class BindingStore:
         )
         if entry["absent_404_count"] >= grace:
             self._retire(local_id, jira_key, entry)
+
+    def note_absent_or_rekey(self, jira_key: str, client: Any = None) -> bool:
+        """404 bookkeeping that first asks whether the issue MOVED (bug 7c26).
+
+        A bound key stops resolving for TWO different reasons, and the pre-7c26 code
+        could not tell them apart: the issue was deleted, or the issue was MOVED to
+        another project and re-keyed. Old keys are normally stacked in Jira's
+        ``moved_issue_key`` table so the old key still resolves, but a
+        Data-Center-specific Atlassian KB documents third-party apps moving issues via
+        post-functions/automations failing to update that table — after which the old
+        key stops resolving entirely. Treating that as a deletion silently detaches a
+        live issue from its local ticket and, at grace, retires the binding.
+
+        So before recording an absence we re-ask by the one identifier a move cannot
+        change — the numeric id. On a hit whose key DIFFERS, the binding is re-keyed
+        (and the reverse index updated in the SAME operation, or the old key would keep
+        resolving to this local id and re-detach next pass), the absence counter is
+        reset, and the issue is reported PRESENT.
+
+        Returns True when the binding was re-keyed, False when the absence was recorded
+        exactly as :meth:`note_absent` always did.
+
+        DEGRADES TO TODAY'S BEHAVIOUR in every other case — no client, no captured id
+        (every pre-7c26 binding), an unresolvable id, or a key that is unchanged. That
+        is what makes this safe on the shared Cloud path and on an unmigrated store:
+        the recovery can only ADD a save, never skip an absence it did not disprove.
+
+        Only ever reached from a CONFIRMED 404, so the happy path never pays for it.
+        """
+        local_id = self._data["reverse"].get(jira_key)
+        entry = self._entry_for_jira_key(jira_key)
+        if entry is None or local_id is None:
+            return False
+        jira_id = entry.get("jira_id")
+        if client is None or not jira_id:
+            self.note_absent(jira_key)
+            return False
+        current_key = _current_key_by_id(client, str(jira_id))
+        if not current_key or current_key == jira_key:
+            self.note_absent(jira_key)
+            return False
+        entry["jira_key"] = current_key
+        entry["absent_404_count"] = 0
+        entry["updated_at"] = _now_iso()
+        self._data["reverse"].pop(jira_key, None)
+        self._data["reverse"][current_key] = local_id
+        self.save()
+        self._alert(
+            key=f"binding-rekeyed:{jira_key}",
+            record={
+                "kind": "binding-rekeyed",
+                "jira_key": current_key,
+                "previous_jira_key": jira_key,
+                "local_id": local_id,
+            },
+        )
+        return True
 
     def _retire(self, local_id: str, jira_key: str, entry: dict[str, Any]) -> None:
         """Soft-delete a binding: move it to the retired file + alert."""
