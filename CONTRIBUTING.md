@@ -628,6 +628,26 @@ this **review-time checklist**:
 This is enforced deterministically by `tests/unit/test_reviewer_prompt_hygiene.py`
 (`test_no_bare_do_not_only_blocks`), which runs in CI — a re-runnable guard, not a hand checklist.
 
+### 7a. Criterion ids cited in the prose guides are PINNED
+
+The hand-written author guides under `src/rebar/_guides/` (`rebar explain plan` / `review` /
+`commit-trailer`) cite criterion ids inline — "name the alternative you rejected (G6)" — but the
+criterion's rubric in the registry, not the guide sentence, is authoritative. Bug `828a` shipped a
+month of contradiction between the two because nothing coupled them. A gate cannot judge whether
+prose faithfully paraphrases a rubric, so instead it refuses to let a cited criterion change
+**silently**: `src/rebar/_guides/criterion-pins.json` pins a digest of every cited criterion's
+authoritative text, and `python -m rebar.llm.plan_review.registry validate-routing` (CI) fails when
+a pin no longer matches. Nothing regenerates the prose — only the derived manifest.
+
+- **Editing a criterion** (its rubric under `src/rebar/llm/reviewers/plan_review_*.md`, or its
+  routing/checklist): CI reports the cited guide as `stale`. Re-read the criterion
+  (`rebar explain <id>`), confirm every guide sentence citing it still holds — **fix the prose if
+  it doesn't** — then re-pin with
+  `python -m rebar.llm.plan_review.guide_parity regenerate` and commit the manifest.
+- **Editing a guide** (adding or dropping a citation): CI reports `unpinned` or `orphan`; run the
+  same regenerator and commit. A pinned id that has left the registry is reported as `retired` —
+  there the **guide** is what must change, since it cites a criterion that no longer exists.
+
 ---
 
 Track your work in rebar (see [`AGENTS.md`](AGENTS.md) and [`docs/`](docs/)); the Gerrit
