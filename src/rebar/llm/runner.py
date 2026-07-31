@@ -291,214 +291,214 @@ class PydanticAIRunner:
         # side recognizes raises the typed LLMConfigError HERE, so it can never be
         # misclassified by the broad `except Exception` further down as a provider OUTAGE.
         # `model_override` (the offline TestModel harness) bypasses all of this.
-        provider_session = ProviderSession(cfg)
-        _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
-        # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
-        # for a class with no `fallback` configured, which is every deployment until an operator
-        # opts in, so the three branches below stay byte-identical there.
-        fallback_targets = (
-            () if self._model_override is not None else fallback_targets_for(resolved)
-        )
-        candidates = [resolved]
-        if self._model_override is not None:
-            model = self._model_override
-        elif fallback_targets:
-            # A chain is built EAGERLY and WHOLE, on this ONE session: every candidate becomes a
-            # real Model (so each entry's own `endpoint` is honored and every rebar-created
-            # transport lands on one `_closeables`), then `FallbackModel` wraps them in order.
-            model, candidates = build_fallback_model(
-                resolved, fallback_targets, session=provider_session
+        with ProviderSession(cfg) as provider_session:
+            _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
+            # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
+            # for a class with no `fallback` configured, which is every deployment until an operator
+            # opts in, so the three branches below stay byte-identical there.
+            fallback_targets = (
+                () if self._model_override is not None else fallback_targets_for(resolved)
             )
-        elif provider_session.supports(_provider_name):
-            from pydantic_ai.models import infer_model
-
-            model = infer_model(resolved, provider_factory=provider_session.provider_factory)
-        elif provider_session.is_resolvable(_provider_name):
-            model = resolved
-        else:
-            model = provider_session.provider_factory(
-                _provider_name
-            )  # always raises LLMConfigError
-        # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker for
-        # an injected test model), not the bare config model — so a parity diff sees exactly
-        # what ran.
-        ran_model = (
-            f"test:{type(self._model_override).__name__}" if self._model_override else resolved
-        )
-        # Agent-build invariant (story anole): for a tool-using op on a REAL model object, fail
-        # fast if the provider can't call tools (else pydantic-ai silently drops them). Gated
-        # on model_override is None (the test double is never checked) and tools present.
-        if self._model_override is None and tools:
-            # Per CANDIDATE: the wrapper inherits the base `.profile`, whose defaults would pass
-            # while a sub-model that cannot call tools sits in the chain, waiting to drop them.
-            for candidate_model, candidate in zip(
-                getattr(model, "models", [model]), candidates, strict=True
-            ):
-                _check_tool_capability(candidate_model, candidate)
-        if req.tool_step_limit is not None and tools:
-            # Executable convergence boundary — intentionally not a forced tool.
-            from pydantic_ai.toolsets import FunctionToolset
-
-            limit = max(0, int(req.tool_step_limit))
-
-            def available(run_ctx, _tool_def):
-                return run_ctx.run_step <= limit
-
-            all_toolsets = [FunctionToolset(tools), *toolsets]
-            tools = []
-            toolsets = [toolset.filtered(available) for toolset in all_toolsets]
-
-        kwargs: dict[str, Any] = {
-            "system_prompt": req.system_prompt,
-            "tools": tools,
-            "toolsets": toolsets,
-            # Per-tool execution timeout (story hoopoe): bounds a hung ASYNC/MCP tool. A
-            # no-op on single_turn (tools=[]) and for sync in-process tools (async cancel
-            # can't interrupt a blocking call — those are bounded by the derived step caps).
-            "tool_timeout": float(cfg.llm_tool_timeout_s),
-        }
-        # Prompt caching (story 0250; capability-based since story S2). The stable bytes
-        # re-sent across the container fan-out live in `system_prompt`;
-        # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
-        # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system prompt
-        # block directly), and `anthropic_cache_tool_definitions` caches the tool surface on
-        # agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for` reads the
-        # resolved model's PROFILE (never a provider-name string, so Bedrock-hosted Claude
-        # still gets its cache keys) and `cache_settings_for` dispatches on the resulting
-        # `prompt_cache_style`; each style's keys are provider-specific and would error on
-        # an unrelated provider, so they are applied at THIS shared seam only — no
-        # RunRequest content-list change, so the structured-output retry path is untouched.
-        # Resolved ONCE, threaded into `_pai_structured` below: `model` (a real object, whose
-        # PROFILE may carry a provider override, S4) for a real run, but `resolved` (the
-        # config STRING) for `model_override` — its profile is irrelevant there, and every
-        # model_override test pins the string behavior; cache_settings stays None then. A
-        # chain resolves capabilities over the whole CANDIDATE SET
-        # (`_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no
-        # profile and its `.provider` is None.
-        if fallback_targets:
-            caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
-        else:
-            caps = capabilities_for(resolved if self._model_override is not None else model)
-        cache_settings = None if self._model_override else cache_settings_for(caps)
-        # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
-        # provider/model, the endpoint host (None for the first-class/no-custom-base_url
-        # path), and the effective capability record — onto the verdict, additively,
-        # alongside the existing `model` string. Built from the SAME `caps` already
-        # resolved above (never recomputed — see capabilities.provenance_for's docstring).
-        provider_provenance = provenance_for(
-            provider=_provider_name, model=resolved, base_url=cfg.base_url, caps=caps
-        )
-        if fallback_targets:
-            # A verdict produced by a fallback must not attest the primary. The ordered candidate
-            # set is known now; `ran_model` is filled in after the run from the response that
-            # actually answered (the wrapper's own name is the synthetic `fallback:a,b` string).
-            provider_provenance["candidates"] = list(candidates)
-        # Server-side web search (bug ff64) — anthropic-GATED like the cache settings above
-        # (an injected test model never gets a provider server tool); any non-flagged-anthropic
-        # request stays byte-identical (no ``capabilities`` key).
-        web_caps = _anthropic_web_search_capabilities(
-            resolved if not self._model_override else "", web=req.web
-        )
-        if web_caps is not None:
-            kwargs["capabilities"] = web_caps
-        # Model settings + usage limits are built by the ADR 0056 decision-3 leaf helpers
-        # (structured_run.py); see their docstrings for the max_tokens/timeout/temperature/
-        # step-budget rationale (bug ids, measured numbers, and invariants preserved there).
-        model_settings = build_model_settings(
-            cfg, req, caps, resolved, cache_settings, model_override=self._model_override
-        )
-        # Sampling-temperature withdrawal (story S3/2932: e.g. `us.anthropic.claude-opus-4-7`
-        # 400s "temperature is deprecated for this model") is decided PURELY inside
-        # ``build_model_settings`` (no logging there — see its docstring and
-        # ``_TEMPERATURE_WITHDRAWN_LOGGED`` below). The once-per-model dedup INFO log for that
-        # withdrawal stays HERE, the only place allowed to mutate the dedup set.
-        temperature = getattr(req.config, "temperature", None)
-        if temperature is None:
-            temperature = cfg.temperature
-        if temperature is not None and not caps.supports_temperature:
-            if resolved not in _TEMPERATURE_WITHDRAWN_LOGGED:
-                _TEMPERATURE_WITHDRAWN_LOGGED.add(resolved)
-                logger.info(
-                    "llm: omitting temperature for model=%s — measured to reject it "
-                    "(capabilities.supports_temperature is False)",
-                    resolved,
+            candidates = [resolved]
+            if self._model_override is not None:
+                model = self._model_override
+            elif fallback_targets:
+                # A chain is built EAGERLY and WHOLE, on this ONE session: every candidate becomes a
+                # real Model (so each entry's own `endpoint` is honored and every rebar-created
+                # transport lands on one `_closeables`), then `FallbackModel` wraps them in order.
+                model, candidates = build_fallback_model(
+                    resolved, fallback_targets, session=provider_session
                 )
-        if model_settings:
-            kwargs["model_settings"] = model_settings
-        usage_limits, req_limit, eff_max_iter = build_usage_limits(cfg, req, UsageLimits)
-        # Observability (one structured record per LLM call): which reviewer/criterion,
-        # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
-        # container per-child loop) is visible without a debugger. Quiet by default;
-        # enable with REBAR_LOG_LEVEL=INFO. Failures log at WARNING.
-        _call_label = (
-            ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
-        )
-        _t0 = time.monotonic()
-        usage: dict[str, int] = {}
-        run_messages: list[Any] = []
-        # `agent.run_sync` never enters the model (only `async with agent` does), so a chain's
-        # sub-models — and thus the HTTP client lifecycle pydantic-ai's OWN providers manage
-        # through that entry — would never be entered. A plain model has no such requirement.
-        model_scope = ExitStack()
-        if fallback_targets:
-            model_scope.enter_context(entered_fallback_model(model))
-        try:
-            if req.mode == "text":
-                agent = Agent(model, **kwargs)
-                with usage_log.collect_failure_messages(run_messages):
-                    with usage_log.capture_attempt_messages():
-                        run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
-                # Text is an intermediate artifact for bounded evidence
-                # gathering. A provider-truncated fragment is incomplete
-                # evidence and must never be handed to a verdict finalizer.
-                from rebar.llm import structured as _structured
+            elif provider_session.supports(_provider_name):
+                from pydantic_ai.models import infer_model
 
-                if req.tool_step_limit is not None:
-                    _structured.check_response(run_result.response)
-                outcome = {"messages": [SimpleNamespace(content=str(run_result.output))]}
-                usage = _extract_usage(run_result)
+                model = infer_model(resolved, provider_factory=provider_session.provider_factory)
+            elif provider_session.is_resolvable(_provider_name):
+                model = resolved
             else:
-                with usage_log.collect_failure_messages(run_messages):
-                    structured, usage = _pai_structured(
-                        Agent, model, caps, req, kwargs, usage_limits
-                    )
-                outcome = {"structured_response": structured}
-            # Agent-build invariant (story anole): telemetry warning on a REAL run whose
-            # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
-            if self._model_override is None:
-                _warn_if_zeroed_usage(usage)
-                # Cache-effectiveness telemetry (story S3/2932): caching can fail SILENTLY on
-                # some Bedrock models (MEASURED: cache_read=0 AND cache_write=0 while billing
-                # full input tokens, no error) — this is the signal an operator otherwise never
-                # sees. `cache_settings is not None` is the existing local for "caching was
-                # requested this call" (set above from `cache_settings_for(caps)`).
-                warn_if_cache_ineffective(
-                    usage, caching_requested=cache_settings is not None, model=ran_model
-                )
-        except Exception as exc:  # noqa: BLE001 — the except spine is `interpret_failure`
-            # (ADR 0056 decision 3, src/rebar/llm/structured_run.py): it dispatches on
-            # UsageLimitExceeded / LLMError / anything-else in that load-bearing order and
-            # always raises, so this broad catch is exactly as narrow as the three arms it
-            # replaces.
-            interpret_failure(
-                exc,
-                run_messages,
-                FailureContext(
-                    call_label=_call_label,
-                    execution_mode=req.execution_mode,
-                    ran_model=ran_model,
-                    req_limit=req_limit,
-                    eff_max_iter=eff_max_iter,
-                    started_at=_t0,
-                ),
+                model = provider_session.provider_factory(
+                    _provider_name
+                )  # always raises LLMConfigError
+            # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker for
+            # an injected test model), not the bare config model — so a parity diff sees exactly
+            # what ran.
+            ran_model = (
+                f"test:{type(self._model_override).__name__}" if self._model_override else resolved
             )
-        finally:
-            # Exit the chain wrapper FIRST so pydantic-ai closes the clients IT owns, then close
-            # whatever rebar's builders opened (story arcticduck / S1). The two sets are disjoint
-            # — a provider handed a client never adopts it — so nothing is closed twice.
-            model_scope.close()
-            # ProviderSession.close() is itself best-effort (log, never raise).
-            provider_session.close()
+            # Agent-build invariant (story anole): for a tool-using op on a REAL model object, fail
+            # fast if the provider can't call tools (else pydantic-ai silently drops them). Gated
+            # on model_override is None (the test double is never checked) and tools present.
+            if self._model_override is None and tools:
+                # Per CANDIDATE: the wrapper inherits the base `.profile`, whose defaults would pass
+                # while a sub-model that cannot call tools sits in the chain, waiting to drop them.
+                for candidate_model, candidate in zip(
+                    getattr(model, "models", [model]), candidates, strict=True
+                ):
+                    _check_tool_capability(candidate_model, candidate)
+            if req.tool_step_limit is not None and tools:
+                # Executable convergence boundary — intentionally not a forced tool.
+                from pydantic_ai.toolsets import FunctionToolset
+
+                limit = max(0, int(req.tool_step_limit))
+
+                def available(run_ctx, _tool_def):
+                    return run_ctx.run_step <= limit
+
+                all_toolsets = [FunctionToolset(tools), *toolsets]
+                tools = []
+                toolsets = [toolset.filtered(available) for toolset in all_toolsets]
+
+            kwargs: dict[str, Any] = {
+                "system_prompt": req.system_prompt,
+                "tools": tools,
+                "toolsets": toolsets,
+                # Per-tool execution timeout (story hoopoe): bounds a hung ASYNC/MCP tool. A
+                # no-op on single_turn (tools=[]) and for sync in-process tools (async cancel
+                # can't interrupt a blocking call — those are bounded by the derived step caps).
+                "tool_timeout": float(cfg.llm_tool_timeout_s),
+            }
+            # Prompt caching (story 0250; capability-based since story S2). The stable bytes
+            # re-sent across the container fan-out live in `system_prompt`;
+            # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
+            # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system prompt
+            # block directly), and `anthropic_cache_tool_definitions` caches the tool surface on
+            # agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for` reads the
+            # resolved model's PROFILE (never a provider-name string, so Bedrock-hosted Claude
+            # still gets its cache keys) and `cache_settings_for` dispatches on the resulting
+            # `prompt_cache_style`; each style's keys are provider-specific and would error on
+            # an unrelated provider, so they are applied at THIS shared seam only — no
+            # RunRequest content-list change, so the structured-output retry path is untouched.
+            # Resolved ONCE, threaded into `_pai_structured` below: `model` (a real object, whose
+            # PROFILE may carry a provider override, S4) for a real run, but `resolved` (the
+            # config STRING) for `model_override` — its profile is irrelevant there, and every
+            # model_override test pins the string behavior; cache_settings stays None then. A
+            # chain resolves capabilities over the whole CANDIDATE SET
+            # (`_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no
+            # profile and its `.provider` is None.
+            if fallback_targets:
+                caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
+            else:
+                caps = capabilities_for(resolved if self._model_override is not None else model)
+            cache_settings = None if self._model_override else cache_settings_for(caps)
+            # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
+            # provider/model, the endpoint host (None for the first-class/no-custom-base_url
+            # path), and the effective capability record — onto the verdict, additively,
+            # alongside the existing `model` string. Built from the SAME `caps` already
+            # resolved above (never recomputed — see capabilities.provenance_for's docstring).
+            provider_provenance = provenance_for(
+                provider=_provider_name, model=resolved, base_url=cfg.base_url, caps=caps
+            )
+            if fallback_targets:
+                # A verdict produced by a fallback must not attest the primary. The ordered
+                # candidate set is known now; `ran_model` is filled in after the run from the
+                # response that actually answered (the wrapper's own name is the synthetic
+                # `fallback:a,b` string).
+                provider_provenance["candidates"] = list(candidates)
+            # Server-side web search (bug ff64) — anthropic-GATED like the cache settings above
+            # (an injected test model never gets a provider server tool); any non-flagged-anthropic
+            # request stays byte-identical (no ``capabilities`` key).
+            web_caps = _anthropic_web_search_capabilities(
+                resolved if not self._model_override else "", web=req.web
+            )
+            if web_caps is not None:
+                kwargs["capabilities"] = web_caps
+            # Model settings + usage limits are built by the ADR 0056 decision-3 leaf helpers
+            # (structured_run.py); see their docstrings for the max_tokens/timeout/temperature/
+            # step-budget rationale (bug ids, measured numbers, and invariants preserved there).
+            model_settings = build_model_settings(
+                cfg, req, caps, resolved, cache_settings, model_override=self._model_override
+            )
+            # Sampling-temperature withdrawal (story S3/2932: e.g. `us.anthropic.claude-opus-4-7`
+            # 400s "temperature is deprecated for this model") is decided PURELY inside
+            # ``build_model_settings`` (no logging there — see its docstring and
+            # ``_TEMPERATURE_WITHDRAWN_LOGGED`` below). The once-per-model dedup INFO log for that
+            # withdrawal stays HERE, the only place allowed to mutate the dedup set.
+            temperature = getattr(req.config, "temperature", None)
+            if temperature is None:
+                temperature = cfg.temperature
+            if temperature is not None and not caps.supports_temperature:
+                if resolved not in _TEMPERATURE_WITHDRAWN_LOGGED:
+                    _TEMPERATURE_WITHDRAWN_LOGGED.add(resolved)
+                    logger.info(
+                        "llm: omitting temperature for model=%s — measured to reject it "
+                        "(capabilities.supports_temperature is False)",
+                        resolved,
+                    )
+            if model_settings:
+                kwargs["model_settings"] = model_settings
+            usage_limits, req_limit, eff_max_iter = build_usage_limits(cfg, req, UsageLimits)
+            # Observability (one structured record per LLM call): which reviewer/criterion,
+            # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
+            # container per-child loop) is visible without a debugger. Quiet by default;
+            # enable with REBAR_LOG_LEVEL=INFO. Failures log at WARNING.
+            _call_label = (
+                ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
+            )
+            _t0 = time.monotonic()
+            usage: dict[str, int] = {}
+            run_messages: list[Any] = []
+            # `agent.run_sync` never enters the model (only `async with agent` does), so a chain's
+            # sub-models — and thus the HTTP client lifecycle pydantic-ai's OWN providers manage
+            # through that entry — would never be entered. A plain model has no such requirement.
+            model_scope = ExitStack()
+            if fallback_targets:
+                model_scope.enter_context(entered_fallback_model(model))
+            try:
+                if req.mode == "text":
+                    agent = Agent(model, **kwargs)
+                    with usage_log.collect_failure_messages(run_messages):
+                        with usage_log.capture_attempt_messages():
+                            run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+                    # Text is an intermediate artifact for bounded evidence
+                    # gathering. A provider-truncated fragment is incomplete
+                    # evidence and must never be handed to a verdict finalizer.
+                    from rebar.llm import structured as _structured
+
+                    if req.tool_step_limit is not None:
+                        _structured.check_response(run_result.response)
+                    outcome = {"messages": [SimpleNamespace(content=str(run_result.output))]}
+                    usage = _extract_usage(run_result)
+                else:
+                    with usage_log.collect_failure_messages(run_messages):
+                        structured, usage = _pai_structured(
+                            Agent, model, caps, req, kwargs, usage_limits
+                        )
+                    outcome = {"structured_response": structured}
+                # Agent-build invariant (story anole): telemetry warning on a REAL run whose
+                # usage looks zeroed (never blocks; test doubles report zero usage, so skip them).
+                if self._model_override is None:
+                    _warn_if_zeroed_usage(usage)
+                    # Cache-effectiveness telemetry (story S3/2932): caching can fail SILENTLY on
+                    # some Bedrock models (MEASURED: cache_read=0 AND cache_write=0 while billing
+                    # full input tokens, no error) — this is the signal an operator otherwise never
+                    # sees. `cache_settings is not None` is the existing local for "caching was
+                    # requested this call" (set above from `cache_settings_for(caps)`).
+                    warn_if_cache_ineffective(
+                        usage, caching_requested=cache_settings is not None, model=ran_model
+                    )
+            except Exception as exc:  # noqa: BLE001 — the except spine is `interpret_failure`
+                # (ADR 0056 decision 3, src/rebar/llm/structured_run.py): it dispatches on
+                # UsageLimitExceeded / LLMError / anything-else in that load-bearing order and
+                # always raises, so this broad catch is exactly as narrow as the three arms it
+                # replaces.
+                interpret_failure(
+                    exc,
+                    run_messages,
+                    FailureContext(
+                        call_label=_call_label,
+                        execution_mode=req.execution_mode,
+                        ran_model=ran_model,
+                        req_limit=req_limit,
+                        eff_max_iter=eff_max_iter,
+                        started_at=_t0,
+                    ),
+                )
+            finally:
+                # Exit the chain wrapper FIRST so pydantic-ai closes the clients IT owns, then
+                # close whatever rebar's builders opened (story arcticduck / S1). The two sets
+                # are disjoint — a provider handed a client never adopts it — so nothing is
+                # closed twice.
+                model_scope.close()
         if fallback_targets:
             # Attest the model that ANSWERED, read off the response rather than the wrapper.
             answered = _answering_model(run_messages, candidates)
