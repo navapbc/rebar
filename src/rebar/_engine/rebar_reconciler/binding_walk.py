@@ -283,9 +283,17 @@ def compute_binding_walk_mutations(
                 if kind is DecisionKind.RETIRE_AFTER_GRACE:
                     result.retired.append(jira_key)
                 if persist:
-                    # note_absent increments the counter and retires it (moves to
-                    # bindings-retired.json + alert) when it reaches grace.
-                    binding_store.note_absent(jira_key)
+                    # A 404 is "gone" OR "MOVED to another project and re-keyed"
+                    # (bug 7c26): the store re-asks by immutable numeric id and
+                    # re-keys on a hit. Only an unproven absence increments the
+                    # counter and retires at grace (bindings-retired.json + alert).
+                    # getattr-guarded because this walk is also driven with
+                    # duck-typed stores that predate the move-aware member.
+                    _rekey = getattr(binding_store, "note_absent_or_rekey", None)
+                    if _rekey is not None:
+                        _rekey(jira_key, client)
+                    else:
+                        binding_store.note_absent(jira_key)
         elif kind is DecisionKind.ADOPT:
             # Class B — an unbound Jira-native issue. Route through the EXISTING
             # inbound-create leaf (deterministic local id jira-dig-NNN ⇒ idempotent
