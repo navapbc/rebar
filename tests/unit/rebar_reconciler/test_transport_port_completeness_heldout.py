@@ -252,3 +252,213 @@ def test_get_parent_map_survives_server_side_maxresults_truncation() -> None:
         f"got {len(parents)} of 250 parents — the pager advanced by the REQUESTED page size "
         f"and read a server-truncated page as the final one, silently losing parents"
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. The construction-time guard — enforcement, not just declaration
+# ---------------------------------------------------------------------------
+
+
+class _StubTransport:
+    """A transport carrying every required member, used as the conforming baseline."""
+
+    def __init__(self) -> None:
+        for member in _REQUIRED_TRANSPORT_MEMBERS_LIVE():
+            setattr(self, member, lambda *a, **k: None)
+
+
+def _REQUIRED_TRANSPORT_MEMBERS_LIVE():
+    from rebar_reconciler._backend import _REQUIRED_TRANSPORT_MEMBERS
+
+    return _REQUIRED_TRANSPORT_MEMBERS
+
+
+def test_the_conformance_guard_rejects_a_transport_missing_a_member() -> None:
+    """HELD-OUT edge. Declaring members on the port only helps if something CHECKS at
+    the moment a backend is assembled. The failure must name the missing member."""
+    from rebar_reconciler._backend import BackendEnvError, assert_transport_conforms
+
+    complete = _StubTransport()
+    assert_transport_conforms(complete, vendor="test")  # conforming: must not raise
+
+    delattr(complete, "set_entity_property")
+    with pytest.raises(BackendEnvError) as excinfo:
+        assert_transport_conforms(complete, vendor="test")
+    assert "set_entity_property" in str(excinfo.value), (
+        "the guard fired but did not name the missing member, so the operator learns "
+        "nothing actionable from it"
+    )
+
+
+def test_the_dc_factory_asserts_conformance_at_construction(monkeypatch) -> None:
+    """HELD-OUT edge, and the ACTUAL criterion: the guard must run where a backend is
+    BUILT. A guard that exists but is never called from the factory is inert — that is
+    the exact shape of the original defect, where the port described members nothing
+    enforced. Proven by making the factory build an INCOMPLETE transport and asserting
+    construction fails BEFORE a JiraDataCenterBackend is returned."""
+    from rebar_reconciler import _backend as backend_mod
+    from rebar_reconciler.adapters.jira_datacenter import backend as dc_backend
+    from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
+    from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+
+    class _Incomplete:
+        def __init__(self, **kw) -> None:
+            for member in _REQUIRED_TRANSPORT_MEMBERS_LIVE():
+                if member != "set_entity_property":  # the member that crashed the live pass
+                    setattr(self, member, lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        dc_settings,
+        "resolve_jira_datacenter_settings",
+        lambda: type("_S", (), {"project": "DC", "resolved_statuses": frozenset({"Done"})})(),
+    )
+    monkeypatch.setattr(dc_transport, "build_client_from_settings", lambda s: object())
+    monkeypatch.setattr(dc_transport, "JiraDataCenterTransport", _Incomplete)
+
+    with pytest.raises(backend_mod.BackendEnvError) as excinfo:
+        dc_backend._build_jira_datacenter_backend(None)
+    assert "set_entity_property" in str(excinfo.value)
+
+
+def test_the_cloud_factory_also_asserts_conformance(monkeypatch) -> None:
+    """HELD-OUT edge. The port states what the CORE requires, so it binds every vendor.
+    Guarding only the new backend would leave Cloud free to regress silently."""
+    from rebar_reconciler import _backend as backend_mod
+    from rebar_reconciler.adapters.jira import acli, acli_subprocess
+    from rebar_reconciler.adapters.jira import backend as cloud_backend
+
+    class _Incomplete:
+        def __init__(self, **kw) -> None:
+            for member in _REQUIRED_TRANSPORT_MEMBERS_LIVE():
+                if member != "set_reporter":
+                    setattr(self, member, lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        acli_subprocess,
+        "resolve_jira_settings",
+        lambda project_default=None: type(
+            "_S", (), {"url": "u", "user": "x", "api_token": "t", "project": "P"}
+        )(),
+    )
+    monkeypatch.setattr(acli, "AcliClient", _Incomplete)
+
+    with pytest.raises(backend_mod.BackendEnvError) as excinfo:
+        cloud_backend._build_jira_backend(None)
+    assert "set_reporter" in str(excinfo.value)
+
+
+def test_the_real_transports_both_satisfy_the_guard() -> None:
+    """TEETH for the two tests above: a guard that rejected the REAL transports would
+    make every backend unbuildable, so this pins that the guard is correct as well as
+    present. If this fails, the shipped product cannot construct a backend at all."""
+    from rebar_reconciler._backend import assert_transport_conforms
+    from rebar_reconciler.adapters.jira.acli import AcliClient
+    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    for cls, vendor in ((AcliClient, "jira"), (JiraDataCenterTransport, "jira-datacenter")):
+        assert_transport_conforms(cls, vendor=vendor)
+
+
+# ---------------------------------------------------------------------------
+# 6. Observability, reporter idempotence, and the property/assignee contracts
+# ---------------------------------------------------------------------------
+
+
+def test_a_failing_member_emits_a_warning_naming_member_and_remote_id(caplog) -> None:
+    """HELD-OUT edge. The logger EXISTING is not the criterion — the record being EMITTED
+    is. Seven of the twelve members are invoked from sites that swallow `Exception`, so
+    this WARNING is the only signal those paths ever produce. An observability
+    requirement with no test asserting emission is exactly the "absence of errors is not
+    evidence" trap."""
+    from rebar_reconciler.adapters.jira_datacenter import transport as dc_transport
+
+    def _boom():
+        raise RuntimeError("the remote said no")
+
+    with caplog.at_level(logging.WARNING, logger=dc_transport.logger.name):
+        with pytest.raises(RuntimeError):
+            dc_transport._call_logged("set_entity_property", "DC-42", _boom)
+
+    records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert records, "the member failed and NOTHING was logged — the path is silent again"
+    message = records[-1].getMessage()
+    assert "set_entity_property" in message, f"the record does not name the member: {message!r}"
+    assert "DC-42" in message, f"the record does not name the remote id: {message!r}"
+
+
+def test_set_entity_property_passes_key_and_value_through_intact() -> None:
+    """HELD-OUT edge. A wrong shape breaks correlation WITHOUT raising, so "it did not
+    error" is not evidence here. Assert the property key and the value reach the REST
+    layer verbatim — a mangled key silently orphans the local_id correlation that
+    keyless-pending recovery depends on."""
+    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    seen: list[tuple] = []
+
+    class _RecordingClient:
+        def add_issue_property(self, remote_id, key, value):
+            seen.append((remote_id, key, value))
+
+    transport = JiraDataCenterTransport.__new__(JiraDataCenterTransport)
+    transport._client = _RecordingClient()  # type: ignore[attr-defined]
+
+    transport.set_entity_property("DC-7", "local_id", "abcd-1234-ef56-7890")
+
+    assert seen == [("DC-7", "local_id", "abcd-1234-ef56-7890")], (
+        f"the property did not reach the REST layer intact: {seen!r}"
+    )
+
+
+def test_validate_assignee_exists_raises_assignee_not_found_on_a_definitive_miss() -> None:
+    """HELD-OUT edge, load-bearing. `outbound_assignee` branches on
+    `type(exc).__name__ == "AssigneeNotFoundError"`. Any OTHER type — a
+    NotImplementedError above all — silently downgrades EVERY DC assignee resolution to
+    the non-authoritative string-match fallback, permanently. So the error TYPE is the
+    contract, not merely that it raises."""
+    from rebar_reconciler.adapters.jira_datacenter.transport import (
+        AssigneeNotFoundError,
+        JiraDataCenterTransport,
+    )
+
+    class _NoMatchClient:
+        def search_users(self, user=None, maxResults=50, **kw):
+            # A substring/relevance hit that is NOT an exact match — DC's search is
+            # substring-based, so returning this as the assignee would mis-assign.
+            return [{"name": "dcuser-other", "emailAddress": "o@x", "displayName": "Other"}]
+
+    transport = JiraDataCenterTransport.__new__(JiraDataCenterTransport)
+    transport._client = _NoMatchClient()  # type: ignore[attr-defined]
+
+    with pytest.raises(AssigneeNotFoundError):
+        transport.validate_assignee_exists("dcuser", project_key="DC")
+
+
+def test_a_successful_dc_reporter_write_leaves_the_next_differ_pass_clean(monkeypatch) -> None:
+    """HELD-OUT edge — IDEMPOTENCE, which "the write succeeded" does not establish.
+
+    The DC-specific risk is concrete: `set_reporter` writes `{"reporter": {"name": …}}`
+    because DC has no accountId, and the inbound identity seam maps that `name` into
+    `account_id`. The loop only closes if the value that comes BACK equals the value
+    `_resolve_reporter_account_id` asks for. If it does not, `_diff_reporter` emits a
+    reporter mutation on EVERY pass — a write loop that converges never, while each
+    individual write reports success."""
+    from rebar_reconciler import outbound_field_diff
+    from rebar_reconciler.inbound_fields import _identity_of
+
+    # The local reporter resolves to the DC username (DC identities are minted under it).
+    monkeypatch.setattr(outbound_field_diff, "_resolve_reporter_account_id", lambda r: "dcuser")
+
+    # What DC hands back for the reporter AFTER a successful set_reporter: a user with a
+    # `name` and no accountId. Run it through the REAL identity seam, not a hand-made dict.
+    remote_identity = _identity_of({"name": "dcuser", "displayName": "DC User"})
+    assert remote_identity["account_id"] == "dcuser", (
+        "precondition: the DC identity seam must map `name` into account_id, or the "
+        "reporter round-trip cannot close at all"
+    )
+
+    changed: dict = {}
+    outbound_field_diff._diff_reporter({"reporter": "dcuser"}, remote_identity, changed)
+    assert "reporter" not in changed, (
+        f"the differ emitted a reporter mutation after a SUCCESSFUL write: {changed!r} — "
+        f"the reporter would be rewritten on every pass and the bridge never converges"
+    )

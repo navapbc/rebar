@@ -271,10 +271,15 @@ class JiraBackend:
 def _build_jira_backend(config: Any) -> JiraBackend:
     """Construct a JiraBackend whose transport is an AcliClient from the resolved
     Jira settings — mirroring the pre-story direct construction."""
+    from rebar_reconciler._backend import assert_transport_conforms
     from rebar_reconciler.adapters.jira import acli, acli_subprocess
 
     s = acli_subprocess.resolve_jira_settings(project_default="DIG")
     transport = acli.AcliClient(
         jira_url=s.url, user=s.user, api_token=s.api_token, jira_project=s.project
     )
+    # The Cloud factory gets the same guard as the DC one: the port describes what
+    # the CORE requires, so it binds every vendor. Guarding only the new backend
+    # would leave the older one free to regress silently (story J9).
+    assert_transport_conforms(transport, vendor="jira")
     return JiraBackend(transport=transport)

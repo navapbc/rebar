@@ -172,6 +172,7 @@ def _search_users_by_username(client: Any, username: str) -> tuple[str | None, b
 def _build_jira_datacenter_backend(config: Any) -> JiraDataCenterBackend:
     """Construct a ``JiraDataCenterBackend`` whose transport is a real
     ``jira.JIRA`` client built from the resolved DC settings."""
+    from rebar_reconciler._backend import assert_transport_conforms
     from rebar_reconciler.adapters.jira_datacenter.settings import (
         resolve_jira_datacenter_settings,
     )
@@ -185,6 +186,10 @@ def _build_jira_datacenter_backend(config: Any) -> JiraDataCenterBackend:
     transport = JiraDataCenterTransport(
         client=client, project=settings.project, resolved_statuses=settings.resolved_statuses
     )
+    # Conformance is asserted HERE, before the backend can be handed to a pass:
+    # a missing member must be a loud construction failure, not a crash partway
+    # through a writing pass that has already mutated the remote (story J9).
+    assert_transport_conforms(transport, vendor="jira-datacenter")
     return JiraDataCenterBackend(transport=transport, client=client)
 
 
