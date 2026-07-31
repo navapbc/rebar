@@ -133,6 +133,27 @@ services:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: "safe.directory"
       GIT_CONFIG_VALUE_0: "/var/gerrit/site/reviewbot-tickets"
+      # AWS region for the Bedrock provider (ticket a574). MEASURED in this container: no
+      # AWS_REGION, no AWS_DEFAULT_REGION, no profile — boto3.session.Session().region_name is
+      # None and bedrock-runtime construction raises NoRegionError. Story eb6e's cutover ships
+      # with NO cross-provider fallback, so an unset region takes the LLM-Review gate down for
+      # every landing rather than degrading it.
+      #
+      # This is rebar's OWN knob rather than a bare AWS_REGION so the value is visible to rebar's
+      # config layer and is recorded in the signed verdict's provider_provenance (ticket 343b);
+      # an AWS_REGION set here would authenticate fine but leave no trace of which region
+      # produced the verdict.
+      #
+      # NOTE this is independent of IMDS. IMDS is reachable from this container and the instance
+      # role resolves (ticket 9249), yet region_name is still None — credential discovery and
+      # region discovery fail, and are fixed, separately.
+      REBAR_LLM_BEDROCK_REGION: "us-east-1"
+      # ALSO the ambient boto3 var, and the two are NOT interchangeable. MEASURED: with only
+      # REBAR_LLM_BEDROCK_REGION set, rebar's own Bedrock path works (it threads the value
+      # into BedrockProvider) but a bare boto3 client STILL raises NoRegionError, because
+      # boto3 has never heard of rebar's knob. AWS_DEFAULT_REGION is botocore's canonical
+      # region var and covers every other caller in the image.
+      AWS_DEFAULT_REGION: "us-east-1"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
