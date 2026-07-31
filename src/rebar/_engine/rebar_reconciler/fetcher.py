@@ -268,11 +268,20 @@ def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
       * ACLI returns the same ``next_page_token`` on two consecutive calls
         ("same-token-twice") — raises
         ``SilentTruncationError(reason='same-token-twice')``.
+      * The endpoint returns the same first issue at a new offset, i.e. it is
+        ignoring ``startAt`` — raises
+        ``SilentTruncationError(reason='offset-stall')``.
+
+    Termination is on an EMPTY page only; a SHORT page does not end the scan,
+    because Jira DC silently truncates ``maxResults`` above
+    ``jira.search.views.default.max`` and a short page is therefore not proof of
+    exhaustion (bug deac).
     """
     start_at = 0
     accumulated = 0
     prev_token: object = None
     token_seen_count = 0
+    prev_first_key: object = None
     while True:
         result = client.search_issues(jql, start_at=start_at, max_results=page_size)
         page = _extract_issues(result)
@@ -299,6 +308,38 @@ def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
         if not page:
             return
 
+        # OFFSET-STALL DETECTION — must run BEFORE the yield, or the repeated page is
+        # emitted to the caller and its issues are double-counted (observed: a
+        # non-offset-aware client yielded its 3 issues twice, which drove duplicate
+        # creates in a dry-run pass that must write nothing).
+        #
+        # Driving the loop off the RETURNED page (below) means a client that ignores
+        # ``startAt`` re-serves the same page forever, so the repeat must be caught. What
+        # to do about it depends on whether it could loop:
+        #
+        #   * repeated FULL page (len >= page_size) — the server claims there is more and
+        #     keeps handing back the same items, so the loop never terminates. Returning
+        #     what we have would be the silent partial this function exists to refuse:
+        #     RAISE.
+        #   * repeated SHORT page — the client returned fewer than asked for and then
+        #     repeated itself, so it is not offset-aware and has nothing further to give.
+        #     We already hold everything it can produce: stop cleanly.
+        #
+        # The short-page case does NOT reintroduce the DC truncation bug. A hardened DC
+        # HONOURS ``startAt``, so its second capped page holds DIFFERENT issues and the
+        # scan continues; only an offset-blind client repeats.
+        first_key = page[0].get("key") if isinstance(page[0], dict) else None
+        if first_key is not None and first_key == prev_first_key:
+            if len(page) >= page_size:
+                raise SilentTruncationError(
+                    f"the search endpoint returned the same first issue ({first_key!r}) "
+                    f"at a new offset ({start_at}) while reporting a full page — it is "
+                    "ignoring startAt, so paging can never advance",
+                    reason="offset-stall",
+                )
+            return
+        prev_first_key = first_key
+
         # Per-query ACLI ceiling: if adding this page would reach or exceed
         # the ceiling, raise rather than yield a silently-truncated set.
         if accumulated + len(page) >= _ACLI_CEILING:
@@ -321,9 +362,22 @@ def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
         if cap is not None and accumulated >= cap:
             return
 
-        if len(page) < page_size:
-            return
-        start_at += page_size
+        # Advance by what the server ACTUALLY returned, and continue until an EMPTY
+        # page — never stop on a SHORT one.
+        #
+        # Jira DC silently truncates ``maxResults`` above
+        # ``jira.search.views.default.max`` (a common hardening), so a short page is NOT
+        # proof of exhaustion. The previous form (`return` on a short page, advance by
+        # the REQUESTED page_size) therefore read a server-truncated FIRST page as the
+        # final one and silently returned a partial snapshot. Measured against a client
+        # serving 250 issues while capping pages at 20: 20 recovered, 92% lost, raising
+        # nothing. Because ``collect()`` feeds ``_build_snapshot``, those are not missing
+        # fields on a present issue — they are issues the pass never sees, each one a
+        # candidate for the absence/deletion path. Identical defect and identical fix to
+        # ``get_parent_map`` (bug deac; the transport sibling is 9263).
+        #
+        # (The offset-stall check runs above, BEFORE the yield — see there for why.)
+        start_at += len(page)
 
 
 def collect(client, jql: str, page_size: int = 100, cap: int | None = None) -> list[dict]:
