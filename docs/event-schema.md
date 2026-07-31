@@ -312,6 +312,41 @@ snapshots, so a recorded channel is never clobbered. `fsck` flags such a stale s
 `SNAPSHOT_STALE_CHANNEL` when a retained CREATE exists, and `fsck --repair-snapshots` rebuilds
 it to persist the channel durably.
 
+## Provider provenance (`provider_provenance`)
+
+A signed gate verdict records the model it ran under as a plain string (`"model"`). That string
+alone cannot distinguish a verdict produced against the direct-Anthropic API from one produced
+behind a gateway or a different provider hosting the same model family, so a consumer could not
+tell a Bedrock-backed `LLM-Review` from an Ollama-backed one even though rebar signs both.
+
+Gate sidecar payloads therefore carry an **additive, optional** `provider_provenance` object
+alongside the existing `model` string, written by all three gate sidecars (plan-review,
+completion, code-review):
+
+| Key | Meaning |
+| --- | --- |
+| `provider` | the resolved provider name (e.g. `anthropic`, `bedrock`) |
+| `model` | the resolved model string, verbatim |
+| `endpoint_host` | the HOST of a configured `base_url`, or `null` when none is set |
+| `tier` | `first_class` when rebar vouches for the route, `best_effort` behind a custom endpoint |
+| `capabilities` | the EFFECTIVE `ModelCapabilities` record that drove the run |
+
+**Additive and optional, deliberately.** The pre-existing `model` string is unchanged, and readers
+that do not know the key ignore it — so this is a backward-compatible payload change requiring no
+store-compatibility capability gate and no migration. A payload written **without**
+`provider_provenance` (any record produced before this field existed) still loads and its
+attestation still verifies; a reader wanting the provenance treats its absence as "unknown,
+legacy" rather than as an error.
+
+**It is not part of the signed bytes.** Signing binds `(ticket_id, manifest)`, where the manifest
+is a list of `"key: value"` lines — the payload is the queryable sidecar record, a separate
+artifact. So adding this key cannot invalidate an existing signature.
+
+**No credential material is ever recorded.** `endpoint_host` is derived with
+`urlparse(base_url).hostname`, which strips any `user:password@` userinfo (unlike `.netloc`, which
+retains it), and neither the configured `api_key` nor any part of a credential-bearing `base_url`
+appears anywhere in the persisted payload.
+
 ## Compaction (I9)
 
 Compaction runs under the per-clone write lock, writes a `SNAPSHOT` that folds
