@@ -85,3 +85,111 @@ def test_nothing_configured_is_byte_identical_to_todays_verifier(monkeypatch) ->
     _no_classes(monkeypatch)
     out = _verifier_cfg(LLMConfig(repo_path=".", model="claude-opus-4-8"))
     assert out.model.endswith(VERIFIER_DEFAULT_MODEL)
+
+
+# ── through the REAL callers, not in isolation ───────────────────────────────────────────
+
+
+class _RecordingRunner:
+    """A runner that records the ``config`` each RunRequest carries and returns a canned
+    structured payload. The point is the CONFIG, not the answer: both xcheck sub-calls build
+    ``RunRequest(config=_verifier_cfg(cfg))``, so what this captures IS the model the verifier
+    path actually runs under."""
+
+    name = "fake"
+
+    def __init__(self, structured: dict):
+        self._structured = structured
+        self.seen_models: list[str] = []
+
+    def preflight(self) -> None:
+        """Always ready — no extra, no network."""
+
+    def run(self, req) -> dict:
+        self.seen_models.append(req.config.model)
+        return dict(self._structured)
+
+
+def _xcheck_active(monkeypatch, *, contradiction=False, comment_trail=False):
+    """Both entries are config-gated and inert by default, so a test that forgets this passes
+    vacuously — the sub-call never runs and no model is ever resolved."""
+    import types
+
+    from rebar import config as core_config
+
+    monkeypatch.setattr(
+        core_config,
+        "load_config",
+        lambda repo_root=None: types.SimpleNamespace(
+            verify=types.SimpleNamespace(
+                contradiction_xcheck_active=contradiction,
+                comment_trail_xcheck_active=comment_trail,
+            )
+        ),
+    )
+
+
+def _two_finding_verdict() -> dict:
+    """Two surfaced findings — the minimum both sub-calls require before they will run."""
+    return {
+        "verdict": "BLOCK",
+        "blocking": [{"id": "b0", "priority": 0.85, "criteria": ["E2"], "finding": "a claim"}],
+        "advisory": [{"id": "a0", "priority": 0.4, "criteria": ["F1"], "finding": "its refuter"}],
+        "dropped": [],
+        "coverage": {"counts": {"blocking": 1, "advisory_surfaced": 1, "dropped": 0}},
+    }
+
+
+def test_contradiction_xcheck_resolves_standard_through_its_real_caller(monkeypatch) -> None:
+    """`_verifier_cfg` resolving correctly in isolation does not prove the CALLERS use it — a
+    caller that passed plain `cfg` would leave this sub-call on the frontier model while every
+    isolated test stayed green. Asserted at xcheck.py's contradiction site."""
+    import types
+
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import xcheck
+
+    _no_classes(monkeypatch)
+    _xcheck_active(monkeypatch, contradiction=True)
+    rr = _RecordingRunner({"pairs": []})
+    xcheck.maybe_apply_contradiction(
+        "t",
+        _two_finding_verdict(),
+        ctx=types.SimpleNamespace(plan_text="p", state={}),
+        cfg=LLMConfig(repo_path=".", runner="fake", model="anthropic:claude-opus-4-8"),
+        runner=rr,
+        repo_root=None,
+    )
+    assert rr.seen_models, "the contradiction sub-call never ran — the gate or the fixture is off"
+    assert all(m.endswith(_STANDARD_TODAY) for m in rr.seen_models), (
+        f"contradiction xcheck ran on {rr.seen_models}, not the standard class"
+    )
+    assert not any("opus" in m for m in rr.seen_models), "cfg.model leaked into the verifier call"
+
+
+def test_comment_trail_xcheck_resolves_standard_through_its_real_caller(monkeypatch) -> None:
+    """The second call site. It reads its trail from ctx.state['comments'], and returns early
+    with no trail — so an empty trail here would make this pass without resolving anything."""
+    import types
+
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.plan_review import xcheck
+
+    _no_classes(monkeypatch)
+    _xcheck_active(monkeypatch, comment_trail=True)
+    rr = _RecordingRunner({"assessments": []})
+    xcheck.maybe_apply_comment_trail(
+        "t",
+        _two_finding_verdict(),
+        ctx=types.SimpleNamespace(
+            plan_text="p", state={"comments": [{"author": "x", "body": "a prior decision"}]}
+        ),
+        cfg=LLMConfig(repo_path=".", runner="fake", model="bedrock:us.anthropic.claude-opus-4-8"),
+        runner=rr,
+        repo_root=None,
+    )
+    assert rr.seen_models, "the comment-trail sub-call never ran — gate or trail fixture is off"
+    assert all(m.endswith(_STANDARD_TODAY) for m in rr.seen_models), (
+        f"comment-trail xcheck ran on {rr.seen_models}, not the standard class"
+    )
+    assert not any("opus" in m for m in rr.seen_models), "cfg.model leaked into the verifier call"
