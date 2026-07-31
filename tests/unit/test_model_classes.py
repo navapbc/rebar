@@ -307,3 +307,50 @@ def test_cli_override_of_one_field_leaves_the_slot_siblings_intact() -> None:
         assert slots["standard"].endpoint == "https://e"
     finally:
         set_cli_overrides(None)
+
+
+# ── reserved class names in the model-string space (172e/7761 shared foundation) ──────────
+def test_a_class_name_resolves_to_the_configured_model(monkeypatch) -> None:
+    """The keystone: a workflow step names a class by USING the class name as its `model:` value.
+    No new `class:` key, no schema change — the closed v3 step schema keeps its shape and only its
+    VALUE space gains three reserved words."""
+    from rebar.llm import config as llm_config
+
+    mc = _mc()
+    monkeypatch.setattr(
+        llm_config,
+        "_read_llm_file_table",
+        lambda repo_root=None: {
+            "model_classes": {
+                "standard": {"model": "us.anthropic.claude-sonnet-4-6", "provider": "bedrock"}
+            }
+        },
+    )
+    assert mc.resolve_model_string("standard") == "bedrock:us.anthropic.claude-sonnet-4-6"
+
+
+def test_a_literal_model_id_passes_through_unchanged() -> None:
+    """The back-compat guarantee, and the reason reserved values are safe: every existing workflow
+    YAML keeps resolving byte-for-byte. If this regresses, every gate silently changes model."""
+    mc = _mc()
+    for literal in (
+        "claude-opus-4-8",
+        "anthropic:claude-opus-4-8",
+        "bedrock:us.anthropic.claude-sonnet-4-6",
+        "openai:gpt-4o",
+    ):
+        assert mc.resolve_model_string(literal) == literal
+
+
+def test_every_class_name_is_reserved_not_just_standard(monkeypatch) -> None:
+    """All three names must be reserved. A partial implementation that special-cased only the
+    verifier's `standard` would leave `trivial`/`frontier` passing through as literal model ids —
+    i.e. sent to a provider as if 'frontier' were a model name."""
+    from rebar.llm import config as llm_config
+
+    mc = _mc()
+    monkeypatch.setattr(llm_config, "_read_llm_file_table", lambda repo_root=None: {})
+    for name in ("trivial", "standard", "frontier"):
+        out = mc.resolve_model_string(name)
+        assert out != name, f"{name} was passed through as a literal model id"
+        assert ":" in out, f"{name} did not resolve to a provider-qualified id"

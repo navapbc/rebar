@@ -31,7 +31,11 @@ from rebar.llm.errors import LLMConfigError
 # Kept here (not in config.py, which has no headroom left) alongside its siblings.
 TRIVIAL_DEFAULT_MODEL = "claude-haiku-4-5"
 
-CLASS_NAMES: tuple[str, ...] = ("frontier", "standard", "trivial")
+TRIVIAL_CLASS = "trivial"
+STANDARD_CLASS = "standard"
+FRONTIER_CLASS = "frontier"
+
+CLASS_NAMES: tuple[str, ...] = (FRONTIER_CLASS, STANDARD_CLASS, TRIVIAL_CLASS)
 
 _DEFAULT_MODEL_BY_CLASS: dict[str, str] = {
     "frontier": DEFAULT_MODEL,
@@ -210,3 +214,29 @@ def load_class_slots(repo_root: str | None = None) -> dict[str, ClassSlot]:
     from rebar.llm.config import _read_llm_file_table
 
     return parse_class_slots(_read_llm_file_table(repo_root).get("model_classes"))
+
+
+def resolve_model_string(value: str, repo_root: str | None = None) -> str:
+    """Resolve a model string that MAY be a reserved class name.
+
+    The keystone of the class system (decided on eb58): a workflow step names a class by using the
+    class name AS its ``model:`` value -- ``model: standard``, ``model_ladder: [trivial, standard,
+    frontier]``. There is no ``class:`` key and no schema change; the v3 step schema stays
+    closed and only its VALUE space gains three reserved words.
+
+    ``trivial`` / ``standard`` / ``frontier`` resolve through the configured class slots. ANY other
+    string is returned UNCHANGED, which is the back-compat guarantee that keeps every existing
+    workflow YAML resolving byte-for-byte.
+
+    THERE IS NO SINGLE INTERCEPTION POINT, so this function has several callers rather than one:
+    ``model_ladder`` never reaches :func:`rebar.llm.config.resolve_model` (the batch runners copy
+    ``model_ladder[0]`` straight onto ``cfg.model``), and neither do the verifier paths
+    (``resolve_verifier_model`` / ``_verifier_cfg``). Keeping the reserved vocabulary in THIS one
+    function is what stops those call sites from drifting apart.
+
+    Callers in :mod:`rebar.llm.config` must import this lazily INSIDE the function body: this module
+    imports ``config`` at module scope, so a module-level import there would close a cycle.
+    """
+    if value not in CLASS_NAMES:
+        return value
+    return resolve_class(value, load_class_slots(repo_root))

@@ -25,7 +25,7 @@ import logging
 from dataclasses import replace
 
 from rebar.llm import findings
-from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.runner import Runner
 
 logger = logging.getLogger(__name__)
@@ -269,6 +269,28 @@ def deterministic_child_failure(ticket_id: str, child_findings: list[dict], cfg)
     return findings.validate_structured(result, _OUTPUT_SCHEMA)
 
 
+def _verifier_model_for_completion() -> str:
+    """The completion verifier's model: the STANDARD model class (ticket 172e).
+
+    This file carried its OWN copy of plan-review's equality test
+    (``if cfg.model == DEFAULT_MODEL: replace(model=_VERIFIER_DEFAULT_MODEL)``), so the same defect
+    lived on a second path: ANY provider-qualified or Bedrock model id read as an explicit operator
+    choice and left the completion verifier on the frontier model. Resolving the class keeps the two
+    gates in step.
+
+    With nothing configured, ``standard`` resolves to the same model ``_VERIFIER_DEFAULT_MODEL``
+    names -- but the returned string is now PROVIDER-QUALIFIED, so this is not byte-identical to the
+    old rule. See :func:`rebar.llm.plan_review._verifier_cfg` for why qualifying is the deliberate
+    and desirable direction.
+
+    A separate function rather than an inline call so the resolution is unit-testable without
+    standing up a whole ``verify_completion`` run.
+    """
+    from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
+
+    return resolve_model_string(STANDARD_CLASS)
+
+
 def verify_completion(
     ticket_id: str,
     *,
@@ -325,12 +347,7 @@ def _verify_completion_inner(
     from rebar import _reads
 
     cfg = config
-    # Default to a decisive verifier model unless the operator EXPLICITLY chose a non-default
-    # one (cfg.model == DEFAULT_MODEL means REBAR_LLM_MODEL/[tool.rebar.llm].model was unset or
-    # left at the framework default → use the verifier default; any other value is an explicit
-    # choice and wins). Mirrors the step-floor pattern below.
-    if cfg.model == DEFAULT_MODEL:
-        cfg = replace(cfg, model=_VERIFIER_DEFAULT_MODEL)
+    cfg = replace(cfg, model=_verifier_model_for_completion())
     # Raise the agent step budget to a verification-appropriate floor (an explicit higher
     # REBAR_LLM_MAX_STEPS still wins) so a multi-criteria verification doesn't trip the
     # recursion cap mid-run.
