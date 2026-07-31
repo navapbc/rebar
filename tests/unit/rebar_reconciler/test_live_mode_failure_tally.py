@@ -30,6 +30,7 @@ REAL functions.
 from __future__ import annotations
 
 import json
+import types
 from pathlib import Path
 from typing import Any
 
@@ -124,4 +125,70 @@ def test_persist_and_log_counts_failures_in_live_without_a_manifest(
     assert result["mutations_applied"] == 1, (
         "a failed mutation must not be counted as applied — that is the 85a1 structural lie "
         f"('applied N of N' while mutations failed). got {result!r}"
+    )
+
+
+def test_live_failure_reaches_a_non_zero_exit_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chain the real functions all the way to the exit code.
+
+    The two tests above stop at `_persist_and_log`'s result dict, and every pre-existing
+    fail-loud test stubs `reconcile_once` to RETURN a `mutation_failures` value. Neither
+    covers the link that actually makes a degraded pass loud: `run_pass`'s
+    `if failures > 0: return 1`. That link was unreachable in LIVE for the whole life of
+    the bug, so a test that stops short of it would not have caught c903 — nor would it
+    catch the link being severed again.
+
+    Drives: _emit_mode_manifest (LIVE, real) -> _persist_and_log (real) -> run_pass (real).
+    """
+    from rebar_reconciler import __main__ as reconciler_main
+
+    outcomes = [
+        {"action": "create", "key": "OK-1"},
+        {"action": "create", "key": "BAD-1", "error": "stale-binding-404: HTTP Error 404"},
+    ]
+    manifest = _write_manifest(tmp_path, outcomes)
+    mode_mod = _mode_mod()
+
+    # 1. real LIVE emission: unlinks the manifest, hands back the tally
+    _action, tally = apply_planning._emit_mode_manifest(
+        mode_mod.Mode.LIVE, mode_mod, outcomes, [], "pass-e2e", manifest, tmp_path, True
+    )
+    assert not manifest.exists()
+
+    # 2. real tally, with no manifest on disk (the LIVE shape)
+    class _Logger:
+        def log(self, *a: Any, **k: Any) -> None: ...
+        def close(self, *a: Any, **k: Any) -> None: ...
+        def sync_pass_end(self, *a: Any, **k: Any) -> None: ...
+
+    ctx = reconcile._PassContext(pass_id="pass-e2e", repo_root=tmp_path)
+    ctx.persist = True
+    ctx.mutations = outcomes
+    ctx.curr_path = tmp_path / "curr.json"
+    ctx.curr_path.write_text("{}")
+    ctx.prev_path = tmp_path / "prev.json"
+    ctx.sync_logger = _Logger()
+    ctx.manifest_path = None
+    ctx.nowrite_plan = None
+    ctx.apply_tally = tally
+    result = reconcile._persist_and_log(ctx)
+
+    # 3. real run_pass over that result -> the exit code CI actually sees
+    applier_stub = types.SimpleNamespace(
+        RescheduleError=type("_R", (Exception,), {}), EXIT_RESCHEDULE=75
+    )
+    reconcile_stub = types.SimpleNamespace(reconcile_once=lambda *a, **k: result)
+    monkeypatch.setattr(
+        reconciler_main,
+        "_try_load_step",
+        lambda name: {"reconcile": reconcile_stub, "applier": applier_stub}.get(name),
+    )
+    rc = reconciler_main.run_pass(repo_root=tmp_path, pass_id="pass-e2e")
+
+    assert rc == 1, (
+        "a LIVE pass with a failed mutation must exit non-zero — this is the whole of "
+        "e534's 'fail loud at the END', and the link that was dead in production. "
+        f"tally={tally} result={result} rc={rc}"
     )
