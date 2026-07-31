@@ -740,8 +740,21 @@ def _main(argv: list[str] | None = None) -> int:
         )
         return 2
     # The parity gate now covers BOTH the routing index AND the derived criteria guide (WS10) —
-    # a removed/renamed guide section fails validate-routing.
-    problems = validate_packaged_routing() + validate_criteria_guide()
+    # a removed/renamed guide section fails validate-routing — PLUS the criterion-pin manifest
+    # for the hand-written prose guides (bug 828a), so a criterion whose text moves out from
+    # under a sentence that cites it can no longer drift silently.
+    #
+    # Imported LAZILY (the pattern `_guide_path` already uses for `rebar.config`): guide_parity
+    # imports CANONICAL_LLM / _guide_section_body / AUTHOR_GUIDES / load_criteria back out of
+    # this module, so a top-level import here would be circular. The call resolves the function
+    # off the module at call time so a monkeypatch of it is honoured.
+    from . import guide_parity
+
+    problems = (
+        validate_packaged_routing()
+        + validate_criteria_guide()
+        + guide_parity.validate_guide_criterion_pins()
+    )
     if problems:
         print("criteria_routing.json parity gate FAILED:", file=sys.stderr)  # noqa: T201
         for p in problems:
