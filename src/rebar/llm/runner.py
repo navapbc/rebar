@@ -37,12 +37,7 @@ from rebar.llm.capabilities import (
     provenance_for,
 )
 from rebar.llm.config import LLMConfig, infer_provider
-from rebar.llm.errors import (
-    LLMConfigError,
-    LLMError,
-    LLMRunnerError,
-    LLMUnavailableError,
-)
+from rebar.llm.errors import LLMConfigError, LLMError
 from rebar.llm.model_classes import (
     build_fallback_model,
     entered_fallback_model,
@@ -50,6 +45,7 @@ from rebar.llm.model_classes import (
 )
 from rebar.llm.providers import ProviderSession
 from rebar.llm.structured_run import (
+    FailureContext,
     _extract_usage,
     _import_pydantic_ai,  # noqa: F401  (re-exported: tests patch it on `runner`)
     _pai_check_config,  # noqa: F401  (re-exported: tests import it from `runner`)
@@ -57,6 +53,7 @@ from rebar.llm.structured_run import (
     _warn_if_zeroed_usage,
     effective_max_iterations,
     effective_max_tokens,
+    interpret_failure,
     warn_if_cache_ineffective,
 )
 
@@ -211,8 +208,6 @@ class PydanticAIRunner:
         preflight failure surfaces the same ``resolution_class`` channel as a mid-run outage
         (mamba's run seam) — a config error classifies non-retryable, so it maps to the
         existing INDETERMINATE exit, never the retryable exit 11."""
-        from rebar.llm.errors import LLMError
-
         try:
             _import_pydantic_ai()
             _pai_check_config(self._config)
@@ -236,7 +231,6 @@ class PydanticAIRunner:
 
         from types import SimpleNamespace
 
-        from pydantic_ai.exceptions import UsageLimitExceeded
         from pydantic_ai.usage import UsageLimits
 
         from rebar.llm import pai_tools
@@ -248,9 +242,8 @@ class PydanticAIRunner:
         from rebar.llm.tracing import setup_tracing
 
         setup_tracing(cfg.langfuse)
-        # single_turn (story 4b2f): exactly ONE model call with NO tools and NO
-        # toolsets — the agent cannot enter a tool loop. agentic: the full
-        # filesystem + rebar (+ MCP) tool surface, as before.
+        # single_turn (story 4b2f): exactly ONE model call with NO tools/toolsets — the agent
+        # cannot enter a tool loop. agentic: the full filesystem + rebar (+ MCP) tool surface.
         if req.execution_mode == "single_turn":
             tools: list = []
             toolsets: list = []
@@ -266,19 +259,16 @@ class PydanticAIRunner:
 
                 assert_gated("agentic filesystem tools")
             # Read-only ticket contract (the gates): in attested mode the agent reads a
-            # PINNED snapshot copy of the ticket store, so a comment write would land in a
-            # throwaway dir and be lost — withhold it. (REBAR_MCP_READONLY also withholds it.)
-            # Local mode reads the live checkout, where a comment is a real write, so it is
-            # allowed there. `current_code_root()` is set only in attested mode.
+            # PINNED snapshot copy of the ticket store, so a comment write would be lost —
+            # withhold it. Local mode reads the live checkout, where a comment is a real
+            # write, so it is allowed there. `current_code_root()` is set only in attested mode.
             from rebar.llm.config import current_code_root
 
             allow_comment = (not _readonly_gate()) and current_code_root() is None
-            # The rebar ticket tools read the PINNED ticket-store snapshot when set (the
-            # orphan `tickets` branch is absent from the code snapshot `cfg.repo_path`),
-            # else the in-place checkout's store. The file tools stay on the code snapshot.
-            # `grounding_tools` adds the environment-aware `resolve_symbol` (bug 406f)
-            # so the finder can CONFIRM a third-party/stdlib symbol the repo-scoped
-            # file tools cannot see, rather than asserting it is hallucinated.
+            # The rebar ticket tools read the PINNED ticket-store snapshot when set, else the
+            # in-place checkout's store. The file tools stay on the code snapshot.
+            # `grounding_tools` adds `resolve_symbol` (bug 406f) so the finder can CONFIRM a
+            # third-party/stdlib symbol the repo-scoped file tools cannot see.
             tools = (
                 pai_tools.filesystem_tools(cfg.repo_path)
                 + pai_tools.grounding_tools(cfg.repo_path)
@@ -290,25 +280,16 @@ class PydanticAIRunner:
                 tools = [*tools, *req.extra_tools]
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
-        # Provider resolution is delegated to the per-run ProviderSession seam (story
-        # S1 / one-provider-factory) — the ONE place that answers "how is a Provider
-        # built for provider X", including when the answer is "it isn't":
-        #   - a rebar-registered provider (today, only anthropic) is eagerly built
-        #     through `infer_model(provider_factory=session.provider_factory)`, which
-        #     owns its client's lifecycle via the session;
-        #   - a provider pydantic-ai itself recognizes but rebar does not build
-        #     (openai/google/...) is left as a lazy model STRING for pydantic-ai's own
-        #     `Agent` construction to resolve later, exactly as before this seam
-        #     existed — eagerly building it here would force that provider's OPTIONAL
-        #     package (openai/google are opt-in, never installed by the `agents`
-        #     extra) to be importable just to wire up model_settings below, before any
-        #     real call is made: a regression this seam must not introduce;
-        #   - a name NEITHER side recognizes raises the typed LLMConfigError HERE
-        #     (before any Agent/tool-loop work), so it can never be misclassified by
-        #     the broad `except Exception` further down as a provider OUTAGE — the
-        #     opposite of what a misspelled/unsupported provider name actually is.
-        # `model_override` (the offline TestModel harness) bypasses all of this and
-        # builds no client.
+        # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
+        # one-provider-factory) — the ONE place answering "how is a Provider built for
+        # provider X", incl. "it isn't": a rebar-registered provider (today, only anthropic)
+        # is eagerly built via `infer_model(provider_factory=...)`, owning its client's
+        # lifecycle via the session; a provider pydantic-ai recognizes but rebar does not
+        # build (openai/google/...) stays a lazy model STRING for pydantic-ai's `Agent` to
+        # resolve later, so that OPTIONAL package need not be importable yet; a name NEITHER
+        # side recognizes raises the typed LLMConfigError HERE, so it can never be
+        # misclassified by the broad `except Exception` further down as a provider OUTAGE.
+        # `model_override` (the offline TestModel harness) bypasses all of this.
         provider_session = ProviderSession(cfg)
         _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
         # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
@@ -337,15 +318,15 @@ class PydanticAIRunner:
             model = provider_session.provider_factory(
                 _provider_name
             )  # always raises LLMConfigError
-        # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker
-        # for an injected test model), not the bare config model — so a parity diff sees
-        # exactly what ran.
+        # Provenance records the PROVIDER-QUALIFIED string actually invoked (or a marker for
+        # an injected test model), not the bare config model — so a parity diff sees exactly
+        # what ran.
         ran_model = (
             f"test:{type(self._model_override).__name__}" if self._model_override else resolved
         )
-        # Agent-build invariant (story anole): for a tool-using op on a REAL model object,
-        # fail fast if the provider can't call tools (else pydantic-ai silently drops them).
-        # Gated on model_override is None (the test double is never checked) and tools present.
+        # Agent-build invariant (story anole): for a tool-using op on a REAL model object, fail
+        # fast if the provider can't call tools (else pydantic-ai silently drops them). Gated
+        # on model_override is None (the test double is never checked) and tools present.
         if self._model_override is None and tools:
             # Per CANDIDATE: the wrapper inherits the base `.profile`, whose defaults would pass
             # while a sub-model that cannot call tools sits in the chain, waiting to drop them.
@@ -354,8 +335,7 @@ class PydanticAIRunner:
             ):
                 _check_tool_capability(candidate_model, candidate)
         if req.tool_step_limit is not None and tools:
-            # Executable convergence boundary. This is intentionally not a
-            # forced structured-output tool on the exploratory history.
+            # Executable convergence boundary — intentionally not a forced tool.
             from pydantic_ai.toolsets import FunctionToolset
 
             limit = max(0, int(req.tool_step_limit))
@@ -377,24 +357,23 @@ class PydanticAIRunner:
             "tool_timeout": float(cfg.llm_tool_timeout_s),
         }
         # Prompt caching (story 0250; capability-based since story S2). The stable bytes
-        # re-sent across the container fan-out (the WHOLE parent plan) live in
-        # `system_prompt`; `anthropic_cache_instructions` puts a `cache_control` breakpoint
-        # on that block (anthropic.py:1611-1616, the no-instruction-parts branch caches the
-        # system prompt block directly), and `anthropic_cache_tool_definitions` caches the
-        # tool surface on agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for`
-        # reads the resolved model's PROFILE (never a provider-name string, so Bedrock-hosted
-        # Claude — whose model string says `bedrock`, not `anthropic` — still gets its cache
-        # keys) and `cache_settings_for` dispatches on the resulting `prompt_cache_style`;
-        # each style's keys are provider-specific and would error on an unrelated provider, so
-        # they are applied at THIS shared seam only — no RunRequest content-list change, so the
-        # structured-output retry path is untouched.
-        # Resolved ONCE, threaded into `_pai_structured` below (never disagree): `model` (a real
-        # object, whose PROFILE may carry a provider override, S4) for a real run, but `resolved`
-        # (the config STRING) for `model_override` — its profile is irrelevant/misleading there,
-        # and every model_override test pins the string behavior; cache_settings stays None then.
-        # A chain resolves capabilities over the whole CANDIDATE SET (see
-        # `_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no profile
-        # and its `.provider` is None, so asking IT returns DEFAULT capabilities silently.
+        # re-sent across the container fan-out live in `system_prompt`;
+        # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
+        # (anthropic.py:1611-1616, the no-instruction-parts branch caches the system prompt
+        # block directly), and `anthropic_cache_tool_definitions` caches the tool surface on
+        # agentic calls (a no-op on single_turn `tools=[]`). `capabilities_for` reads the
+        # resolved model's PROFILE (never a provider-name string, so Bedrock-hosted Claude
+        # still gets its cache keys) and `cache_settings_for` dispatches on the resulting
+        # `prompt_cache_style`; each style's keys are provider-specific and would error on
+        # an unrelated provider, so they are applied at THIS shared seam only — no
+        # RunRequest content-list change, so the structured-output retry path is untouched.
+        # Resolved ONCE, threaded into `_pai_structured` below: `model` (a real object, whose
+        # PROFILE may carry a provider override, S4) for a real run, but `resolved` (the
+        # config STRING) for `model_override` — its profile is irrelevant there, and every
+        # model_override test pins the string behavior; cache_settings stays None then. A
+        # chain resolves capabilities over the whole CANDIDATE SET
+        # (`_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no
+        # profile and its `.provider` is None.
         if fallback_targets:
             caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
         else:
@@ -413,10 +392,9 @@ class PydanticAIRunner:
             # set is known now; `ran_model` is filled in after the run from the response that
             # actually answered (the wrapper's own name is the synthetic `fallback:a,b` string).
             provider_provenance["candidates"] = list(candidates)
-        # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
-        # above (an injected test model never gets a provider server tool). Attached as a
-        # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
-        # (no ``capabilities`` key).
+        # Server-side web search (bug ff64) — anthropic-GATED like the cache settings above
+        # (an injected test model never gets a provider server tool); any non-flagged-anthropic
+        # request stays byte-identical (no ``capabilities`` key).
         web_caps = _anthropic_web_search_capabilities(
             resolved if not self._model_override else "", web=req.web
         )
@@ -425,8 +403,8 @@ class PydanticAIRunner:
         # Wire the configured OUTPUT cap into the call. cfg.max_tokens was previously DROPPED
         # (only the cache flags were sent as model_settings), so pydantic-ai fell back to its
         # max_tokens=4096 default — far too small for a multi-child container review, whose
-        # output truncated (stop_reason=max_tokens) and tripped the structured-output retry.
-        # max_tokens is a base ModelSettings field, so it rides alongside the cache flags.
+        # output truncated (stop_reason=max_tokens) and tripped the structured-output retry;
+        # max_tokens is a base ModelSettings field, riding alongside the cache flags.
         model_settings = dict(cache_settings) if cache_settings is not None else {}
         # The output cap is PER-REQUEST too (bug spy-luge-wool / sole-teal-churn): a finding-rich
         # Pass-2 verifier carries a scaled max_tokens on ``req.config`` so its structured output
@@ -474,21 +452,19 @@ class PydanticAIRunner:
                 model_settings["temperature"] = float(temperature)
         if model_settings:
             kwargs["model_settings"] = model_settings
-        # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle).
-        # Halve cfg.max_iterations (which is authored as ~2 steps per tool-call cycle)
-        # so a given cfg.max_iterations allows the intended number of tool-call cycles
-        # (and so we DON'T silently inherit pydantic-ai's default request_limit=50).
-        # request_limit bounds model TURNS, not tool calls WITHIN a turn — a tool that fails
-        # and gets re-called can spray many calls in few turns (pydantic-ai #2593). Add
-        # tool_calls_limit as the in-turn backstop so a failing/looping tool cannot burn the
-        # whole budget (the retry-to-exhaustion failure mode). Set generously above the
-        # expected ~max_iterations/2 tool calls, so it only trips on a genuine runaway.
-        # The step budget is PER-REQUEST: a caller (e.g. the workflow agent step) may raise
-        # max_iterations for THIS call by carrying a higher value on ``req.config`` — needed so a
-        # finding-rich Pass-2 verifier gets a budget scaled to its work without a shared runner's
-        # self._config changing under other steps (bug 59bc). The request can only RAISE the floor
-        # (``max``), never lower the operator-configured budget. ``self._config`` (cfg) is the
-        # floor; req.config is the per-call override.
+        # pydantic-ai's request_limit counts MODEL REQUESTS (~1 per tool-call cycle). Halve
+        # cfg.max_iterations (authored as ~2 steps per tool-call cycle) so a given
+        # max_iterations allows the intended number of cycles (and we DON'T silently inherit
+        # pydantic-ai's default request_limit=50). request_limit bounds model TURNS, not tool
+        # calls WITHIN a turn — a failing/re-called tool can spray many calls in few turns
+        # (pydantic-ai #2593); tool_calls_limit is the in-turn backstop so a failing/looping
+        # tool cannot burn the whole budget (the retry-to-exhaustion failure mode), set
+        # generously above the expected ~max_iterations/2 tool calls so it only trips on a
+        # genuine runaway. The step budget is PER-REQUEST: a caller may raise max_iterations
+        # for THIS call via ``req.config`` — needed so a finding-rich Pass-2 verifier gets a
+        # scaled budget without a shared runner's self._config changing under other steps
+        # (bug 59bc); it can only RAISE the floor, never lower it. ``self._config`` (cfg) is
+        # the floor; req.config is the per-call override.
         eff_max_iter = effective_max_iterations(
             cfg.max_iterations, getattr(req.config, "max_iterations", None)
         )
@@ -514,8 +490,7 @@ class PydanticAIRunner:
         run_messages: list[Any] = []
         # `agent.run_sync` never enters the model (only `async with agent` does), so a chain's
         # sub-models — and thus the HTTP client lifecycle pydantic-ai's OWN providers manage
-        # through that entry — would never be entered. A plain model has no such requirement,
-        # so this stack stays empty there.
+        # through that entry — would never be entered. A plain model has no such requirement.
         model_scope = ExitStack()
         if fallback_targets:
             model_scope.enter_context(entered_fallback_model(model))
@@ -552,81 +527,23 @@ class PydanticAIRunner:
                 warn_if_cache_ineffective(
                     usage, caching_requested=cache_settings is not None, model=ran_model
                 )
-        except UsageLimitExceeded as exc:
-            budget_diag = usage_log.failure_usage(
-                run_messages, request_limit=req_limit, tool_calls_limit=max(8, eff_max_iter)
-            )
-            logger.warning(
-                "llm call [%s] mode=%s model=%s hit step budget "
-                "(request_limit=%d max_iterations=%d) in %.1fs %s",
-                _call_label,
-                req.execution_mode,
-                ran_model,
-                req_limit,
-                eff_max_iter,
-                time.monotonic() - _t0,
-                usage_log.format_repetition(budget_diag),
-            )
-            budget_err = LLMRunnerError(
-                f"agent exceeded its step budget (max_iterations={eff_max_iter}; "
-                "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
-                "the task."
-            )
-            budget_err.diagnostic = budget_diag  # type: ignore[attr-defined]
-            raise budget_err from exc
-        except LLMError as exc:
-            # Preserve the typed failure while attaching bounded counters from
-            # the failed run (no prompt/tool content).
-            exc.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-                run_messages,
-                request_limit=req_limit,
-                tool_calls_limit=max(8, eff_max_iter),
-            )
-            raise
-        except Exception as exc:  # noqa: BLE001 — a SYSTEMIC provider failure (auth / missing
-            # key / connection / rate-limit). Unify into the provider-agnostic
-            # LLMUnavailableError so every prompt-using client gets ONE recognizable
-            # "LLM couldn't run" signal — never a swallowed empty result (fuel-posse-ball).
-            # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g.
-            # Bedrock's "temperature is deprecated for this model" on a model NOT in the
-            # capabilities.py denylist) must fail LOUDLY and ACTIONABLY, not be misclassified
-            # as an opaque outage by the broad LLMUnavailableError path below. Only when this
-            # returns None (not a sampling-parameter rejection) does the existing path run,
-            # unchanged.
-            from rebar.llm.failure import translate_sampling_parameter_rejection
-
-            sampling_err = translate_sampling_parameter_rejection(exc, ran_model)
-            if sampling_err is not None:
-                sampling_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-                    run_messages,
-                    request_limit=req_limit,
-                    tool_calls_limit=max(8, eff_max_iter),
-                )
-                raise sampling_err from exc
-            logger.warning(
-                "llm call [%s] mode=%s model=%s FAILED in %.1fs: %s",
-                _call_label,
-                req.execution_mode,
-                ran_model,
-                time.monotonic() - _t0,
+        except Exception as exc:  # noqa: BLE001 — the except spine is `interpret_failure`
+            # (ADR 0056 decision 3, src/rebar/llm/structured_run.py): it dispatches on
+            # UsageLimitExceeded / LLMError / anything-else in that load-bearing order and
+            # always raises, so this broad catch is exactly as narrow as the three arms it
+            # replaces.
+            interpret_failure(
                 exc,
-            )
-            provider_err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
-            provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
                 run_messages,
-                request_limit=req_limit,
-                tool_calls_limit=max(8, eff_max_iter),
+                FailureContext(
+                    call_label=_call_label,
+                    execution_mode=req.execution_mode,
+                    ran_model=ran_model,
+                    req_limit=req_limit,
+                    eff_max_iter=eff_max_iter,
+                    started_at=_t0,
+                ),
             )
-            # Attach the classified disposition as METADATA (story civilized-immediate-mamba).
-            # This does NOT change the raised type — every existing `except LLMUnavailableError`
-            # still catches, and the per-seam wiring + exit-code use is story blackbear's. Kept
-            # total (classify_llm_failure never raises), so enriching the error can't mask it.
-            from rebar.llm.failure import ClassifyContext, classify_llm_failure
-
-            provider_err.outcome = classify_llm_failure(  # type: ignore[attr-defined]
-                exc, ClassifyContext(model=ran_model)
-            )
-            raise provider_err from exc
         finally:
             # Exit the chain wrapper FIRST so pydantic-ai closes the clients IT owns, then close
             # whatever rebar's builders opened (story arcticduck / S1). The two sets are disjoint
