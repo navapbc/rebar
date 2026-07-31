@@ -60,6 +60,60 @@ class FakeTransport:
         self.calls.append(("search_issues", (jql,)))
         return []
 
+    # The twelve members J9 added to ``TicketTransport``. Present here because the
+    # fake is the contract suite's stand-in and must satisfy the WIDENED port: a
+    # fake that mirrors only the members its author remembered is exactly the
+    # oracle that let a transport missing twelve of them pass every test.
+    def get_issue_by_rest(self, remote_id: str) -> dict[str, Any]:
+        self.calls.append(("get_issue_by_rest", (remote_id,)))
+        return {"key": remote_id, "fields": self.store.get(remote_id, {})}
+
+    def delete_issue(self, remote_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_issue", (remote_id,)))
+        self.store.pop(remote_id, None)
+        return {"status": "deleted", "key": remote_id}
+
+    def get_comments(self, remote_id: str) -> list[dict[str, Any]]:
+        self.calls.append(("get_comments", (remote_id,)))
+        return []
+
+    def get_issue_links(self, remote_id: str) -> list[dict[str, Any]]:
+        self.calls.append(("get_issue_links", (remote_id,)))
+        return []
+
+    def delete_issue_link(self, link_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_issue_link", (link_id,)))
+        return {"status": "deleted", "id": link_id}
+
+    def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
+        self.calls.append(("get_parent_map", (project_key,)))
+        return {}
+
+    def set_parent(self, remote_id: str, parent_key: str | None) -> None:
+        self.calls.append(("set_parent", (remote_id, parent_key)))
+
+    def remove_label(self, remote_id: str, label: str) -> None:
+        self.calls.append(("remove_label", (remote_id, label)))
+
+    def set_issue_property(self, remote_id: str, property_key: str, value: Any) -> None:
+        self.calls.append(("set_issue_property", (remote_id, property_key, value)))
+
+    def set_entity_property(self, remote_id: str, prop_name: str, value: Any) -> None:
+        self.calls.append(("set_entity_property", (remote_id, prop_name, value)))
+
+    def set_reporter(self, remote_id: str, account_id: str) -> None:
+        self.calls.append(("set_reporter", (remote_id, account_id)))
+
+    def validate_assignee_exists(
+        self,
+        assignee: str,
+        *,
+        issue_key: str | None = None,
+        project_key: str | None = None,
+    ) -> str:
+        self.calls.append(("validate_assignee_exists", (assignee, issue_key, project_key)))
+        return assignee
+
     # link + comment surface (JiraBackend delegates its capability methods here)
     def set_relationship(
         self, from_id: str, to_id: str, link_type: str = "Blocks"
