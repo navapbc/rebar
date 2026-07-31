@@ -65,4 +65,24 @@ def build_bedrock_provider(cfg: LLMConfig):
             "package is not installed: pip install 'pydantic-ai-slim[bedrock]'"
         ) from exc
     region = cfg.bedrock_region_name or None
+    if region is None:
+        # MEASURED in compose-review-bot-1 (ticket a574): the container has no AWS_REGION, no
+        # AWS_DEFAULT_REGION and no profile, so boto3 resolves NOTHING and BedrockProvider raised
+        # a bare `NoRegionError` from deep inside client construction — a stack trace that names
+        # no rebar setting. Every earlier Bedrock probe in this epic passed region_name explicitly,
+        # which is exactly why ambient resolution was never exercised. Pre-check boto3's OWN
+        # resolution (rather than inventing a default region, which would be a
+        # silent-until-call misconfiguration) and fail with a typed, actionable error instead.
+        import boto3
+
+        if not boto3.session.Session().region_name:
+            raise LLMConfigError(
+                "a bedrock model/provider is configured but no AWS region could be resolved. "
+                "Set REBAR_LLM_BEDROCK_REGION (rebar's own knob, so the value is visible to "
+                "rebar's config layer and to the verdict's provider provenance), or a standard "
+                "AWS region source (AWS_REGION / AWS_DEFAULT_REGION / the active profile's "
+                "config). NOTE: instance-metadata (IMDS) reachability does NOT supply a region "
+                "— credential discovery and region discovery are independent, so a working "
+                "instance role does not remove the need to set one."
+            )
     return BedrockProvider(region_name=region)
