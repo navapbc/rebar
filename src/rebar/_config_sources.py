@@ -164,6 +164,70 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
     return None
 
 
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """``overlay`` layered over ``base``, RECURSIVELY through nested tables.
+
+    A key holding a table in BOTH is merged key-by-key, so overriding one leaf never
+    discards its siblings; anything else (scalar, array, or a type change) is REPLACED
+    wholesale. Arrays are deliberately never appended: an appending merge would leave a
+    project's ordered chain reachable behind an environment's, so the environment could
+    never actually narrow one, and ``x = []`` could not mean "none".
+
+    Deliberately NOT folded into :func:`rebar.config.read_reserved_section`, whose
+    user-then-project merge is SHALLOW and shared by every reserved section — deepening
+    it there would silently change layering for unrelated consumers."""
+    out = dict(base)
+    for key, value in overlay.items():
+        prev = out.get(key)
+        out[key] = (
+            _deep_merge(prev, value)
+            if isinstance(prev, dict) and isinstance(value, dict)
+            else value
+        )
+    return out
+
+
+def llm_config_file_pointer() -> Path | None:
+    """The ``REBAR_LLM_CONFIG_FILE`` pointer as a path, or ``None`` when unset/blank.
+
+    Raises :class:`ConfigError` naming the variable when it points at something that is
+    not a readable file. Fail-loud is the point: an environment that asked for a specific
+    file and silently got the checkout's would send the operator debugging the wrong config.
+
+    The read below is a string LITERAL ``os.environ.get("REBAR_LLM_CONFIG_FILE")`` on
+    purpose. ``scripts/gen_env_registry.py`` — the generator behind the CI doc-drift gate
+    for ``docs/env-vars.md`` — statically scans for a string-literal argument, so a name
+    built with an f-string or read through a variable resolves fine at runtime but is
+    invisible to that scanner and silently escapes the documented env-var registry. Do not
+    "tidy" this into an indirection (same rule as ``llm/model_classes.py::_env_override``)."""
+    raw = os.environ.get("REBAR_LLM_CONFIG_FILE")
+    if raw is None or not raw.strip():
+        return None
+    path = Path(raw.strip()).expanduser()
+    if not path.is_file():
+        raise ConfigError(f"REBAR_LLM_CONFIG_FILE points at {path}, which is not a readable file")
+    return path
+
+
+def layer_llm_config_file(discovered: dict) -> dict:
+    """The ``[llm]`` table of the :func:`llm_config_file_pointer` file LAYERED over the
+    already-discovered ``llm`` section (deep — see :func:`_deep_merge`), or ``discovered``
+    unchanged when the pointer is unset.
+
+    Layering rather than REPLACING (which is what ``KUBECONFIG`` / ``AWS_CONFIG_FILE`` /
+    ``DOCKER_CONFIG`` do) is deliberate: an environment overriding one key must not have to
+    restate the whole config, because that duplication drifts more readily than precedence
+    subtlety does. The pointed file is an ordinary rebar config — a ``[llm]`` table, or
+    ``[tool.rebar.llm]`` when it is named ``pyproject.toml`` — so a file with no such table
+    (including an empty one) is a clean no-op, which is what makes it usable to make model
+    resolution hermetic in tests."""
+    path = llm_config_file_pointer()
+    if path is None:
+        return discovered
+    sub = _read_toml_table(path, pyproject=(path.name == "pyproject.toml")).get("llm")
+    return _deep_merge(discovered, sub) if isinstance(sub, dict) else discovered
+
+
 def user_config_path() -> Path:
     """User-level config path (hand-rolled XDG; no platformdirs):
     ``$XDG_CONFIG_HOME/rebar/config.toml``, default ``~/.config/rebar/config.toml``.
