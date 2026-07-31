@@ -171,14 +171,33 @@ class TestRecovery:
         )
 
     def test_recover_pending_not_found_in_jira(self, store: BindingStore) -> None:
+        """A create that genuinely never landed is unbound — but only once absence is
+        CORROBORATED.
+
+        This test previously asserted the unbind after a SINGLE negative search. That
+        assertion encoded bug 21fc: on Jira DC the keyless-pending state is entered exactly
+        when we crashed during create_issue, and the Lucene index is eventually consistent
+        (JRASERVER-70423: a 2,991s lag observed), so one empty search is precisely what a
+        LIVE issue looks like — and unbinding on it made the next pass write a DUPLICATE
+        Jira issue.
+
+        The test's intent is unchanged and still asserted: a truly-absent issue must not
+        strand its ticket pending forever. What changed is that absence must now be
+        corroborated by repeated misses AND an entry older than the index-lag grace window.
+        The complementary guard — that a SINGLE miss does NOT unbind — lives in
+        ``test_index_lag_duplicate_heldout.py``.
+        """
         store.bind_pending("orphan-1")
+        # Age the entry past the index-lag grace window; without this the misses alone
+        # prove nothing, which is the whole point of the fix.
+        store._data["bindings"]["orphan-1"]["created_at"] = "2000-01-01T00:00:00Z"
 
         client = MagicMock()
         client.search_issues.return_value = []
 
-        count = store.recover_pending_bindings(client)
+        counts = [store.recover_pending_bindings(client) for _ in range(3)]
 
-        assert count == 1
+        assert counts[-1] == 1, f"the corroborated unbind never resolved: {counts}"
         assert not store.is_bound("orphan-1")
 
     def test_recover_with_no_pending_is_noop(self, store: BindingStore) -> None:
