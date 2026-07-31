@@ -84,7 +84,12 @@ class FakeJiraClient:
         return self.issues[key]
 
     def search_issues(self, _jql: str, **_k: Any) -> list[_LibIssue]:
-        return list(self.issues.values())
+        issues = list(self.issues.values())
+        start_at = _k.get("startAt", 0)
+        max_results = _k.get("maxResults")
+        if max_results is None:
+            return issues[start_at:]
+        return issues[start_at : start_at + max_results]
 
     def comments(self, key: str) -> list[_LibComment]:
         return [_LibComment("10001", "a comment")] if key in self.issues else []
