@@ -295,9 +295,32 @@ class _Heartbeat:
                 with self._oid_lock:
                     self._oid = new_oid
             except self._lease_lost_cls:
+                # Bug 4afc: probe what the ref actually holds NOW. Reporting only that
+                # the lease is gone leaves "stolen by whom" unanswerable — the ambiguity
+                # that makes the 2026-07-30 losses (runs 30576272914, 30579382013)
+                # unclassifiable after the fact. A DIFFERENT holder is a real takeover;
+                # our own oid still on the ref means the CAS failed for another reason.
+                # Strictly diagnostic: it must never mask or delay the abort, and a
+                # probe that fails says so rather than reporting nothing (silence would
+                # read as "no holder", which is the ambiguity being removed).
+                try:
+                    _rl = self._advisory._load_ref_lock()
+                    _st = _rl.read(
+                        self._repo_root,
+                        _rl.LOCK_REF,
+                        remote=self._advisory._lock_remote(self._repo_root),
+                    )
+                    held = (
+                        f"ref now oid={_st.oid} holder={_st.holder!r} fence={_st.fence}"
+                        if _st is not None
+                        else "ref now ABSENT"
+                    )
+                except Exception as exc:  # noqa: BLE001 — diagnostic must not mask the abort
+                    held = f"ref state UNREADABLE ({exc!r})"
                 print(
                     f"ERROR: reconcile heartbeat lost the lease "
-                    f"(pass_id={self._pass_id!r}) — aborting pass",
+                    f"(pass_id={self._pass_id!r}, we held {self.current_oid()}; {held})"
+                    f" — aborting pass",
                     file=sys.stderr,
                 )
                 self.lock_lost.set()
