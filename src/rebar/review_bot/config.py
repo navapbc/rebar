@@ -29,6 +29,18 @@ from pathlib import Path
 #: (``app._worker``) and the backfill reconciler so both bound a single review identically.
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
 
+#: Bounded grace (seconds) to DRAIN the in-memory review queue on shutdown BEFORE the worker is
+#: cancelled, so a routine autodeploy restart doesn't abandon acknowledged (``202``) webhooks.
+#: Anything still queued when the window elapses is left for the backfill reconciler (fail-safe,
+#: never fail-lose). Keep it below the container ``stop_grace_period`` (see docker-compose.yml)
+#: so the drain completes before Docker escalates SIGTERM → SIGKILL.
+#:
+#: Lives here rather than in ``app`` for the same reason as the review timeout above: the
+#: container's ``stop_grace_period`` is sized against this value, so the test that asserts that
+#: relationship must be able to read it WITHOUT importing the fastapi-laden ``app`` module (the
+#: ``reviewbot`` extra is not installed in the default test tier).
+DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
+
 #: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
 #: is idempotent (a reload/re-import never stacks duplicate handlers).
 _REVIEWBOT_LOG_HANDLER_MARKER = "_reviewbot_handler"
@@ -49,6 +61,20 @@ def review_timeout_seconds() -> float:
     except ValueError:
         return float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
     return val if val > 0 else float(DEFAULT_REVIEW_TIMEOUT_SECONDS)
+
+
+def shutdown_drain_seconds() -> float:
+    """Bounded queue-drain window on shutdown from ``SHUTDOWN_DRAIN_SECONDS`` (default
+    :data:`DEFAULT_SHUTDOWN_DRAIN_SECONDS`); a missing / unparseable / non-positive value falls
+    back to the default."""
+    raw = os.environ.get("SHUTDOWN_DRAIN_SECONDS")
+    if not raw:
+        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+    try:
+        val = float(raw.strip())
+    except ValueError:
+        return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+    return val if val > 0 else float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
 
 
 def configure_logging() -> None:
