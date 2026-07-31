@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -29,13 +30,23 @@ from rebar.llm.anthropic_model import (
     _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
     _pai_model,
 )
-from rebar.llm.capabilities import cache_settings_for, capabilities_for, provenance_for
+from rebar.llm.capabilities import (
+    ModelCapabilities,
+    cache_settings_for,
+    capabilities_for,
+    provenance_for,
+)
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
     LLMRunnerError,
     LLMUnavailableError,
+)
+from rebar.llm.model_classes import (
+    build_fallback_model,
+    entered_fallback_model,
+    fallback_targets_for,
 )
 from rebar.llm.providers import ProviderSession
 from rebar.llm.structured_run import (
@@ -300,8 +311,22 @@ class PydanticAIRunner:
         # builds no client.
         provider_session = ProviderSession(cfg)
         _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
+        # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
+        # for a class with no `fallback` configured, which is every deployment until an operator
+        # opts in, so the three branches below stay byte-identical there.
+        fallback_targets = (
+            () if self._model_override is not None else fallback_targets_for(resolved)
+        )
+        candidates = [resolved]
         if self._model_override is not None:
             model = self._model_override
+        elif fallback_targets:
+            # A chain is built EAGERLY and WHOLE, on this ONE session: every candidate becomes a
+            # real Model (so each entry's own `endpoint` is honored and every rebar-created
+            # transport lands on one `_closeables`), then `FallbackModel` wraps them in order.
+            model, candidates = build_fallback_model(
+                resolved, fallback_targets, session=provider_session
+            )
         elif provider_session.supports(_provider_name):
             from pydantic_ai.models import infer_model
 
@@ -322,7 +347,12 @@ class PydanticAIRunner:
         # fail fast if the provider can't call tools (else pydantic-ai silently drops them).
         # Gated on model_override is None (the test double is never checked) and tools present.
         if self._model_override is None and tools:
-            _check_tool_capability(model, resolved)
+            # Per CANDIDATE: the wrapper inherits the base `.profile`, whose defaults would pass
+            # while a sub-model that cannot call tools sits in the chain, waiting to drop them.
+            for candidate_model, candidate in zip(
+                getattr(model, "models", [model]), candidates, strict=True
+            ):
+                _check_tool_capability(candidate_model, candidate)
         if req.tool_step_limit is not None and tools:
             # Executable convergence boundary. This is intentionally not a
             # forced structured-output tool on the exploratory history.
@@ -362,7 +392,13 @@ class PydanticAIRunner:
         # object, whose PROFILE may carry a provider override, S4) for a real run, but `resolved`
         # (the config STRING) for `model_override` — its profile is irrelevant/misleading there,
         # and every model_override test pins the string behavior; cache_settings stays None then.
-        caps = capabilities_for(resolved if self._model_override is not None else model)
+        # A chain resolves capabilities over the whole CANDIDATE SET (see
+        # `_intersect_capabilities`), never over the wrapper: `FallbackModel` carries no profile
+        # and its `.provider` is None, so asking IT returns DEFAULT capabilities silently.
+        if fallback_targets:
+            caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
+        else:
+            caps = capabilities_for(resolved if self._model_override is not None else model)
         cache_settings = None if self._model_override else cache_settings_for(caps)
         # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
         # provider/model, the endpoint host (None for the first-class/no-custom-base_url
@@ -372,6 +408,11 @@ class PydanticAIRunner:
         provider_provenance = provenance_for(
             provider=_provider_name, model=resolved, base_url=cfg.base_url, caps=caps
         )
+        if fallback_targets:
+            # A verdict produced by a fallback must not attest the primary. The ordered candidate
+            # set is known now; `ran_model` is filled in after the run from the response that
+            # actually answered (the wrapper's own name is the synthetic `fallback:a,b` string).
+            provider_provenance["candidates"] = list(candidates)
         # Server-side web search (bug ff64) — anthropic-GATED like the cache settings
         # above (an injected test model never gets a provider server tool). Attached as a
         # pydantic-ai capability; any non-flagged-anthropic request stays byte-identical
@@ -471,6 +512,13 @@ class PydanticAIRunner:
         _t0 = time.monotonic()
         usage: dict[str, int] = {}
         run_messages: list[Any] = []
+        # `agent.run_sync` never enters the model (only `async with agent` does), so a chain's
+        # sub-models — and thus the HTTP client lifecycle pydantic-ai's OWN providers manage
+        # through that entry — would never be entered. A plain model has no such requirement,
+        # so this stack stays empty there.
+        model_scope = ExitStack()
+        if fallback_targets:
+            model_scope.enter_context(entered_fallback_model(model))
         try:
             if req.mode == "text":
                 agent = Agent(model, **kwargs)
@@ -580,9 +628,18 @@ class PydanticAIRunner:
             )
             raise provider_err from exc
         finally:
-            # Close whatever the provider seam opened this run (story arcticduck / S1);
+            # Exit the chain wrapper FIRST so pydantic-ai closes the clients IT owns, then close
+            # whatever rebar's builders opened (story arcticduck / S1). The two sets are disjoint
+            # — a provider handed a client never adopts it — so nothing is closed twice.
+            model_scope.close()
             # ProviderSession.close() is itself best-effort (log, never raise).
             provider_session.close()
+        if fallback_targets:
+            # Attest the model that ANSWERED, read off the response rather than the wrapper.
+            answered = _answering_model(run_messages, candidates)
+            if answered is not None:
+                ran_model = answered
+            provider_provenance["ran_model"] = ran_model
         logger.info(
             "llm call [%s] mode=%s model=%s ok in %.1fs "
             "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
@@ -665,6 +722,42 @@ def _check_tool_capability(model, resolved: str) -> None:
             f"model {resolved!r} does not support tool calling, but a tool-using gate op "
             "would silently drop its tools — choose a tool-calling model/provider"
         )
+
+
+def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapabilities:
+    """The CONSERVATIVE capability record for a fallback chain: a capability holds only if EVERY
+    candidate has it (task cc33).
+
+    Any candidate may be the one that answers, and which one that is depends on provider health
+    at call time. Reading the primary's capabilities would make the run succeed or fail by luck —
+    a chain containing a model MEASURED to reject `temperature` would 400 only once that model
+    answered, a failure reproducing solely under provider degradation. Disagreeing prompt-cache
+    styles collapse to "none" for the same reason: each style's keys are provider-specific and
+    would error on the candidate that does not share it."""
+    styles = {caps.prompt_cache_style for caps in per_candidate}
+    return ModelCapabilities(
+        native_structured_output=all(c.native_structured_output for c in per_candidate),
+        prompt_cache_style=per_candidate[0].prompt_cache_style if len(styles) == 1 else "none",
+        supports_thinking=all(c.supports_thinking for c in per_candidate),
+        supports_temperature=all(c.supports_temperature for c in per_candidate),
+    )
+
+
+def _answering_model(messages: list[Any], candidates: list[str]) -> str | None:
+    """The candidate that actually produced the run's final response, or ``None``.
+
+    Read from ``ModelResponse.model_name`` — the model that answered — never from
+    ``FallbackModel.model_name``, which is the synthetic combined ``fallback:a,b`` string and
+    would attest a model that never ran. The bare name is mapped back onto the provider-qualified
+    candidate so provenance keeps naming a provider, and an unrecognized name is returned as-is
+    rather than dropped (an unattributable answer is still better evidence than the primary)."""
+    from pydantic_ai.messages import ModelResponse
+
+    for message in reversed(messages):
+        name = getattr(message, "model_name", None) if isinstance(message, ModelResponse) else None
+        if name:
+            return next((c for c in candidates if c.rpartition(":")[2] == name), name)
+    return None
 
 
 def _readonly_gate() -> bool:
