@@ -14,6 +14,7 @@ from importlib import resources
 import pytest
 
 from rebar.llm.plan_review.coach_moves import MOVE_REGISTRY
+from rebar.llm.plan_review.registry import explain_criterion, explain_guide
 
 pytestmark = pytest.mark.unit
 
@@ -92,4 +93,89 @@ def test_advisory_section_cross_links_to_moves() -> None:
     advisory = advisory.split("\n## ", 1)[0]
     assert "#responding-to-coaching-moves" in advisory, (
         "advisory section does not cross-link the coaching-moves section"
+    )
+
+
+# --- Ticket 828a: the author guide must not contradict G6's anti-priming rule ---------------
+#
+# G6 clause (4) is the authoritative contract for what a plan's approach section must contain:
+# a POSITIVE rationale for the chosen approach, and explicitly *not* a rejected-alternatives
+# section, "that primes implementers with rejected behavior". Clause (3) reinforces it — the
+# reviewer generates alternatives, discards them, and "never write[s] them into the plan", so
+# "the implementer's plan still contains only ONE approach".
+#
+# The guide (served by `rebar explain plan`) and the criterion (served by `rebar explain G6`)
+# are two independently-canonical artifacts with no generator linking them, so these tests
+# assert parity across the same two public seams the CLI uses. They are keyed to the criterion
+# text, so they self-invalidate rather than silently ossify if the contract ever changes.
+
+ANTI_PRIMING_CLAUSE = "do NOT require a rejected-alternatives section"
+
+# Author-facing directives that tell a planner to persist a rejected option in the plan.
+REJECTED_ALTERNATIVE_DIRECTIVES = [
+    "alternative you rejected",
+    "rejected alternative is named",
+    "\nRejected:",
+]
+
+
+def _g6_text() -> str:
+    return explain_criterion("G6")
+
+
+def test_g6_still_forbids_requiring_rejected_alternatives() -> None:
+    """Precondition: the authoritative contract still carries the anti-priming rule.
+
+    If this fails the contract itself changed and the parity tests below are moot — fix the
+    contract-derived expectations deliberately rather than deleting the parity tests.
+    """
+    assert ANTI_PRIMING_CLAUSE in _g6_text(), (
+        "G6 no longer carries the anti-priming clause; the guide-parity expectation is stale"
+    )
+
+
+def test_guide_does_not_instruct_authors_to_name_a_rejected_alternative() -> None:
+    """`rebar explain plan` must not teach what `rebar explain G6` forbids."""
+    assert ANTI_PRIMING_CLAUSE in _g6_text(), "precondition: G6 anti-priming clause present"
+    guide = explain_guide("plan")
+    offending = [d for d in REJECTED_ALTERNATIVE_DIRECTIVES if d in guide]
+    assert not offending, (
+        f"the plan guide instructs authors to persist a rejected alternative {offending!r}, "
+        f"contradicting G6's {ANTI_PRIMING_CLAUSE!r} (anti-priming)"
+    )
+
+
+def test_worked_example_models_a_single_approach() -> None:
+    """The minimum-viable plan example must model one approach, not a chosen/rejected pair."""
+    guide = explain_guide("plan")
+    # The example is a fenced markdown block, and its own "## " headings are part of the
+    # sample plan — so bound it by the fence, not by the next document heading.
+    after_heading = guide.split("## A minimum-viable passing plan", 1)[1]
+    example = after_heading.split("```markdown", 1)[1].split("```", 1)[0]
+    assert "## Approach" in example, "the worked example lost its Approach section"
+    assert "Rejected" not in example, (
+        "the worked example models a rejected alternative, priming implementers with "
+        "rejected behavior (G6 clause 3: the plan contains only ONE approach)"
+    )
+
+
+def test_guide_still_requires_a_positive_rationale() -> None:
+    """Negative control: the fix must reframe to G6's positive rationale, not just delete."""
+    guide = explain_guide("plan")
+    approach_bullet = next(
+        line for line in guide.splitlines() if line.startswith("- **`## Approach`**")
+    )
+    assert "rationale" in approach_bullet.lower() or "why" in approach_bullet.lower(), (
+        "the Approach template bullet no longer asks for a rationale; G6 clause (4) makes a "
+        "missing positive rationale a finding"
+    )
+    assert "(G6)" in approach_bullet, "the Approach bullet lost its G6 criterion citation"
+
+
+def test_weigh_alternatives_coaching_move_is_unchanged() -> None:
+    """Negative control: reviewer-side coaching is preserved — G6 only bars persisting losers."""
+    body = _section_text()
+    assert "weigh alternatives" in body, (
+        "the reviewer-side 'weigh alternatives' coaching move must remain documented; "
+        "G6 bars persisting a rejected option in the plan, not weighing alternatives"
     )
