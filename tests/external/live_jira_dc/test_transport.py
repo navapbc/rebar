@@ -400,3 +400,75 @@ def test_add_label_and_the_links_surface_against_a_real_instance(
         "depends_on must invert the Blocks direction"
     )
     assert backend.link_payload_for_relation("not-a-relation") is None
+
+
+# ── bug 7c26 — the identity a project MOVE cannot change ─────────────────────
+#
+# Bindings key on the Jira KEY, which changes when an issue is moved between
+# projects; the numeric ``id`` never does. The fix re-asks by that id before
+# treating a 404 on a bound key as a deletion. These cells establish LIVE, on the
+# real 8.17.1 instance, the two facts the fix rests on — that an id resolves an
+# issue at all, and that a genuine deletion still fails BOTH lookups so the
+# recovery cannot mask it.
+#
+# WHAT COULD NOT BE ESTABLISHED HERE, and why the ticket says so plainly: an
+# actual project move is NOT performable through the authoritative client. Jira
+# DC's move is the UI wizard (``/secure/MoveIssue!default.jspa``, form-token
+# bound); pycontribs/jira 3.10.5 exposes no move member (verified at runtime —
+# ``move_to_backlog`` is Agile, ``move_version`` is versions), and the repo
+# forbids hand-rolled REST for DC. So what ``GET /issue/{oldKey}`` returns AFTER
+# a real move (200-with-new-key vs 301 vs 404) stays unsettled by this harness.
+# The fix is correct under all three readings — that was the design constraint
+# that made it safe to build without the answer.
+
+
+@_skip
+@_skip_no_extra
+def test_an_issue_resolves_by_its_immutable_numeric_id(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any
+) -> None:
+    """The fix's load-bearing mechanism, live: ``GET /rest/api/2/issue/{idOrKey}``
+    accepts the NUMERIC ID and answers with the issue's CURRENT key.
+
+    If DC rejected an id here, the whole id-fallback would be inert — and inert in
+    the silent direction, since the recovery falls through to ordinary absence
+    bookkeeping on any failure."""
+    dc_transport.project = jira_dc_project
+    created = dc_transport.create_issue({"summary": "rebar 7c26 live — id", "issuetype": "Task"})
+    key = created["key"]
+    track_issue(key)
+
+    numeric_id = created.get("id")
+    assert isinstance(numeric_id, str) and numeric_id.isdigit(), (
+        f"the create response must carry a numeric id to capture; got {numeric_id!r}"
+    )
+
+    by_id = dc_transport.get_issue_by_rest(numeric_id)
+    assert by_id["key"] == key, "a by-id read must answer with the issue's current key"
+    assert by_id["id"] == numeric_id
+
+
+@_skip
+@_skip_no_extra
+def test_a_deleted_issue_fails_by_key_AND_by_id_so_deletions_are_not_masked(
+    dc_transport: Any, jira_dc_project: str
+) -> None:
+    """The recovery must never make a real deletion unretirable.
+
+    A deleted issue must be unreachable by BOTH handles: the key 404s (which is
+    what starts the absence path) and the recorded numeric id 404s too (which is
+    what makes the recovery fall through instead of suppressing the absence)."""
+    dc_transport.project = jira_dc_project
+    created = dc_transport.create_issue(
+        {"summary": "rebar 7c26 live — deleted", "issuetype": "Task"}
+    )
+    key = created["key"]
+    numeric_id = created["id"]
+    dc_transport._client.issue(key).delete()
+
+    for handle, what in ((key, "key"), (numeric_id, "numeric id")):
+        with pytest.raises(Exception) as excinfo:  # noqa: PT011 — library error type varies
+            dc_transport.get_issue_by_rest(handle)
+        assert "404" in str(excinfo.value) or "does not exist" in str(excinfo.value).lower(), (
+            f"a deleted issue must not resolve by {what}; got {excinfo.value!r}"
+        )
