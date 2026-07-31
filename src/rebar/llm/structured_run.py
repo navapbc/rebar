@@ -18,11 +18,13 @@ direction is one-way (``runner`` -> ``structured_run``, never back).
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from rebar.llm import usage_log
+from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
@@ -230,6 +232,108 @@ def _pai_structured(Agent, model, caps, req: RunRequest, kwargs: dict, usage_lim
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
     raise last  # exhausted the bounded retry; surface the last validation error
+
+
+def build_model_settings(
+    cfg: LLMConfig,
+    req: RunRequest,
+    caps: ModelCapabilities,
+    resolved: str,
+    cache_settings: dict | None,
+    *,
+    model_override,
+) -> dict:
+    """Assemble the ``model_settings`` dict for this call (ADR 0056 decision 3), lifted out of
+    ``PydanticAIRunner.run()`` as a PURE function — no logging, no mutation of any module-level
+    state. ``model_override`` is accepted only to document/preserve the invariant that
+    ``cache_settings`` was ALREADY computed by the caller as
+    ``None if model_override else cache_settings_for(caps)`` (see ``run()``'s own assignment) —
+    it is never recomputed here, so the guard that keeps the offline ``TestModel`` path free of
+    cache flags cannot be silently dropped by this move.
+
+    Sampling temperature (upstream review-code report §2): a per-request override on
+    ``req.config`` wins over the runner's own ``cfg``, mirroring the ``max_tokens`` seam below;
+    both are ``None`` by default so the provider default is used (byte-unchanged). The Pass-2
+    verify steps carry ``temperature=0`` (greedy) so re-running the same finding does not
+    resample its narrow verification and flip a block/advisory decision. `temperature` is
+    WITHDRAWN (never sent) for a model MEASURED to reject it (story S3/2932: e.g.
+    ``us.anthropic.claude-opus-4-7`` 400s "temperature is deprecated for this model") — ``caps``
+    already carries this per-model fact, so this is a capability check, never a provider-name
+    branch. The once-per-model dedup INFO log for that withdrawal stays in ``run()`` (this
+    function must stay side-effect-free; see ``_TEMPERATURE_WITHDRAWN_LOGGED`` in ``runner.py``
+    and the module-level purity test in ``test_structured_run_seam.py``)."""
+    del model_override  # documented above: only `cache_settings` (already gated) is consumed
+    # Wire the configured OUTPUT cap into the call. cfg.max_tokens was previously DROPPED
+    # (only the cache flags were sent as model_settings), so pydantic-ai fell back to its
+    # max_tokens=4096 default — far too small for a multi-child container review, whose
+    # output truncated (stop_reason=max_tokens) and tripped the structured-output retry;
+    # max_tokens is a base ModelSettings field, riding alongside the cache flags.
+    model_settings = dict(cache_settings) if cache_settings is not None else {}
+    # The output cap is PER-REQUEST too (bug spy-luge-wool / sole-teal-churn): a finding-rich
+    # Pass-2 verifier carries a scaled max_tokens on ``req.config`` so its structured output
+    # doesn't truncate (finish_reason=length), without mutating a shared runner's self._config.
+    # A request can only RAISE the configured floor, never lower it.
+    eff_max_tokens = effective_max_tokens(cfg.max_tokens, getattr(req.config, "max_tokens", None))
+    if req.output_token_limit is not None:
+        eff_max_tokens = min(eff_max_tokens, max(256, int(req.output_token_limit)))
+    if eff_max_tokens:
+        model_settings["max_tokens"] = eff_max_tokens
+    # Wire the configured wall-clock timeout so the operator's REBAR_LLM_TIMEOUT
+    # actually bounds each LLM call. Audit reliability #6: cfg.timeout_s was resolved
+    # into LLMConfig but never passed to the model, so every call silently rode the
+    # Anthropic SDK's ~600 s default regardless of the operator's setting. `timeout`
+    # is a base ModelSettings field mapping to the underlying httpx/Anthropic client
+    # request timeout. DEFAULT_TIMEOUT_S (600) equals the SDK default, so an unset
+    # knob is never lowered below it; an explicit operator value is honored verbatim.
+    if cfg.timeout_s:
+        model_settings["timeout"] = float(cfg.timeout_s)
+    temperature = getattr(req.config, "temperature", None)
+    if temperature is None:
+        temperature = cfg.temperature
+    if temperature is not None and caps.supports_temperature:
+        model_settings["temperature"] = float(temperature)
+    return model_settings
+
+
+def build_usage_limits(cfg: LLMConfig, req: RunRequest, UsageLimits) -> tuple[Any, int, int]:
+    """Compute the per-call step budget (ADR 0056 decision 3), lifted out of
+    ``PydanticAIRunner.run()`` verbatim. ``UsageLimits`` is threaded in as a parameter (rather
+    than imported here) because ``run()`` already imports it lazily from ``pydantic_ai.usage``
+    (heavy libraries stay out of module top per this package's convention).
+
+    pydantic-ai's ``request_limit`` counts MODEL REQUESTS (~1 per tool-call cycle). Halve
+    ``cfg.max_iterations`` (authored as ~2 steps per tool-call cycle) so a given
+    ``max_iterations`` allows the intended number of cycles (and we DON'T silently inherit
+    pydantic-ai's default ``request_limit=50``). ``request_limit`` bounds model TURNS, not tool
+    calls WITHIN a turn — a failing/re-called tool can spray many calls in few turns
+    (pydantic-ai #2593); ``tool_calls_limit`` is the in-turn backstop so a failing/looping
+    tool cannot burn the whole budget (the retry-to-exhaustion failure mode), set generously
+    above the expected ``~max_iterations/2`` tool calls so it only trips on a genuine runaway.
+    The step budget is PER-REQUEST: a caller may raise ``max_iterations`` for THIS call via
+    ``req.config`` — needed so a finding-rich Pass-2 verifier gets a scaled budget without a
+    shared runner's ``self._config`` changing under other steps (bug 59bc); it can only RAISE
+    the floor, never lower it. ``self._config`` (``cfg``) is the floor; ``req.config`` is the
+    per-call override.
+
+    Returns ``(usage_limits, req_limit, eff_max_iter)`` — ``req_limit``/``eff_max_iter`` are
+    handed back explicitly because neither is recoverable from the built ``UsageLimits``: only
+    ``max(8, eff_max_iter)`` is stored there as ``tool_calls_limit``, and ``max()`` is not
+    invertible for ``eff_max_iter <= 8``. ``run()`` needs both for ``FailureContext`` and the
+    telemetry log."""
+    eff_max_iter = effective_max_iterations(
+        cfg.max_iterations, getattr(req.config, "max_iterations", None)
+    )
+    if req.iteration_limit is not None:
+        eff_max_iter = min(eff_max_iter, max(2, int(req.iteration_limit)))
+    # The model-REQUEST ceiling (~1 per tool-call cycle). Bound to a LOCAL so the telemetry
+    # logs report it directly instead of reading it back off the UsageLimits object (which a
+    # test may stub) — and so the step-usage line reports the EFFECTIVE per-request budget.
+    req_limit = max(1, math.ceil(eff_max_iter / 2))
+    usage_limits = UsageLimits(
+        request_limit=req_limit,
+        tool_calls_limit=max(8, eff_max_iter),
+    )
+    return usage_limits, req_limit, eff_max_iter
 
 
 def effective_max_iterations(floor: int, requested: int | None) -> int:
