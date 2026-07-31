@@ -93,18 +93,45 @@ def test_runner_omits_temperature_when_none():
     assert ms is None or "temperature" not in ms
 
 
+# These two exercise the temperature PLUMBING (cfg -> model_settings, and the per-request
+# override), so they must run on a model that ACCEPTS temperature. They previously relied on the
+# default model, which is `claude-opus-4-8` — now MEASURED to reject an explicit temperature on
+# BOTH the Bedrock and direct-Anthropic paths (ticket 1903), so the capability layer withdraws the
+# parameter there and the key is legitimately absent. Pinning sonnet keeps these testing the
+# plumbing rather than the withdrawal; the withdrawal has its own test below.
+_TEMP_OK_MODEL = "anthropic:claude-sonnet-4-6"
+
+
 def test_runner_sets_temperature_on_model_settings():
     """cfg.temperature=0 ⇒ model_settings carries temperature 0.0 (greedy)."""
-    ms = _capture_model_settings(_cfg(temperature=0.0))
+    ms = _capture_model_settings(_cfg(temperature=0.0, model=_TEMP_OK_MODEL))
     assert ms is not None and ms["temperature"] == 0.0
 
 
 def test_request_config_temperature_overrides_runner_cfg():
     """A per-request RunRequest.config.temperature wins over the runner's own cfg."""
-    runner_cfg = _cfg(temperature=None)
-    req_cfg = _cfg(temperature=0.0)
+    runner_cfg = _cfg(temperature=None, model=_TEMP_OK_MODEL)
+    req_cfg = _cfg(temperature=0.0, model=_TEMP_OK_MODEL)
     ms = _capture_model_settings(runner_cfg, req_cfg=req_cfg)
     assert ms is not None and ms["temperature"] == 0.0
+
+
+def test_runner_withdraws_temperature_on_a_model_that_rejects_it():
+    """Ticket 1903, pinned END-TO-END at the runner rather than only at the capability layer.
+
+    `claude-opus-4-8` does not accept an explicit temperature. On Bedrock the call 400s; on the
+    direct-Anthropic path pydantic-ai's `_drop_unsupported_sampling_settings` silently drops it and
+    logs "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'" on EVERY
+    call — which is how this was found in production on the code-review bot.
+
+    So even with cfg.temperature explicitly pinned to 0, the runner must NOT send it. This matters
+    beyond the log noise: a pass that pins temperature=0 for greedy determinism (code review pins it
+    on Pass-2 so re-running a finding cannot resample its verdict) was never actually getting it."""
+    ms = _capture_model_settings(_cfg(temperature=0.0, model="anthropic:claude-opus-4-8"))
+    assert ms is None or "temperature" not in ms, (
+        "temperature must be withdrawn for a model whose capability record says it is "
+        f"unsupported, but model_settings carried: {ms}"
+    )
 
 
 # ── The workflow step layer honors `with: temperature` ────────────────────────

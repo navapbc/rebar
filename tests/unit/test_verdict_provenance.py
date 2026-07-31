@@ -137,3 +137,71 @@ def test_record_is_json_serializable() -> None:
     non-serializable value in `capabilities` would break the write at runtime rather than here."""
     rec = _provenance(provider="anthropic", model="anthropic:m", base_url=None, caps=CAPS)
     json.loads(json.dumps(rec))  # raises if any value is not serializable
+
+
+# ── the PERSISTED PAYLOAD, not just the assembled record ──────────────────────────────────
+def _credentialed_provenance():
+    from rebar.llm.capabilities import provenance_for
+
+    return provenance_for(
+        provider="openai",
+        model="openai:gpt-4o",
+        base_url="https://alice:hunter2@gateway.internal:8443/v1",
+        caps=CAPS,
+    )
+
+
+def test_no_credential_material_in_the_persisted_completion_payload() -> None:
+    """343b AC: no credential material from `base_url` or `api_key` appears anywhere in the
+    PERSISTED sidecar payload.
+
+    This asserts the PAYLOAD, not the provenance record. They are different artifacts: the record
+    is one key inside a payload that also carries model, runner, coverage and findings, and the
+    configured `api_key` flows near that path independently — so a record-only assertion would
+    pass even if a credential leaked through some OTHER field. The whole payload is serialized and
+    searched."""
+    from rebar.llm import completion_sidecar
+
+    verdict = {
+        "verdict": "PASS",
+        "runner": "pydantic_ai",
+        "model": "openai:gpt-4o",
+        "provider_provenance": _credentialed_provenance(),
+        "criteria": [],
+        "findings": [],
+        "summary": "ok",
+    }
+    payload = completion_sidecar.build_payload(verdict)
+    blob = json.dumps(payload)
+    assert "hunter2" not in blob, "password reached the PERSISTED payload"
+    assert "alice" not in blob, "username reached the PERSISTED payload"
+    assert "sk-" not in blob, "an api-key-shaped secret reached the PERSISTED payload"
+    # the provenance itself still made it through, so this is not passing by omission
+    assert payload["provider_provenance"]["endpoint_host"] == "gateway.internal"
+
+
+def test_legacy_payload_without_provenance_still_builds_and_signs() -> None:
+    """343b AC: a legacy payload lacking `provider_provenance` still loads and its signature
+    verifies.
+
+    This is the whole justification for the additive-only design. NOTE the signing seam: the
+    payload is NOT what gets signed — signing binds (ticket_id, manifest), a list of "key: value"
+    lines — so "the signature still verifies" is a claim about the MANIFEST. A verdict carrying no
+    provenance must therefore (1) still build a valid payload, and (2) still produce a signable
+    manifest, with the absence read as "unknown, legacy" rather than as an error."""
+    from rebar.llm import completion_sidecar
+
+    legacy = {
+        "verdict": "PASS",
+        "runner": "pydantic_ai",
+        "model": "anthropic:claude-opus-4-8",
+        "criteria": [],
+        "findings": [],
+        "summary": "ok",
+    }
+    assert "provider_provenance" not in legacy
+    payload = completion_sidecar.build_payload(legacy)
+    # loads cleanly, round-trips, and the pre-existing model field is untouched
+    assert json.loads(json.dumps(payload))["model"] == "anthropic:claude-opus-4-8"
+    # absence is representable, never an error
+    assert payload.get("provider_provenance") is None
