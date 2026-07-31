@@ -117,6 +117,17 @@ class StubBindingStore:
     def note_absent(self, jira_key):
         self.absent_counts[jira_key] = self.absent_counts.get(jira_key, 0) + 1
 
+    def note_absent_or_rekey(self, jira_key, client=None):
+        """The member the outbound differ's 404 branch now calls (bug 7c26).
+
+        Mirrors the real store's degradation contract: with no captured numeric id
+        there is nothing to re-ask by, so this falls straight through to
+        ``note_absent``. This stub carries no ids, so the assertion that outbound
+        owns the retirement counter and bumps it ONCE keeps its original meaning.
+        """
+        self.note_absent(jira_key)
+        return False
+
     def clear_absent(self, jira_key):
         self.cleared.append(jira_key)
         self.absent_counts[jira_key] = 0
