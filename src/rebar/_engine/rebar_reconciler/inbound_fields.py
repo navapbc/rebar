@@ -155,12 +155,27 @@ def _identity_of(raw: Any) -> dict[str, Any]:
     """A fixed-shape canonical identity ``{"display", "email", "account_id"}`` from a
     Jira user object (``assignee``/``reporter``). A null / non-dict value yields all
     three ``None`` — so a present-but-unassigned field is distinguishable from an
-    absent one (which emits no identity key at all)."""
+    absent one (which emits no identity key at all).
+
+    ``account_id`` carries ``accountId`` **or**, when absent, Jira Data Center's
+    ``name`` (the username) — DC has no accountId concept at all. The key is
+    deliberately the EXISTING ``account_id`` rather than a new one: ``_diff_reporter``
+    (``outbound_field_diff.py``) compares ``reporter_identity["account_id"]`` against
+    the desired identity, so a DC username stored anywhere else leaves that
+    comparison reading ``None`` on every snapshot and the reporter mutation
+    re-emitting forever, even immediately after a successful write.
+
+    **The precedence is load-bearing and ``accountId`` must win.** Measured across
+    all three real payload shapes: ``{accountId}`` → the accountId (Cloud
+    unchanged); ``{name}`` → the username (DC fixed); ``{accountId, name}`` → the
+    accountId (Cloud does not regress). Reversing the order would silently
+    re-identify every Cloud user.
+    """
     if isinstance(raw, dict):
         return {
             "display": raw.get("displayName"),
             "email": raw.get("emailAddress"),
-            "account_id": raw.get("accountId"),
+            "account_id": raw.get("accountId") or raw.get("name"),
         }
     return {"display": None, "email": None, "account_id": None}
 

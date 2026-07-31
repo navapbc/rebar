@@ -98,11 +98,110 @@ class RemoteRef:
 # ---------------------------------------------------------------------------
 
 
-class TicketTransport(Protocol):
+#: The transport members the core requires of EVERY backend: the six original
+#: CRUD members plus the twelve story J9 measured the core calling while no
+#: Protocol declared them. ``isinstance(x, TicketTransport)`` is defined against
+#: exactly this set — see :class:`_TransportPortMeta`.
+_REQUIRED_TRANSPORT_MEMBERS = (
+    "create_issue",
+    "get_issue",
+    "update_issue",
+    "transition_issue_by_name",
+    "add_label",
+    "search_issues",
+    "get_issue_by_rest",
+    "delete_issue",
+    "get_comments",
+    "get_issue_links",
+    "delete_issue_link",
+    "get_parent_map",
+    "set_parent",
+    "remove_label",
+    "set_issue_property",
+    "set_entity_property",
+    "set_reporter",
+    "validate_assignee_exists",
+)
+
+
+class _TransportPortMeta(type(Protocol)):  # type: ignore[misc]
+    """Makes :class:`TicketTransport` conformance mean what the story needs it to
+    mean, in two respects.
+
+    **1. The check is uncached, so it is always current.** ``typing``'s own
+    ``isinstance`` against a runtime-checkable Protocol goes through
+    ``ABCMeta``'s subclass CACHE, which memoises the first positive answer per
+    class: a class that conformed once keeps reporting ``True`` even after a
+    member is removed. That is harmless for a static class definition and fatal
+    for a guard whose entire job is detecting a missing member — including in the
+    test that proves the guard has teeth. :meth:`__instancecheck__` therefore
+    evaluates the required set directly, every time.
+
+    **2. It carries the CAPABILITY members** the core also reaches for on a
+    transport receiver — ``set_relationship`` / ``get_issuelinks_map``
+    (``SupportsLinks``) and ``add_comment`` / ``get_comment_map``
+    (``SupportsComments``).
+
+    Two facts about :class:`TicketTransport` are BOTH true and pull in opposite
+    directions. (1) The core calls those four directly on a transport object, so
+    an audit asking "is every transport member a core module reaches for declared
+    on the port?" must be able to find them here. (2) They are nonetheless the
+    OPT-IN capability surface: a tracker with no link model, or no comment model,
+    is still a perfectly valid transport, and the whole point of the capability
+    Protocols is that a backend advertises them rather than being forced to
+    provide them. Declaring them in the class body would collapse (2) into (1) and
+    make every future non-Jira transport fail conformance for lacking a feature it
+    was never obliged to have.
+
+    Attaching them to the METACLASS resolves that: ``hasattr(TicketTransport,
+    "add_comment")`` is ``True`` (the audit finds them, attributed to the right
+    capability), while ``typing``'s protocol-attribute collection — which walks the
+    CLASS's ``__mro__``, in every Python from 3.11 through 3.14 — never sees them,
+    so structural conformance stays exactly the always-required set below. They are
+    reference markers, not implementations; nothing calls them.
+    """
+
+    #: ``SupportsLinks``: create one link between two remote items.
+    set_relationship = None
+    #: ``SupportsLinks``: every item's links across a project.
+    get_issuelinks_map = None
+    #: ``SupportsComments``: post one comment.
+    add_comment = None
+    #: ``SupportsComments``: every item's comments across a project.
+    get_comment_map = None
+
+    def __instancecheck__(cls, instance: Any) -> bool:
+        """``isinstance(x, TicketTransport)`` ⇔ ``x`` has every always-required
+        member. Evaluated fresh (no ``ABCMeta`` subclass cache) so the answer
+        tracks the object as it actually is. Any other protocol using this
+        metaclass falls back to ``typing``'s standard behaviour."""
+        if cls is not TicketTransport:
+            return bool(super().__instancecheck__(instance))
+        return all(hasattr(instance, member) for member in _REQUIRED_TRANSPORT_MEMBERS)
+
+
+@runtime_checkable
+class TicketTransport(Protocol, metaclass=_TransportPortMeta):
     """CRUD transport against the remote tracker (today: ``acli.AcliClient``).
 
     The always-present read/write surface the core drives regardless of which
     optional capabilities a backend advertises.
+
+    **This Protocol must state what the CORE actually requires, not a comfortable
+    subset of it.** It declared six members while the core reached for eighteen;
+    the twelve it omitted were therefore unchecked by every conformance test, and
+    a transport missing all twelve passed ``isinstance``, the backend contract
+    suite, and 1600+ unit tests while being unable to complete a single writing
+    pass (story J9, epic ``e369``). Conformance to an incomplete port proves less
+    than it appears to — so a member the core calls belongs HERE, even when only
+    one backend implements it today.
+
+    It is ``@runtime_checkable`` for the same reason the capability Protocols are:
+    without the decorator ``isinstance(x, TicketTransport)`` raises ``TypeError``
+    rather than returning ``False``, so a construction-time conformance guard
+    cannot be written against it at all. (``isinstance`` against a runtime-checkable
+    Protocol checks member PRESENCE, not signatures — which is exactly the check
+    that would have caught this defect.)
     """
 
     def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]: ...
@@ -118,6 +217,78 @@ class TicketTransport(Protocol):
     def search_issues(
         self, jql: str, start_at: int = 0, max_results: int = 50
     ) -> list[dict[str, Any]]: ...
+
+    # -- the twelve the core also reaches for (J9) ------------------------
+    # Grouped, not merged into the block above, so the audit trail stays legible:
+    # every member below has at least one call site in a core module, and most of
+    # those sites swallow ``Exception``, which is why their absence degraded
+    # SILENTLY rather than crashing.
+
+    def get_issue_by_rest(self, remote_id: str) -> dict[str, Any]:
+        """Read an issue from the primary store, bypassing any search-index lag
+        (``outbound_differ._safe_get_issue``). The one call site of the twelve that
+        lets the error PROPAGATE."""
+        ...
+
+    def delete_issue(self, remote_id: str) -> dict[str, Any]:
+        """Delete an issue. An already-absent issue is idempotent success."""
+        ...
+
+    def get_comments(self, remote_id: str) -> list[dict[str, Any]]:
+        """Every comment on an issue, as raw payload dicts."""
+        ...
+
+    def get_issue_links(self, remote_id: str) -> list[dict[str, Any]]:
+        """The issue's links in REST-nested shape (``[{"id", "type", …}]``)."""
+        ...
+
+    def delete_issue_link(self, link_id: str) -> dict[str, Any]:
+        """Delete one issue link by id. A concurrent removal (404/409) is
+        idempotent success and must be absorbed by the TRANSPORT — the core's
+        handler for it is written against a Cloud-specific exception type."""
+        ...
+
+    def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
+        """``{issue_key → parent_key | None}`` for a project. Degradation contract
+        (``fetcher``): log a warning and return ``{}`` on failure, never raise."""
+        ...
+
+    def set_parent(self, remote_id: str, parent_key: str | None) -> None:
+        """Set the parent, or clear it when ``parent_key`` is falsy."""
+        ...
+
+    def remove_label(self, remote_id: str, label: str) -> None:
+        """Remove ONE label, leaving the issue's other labels intact."""
+        ...
+
+    def set_issue_property(self, remote_id: str, property_key: str, value: Any) -> None:
+        """Store ``value`` VERBATIM as an issue property. Wrapping it (e.g. as
+        ``{"value": …}``) stores the wrong shape and breaks correlation without
+        ever raising."""
+        ...
+
+    def set_entity_property(self, remote_id: str, prop_name: str, value: Any) -> None:
+        """Store an entity property — the same endpoint and the same verbatim-value
+        contract as :meth:`set_issue_property`."""
+        ...
+
+    def set_reporter(self, remote_id: str, account_id: str) -> None:
+        """Set the reporter to the identity seam's ``external_id`` for the backend
+        (Cloud: an accountId; Data Center: a username)."""
+        ...
+
+    def validate_assignee_exists(
+        self,
+        assignee: str,
+        *,
+        issue_key: str | None = None,
+        project_key: str | None = None,
+    ) -> str:
+        """Resolve ``assignee`` to the backend's assignable-user identifier, or
+        raise the backend's ``AssigneeNotFoundError``. The RETURN VALUE flows on as
+        the resolved assignee identity, so it must be the backend's own identifier
+        shape — never a bare truthy value."""
+        ...
 
 
 class OutboundMapper(Protocol):

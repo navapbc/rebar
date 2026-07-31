@@ -31,12 +31,15 @@ response) is attempted EXACTLY ONCE, since retrying a mutation risks duplicates.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from email.message import Message
 from typing import Any
 
 from rebar_reconciler._backend import BackendAssigneeNotFoundError, BackendHTTPError
+
+logger = logging.getLogger(__name__)
 
 _MISSING = object()
 
@@ -237,6 +240,40 @@ def _with_connection_retry(fn: Any) -> Any:
     raise last_exc
 
 
+def _call_logged(member: str, remote_id: Any, fn: Any) -> Any:
+    """Run ``fn()`` through :func:`_with_connection_retry`, logging a WARNING that
+    names the transport MEMBER and the REMOTE ID before any failure propagates.
+
+    Seven of the twelve members added by story J9 are invoked from core call sites
+    that swallow ``Exception`` at EVERY site (comments, links, parents, issue
+    properties, assignee validation), and three more swallow it at some sites. A
+    failure there produces no crash and no record — which is precisely how a DC
+    deployment can "converge" while syncing nothing. This log is the only signal
+    those paths emit, so it is written HERE, at the single choke point every
+    member routes through, rather than per method (where it would be forgotten by
+    the thirteenth member). The exception is re-raised untouched: this observes,
+    it never handles. Follows ``adapters/jira/acli_subprocess.py``'s module-level
+    ``logger = logging.getLogger(__name__)`` convention.
+    """
+    try:
+        return _with_connection_retry(fn)
+    except Exception as exc:
+        logger.warning(
+            "jira-datacenter transport: %s failed for remote id %r: %r", member, remote_id, exc
+        )
+        raise
+
+
+def _user_attr(user: Any, key: str) -> Any:
+    """Read ``key`` off a ``jira.resources.User`` (attribute) or an already-raw
+    dict (item) — the two shapes ``search_users`` yields against a real client and
+    against an injected fake respectively."""
+    raw = _unwrap(user)
+    if isinstance(raw, dict):
+        return raw.get(key)
+    return getattr(user, key, None)
+
+
 class JiraDataCenterTransport:
     """The DC ``TicketTransport`` + ``SupportsLinks``/``SupportsComments``/
     ``SupportsAbsenceProbe`` capabilities, built on an injected ``jira.JIRA``-shaped
@@ -399,4 +436,313 @@ class JiraDataCenterTransport:
             )
         return classify_probe_response(
             remote_id, 200, _unwrap(issue), resolved_statuses=self._resolved_statuses
+        )
+
+    # ------------------------------------------------------------------
+    # The twelve members the core reaches for (story J9). Each is written
+    # against DC REST **v2** via ``pycontribs/jira`` — never by copying Cloud's
+    # v3 endpoint, and never by hand-rolled REST. Every one routes through
+    # :func:`_call_logged` so a failure at a call site that swallows
+    # ``Exception`` still leaves a WARNING naming the member and the remote id.
+    # ------------------------------------------------------------------
+
+    def get_issue_by_rest(self, remote_id: str) -> dict[str, Any]:
+        """Read an issue straight from the primary store (no search-index lag).
+
+        On DC this is the SAME call ``get_issue`` makes — ``client.issue(key)`` is
+        already ``GET /rest/api/2/issue/{key}``. Cloud needs the distinction only
+        because its ``get_issue`` goes through ACLI's JQL search; DC has no such
+        indirection, so the two coincide. The method still exists separately
+        because ``outbound_differ`` calls it by name, and it is the ONE member of
+        the twelve whose call site lets the error propagate.
+        """
+        issue = _call_logged("get_issue_by_rest", remote_id, lambda: self._client.issue(remote_id))
+        return _unwrap(issue)
+
+    def get_comments(self, remote_id: str) -> list[dict[str, Any]]:
+        """All comments on an issue, as raw payload dicts.
+
+        ``get_comment_map`` already made this exact call (``client.comments``);
+        what was missing was the SURFACE, not the capability. The library pages
+        internally, so there is no Cloud-style ``--paginate`` caveat here.
+        """
+        comments = _call_logged("get_comments", remote_id, lambda: self._client.comments(remote_id))
+        return [_unwrap(c) for c in comments]
+
+    def get_issue_links(self, remote_id: str) -> list[dict[str, Any]]:
+        """The issue's ``issuelinks`` in REST-nested shape — the shape
+        ``JiraDataCenterBackend.map_remote_links`` already canonicalizes and the
+        shape ``dispatch_one._index_existing_links`` indexes. REST v2 and v3 carry
+        an identical ``issuelinks`` payload, so no translation is needed."""
+        issue = _call_logged("get_issue_links", remote_id, lambda: self._client.issue(remote_id))
+        raw = _unwrap(issue)
+        fields = raw.get("fields") if isinstance(raw, dict) else None
+        links = fields.get("issuelinks") if isinstance(fields, dict) else None
+        return links if isinstance(links, list) else []
+
+    def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
+        """``{issue_key → parent_key | None}`` for a project, via DC REST **v2**
+        OFFSET pagination.
+
+        Deliberately NOT a port of Cloud's ``get_parent_map``: that one POSTs to
+        ``/rest/api/3/search/jql`` and pages with an opaque ``nextPageToken``
+        cursor, and its own docstring records (live-proven, ticket 8b25) that the
+        legacy endpoint is retired with HTTP 410 and that sending ``startAt`` is
+        rejected with HTTP 400. Both the endpoint and the pagination model are
+        Cloud-v3 only. DC serves ``/rest/api/2/search`` with ``startAt`` /
+        ``maxResults``, which is exactly what ``jira.JIRA.search_issues`` drives —
+        so the library's native offset paging IS the DC-correct mechanism.
+
+        Degradation contract (mirrors Cloud, and what ``fetcher`` expects): a
+        failure logs a WARNING and returns ``{}``, so the inbound pass falls back
+        to its parentless path rather than aborting.
+        """
+        query = jql or f"project = {project_key}"
+        out: dict[str, str | None] = {}
+        start_at = 0
+        page_size = 100
+        try:
+            while True:
+                results = _call_logged(
+                    "get_parent_map",
+                    project_key,
+                    lambda offset=start_at: self._client.search_issues(
+                        query, startAt=offset, maxResults=page_size, fields="parent"
+                    ),
+                )
+                batch = list(results)
+                for issue in batch:
+                    raw = _unwrap(issue)
+                    if not isinstance(raw, dict):
+                        continue
+                    key = raw.get("key")
+                    if not key:
+                        continue
+                    fields = raw.get("fields")
+                    parent = fields.get("parent") if isinstance(fields, dict) else None
+                    out[key] = parent.get("key") if isinstance(parent, dict) else None
+                # Advance by what the server ACTUALLY returned, and stop only on an
+                # EMPTY page. Jira DC silently truncates ``maxResults`` when it exceeds
+                # ``jira.search.views.default.max`` (a common hardening), so a short page
+                # is NOT proof of exhaustion. Advancing by the REQUESTED page_size — and
+                # breaking on a short page — reads a truncated first page as the final
+                # one and silently returns a PARTIAL parent map; the inbound pass then
+                # treats every unseen issue as parentless. Measured against a client
+                # capping pages at 20: 20 of 250 parents recovered, raising nothing.
+                if not batch:
+                    break
+                start_at += len(batch)
+        except Exception as exc:  # noqa: BLE001 — degradation contract: a parent-map failure must not abort the inbound pass
+            logger.warning(
+                "jira-datacenter transport: get_parent_map degraded to {} for project %r: %r",
+                project_key,
+                exc,
+            )
+            return {}
+        return out
+
+    def delete_issue(self, remote_id: str) -> dict[str, Any]:
+        """Delete an issue (``Issue.delete()`` — ``DELETE /rest/api/2/issue/{key}``).
+
+        A 404 is idempotent success (the post-state we want is "gone"), matching
+        Cloud's contract; a 403 becomes ``PermissionError`` so the rollback callers
+        that special-case a permissions denial keep behaving identically.
+        """
+
+        def _delete() -> None:
+            issue = self._client.issue(remote_id)
+            issue.delete()
+
+        try:
+            _call_logged("delete_issue", remote_id, _delete)
+        except BackendHTTPError as exc:
+            if exc.code == 404:
+                return {"status": "already_absent", "key": remote_id}
+            if exc.code == 403:
+                raise PermissionError(
+                    f"permission denied deleting {remote_id} on Jira Data Center: {exc}"
+                ) from exc
+            raise
+        return {"status": "deleted", "key": remote_id}
+
+    def delete_issue_link(self, link_id: str) -> dict[str, Any]:
+        """Delete an issue link by id, absorbing 404/409 as idempotent success
+        **inside the transport**.
+
+        That absorption is NOT redundant with the caller. ``dispatch_one`` treats a
+        concurrent-removal failure as success only when it sees
+        ``subprocess.CalledProcessError`` — a Cloud/ACLI-specific type, as its own
+        comment says ("delete_issue_link shells out via ACLI"). DC raises
+        ``BackendHTTPError``, which does not match that clause, so a raced 404 would
+        escape and unwind the pass. Owning idempotence here makes the DC path
+        correct under a handler written for a different transport.
+        """
+        try:
+            _call_logged(
+                "delete_issue_link", link_id, lambda: self._client.delete_issue_link(link_id)
+            )
+        except BackendHTTPError as exc:
+            if exc.code in (404, 409):
+                return {"status": "already_absent", "id": link_id}
+            raise
+        return {"status": "deleted", "id": link_id}
+
+    def remove_label(self, remote_id: str, label: str) -> None:
+        """Remove ONE label, leaving every other label intact.
+
+        This is **not** the mirror image of :meth:`add_label`. ``add_label`` uses
+        ``Issue.add_field_value("labels", …)``, which has no removal counterpart;
+        removal goes through ``Issue.update``'s ``update`` verb —
+        ``{"labels": [{"remove": <label>}]}`` — which is target-specific, so a
+        concurrent label edit is not clobbered the way a read-modify-write of the
+        whole list would clobber it.
+        """
+        issue = _call_logged("remove_label", remote_id, lambda: self._client.issue(remote_id))
+        _call_logged(
+            "remove_label",
+            remote_id,
+            lambda: issue.update(update={"labels": [{"remove": label}]}),
+        )
+
+    def _put_property(self, member: str, remote_id: str, property_key: str, value: Any) -> None:
+        """PUT ``value`` to ``issue/{remote_id}/properties/{property_key}`` via the
+        library's ``add_issue_property``.
+
+        THE value-shape contract: the value is passed **verbatim**. Jira's
+        issue-properties API stores whatever JSON is PUT as the property's value,
+        and an earlier Cloud implementation wrapped it as ``{"value": …}`` — which
+        stored the wrong shape and broke correlation WITHOUT ever raising (bug
+        0b27). So "it did not error" is not evidence here; the key and the value
+        must reach the endpoint intact.
+
+        ``member`` is the PUBLIC method name so the WARNING names the member the
+        core actually called, not this private helper.
+        """
+        _call_logged(
+            member,
+            remote_id,
+            lambda: self._client.add_issue_property(remote_id, property_key, value),
+        )
+
+    def set_issue_property(self, remote_id: str, property_key: str, value: Any) -> None:
+        """Set an issue property (``PUT issue/{key}/properties/{prop}``, value verbatim)."""
+        self._put_property("set_issue_property", remote_id, property_key, value)
+
+    def set_entity_property(self, remote_id: str, prop_name: str, value: Any) -> None:
+        """Set an entity property — the same endpoint as :meth:`set_issue_property`
+        (Cloud's is literally an alias of it, ``acli_rest.py:266``).
+
+        This is the member whose absence crashed the first live DC writing pass.
+        """
+        self._put_property("set_entity_property", remote_id, prop_name, value)
+
+    def set_reporter(self, remote_id: str, account_id: str) -> None:
+        """Set the reporter to a DC **username**.
+
+        DC has no ``accountId``, so the payload is ``{"reporter": {"name": …}}``
+        rather than Cloud's ``{"accountId": …}``. The parameter keeps Cloud's name
+        because the core's identity seam (``jira_account_id``) is already
+        vendor-neutral: it hands back whatever ``external_id`` the family stored,
+        which for DC identities is the username. No call-site change is needed.
+
+        Idempotence depends on the INBOUND half: ``inbound_fields._identity_of``
+        must carry DC's ``name`` into the canonical identity's ``account_id`` key,
+        or the next snapshot reads ``None`` and the differ re-emits the reporter
+        mutation on every pass.
+        """
+        issue = _call_logged("set_reporter", remote_id, lambda: self._client.issue(remote_id))
+        _call_logged(
+            "set_reporter",
+            remote_id,
+            lambda: issue.update(fields={"reporter": {"name": account_id}}),
+        )
+
+    def set_parent(self, remote_id: str, parent_key: str | None) -> None:
+        """Set or clear a SUB-TASK's parent via ``fields.parent``.
+
+        DC splits what Cloud unifies. A sub-task's parent genuinely lives in
+        ``fields.parent`` and this method writes it (``{"parent": {"key": …}}``, or
+        ``{"parent": None}`` to clear — the same call path for a SET and a CLEAR,
+        which is what ``dispatch_one`` relies on). But EPIC membership on DC is not
+        ``parent`` at all: it is the "Epic Link" **custom field**
+        (``customfield_NNNNN``, whose id differs per instance), written through the
+        Agile API — which DC serves under ``greenhopper`` while the library's
+        ``AGILE_BASE_REST_PATH`` defaults to ``agile`` (``jira/resources.py:1518``),
+        so ``add_issues_to_epic`` with default options targets a path DC does not
+        expose.
+
+        Rather than write ``fields.parent`` for a non-subtask and let DC silently
+        no-op the epic link — the failure mode this story exists to eliminate — the
+        epic case raises ``NotImplementedError`` NAMING the limitation. It is a
+        loud, attributed decline, not an absent attribute and not a silent success.
+        Lifting it is the story's recorded spike (epic-link field id +
+        ``add_issues_to_epic`` against a real DC instance under
+        ``agile_rest_path='greenhopper'``).
+        """
+        issue = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
+        raw = _unwrap(issue)
+        fields = raw.get("fields") if isinstance(raw, dict) else None
+        issue_type = fields.get("issuetype") if isinstance(fields, dict) else None
+        is_subtask = bool(issue_type.get("subtask")) if isinstance(issue_type, dict) else False
+        if not is_subtask:
+            logger.warning(
+                "jira-datacenter transport: set_parent declined for remote id %r "
+                "(parent=%r): not a sub-task, so this is an Epic Link, not fields.parent",
+                remote_id,
+                parent_key,
+            )
+            raise NotImplementedError(
+                f"set_parent is not supported for {remote_id!r} on Jira Data Center: only a "
+                "SUB-TASK's parent lives in fields.parent. For any other issue type the parent "
+                "is an EPIC LINK, held in an instance-specific 'Epic Link' custom field "
+                "(customfield_NNNNN) and written through the Agile API, which Data Center "
+                "serves under the 'greenhopper' REST path rather than the 'agile' path "
+                "pycontribs/jira defaults to. Writing fields.parent here would silently "
+                "no-op, so the operation is declined instead."
+            )
+        body: dict[str, Any] = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
+        _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
+
+    def validate_assignee_exists(
+        self,
+        assignee: str,
+        *,
+        issue_key: str | None = None,
+        project_key: str | None = None,
+    ) -> str:
+        """Resolve ``assignee`` to an assignable DC **username**, or raise
+        :class:`AssigneeNotFoundError`.
+
+        RETURN CONTRACT, which differs from Cloud's on purpose: the caller does
+        ``acct = client.validate_assignee_exists(...)`` and then flows the return
+        value ON as the resolved assignee identity. Cloud returns an ``accountId``;
+        DC has none, so DC returns the ``name`` — consistent with ``NameIdentity``
+        and with the ``external_id`` DC identities are minted under. Returning an
+        accountId-shaped value, or ``True``, would corrupt the identity.
+
+        ERROR CONTRACT: a definitive miss raises ``AssigneeNotFoundError``
+        *specifically*, because ``outbound_assignee`` branches on
+        ``type(exc).__name__ == "AssigneeNotFoundError"``. Any other type — and in
+        particular a ``NotImplementedError`` — would downgrade EVERY DC assignee
+        resolution to the non-authoritative string-match fallback, permanently and
+        silently. That is why this member is implemented rather than declined.
+
+        Matching is EXACT (username, then email, then display name) — DC's user
+        search is substring/relevance-based, so returning its first hit would
+        mis-assign a local handle that is not a DC user at all.
+        """
+        scope = issue_key or project_key or assignee
+        users = _call_logged(
+            "validate_assignee_exists",
+            scope,
+            lambda: self._client.search_users(user=assignee, maxResults=50),
+        )
+        candidates = list(users or [])
+        for field in ("name", "emailAddress", "displayName"):
+            for user in candidates:
+                if _user_attr(user, field) == assignee:
+                    return str(_user_attr(user, "name") or assignee)
+        raise AssigneeNotFoundError(
+            f"validate_assignee_exists: no assignable Data Center user exactly matches "
+            f"{assignee!r} (scope {scope!r})"
         )
