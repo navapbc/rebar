@@ -54,6 +54,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_CONFIG_FILE` | `src/rebar/_config_sources.py` |  |
 | `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
@@ -154,7 +155,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_144 variables._
+_145 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -175,15 +176,15 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:760` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:262` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:275` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:279` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:286` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:263` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:276` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:280` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:287` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:385` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:414` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:429` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:449` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:389` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:423` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:438` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:458` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`

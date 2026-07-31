@@ -16,6 +16,10 @@ Environment variables (all optional; sensible defaults):
   REBAR_LLM_TIMEOUT       per-operation wall-clock seconds (default 600)
   REBAR_LLM_REPO_PATH     repo root the agent's read-only file tools see (default: repo root)
   REBAR_LLM_MCP_SERVERS   JSON object of MCP servers (Pydantic AI MCP toolset shape)
+  REBAR_LLM_CONFIG_FILE   path to a TOML file whose ``[llm]`` table LAYERS (deep-merges,
+                          per key) over the discovered config — for an environment that
+                          needs its own settings without editing the checkout's. Missing
+                          path = hard error, never a silent fallback.
   REBAR_LLM_BEDROCK_REGION    AWS region for the Bedrock provider (default: boto3's own
                               region resolution — AWS_REGION/AWS_DEFAULT_REGION/profile).
   ANTHROPIC_API_KEY       model credentials (required to actually run an operation)
@@ -399,12 +403,17 @@ def _env_truthy(name: str) -> bool:
 
 
 def _read_llm_file_table(repo_root=None) -> dict:
-    """The merged ``[tool.rebar.llm]`` table (user < project), or ``{}``. A malformed
-    core config degrades to env-only — a broken pyproject must never break an LLM op."""
+    """The merged ``[tool.rebar.llm]`` table (user < project < ``REBAR_LLM_CONFIG_FILE``),
+    or ``{}``. A malformed core config degrades to env-only — a broken pyproject must never
+    break an LLM op — but the ``REBAR_LLM_CONFIG_FILE`` pointer is layered OUTSIDE that
+    degrade, so an environment that explicitly named a config file is never silently
+    ignored (it deep-merges per key over the discovered table; see
+    :func:`rebar.config.layer_llm_config_file`)."""
     try:
-        return _root_config.read_reserved_section("llm", repo_root)
+        discovered = _root_config.read_reserved_section("llm", repo_root)
     except _root_config.ConfigError:
-        return {}
+        discovered = {}
+    return _root_config.layer_llm_config_file(discovered)
 
 
 def _llm_str(table: dict, cli: dict, env_name: str, file_key: str, default):
