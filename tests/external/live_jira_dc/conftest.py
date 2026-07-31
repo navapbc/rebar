@@ -202,6 +202,70 @@ def _leaked_scratch_projects() -> list[str]:
     )
 
 
+#: Every PAT this harness mints carries this prefix (see ``jira_dc_pat``), which is
+#: what makes a token left by an interrupted run identifiable — and, critically,
+#: distinguishable from a HUMAN's unrelated PAT on the same account.
+_PAT_NAME_PREFIX = "rebar-j5-harness-"
+
+
+def _leaked_harness_tokens() -> list[dict[str, Any]]:
+    """PATs left behind by an earlier, interrupted run.
+
+    The exact analogue of :func:`_leaked_scratch_projects` for tokens, and for the
+    same reason: a run whose teardown did not finish leaves residue that silently
+    poisons the NEXT run. For tokens the poisoning is specific and total — Jira DC
+    caps a user at 10 PATs, so leftovers consume a budget the next session needs
+    and it dies at setup (see ``jira_dc_pat``).
+
+    **Only tokens carrying** ``_PAT_NAME_PREFIX`` **are returned.** The admin
+    account may legitimately hold PATs a human created, and deleting one of those
+    would make this sweep worse than the bug it fixes.
+
+    Read from ``GET /rest/pat/latest/tokens`` — the direct token list, not the
+    search index. On any non-200 or unexpected shape this returns EMPTY: a sweep
+    that cannot enumerate is not evidence of cleanliness, and inventing a failure
+    here would block a run for a reason unrelated to the code under test. The
+    mint in ``jira_dc_pat`` remains the authoritative test of whether headroom
+    actually exists.
+    """
+    status, body = _request("/rest/pat/latest/tokens")
+    if status != 200 or not isinstance(body, list):
+        return []
+    return [
+        token
+        for token in body
+        if isinstance(token, dict)
+        and str(token.get("name", "")).startswith(_PAT_NAME_PREFIX)
+        and token.get("id") is not None
+    ]
+
+
+def _sweep_leaked_harness_tokens() -> list[str]:
+    """Delete leftover harness PATs; return the names actually swept.
+
+    Best-effort by design, and the asymmetry with scratch PROJECTS is deliberate:
+    a leaked project makes later assertions lie, so ``_jira_dc_harness_ready``
+    REFUSES to run against one. A leaked token does not corrupt any assertion —
+    it only consumes budget — so the right response is to reclaim it and carry on.
+    A failed DELETE is reported to stderr and skipped rather than raised: if the
+    reclaim was genuinely insufficient, the mint that follows fails with Jira's
+    own explicit limit error, which is a better diagnostic than anything asserted
+    here.
+    """
+    swept: list[str] = []
+    for token in _leaked_harness_tokens():
+        name = str(token.get("name", ""))
+        status, body = _request(f"/rest/pat/latest/tokens/{token['id']}", method="DELETE")
+        if status in (200, 204, 404):
+            swept.append(name)
+        else:
+            print(  # noqa: T201 — visible in the CI job log, where this is diagnosed
+                f"[jira-dc-harness] could not reclaim leftover PAT {name!r}: {status} {body!r}",
+                file=sys.stderr,
+            )
+    return swept
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _jira_dc_harness_ready() -> None:
     """Wait for the harness, then REFUSE a harness carrying leaked state.
@@ -225,6 +289,19 @@ def _jira_dc_harness_ready() -> None:
     silently testing against dirty state.
     """
     wait_for_jira_dc_ready()
+
+    # Reclaim leftover PATs BEFORE anything mints one. Unlike scratch projects
+    # (below), a leaked token is reclaimed rather than refused: it corrupts no
+    # assertion, it only consumes the 10-token budget the session is about to
+    # need. Doing it here — once, at session start — is what stops a crashed run
+    # from poisoning the next one.
+    swept = _sweep_leaked_harness_tokens()
+    if swept:
+        print(  # noqa: T201 — visible in the CI job log
+            f"[jira-dc-harness] reclaimed {len(swept)} leftover PAT(s) from an "
+            f"interrupted run: {sorted(swept)}",
+            file=sys.stderr,
+        )
 
     leaked = _leaked_scratch_projects()
     if leaked:
@@ -352,13 +429,37 @@ def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
     _poll_until_404(f"/rest/api/2/project/{key}", what=f"project {key}")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def jira_dc_pat() -> str:
     """A Personal Access Token minted programmatically for the Bearer-auth test.
 
     ``POST /rest/pat/latest/tokens`` (the Jira DC 8.14+ PAT endpoint),
     authenticated with the admin basic credentials — never a hand-minted token,
     so this fixture is self-contained.
+
+    **SESSION-scoped, and that is load-bearing rather than an optimisation.**
+    Jira Data Center caps a user at **10 Personal Access Tokens** — a
+    non-obvious limit with no analogue on Cloud. This fixture was function-scoped
+    and minted a NEW token per requesting test without ever deleting it, so
+    consumption grew as O(tests) against a fixed budget of 10 and the suite died
+    at SETUP once the eleventh test asked:
+
+        UserTokenLimitExceededException: You can't create more than 10 tokens.
+
+    Two properties made that expensive to diagnose, and both argue for fixing the
+    scope rather than trimming the test count. It MIS-ATTRIBUTES: the error
+    surfaces at setup of whichever test happens to run once the budget is spent —
+    observed twice in ``test_transport.py``, a module nobody had touched. And it
+    LOOKS FLAKY while being deterministic: tokens are minted with
+    ``expirationDuration=1``, so they self-clear after a day and whether a run
+    fails depends on how recently the instance was used.
+
+    Session scope makes consumption O(1): one token per run regardless of how
+    many tests request it, which is what supplies headroom as this tier grows.
+    Every consumer needs only *a* valid bearer credential — no test here asserts
+    per-token behaviour — so one token is behaviourally identical to one per
+    test. A future test that genuinely needs a DISTINCT token (revocation,
+    expiry) should get its own fixture rather than widening this one back out.
     """
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
     name = f"rebar-j5-harness-{suffix}"
