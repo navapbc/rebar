@@ -289,10 +289,16 @@ def test_materialize_tickets_resolves_configured_remote_ref(
     seen: dict[str, str] = {}
 
     def _fake_resolve(
-        ref: str, repo_root: object = None, *, fetch: bool = True, remote: str = "origin"
+        ref: str,
+        repo_root: object = None,
+        *,
+        fetch: bool = True,
+        remote: str = "origin",
+        blobless: bool = True,
     ):
         seen["ref"] = ref
         seen["remote"] = remote
+        seen["blobless"] = blobless
         raise _Stop  # short-circuit before real FS materialization
 
     monkeypatch.setattr(repo_snapshot, "_has_remote", lambda root, remote="origin": True)
@@ -302,3 +308,6 @@ def test_materialize_tickets_resolves_configured_remote_ref(
         repo_snapshot.materialize_tickets(repo_root=str(_proj(tmp_path)), fetch=True)
     assert seen["ref"] == "github/tickets"
     assert seen["remote"] == "github"
+    # bug 747f: this resolution BACKS a materialization, so it must not filter out blobs —
+    # a blob:none fetch here leaves the plumbing to lazy-fetch the tree one file per RPC.
+    assert seen["blobless"] is False

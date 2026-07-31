@@ -38,10 +38,19 @@ Portability + safety:
     crash leaves only a ``tmp/`` entry that :func:`sweep_tmp` clears on startup.
 
 Fetch prerequisites (operators): fetching an *arbitrary SHA* requires the remote's
-``uploadpack.allowReachableSHA1InWant`` (else fetch a containing ref then resolve);
-this prefers ``--filter=blob:none`` over a deep shallow refetch. A private-repo fetch
-with missing credentials raises a descriptive, actionable :class:`SnapshotFetchError`
-(attested mode fails closed; local mode never fetches).
+``uploadpack.allowReachableSHA1InWant`` (else fetch a containing ref then resolve).
+A private-repo fetch with missing credentials raises a descriptive, actionable
+:class:`SnapshotFetchError` (attested mode fails closed; local mode never fetches).
+
+Filtering policy — **filter iff you will NOT materialize**. ``--filter=blob:none`` is kept
+only for *pure ref-RESOLUTION* fetches (its designed use: commits and trees) and DROPPED
+(``--no-filter``) for any fetch backing a ref we are about to materialize, because (a) git
+batches missing-blob fetches only in ``unpack-trees``' working-tree update path, which
+``read-tree`` (no ``-u``) and ``checkout-index`` never reach — so a blob-starved
+materialization degrades to ONE round-trip per file (hours on a 25k-file tree) — and (b)
+``git fetch --filter`` permanently marks the remote a promisor
+(``remote.<name>.promisor``/``.partialclonefilter``), so a clone that filters once keeps
+filtering forever. An ALREADY-latched clone is repaired by :func:`_ensure_blobs_present`.
 """
 
 from __future__ import annotations
@@ -277,10 +286,27 @@ def _fetch_lock_for(repo_root: str) -> threading.Lock:
 # --------------------------------------------------------------------------------------
 # git plumbing
 # --------------------------------------------------------------------------------------
+# Bound every git call on this path so a stuck remote (or hung credential helper) can never
+# wedge the long-lived MCP server. Deliberately MUCH larger than the 30s in _store/push.py
+# and _store/sync.py: those bound a tickets push/fetch (a few tiny event files), whereas a
+# materialization fetch here is UNFILTERED and transfers every blob of a whole tree in one
+# RPC — legitimately minutes on a cold clone. A timeout surfaces as a failed
+# CompletedProcess (returncode 124), never a hang.
+_GIT_TIMEOUT = 300
+
+
 def _git(
     repo_root: str, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    return run_git(repo_root, *args, check=False, env=env)
+    try:
+        return run_git(repo_root, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", "-C", repo_root, *args],
+            124,
+            "",
+            f"git timed out after {_GIT_TIMEOUT}s",
+        )
 
 
 def _has_remote(repo_root: str, remote: str = "origin") -> bool:
@@ -308,18 +334,27 @@ def _is_auth_failure(stderr: str) -> bool:
     return any(marker in low for marker in _AUTH_STDERR_MARKERS)
 
 
-def _fetch_origin(repo_root: str, *, ref: str | None = None, remote: str = "origin") -> None:
+def _fetch_origin(
+    repo_root: str, *, ref: str | None = None, remote: str = "origin", blobless: bool = True
+) -> None:
     """Coalesced ``git fetch <remote>`` (optionally a targeted ref/SHA).
 
     Serialized in-process (one fetch per repo at a time) and cross-process (an exclusive
-    flock), since fetch is the only lock-taking step. Prefers a blobless partial fetch
-    (``--filter=blob:none``) to avoid deep history transfer. Raises
-    :class:`SnapshotFetchError` (fail-closed) on failure, with an actionable credential
-    remedy when the remote rejected us for auth reasons."""
+    flock), since fetch is the only lock-taking step. ``blobless`` selects the filtering
+    policy (see the module docstring): ``True`` (the default, preserving today's behaviour
+    for pure-resolution callers) fetches ``--filter=blob:none`` — commits and trees only. A
+    caller whose ref WILL be materialized must pass ``blobless=False`` → ``--no-filter``, so
+    blobs arrive with the commit in a single RPC and an ordinary clone is never latched into
+    a promisor remote.
+
+    Raises :class:`SnapshotFetchError` (fail-closed) on failure, with an actionable
+    credential remedy when the remote rejected us for auth reasons; a timeout is likewise
+    surfaced as a descriptive error rather than a hang."""
     # Disable any interactive credential prompt so a missing credential fails fast with a
     # descriptive error instead of hanging the long-lived server on a TTY prompt.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    args = ["fetch", "--quiet", "--filter=blob:none", remote]
+    filter_arg = "--filter=blob:none" if blobless else "--no-filter"
+    args = ["fetch", "--quiet", filter_arg, remote]
     if ref is not None:
         # SECURITY: a client ref reaches this positional, so it MUST be terminated with
         # --end-of-options. Without it, git reorders interspersed options and a ref like
@@ -328,12 +363,21 @@ def _fetch_origin(repo_root: str, *, ref: str | None = None, remote: str = "orig
         args += ["--end-of-options", ref]
     lock_path = store_root() / "locks" / "fetch.lock"
     with _fetch_lock_for(repo_root), _interprocess_lock(lock_path):
-        proc = subprocess.run(
-            ["git", "-C", repo_root, *args],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            proc = subprocess.run(
+                ["git", "-C", repo_root, *args],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=_GIT_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Fail closed with a description (this function's contract) — never leave the
+            # caller, or the long-lived server, blocked on a stuck remote.
+            raise SnapshotFetchError(
+                f"git fetch from '{remote}' timed out after {_GIT_TIMEOUT}s (attested mode "
+                "fails closed) — the remote may be unreachable or the transfer too large."
+            ) from exc
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
         if _is_auth_failure(stderr):
@@ -351,7 +395,12 @@ def _fetch_origin(repo_root: str, *, ref: str | None = None, remote: str = "orig
 
 
 def resolve_ref(
-    ref: str, repo_root: str | None = None, *, fetch: bool = True, remote: str = "origin"
+    ref: str,
+    repo_root: str | None = None,
+    *,
+    fetch: bool = True,
+    remote: str = "origin",
+    blobless: bool = True,
 ) -> str:
     """Resolve a client ``ref`` (branch | tag | SHA) to an immutable commit SHA.
 
@@ -359,17 +408,20 @@ def resolve_ref(
     ``origin/main`` (and any moving branch/tag) resolves against the remote, not a stale
     local copy. A SHA that is not present locally triggers a targeted fetch (requires the
     remote's ``uploadpack.allowReachableSHA1InWant``). Raises :class:`SnapshotRefError`
-    (fail-closed) if the ref still does not resolve."""
+    (fail-closed) if the ref still does not resolve. ``blobless`` is forwarded verbatim to
+    :func:`_fetch_origin`; it defaults to ``True`` (commits/trees only) because a bare
+    resolution never needs file content. A caller about to MATERIALIZE the resolved SHA must
+    pass ``blobless=False``."""
     root = str(repo_root) if repo_root else "."
     has_remote = fetch and _has_remote(root, remote)
     if has_remote:
-        _fetch_origin(root, remote=remote)
+        _fetch_origin(root, remote=remote, blobless=blobless)
     sha = _rev_parse(root, ref)
     if sha is None and has_remote:
         # A bare SHA (or a ref only reachable by an explicit want) not present after the
         # general fetch — try a targeted fetch (allowReachableSHA1InWant on the remote).
         try:
-            _fetch_origin(root, ref=ref, remote=remote)
+            _fetch_origin(root, ref=ref, remote=remote, blobless=blobless)
         except SnapshotFetchError:
             pass  # fall through to the descriptive ref error below
         sha = _rev_parse(root, ref)
@@ -435,15 +487,75 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+# --------------------------------------------------------------------------------------
+# Blob top-up — make materialization independent of git's per-blob lazy fetch
+# --------------------------------------------------------------------------------------
+def _has_missing_blobs(repo_root: str, sha: str) -> bool:
+    """Cheap, OFFLINE probe: does the local object DB lack any blob of ``sha``'s tree?
+
+    ``git rev-list --objects --missing=print --no-object-names --no-walk <sha>`` lists the
+    commit's tree entries, prefixing each ABSENT object with ``?``. ``--missing`` turns git's
+    own lazy fetch OFF internally, so the probe never perturbs what it measures (no env guard
+    needed — and none may be used: ``GIT_NO_LAZY_FETCH`` is silently ignored before git
+    2.45); ``--no-walk`` scopes it to this ONE commit's tree, not all history. A normal clone
+    has nothing missing, so this returns ``False`` and the top-up is inherently a no-op there.
+    A probe failure reads as "nothing known to be missing" — it must never become a new way
+    for materialization to fail."""
+    probe = ["rev-list", "--objects", "--missing=print", "--no-object-names", "--no-walk"]
+    # --end-of-options: the SHA is a positional, so it must never be read as an option.
+    proc = _git(repo_root, *probe, "--end-of-options", sha)
+    if proc.returncode != 0:
+        return False
+    return any(line.startswith("?") for line in proc.stdout.splitlines())
+
+
+def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
+    """Best-effort: guarantee ``sha``'s blobs are local BEFORE the plumbing runs.
+
+    ``read-tree`` (without ``-u``) and ``checkout-index`` never enter ``unpack-trees``'
+    ``check_updates()`` — the only place git batches missing-blob requests (via
+    ``prefetch_cache_entries()``). So on a blob-starved partial clone each absent blob costs
+    its own sequential fetch RPC (~2 hours on a 25k-file tree). Fetching them up front in ONE
+    batched RPC is what makes the attested path INDEPENDENT of lazy fetching rather than
+    merely slow because of it. ``--no-filter`` overrides the remote's configured
+    ``partialclonefilter`` (a plain fetch silently re-applies it and refills nothing);
+    ``--refetch`` disables negotiation so an already-present commit still transfers its
+    objects instead of no-op'ing.
+
+    Deliberately BEST-EFFORT and silent on failure — ``--refetch`` needs git >= 2.36, and the
+    remote may be absent, offline, or reject our credentials. Production still has lazy fetch
+    as the fallback, so a failed top-up degrades to today's behaviour and never adds a NEW
+    failure mode. Exactly ONE fetch per materialization; a loop would defeat the point."""
+    if not _has_missing_blobs(repo_root, sha) or not _has_remote(repo_root, remote):
+        return
+    # SECURITY: the SHA reaches a fetch positional, so it MUST be terminated with
+    # --end-of-options — same reasoning as the targeted fetch in _fetch_origin (without it,
+    # a value like "--upload-pack=<cmd>" would be parsed as an option and EXECUTE).
+    argv = ["fetch", "--no-filter", "--refetch", "--quiet", remote, "--end-of-options", sha]
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        subprocess.run(
+            ["git", "-C", repo_root, *argv],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_GIT_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass  # best-effort: fall through to the plumbing, which still has lazy fetch
+
+
 def _materialize_tree(repo_root: str, sha: str, dest_tmp: Path) -> None:
     """Faithfully write the committed tree at ``sha`` into ``dest_tmp`` via git plumbing.
 
     Uses a throwaway index (``GIT_INDEX_FILE``) so the repo's own index/working tree is
     never touched — this is what keeps concurrent materializations of different SHAs from
-    contending on ``index.lock``."""
+    contending on ``index.lock``. ``GIT_TERMINAL_PROMPT=0`` is set for the same reason
+    :func:`_fetch_origin` sets it — this path can drive git's own (lazy) network fetch, so
+    without it a missing credential would block on a TTY prompt and hang the server."""
     dest_tmp.mkdir(parents=True, exist_ok=True)
     index_file = dest_tmp.parent / (dest_tmp.name + ".index")
-    env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
+    env = {**os.environ, "GIT_INDEX_FILE": str(index_file), "GIT_TERMINAL_PROMPT": "0"}
     try:
         read = _git(repo_root, "read-tree", sha, env=env)
         if read.returncode != 0:
@@ -529,7 +641,9 @@ def materialize(
             source=SOURCE_LOCAL,
         )
 
-    sha = resolve_ref(ref, repo_root, fetch=fetch)
+    # blobless=False: this ref WILL be materialized, so its blobs must arrive with the commit
+    # in one RPC (see the module docstring's filtering policy).
+    sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     store = store_root()
     dest = entry_path(sha, store)
     if dest.is_dir():
@@ -551,6 +665,9 @@ def materialize(
     tmp_parent = _tmp_root(store)
     build = tmp_parent / f"build-{sha[:12]}-{uuid.uuid4().hex}"
     try:
+        # Gated on "are blobs actually missing?", NOT on `fetch`: cache.acquire (the real
+        # entry point) resolves the ref itself and calls us with fetch=False.
+        _ensure_blobs_present(root_dir, sha, "origin")
         _materialize_tree(root_dir, sha, build)
         _fsync_dir(build)
         try:
@@ -624,13 +741,16 @@ def materialize_tickets(
         remote = _tickets_remote(root_dir)
     except _ConfigError:
         remote = "origin"
+    # blobless=False on every fetching resolution — this ref is about to be materialized.
     if fetch and _has_remote(root_dir, remote):
         try:
-            sha = resolve_ref(f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote)
+            sha = resolve_ref(
+                f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote, blobless=False
+            )
         except SnapshotRefError:
             sha = resolve_ref(ref, repo_root, fetch=False)
     else:
-        sha = resolve_ref(ref, repo_root, fetch=fetch)
+        sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     store = store_root()
     dest = store / f"tickets-{sha}"
     if dest.is_dir():
@@ -642,6 +762,9 @@ def materialize_tickets(
     build = tmp_parent / f"tickets-{sha[:12]}-{uuid.uuid4().hex}"
     tracker = build / _TRACKER_DIRNAME
     try:
+        # Same probe-gated, one-RPC top-up as the code path — against the already-resolved
+        # tickets remote (sync.remote), never a hardcoded "origin".
+        _ensure_blobs_present(root_dir, sha, remote)
         _materialize_tree(root_dir, sha, tracker)
         _fsync_dir(build)
         try:
