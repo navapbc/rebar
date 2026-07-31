@@ -25,12 +25,15 @@ the write lock, racing in-flight writers and corrupting the store (bug 88eb). So
 the write lock — see ADR 0051. UUID-named event files never collide
 on merge; the only shared mutable root file (``.bridge_state/*``) resolves via the
 tickets-branch ``.gitattributes`` ``merge=ours`` (it is per-pass
-derived caches the reconciler rebuilds). Resolution by case: unrelated histories →
-``merge --allow-unrelated-histories`` (union); related + no local commits →
-fast-forward adopt (``reset --hard`` onto an ancestor — discards nothing); local
-strictly ahead → nothing to do; diverged → ``merge origin/tickets`` (union). Every
-merge: on conflict → ``merge --abort``, keep local, hint ``fsck`` (never reset,
-never hard-fail a read).
+derived caches the reconciler rebuilds). Resolution by case: unrelated histories
+(no common ancestor) + an EMPTY local store → ``merge --allow-unrelated-histories``
+(union — nothing local can be lost); unrelated histories + a local store that already
+carries ticket events → **REFUSE**, mutate nothing, and log a ``DIVERGED`` warning
+pointing at ``rebar fsck`` / ``rebar fsck-recover`` (see ``_carries_ticket_events``);
+related + no local commits → fast-forward adopt (``reset --hard`` onto an ancestor —
+discards nothing); local strictly ahead → nothing to do; diverged → ``merge
+origin/tickets`` (union). Every merge: on conflict → ``merge --abort``, keep local,
+hint ``fsck`` (never reset, never hard-fail a read).
 
 The ≤1/min throttle + ``/tmp/.ticket-sync-<md5>`` marker live in the CALLER
 (``reads.py::ensure_fresh``), NOT here — this function is throttle-free, matching
@@ -71,6 +74,33 @@ def _ok(tracker: str, *args: str) -> bool:
     return _git(tracker, *args).returncode == 0
 
 
+def _carries_ticket_events(tracker: str) -> bool:
+    """Does this tracker's HEAD hold any ticket events at all?
+
+    The tickets store has a strict root layout: every ticket is a directory named by
+    its UUID, and every *non*-ticket root entry is dot-prefixed (``.gitignore``,
+    ``.gitattributes``, ``.pre-commit-config.yaml``, ``.store-compat.json``,
+    ``.bridge_state``, ``.ticket-write.lock``). So "carries ticket events" is exactly
+    "``git ls-tree HEAD`` names at least one entry that does not start with a dot" —
+    no walk of the tree, one cheap git call.
+
+    Two different failures hide behind "``ls-tree`` did not work", and they must answer
+    OPPOSITELY, because this predicate gates the destructive-if-wrong branch:
+
+    * **Unborn HEAD** (a tracker with no commits at all) → False. There is provably
+      nothing to lose, so the caller may safely adopt the shared branch.
+    * **HEAD resolves but its tree is unreadable** → True, i.e. REFUSE. We cannot show
+      the store is empty, and the whole point of this predicate is to fail toward
+      reporting DIVERGED rather than toward absorbing a store we could not inspect.
+    """
+    if not _ok(tracker, "rev-parse", "--verify", "HEAD"):
+        return False  # unborn HEAD: no commits, nothing at risk
+    tree = _git(tracker, "ls-tree", "--name-only", "HEAD")
+    if tree.returncode != 0:
+        return True  # HEAD exists but is unreadable — refuse rather than guess
+    return any(line.strip() and not line.startswith(".") for line in tree.stdout.splitlines())
+
+
 def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     """The locked mutation critical section (lock held, fetch already ran)."""
     remote = f"{remote_name}/{branch}"
@@ -88,12 +118,34 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     if not _ok(tracker, "rev-parse", "--verify", remote):
         return
 
-    # Unrelated histories (no common ancestor): UNION them, never discard local.
-    # The append-only event files are UUID-named so they never collide; the only
-    # shared mutable root file (.bridge_state/*) resolves via the tickets-branch
-    # .gitattributes `merge=ours` (WU-3). Reuses the diverged-path
-    # conflict net below (abort → keep local → hint fsck) — extend, don't reinvent.
+    # Unrelated histories (no common ancestor). Two sub-cases, split by whether the
+    # local store has anything to lose (see `_carries_ticket_events`):
+    #
+    #   * EMPTY local store → UNION them. Nothing local can be lost, and this is the
+    #     ordinary "fresh tracker adopts the shared branch" path. The append-only event
+    #     files are UUID-named so they never collide; the only shared mutable root file
+    #     (.bridge_state/*) resolves via the tickets-branch .gitattributes `merge=ours`
+    #     (WU-3). Reuses the diverged-path conflict net below (abort → keep local →
+    #     hint fsck) — extend, don't reinvent.
+    #
+    #   * NON-EMPTY local store → REFUSE, and mutate nothing. Two histories with no
+    #     common ancestor but events on BOTH sides is not a routine drift; it means
+    #     this clone's store and the remote's were built independently (a re-init, a
+    #     restored backup, a wrong `sync.remote`). Silently union-merging that would
+    #     graft an orphan store into the SHARED tickets branch for everyone, which is
+    #     unreviewable after the fact. Sync is best-effort and runs implicitly on
+    #     reads, so it is the wrong place to make that call: fail toward REPORTING
+    #     (a DIVERGED warning naming the operator recovery path) rather than toward
+    #     silently absorbing.
     if not _ok(tracker, "merge-base", "HEAD", remote):
+        if _carries_ticket_events(tracker):
+            logger.warning(
+                "tickets sync DIVERGED — local store and %s share no common ancestor "
+                "and the local store already carries ticket events; refusing to merge. "
+                "Local state is untouched; run: rebar fsck (then rebar fsck-recover)",
+                remote,
+            )
+            return
         _union_merge(tracker, remote, "--allow-unrelated-histories")
         return
 
@@ -168,8 +220,22 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         return
 
     # Fetch OUTSIDE the lock (only moves remote-tracking refs).
-    if not _ok(tracker, "fetch", remote_name, branch, "--quiet"):
+    #
+    # The EXPLICIT refspec is load-bearing — do NOT "simplify" this back to a bare
+    # `git fetch <remote> <branch>`. A bare fetch always writes FETCH_HEAD but only
+    # *opportunistically* writes `refs/remotes/<remote>/<branch>`: it does so when the
+    # remote's CONFIGURED refspec happens to cover that branch. A single-branch clone
+    # configures `+refs/heads/main:refs/remotes/origin/main`, which does not cover
+    # `tickets` — so the bare fetch exits 0 having created no `origin/tickets`, the
+    # `rev-parse --verify` below fails with 128, and reconverge returns early. The
+    # merge/adopt logic in `_do_reconverge` then never runs at all, silently. Naming
+    # the destination ref makes the remote-tracking ref appear regardless of the
+    # clone's configured refspec (same idiom as review_bot.gerrit_client).
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote_name}/{branch}"
+    if not _ok(tracker, "fetch", remote_name, refspec, "--quiet"):
         return
+    # Still guard on the ref existing: a remote that genuinely has no such branch
+    # fetches fine (nothing matched) and must remain a quiet no-op.
     if not _ok(tracker, "rev-parse", "--verify", f"{remote_name}/{branch}"):
         return
 
