@@ -138,6 +138,14 @@ def test_create_one_populates_binding_store(applier_mod):
     mock_client.set_entity_property.return_value = None
 
     mock_binding_store = MagicMock()
+    # A bare MagicMock answers EVERY member with a truthy Mock, including the
+    # index-lag create gate added by bug 21fc — so the create would be deferred
+    # and create_one would return None, for a ticket that has no pending binding
+    # at all. A real store returns False here (binding_store.py: the entry is
+    # absent, so it is not keyless-pending), and this is that answer. Without it
+    # the double is unfaithful to the store it stands in for, and this test would
+    # be asserting against a state that cannot occur.
+    mock_binding_store.is_keyless_pending_within_grace.return_value = False
 
     mutation = {
         "local_id": "test-bind-1234",
