@@ -129,6 +129,8 @@ def test_moved_symbols_are_importable_from_the_new_module():
         "_warn_if_zeroed_usage",
         "effective_max_iterations",
         "effective_max_tokens",
+        "build_model_settings",
+        "build_usage_limits",
     ):
         assert hasattr(structured_run, name), f"{name} did not move to structured_run.py"
 
@@ -145,5 +147,7 @@ def test_runner_no_longer_defines_the_moved_symbols():
         "_warn_if_zeroed_usage",
         "effective_max_iterations",
         "effective_max_tokens",
+        "build_model_settings",
+        "build_usage_limits",
     }
     assert not leftovers, f"runner.py still DEFINES moved symbols (copied, not moved): {leftovers}"
