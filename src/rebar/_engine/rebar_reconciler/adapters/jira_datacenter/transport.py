@@ -37,7 +37,11 @@ import time
 from email.message import Message
 from typing import Any
 
-from rebar_reconciler._backend import BackendAssigneeNotFoundError, BackendHTTPError
+from rebar_reconciler._backend import (
+    BackendAssigneeNotFoundError,
+    BackendEnvError,
+    BackendHTTPError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +92,46 @@ def build_client_from_settings(settings: Any) -> Any:
     inside ``ReconcilerConfig`` before this settings object existed
     (``_config_schema.py``); it has no bearing on certificate verification.
     """
+    # FAIL CLOSED on a missing credential, HERE — at the one point an anonymous client
+    # could come into existence (bug cd78).
+    #
+    # `resolve_jira_datacenter_settings` defaulted the PAT to "" and it was handed straight
+    # to `token_auth=`. An empty bearer token constructs fine and then issues every request
+    # ANONYMOUSLY. Two consequences make that worse than a plain error:
+    #
+    #   * it MISATTRIBUTES — Jira answers an anonymous search with "The value 'X' does not
+    #     exist for the field 'project'" (it hides projects the caller cannot browse rather
+    #     than leaking their existence), so an operator who merely forgot the export goes
+    #     hunting project keys and permissions. Observed live, CI run 30652534806.
+    #   * on an instance where anonymous CAN browse there is no error at all: the pass reads
+    #     a partial or empty view and reports a converged, successful run.
+    #
+    # `docs/user-guide.md` promises this as a security property ("a missing JIRA_PAT fails
+    # with an error naming the variable rather than falling back to anonymous access"); this
+    # is the code catching up. `Backend.assert_env_ready` already made the same check, but it
+    # is only reached on the bootstrap-band path (`_attestation.py`), so dry-run and ordinary
+    # reconcile passes went anonymous.
+    #
+    # WHY NOT AT SETTINGS RESOLUTION, which is the more obvious home: that function is
+    # reached from PROPERTIES (`JiraDataCenterBackend.query_project`), and on Python <= 3.11
+    # `isinstance(x, SomeRuntimeCheckableProtocol)` evaluates properties via `hasattr` — so a
+    # raise there breaks every Protocol conformance check. Python 3.12+ uses
+    # `inspect.getattr_static`, which does not execute properties, making the breakage
+    # invisible locally and visible only on the CI matrix's 3.11 leg. Here is strictly
+    # better anyway: it is the last point before the network and it cannot be reached by an
+    # attribute probe.
+    if not (settings.pat or "").strip():
+        raise BackendEnvError(
+            "JIRA_PAT is not set. The Jira Data Center backend authenticates with a "
+            "Personal Access Token read from the environment — it is environment-only and "
+            "is never accepted from a config file, so the credential cannot be committed by "
+            "accident. Export it before reconciling:\n"
+            "    export JIRA_PAT=<your personal access token>\n"
+            "Without it the reconciler would fall back to ANONYMOUS access, which typically "
+            'surfaces as a misleading "project does not exist" error (Jira hides projects '
+            "you cannot browse) or, on a permissive instance, as a silently empty pass."
+        )
+
     jira_cls = _jira_client_class()
     options: dict[str, Any] = {}
     if settings.ca_bundle:
