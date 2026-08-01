@@ -49,3 +49,17 @@ include_only = [
   "MAKEFLAGS",
   "HOMEBREW_*",
 ]
+
+[mcp_servers.serena]
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/oraios/serena@c7dbe3bd1198cf451bf7aa8fdeeab88571fa3a6e",
+  "serena",
+  "start-mcp-server",
+  "--context",
+  "codex",
+  "--project-from-cwd",
+]
+startup_timeout_sec = 120
+enabled = true
