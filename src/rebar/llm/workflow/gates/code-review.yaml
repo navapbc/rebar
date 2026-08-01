@@ -69,6 +69,9 @@ steps:
     prompt: code-review-base
     mode: structured
     output_schema: code_review_base_output
+    # Pass-1 finder. A CLASS, not a model id, so the pass follows the run's configured provider
+    # instead of pinning the gate to one vendor's model string (ticket 3768).
+    model: frontier
     with:
       ticket_id: "(code review)"
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
@@ -81,6 +84,12 @@ steps:
     needs: [triggers]
     batch:
       prompt: code-review-base
+      # Pass-1 fan-out. DECLARED INSIDE `batch:` ON PURPOSE: the interpreter builds
+      # BatchRunRequest from this sub-dict only and never reads a step-level `model:`, so putting
+      # the class up there would validate and then be silently discarded (ticket 3768). ONE rung —
+      # a multi-rung ladder escalates per criterion, which makes the resolved model per pass
+      # non-deterministic and the per-pass assertions unwritable.
+      model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.triggers.outputs.include_security }}" }
         - { prompt: code-review-performance, when: "${{ steps.triggers.outputs.include_performance }}" }
@@ -113,6 +122,12 @@ steps:
     needs: [union]
     batch:
       prompt: code-review-base
+      # Pass-1 fan-out. DECLARED INSIDE `batch:` ON PURPOSE: the interpreter builds
+      # BatchRunRequest from this sub-dict only and never reads a step-level `model:`, so putting
+      # the class up there would validate and then be silently discarded (ticket 3768). ONE rung —
+      # a multi-rung ladder escalates per criterion, which makes the resolved model per pass
+      # non-deterministic and the per-pass assertions unwritable.
+      model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.union.outputs.include_security }}" }
         - { prompt: code-review-performance, when: "${{ steps.union.outputs.include_performance }}" }
@@ -190,6 +205,8 @@ steps:
     prompt: code-review-coach
     mode: structured
     output_schema: code_review_coach
+    # Pass-4 runs on the decisive non-frontier class, matching the Pass-2 verifier above.
+    model: standard
     with:
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
       instructions: ${{ steps.coach_inputs.outputs.instructions }}
