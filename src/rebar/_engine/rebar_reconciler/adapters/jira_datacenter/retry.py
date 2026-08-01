@@ -20,12 +20,21 @@ transport module.
 
 from __future__ import annotations
 
+import random
 import sys
 import time
 from email.message import Message
 from typing import Any
 
 from rebar_reconciler._backend import BackendHTTPError
+from rebar_reconciler._errors import MAX_BACKOFF_S, parse_retry_after
+
+#: Atlassian's guidance for the Data Center token bucket is to honour ``Retry-After`` PLUS up to
+#: 20% random jitter. The jitter is not decoration: every rebar process sharing a bucket would
+#: otherwise wake in lockstep and re-collide. This is a DELIBERATE divergence from
+#: ``dispatch_one``'s 429 branch, which applies ``min(MAX_BACKOFF_S, retry_after)`` with no
+#: jitter — the parser and the ceiling are reused from ``_errors``; the delay arithmetic is not.
+_RETRY_AFTER_JITTER = 0.20
 
 
 def _connection_retry_exceptions() -> tuple[type[BaseException], ...]:
@@ -118,8 +127,55 @@ def _tls_verification_error(exc: BaseException) -> Exception | None:
     )
 
 
-def _with_connection_retry(fn: Any) -> Any:
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Seconds the SERVER asked us to wait, read off the 429 response's ``Retry-After``.
+
+    READ FROM ``exc.response.headers``, **NOT** ``exc.headers`` — verified against
+    pycontribs/jira 3.10.5 at runtime rather than assumed. ``JIRAError.__init__`` does
+    ``self.headers = kwargs.get("headers", None)`` and its own docstring describes that kwarg as
+    "will be used to get REQUEST headers"; the RESPONSE headers, the ones carrying
+    ``Retry-After``, hang off ``.response``. Reading ``.headers`` would look right, type-check,
+    and silently never find the header — so the rate-limit retry would degrade to "no header
+    present" on every single 429.
+
+    Returns ``None`` when there is no usable header, which the caller treats as "do not retry".
+    ``getattr`` throughout because a fake client in the unit tests raises an error object with
+    neither attribute, and this must not be the thing that breaks it.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    return parse_retry_after(getter("Retry-After"))
+
+
+def _rate_limit_delay(retry_after: float) -> float:
+    """``Retry-After`` plus up to 20% jitter, CLAMPED to ``MAX_BACKOFF_S``.
+
+    Jitter is added BEFORE the clamp so the ceiling is a real ceiling: jittering after clamping
+    would let the delay exceed ``MAX_BACKOFF_S`` by up to 20%, which is the sort of off-by-a-bit
+    that only shows up under the load the limiter exists for.
+    """
+    return min(MAX_BACKOFF_S, retry_after * (1.0 + random.random() * _RETRY_AFTER_JITTER))
+
+
+def _with_connection_retry(fn: Any, *, rate_limit_retry: bool = False) -> Any:
     """Run ``fn()`` with the transport's retry policy.
+
+    ``rate_limit_retry`` OPTS THIS CALL IN to retrying HTTP 429, and it **defaults to False**.
+    That default is the load-bearing part. This function is the single choke point for ALL
+    transport call sites INCLUDING ``create_issue``, ``add_comment`` and ``add_label``, and a 429
+    can arrive AFTER the server began a write with nothing in the response distinguishing that
+    from rejection at the gate — so retrying a mutation here would reintroduce the duplicate-issue
+    class bug 21fc just fixed. Opting in per call, rather than opting out, means a mutation added
+    later cannot inherit the retry by omission.
+
+    The 429 retry fires ONLY when the response carries a usable ``Retry-After``. Data Center's
+    limiter is admin-enabled and absent by default (8.6+, DC only), so with no header this
+    behaves exactly as it does today: the error is translated and raised on the first occurrence.
 
     Retries up to 2 times (3 total attempts), 2s then 5s backoff, on a
     connection-level fault (see :func:`_connection_retry_exceptions`).
@@ -142,6 +198,23 @@ def _with_connection_retry(fn: Any) -> Any:
         try:
             return fn()
         except http_errors as exc:
+            # 429 is the ONE HTTP status this function may retry, and only for a call that
+            # explicitly opted in. Everything else — every other 4xx/5xx, and every 429 on a
+            # non-opted-in call — still fails on the FIRST attempt, translated at this boundary.
+            if (
+                rate_limit_retry
+                and getattr(exc, "status_code", None) == 429
+                and attempt < 2
+                and (retry_after := _retry_after_seconds(exc)) is not None
+            ):
+                delay = _rate_limit_delay(retry_after)
+                print(
+                    f"[jira-dc-retry] HTTP 429 rate limited; server asked for "
+                    f"{retry_after}s, sleeping {delay:.2f}s (attempt {attempt + 1}) …",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                continue
             raise _as_backend_http_error(exc) from exc
         except retryable as exc:
             # Checked BEFORE the retry bookkeeping: SSLError is a ConnectionError

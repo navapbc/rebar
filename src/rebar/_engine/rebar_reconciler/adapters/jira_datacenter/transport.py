@@ -162,7 +162,7 @@ def _unwrap(obj: Any) -> Any:
     return raw if raw is not None else obj
 
 
-def _call_logged(member: str, remote_id: Any, fn: Any) -> Any:
+def _call_logged(member: str, remote_id: Any, fn: Any, *, rate_limit_retry: bool = False) -> Any:
     """Run ``fn()`` through :func:`_with_connection_retry`, logging a WARNING that
     names the transport MEMBER and the REMOTE ID before any failure propagates.
 
@@ -176,9 +176,15 @@ def _call_logged(member: str, remote_id: Any, fn: Any) -> Any:
     the thirteenth member). The exception is re-raised untouched: this observes,
     it never handles. Follows ``adapters/jira/acli_subprocess.py``'s module-level
     ``logger = logging.getLogger(__name__)`` convention.
+
+    ``rate_limit_retry`` is FORWARDED, defaulting to False. This forward is load-bearing
+    rather than cosmetic: before story S2 this function called ``_with_connection_retry(fn)``
+    with no keyword at all, so a flag threaded only as far as here would have been a no-op
+    that still type-checked — every ``_paged_search`` read would have looked opted-in and
+    retried nothing.
     """
     try:
-        return _with_connection_retry(fn)
+        return _with_connection_retry(fn, rate_limit_retry=rate_limit_retry)
     except Exception as exc:
         logger.warning(
             "jira-datacenter transport: %s failed for remote id %r: %r", member, remote_id, exc
@@ -313,7 +319,12 @@ class JiraDataCenterTransport:
         return self.get_issue(from_id)
 
     def _paged_search(
-        self, jql: str, *, fields: str | None = None, page_size: int = 100
+        self,
+        jql: str,
+        *,
+        fields: str | None = None,
+        page_size: int = 100,
+        rate_limit_retry: bool = False,
     ) -> list[dict[str, Any]]:
         """Every issue matching ``jql``, paged to exhaustion — the ONE pager the
         whole-project readers share.
@@ -337,6 +348,7 @@ class JiraDataCenterTransport:
                 lambda offset=start_at: self._client.search_issues(
                     jql, startAt=offset, maxResults=page_size, fields=fields
                 ),
+                rate_limit_retry=rate_limit_retry,
             )
             batch = [_unwrap(issue) for issue in results]
             if not batch:
@@ -346,7 +358,7 @@ class JiraDataCenterTransport:
         return out
 
     def get_issuelinks_map(self, project_key: str) -> dict[str, Any]:
-        issues = self._paged_search(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}", rate_limit_retry=True)
         return {
             issue["key"]: list(issue.get("fields", {}).get("issuelinks") or []) for issue in issues
         }
@@ -360,11 +372,18 @@ class JiraDataCenterTransport:
         return _unwrap(comment)
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
-        issues = self._paged_search(f"project = {project_key}")
+        issues = self._paged_search(f"project = {project_key}", rate_limit_retry=True)
         out: dict[str, Any] = {}
         for issue in issues:
             key = issue["key"]
-            comments = _with_connection_retry(lambda k=key: self._client.comments(k))
+            # PATH B: this per-issue fetch does NOT route through `_paged_search` or
+            # `_call_logged`, so it must opt in DIRECTLY. It is one request PER ISSUE —
+            # the highest-volume read in a pass, and therefore the call most likely to
+            # trip a token bucket. Threading the flag only through `_call_logged` would
+            # have left exactly this one unprotected while every test passed.
+            comments = _with_connection_retry(
+                lambda k=key: self._client.comments(k), rate_limit_retry=True
+            )
             out[key] = {"comments": [_unwrap(c) for c in comments]}
         return out
 
@@ -458,7 +477,7 @@ class JiraDataCenterTransport:
             # Routed through the SHARED pager (9263). It was correct here first, and
             # leaving it as a fourth hand-rolled loop would mean the helper exists while
             # the method that motivated it does not use it — the two would drift.
-            for issue in self._paged_search(query, fields="parent"):
+            for issue in self._paged_search(query, fields="parent", rate_limit_retry=True):
                 if not isinstance(issue, dict):
                     continue
                 key = issue.get("key")
