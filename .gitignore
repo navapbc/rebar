@@ -56,6 +56,12 @@ htmlcov/
 # pytest --store-durations / pytest-split timings (perf logging, task 9ad9) — never committed
 .test_durations
 
+# uv lockfile — NOT committed. rebar's core dependencies are deliberately unpinned `>=`
+# (see .github/dependabot.yml: "Add a `uv` block only if a uv.lock is ever committed"), and
+# the canonical bootstrap is `make install` / `pip install -e '.[dev]'` (uv is only ever an
+# equivalent alternative in docs/local-dev-env.md). A uv.lock is thus a per-developer artifact.
+uv.lock
+
 # Serena MCP (local code-navigation tooling; per-developer)
 .serena/
 
