@@ -313,6 +313,58 @@ def _wait_until_searchable(transport: Any, project: str, key: str, timeout: floa
 # ---------------------------------------------------------------------------
 
 
+def _seed_searchable_issue(transport: Any, project: str, track_issue: Any, summary: str) -> str:
+    """Create an issue in DC and return its key once a JQL search can see it."""
+    transport.project = project
+    created = transport.create_issue({"summary": summary, "issuetype": "Task"})
+    key = created["key"]
+    track_issue(key)
+    _wait_until_searchable(transport, project, key)
+    return key
+
+
+@_skip
+@_skip_no_extra
+def test_the_inbound_create_is_PLANNED_for_a_new_dc_issue(
+    dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, track_issue: Any
+) -> None:
+    """DOES THE FETCH+DIFFER EVEN SEE THE ISSUE? Asserted separately from applying it.
+
+    Split out because the round-trip cell below failed three times for three DIFFERENT
+    reasons, and each time its one assertion ("the ticket did not appear") could not say
+    whether the differ never planned the create or the pass failed to apply it. This cell
+    answers only the first question, so the two failures stop being indistinguishable.
+
+    UNFILTERED and DRY-RUN, both deliberately. Unfiltered because `--filter-local-ids` is a
+    POST filter — a pass reported "1640 mutations computed, 0 match filter" — so a filtered
+    run cannot show whether the create was planned. Dry-run because unfiltered is only SAFE
+    in dry-run: the scrub leaves every copied ticket unbound, so an unfiltered WRITING pass
+    would file production tickets into the harness (bootstrap-strict's cap=10 would file ten).
+    Dry-run computes the plan and writes nothing.
+    """
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    key = _seed_searchable_issue(
+        dc_transport, jira_dc_project, track_issue, "rebar J11 slice — planned"
+    )
+    local_id = _jira_key_to_local_id(key)
+
+    cp = _run_reconcile(dc_store_copy_repo, "dry-run")
+    plan = _envelope(cp).get("plan", [])
+    inbound_creates = [
+        e for e in plan if e.get("direction") == "inbound" and e.get("action") == "create"
+    ]
+    mine = [
+        e for e in inbound_creates if key in str(e.get("target")) or e.get("local_id") == local_id
+    ]
+
+    assert mine, (
+        f"the differ planned NO inbound create for {key} even though the issue is searchable. "
+        f"inbound creates planned: {len(inbound_creates)}; plan size: {len(plan)}. "
+        f"stderr:\n{cp.stderr[-2000:]}"
+    )
+
+
 @_skip
 @_skip_no_extra
 def test_a_dc_issue_reaches_the_local_store_inbound(
@@ -321,15 +373,10 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     """INBOUND round-trip over the real store copy: an issue created in DC appears locally."""
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
-    dc_transport.project = jira_dc_project
-    created = dc_transport.create_issue(
-        {"summary": "rebar J11 slice — inbound", "issuetype": "Task"}
+    key = _seed_searchable_issue(
+        dc_transport, jira_dc_project, track_issue, "rebar J11 slice — inbound"
     )
-    key = created["key"]
-    track_issue(key)
     local_id = _jira_key_to_local_id(key)
-
-    _wait_until_searchable(dc_transport, jira_dc_project, key)
 
     cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=local_id)
     assert "Traceback" not in cp.stderr, f"unhandled exception in the pass:\n{cp.stderr}"
