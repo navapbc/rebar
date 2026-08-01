@@ -112,6 +112,24 @@ def test_shared_gate_signatures_live_in_the_reusable() -> None:
         )
 
 
+def test_shared_pytest_job_has_incident_timeout() -> None:
+    """A blocked pytest worker must not occupy a matrix slot until GitHub's 6-hour default.
+
+    Both the Gerrit Verified lane and post-merge branch CI consume this reusable job, so the
+    bound belongs here rather than in either caller.  Sixty minutes leaves more than 3x the
+    workflow's documented 10–16 minute macOS runtime while making hangs self-clearing.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    test_job = (workflow.get("jobs") or {}).get("test")
+    assert test_job, "_build-and-test.yml no longer defines the shared pytest matrix job"
+    assert test_job.get("timeout-minutes") == 60, (
+        "_build-and-test.yml jobs.test must set timeout-minutes: 60 so a blocked pytest "
+        "worker cannot retain each hosted matrix slot for GitHub's 360-minute default"
+    )
+
+
 def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
     """Auto-catch the drift class: any scripts/*.py a gate runs in the branch-CI lane (test.yml
     plus the reusable it calls) must also run in the Verified lane (gerrit-verify.yaml plus the
