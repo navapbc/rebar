@@ -472,3 +472,114 @@ def test_a_deleted_issue_fails_by_key_AND_by_id_so_deletions_are_not_masked(
         assert "404" in str(excinfo.value) or "does not exist" in str(excinfo.value).lower(), (
             f"a deleted issue must not resolve by {what}; got {excinfo.value!r}"
         )
+
+
+def _admin_request(
+    path: str, *, method: str = "GET", payload: dict[str, Any] | None = None
+) -> tuple[int, Any]:
+    """Minimal admin-authenticated REST v2 call, returning ``(status, body_or_None)``.
+
+    Mirrors ``conftest._request`` deliberately, for the same reason that helper mirrors
+    ``test_harness_smoke.py``'s: this harness speaks raw REST, never a client library, so
+    a test that needs the raw STATUS CODE must not route through one.
+    """
+    import base64
+    import json as _json
+
+    url = f"{_BASE.rstrip('/')}{path}"
+    body = _json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("Accept", "application/json")
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    user = os.environ.get("JIRA_DC_ADMIN", "admin")
+    password = os.environ.get("JIRA_DC_ADMIN_PASSWORD", "admin")
+    req.add_header(
+        "Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8") or ""
+            return resp.status, (_json.loads(raw) if raw.strip() else None)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            return exc.code, _json.loads(raw) if raw.strip() else None
+        except ValueError:
+            return exc.code, raw
+
+
+@_skip
+@_skip_no_extra
+def test_a_rekeyed_issue_resolves_by_id_and_records_what_the_stale_key_returns(
+    dc_transport: Any, jira_dc_project: str
+) -> None:
+    """SETTLE THE FOLKLORE, and prove the remediation under a REAL re-key.
+
+    Two research passes disagreed about what ``GET /rest/api/2/issue/{oldKey}`` returns
+    once a key is stale (200-with-new-key vs 301 vs 404), and the disagreement was never
+    resolved because a project MOVE is not performable here: pycontribs/jira 3.10.5 has no
+    move member (verified at runtime) and DC's move is a UI wizard.
+
+    A project KEY RENAME reaches the same state through the same mechanism — Jira re-keys
+    every issue in the project and keeps the old key resolvable via the ``moved_issue_key``
+    table, which is exactly the table the DC KB warns third-party movers fail to update.
+    It is reachable via REST, so it is the experiment that CAN be run.
+
+    BE PRECISE ABOUT WHAT THIS DOES AND DOES NOT SHOW: this performs a project key
+    RENAME, not an issue MOVE between projects. Both produce a stale key resolved through
+    ``moved_issue_key``, so this settles the stale-key READ behaviour; it does not prove
+    the move wizard behaves identically. The reading is recorded rather than asserted, so
+    this test reports the answer instead of encoding a guess as a contract.
+
+    What IS asserted is the load-bearing claim of the fix: after a re-key the issue still
+    resolves by its IMMUTABLE NUMERIC ID, and answers with its NEW key.
+    """
+    dc_transport.project = jira_dc_project
+    created = dc_transport.create_issue({"summary": "rebar 7c26 live — rekey", "issuetype": "Task"})
+    old_issue_key = created["key"]
+    numeric_id = created["id"]
+
+    new_project_key = (jira_dc_project[:-1] if len(jira_dc_project) >= 4 else jira_dc_project) + "Z"
+    assert new_project_key != jira_dc_project
+
+    status, body = _admin_request(
+        f"/rest/api/2/project/{jira_dc_project}", method="PUT", payload={"key": new_project_key}
+    )
+    assert status == 200, (
+        f"project key rename is the only re-key this harness can perform; it returned "
+        f"{status} {body!r}. If DC 8.17.1 refuses it, the stale-key question cannot be "
+        f"settled on this oracle at all and the ticket's AC must say so."
+    )
+    try:
+        expected_new_key = old_issue_key.replace(f"{jira_dc_project}-", f"{new_project_key}-", 1)
+
+        # THE RECORDED READING — the folklore item. Reported, not asserted into a contract.
+        stale_status, stale_body = _admin_request(f"/rest/api/2/issue/{old_issue_key}")
+        stale_key = stale_body.get("key") if isinstance(stale_body, dict) else None
+        print(
+            f"[7c26-rekey-evidence] DC {os.environ.get('JIRA_DC_VERSION', '8.17.1')} "
+            f"GET /rest/api/2/issue/{{oldKey}} after a project key rename: "
+            f"status={stale_status} body_key={stale_key!r} "
+            f"(old={old_issue_key} new={expected_new_key} id={numeric_id})"
+        )
+        assert stale_status in (200, 301, 302, 404), (
+            f"unexpected stale-key status {stale_status}; record it and widen this list"
+        )
+
+        # THE ASSERTION THAT MATTERS: the numeric id survives the re-key.
+        by_id = dc_transport.get_issue_by_rest(numeric_id)
+        assert by_id["key"] == expected_new_key, (
+            f"after a re-key the immutable id must answer with the NEW key; got "
+            f"{by_id['key']!r}, expected {expected_new_key!r} — the whole 7c26 remediation "
+            f"rests on this"
+        )
+        assert by_id["id"] == numeric_id
+    finally:
+        # Rename back so the scratch-project fixture's teardown (delete by the ORIGINAL
+        # key) still works; otherwise this test leaks a project on every run.
+        _admin_request(
+            f"/rest/api/2/project/{new_project_key}",
+            method="PUT",
+            payload={"key": jira_dc_project},
+        )
