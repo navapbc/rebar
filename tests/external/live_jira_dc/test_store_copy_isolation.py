@@ -39,17 +39,15 @@ import pytest
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 
-# Dot-entries that are NOT tickets. Ticket entries are bare ids. `.git` is not on the branch
-# listing but IS in the working copy, because the store is its own repo (see the fixture).
-_NON_TICKET_ENTRIES = {
-    ".git",
-    ".bridge_state",
-    ".gitattributes",
-    ".gitignore",
-    ".pre-commit-config.yaml",
-    ".store-compat.json",
-    ".ticket-write.lock",
-}
+
+# A ticket entry is a bare rebar id (hex-and-dashes); NOTHING that is a ticket starts with a
+# dot. Filtering structurally rather than enumerating dot-files is deliberate: an enumerated
+# list silently miscounts the moment the store gains a new marker, which is exactly what
+# happened when `run_ensures` convergence started creating `.env-id` — the copy became a
+# SUPERSET and the assertion reported "PARTIAL ... missing []", a message that contradicted
+# itself.
+def _is_ticket_entry(name: str) -> bool:
+    return not name.startswith(".")
 
 
 def _live_jira_ready() -> bool:
@@ -97,21 +95,6 @@ def _source_repo_root() -> Path:
     )
 
 
-def _tickets_branch_entries(source: Path) -> list[str]:
-    """Ticket entries on the orphan `tickets` branch, excluding its non-ticket dot-files."""
-    subprocess.run(
-        ["git", "fetch", "origin", "tickets"], cwd=source, capture_output=True, check=True
-    )
-    listing = subprocess.run(
-        ["git", "ls-tree", "--name-only", "FETCH_HEAD"],
-        cwd=source,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.split()
-    return [e for e in listing if e not in _NON_TICKET_ENTRIES]
-
-
 @pytest.fixture
 def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, monkeypatch) -> Path:
     """A fresh repo holding a SCRUBBED COPY of the project's real ticket store.
@@ -152,6 +135,24 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
         ["git", "archive", "FETCH_HEAD"], cwd=source, capture_output=True, check=True
     ).stdout
     subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
+
+    # Record the expected entry set from THE SAME FETCH_HEAD the archive came from, and compare
+    # against that later rather than re-listing the branch. The tickets branch is LIVE — rebar
+    # auto-pushes on every store write, and a concurrent agent session writes to it constantly —
+    # so re-fetching at assertion time samples a DIFFERENT commit and the counts differ for
+    # reasons that have nothing to do with the extraction. Pinning both sides to one commit is
+    # what makes the completeness check mean "the copy is whole" instead of "the branch held
+    # still".
+    listing = subprocess.run(
+        ["git", "ls-tree", "--name-only", "FETCH_HEAD"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.split()
+    (work / ".j11-expected-entries.json").write_text(
+        json.dumps(sorted(e for e in listing if _is_ticket_entry(e)))
+    )
 
     # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
     # cannot survive merely because its exact name is not enumerated above.
@@ -289,13 +290,13 @@ def test_the_store_copy_is_complete_and_scrubbed(dc_store_copy_repo: Path) -> No
     count of REMOTE Jira issues, which says nothing about the local store.
     """
     tracker = dc_store_copy_repo / ".tickets-tracker"
-    copied = {p.name for p in tracker.iterdir() if p.name not in _NON_TICKET_ENTRIES}
-    expected = set(_tickets_branch_entries(_source_repo_root()))
+    copied = {p.name for p in tracker.iterdir() if _is_ticket_entry(p.name)}
+    expected = set(json.loads((dc_store_copy_repo / ".j11-expected-entries.json").read_text()))
 
     assert copied, "the store copy is EMPTY — extraction landed somewhere the reconciler cannot see"
     assert copied == expected, (
-        f"the store copy is PARTIAL: {len(copied)} entries vs {len(expected)} on the branch; "
-        f"missing {sorted(expected - copied)[:5]}"
+        f"the store copy does not match the branch: {len(copied)} entries vs {len(expected)}; "
+        f"missing {sorted(expected - copied)[:5]}; unexpected {sorted(copied - expected)[:5]}"
     )
     survivors = sorted(str(p.relative_to(tracker)) for p in tracker.rglob(".bridge_state*"))
     assert survivors == [], f"binding/snapshot artifacts survived the scrub: {survivors}"
