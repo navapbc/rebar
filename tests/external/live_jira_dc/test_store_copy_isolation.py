@@ -183,6 +183,12 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     monkeypatch.setenv("JIRA_PAT", jira_dc_pat)
     monkeypatch.setenv("JIRA_PROJECT", jira_dc_project)
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
+    # REBAR_ROOT is what a `rebar` SUBPROCESS resolves the store from (`config.py:266`).
+    # `rebar.edit_ticket(..., repo_root=...)` shells out to the CLI, and the child does not
+    # inherit that argument — so without this it resolved the AMBIENT checkout, which in CI has
+    # no `.tickets-tracker` at all (gitignored, never fetched) and failed the store guard
+    # `_ensure_initialized` (`event_append.py:120-123`) with "ticket system not initialized".
+    monkeypatch.setenv("REBAR_ROOT", str(work))
     # Belt and braces: if a Cloud credential is inherited from the ambient environment, the
     # isolation test below would fail — but so might a mis-routed pass, so clear them here too.
     for cloud_var in ("JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"):
