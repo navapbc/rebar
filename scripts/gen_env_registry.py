@@ -41,6 +41,10 @@ KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
     "_int_pref": (1, ""),  # _snapshot/janitor.py: (table, env_name, ...)
     "_llm_str": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     "_llm_int": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
+    # Omitting this one cost four undocumented vars (bug b00f): a helper absent from this table
+    # is not an error, it is INVISIBLE — the scan walks past every call and the drift gate stays
+    # green, so a clean `--check` proves agreement with the generator, never completeness.
+    "_llm_float": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     "_int_env": (0, ""),  # review_bot/config.py
     "_severities_env": (0, ""),  # review_bot/config.py
     "_str_env": (0, ""),  # opcert_service/config.py: os.environ.get(name)

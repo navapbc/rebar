@@ -5,7 +5,7 @@
 This lists environment variables read under `src/rebar` via the following recognized read patterns (reads through other indirections are not captured — extend `KNOWN_ENV_HELPERS` in the generator to cover a new helper):
 
 - direct `os.environ["X"]` / `os.environ.get("X", …)` / `os.getenv("X", …)`
-- project env-read helpers: `_env_int`, `_int_env`, `_int_pref`, `_llm_int`, `_llm_str`, `_rebar_env`, `_severities_env`, `_str_env`, `_str_pref`
+- project env-read helpers: `_env_int`, `_int_env`, `_int_pref`, `_llm_float`, `_llm_int`, `_llm_str`, `_rebar_env`, `_severities_env`, `_str_env`, `_str_pref`
 
 | Variable | Read in | Alias/deprecation |
 |----------|---------|-------------------|
@@ -63,11 +63,14 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_CONF_THRESHOLD` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_DRAIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_DRAIN_BATCH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_DRAIN_GATE_BUDGET_MS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_K` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_LEASE_TTL_MIN` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_MAX_DOC_FREQ` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_OVERLAP_MIN_SHOULD_MATCH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_PROPOSITIONS_MAX` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config.py` |  |
@@ -78,6 +81,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_STANDARD_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LLM_TEMPERATURE` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TIMEOUT` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TOOL_TIMEOUT_S` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
@@ -155,7 +159,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_145 variables._
+_149 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
