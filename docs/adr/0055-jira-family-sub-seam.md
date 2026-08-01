@@ -143,7 +143,9 @@ and the creation-channel vocabulary. That work is `be74`'s spine — a genuinely
 (GitHub) makes it necessary — and it touches 50+ binding-store sites. Pulling it forward here
 would mean a store migration for no user-visible benefit and would delay the DC delivery.
 
-**`RemoteRef.instance` is INTENDED design, not an existing mechanism.**
+**`RemoteRef.instance` was INTENDED design when this ADR was written; it is now built —
+see the amended open-issue entry below, which also records that it protects LESS than the next
+paragraph claims (it does not prevent local-id collision).**
 `0035-reconciler-vendor-adapter-seam.md` §(d) item 4 defines
 `RemoteRef{vendor, instance, remote_id}` precisely so two deployments of one vendor never
 collide, and that is the mechanism this provenance decision is *designed* to lean on. It is not
@@ -314,9 +316,22 @@ restricted create screen. So "live testing is the oracle" is necessary and still
   and now points here.
 - **"The contract suite certifies a backend" is now a conditional claim** (§(g)), and the
   condition is enforced by a structural test rather than by discipline.
-- **`RemoteRef.instance` remains unbuilt** ([rebar:6a91-7429-e521-4a2e]). Until it is populated,
-  the shared-`jira` provenance decision is correct in design and incomplete in implementation:
-  one store reconciled against two deployments of the same vendor has no disambiguator.
+- **`RemoteRef.instance` is now BUILT — and it protects less than this ADR assumed**
+  ([rebar:6a91-7429-e521-4a2e], which amended this entry). `Backend` declares `remote_ref()`,
+  both concrete backends implement it, and `instance` is derived from the configured base URL and
+  injected at construction.
+  **The correction matters more than the implementation.** Two things this ADR ran together are
+  distinct: Cloud-vs-DC was ALREADY separated by `vendor` itself (`"jira"` vs
+  `"jira-datacenter"`), so `instance` was never needed for that; what it disambiguates is two
+  deployments of the SAME vendor. And it does **NOT** prevent the collision that actually bites —
+  `inbound_translate._jira_key_to_local_id` is `"jira-" + jira_key.lower()` and consults nothing
+  else, so two DC deployments each owning a project `DIG` still both mint `jira-dig-123`. Nothing
+  reads `instance` when a local id is minted. Making the id deployment-aware would change the id
+  scheme for every existing Jira-sourced ticket — a breaking, store-wide migration deliberately
+  not undertaken. So one store reconciled against two same-vendor deployments STILL has no
+  local-id disambiguator; it now has a typed identity value that names the deployment.
+  A `RemoteRef` is also not persisted anywhere, which is why deriving `instance` from a mutable
+  base URL is safe: a URL change re-labels nothing on disk.
 - **rebar gains its first third-party runtime dependency in the reconciler**, confined to
   `[jira-datacenter]`, lazily imported, and CI-checked absent from a default install.
 - **The DC adapter has a stated end date.** Effort on it should be corrective; effort on

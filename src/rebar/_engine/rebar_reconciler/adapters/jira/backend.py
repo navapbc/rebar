@@ -19,12 +19,14 @@ from __future__ import annotations
 from typing import Any
 
 from rebar_reconciler import inbound_fields
+from rebar_reconciler._backend import RemoteRef
 from rebar_reconciler._backend_registry import register
 from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound_fields
 from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
 from rebar_reconciler.adapters.jira_family import (
     RELATION_TO_JIRA_LINK,
     JiraIdentityConvention,
+    instance_from_base_url,
 )
 from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sanitize_label
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
@@ -147,8 +149,14 @@ class JiraBackend:
     #: a family from the backend rather than deriving one from the vendor string.
     identity_family = "jira"
 
-    def __init__(self, transport: Any) -> None:
+    def remote_ref(self, remote_id: str) -> RemoteRef:
+        """This deployment's identity for ``remote_id``. Reads constructor state only."""
+        return RemoteRef(vendor=self.vendor, instance=self.instance, remote_id=remote_id)
+
+    def __init__(self, transport: Any, instance: str = "") -> None:
         self.transport = transport
+        #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``.
+        self.instance = instance
         self.outbound = _JiraOutbound()
         self.inbound = _JiraInbound()
         self.sanitizer = _JiraSanitizer()
@@ -282,4 +290,4 @@ def _build_jira_backend(config: Any) -> JiraBackend:
     # the CORE requires, so it binds every vendor. Guarding only the new backend
     # would leave the older one free to regress silently (story J9).
     assert_transport_conforms(transport, vendor="jira")
-    return JiraBackend(transport=transport)
+    return JiraBackend(transport=transport, instance=instance_from_base_url(s.url))

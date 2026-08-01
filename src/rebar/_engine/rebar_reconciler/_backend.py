@@ -82,10 +82,21 @@ class RemoteRef:
     """A backend-neutral identity for one remote work item.
 
     ``vendor`` names the backend family (e.g. ``"jira"``); ``instance`` names the
-    concrete deployment (e.g. a Jira site / project host) so two instances of the
-    same vendor never collide; ``remote_id`` is the backend's own opaque key for
-    the item (e.g. a Jira issue key ``"DIG-1234"``). Frozen + value-equal so it can
-    be a dict key and compared by identity content.
+    concrete deployment (e.g. a Jira site / project host); ``remote_id`` is the
+    backend's own opaque key for the item (e.g. a Jira issue key ``"DIG-1234"``).
+    Frozen + value-equal so it can be a dict key and compared by identity content.
+
+    **WHAT ``instance`` DOES NOT DO** (corrected by ticket 6a91; this docstring
+    previously claimed "so two instances of the same vendor never collide", which
+    overstated it). It distinguishes two deployments of the SAME vendor *within this
+    value* — Cloud vs Data Center is already separated by ``vendor`` itself
+    (``"jira"`` vs ``"jira-datacenter"``). It does **NOT** prevent LOCAL-ID collision
+    between two same-vendor deployments: ``inbound_translate._jira_key_to_local_id``
+    is ``"jira-" + jira_key.lower()`` and consults nothing else, so two DC
+    deployments that each own a project ``DIG`` both mint ``jira-dig-123``. Making
+    the local id instance-aware would change the id scheme for every existing
+    Jira-sourced ticket — a breaking, store-wide migration, deliberately not done
+    here. A `RemoteRef` is also NOT persisted anywhere.
     """
 
     vendor: str
@@ -525,6 +536,25 @@ class Backend(Protocol):
 
     @property
     def vendor(self) -> str: ...
+
+    def remote_ref(self, remote_id: str) -> RemoteRef:
+        """This backend's identity for ``remote_id``, naming vendor AND deployment.
+
+        DECLARED HERE because the test double has implemented it since J7
+        (``tests/unit/rebar_reconciler/backend_support.py``) while the port never declared it and
+        no real backend provided it — so the contract tests ran against a fake strictly more
+        capable than production. Ticket 6a91 closed that gap.
+
+        Implementations MUST NOT resolve configuration when called: the ``instance`` value is
+        supplied at CONSTRUCTION by the ``build_backend`` factory, which already holds the
+        resolved settings. A call-time resolve reaches into ambient config, which makes the
+        backend unusable in any context that has none — and a settings-resolving PROPERTY has
+        already earned a ``Verified -1`` on this project once (change cd78: Python 3.12 changed
+        runtime-checkable ``Protocol`` ``isinstance`` from ``hasattr`` to
+        ``inspect.getattr_static``, so a property that raises breaks ``isinstance`` on CI's 3.11
+        while passing locally).
+        """
+        ...
 
     @property
     def transport(self) -> TicketTransport: ...

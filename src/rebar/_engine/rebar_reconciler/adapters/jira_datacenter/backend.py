@@ -19,10 +19,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from rebar_reconciler._backend import RemoteRef
 from rebar_reconciler._backend_registry import register
 from rebar_reconciler.adapters.jira_family import (
     RELATION_TO_JIRA_LINK,
     JiraIdentityConvention,
+    instance_from_base_url,
 )
 from rebar_reconciler.adapters.jira_family import sanitize_comment as _shared_sanitize_comment
 from rebar_reconciler.adapters.jira_family import (
@@ -190,7 +192,9 @@ def _build_jira_datacenter_backend(config: Any) -> JiraDataCenterBackend:
     # a missing member must be a loud construction failure, not a crash partway
     # through a writing pass that has already mutated the remote (story J9).
     assert_transport_conforms(transport, vendor="jira-datacenter")
-    return JiraDataCenterBackend(transport=transport, client=client)
+    return JiraDataCenterBackend(
+        transport=transport, client=client, instance=instance_from_base_url(settings.url)
+    )
 
 
 class JiraDataCenterBackend:
@@ -206,8 +210,15 @@ class JiraDataCenterBackend:
     #: ``RemoteRef.instance``, not by forking the store vocabulary.
     identity_family = "jira"
 
-    def __init__(self, transport: Any, client: Any | None = None) -> None:
+    def remote_ref(self, remote_id: str) -> RemoteRef:
+        """This deployment's identity for ``remote_id``. Reads constructor state only."""
+        return RemoteRef(vendor=self.vendor, instance=self.instance, remote_id=remote_id)
+
+    def __init__(self, transport: Any, client: Any | None = None, instance: str = "") -> None:
         self.transport = transport
+        #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``
+        #: from the resolved settings. NOT resolved at call time — see the port docstring.
+        self.instance = instance
         self.outbound = _DCOutbound()
         self.inbound = _DCInbound()
         self.sanitizer = _DCSanitizer()
