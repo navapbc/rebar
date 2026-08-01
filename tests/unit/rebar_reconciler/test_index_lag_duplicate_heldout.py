@@ -269,3 +269,105 @@ def test_create_one_proceeds_normally_once_the_grace_window_has_passed() -> None
         binding_store=_Store(),
     )
     assert client.created, "the create was suppressed even outside the grace window"
+
+
+# ---------------------------------------------------------------------------
+# The WHOLE path — the criterion the ticket warned a partial test would fake
+# ---------------------------------------------------------------------------
+
+
+def test_the_whole_crash_recover_differ_create_path_creates_exactly_one_issue(store) -> None:
+    """THE HEADLINE CRITERION: drive crash -> recover -> differ -> create as ONE sequence
+    against the REAL ``BindingStore`` and assert EXACTLY ONE issue exists at the end.
+
+    Why this test has to exist even though the two sites are already covered separately:
+    the ticket's own analysis warns that "a test asserting only 'recover_pending did not
+    unbind' passes today's code path while the duplicate is still written". The same is
+    true in reverse — driving ``create_one`` with a hand-written double that returns True
+    for the gate proves the gate works, not that the REAL store ever reports True at the
+    moment the differ reaches the create branch. Only the continuous sequence, on the real
+    store, rules out a fix that is correct at each site and broken at the seam between
+    them.
+    """
+    from rebar_reconciler.dispatch_one import create_one
+
+    client = _LaggingIndexClient()  # DC-1 already landed in the crashed pass, unindexed
+
+    # (a) CRASH during create_issue -> the write-ahead record is keyless-pending.
+    store.bind_pending("t1")
+
+    # (b) RECOVER: the search cannot see DC-1, so recovery must NOT unbind.
+    assert store.recover_pending_bindings(client) == 0
+    assert "t1" in store.pending_bindings(), (
+        "recovery unbound on one unindexed search — the next pass would now create a duplicate"
+    )
+
+    # (c) DIFFER: its gate is `get_jira_key(local_id) is None`, which is TRUE for a
+    #     keyless-pending entry — so the differ really does reach the create branch.
+    #     This is the step that makes fixing recovery alone insufficient.
+    assert store.get_jira_key("t1") is None
+
+    # (d) CREATE: the write site must defer rather than write the second issue.
+    deferred: list = []
+    create_one(
+        {"local_id": "t1", "fields": {"summary": "s"}},
+        client,
+        deferred_creates=deferred,
+        binding_store=store,
+    )
+
+    total_issues = 1 + len(client.created)  # the pre-existing DC-1 + anything written now
+    assert total_issues == 1, (
+        f"EXACTLY ONE issue must exist for this ticket; found {total_issues} "
+        f"(new writes: {client.created}) — this is the duplicate 21fc exists to prevent"
+    )
+    assert deferred, "the create was dropped rather than deferred; it would never be retried"
+
+    # (e) ONCE THE INDEX CATCHES UP the pending entry binds to the issue that was always
+    #     there, and the differ's create branch closes — still exactly one issue.
+    client.index_caught_up = True
+    assert store.recover_pending_bindings(client) == 1
+    assert store.get_jira_key("t1") == "DC-1"
+    assert 1 + len(client.created) == 1
+
+
+def test_the_cloud_path_is_unaffected_beyond_the_deferral(store) -> None:
+    """CLOUD-PATH REGRESSION GUARD. ``create_one`` and ``BindingStore`` are SHARED core,
+    not DC-only, so this change reaches the Cloud path too and has to be held to that.
+
+    The intended blast radius is exactly one thing: a create is deferred while a
+    KEYLESS-PENDING binding is inside the grace window. Everything else must be
+    byte-for-byte the old behaviour. The two cases below are the ones a Cloud deployment
+    actually runs — an ordinary new ticket, and a ticket whose create genuinely never
+    landed — and neither may pay for the recovery path.
+    """
+    from rebar_reconciler.dispatch_one import create_one
+
+    # 1. The overwhelmingly common Cloud case: a brand-new ticket, no binding at all.
+    #    It must be created IMMEDIATELY — no deferral, no extra latency.
+    client = _LaggingIndexClient()
+    deferred: list = []
+    create_one(
+        {"local_id": "cloud-new", "fields": {"summary": "s"}},
+        client,
+        deferred_creates=deferred,
+        binding_store=store,
+    )
+    assert client.created, "an ordinary new ticket was deferred; the happy path regressed"
+    assert deferred == [], "an ordinary new ticket must not be deferred at all"
+
+    # 2. A create that genuinely never landed: suppressed only until the window expires,
+    #    then created. The fix must not trade a rare duplicate for a permanent omission.
+    store.bind_pending("cloud-orphan")
+    store._data["bindings"]["cloud-orphan"]["created_at"] = "2000-01-01T00:00:00Z"
+    before = len(client.created)
+    create_one(
+        {"local_id": "cloud-orphan", "fields": {"summary": "s"}},
+        client,
+        deferred_creates=[],
+        binding_store=store,
+    )
+    assert len(client.created) == before + 1, (
+        "a ticket past the grace window was still suppressed — the deferral is unbounded, "
+        "which is a permanent silent omission rather than a delay"
+    )
