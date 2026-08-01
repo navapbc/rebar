@@ -383,11 +383,21 @@ def finalize_verdict(
     coverage: dict[str, Any],
     runner_name: str | None,
     model: str | None,
+    provider_provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the terminal ``plan_review_verdict`` from a partition + coaching +
     coverage. Computes the verdict string (a DET block ⇒ BLOCK; an unavailable/
     unresolved LLM tier ⇒ INDETERMINATE; else PASS), records the counts on coverage,
-    and returns the verdict dict. Shared by ``drift_refresh`` and the workflow ops."""
+    and returns the verdict dict. Shared by ``drift_refresh`` and the workflow ops.
+
+    ``provider_provenance`` is the record the runner already assembled for the call that
+    actually ran (``capabilities.provenance_for`` via ``findings.finalize_outcome``); it is
+    CARRIED here, never recomputed — a second resolution at this site can diverge from the
+    endpoint/caps that served the run (``capabilities.py`` ``provenance_for`` docstring).
+    Default ``None`` means the key is NOT set at all: absence is meaningful and says "no
+    provider record accompanies this verdict" (e.g. the DET short-circuit and the outage
+    degrade, where no LLM ran). Setting a synthesized record there would make the verdict
+    claim a provider served it when none did — the exact misattribution the record removes."""
     blocking = parts["blocking"]
     surfaced = parts["surfaced"]
     overflow = parts["overflow"]
@@ -451,7 +461,7 @@ def finalize_verdict(
             None,
         )
         note["guide_url"] = f"{_base}#{crit.lower()}" if crit else _base
-    return {
+    out: dict[str, Any] = {
         "verdict": verdict,
         "ticket_id": ctx.ticket_id,
         "ticket_type": ctx.ticket_type,
@@ -465,6 +475,11 @@ def finalize_verdict(
         "runner": runner_name,
         "model": model,
     }
+    # Set ONLY when a record was carried in: an absent key means no LLM call backs this
+    # verdict, which a sidecar reader must be able to tell apart from "a provider served it".
+    if provider_provenance is not None:
+        out["provider_provenance"] = provider_provenance
+    return out
 
 
 # ── progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002) ──────────

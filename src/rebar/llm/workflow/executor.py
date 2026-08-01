@@ -657,6 +657,18 @@ def _dispatch(
                 sr = StepResult(
                     outputs={**defaults, **sr.outputs}, status=sr.status, error=sr.error
                 )
+        # Same reason, for the one runner-stamped field that is CONDITIONAL rather than
+        # schema-declared: `provider_provenance` (343b). findings.finalize_outcome emits it only
+        # when the runner resolved a provider — FakeRunner and every canned/injected agent omit
+        # it — yet the gates wire `${{ steps.<agent>.outputs.provider_provenance }}`, so it must
+        # resolve offline too. Always-present-but-None = "no provider record for this call", which
+        # downstream carries as an ABSENT verdict key, exactly like a runner that stamped nothing.
+        if "provider_provenance" not in sr.outputs:
+            sr = StepResult(
+                outputs={**sr.outputs, "provider_provenance": None},
+                status=sr.status,
+                error=sr.error,
+            )
         return sr
     name = ctx.step.get("uses")
     handler = registry.get(name) if name is not None else None
