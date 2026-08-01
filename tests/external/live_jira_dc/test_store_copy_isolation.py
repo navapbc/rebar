@@ -276,6 +276,38 @@ def test_the_store_copy_is_complete_and_scrubbed(dc_store_copy_repo: Path) -> No
     assert survivors == [], f"binding/snapshot artifacts survived the scrub: {survivors}"
 
 
+def _wait_until_searchable(transport: Any, project: str, key: str, timeout: float = 90.0) -> None:
+    """Block until `key` is visible to a JQL SEARCH, or fail loudly naming index lag.
+
+    THE REASON THIS EXISTS, learned the expensive way. The inbound cell created an issue and
+    ran the pass immediately, and the pass reported `inbound_differ total=0` — it saw NO issue
+    at all. The fetch finds issues through `search_issues`, and Jira's Lucene index is
+    eventually consistent, so a just-created issue is not searchable yet. The issue existed;
+    the search could not see it.
+
+    This is the same eventual-consistency hazard as bug 21fc, and it fails in the worst
+    direction: without this wait the cell reports "the DC issue did not reach the local store",
+    which reads as a BRIDGE defect when it is really a timing artefact of the test. Waiting
+    here — rather than retrying the whole pass — keeps the failure honest: if the issue never
+    becomes searchable, that is what the message says.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        hits = transport.search_issues(f'project = "{project}" AND key = "{key}"')
+        if any(h.get("key") == key for h in hits):
+            return
+        time.sleep(2.0)
+    raise AssertionError(
+        f"{key} was created but never became searchable within {timeout:.0f}s "
+        f"({attempts} attempts) — Jira's index is lagging further than this suite allows. "
+        "This is NOT a bridge defect: the issue exists, the search cannot see it."
+    )
+
+
 # ---------------------------------------------------------------------------
 # The thin vertical slice — one round-trip each way, over the real store copy
 # ---------------------------------------------------------------------------
@@ -296,6 +328,8 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     key = created["key"]
     track_issue(key)
     local_id = _jira_key_to_local_id(key)
+
+    _wait_until_searchable(dc_transport, jira_dc_project, key)
 
     cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=local_id)
     assert "Traceback" not in cp.stderr, f"unhandled exception in the pass:\n{cp.stderr}"
