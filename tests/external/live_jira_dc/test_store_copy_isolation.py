@@ -378,7 +378,15 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     )
     local_id = _jira_key_to_local_id(key)
 
-    cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=local_id)
+    # PASS BOTH THE LOCAL ID AND THE JIRA KEY. The flag is named --filter-local-ids, but
+    # `_build_filter_target_set` (reconcile_helpers.py:419-434) seeds the target set with the
+    # strings VERBATIM and can only add a Jira key via `binding_store.get_jira_key(lid)` — a
+    # binding that does not exist yet for an issue arriving inbound for the first time. An
+    # inbound create's `target` IS the Jira key, so filtering on the local id alone matches
+    # NOTHING: an earlier run reported "1640 mutations computed, 0 match filter" and the pass
+    # then reported `inbound_differ total=0` POST-filter, which read like the differ had planned
+    # nothing at all. It had — the companion dry-run cell above proves it.
+    cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
     assert "Traceback" not in cp.stderr, f"unhandled exception in the pass:\n{cp.stderr}"
 
     ticket_dir = dc_store_copy_repo / ".tickets-tracker" / local_id
