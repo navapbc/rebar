@@ -148,6 +148,15 @@ steps:
     prompt: code-review-verify
     mode: structured
     output_schema: code_review_verification
+    # The STANDARD model class (task 172e). This step declared no model and so fell through to
+    # cfg.model — the FRONTIER model — which cost the Pass-2 downgrade AND silently voided the
+    # `temperature: 0` below: pydantic-ai's Anthropic adapter drops temperature for that model,
+    # so the greedy determinism the verification contract depends on was never in force.
+    # A CLASS name rather than a literal id, so the operator retargets Pass-2 by configuring the
+    # class and a step-level value does not out-rank that configuration (`resolve_model`
+    # precedence is step > workflow > cfg). Resolution is sibling 7761's wiring of
+    # config.resolve_model; before it, this string reached the runner as a literal model id.
+    model: standard
     with:
       ticket_context: ${{ steps.assemble_diff.outputs.context }}
       instructions: ${{ steps.verify_inputs.outputs.instructions }}
