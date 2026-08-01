@@ -30,6 +30,7 @@ this package; it never imports them back. See
 
 from __future__ import annotations
 
+from rebar_reconciler.adapters.jira_family.deployment import instance_from_base_url
 from rebar_reconciler.adapters.jira_family.identity import JiraIdentityConvention
 from rebar_reconciler.adapters.jira_family.probe import classify_probe_response
 from rebar_reconciler.adapters.jira_family.sanitizers import (
@@ -56,6 +57,7 @@ __all__ = [
     "InvalidLabelError",
     "JiraIdentityConvention",
     "classify_probe_response",
+    "instance_from_base_url",
     "sanitize_comment",
     "sanitize_description",
     "sanitize_label",

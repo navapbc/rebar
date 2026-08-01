@@ -194,7 +194,18 @@ capability by an `isinstance`-guarded check against the backend (a backend that 
 implement `SupportsLinks` is never asked to sync links) — capability is observed via behavior,
 not structural introspection.
 
-**4. One new identity type `RemoteRef{vendor, instance, remote_id}`.** This identity tuple
+**4. One new identity type `RemoteRef{vendor, instance, remote_id}`.**
+
+> **AMENDED by [rebar:6a91-7429-e521-4a2e].** This section originally introduced `instance` as
+> the thing that stops two deployments of one vendor colliding. That is true of the VALUE and
+> false of the STORE. `inbound_translate._jira_key_to_local_id` derives the local ticket id from
+> the Jira key alone (`"jira-" + jira_key.lower()`), so two deployments sharing a project key mint
+> the SAME local id whatever `instance` holds — nothing consults it at mint time. `vendor` already
+> separates Cloud from Data Center; `instance` distinguishes same-vendor deployments within the
+> identity value only. `RemoteRef` is not persisted, and `Backend.remote_ref()` derives `instance`
+> from the configured base URL at construction time.
+
+This identity tuple
 replaces the hardcoded `"jira"` provider literal in `apply_inbound_records.py` and the bare
 `jira_key` threaded through the apply path. `IdentityConvention` formats a `RemoteRef` to the
 backend's back-pointer label and parses it back, so provider identity is a typed value rather
