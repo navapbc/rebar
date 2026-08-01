@@ -169,6 +169,26 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
         check=True,
     )
 
+    # CONVERGE THE COPY INTO A WRITABLE STORE. A store materialised from `git archive` is
+    # NOT yet usable: rebar's store marker `.env-id` is the FIRST line of the tickets branch's
+    # own `.gitignore`, so it is absent from the archive by construction, and
+    # `composer.edit_core` (`composer.py:400`) refuses every library write with
+    # "ticket system not initialized" — the SAME message `event_append`'s `.git` guard emits,
+    # which is what made this so slow to place. The reconciler's own writes go through
+    # `event_append` and only need `.git`, so the inbound pass succeeds while a library edit
+    # fails on the identical store; that asymmetry is real, not a contradiction.
+    # `run_ensures` is rebar's idempotent ensure-registry and the sanctioned remedy for exactly
+    # this (see `infra/scripts/reviewbot-ensure-tickets.sh`, bug d220, which hit the same
+    # `.env-id` gate on a fresh single-branch clone).
+    from rebar._store.ensures import run_ensures
+
+    for _outcome in run_ensures(str(tracker)):
+        pass
+    assert (tracker / ".env-id").is_file(), (
+        "ensure-registry did not create the store marker `.env-id`; every library write "
+        "against this copy would fail with 'ticket system not initialized'"
+    )
+
     (work / "rebar.toml").write_text(
         textwrap.dedent(f"""
         [reconciler]
