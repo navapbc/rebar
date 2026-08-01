@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar.llm.errors import LLMError
+from rebar.llm.model_classes import resolve_model_string
 from rebar.llm.workflow.runners import BatchRunner, BatchRunRequest, BatchRunResult
 
 _FINDINGS_SCHEMA = "code_review_findings"
@@ -60,7 +61,13 @@ class CodeReviewBatchRunner(BatchRunner):
     def run(self, req: BatchRunRequest, agent_runner: Any = None) -> BatchRunResult:
         from rebar.llm.workflow.executor import StepContext
 
-        model = req.model_ladder[0] if req.model_ladder else None
+        # The entry rung is a MODEL CLASS name (`trivial`/`standard`/`frontier`) resolved at run
+        # time against the configured class table, so the overlays follow the RUN's provider
+        # instead of the ladder's historical bare Anthropic ids (task 7761). A non-class string
+        # resolves to itself; an EMPTY ladder still means "no per-step model" (None).
+        model = (
+            resolve_model_string(req.model_ladder[0], req.repo_root) if req.model_ladder else None
+        )
         plan: dict[str, Any] = {
             "finder": req.finder,
             "ran": [],
