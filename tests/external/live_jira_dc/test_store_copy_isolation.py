@@ -11,7 +11,9 @@ ISOLATION IS THE PRECONDITION, AND IT IS ASSERTED, NOT ASSUMED. rebar's store au
 auto-pushes to `sync.remote` on every write, so a test that mutates tickets could push into the
 project's real tickets branch, and a misconfigured backend could write into the project's real
 Jira. Three independent layers, all verified by the tests below rather than trusted:
-  1. the working repo is a fresh `git init` with NO remote — there is physically nowhere to push;
+  1. BOTH repos — the outer working repo and the `.tickets-tracker/` STORE repo, which is the
+     one `sync.remote` would actually push — are fresh `git init`s with NO remote, so there is
+     physically nowhere to push;
   2. `REBAR_SYNC_PUSH=off`;
   3. no Cloud credential is present in the environment.
 Layer 1 is the primary one because it cannot be defeated by a mis-read setting.
@@ -37,8 +39,10 @@ import pytest
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 
-# Dot-entries on the `tickets` branch that are NOT tickets. Ticket entries are bare ids.
+# Dot-entries that are NOT tickets. Ticket entries are bare ids. `.git` is not on the branch
+# listing but IS in the working copy, because the store is its own repo (see the fixture).
 _NON_TICKET_ENTRIES = {
+    ".git",
     ".bridge_state",
     ".bridge_state.bak-retarget",
     ".gitattributes",
@@ -113,16 +117,33 @@ def _tickets_branch_entries(source: Path) -> list[str]:
 def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, monkeypatch) -> Path:
     """A fresh repo holding a SCRUBBED COPY of the project's real ticket store.
 
-    Fresh `git init`, no remote, tickets extracted INTO `.tickets-tracker/`, every
-    `.bridge_state*` artifact removed, and a `rebar.toml` written pointing at the harness —
-    the copied tree carries tickets, not reconciler settings, so the config has to be created
-    here or the pass would have no backend at all.
+    TWO repos, mirroring the real layout, because the store IS a git repo of its own.
+    `.tickets-tracker/` is gitignored by the outer checkout and lives on the orphan `tickets`
+    branch, and the reconciler commits into it directly — `git -C <root>/.tickets-tracker
+    commit`. A first attempt extracted the tickets into a plain directory inside a single
+    outer repo, and every store write then failed with `CalledProcessError(128)` ("not a git
+    repository"): the pass reported "binding-store commit to tickets branch failed" and the
+    inbound ticket never landed. So the tracker gets its own `git init` on a `tickets` branch,
+    and the outer repo gitignores it exactly as a real checkout does.
+
+    NEITHER repo gets a remote — that is the primary isolation layer — and both get a local
+    committer identity, since a CI runner has no global one and `git commit` would otherwise
+    fail for a second, unrelated reason.
     """
     source = _source_repo_root()
     work = tmp_path / "dc-store-copy"
     tracker = work / ".tickets-tracker"
     tracker.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+
+    def _init(repo: Path, branch: str) -> None:
+        subprocess.run(["git", "init", "-q", "-b", branch], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "harness@example.invalid"], cwd=repo, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "rebar J11 harness"], cwd=repo, check=True)
+
+    _init(work, "main")
+    (work / ".gitignore").write_text(".tickets-tracker/\n")
 
     # Materialise the orphan branch INTO .tickets-tracker/ (see the module docstring).
     subprocess.run(
@@ -137,6 +158,16 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     # (.bridge_state.bak-retarget) cannot survive by not being named explicitly.
     for path in sorted(tracker.glob(".bridge_state*")):
         subprocess.run(["rm", "-rf", str(path)], check=True)
+
+    # The store is its own repo on `tickets`, committed AFTER the scrub so the bindings are
+    # absent from history too, not merely from the working tree.
+    _init(tracker, "tickets")
+    subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--no-verify", "-m", "scrubbed store copy for J11"],
+        cwd=tracker,
+        check=True,
+    )
 
     (work / "rebar.toml").write_text(
         textwrap.dedent(f"""
@@ -200,13 +231,20 @@ def test_the_working_repo_is_isolated_from_this_project(dc_store_copy_repo: Path
     Deliberately NOT asserted via `sync.remote`, which defaults to "origin" whether or not
     that remote exists — reading it would prove nothing about where a push could actually go.
     """
-    remotes = subprocess.run(
-        ["git", "remote"], cwd=dc_store_copy_repo, text=True, capture_output=True, check=True
-    ).stdout.strip()
-    assert remotes == "", (
-        f"the working repo has git remote(s) {remotes!r} — a store write here could push into "
-        "this project's real tickets branch"
-    )
+    # BOTH repos, and the tracker is the one that actually matters: it is the store, so it is
+    # what `sync.remote` would push. Checking only the outer repo would leave the real hazard
+    # unasserted while looking thorough.
+    for repo, what in (
+        (dc_store_copy_repo, "the working repo"),
+        (dc_store_copy_repo / ".tickets-tracker", "the STORE repo"),
+    ):
+        remotes = subprocess.run(
+            ["git", "remote"], cwd=repo, text=True, capture_output=True, check=True
+        ).stdout.strip()
+        assert remotes == "", (
+            f"{what} has git remote(s) {remotes!r} — a store write here could push into this "
+            "project's real tickets branch"
+        )
     assert os.environ.get("REBAR_SYNC_PUSH") == "off"
     for cloud_var in ("JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"):
         assert not os.environ.get(cloud_var), (
