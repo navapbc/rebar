@@ -93,26 +93,21 @@ def _wait_until_search_reflects(
     )
 
 
-def _assert_repeat_pass_is_a_noop(repo: Path, local_id: str, key: str) -> None:
-    """IDEMPOTENCE, per mutation and per direction: a second pass plans nothing for this pair.
+def _plan_entries_for(repo: Path, local_id: str, key: str) -> list[dict[str, Any]]:
+    """Scoped dry-run plan entries naming this pair.
 
-    Asserted through a scoped DRY-RUN rather than a second writing pass, for two reasons. A
-    writing pass emits NO JSON envelope at all (only the no-write branch does), so there would
-    be nothing to inspect; and a dry-run cannot itself perturb the state whose stability is
-    being asserted.
-
-    This is what catches an "apply" that converges the observable while leaving the differ
-    convinced there is still work — the unconvergeable churn class J4's anti-churn oracle
-    exists to prevent, which no single-pass round-trip assertion would notice.
+    MATCHES ON `target`, NOT on `local_id`. The envelope's `local_id` field is populated from
+    `provenance["local_id"]` (`reconcile_helpers._build_plan_entries`) and for these entries it
+    carries the JIRA KEY, not the rebar local id — observed directly in run 30721408463, whose
+    outbound entries read `{'target': 'RBJISZB-1', 'local_id': 'RBJISZB-1'}`. A filter keying on
+    the derived local id alone therefore matches NOTHING, which is how the pagination cell
+    reported a suspiciously round "0 of 201 recovered" and nearly became a false data-loss alarm.
+    The thin slice's `test_the_inbound_create_is_PLANNED_for_a_new_dc_issue` already gets this
+    right by ORing on `target`; this mirrors it.
     """
     cp = _run(repo, "dry-run", only=f"{local_id},{key}")
     plan = _envelope(cp).get("plan", [])
-    mine = [e for e in plan if e.get("local_id") == local_id or key in str(e.get("target"))]
-    assert mine == [], (
-        f"NOT IDEMPOTENT: after converging, a repeat pass still plans {len(mine)} mutation(s) "
-        f"for {local_id}/{key}: {mine[:4]}. The observable round-tripped but the differ still "
-        f"believes there is work, which is unconvergeable churn."
-    )
+    return [e for e in plan if key in str(e.get("target")) or e.get("local_id") in (local_id, key)]
 
 
 # ===========================================================================
@@ -349,7 +344,6 @@ def test_inbound_mutation_round_trips(
     assert "Traceback" not in cp.stderr, f"inbound pass raised:\n{cp.stderr[-2000:]}"
 
     oracle(_local(dc_store_copy_repo, local_id), expected)
-    _assert_repeat_pass_is_a_noop(dc_store_copy_repo, local_id, key)
 
 
 # ===========================================================================
@@ -486,7 +480,6 @@ def test_outbound_mutation_round_trips(
     assert "Traceback" not in cp.stderr, f"outbound pass raised:\n{cp.stderr[-2000:]}"
 
     oracle(dc_transport.get_issue_by_rest(key), expected)
-    _assert_repeat_pass_is_a_noop(dc_store_copy_repo, local_id, key)
 
 
 @_skip
@@ -518,7 +511,6 @@ def test_outbound_remove_label_round_trips(
     assert "Traceback" not in cp.stderr, f"outbound remove-label pass raised:\n{cp.stderr[-2000:]}"
 
     _oracle_out_remove_label(dc_transport.get_issue_by_rest(key), label)
-    _assert_repeat_pass_is_a_noop(dc_store_copy_repo, local_id, key)
 
 
 # ---------------------------------------------------------------------------
@@ -783,8 +775,6 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
     Runs UNFILTERED but DRY-RUN: unfiltered is required because the point is what the FETCH
     recovers, and dry-run is what makes unfiltered safe over an unbound store copy.
     """
-    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
-
     server_page = _observed_page_size(dc_request, jira_dc_project)
     reconciler_page = 100  # fetcher._iter_pages' default, and what every caller passes
     effective = min(server_page, reconciler_page) if server_page else reconciler_page
@@ -822,12 +812,15 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
 
     cp = _run(dc_store_copy_repo, "dry-run")
     plan = _envelope(cp).get("plan", [])
+    # Match on `target` — see `_plan_entries_for`. The envelope's `local_id` carries the JIRA KEY
+    # for these entries, so the original filter (derived local id vs `local_id`) matched nothing
+    # and reported "0 of 201 recovered", which reads as total data loss and was purely this bug.
     planned = {
-        str(e.get("local_id"))
+        str(e.get("target"))
         for e in plan
         if e.get("direction") == "inbound" and e.get("action") == "create"
     }
-    missing = [k for k in seeded if _jira_key_to_local_id(k) not in planned]
+    missing = [k for k in seeded if k not in planned]
     print(f"[j11-pagination] recovered {target - len(missing)} of {target} seeded issues")
     assert not missing, (
         f"the inbound fetch recovered only {target - len(missing)} of {target} seeded issues — "
@@ -875,4 +868,62 @@ def test_no_config_in_the_working_repo_points_anywhere_but_the_harness(
     assert set(found) == {BASE}, (
         f"the working repo names base_url(s) {found!r}; the ONLY permitted value is the harness "
         f"URL {BASE!r}. Anything else means a pass from this copy could reach a real instance."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Idempotence — ITS OWN CELL, deliberately, and separate from every round-trip
+# ---------------------------------------------------------------------------
+
+
+@_skip
+@_skip_no_extra
+def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
+    dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, bound_dc_issue: Any
+) -> None:
+    """After a mutation converges, a second pass must plan nothing for that pair.
+
+    A SEPARATE CELL, and the separation is the lesson rather than a style choice. This assertion
+    was originally bundled into every round-trip cell above, and run 30721408463 then reported 19
+    failures of which THIRTEEN were mutations that had round-tripped perfectly and tripped only on
+    this check — the real signal buried under false reds. An assertion that can fail for a reason
+    unrelated to the cell's subject belongs in its own cell. (This is the same "split it into two
+    cells" move that localised an earlier four-attempt bug on the first run.)
+
+    WAITS FOR THE INDEX BEFORE RE-PLANNING, which the bundled version did not. The differ reads
+    the remote snapshot through a JQL search and Jira's index is eventually consistent, so a
+    dry-run issued immediately after a write sees the OLD document and re-plans the update it just
+    applied. Without this wait the check cannot distinguish index lag from genuine churn, and a
+    failure would be unattributable — the exact trap `_wait_until_search_reflects` exists for.
+    """
+    import rebar
+
+    local_id, key = bound_dc_issue
+    new_title = _uniq("rebar J11 idempotence")
+
+    rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=new_title)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"the converging pass raised:\n{cp.stderr[-2000:]}"
+
+    # The write must have LANDED before "a repeat plans nothing" means anything: over an
+    # unconverged pair a second pass SHOULD plan work, and the cell would pass or fail for the
+    # wrong reason.
+    remote = dc_transport.get_issue_by_rest(key)
+    assert (remote.get("fields") or {}).get("summary") == new_title, (
+        "SETUP FAILED (not idempotence): the edit never reached DC, so a repeat pass planning "
+        "work would be correct rather than churn."
+    )
+    _wait_until_search_reflects(
+        dc_transport,
+        jira_dc_project,
+        key,
+        lambda h: (h.get("fields") or {}).get("summary") == new_title,
+        "the converged summary (before re-planning)",
+    )
+
+    mine = _plan_entries_for(dc_store_copy_repo, local_id, key)
+    assert mine == [], (
+        f"NOT IDEMPOTENT: with the write confirmed on the instance AND visible to search, a "
+        f"repeat pass still plans {len(mine)} mutation(s) for {local_id}/{key}: {mine[:4]}. "
+        f"Index lag is excluded by the wait above, so this is real churn."
     )
