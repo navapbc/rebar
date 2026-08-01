@@ -44,12 +44,18 @@ def test_recovery_module_exists() -> None:
 
 
 def test_gate_dispatch_regains_real_headroom_under_the_cap() -> None:
-    """The whole point: gate_dispatch must stop sitting ON the 800 gate, not merely pass it —
-    343b adds an argument at three call sites that live in this file."""
+    """The whole point: gate_dispatch must stop sitting ON the 800 gate, not merely pass it.
+
+    CORRECTED (ticket d8ef): this used to justify itself with "343b adds an argument at three call
+    sites that live in this file". Ticket 1484 MOVED those sites out, and gate_dispatch now holds
+    ZERO `finalize_verdict` calls — they live in `workflow/plan_review_recovery.py` (3, at :223,
+    :297, :336) and `plan_review/workflow_ops.py` (2). The headroom is still worth guarding, but on
+    its own merit as a hot dispatch module rather than on a call-site count that has moved."""
     loc = _loc(_GATE_DISPATCH)
     assert loc < _HEADROOM_TARGET, (
-        f"gate_dispatch.py is {loc} LOC; the split must bring it under {_HEADROOM_TARGET} so "
-        "adding an argument at its three finalize_verdict call sites is not a build break"
+        f"gate_dispatch.py is {loc} LOC; keep it under {_HEADROOM_TARGET} so a routine change here "
+        "is not a build break (the finalize_verdict call sites it once held now live in "
+        "plan_review_recovery.py and plan_review/workflow_ops.py)"
     )
 
 
