@@ -116,6 +116,13 @@ jobs:
           rm -rf .tickets-tracker
           git worktree add -B tickets .tickets-tracker origin/tickets
 
+      - name: Configure tickets merge driver
+        # .bridge_state/* uses merge=ours; define that custom driver before the
+        # push-retry loop can merge origin/tickets into the mounted worktree.
+        run: |
+          set -euo pipefail
+          git config merge.ours.driver true
+
       - name: Sync reconciler lock refs (ref-lock backend)
         # The self-healing pass-lock/phase-gate live on refs/reconciler/* (epic
         # dust-troth-naval, ADR 0031), NOT in the tickets tree. Sync them before the
