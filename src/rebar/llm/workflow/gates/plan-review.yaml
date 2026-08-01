@@ -268,6 +268,14 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
+                # The verify step is an AGENT step, so its outputs are the runner result
+                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
+                # record for the call that actually ran (capabilities.provenance_for via
+                # findings.finalize_outcome). Carry that record; never recompute one at the
+                # verdict site (capabilities.provenance_for docstring: a second resolution can
+                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
+                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -286,6 +294,14 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
+                # The verify step is an AGENT step, so its outputs are the runner result
+                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
+                # record for the call that actually ran (capabilities.provenance_for via
+                # findings.finalize_outcome). Carry that record; never recompute one at the
+                # verdict site (capabilities.provenance_for docstring: a second resolution can
+                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
+                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
         else:
         - id: verify_inputs
           uses: plan_review_verify_inputs
@@ -373,6 +389,14 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
+                # The verify step is an AGENT step, so its outputs are the runner result
+                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
+                # record for the call that actually ran (capabilities.provenance_for via
+                # findings.finalize_outcome). Carry that record; never recompute one at the
+                # verdict site (capabilities.provenance_for docstring: a second resolution can
+                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
+                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
             else:
             - id: coach
               uses: plan_review_coach
@@ -391,6 +415,14 @@ steps:
                 hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
                 outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
                 prerequisite_coverage: ${{ steps.coach_inputs.outputs.prerequisite_coverage }}
+                # The verify step is an AGENT step, so its outputs are the runner result
+                # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance
+                # record for the call that actually ran (capabilities.provenance_for via
+                # findings.finalize_outcome). Carry that record; never recompute one at the
+                # verdict site (capabilities.provenance_for docstring: a second resolution can
+                # diverge from what ran). Every coach arm must wire it — a missed arm ships a
+                # verdict whose `provider_provenance` is silently absent, the 343b defect.
+                provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
     else:
     - id: passthrough
       uses: plan_review_passthrough

@@ -131,6 +131,14 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
         "model": ctx.inputs.get("model"),
         "trace_id": ctx.inputs.get("trace_id"),
     }
+    # Provider provenance (343b): wired from the verify agent step, which carries the runner's
+    # OWN record for the call that ran — carried, never recomputed here (a second resolution can
+    # diverge from the endpoint/caps that served the run). Set only when non-None, like `summary`
+    # below: a None means the runner resolved no provider, and an absent key is the honest
+    # record of that — it also keeps this op byte-identical to completion.py's bespoke tail.
+    provenance = ctx.inputs.get("provider_provenance")
+    if provenance is not None:
+        result["provider_provenance"] = provenance
     # Mirror the structured runner's exclude_none: only carry `summary` when present (the
     # completion_verdict schema's `summary` is a string, never null). An absent summary is the
     # common case (the verifier usually omits it); a None here would fail validation.
