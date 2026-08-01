@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from rebar._plan_clarity import evaluate_plan_clarity
+from rebar.llm import capabilities
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
@@ -43,10 +44,13 @@ _shed_to_budget = sizing.shed_to_budget
 # per-child loop, never the normal agent path.
 CONTAINER_CRITERIA = ("G3", "G4", "decomp-shape")
 
-# The minimum prompt-prefix the anthropic cache will write/read (Opus 4.8 floor).
-# Below this the parent-plan system prefix never caches, so WARMING would just add a
-# serialized call for no read benefit — fan out directly instead (story ba7e).
-CACHE_MIN_PREFIX_TOKENS = 4096
+# The minimum prompt-prefix the anthropic cache will write/read. Below this the parent-plan
+# system prefix never caches, so WARMING would just add a serialized call for no read benefit —
+# fan out directly instead (story ba7e). Re-exported from ``llm.capabilities`` (bug 7a79) so the
+# cache-effectiveness warning in ``llm/structured_run.py`` shares ONE definition of the floor
+# with this warm-up decision instead of hand-syncing a second literal; the historical call sites
+# below read this name unchanged.
+CACHE_MIN_PREFIX_TOKENS = capabilities.CACHE_MIN_PREFIX_TOKENS
 
 
 def _prefix_tokens(plan: str) -> int:
