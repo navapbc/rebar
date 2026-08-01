@@ -224,6 +224,40 @@ def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
     return states, aliases
 
 
+def counts_as_plan_material_child(state: dict) -> bool:
+    """The single predicate for "does this child count as a container's plan material".
+
+    A child is plan material only while it is LIVE: ``archived`` and ``deleted``
+    children are no longer part of the plan. Both the signer side (this module's
+    child enumeration, which feeds ``generation.own_material`` and the
+    ``plan-material-pin`` manifest) and the claim gate
+    (:func:`attest.current_material_fingerprint`) MUST obtain their child set
+    through this one helper. Spelling the status test independently at each site —
+    the signer admitting ``status != "deleted"`` while the gate relied on
+    ``list_tickets(... include_archived=False)`` — is exactly what let the two
+    fingerprints diverge and made any container with an archived child permanently
+    unclaimable (bug b7a2)."""
+    return state.get("status") not in ("deleted", "archived")
+
+
+def live_material_children(canonical_id: str, *, repo_root=None) -> list[dict]:
+    """Gate-side counterpart to the signer's child enumeration: list the container's
+    children WIDE (``include_archived=True``) and keep only those that count as plan
+    material, through :func:`counts_as_plan_material_child`. Centralising the gate's
+    enumeration here is what guarantees the claim gate and the signer cannot drift
+    apart (bug b7a2)."""
+    from rebar import _reads
+
+    return [
+        k
+        for k in (
+            _reads.list_tickets(parent=canonical_id, include_archived=True, repo_root=repo_root)
+            or []
+        )
+        if counts_as_plan_material_child(k)
+    ]
+
+
 def _context_for(
     ticket_id: str,
     states: dict[str, dict],
@@ -241,7 +275,7 @@ def _context_for(
             canonical_parent = _resolve_reference(parent, states, aliases)
         except PlanRelationSnapshotError:
             continue
-        if canonical_parent == ticket_id and candidate.get("status") != "deleted":
+        if canonical_parent == ticket_id and counts_as_plan_material_child(candidate):
             children.append({"ticket_id": candidate_id})
     return PlanContext(
         ticket_id=ticket_id,
@@ -281,7 +315,7 @@ def collect_plan_relation_snapshot(
                 canonical_parent = _resolve_reference(parent, states, aliases)
             except PlanRelationSnapshotError:
                 canonical_parent = None
-            if canonical_parent == subject_id and candidate.get("status") != "deleted":
+            if canonical_parent == subject_id and counts_as_plan_material_child(candidate):
                 child_ids.add(candidate_id)
 
         for dep in candidate.get("deps") or []:
