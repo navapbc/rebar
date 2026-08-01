@@ -769,8 +769,15 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     violations = orchestrator.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
+    # Carry the verify step's runner-stamped record (343b); never recomputed (it could diverge).
     verdict = orchestrator.finalize_verdict(
-        pctx, parts, coaching=coaching, coverage=coverage, runner_name=cfg.runner, model=cfg.model
+        pctx,
+        parts,
+        coaching=coaching,
+        coverage=coverage,
+        runner_name=cfg.runner,
+        model=cfg.model,
+        provider_provenance=ctx.inputs.get("provider_provenance"),
     )
     # R6 (epic 6982): deterministic advisory triage — bucket the surviving advisories into
     # apply-now/defer from recorded fields (no LLM), attached as a top-level verdict key. The
