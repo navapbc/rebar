@@ -1,0 +1,177 @@
+"""Shared helpers for the J11 live Data Center suites (epic e369, ticket 5200).
+
+NOT a test module — the name is deliberately not ``test_*.py`` so pytest does not collect
+it and `tests/unit/test_external_isolation.py` (which rglobs ``test_*.py``) does not treat
+it as an uncovered external test.
+
+These were module-local to ``test_store_copy_isolation.py`` until the comprehensive mutation
+suite needed them too. Plain FUNCTIONS live here; FIXTURES live in ``conftest.py``, because a
+fixture is only visible to a sibling module when pytest resolves it — importing a fixture
+function across modules does not register it. That distinction cost a full harness cycle once
+already (``dc_transport`` was module-local and the mutation cell errored at SETUP with
+"fixture 'dc_transport' not found"), and `pytest --collect-only` does NOT catch it: fixtures
+resolve at setup, so use `pytest --fixtures <module>`.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
+# The harness's admin account — the ONE user guaranteed to exist and be assignable on a
+# freshly provisioned instance, and the same value `conftest` uses to create the scratch
+# project's lead. Read from the environment with the same default so the two cannot drift.
+ADMIN_USER = os.environ.get("JIRA_DC_ADMIN", "admin")
+
+
+def is_ticket_entry(name: str) -> bool:
+    """A ticket entry is a bare rebar id; NOTHING that is a ticket starts with a dot.
+
+    Filtering structurally rather than enumerating dot-files is deliberate: an enumerated
+    list silently miscounts the moment the store gains a new marker, which is exactly what
+    happened when `run_ensures` convergence started creating `.env-id` — the copy became a
+    SUPERSET and the assertion reported "PARTIAL ... missing []", contradicting itself.
+    """
+    return not name.startswith(".")
+
+
+def live_jira_ready() -> bool:
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{BASE}/rest/api/2/serverInfo", timeout=5) as resp:
+            return bool(resp.status == 200)
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def jira_extra_installed() -> bool:
+    try:
+        import jira  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+skip_no_harness = pytest.mark.skipif(
+    not live_jira_ready(),
+    reason=(
+        f"Jira DC harness not reachable at {BASE}; start it with "
+        "`docker compose -f tests/external/live_jira_dc/docker-compose.yml up -d`"
+    ),
+)
+skip_no_extra = pytest.mark.skipif(
+    not jira_extra_installed(),
+    reason="the [jira-datacenter] extra is not installed",
+)
+
+
+def source_repo_root() -> Path:
+    """The checkout this test file lives in — the SOURCE of the store copy."""
+    return Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+    )
+
+
+def run_reconcile(repo: Path, mode: str, *, only: str | None = None):
+    """Invoke the reconciler subprocess directly so BOTH streams are observable.
+
+    ``only`` maps to ``--filter-local-ids``. Scoping is MANDATORY for writing passes here:
+    the scrub removes every binding, so an unscoped writing pass would route the whole copied
+    store down the CREATE path (`outbound_differ.py:518-520`) and file production tickets as
+    new harness issues.
+    """
+    from rebar._engine import engine_env
+
+    argv = [sys.executable, "-m", "rebar_reconciler", "--mode", mode, "--repo-root", str(repo)]
+    if only is not None:
+        argv += ["--filter-local-ids", only]
+    return subprocess.run(
+        argv, env=engine_env(str(repo)), text=True, capture_output=True, check=False
+    )
+
+
+def envelope(cp) -> dict[str, Any]:
+    out = cp.stdout.strip()
+    for line in reversed([ln for ln in out.splitlines() if ln.strip()]):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    raise AssertionError(f"no JSON envelope on stdout:\n{out}\n--stderr--\n{cp.stderr}")
+
+
+def wait_until_searchable(transport: Any, project: str, key: str, timeout: float = 90.0) -> None:
+    """Block until `key` is visible to a JQL SEARCH, or fail loudly naming index lag.
+
+    THE REASON THIS EXISTS, learned the expensive way. The inbound cell created an issue and
+    ran the pass immediately, and the pass reported `inbound_differ total=0` — it saw NO issue
+    at all. The fetch finds issues through `search_issues`, and Jira's Lucene index is
+    eventually consistent, so a just-created issue is not searchable yet. The issue existed;
+    the search could not see it.
+
+    This is the same eventual-consistency hazard as bug 21fc, and it fails in the worst
+    direction: without this wait the cell reports "the DC issue did not reach the local store",
+    which reads as a BRIDGE defect when it is really a timing artefact of the test.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        hits = transport.search_issues(f'project = "{project}" AND key = "{key}"')
+        if any(h.get("key") == key for h in hits):
+            return
+        time.sleep(2.0)
+    raise AssertionError(
+        f"{key} was created but never became searchable within {timeout:.0f}s "
+        f"({attempts} attempts) — Jira's index is lagging further than this suite allows. "
+        "This is NOT a bridge defect: the issue exists, the search cannot see it."
+    )
+
+
+def seed_searchable_issue(
+    transport: Any,
+    project: str,
+    track_issue: Any,
+    summary: str,
+    *,
+    issuetype: str = "Task",
+    extra: dict[str, Any] | None = None,
+) -> str:
+    """Create an issue in DC and return its key once a JQL search can see it."""
+    transport.project = project
+    payload: dict[str, Any] = {"summary": summary, "issuetype": issuetype}
+    if extra:
+        payload.update(extra)
+    created = transport.create_issue(payload)
+    key = created["key"]
+    track_issue(key)
+    wait_until_searchable(transport, project, key)
+    return key
+
+
+def read_local_ticket(repo: Path, local_id: str) -> dict[str, Any]:
+    """The local ticket as JSON — the inbound oracle's read side.
+
+    Reads the store through the library rather than by parsing event files, so the oracle
+    sees the same PROJECTION the product serves rather than a re-implementation of it.
+    """
+    import rebar
+
+    return rebar.show_ticket(local_id, repo_root=repo)
