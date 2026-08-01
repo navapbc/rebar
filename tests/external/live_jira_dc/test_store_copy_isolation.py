@@ -414,3 +414,75 @@ def test_the_scrubbed_copy_plans_no_deletions_or_outbound_updates(
     updates = [e for e in plan if e.get("direction") == "outbound" and e.get("action") == "update"]
     assert deletions == [], f"the scrub left bindings behind: {len(deletions)} deletions planned"
     assert updates == [], f"unexpected outbound updates over an unbound store: {len(updates)}"
+
+
+@pytest.fixture
+def bound_dc_issue(
+    dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, track_issue: Any
+):
+    """A DC issue that is BOUND to a local ticket in the store copy — `(local_id, dc_key)`.
+
+    Every outbound mutation except create is an UPDATE, and `outbound_differ.py:518-520` routes a
+    ticket with no binding to the CREATE path instead. The scrub deliberately removes every
+    binding, so without this fixture an outbound "edit" cell would CREATE a new DC issue and then
+    its oracle (`fields.summary` on "the" issue) would pass against that fresh issue rather than
+    the one it meant to change — green, and proving nothing.
+
+    Both identifiers go to `--filter-local-ids`. Filtering on the local id alone does NOT work for
+    the inbound leg: the filter can only derive a Jira key from an existing binding
+    (`reconcile_helpers.py:419-434`), which is precisely what does not exist yet, while an inbound
+    create's `target` IS the key. The plan specified the local id alone; that was insufficient.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    key = _seed_searchable_issue(
+        dc_transport, jira_dc_project, track_issue, "rebar J11 — bound fixture"
+    )
+    local_id = _jira_key_to_local_id(key)
+
+    cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"binding pass raised:\n{cp.stderr[-2000:]}"
+
+    # ASSERT the binding before yielding. If this pass silently failed, every dependent cell
+    # would fall back to the create path and pass for the wrong reason.
+    bound = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
+    assert bound == key, (
+        f"the fixture did not establish a binding: get_jira_key({local_id!r}) == {bound!r}, "
+        f"expected {key!r}. Every outbound UPDATE cell would silently become a CREATE.\n"
+        f"stdout:\n{cp.stdout[-1500:]}"
+    )
+    return local_id, key
+
+
+@_skip
+@_skip_no_extra
+def test_a_local_edit_reaches_the_dc_issue_outbound(
+    dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
+) -> None:
+    """THE EPIC'S UNPROVEN HALF: a local edit surfaces on the DC issue after an outbound pass.
+
+    Everything before this proved DATA ARRIVES (inbound). This is the other direction, and it is
+    the criterion the epic has never had evidence for — three live tests existed and none mutated
+    a local ticket then asserted the change on the DC issue.
+
+    The assertion reads the value THIS cell wrote, so it is a genuine round-trip rather than a
+    re-read of an unchanged field.
+    """
+    import rebar
+
+    local_id, key = bound_dc_issue
+    new_title = f"rebar J11 outbound proof {key}"
+
+    rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=new_title)
+
+    cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"outbound pass raised:\n{cp.stderr[-2000:]}"
+
+    remote = dc_transport.get_issue_by_rest(key)
+    summary = (remote.get("fields") or {}).get("summary")
+    assert summary == new_title, (
+        f"the local edit did NOT surface on {key}: fields.summary is {summary!r}, expected "
+        f"{new_title!r}. This is the epic's headline outbound criterion.\n"
+        f"stdout:\n{cp.stdout[-1500:]}\nstderr:\n{cp.stderr[-1500:]}"
+    )
