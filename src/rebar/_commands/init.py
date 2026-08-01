@@ -30,7 +30,7 @@ import time
 import uuid
 
 from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
-from rebar._store.gitutil import run_git_write
+from rebar._store.gitutil import run_git, run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
 from rebar.reducer.marker import ARCHIVE_MARKER_NAME, MARKER_LOCK_NAME
@@ -85,6 +85,28 @@ repos: []
 
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return run_git_write(cwd, *args, check=False)
+
+
+# A cold first fetch of the tickets branch into a freshly-initialised store can
+# legitimately take MINUTES (the shared branch is a large event-sourced history —
+# tens of thousands of commits — and may travel over an agent proxy). Bound it with the
+# COLD-materialize precedent (repo_snapshot._GIT_TIMEOUT = 300, bug 747f), NOT the 30s
+# _store incremental-op bound (push.py/sync.py). A timeout surfaces as a synthetic failed
+# CompletedProcess(124) naming the op + bound (never a bare TimeoutExpired, never a hang),
+# mirroring _store/push.py._git.
+_FETCH_TIMEOUT = 300
+
+
+def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return run_git(cwd, *args, check=False, timeout=_FETCH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", *args],
+            124,
+            "",
+            f"git {' '.join(args)} timed out after {_FETCH_TIMEOUT}s",
+        )
 
 
 def _git_ok(cwd: str, *args: str) -> bool:
@@ -372,7 +394,17 @@ def _mount_or_create_branch(repo: str, tracker: str) -> int:
             return 1
         return 0
     if remote:
-        _git(repo, "fetch", remote_name, branch)
+        fetch = _git_fetch(repo, "fetch", remote_name, branch)
+        if fetch.returncode != 0:
+            # Non-fatal: the remote-tracking ref already exists (that is why this arm
+            # ran), so the worktree still mounts off it and sync self-heals later. But
+            # surface it actionably rather than swallowing it — a timeout must never be
+            # a silent hang (bug 983f / AC2).
+            sys.stderr.write(
+                f"WARNING: could not refresh {remote_name}/{branch} before mount "
+                f"({fetch.stderr.strip() or 'fetch failed'}); mounting the existing "
+                "tracking ref — the store will reconverge on the next sync\n"
+            )
         cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add (remote branch) failed: {cp.stderr}\n")

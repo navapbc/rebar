@@ -57,6 +57,27 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     return run_git(tracker, *args, check=False)
 
 
+# The a3-remediation push is an INCREMENTAL push of a batch of ticket events against an
+# already-warm clone, so bound it with the _store incremental precedent
+# (_store/push.py._GIT_TIMEOUT = 30), NOT the 300s cold-materialize one. A timeout
+# surfaces as a synthetic failed CompletedProcess(124) naming the op + bound, which the
+# caller's existing ABORT path reports (never a bare TimeoutExpired, never a hang) —
+# mirroring _store/push.py._git (bug 983f).
+_PUSH_TIMEOUT = 30
+
+
+def _git_push(tracker: str, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return run_git(tracker, *args, check=False, timeout=_PUSH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["git", *args],
+            124,
+            "",
+            f"git {' '.join(args)} timed out after {_PUSH_TIMEOUT}s",
+        )
+
+
 def _resolve_tracker_git_dir(tracker: str) -> str:
     tracker_git = os.path.join(tracker, ".git")
     if os.path.isfile(tracker_git):
@@ -335,7 +356,7 @@ def _repair_run(
                         lines.append("ABORT: commit failed while holding batch")
                         return lines, -1
                     if _has_remote(tracker):
-                        push = _git(tracker, "push", "origin", "HEAD:tickets")
+                        push = _git_push(tracker, "push", "origin", "HEAD:tickets")
                         if push.returncode != 0:
                             lines.append(f"ABORT: push failed for batch {n}: {push.stderr.strip()}")
                             return lines, -1
