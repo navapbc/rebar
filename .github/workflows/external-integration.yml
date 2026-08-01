@@ -322,8 +322,14 @@ jobs:
           # This tier is inert unless opted in (tests/external/conftest.py's
           # _require_external_opt_in guard) — see AGENTS.md's leak-guard note.
           REBAR_RUN_EXTERNAL: "1"
+        # -rA (not the usual -ra) so the summary includes PASSED tests WITH their captured
+        # stdout. This suite's job is to produce EVIDENCE about a real Jira Data Center, and
+        # several cells record a measurement rather than assert a value — what a stale key
+        # returns after a re-key (7c26), the observed server page size. Under plain -q pytest
+        # swallows the stdout of a passing test, so those measurements were written to a log
+        # nobody could read and the run reported green having recorded nothing.
         run: >-
-          pytest -m external tests/external/live_jira_dc -q
+          pytest -m external tests/external/live_jira_dc -q -rA
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Jira DC container logs on failure
