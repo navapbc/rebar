@@ -70,7 +70,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       # (2) Version-lockstep — the intended version and every manifest must agree BEFORE build.
@@ -112,10 +112,10 @@ jobs:
           {
             echo "== pinned action SHAs (evidence-shapin) =="
             echo "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0"
-            echo "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0"
+            echo "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v6.3.0"
             echo "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1"
             echo "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1"
-            echo "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0"
+            echo "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.0"
           } > evidence-shapin.txt
           cat evidence-shapin.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       # BUILD ONCE (story 6168): the wheel + sdist are built exactly once here, their
@@ -221,7 +221,7 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - name: Install the exact wheel by filename
@@ -250,7 +250,7 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - name: Install from the sdist (REBAR_BUILD_COMMIT unset, no .git)
@@ -297,7 +297,7 @@ jobs:
           # twine/PyPI must not see the manifest as a distribution — drop it post-verify.
           rm -f dist/SHA256SUMS
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
           # PEP 740 digital attestations: the action generates + uploads
           # provenance attestations for each artifact, signed via the same OIDC

@@ -50,7 +50,7 @@ jobs:
             echo "::error::checkout pack is ${size_pack} KiB; limit is ${REBAR_CHECKOUT_PACK_LIMIT_KIB} KiB" >&2
             exit 1
           fi
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: 'pip'

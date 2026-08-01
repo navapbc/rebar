@@ -56,7 +56,7 @@ jobs:
     continue-on-error: true  # advisory: a live regression reports, it does not block
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           # pip caching is now the setup-python built-in (keyed on pyproject.toml),
