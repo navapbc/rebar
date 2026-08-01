@@ -222,6 +222,30 @@ def _with_transient_add_retry(
 # event_append's OWN object-DB ``git add`` retry (the ``_TRANSIENT_ADD_MARKERS`` loop).
 
 
+# Bound every lock-held git child (c2ba). These run INSIDE ``lock.write_lock`` holding the
+# store's MKDIR write lock, so a stuck/contended tracker volume would otherwise hold that lock
+# indefinitely — the residue that made the review-bot ``stop_grace_period`` unprovable and, on a
+# SIGKILL mid-write, orphaned the lock (the 2026-07-31 autodeploy incident). ``_store/push.py``
+# already bounds its git calls with the SAME ``_GIT_TIMEOUT``; this closes the inconsistency.
+_GIT_TIMEOUT = 30
+
+
+def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run`` a git command (captured, text) bounded by :data:`_GIT_TIMEOUT`.
+
+    The single entry point for event_append's lock-held git invocations, so every one carries
+    the same wall-clock bound as ``push.py``. Mirrors ``push.py._git``: a hung git is folded
+    into a synthetic FAILED result (returncode 124) rather than raised, so the existing
+    returncode-inspecting callers (and their retry wrappers) fail the write cleanly — which
+    unwinds out of ``write_lock`` and releases the lock — instead of surfacing a new
+    ``TimeoutExpired`` exception type. A genuine ``OSError`` (e.g. git not on PATH) still
+    propagates unchanged, preserving the best-effort helpers' ``except OSError`` behavior."""
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=_GIT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {_GIT_TIMEOUT}s")
+
+
 def _git_add(
     tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
 ) -> subprocess.CompletedProcess[str]:
@@ -238,11 +262,7 @@ def _git_add(
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_add_retry(
-            lambda: subprocess.run(
-                ["git", "-C", tracker, "add", "--", *relpaths],
-                capture_output=True,
-                text=True,
-            ),
+            lambda: _run_git(["git", "-C", tracker, "add", "--", *relpaths]),
             attempts=attempts,
         ),
         force_reclaim=True,
@@ -264,10 +284,8 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
         tracker,
         lambda: _with_transient_head_retry(
             lambda: _with_transient_add_retry(
-                lambda: subprocess.run(
-                    ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                    capture_output=True,
-                    text=True,
+                lambda: _run_git(
+                    ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
                 )
             )
         ),
@@ -281,11 +299,7 @@ def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[st
     removes the worktree files; a non-lock failure surfaces immediately."""
     return _with_index_lock_retry(
         tracker,
-        lambda: subprocess.run(
-            ["git", "-C", tracker, "rm", "-q", "--", *relpaths],
-            capture_output=True,
-            text=True,
-        ),
+        lambda: _run_git(["git", "-C", tracker, "rm", "-q", "--", *relpaths]),
         force_reclaim=True,
     )
 
@@ -305,9 +319,7 @@ def _git_commit_paths(
     return _with_index_lock_retry(
         tracker,
         lambda: _with_transient_head_retry(
-            lambda: _with_transient_add_retry(
-                lambda: subprocess.run(argv, capture_output=True, text=True)
-            )
+            lambda: _with_transient_add_retry(lambda: _run_git(argv))
         ),
         force_reclaim=True,
     )
@@ -318,11 +330,7 @@ def _restore_paths(tracker: str, relpaths: list[str]) -> None:
     (best-effort). Undoes a staged ``git rm`` whose commit then failed, so a failed delete
     leaves the store exactly as it was (the events stay present and committed)."""
     try:
-        subprocess.run(
-            ["git", "-C", tracker, "checkout", "HEAD", "--", *relpaths],
-            capture_output=True,
-            text=True,
-        )
+        _run_git(["git", "-C", tracker, "checkout", "HEAD", "--", *relpaths])
     except OSError:
         pass
 
@@ -630,11 +638,7 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
     transition path already carries this fix; the general append path did not.
     """
     try:
-        subprocess.run(
-            ["git", "-C", str(tracker), "reset", "-q", "--", relative_path],
-            capture_output=True,
-            text=True,
-        )
+        _run_git(["git", "-C", str(tracker), "reset", "-q", "--", relative_path])
     except OSError:
         pass
 
@@ -660,10 +664,8 @@ def _recover_from_unmerged(
     - ``(False, None)`` — no unmerged paths (the commit failed for another reason) or
       the retry still failed; the caller raises the generic error.
     """
-    unmerged = subprocess.run(
-        ["git", "-C", tracker, "diff", "--name-only", "--diff-filter=U"],
-        capture_output=True,
-        text=True,
+    unmerged = _run_git(
+        ["git", "-C", tracker, "diff", "--name-only", "--diff-filter=U"]
     ).stdout.split()
     if not unmerged:
         return (False, None)
@@ -679,24 +681,16 @@ def _recover_from_unmerged(
     # once. Drop the unmerged index entries (all stages) THEN restore from HEAD: this
     # reliably clears both the UU and the working-tree markers (a bare `checkout HEAD
     # --` can leave a stranded stage behind).
-    subprocess.run(
-        ["git", "-C", tracker, "rm", "-q", "--cached", "--", *unmerged],
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        ["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged], capture_output=True, text=True
-    )
+    _run_git(["git", "-C", tracker, "rm", "-q", "--cached", "--", *unmerged])
+    _run_git(["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged])
     _git_add(tracker, list(event_relpaths))
     # Same transient ``could not parse HEAD`` (read) AND object-DB temp-create (write)
     # self-heals as _git_commit — this UU-recovery commit reads HEAD and writes loose
     # objects too, and must not lose a resolved write to a runner-FS blip.
     retry = _with_transient_head_retry(
         lambda: _with_transient_add_retry(
-            lambda: subprocess.run(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True,
-                text=True,
+            lambda: _run_git(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
             )
         )
     )
@@ -718,9 +712,7 @@ def _is_invalid_object_error(text: str) -> bool:
 def _staged_index_paths(tracker: str) -> list[str]:
     """Paths currently staged in the index. ``ls-files --cached`` reads ``.git/index``
     directly (no object access), so it is safe to call on a poisoned index."""
-    r = subprocess.run(
-        ["git", "-C", tracker, "ls-files", "--cached"], capture_output=True, text=True
-    )
+    r = _run_git(["git", "-C", tracker, "ls-files", "--cached"])
     return r.stdout.splitlines() if r.returncode == 0 else []
 
 
@@ -755,16 +747,12 @@ def _recover_from_invalid_object(
     staged_before = _staged_index_paths(tracker)
     # HEAD must exist for read-tree HEAD; the cascade only arises after prior writes, so it
     # always does. If it somehow doesn't, the retry commit simply fails → the caller raises.
-    read_tree = subprocess.run(
-        ["git", "-C", tracker, "read-tree", "HEAD"], capture_output=True, text=True
-    )
+    read_tree = _run_git(["git", "-C", tracker, "read-tree", "HEAD"])
     _git_add(tracker, list(event_relpaths))
     retry = _with_transient_head_retry(
         lambda: _with_transient_add_retry(
-            lambda: subprocess.run(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg],
-                capture_output=True,
-                text=True,
+            lambda: _run_git(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
             )
         )
     )
