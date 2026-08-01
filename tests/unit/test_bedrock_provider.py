@@ -172,12 +172,16 @@ def test_warns_when_caching_was_requested_but_both_counters_are_zero(caplog):
 
     MEASURED: opus-4-5 bills the full input on every call with cache_read=0 AND cache_write=0
     and no error. The existing ``_warn_if_zeroed_usage`` CANNOT catch this: it fires on
-    input_tokens==0, and here input_tokens is a healthy 4029. Without a distinct predicate an
-    operator pays full price forever with no signal."""
+    input_tokens==0, and here input_tokens is a healthy 40290. Without a distinct predicate an
+    operator pays full price forever with no signal.
+
+    ``input_tokens`` clears ``CACHE_MIN_PREFIX_TOKENS`` (bug 7a79): the warning now asserts that
+    a CACHEABLE prompt silently failed to cache, so the fixture has to be a cacheable size. The
+    sub-floor half of that contract lives in ``tests/unit/test_cache_floor_warning.py``."""
     from rebar.llm.structured_run import warn_if_cache_ineffective
 
     usage = {
-        "input_tokens": 4029,
+        "input_tokens": 40290,
         "output_tokens": 4,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,

@@ -319,6 +319,17 @@ def provenance_for(
     }
 
 
+# The minimum prompt-prefix the anthropic cache will write/read (Opus 4.8 floor). Below this
+# a prefix never caches, so a zero/zero cache reading is the EXPECTED result rather than a
+# symptom of anything. Lives HERE, alongside ``cache_settings_for``, because it is a fact about
+# the prompt cache that BOTH sides need and neither owns (bug 7a79): the Pass-1 warm-up decision
+# (``llm/plan_review/pass1.py`` — warming a sub-floor prefix would add a serialized call for no
+# read benefit, story ba7e) and the cache-effectiveness warning
+# (``llm/structured_run.py:warn_if_cache_ineffective`` — it can only claim caching FAILED for a
+# prompt that was cacheable to begin with). ONE definition; do not restate the literal.
+CACHE_MIN_PREFIX_TOKENS = 4096
+
+
 def cache_settings_for(caps: ModelCapabilities) -> Any:
     """The provider-specific prompt-cache ``ModelSettings`` mapping for ``caps``, or ``None``.
 
