@@ -29,7 +29,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, infer_provider
+from rebar.llm.config import (
+    DEFAULT_MODEL,
+    VERIFIER_DEFAULT_MODEL,
+    infer_provider,
+    split_provider_qualifier,
+)
 from rebar.llm.errors import LLMConfigError
 
 logger = logging.getLogger(__name__)
@@ -217,11 +222,37 @@ def _deprecated_bare_model() -> str | None:
 
 
 def _resolve_target(model: str, provider: str | None) -> str:
-    # Already provider-qualified -- return as-is, never double-prefix.
-    if ":" in model:
+    """Compose the ``provider:model`` string a runner dispatches on (ticket 03b0).
+
+    AN EXPLICITLY CONFIGURED ``provider`` IS CHECKED FIRST, before the model string is scanned for a
+    qualifier at all. That guard order is the substance of this fix, and it is the one used by
+    LangChain's ``init_chat_model`` (``if not model_provider and ":" in model and prefix in
+    _BUILTIN_PROVIDERS``): if the operator said which provider to use, no amount of punctuation in
+    the model id can overrule or discard it. The original code scanned first and so dropped the
+    configured provider for any model id containing a colon — which is every canonical Bedrock id
+    (``...-v1:0``).
+
+    Whether a string is ALREADY qualified is decided by :func:`split_provider_qualifier`, never by
+    ``":" in model``.
+    """
+    if provider:
+        qualifier, _ = split_provider_qualifier(model)
+        if qualifier == provider:
+            return model  # already qualified with the SAME provider — never double-prefix
+        if qualifier:
+            # A contradiction, not a preference to resolve silently: the config names one provider
+            # and the model id names another. Whichever we picked would discard an explicit
+            # instruction, which is the defect class this ticket exists to remove.
+            raise LLMConfigError(
+                f"conflicting provider configuration: provider={provider!r} but the model id "
+                f"{model!r} is already qualified for {qualifier!r}. Remove one of them."
+            )
+        return f"{provider}:{model}"
+    qualifier, _ = split_provider_qualifier(model)
+    if qualifier:
         return model
-    resolved_provider = provider or infer_provider(model)
-    return f"{resolved_provider}:{model}" if resolved_provider else model
+    inferred = infer_provider(model)
+    return f"{inferred}:{model}" if inferred else model
 
 
 def resolve_class(name: str, slots: Mapping[str, ClassSlot]) -> str:

@@ -36,6 +36,7 @@ import contextlib
 import contextvars
 import json
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from importlib.util import find_spec
@@ -176,13 +177,42 @@ _PROVIDER_PREFIXES = (
 )
 
 
+# A provider-qualified model is ``<provider>:<model>`` — but a MODEL ID MAY ITSELF CONTAIN A COLON,
+# so "contains a colon" cannot decide whether a string is qualified. Bedrock's canonical ids carry a
+# version suffix with one (``anthropic.claude-haiku-4-5-20251001-v1:0``), which is the majority form
+# AWS publishes. Reading such an id as ``provider:model`` yielded a "provider" of
+# ``anthropic.claude-haiku-4-5-20251001-v1`` and killed the run with an error naming a fragment of
+# the operator's own model id (ticket 03b0).
+#
+# What separates the two is the SHAPE OF THE PREFIX: a provider name is a short identifier
+# (``anthropic``, ``bedrock``, ``openai-chat``, ``google_genai``), while a Bedrock model id is
+# DOTTED (``us.anthropic.claude-…``). Requiring an identifier — and so rejecting dots — separates
+# them without a provider registry to keep in sync, which matters because this runs during config
+# resolution where the optional provider packages may not be importable at all.
+_PROVIDER_QUALIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+
+def split_provider_qualifier(model: str) -> tuple[str | None, str]:
+    """Split ``provider:model`` into ``(provider, model)``, or ``(None, model)`` when the string
+    carries no provider qualifier — including when it contains a colon that belongs to the model id.
+
+    THE single place that answers "is this string provider-qualified?", so the qualifier and
+    :func:`infer_provider` cannot drift apart (they were two independent colon scans before 03b0,
+    and both were wrong in the same way)."""
+    prefix, sep, rest = model.partition(":")
+    if sep and rest and _PROVIDER_QUALIFIER_RE.match(prefix):
+        return prefix, rest
+    return None, model
+
+
 def infer_provider(model: str, explicit: str | None = None) -> str | None:
     """Resolve the provider for a model: an explicit setting, a ``provider:model``
     prefix, or inference from the model name. Returns None if undeterminable."""
     if explicit:
         return explicit
-    if ":" in model:
-        return model.split(":", 1)[0]
+    qualifier, _ = split_provider_qualifier(model)
+    if qualifier:
+        return qualifier
     low = model.lower()
     for prefix, provider in _PROVIDER_PREFIXES:
         if low.startswith(prefix):
