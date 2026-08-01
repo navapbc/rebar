@@ -52,6 +52,57 @@ def collect_failure_messages(sink: list[object]) -> Iterator[None]:
         _FAILURE_MESSAGE_SINK.reset(token)
 
 
+# The workflow step whose execution is in progress, as (step id, RAW declared `model:` token).
+# Threaded as a ContextVar because `RunRequest` — the object that reaches the runner — is
+# constructed at 25 sites under `src/rebar`, most with NO step context at all (a spec scan and an
+# enrich pass are not workflow steps). A required field would churn all 25; an optional one would
+# leave ~24 sites passing None forever. A ContextVar costs zero churn and scopes truthfully: a
+# call made OUTSIDE a step simply has no step id. Precedent: `_active_gate_config`
+# (`llm/config.py`), itself mirroring the read-root ContextVars in `llm/gate_context.py`.
+#
+# WHY THE RAW TOKEN RIDES ALONG rather than being recovered later: by the time the runner records
+# usage the class is GONE — `resolve_model` has collapsed it and `resolve_model_string` returns a
+# bare model id — and reverse lookup is UNSOUND because two classes may resolve to the same model.
+_ACTIVE_STEP: ContextVar[tuple[str, str | None] | None] = ContextVar(
+    "rebar_active_workflow_step", default=None
+)
+
+
+@contextmanager
+def step_identity(step_id: str, model_token: str | None) -> Iterator[None]:
+    """Bind the executing workflow step's identity for the dynamic extent of the block.
+
+    ``model_token`` is the RAW declared token exactly as the document wrote it (a prompt step's
+    ``model:``, a batch step's ``model_ladder[0]``) — never a resolved model id. Dropped on exit,
+    so it never leaks into a call made outside a step.
+    """
+
+    token = _ACTIVE_STEP.set((step_id, model_token))
+    try:
+        yield
+    finally:
+        _ACTIVE_STEP.reset(token)
+
+
+def active_step() -> tuple[str, str | None] | None:
+    """The executing step as ``(step_id, raw model token)``, or None outside any step."""
+
+    return _ACTIVE_STEP.get()
+
+
+def declared_model_class(model_token: str | None) -> str | None:
+    """``model_token`` when it names a model CLASS, else None.
+
+    A literal model id is not a class, and recording it as one would recreate the very ambiguity
+    this attribution exists to remove. The import is lazy because ``model_classes`` imports
+    ``llm.config``, which would otherwise drag a dependency chain into this stdlib-only sink.
+    """
+
+    from rebar.llm.model_classes import CLASS_NAMES
+
+    return model_token if model_token in CLASS_NAMES else None
+
+
 @contextmanager
 def capture_attempt_messages() -> Iterator[None]:
     """Append one pydantic-ai attempt to the active failure counter source."""
@@ -190,12 +241,27 @@ def format_repetition(usage: dict) -> str:
     )
 
 
-def record(usage: dict, *, op: str, model: str | None = None, provider: str | None = None) -> None:
+def record(
+    usage: dict,
+    *,
+    op: str,
+    model: str | None = None,
+    provider: str | None = None,
+    step: str | None = None,
+    model_class: str | None = None,
+) -> None:
     """Append one usage record for a single LLM call to ``$REBAR_USAGE_LOG`` (JSONL).
 
     ``model``/``provider`` (when known) and a UTC ISO-8601 timestamp — stamped here, not
     by the caller — make the row priceable later by :func:`summarize`'s optional
     genai-prices integration (historical prices are looked up by timestamp).
+
+    ``step``/``model_class`` (when known) make the row ATTRIBUTABLE to a workflow step. ``op``
+    alone cannot: it is the PROMPT name, and one prompt may serve several steps —
+    ``code-review-base`` is used both by the ``base`` step and as the ``round_a``/``round_b``
+    batch finder — so without ``step`` no record can be tied to the declaration that chose its
+    model. ``model_class`` is the raw declared token when it names a class (see
+    :func:`declared_model_class`), which is what makes "declared X, ran Y" visible in one row.
 
     No-op when the env var is unset (the default) or ``usage`` is empty. Best-effort: a
     telemetry sink must never break the LLM call path, so any write error is logged and
@@ -213,6 +279,13 @@ def record(usage: dict, *, op: str, model: str | None = None, provider: str | No
         row["model"] = model
     if provider:
         row["provider"] = provider
+    # Same omission pattern as model/provider above: an absent value is simply not written,
+    # rather than written as null. A row without `step` means "this call was not made inside a
+    # workflow step" — the truthful answer for a spec scan or an enrich pass.
+    if step:
+        row["step"] = step
+    if model_class:
+        row["model_class"] = model_class
     row["timestamp"] = datetime.now(timezone.utc).isoformat()
     for field in _FIELDS:
         row[field] = int(usage.get(field, 0) or 0)

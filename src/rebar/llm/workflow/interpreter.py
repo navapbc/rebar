@@ -37,6 +37,8 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from rebar.llm import usage_log
+
 from .executor import (
     _ENV_RE,
     _EXPR_RE,
@@ -395,7 +397,12 @@ def _run_batch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None:
     )
     runner = rc.batch_runner if rc.batch_runner is not None else DefaultBatchRunner()
     _t_batch = time.monotonic()
-    result = runner.run(req, rc.runner)
+    # A batch step's declared model is the ladder's ENTRY rung — the batch runners copy
+    # `model_ladder[0]` onto `cfg.model` rather than routing it through `resolve_model`, so that
+    # is the token whose honouring is in question (b690).
+    _ladder = req.model_ladder
+    with usage_log.step_identity(sid, _ladder[0] if _ladder else None):
+        result = runner.run(req, rc.runner)
     # Per-step wall-clock (toy-kink-ire): the batch finder is the dominant LLM-tier cost
     # (Pass-1 fan-out), so its duration must feed coverage["metrics"].llm_ms.
     duration_ms = round((time.monotonic() - _t_batch) * 1000, 1)
@@ -494,7 +501,12 @@ def _run_leaf(rc, step, sid, frame_key, kind, prefixes, bindings, iteration) -> 
                 frame_key=frame_key,
                 iteration=iteration,
             )
-            result = _dispatch(ctx, rc.registry, rc.runner)
+            # Bind this step's identity (id + RAW declared `model:` token) for the extent of
+            # its execution, so the usage log can attribute each LLM call to the declaration
+            # that chose its model (b690). A scripted step declares no model and simply binds
+            # None. Dropped on exit by the contextmanager.
+            with usage_log.step_identity(sid, step.get("model")):
+                result = _dispatch(ctx, rc.registry, rc.runner)
         except Exception as exc:  # noqa: BLE001 — a step failure is data, not a crash: captured as a failed StepResult (error in-band), the workflow continues
             result = StepResult(outputs={}, status="failed", error=str(exc))
         # Per-step wall-clock (toy-kink-ire): drives the workflow plan-review gate's

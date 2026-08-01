@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
@@ -178,6 +178,39 @@ class FakeRunner:
         )
 
 
+def _effective_config(base: LLMConfig, req: RunRequest) -> LLMConfig:
+    """``base`` with the request's per-call MODEL substituted, or ``base`` unchanged.
+
+    A runner instance is built ONCE per gate run and shared by every step, so ``base``
+    (``self._config``) is the run-wide FLOOR and ``req.config`` carries per-call tuning. That
+    split is not new here — :func:`rebar.llm.structured_run.build_usage_limits` states it
+    outright ("``self._config`` (``cfg``) is the floor; ``req.config`` is the per-call
+    override") and applies it to the step budget, and ``run()`` applies it to ``temperature``.
+    The MODEL was the one per-call value that did not follow the rule: ``run()`` resolved it from
+    ``self._config``, so a workflow step's declared ``model:`` — resolved through
+    ``resolve_model`` into ``req.config.model`` by ``RunnerAgentStep`` — was computed and then
+    discarded, and every call in a run went to the shared model regardless of declaration
+    (story b690).
+
+    Substituted into a COPY of the config rather than read as a loose variable at the call, so
+    every model-ADJACENT decision downstream — the ``ProviderSession``, the capability record,
+    the fallback chain, the caching settings — is taken for the model that actually runs. Copied
+    rather than assigned so honouring one step cannot change the floor for the next.
+
+    An ABSENT or EMPTY requested model falls back to ``base`` rather than raising. That is the
+    deliberate choice for a value on the LLM call path: substituting an empty model would build a
+    provider session for nothing and fail deep inside the SDK, whereas falling back to the
+    run-wide floor is the same thing a step that declares no ``model:`` at all already does.
+    ``LLMConfig.model`` defaults to ``DEFAULT_MODEL`` and so is never empty via the workflow path;
+    this branch exists for a direct library caller. The ``getattr`` matches the existing
+    ``req.config`` reads in ``run()`` (e.g. ``temperature``), which tolerate a stubbed config.
+    """
+    requested = getattr(req.config, "model", None)
+    if not requested or requested == base.model:
+        return base
+    return replace(base, model=requested)
+
+
 # ── Pydantic AI runner (provider-agnostic, behind the same seam) ──────────────
 class PydanticAIRunner:
     """Run an operation on a provider-agnostic Pydantic AI agent (epic
@@ -236,7 +269,7 @@ class PydanticAIRunner:
 
         from rebar.llm import pai_tools
 
-        cfg = self._config
+        cfg = _effective_config(self._config, req)
         _pai_check_config(cfg)
         # Best-effort OTLP→Langfuse tracing: no-op without the [tracing] extra / Langfuse
         # keys, never raises, idempotent. Write-only (never read back into a decision).
@@ -544,7 +577,20 @@ class PydanticAIRunner:
         # Durable, opt-in spend record for the weekly billable CI jobs (no-op unless
         # REBAR_USAGE_LOG is set) — the runner is the one chokepoint shared by both the
         # external tier and the live prompt-eval, so a single sink covers both.
-        usage_log.record(usage, op=_call_label, model=ran_model, provider=infer_provider(ran_model))
+        # Attribute the row to the workflow step that made the call (b690). `op` is the PROMPT
+        # name, which cannot separate steps that share a prompt, so the step id and the raw
+        # declared class token ride in on a ContextVar the step executor binds. Both are absent
+        # for a call made outside any step, and `record` omits them accordingly.
+        _step = usage_log.active_step()
+        _step_id, _model_token = _step if _step is not None else (None, None)
+        usage_log.record(
+            usage,
+            op=_call_label,
+            model=ran_model,
+            provider=infer_provider(ran_model),
+            step=_step_id,
+            model_class=usage_log.declared_model_class(_model_token),
+        )
         return result
 
 
