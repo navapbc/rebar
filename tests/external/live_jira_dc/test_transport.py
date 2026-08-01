@@ -109,34 +109,6 @@ def _fail_if_extra_missing_while_harness_is_up() -> None:
         )
 
 
-@pytest.fixture
-def dc_transport(jira_dc_pat: str) -> Any:
-    """A REAL ``JiraDataCenterTransport`` against the live harness.
-
-    Builds the client directly from harness fixtures (rather than through
-    ``load_config()``) so this test suite does not depend on process-wide config
-    discovery — ``allow_insecure=True`` mirrors what a ``[tool.rebar.reconciler]``
-    config pointed at this loopback harness would need, exercised here as a
-    direct constructor argument instead.
-    """
-    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
-    from rebar_reconciler.adapters.jira_datacenter.transport import (
-        JiraDataCenterTransport,
-        build_client_from_settings,
-    )
-
-    settings = JiraDataCenterSettings(
-        url=_BASE,
-        project="",  # overridden per-test via jira_dc_project
-        allow_insecure=True,
-        ca_bundle="",
-        resolved_statuses=frozenset({"Resolved", "Done", "Cancelled"}),
-        pat=jira_dc_pat,
-    )
-    client = build_client_from_settings(settings)
-    return JiraDataCenterTransport(client=client, project="")
-
-
 @_skip
 @_skip_no_extra
 def test_create_get_update_transition_roundtrip(

@@ -471,3 +471,35 @@ def jira_dc_pat() -> str:
     assert status in (200, 201), f"PAT creation failed: {status} {created}"
     assert created is not None and created.get("rawToken"), f"PAT missing rawToken: {created}"
     return str(created["rawToken"])
+
+
+@pytest.fixture
+def dc_transport(jira_dc_pat: str) -> Any:
+    """A REAL ``JiraDataCenterTransport`` against the live harness.
+
+    Builds the client directly from harness fixtures (rather than through ``load_config()``)
+    so this suite does not depend on process-wide config discovery — ``allow_insecure=True``
+    mirrors what a ``[tool.rebar.reconciler]`` config pointed at this loopback harness would
+    need, exercised here as a direct constructor argument instead.
+
+    LIVES IN conftest, not in a test module, because more than one module needs it: it began
+    as a local fixture in ``test_transport.py``, and ``test_store_copy_isolation.py`` then
+    failed at SETUP with "fixture 'dc_transport' not found" — a module-local fixture is not
+    visible to siblings. Sharing it here beats copying twenty lines into each consumer.
+    """
+    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+    from rebar_reconciler.adapters.jira_datacenter.transport import (
+        JiraDataCenterTransport,
+        build_client_from_settings,
+    )
+
+    settings = JiraDataCenterSettings(
+        url=_BASE,
+        project="",  # overridden per-test via jira_dc_project
+        allow_insecure=True,
+        ca_bundle="",
+        resolved_statuses=frozenset({"Resolved", "Done", "Cancelled"}),
+        pat=jira_dc_pat,
+    )
+    client = build_client_from_settings(settings)
+    return JiraDataCenterTransport(client=client, project="")
