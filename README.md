@@ -291,6 +291,16 @@ pip install '.[mcp]'      # + MCP server (FastMCP)
 pip install -e '.[dev]'
 ```
 
+> **pipx source installs and older uv.** If `pipx install "<path>[agents]"` stops
+> before installing rebar with `pipx needs uv>=0.9.17`, it selected an older host uv.
+> Retry the same source install with pipx's pip backend:
+>
+> ```bash
+> pipx install --backend pip "<path>[agents]"
+> ```
+>
+> This is a host pipx/uv toolchain mismatch, not a rebar packaging defect.
+
 > **Contributing changes?** GitHub is a **read-only mirror** — `main` only advances via
 > Gerrit's two-vote gate (`LLM-Review` + `Verified`/CI). New contributors: start with the
 > friendly walkthrough [docs/your-first-change.md](docs/your-first-change.md); the full
