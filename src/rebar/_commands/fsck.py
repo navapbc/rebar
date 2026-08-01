@@ -6,7 +6,8 @@ Ports ticket-fsck.sh. Runs five checks over the tracker:
   3. Stale ``.git/index.lock`` cleanup (>5min; the ONLY mutation, suppressed by
      the ``no_mutate=True`` argument for read-only surfaces)
   4. SNAPSHOT ``source_event_uuids`` consistency (4a still-on-disk, 4b orphans)
-  4.5 Push-pending notice (local ahead of origin/tickets; informational)
+  4.5 Tracker-vs-origin status: PUSH_PENDING (local ahead; informational) or
+      DIVERGED (no shared history / cannot fast-forward; a real integrity issue)
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the
@@ -185,10 +186,18 @@ def _scan(
         lines.extend(findings)
         issue_count += len(findings)
 
-    # ── Check 4.5: push-pending (informational; no issue_count) ──────────────
-    pp = _push_pending(tracker)
+    # ── Check 4.5: tracker-vs-origin sync status ─────────────────────────────
+    # PUSH_PENDING (local strictly ahead) is informational; DIVERGED (no common
+    # ancestor, or a common ancestor that cannot fast-forward) is a real integrity
+    # issue — the local store will never push to origin/tickets and hides remote work
+    # (bug 01e8). _store/sync.py already refuses to absorb such a store and logs a
+    # best-effort warning; fsck must surface it as a COUNTED issue so the operator
+    # sees it from the dedicated health check.
+    pp, pp_is_issue = _tracker_sync_status(tracker)
     if pp:
         lines.append(pp)
+        if pp_is_issue:
+            issue_count += 1
 
     # ── Check 4.6: configured-vs-mounted branch mismatch (informational) ──────
     bm = _branch_mismatch(tracker, repo_root)
@@ -360,35 +369,67 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
     )
 
 
-def _push_pending(tracker: str) -> str | None:
+def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
+    """Classify the local tracker against ``<remote>/<branch>`` and return
+    ``(line, is_issue)``. Mirrors the divergence taxonomy in ``_store/sync.py``:
+
+    * no common ancestor (unrelated histories) → ``DIVERGED`` **issue**;
+    * common ancestor but neither side is an ancestor of the other → ``DIVERGED``
+      **issue** (a non-fast-forwardable divergence — the local store will never push);
+    * remote is an ancestor of HEAD and HEAD is ahead → ``PUSH_PENDING`` informational;
+    * HEAD is an ancestor of remote (local merely behind) → nothing (sync ff-adopts).
+
+    Best-effort: a malformed config or an absent remote/remote-ref yields no report
+    rather than a crash.
+    """
+
     def _git(*args: str) -> subprocess.CompletedProcess:
         return run_git(tracker, *args, check=False)
 
-    # Branch + remote resolved from the MAIN repo config (the tracker's parent);
-    # best-effort: a malformed config yields no push-pending notice rather than a crash.
+    # Branch + remote resolved from the MAIN repo config (the tracker's parent).
     try:
         base = os.path.dirname(os.path.realpath(tracker))
         branch = config.tickets_branch(base)
         remote = config.tickets_remote(base)
     except config.ConfigError:
-        return None
+        return None, False
     remote_ref = f"{remote}/{branch}"
     if _git("remote", "get-url", remote).returncode != 0:
-        return None
+        return None, False
     if _git("rev-parse", "--verify", remote_ref).returncode != 0:
-        return None
-    cp = _git("rev-list", f"{remote_ref}..HEAD", "--count")
-    try:
-        ahead = int((cp.stdout or "0").strip() or "0")
-    except ValueError:
-        ahead = 0
-    if ahead > 0:
-        return (
-            f"PUSH_PENDING: local '{branch}' branch is ahead of {remote_ref} by {ahead} "
-            "commit(s) — push pending (run a ticket write to retry the push, or check "
-            "connectivity to origin)"
-        )
-    return None
+        return None, False
+
+    diverged = (
+        f"DIVERGED: local '{branch}' branch has diverged from {remote_ref} — no "
+        "shared history / cannot fast-forward. The local store was built independently "
+        "of the remote (e.g. init could not fetch the existing branch), so it hides "
+        "remote tickets and its writes will never push. Recover: run `rebar "
+        "fsck-recover`, or re-clone and re-init"
+    )
+
+    # Unrelated histories: no common ancestor at all.
+    if _git("merge-base", "HEAD", remote_ref).returncode != 0:
+        return diverged, True
+    # Remote is an ancestor of HEAD → local is ahead (or level): benign push-pending.
+    if _git("merge-base", "--is-ancestor", remote_ref, "HEAD").returncode == 0:
+        cp = _git("rev-list", f"{remote_ref}..HEAD", "--count")
+        try:
+            ahead = int((cp.stdout or "0").strip() or "0")
+        except ValueError:
+            ahead = 0
+        if ahead > 0:
+            return (
+                f"PUSH_PENDING: local '{branch}' branch is ahead of {remote_ref} by "
+                f"{ahead} commit(s) — push pending (run a ticket write to retry the "
+                "push, or check connectivity to origin)",
+                False,
+            )
+        return None, False
+    # HEAD is an ancestor of remote → local merely behind; sync will ff-adopt.
+    if _git("merge-base", "--is-ancestor", "HEAD", remote_ref).returncode == 0:
+        return None, False
+    # Common ancestor, but neither side is an ancestor of the other → true divergence.
+    return diverged, True
 
 
 def _transform_json(text: str, compat_error: dict | None = None) -> str:

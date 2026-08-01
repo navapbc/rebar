@@ -207,9 +207,10 @@ def test_fsck_push_pending_names_configured_remote(
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "-m", "ahead")
 
-    notice = fsck._push_pending(str(tracker))
+    notice, is_issue = fsck._tracker_sync_status(str(tracker))
     assert notice is not None
     assert "github/tickets" in notice and "ahead" in notice
+    assert is_issue is False, "a local-ahead tracker is push-pending, not a counted issue"
 
 
 def test_reconverge_pulls_from_configured_remote(
