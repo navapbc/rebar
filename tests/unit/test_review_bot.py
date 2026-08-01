@@ -1589,3 +1589,99 @@ def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():
     assert str(env.get("GIT_CONFIG_COUNT")) == "1"
     assert env.get("GIT_CONFIG_KEY_0") == "safe.directory"
     assert env.get("GIT_CONFIG_VALUE_0") == "/var/gerrit/site/reviewbot-tickets"
+
+
+# ── c2ba: bounded shutdown / off-loop store write ─────────────────────────────
+def test_emit_code_review_artifact_runs_off_the_event_loop(monkeypatch, tmp_path):
+    """AC1: the code_review artifact emission — a SYNCHRONOUS, lock-held store write — must run
+    OFF the asyncio event loop (via asyncio.to_thread), so it cannot block the loop and thereby
+    unenforce the drain and per-review wait_for bounds. Pre-fix voter.py called the synchronous
+    emit_code_review_artifact directly on the loop thread; this asserts it is offloaded."""
+    import threading
+
+    _patch_review(monkeypatch, [])  # clean → PASS, so review_and_vote reaches the emit path
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    emit_threads: list[int] = []
+
+    def _spy_emit(*a, **k):
+        emit_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(voter, "emit_code_review_artifact", _spy_emit, raising=True)
+
+    async def _run():
+        loop_thread = threading.get_ident()
+        res = await voter.review_and_vote(_event(), config=_cfg(tmp_path), gerrit=g, dedup=store)
+        return loop_thread, res
+
+    loop_thread, res = asyncio.run(_run())
+    assert res["status"] == "voted", res
+    assert emit_threads, "emit_code_review_artifact was never reached"
+    assert emit_threads[0] != loop_thread, (
+        "emit_code_review_artifact ran on the event-loop thread; it must be offloaded via "
+        "asyncio.to_thread so its synchronous, lock-held store write cannot block the loop "
+        "(which is what makes the drain/per-review bounds unenforceable) — c2ba."
+    )
+
+
+def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch, tmp_path):
+    """AC2: the lifespan's cancel + await path must be bounded end to end, so total shutdown has
+    a stateable upper bound even if a background task is slow to honor cancellation (a shielded
+    cleanup, a synchronous finally, or — the c2ba insight — an orphaned to_thread worker whose
+    OS thread cannot be force-cancelled). Pre-fix the unbounded `await task` hangs on exactly
+    such a task; post-fix the bounded cancel/await abandons it."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    async def _idle_worker(queue, cfg):
+        while True:  # a well-behaved worker: parks on the queue, honors cancellation promptly
+            await queue.get()
+
+    def _slow_reconcile_loop(*a, **k):
+        async def _loop():
+            cancels = 0
+            while True:
+                try:
+                    await asyncio.sleep(3600)
+                except asyncio.CancelledError:
+                    # Models a task slow to honor cancellation: it swallows the FIRST cancel and
+                    # keeps running (pre-fix, the lifespan's unbounded `await task` hangs here).
+                    # It honors a SECOND cancel so asyncio.run's own teardown stays clean.
+                    cancels += 1
+                    if cancels >= 2:
+                        raise
+
+        return _loop()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _slow_reconcile_loop, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            # Let the worker + reconcile tasks reach their await points, so the reconcile task
+            # is genuinely mid-await (not cancelled-before-start) when shutdown cancels it —
+            # that is the state in which the unbounded `await task` actually hangs.
+            await asyncio.sleep(0.05)
+
+    # Pre-fix the lifespan's unbounded `await task` hangs on the slow-to-cancel reconcile task
+    # (only the 10s safety net stops it); post-fix the lifespan's own bounded cancel/await
+    # abandons it in ~SHUTDOWN_CANCEL_SECONDS. Assert on elapsed so a hang FAILS fast rather
+    # than slow-passing at the outer cap.
+    start = time.monotonic()
+    try:
+        asyncio.run(asyncio.wait_for(_run(), timeout=10))
+    except (asyncio.TimeoutError, TimeoutError):
+        pass  # the safety net fired — elapsed asserted below turns a hang into a fast failure
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0, (
+        f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
+        "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."
+    )

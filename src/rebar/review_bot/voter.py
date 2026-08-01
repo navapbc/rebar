@@ -732,7 +732,13 @@ async def review_and_vote(
         # code_review artifact into the AMBIENT tickets store (repo_root=None — NOT the temp code
         # clone, which is already deleted) and link it relates_to the change's trailer-cited
         # tickets. Best-effort: the vote is already cast, so this never fails the review.
-        emit_code_review_artifact(
+        # emission via ``asyncio.to_thread`` so this SYNCHRONOUS, lock-held store write runs OFF
+        # the event loop (c2ba). Run inline, it blocks the loop for the whole write, which
+        # unenforces the drain and per-review ``wait_for`` bounds and stalls ``/health``. Every
+        # other blocking Gerrit/store call in this coroutine is already offloaded the same way;
+        # this was the lone on-loop residue.
+        await asyncio.to_thread(
+            emit_code_review_artifact,
             decision,
             change_id=change_id,
             revision=revision,
