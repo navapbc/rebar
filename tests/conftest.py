@@ -310,6 +310,31 @@ def _compaction_horizon_zero_by_default(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_model_classes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scrub the nine ``REBAR_LLM_<CLASS>_<FIELD>`` model-class overrides (task 7761).
+
+    The project-config layer is already sandboxed — ``REBAR_ROOT`` points at a scratch repo, so
+    a ``[tool.rebar.llm.model_classes]`` table in rebar's OWN pyproject is never read. The ENV
+    layer had no such guard, and since 7761 it matters: ``sizing.models_at_or_above`` and
+    ``config.resolve_model`` now resolve model-CLASS names, so they read the class config where
+    they previously read only the ``MODEL_LADDER`` constant. A developer or CI runner with
+    ``REBAR_LLM_STANDARD_MODEL`` exported — exactly what an operator retargeting the standard
+    class onto Bedrock has set — otherwise gets a spurious failure in
+    ``test_plan_review.py::test_is_context_limit_error_and_ladder``, whose ladder assertion is
+    written with literal BARE ids (MEASURED: index 1 becomes
+    ``bedrock:us.anthropic.claude-sonnet-4-6``). That failure names an unrelated test and reads
+    as a regression in the size ladder, so it is expensive to diagnose.
+
+    UNCONDITIONAL, like the identity guard above rather than the horizon default: the point is to
+    override a stray ambient value, not defer to it. Tests that exercise the override mechanism
+    itself (``tests/unit/test_model_classes.py``) call ``monkeypatch.setenv`` in their own body,
+    which runs after every fixture, so their value still wins."""
+    for class_name in ("TRIVIAL", "STANDARD", "FRONTIER"):
+        for field in ("MODEL", "PROVIDER", "ENDPOINT"):
+            monkeypatch.delenv(f"REBAR_LLM_{class_name}_{field}", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_config_cache() -> None:
     """``load_config`` memoizes resolution per process (perf: it is on the command
     hot path). Tests reconfigure env/files freely between cases, so clear the caches

@@ -37,6 +37,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from rebar.llm.config import resolve_gate_config
+from rebar.llm.model_classes import resolve_model_string
 from rebar.llm.runner import Runner, get_runner
 from rebar.llm.workflow.runners import (
     AgentStepRunner,
@@ -88,9 +89,15 @@ class ProductionBatchRunner(BatchRunner):
         # escalates up from here). Everything else comes from the CALLER-RESOLVED run config
         # (veiny-trout-brink) — resolve_gate_config returns the gate-run cfg when inside a run
         # (this batch runner is NOT a workflow step, so it cannot read ctx.inputs), else from_env.
+        # The rung is resolved through the MODEL CLASS table (task 7761): the ladder names
+        # classes (`trivial`/`standard`/`frontier`), and copying a rung verbatim onto cfg.model
+        # is exactly what sent Pass-1 — 41 of 42 calls on a real review — to direct Anthropic on
+        # a Bedrock-configured run. A non-class string is returned unchanged.
         cfg = resolve_gate_config(req.repo_root)
         if req.model_ladder:
-            cfg = dataclasses.replace(cfg, model=req.model_ladder[0])
+            cfg = dataclasses.replace(
+                cfg, model=resolve_model_string(req.model_ladder[0], req.repo_root)
+            )
 
         # D5: resolve each criterion's descriptor by its prompt-id and split by tier.
         single, agent, skipped = _resolve_criteria(req.criteria)
