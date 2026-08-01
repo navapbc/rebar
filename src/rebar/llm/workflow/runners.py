@@ -117,7 +117,17 @@ class DefaultBatchRunner(BatchRunner):
     def run(
         self, req: BatchRunRequest, agent_runner: AgentStepRunner | None = None
     ) -> BatchRunResult:
-        model = req.model_ladder[0] if req.model_ladder else None
+        # The entry rung is a MODEL CLASS name (`trivial`/`standard`/`frontier`) resolved at run
+        # time against the configured class table, so a rung follows the RUN's provider instead
+        # of the ladder's historical bare Anthropic ids (task 7761). A non-class string resolves
+        # to itself, and an EMPTY ladder still yields None — "no per-step model", NOT a resolved
+        # class. Imported in-method to keep this module's import edges as narrow as the module
+        # docstring's no-module-level-`executor` rule (`plan` below still records the raw ladder).
+        from rebar.llm.model_classes import resolve_model_string
+
+        model = (
+            resolve_model_string(req.model_ladder[0], req.repo_root) if req.model_ladder else None
+        )
         plan: dict[str, Any] = {
             "finder": req.finder,
             "max_batch_size": self.max_batch_size,

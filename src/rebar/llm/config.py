@@ -358,8 +358,15 @@ def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | No
     (e.g. ``anthropic:claude-opus-4-8`` or ``openai:gpt-4o``) wins, then a
     workflow-level ``model:``, then whatever the config/env/default resolved to.
     Returns a model id consumable by the runner (``provider:model`` or a bare model
-    whose provider is inferred)."""
-    return step or workflow or cfg.model
+    whose provider is inferred).
+
+    The precedence WINNER may be a reserved MODEL CLASS name (``trivial``/``standard``/
+    ``frontier``), so it is resolved through the class table; any other string comes back
+    unchanged (task 7761). The import is lazy INSIDE the body on purpose: ``model_classes``
+    imports this module at scope, so a module-level import here would close a cycle."""
+    from rebar.llm.model_classes import resolve_model_string
+
+    return resolve_model_string(step or workflow or cfg.model)
 
 
 def denied_paths(root: str) -> tuple[str, ...]:
