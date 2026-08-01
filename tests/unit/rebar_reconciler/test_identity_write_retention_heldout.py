@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar_reconciler.binding_store import BindingStore
+from rebar_reconciler.binding_store import BindingPersistError, BindingStore
 from rebar_reconciler.dispatch_one import create_one
 
 
@@ -193,3 +193,53 @@ def test_the_happy_path_is_untouched(store, tmp_path) -> None:
     assert client.deleted == []
     assert ("DC-1", "rebar-id:t1") in client.labelled
     assert store.get_jira_key("t1") == "DC-1"
+
+
+class _PersistFailsAfterCreateStore(BindingStore):
+    """A real store whose POST-create persist fails.
+
+    The pre-create persist (``bind_pending`` + ``save``) must SUCCEED so the create
+    actually happens; only the second save — the one recording the key on the pending
+    entry — fails. Faking it any earlier tests the other branch, which skips the create
+    entirely and so has no issue to delete.
+    """
+
+    def __init__(self, tracker) -> None:
+        super().__init__(tracker)
+        self.saves = 0
+
+    def save(self):  # type: ignore[override]
+        self.saves += 1
+        if self.saves >= 2:  # 1 = pre-create bind_pending, 2 = post-create record_pending_key
+            raise OSError("disk full")
+        return super().save()
+
+
+def test_the_binding_persist_failure_branch_also_does_not_delete(tmp_path) -> None:
+    """THE OTHER WAY INTO THE RETAIN HANDLER, and it has to be asserted separately.
+
+    ``record_pending_key``'s persist floor raises ``BindingPersistError`` from INSIDE the
+    same ``try`` that wraps the identity writes, so it lands in the very handler that used
+    to call ``client.delete_issue``. A reader could reasonably assume the retain fix only
+    covers the label/property failure — it covers this too, and nothing pinned that.
+
+    This branch is the more dangerous of the two: the create SUCCEEDED and the key was
+    never durably recorded, so deleting here would destroy an issue that the binding store
+    has no record of at all — unrecoverable even by retro-attach.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir(parents=True, exist_ok=True)
+    store = _PersistFailsAfterCreateStore(tracker)
+    # The label would SUCCEED here; the persist fails first. That isolates this branch
+    # instead of re-testing the identity-write path under a different name.
+    client = _IdentityWriteFailsClient(fail_label=False)
+
+    with pytest.raises(BindingPersistError):
+        create_one(_mutation(), client, binding_store=store, repo_root=tmp_path)
+
+    assert client.created == ["DC-1"], "precondition: the issue really was created"
+    assert client.deleted == [], (
+        "the created Jira issue was DELETED because the write-ahead persist failed — this "
+        "is the same inverted cost as the labelling case, and worse: the key was never "
+        "durably recorded, so a deleted issue here is not even recoverable by retro-attach"
+    )

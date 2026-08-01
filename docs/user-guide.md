@@ -364,6 +364,16 @@ will reject that write. rebar does **not** discover or populate custom required 
 supported answer is to add `labels` to those screens (or reconcile a project that already has
 it), matching the boundary mature Jira integrations draw.
 
+**A `createmeta` pre-flight is deliberately out of scope, and that is the mature answer rather
+than a gap.** Jira's `/rest/api/2/issue/createmeta` can enumerate a project's required fields,
+so an obvious-looking fix is to query it and populate whatever it reports. rebar does not, and
+the precedent is explicit: **Sentry's Jira integration states it does not support custom
+required fields — "The only required fields supported are those that are pre-populated by
+Sentry."** A sync bridge cannot invent a meaningful value for an arbitrary required custom
+field; guessing one writes plausible-looking wrong data into the tracker, which is worse than
+refusing. Configuring the screen is a one-time admin action with a correct answer, so that is
+where the boundary sits.
+
 If the write does fail, **the created issue is retained, not deleted**: it is left bound as
 *pending* and the next reconcile pass retro-attaches the label deterministically. Expect an
 issue that exists but is briefly unlabelled, plus a `BRIDGE_ALERT` naming the failure. Jira's
