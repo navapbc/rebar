@@ -19,6 +19,18 @@ EXCLUDED_SYNC_TYPES: frozenset[str] = frozenset({"session_log", "code_review", "
 # references a status absent from this mapping. An empty dict is a valid
 # kill-switch — preflight tolerates an empty mapping when no update
 # mutations contain a status field.
+#
+# Must stay in lock-step with adapters/jira_family/value_maps.LOCAL_STATUS_TO_JIRA
+# (parity is enforced by tests/unit/rebar_reconciler/state/test_config.py). This is a
+# SECOND, INDEPENDENT literal of the same mapping and it is deliberately not an import:
+# this module imports nothing but __future__, and adapters/jira_family is a VENDOR
+# package whose dependency direction is one-way (concrete backends import it; it never
+# imports core back), so importing it here would invert that layering and put this
+# operator-overridable surface — including the empty-dict kill-switch above — behind an
+# adapter import. The parity TEST is what keeps the two honest instead, exactly as it
+# does for jira_to_local_status below. Bug fe15-3bc4-ed70-4b61: before that test, the
+# two could drift silently — mutating "deleted" here to a non-workflow value left 59
+# tests green.
 local_to_jira_status: dict[str, str] = {
     # `idea ↔ IDEA` is a UNIQUE (injective) mapping — no rebar-status: annotation
     # label is needed to reconstruct it inbound. Requires the Jira project workflow

@@ -193,3 +193,57 @@ def test_idea_maps_to_jira_idea_across_all_status_maps(config: ModuleType) -> No
         _load_attr("adapters/jira_family/value_maps.py", "LOCAL_STATUS_TO_JIRA")["idea"] == "IDEA"
     )
     assert _load_attr("adapters/jira/outbound_fields.py", "_LOCAL_TO_JIRA_STATUS")["idea"] == "IDEA"
+
+
+def test_local_to_jira_status_parity_with_the_jira_family_map(config: ModuleType) -> None:
+    """`config.local_to_jira_status` must equal the canonical Jira-family map.
+
+    THE THIRD COPY (bug fe15-3bc4-ed70-4b61). Story J2 consolidated the two drifted copies
+    inside `adapters/jira/` into a single definition in
+    `adapters/jira_family/value_maps.LOCAL_STATUS_TO_JIRA`, which both the ACLI transport and
+    the Backend port now read. It deliberately left THIS copy out of scope and named this bug
+    in its own module docstring. The two are content-identical today, so there is no drift yet
+    — and nothing prevented one: mutating `local_to_jira_status["deleted"]` to
+    "Archived-MUTANT", a value that is not a state in the live DIG workflow, left **59 tests
+    green** across this module, the ACLI status-resolution suite and the jira-family seam
+    suites. That measurement is why this test exists.
+
+    A PARITY TEST RATHER THAN A SHARED IMPORT, for the reasons recorded on
+    `local_to_jira_status` itself: `config.py` imports nothing but `__future__`, and pulling a
+    vendor adapter into core would invert the one-way dependency direction `adapters/jira_family`
+    declares. This mirrors what `test_jira_to_local_status_parity_with_inbound_differ` above
+    already does for the reverse map — the established idiom here for exactly this problem.
+
+    FULL-DICT EQUALITY, not a per-key spot check.
+    `test_idea_maps_to_jira_idea_across_all_status_maps` already pins the single `idea -> IDEA`
+    entry across all three maps; the other six keys were
+    the unguarded ones, which is precisely why the mutation above went unseen.
+    """
+    import sys
+
+    # Loaded BY PATH, not imported as a package, so reading the adapter's map here creates no
+    # import-time dependency from core's test context onto the vendor package. The nested
+    # helper mirrors `test_idea_maps_to_jira_idea_across_all_status_maps`'s own loader rather
+    # than editing it, keeping this change purely additive.
+    path = (
+        REPO_ROOT
+        / "src"
+        / "rebar"
+        / "_engine"
+        / "rebar_reconciler"
+        / "adapters"
+        / "jira_family"
+        / "value_maps.py"
+    )
+    spec = importlib.util.spec_from_file_location("_parity_jira_family_value_maps", path)
+    assert spec is not None and spec.loader is not None
+    value_maps = importlib.util.module_from_spec(spec)
+    sys.modules["_parity_jira_family_value_maps"] = value_maps
+    spec.loader.exec_module(value_maps)  # type: ignore[union-attr]
+
+    assert config.local_to_jira_status == value_maps.LOCAL_STATUS_TO_JIRA, (
+        "config.local_to_jira_status has DRIFTED from the canonical Jira-family map. These are "
+        "two independent literals of one mapping (see the lock-step comment in config.py); a "
+        "status that maps to a different Jira state through the config surface than through the "
+        "adapter surface produces transitions Jira rejects, or silently wrong ones."
+    )
