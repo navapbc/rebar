@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import logging
 import os
 import socket
 import time
@@ -59,6 +60,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from rebar._store.compat import check_store_compat
+
+logger = logging.getLogger(__name__)
 
 WRITE_LOCK_NAME = ".ticket-write.lock"
 MKDIR_LOCK_NAME = ".ticket-write.lock.d"
@@ -70,6 +73,18 @@ _MKDIR_OWNER_FILE = "owner"
 # Bash parity: FLOCK_STAGE_COMMIT_TIMEOUT (default 30s) per attempt × max_retries(2).
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_ATTEMPTS = 2
+
+# Wall-clock backstop for the refuse-without-proof branches of _mkdir_lock_is_stale (bug
+# yaw-gravel-linen). Those branches correctly decline to reclaim a lock whose owner MIGHT be
+# live, but with no upper bound in time an absent/foreign/malformed/unprobeable stamp wedges
+# the store FOREVER — the CLASS behind the 2026-07-31 incident, of which castoff-tigerseye-
+# ammonite fixed only one instance. Honour such a stamp until this ceiling, then reclaim, so
+# the store can never wedge permanently (9305 rec #1). git gc's gc.pid uses 12h as its
+# "very generous" bound (builtin/gc.c); rebar holds the write lock only for a single event
+# append (seconds), so 1h is ~1000x margin over normal hold time yet bounds the wedge. This
+# is a BACKSTOP, never a timer on its own: it is applied ONLY where there is no positive
+# liveness signal — a live-pid probe is never overridden by age ("never on a timer alone").
+_MKDIR_LOCK_STALE_CEILING_S = 3600
 
 
 # Exceptions carry (returncode, full stderr text); callers surface the message
@@ -277,6 +292,28 @@ def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:
     return fields
 
 
+def _mkdir_lock_age_s(lock_dir: str) -> float | None:
+    """Wall-clock age of *lock_dir* in seconds, or ``None`` if it cannot be stat'd.
+
+    The ownership stamp is written once at acquisition and never refreshed (there is no
+    heartbeat), so the lock dir's mtime is the acquisition time — the quantity the stale
+    ceiling is measured against."""
+    try:
+        return time.time() - os.stat(lock_dir).st_mtime
+    except OSError:
+        return None
+
+
+def _mkdir_lock_age_exceeds_ceiling(lock_dir: str) -> bool:
+    """Whether *lock_dir* is older than :data:`_MKDIR_LOCK_STALE_CEILING_S`.
+
+    Fail-closed: an unreadable mtime returns False (keep refusing), so a stat error can
+    never itself license a reclaim. Applied ONLY on refuse-without-proof branches that
+    carry no positive liveness signal — never to override a live-pid probe."""
+    age = _mkdir_lock_age_s(lock_dir)
+    return age is not None and age > _MKDIR_LOCK_STALE_CEILING_S
+
+
 def _pid_alive(pid: int) -> bool:
     """Whether *pid* is a live process. ``os.kill(pid, 0)`` probes existence without
     signalling. A PermissionError means the pid exists but is owned by another user
@@ -316,47 +353,56 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
     than a hint. The decision table:
 
     1. Owner file absent or unreadable → False (a bash-style lock, or one seen in the
-       window between ``mkdir`` and the stamp write).
+       window between ``mkdir`` and the stamp write) — UNLESS the dir has out-aged
+       :data:`_MKDIR_LOCK_STALE_CEILING_S`, the wall-clock backstop that stops an
+       unprovable stamp wedging the store forever (9305 rec #1).
     2. Not a v2 stamp → exactly the legacy behaviour (:func:`_legacy_stamp_is_stale`).
-    3. v2 stamp with missing/malformed fields → False.
-    4. v2 stamp from a different :func:`_host_identity` → False, **always**. This is the
-       genuine foreign-host / shared-filesystem case: we cannot observe that host's
-       processes and our own locks prove nothing about its kernel, so no pid, no
-       namespace and no ``fcntl_held`` can license a reclaim (bug yaw-gravel-linen).
+    3. v2 stamp with missing/malformed fields → False, or reclaim past the age ceiling.
+    4. v2 stamp from a different :func:`_host_identity` → the genuine foreign-host /
+       shared-filesystem case: we cannot observe that host's processes and our own locks
+       prove nothing about its kernel, so no pid, no namespace and no ``fcntl_held`` can
+       license a reclaim (bug yaw-gravel-linen) — refused until the age ceiling, then
+       reclaimed so a shared-filesystem orphan cannot wedge forever.
     5. Same host and the pid namespaces are comparable (stamped ``ns`` equals ours,
        including both being unknown) → probe the pid, qualified by start time. Dead pid
        ⇒ stale. Live pid whose start time is known on both sides and differs ⇒ the
        number was recycled by an unrelated process and the true owner is gone ⇒ stale.
-       Anything else ⇒ False: a live owner is NEVER reclaimed.
+       Anything else ⇒ False: a live owner is NEVER reclaimed — the ceiling does NOT
+       apply here, because a live-pid probe is a positive liveness signal and breaking
+       a lock on a timer alone over a live owner is forbidden ("never on a timer alone").
     6. Same host, namespaces NOT comparable (different, or exactly one unknown) — the
        container-recreate case, where the stamped pid is not probeable at all → stale
-       iff *fcntl_held*, else False.
+       iff *fcntl_held*, else refused until the age ceiling.
+
+    Non-numeric pid on an otherwise same-host/same-namespace stamp is likewise a
+    no-liveness-signal refusal and reclaims past the ceiling.
     """
     try:
         with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
             stamp = fh.read().strip()
     except OSError:
-        return False
+        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
 
     fields = _parse_v2_stamp(stamp)
     if fields is None:
         return _legacy_stamp_is_stale(stamp)
     if not fields:
-        return False
+        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
 
     if fields["host"] != _host_identity():
-        return False
+        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
 
     stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
     if stamped_ns != _read_pid_namespace_id():
         # Same host, different (or unknowable) pid namespace: the stamped pid number is
-        # meaningless to us, so the fcntl proof is the only evidence available.
-        return fcntl_held
+        # meaningless to us, so the fcntl proof is the only positive evidence — and, short
+        # of it, the age ceiling backstops the wedge.
+        return fcntl_held or _mkdir_lock_age_exceeds_ceiling(lock_dir)
 
     try:
         pid = int(fields["pid"])
     except ValueError:
-        return False
+        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
     if not _pid_alive(pid):
         return True
     stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
@@ -368,8 +414,22 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
 
 
 def _reclaim_mkdir_lock(lock_dir: str) -> None:
-    """Remove a provably-stale mkdir lock (owner stamp + dir). Best-effort: a failure
-    just leaves the next acquirer to wait/retry — never a correctness hazard."""
+    """Remove a provably-stale (or aged-out) mkdir lock (owner stamp + dir). Best-effort:
+    a failure just leaves the next acquirer to wait/retry — never a correctness hazard.
+
+    Reclaiming is noteworthy — it breaks another acquirer's lock — so disclose the holder
+    stamp and the dir age at WARNING before removing (research rec #8, "report the
+    holder"), turning a silent wedge into an attributable event. This runs on the reclaim
+    path only, not the poll hot loop, so it does not spam."""
+    stamp = "<unreadable>"
+    try:
+        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
+            stamp = fh.read().strip() or "<empty>"
+    except OSError:
+        pass
+    age = _mkdir_lock_age_s(lock_dir)
+    age_s = f"{age:.0f}s" if age is not None else "unknown"
+    logger.warning("reclaiming stale write lock %s: holder=%r age=%s", lock_dir, stamp, age_s)
     try:
         os.remove(os.path.join(lock_dir, _MKDIR_OWNER_FILE))
     except OSError:
