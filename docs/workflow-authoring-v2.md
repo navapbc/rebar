@@ -144,7 +144,8 @@ The value is any runner-consumable model id (`provider:model`, e.g.
 `anthropic:claude-opus-4-8` / `openai:gpt-4o`, or a bare id whose provider is inferred).
 Resolution follows the **WS-D3 precedence** (`resolve_model`):
 
-> **step `model:` > workflow `model:` > config (`REBAR_LLM_MODEL` / `[tool.rebar.llm].model`) > `DEFAULT_MODEL`**
+> **step `model:` > workflow `model:` > config (a `model_classes` slot, or the DEPRECATED
+> `REBAR_LLM_MODEL` / `[tool.rebar.llm].model`) > `DEFAULT_MODEL`**
 
 The visual editor exposes this as the per-step **Model** field (a free-text entry, so
 custom/non-ladder models are allowed); it round-trips losslessly through BPMN
