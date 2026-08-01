@@ -308,6 +308,15 @@ with the op label, the four token fields + request count, the provider-qualified
 (stamped inside `record()`). `python -m rebar.llm.usage_log summarize <path>` folds the
 file into a Markdown table (per-op breakdown + totals) for `$GITHUB_STEP_SUMMARY`.
 
+A call made inside a workflow step also carries **`step`** (the step id) and, when that step
+declared a model CLASS rather than a literal id, **`model_class`** (`trivial`/`standard`/
+`frontier`). Both are omitted — not written as null — when they do not apply, so a row with no
+`step` means the call was made outside any step (a spec scan, an enrich pass). They exist because
+`op` alone cannot attribute a call: it is the PROMPT name, several steps may share one prompt, and
+without the declared class a reader cannot tell "resolved to opus *because* `frontier`" from
+"resolved to opus *because* it fell through to `cfg.model`" — the distinction that makes a
+per-pass model claim checkable.
+
 **Est. cost is an optional add-in**: install the `pricing` extra
 (`pip install 'nava-rebar[pricing]'` → [genai-prices](https://github.com/pydantic/genai-prices),
 pydantic's offline price data with cache read/write tiers and historical prices by
