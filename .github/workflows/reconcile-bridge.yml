@@ -81,6 +81,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: true   # the mounted worktree reuses these creds to push
+          filter: blob:none
           # Full history (NOT shallow). A shallow graft defeats git's merge-base
           # computation, so reconciling a compaction (which deletes source event
           # files) against the remote resurrects those files — SNAPSHOT_INCONSISTENT
