@@ -168,7 +168,8 @@ model emits **no** holistic severity/confidence anywhere in the decision path:
 
 **Verifier model.** Pass-2 verify (and the Pass-4 coach, which share the verify cfg) run on
 the decisive non-frontier `VERIFIER_DEFAULT_MODEL` (`claude-sonnet-4-6`) **unless the operator
-explicitly chose a model** (`REBAR_LLM_MODEL` / `[tool.rebar.llm].model` set to a non-default).
+explicitly chose a model** (a `[tool.rebar.llm.model_classes]` slot, or the deprecated
+`REBAR_LLM_MODEL` / `[tool.rebar.llm].model`, set to a non-default).
 
 **Verify token-budget chunking.** Pass-2 verify is normally ONE aggregate call. For a
 pathological huge-findings ticket whose request would exceed the verifier model's context

@@ -142,10 +142,18 @@ def _cli_override(class_name: str, field_name: str) -> str | None:
     return value if value else None
 
 
-def _parse_slot(name: str, raw: Mapping[str, Any]) -> ClassSlot:
+def _parse_slot(
+    name: str, raw: Mapping[str, Any], *, fallback_default: str | None = None
+) -> ClassSlot:
     _reject_api_key(raw, what=f"the '{name}' class slot")
 
-    model = raw.get("model") or _DEFAULT_MODEL_BY_CLASS[name]
+    # ``fallback_default`` is the deprecated bare REBAR_LLM_MODEL (see
+    # :func:`_deprecated_bare_model`). It sits at the DEFAULT position, so the resulting precedence
+    # is CLI > per-class env > config table > bare REBAR_LLM_MODEL > built-in default: an explicit
+    # class configuration still wins, while an operator who set only the old knob has it honoured
+    # for every class. It is passed in rather than read here because this function runs once per
+    # class and would otherwise warn three times per slot build.
+    model = raw.get("model") or fallback_default or _DEFAULT_MODEL_BY_CLASS[name]
     provider = raw.get("provider")
     endpoint = raw.get("endpoint")
 
@@ -175,7 +183,37 @@ def parse_class_slots(table: Mapping[str, Any] | None) -> dict[str, ClassSlot]:
     if unknown:
         raise LLMConfigError(f"unknown model-class name(s): {', '.join(unknown)}")
 
-    return {name: _parse_slot(name, table.get(name) or {}) for name in CLASS_NAMES}
+    # Resolved ONCE, OUTSIDE the comprehension. Inlining the call into the comprehension evaluates
+    # it once per class and emits three identical deprecation warnings per call — the exact defect
+    # `test_one_call_emits_exactly_one_warning_not_one_per_class` exists to catch (it caught it).
+    bare_model = _deprecated_bare_model()
+    return {
+        name: _parse_slot(name, table.get(name) or {}, fallback_default=bare_model)
+        for name in CLASS_NAMES
+    }
+
+
+def _deprecated_bare_model() -> str | None:
+    """The deprecated bare ``REBAR_LLM_MODEL``, or None — warning once per call when it is set.
+
+    READ HERE, NOT IN :func:`_parse_slot`, deliberately. ``_parse_slot`` runs once per class, so
+    reading (and warning) inside it would emit THREE identical deprecation warnings for a single
+    ``load_class_slots()`` call. Emission is per-call by design — ``warn_deprecated`` has no dedup
+    and none of the sibling env deprecations has any — so the fix is to read once at the level that
+    loops the classes, not to add per-process state.
+
+    The env name is a STRING LITERAL on purpose: ``scripts/gen_env_registry.py`` resolves an env
+    name only when it is literal, so a dynamically-built read would silently vanish from
+    ``docs/env-vars.md`` while the CI drift gate stayed green (that is how bug b00f lost four
+    variables).
+    """
+    raw = os.environ.get("REBAR_LLM_MODEL")
+    if raw is None or not raw.strip():
+        return None
+    from rebar._deprecations import warn_deprecated
+
+    warn_deprecated("env:REBAR_LLM_MODEL", logger=logger)
+    return raw.strip()
 
 
 def _resolve_target(model: str, provider: str | None) -> str:

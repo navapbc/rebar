@@ -7,9 +7,13 @@ heavy libraries are imported lazily by the runner only when an operation runs.
 
 Environment variables (all optional; sensible defaults):
 
-  REBAR_LLM_MODEL         model id (default ``claude-opus-4-8``); the runner is the
-                          provider-agnostic pydantic_ai runtime (``fake`` is test-only,
-                          reachable only via the library ``runner=`` arg).
+  REBAR_LLM_MODEL         DEPRECATED (scheduled for removal) — a bare model id that fans
+                          out to ALL THREE model classes. Prefer the per-class
+                          ``[tool.rebar.llm.model_classes]`` slots, or the
+                          ``REBAR_LLM_<CLASS>_MODEL`` variables, which win over this.
+                          The runner is the provider-agnostic pydantic_ai runtime
+                          (``fake`` is test-only, reachable only via the library
+                          ``runner=`` arg).
   REBAR_LLM_MAX_TOKENS    per-response token ceiling (default 8000)
   REBAR_LLM_MAX_STEPS     Max agent loop steps before abort (~2 per tool call; default
                           50 ~= 25 tool calls).
@@ -192,7 +196,7 @@ def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | No
         step > workflow > config > env > default
 
     The first three are explicit here; ``cfg.model`` already folds the last two
-    (``REBAR_LLM_MODEL`` env, else ``DEFAULT_MODEL``). So a per-step ``model:``
+    (the DEPRECATED ``REBAR_LLM_MODEL`` env, else ``DEFAULT_MODEL``). So a per-step ``model:``
     (e.g. ``anthropic:claude-opus-4-8`` or ``openai:gpt-4o``) wins, then a
     workflow-level ``model:``, then whatever the config/env/default resolved to.
     Returns a model id consumable by the runner (``provider:model`` or a bare model
@@ -464,6 +468,22 @@ class LLMConfig:
         # The agent's rebar ticket tools read the PINNED ticket-store snapshot when a gate
         # set it (None when unset -> the live checkout's store; preserves prior behavior).
         tickets_path = current_tickets_root()
+        # REBAR_LLM_MODEL is deprecated in favour of the per-class model_classes slots. THIS is one
+        # of exactly two env reads of it (the other is the fan-out in model_classes.py), and the
+        # warning belongs at each READ: `resolve_model` hands `resolve_model_string` an
+        # ALREADY-RESOLVED string, where the value is indistinguishable from a config-table `model`
+        # key or a per-step `model:`, so warning there would fire at operators who never set the
+        # variable. Provenance exists only here.
+        #
+        # WARN-WHEN-SET, not warn-when-it-wins: `_llm_str` resolves CLI > env > file > default and
+        # returns early on a CLI hit, so it never even reads the environment when `--model` wins.
+        # Implementing warn-when-it-wins would mean either teaching the shared `_llm_str` about one
+        # of its dozen variables or duplicating its precedence here. An exported deprecated variable
+        # is a migration item whether or not a flag overrode it this run.
+        if os.environ.get("REBAR_LLM_MODEL", "").strip():
+            from rebar._deprecations import warn_deprecated
+
+            warn_deprecated("env:REBAR_LLM_MODEL")
         return cls(
             runner=runner,
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),

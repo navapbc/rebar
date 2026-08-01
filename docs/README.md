@@ -168,6 +168,9 @@ The LLM-agent operations and the gate / workflow machinery behind them.
 - **[llm-framework.md](llm-framework.md)** — the `rebar.llm` framework for tool-using
   LLM agents that emit structured findings (review, verify-completion, and the seams
   to add more).
+- **[llm-example-configs.md](llm-example-configs.md)** — four complete, paste-able
+  `[tool.rebar.llm]` configurations (Anthropic-only, Bedrock-only, mixed-provider, and
+  local+hosted-fallback), each sizing the three model classes.
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
 - **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the

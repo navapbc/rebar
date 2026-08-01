@@ -236,8 +236,10 @@ The `[agents]` extra adds the optional **LLM agent-operations framework**
 (`rebar.llm`) — tool-using agents that review tickets/code and emit structured
 findings, over library / CLI (`rebar review`) / MCP. It is multi-provider
 (**Claude** and **ChatGPT** out of the box, plus Gemini and OpenAI-compatible local
-servers like LMStudio/Ollama via `REBAR_LLM_MODEL`/`REBAR_LLM_MODEL_PROVIDER`/
-`REBAR_LLM_BASE_URL`) and is **never required by core rebar** — none of the LLM
+servers like LMStudio/Ollama, configured per model class in
+`[tool.rebar.llm.model_classes]` — or via `REBAR_LLM_<CLASS>_MODEL` /
+`REBAR_LLM_MODEL_PROVIDER` / `REBAR_LLM_BASE_URL`; the single bare `REBAR_LLM_MODEL`
+is **deprecated**, see [docs/llm-framework.md](docs/llm-framework.md)) and is **never required by core rebar** — none of the LLM
 stack is installed or imported unless you opt into this extra (CI enforces it);
 see [docs/llm-framework.md](docs/llm-framework.md).
 
