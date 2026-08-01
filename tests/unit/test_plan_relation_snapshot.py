@@ -493,3 +493,50 @@ def test_resign_tolerates_a_concurrent_writer_churning_tracker_temp_files(
         f"store-read-failure — signing races other sessions: {result}"
     )
     assert result["ok"] is True and result["signed"] is True, f"resign refused: {result}"
+
+
+def test_signer_and_gate_material_agree_across_archive(repo: str) -> None:
+    """b7a2: the signer-side child enumeration (snapshot.child_ids, feeding
+    ``generation.own_material``) and the gate-side enumeration
+    (``attest.current_material_fingerprint``) must agree BOTH before and after a
+    child is archived — that is the invariant whose violation makes a container
+    permanently unclaimable. Before the fix the two diverge the moment a child is
+    archived: the signer keeps it (``status != "deleted"``) while the claim gate
+    drops it (``list_tickets`` default ``include_archived=False``)."""
+    from rebar.llm.plan_review import attest, generation
+
+    subject = rebar.create_ticket("epic", "Subject", repo_root=repo)
+    rebar.create_ticket("story", "Live child", parent=subject, repo_root=repo)
+    drop = rebar.create_ticket("story", "To be archived", parent=subject, repo_root=repo)
+
+    def signer() -> str:
+        return generation.collect(subject, repo_root=repo).own_material
+
+    def gate() -> str | None:
+        return attest.current_material_fingerprint(subject, repo_root=repo)
+
+    assert signer() == gate(), "signer and gate disagree while all children are live"
+
+    rebar.archive(drop, repo_root=repo)
+    assert signer() == gate(), (
+        "signer and gate diverged after archiving a child — the archived-vs-deleted "
+        "predicate is spelled independently at the two sites (bug b7a2)"
+    )
+
+
+def test_archived_child_excluded_from_child_ids_and_pins(repo: str) -> None:
+    """b7a2 AC1/AC5: an archived child is no longer plan material, so it must drop
+    out of ``snapshot.child_ids`` and out of the ``plan-material-pin`` manifest, via
+    the single shared predicate both sides use."""
+    _, collect_plan_relation_snapshot, _ = _api()
+    subject = rebar.create_ticket("epic", "Subject", repo_root=repo)
+    keep = rebar.create_ticket("story", "Live child", parent=subject, repo_root=repo)
+    drop = rebar.create_ticket("story", "To be archived", parent=subject, repo_root=repo)
+    rebar.archive(drop, repo_root=repo)
+
+    snapshot = collect_plan_relation_snapshot(subject, repo_root=repo)
+
+    assert snapshot.child_ids == (keep,)
+    child_pins = [pin.canonical_id for pin in snapshot.related_material if pin.role == "child"]
+    assert drop not in child_pins
+    assert child_pins == [keep]

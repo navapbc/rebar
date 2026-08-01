@@ -37,7 +37,7 @@ from .manifest import (
     validate_review_phase_metadata,
 )
 from .pin_health import DerivedPlanMaterialPinHealth, DerivedPlanReviewHealth, PlanValidityProfile
-from .relation_snapshot import PlanMaterialPin
+from .relation_snapshot import PlanMaterialPin, live_material_children
 
 logger = logging.getLogger(__name__)
 
@@ -771,7 +771,7 @@ def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | Non
             return None
         canonical = state.get("ticket_id", ticket_id)
         try:
-            kids = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
+            kids = live_material_children(canonical, repo_root=repo_root)
         except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
             kids = []
         ctx = PlanContext(
