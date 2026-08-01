@@ -311,7 +311,15 @@ jobs:
               exit 0
             fi
 
-            if echo "$push_stderr" | grep -qiE 'non-fast-forward|rejected|fetch first'; then
+            # Classify via a here-string, NOT `echo "$push_stderr" | grep -q`. Under this
+            # step's `set -o pipefail`, `grep -q` exits the instant it matches (the rejection
+            # keywords are on stderr line 2), closing the pipe while `echo` may still be
+            # writing a large capture; `echo` then takes SIGPIPE (141) and `pipefail` makes the
+            # whole pipeline non-zero, so a MATCHED (retryable) rejection is misclassified as
+            # non-retryable and the loop fails red. On a loaded CI runner this surfaced as a
+            # flake (rebar e161). A here-string is not a pipeline, so there is no upstream
+            # writer to receive SIGPIPE and no pipeline status for `pipefail` to poison.
+            if grep -qiE 'non-fast-forward|rejected|fetch first' <<<"$push_stderr"; then
               printf 'Push rejected (attempt %d):\n%s\n' "$attempt" "$push_stderr" >&2
               # EXPLICIT refspec (see above): a bare fetch leaves origin/tickets
               # stale under a narrow refspec, so the merge below would re-merge the

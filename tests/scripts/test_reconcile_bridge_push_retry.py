@@ -202,3 +202,152 @@ def test_push_loop_converges_under_contention(bridge: dict) -> None:
         "the workspace's commit must actually reach origin/tickets — a zero exit with the "
         f"commit unpushed would be worse than failing.\norigin log:\n{landed}\n{ctx}"
     )
+
+
+# --- e161: the rejection classifier must not be SIGPIPE-fragile under `pipefail` -------------
+#
+# reconcile-bridge.yml:314 classifies a failed push with
+#     if echo "$push_stderr" | grep -qiE 'non-fast-forward|rejected|fetch first'; then
+# Under the step's `set -euo pipefail`, `grep -q` exits the instant it matches an early line
+# (`rejected`/`fetch first` sit on stderr line 2). If `echo` has not finished writing the
+# capture when the pipe's read end closes, `echo` takes SIGPIPE (141); `pipefail` then makes
+# the pipeline's status 141, so the `if` wrongly takes the ELSE (non-retryable) arm even though
+# the text matched. On a loaded CI runner this is a scheduling race (rare, load-only, never
+# reproduces on an idle dev box). We force it deterministically by enlarging the capture past
+# what `echo` can buffer before `grep -q` matches and exits — the same mechanism, made reliable.
+PADDED_COMPETITOR_PUSHES = 1
+_STDERR_PAD_BYTES = 200_000
+
+
+@pytest.fixture()
+def bridge_padded(tmp_path: Path) -> dict:
+    """Like `bridge`, but the workspace's rejected push carries a large stderr capture.
+
+    Exactly one competitor push fires (so attempt 1 is a benign rejection and attempt 2 can
+    succeed), and the shim appends a `_STDERR_PAD_BYTES` blob AFTER the real rejection text so
+    the classifier's `echo "$push_stderr" | grep -q` cannot drain before `grep -q` matches and
+    exits — deterministically reproducing the loaded-runner SIGPIPE/pipefail misclassification.
+    """
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    root = tmp_path / "root"
+    root.mkdir()
+    work = root / ".tickets-tracker"
+    comp = tmp_path / "comp"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    subprocess.run(
+        ["git", "init", "--bare", "-b", "tickets", str(origin)], check=True, capture_output=True
+    )
+    subprocess.run(["git", "init", "-b", "tickets", str(seed)], check=True, capture_output=True)
+    for k, v in (("user.email", "t@example.invalid"), ("user.name", "t")):
+        _git(seed, "config", k, v)
+    (seed / "seed.txt").write_text("seed\n")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-m", "seed")
+    _git(seed, "remote", "add", "origin", str(origin))
+    _git(seed, "push", "-q", "origin", "tickets")
+
+    for path in (work, comp):
+        subprocess.run(
+            ["git", "clone", "-q", "-b", "tickets", str(origin), str(path)],
+            check=True,
+            capture_output=True,
+        )
+        for k, v in (("user.email", "t@example.invalid"), ("user.name", "t")):
+            _git(path, "config", k, v)
+
+    (work / "event-local.json").write_text('{"local": true}\n')
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", "local reconciler events")
+
+    counter = tmp_path / "n"
+    counter.write_text("0")
+    real_git = subprocess.run(["which", "git"], capture_output=True, text=True).stdout.strip()
+    shim = bin_dir / "git"
+    # NB: the shim itself runs WITHOUT `pipefail`, so its own `printf | grep -q` guard cannot be
+    # poisoned by the same SIGPIPE effect — only the workflow's classifier is under test.
+    shim.write_text(
+        textwrap.dedent(f"""\
+        #!/usr/bin/env bash
+        if [ "$1" = "push" ] && printf '%s ' "$@" | grep -q 'HEAD:tickets'; then
+          n=$(cat {counter})
+          if [ "$n" -lt {PADDED_COMPETITOR_PUSHES} ]; then
+            echo $((n + 1)) > {counter}
+            f="{comp}/event-comp-$n.json"
+            echo "{{\\"c\\": $n}}" > "$f"
+            {real_git} -C {comp} pull -q --no-rebase origin tickets >/dev/null 2>&1
+            {real_git} -C {comp} add -A >/dev/null 2>&1
+            {real_git} -C {comp} commit -q -m "competitor $n" >/dev/null 2>&1
+            {real_git} -C {comp} push -q origin tickets >/dev/null 2>&1
+            # The workspace push below is now a real non-fast-forward rejection. Emit its real
+            # stderr FIRST (so the classifier's pattern matches early), then a large blob, so
+            # `echo "$push_stderr" | grep -q` is still writing when `grep -q` matches and exits.
+            err=$({real_git} "$@" 2>&1); rc=$?
+            printf '%s\\n' "$err" >&2
+            head -c {_STDERR_PAD_BYTES} /dev/zero | tr '\\0' x >&2
+            printf '\\n' >&2
+            exit $rc
+          fi
+        fi
+        exec {real_git} "$@"
+    """)
+    )
+    shim.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["BRIDGE_BOT_NAME"] = "t"
+    env["BRIDGE_BOT_EMAIL"] = "t@example.invalid"
+    return {"work": work, "root": root, "origin": origin, "env": env, "counter": counter}
+
+
+def test_rejection_classifier_is_not_sigpipe_fragile(bridge_padded: dict) -> None:
+    """A retryable rejection whose stderr is large must still be retried, not failed red.
+
+    RED against reconcile-bridge.yml:314's `echo "$push_stderr" | grep -q` (the large capture
+    forces `echo` to SIGPIPE when `grep -q` matches and exits, so `pipefail` routes a matched,
+    retryable rejection into the non-retryable ELSE arm). GREEN once the classifier no longer
+    depends on a pipeline exit status — the push is fetched, merged, and re-pushed to origin.
+    """
+    root: Path = bridge_padded["root"]
+    script = root / "push_step.sh"
+    script.write_text(_extract_push_block())
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=root,
+        env=bridge_padded["env"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    # Prove the precondition: exactly one competitor push fired, so attempt 1 WAS a benign
+    # rejection that the loop had to retry (not a spurious failure of the harness).
+    assert bridge_padded["counter"].read_text().strip() == str(PADDED_COMPETITOR_PUSHES), (
+        "the competitor must have landed exactly once, forcing a single retryable rejection"
+    )
+    ctx = (
+        f"rc={result.returncode}\n"
+        f"stdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}"
+    )
+    assert result.returncode == 0, (
+        "a rejected push with a large stderr must be classified RETRYABLE, not non-retryable "
+        "— the classifier must not depend on a `pipefail`-poisoned pipeline exit status.\n"
+        f"{ctx}"
+    )
+    landed = subprocess.run(
+        # `-c safe.bareRepository=all`: some dev machines set `safe.bareRepository=explicit`
+        # globally, which makes a plain `git log` refuse the bare origin (exit 128); CI does
+        # not. Neutralize it for this read so the assertion reflects convergence, not env.
+        ["git", "-c", "safe.bareRepository=all", "log", "--oneline", "tickets"],
+        cwd=bridge_padded["origin"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "local reconciler events" in landed, (
+        "the workspace commit must reach origin/tickets after the retry.\n"
+        f"origin log:\n{landed}\n{ctx}"
+    )
