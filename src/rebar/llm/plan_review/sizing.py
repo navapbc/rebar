@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.runner import Runner
 
@@ -316,15 +316,64 @@ def is_context_limit_error(exc: Exception) -> bool:
     )
 
 
+# Ladder rung FAMILY substring → the model class that rung stands for (task 7761). Keyed on the
+# family, not the full pinned id, so a ladder version bump (`claude-sonnet-4-6` → `-4-7`) keeps
+# resolving instead of silently falling off the mapping. MODEL_LADDER itself must keep its BARE
+# names: `largest_window_tokens` matches with `if name in model`, and no class name is a
+# substring of `bedrock:us.anthropic.claude-sonnet-4-6`, so class names in the table would make
+# every window lookup miss and silently return the ladder maximum for every model.
+_RUNG_CLASSES: tuple[tuple[str, str], ...] = (
+    ("haiku", "trivial"),
+    ("sonnet", "standard"),
+    ("opus", "frontier"),
+)
+
+
+def _rung_target(bare: str) -> str:
+    """The escalation target for ladder rung ``bare``, resolved through its model class.
+
+    THE BACK-COMPAT RULE: when the rung's class has NOT been retargeted, return TODAY'S BARE
+    NAME byte-for-byte. ``resolve_class`` runs every name through ``_resolve_target``, which
+    PREFIXES the inferred provider, so a naive always-resolve would hand existing callers
+    ``anthropic:claude-sonnet-4-6`` where they have always seen ``claude-sonnet-4-6`` —
+    ``plan_review/orchestrator.py``'s module-level ``_models_at_or_above`` alias (asserted
+    against literal bare ids at ``tests/unit/test_plan_review.py:1145-1150``) and
+    ``plan_review/prerequisites.py``'s escalation log both depend on the bare form. So the
+    rung's OWN provider-inferred qualified form is computed and compared: equal ⇒ nothing is
+    configured ⇒ keep the bare name; different ⇒ a config table or ``REBAR_LLM_<CLASS>_MODEL``
+    env override retargeted the class, and THAT retarget is what escalation must follow.
+
+    A rung with no class mapping, or any failure resolving a class, degrades to the bare name —
+    escalation is a recovery path and must never become a new failure mode."""
+    class_name = next((cls for family, cls in _RUNG_CLASSES if family in bare), None)
+    if class_name is None:
+        return bare
+    try:
+        from rebar.llm.model_classes import resolve_model_string
+
+        resolved = resolve_model_string(class_name)
+        provider = infer_provider(bare)
+        own = f"{provider}:{bare}" if provider else bare
+        return bare if resolved == own else resolved
+    except Exception:  # noqa: BLE001 — best-effort: an unresolvable class must not break escalation
+        return bare
+
+
 def models_at_or_above(model: str | None) -> list[str]:
     """The model ladder from ``model`` upward (by window), for runtime escalation.
-    Unknown/absent model → the whole ladder."""
+    Unknown/absent model → the whole ladder.
+
+    The START rung is still located by substring match against MODEL_LADDER's bare names, so an
+    already-resolved ``provider:model`` primary positions correctly; each at-or-above rung is
+    then mapped through its MODEL CLASS by :func:`_rung_target`, so a Bedrock-configured run
+    escalates to Bedrock rather than to direct Anthropic (task 7761). ORDER is unchanged:
+    cheapest rung first, frontier last."""
     names = [n for n, _w in MODEL_LADDER]
     if model:
         for i, n in enumerate(names):
             if n in model:
-                return names[i:]
-    return list(names)
+                return [_rung_target(name) for name in names[i:]]
+    return [_rung_target(name) for name in names]
 
 
 def pass1_with_ladder(
