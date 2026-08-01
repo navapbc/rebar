@@ -50,11 +50,21 @@ _WORKFLOW_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "workflow_
 _LLM_CONFIG = REPO_ROOT / "src" / "rebar" / "llm" / "config.py"
 _PLAN_REVIEW_YAML = REPO_ROOT / "src" / "rebar" / "llm" / "workflow" / "gates" / "plan-review.yaml"
 
-# The hard cap every file under src/rebar must respect (.github/module-size-limit.txt). The STAGED
-# bound: `workflow_ops.py` (794) and `config.py` (793) are both still above the 700 policy target
-# used by the sibling seam tests, and their extraction tickets (b5fe, b300) tighten each file to
-# < 700 in the same change that creates the headroom. Asserting 700 here would land red.
+# The hard cap every file under src/rebar must respect (.github/module-size-limit.txt), and the
+# 700 policy target the sibling seam tests use.
 _HARD_CAP = 800
+_HEADROOM_TARGET = 700
+
+# PER-FILE bounds, not one shared constant. Both files were staged at the hard cap while their
+# extraction tickets were open; b300 has since moved the gate read-root / snapshot-session domain
+# out of `config.py` into `llm/gate_context.py`, so that file now holds real headroom and is
+# asserted at the policy target. `workflow_ops.py` stays at the staged cap until b5fe lands —
+# tightening the SHARED constant instead would turn this test red on b5fe's file and name the
+# wrong ticket in the failure.
+_LOC_BOUNDS = (
+    (_WORKFLOW_OPS, _HARD_CAP),
+    (_LLM_CONFIG, _HEADROOM_TARGET),
+)
 
 # Eight ops registered by `workflow_ops` itself, plus the ninth registered through its side-effect
 # import of `prerequisite_workflow_ops` — the one a stray import cleanup would silently drop.
@@ -147,16 +157,17 @@ def test_every_uses_in_the_gate_yaml_resolves_to_a_registered_op() -> None:
 def test_the_hot_plan_review_files_stay_under_the_hard_cap() -> None:
     """`workflow_ops.py` holds two of the five `finalize_verdict` call sites and `config.py` is the
     most-imported near-cap module in the repo, yet NEITHER had a headroom guard — the sibling seam
-    tests cover `gate_dispatch.py` and `orchestrator.py` only. Staged at the hard cap because both
-    files exceed the 700 policy target until b5fe and b300 land."""
-    for path in (_WORKFLOW_OPS, _LLM_CONFIG):
+    tests cover `gate_dispatch.py` and `orchestrator.py` only. Bounds are per file: `config.py` is
+    held to the 700 policy target now that b300 has extracted `llm/gate_context.py`;
+    `workflow_ops.py` stays staged at the hard cap until b5fe lands."""
+    for path, bound in _LOC_BOUNDS:
         loc = _loc(path)
         # STRICTLY under, not `<=`. The CI gate itself fails only at 801, but "passes CI" is a
         # weaker property than "has headroom": three files in this repo sit at EXACTLY 800 today
         # (plan_review/passes.py, plan_review/attest.py, rebar_reconciler/outbound_differ.py), which
         # means the next one-line change to any of them is unlandable. ADR 0056 names this directly
         # — a hot file "must stop sitting ON the 800 gate, not merely pass it".
-        assert loc < _HARD_CAP, (
-            f"{path.relative_to(REPO_ROOT)} is {loc} LOC and must stay UNDER {_HARD_CAP}, not sit "
+        assert loc < bound, (
+            f"{path.relative_to(REPO_ROOT)} is {loc} LOC and must stay UNDER {bound}, not sit "
             "on it; extract along a call-graph seam rather than raising the limit"
         )
