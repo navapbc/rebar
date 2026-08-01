@@ -44,7 +44,6 @@ _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 _NON_TICKET_ENTRIES = {
     ".git",
     ".bridge_state",
-    ".bridge_state.bak-retarget",
     ".gitattributes",
     ".gitignore",
     ".pre-commit-config.yaml",
@@ -155,7 +154,7 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
 
     # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
-    # (.bridge_state.bak-retarget) cannot survive by not being named explicitly.
+    # cannot survive merely because its exact name is not enumerated above.
     for path in sorted(tracker.glob(".bridge_state*")):
         subprocess.run(["rm", "-rf", str(path)], check=True)
 
