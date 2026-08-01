@@ -61,7 +61,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_MAX_STEPS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MAX_TOKENS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_MCP_SERVERS` | `src/rebar/llm/config.py` |  |
-| `REBAR_LLM_MODEL` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_MODEL` | `src/rebar/config.py (alias resolver)`, `src/rebar/llm/config.py`, `src/rebar/llm/model_classes.py` | deprecated alias of `the [tool.rebar.llm.model_classes] slots` (removal in v1.0.0) |
 | `REBAR_LLM_MODEL_PROVIDER` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_CONF_THRESHOLD` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_DRAIN` | `src/rebar/llm/config.py` |  |
@@ -185,10 +185,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:280` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:287` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:234` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:268` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:283` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:303` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:238` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:272` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:287` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:307` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`

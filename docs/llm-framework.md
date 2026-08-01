@@ -130,15 +130,31 @@ library-arg-only, off the public env surface).
 The pydantic-ai runner is **provider-agnostic**: pydantic-ai resolves the provider
 from the model string in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
 `openai:gpt-4o`, `google:gemini-2.5-pro`). The provider can also be inferred from a
-bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`:
+bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`.
+
+Models are chosen **per model class** (`trivial` / `standard` / `frontier`), so a cheap
+model can serve the decisive checks while a frontier model does the open-ended work:
+
+```toml
+[tool.rebar.llm.model_classes]
+frontier = { model = "openai:gpt-4o" }
+standard = { model = "google:gemini-2.5-pro" }
+trivial  = { model = "local-model", provider = "openai", endpoint = "http://localhost:1234/v1" }
+```
+
+The same slots are settable from the environment, one variable per class and field:
 
 ```bash
-REBAR_LLM_MODEL=openai:gpt-4o rebar review <id>
-REBAR_LLM_MODEL=google:gemini-2.5-pro rebar review <id>
+REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review <id>
+REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review <id>
 # local OpenAI-compatible server (LMStudio / Ollama / vLLM):
-REBAR_LLM_MODEL=local-model REBAR_LLM_MODEL_PROVIDER=openai \
-  REBAR_LLM_BASE_URL=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
+REBAR_LLM_TRIVIAL_MODEL=local-model REBAR_LLM_TRIVIAL_PROVIDER=openai \
+  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
 ```
+
+> **`REBAR_LLM_MODEL` is DEPRECATED** (scheduled for removal in v1.0.0). It still works and
+> now applies its value to **all three** classes, warning once per call; any class slot or
+> `REBAR_LLM_<CLASS>_MODEL` you set wins over it. Migrate to the slots above.
 
 The `[agents]` extra ships **`pydantic-ai-slim[anthropic]`** (Claude, the default)
 out of the box; other providers need their pydantic-ai slim group
