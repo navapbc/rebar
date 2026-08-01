@@ -23,6 +23,7 @@ import json
 import os
 import random
 import string
+import subprocess
 import sys
 import time
 import urllib.error
@@ -503,3 +504,174 @@ def dc_transport(jira_dc_pat: str) -> Any:
     )
     client = build_client_from_settings(settings)
     return JiraDataCenterTransport(client=client, project="")
+
+
+# ---------------------------------------------------------------------------
+# The J11 store-copy fixtures — HERE, not in a test module, because two suites need them
+# ---------------------------------------------------------------------------
+#
+# `dc_store_copy_repo` and `bound_dc_issue` began as module-local fixtures in
+# `test_store_copy_isolation.py`. `test_dc_mutations.py` needs the same two, and a
+# module-local fixture is NOT visible to a sibling module — the same trap `dc_transport`
+# fell into, which cost a full harness cycle and surfaced as an ERROR at setup
+# ("fixture 'dc_transport' not found") rather than as a collection failure. Note that
+# `pytest --collect-only` does NOT catch this: fixtures resolve at SETUP. Use
+# `pytest --fixtures <module>`.
+
+
+@pytest.fixture
+def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, monkeypatch) -> Path:
+    """A fresh repo holding a SCRUBBED COPY of the project's real ticket store.
+
+    TWO repos, mirroring the real layout, because the store IS a git repo of its own.
+    `.tickets-tracker/` is gitignored by the outer checkout and lives on the orphan `tickets`
+    branch, and the reconciler commits into it directly — `git -C <root>/.tickets-tracker
+    commit`. A first attempt extracted the tickets into a plain directory inside a single
+    outer repo, and every store write then failed with `CalledProcessError(128)` ("not a git
+    repository"). So the tracker gets its own `git init` on a `tickets` branch, and the outer
+    repo gitignores it exactly as a real checkout does.
+
+    NEITHER repo gets a remote — that is the primary isolation layer — and both get a local
+    committer identity, since a CI runner has no global one and `git commit` would otherwise
+    fail for a second, unrelated reason.
+    """
+    import textwrap
+
+    from _dc_support import is_ticket_entry, source_repo_root
+
+    source = source_repo_root()
+    work = tmp_path / "dc-store-copy"
+    tracker = work / ".tickets-tracker"
+    tracker.mkdir(parents=True)
+
+    def _init(repo: Path, branch: str) -> None:
+        subprocess.run(["git", "init", "-q", "-b", branch], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "harness@example.invalid"], cwd=repo, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "rebar J11 harness"], cwd=repo, check=True)
+
+    _init(work, "main")
+    (work / ".gitignore").write_text(".tickets-tracker/\n")
+
+    subprocess.run(
+        ["git", "fetch", "origin", "tickets"], cwd=source, capture_output=True, check=True
+    )
+    archive = subprocess.run(
+        ["git", "archive", "FETCH_HEAD"], cwd=source, capture_output=True, check=True
+    ).stdout
+    subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
+
+    # Record the expected entry set from THE SAME FETCH_HEAD the archive came from. The
+    # tickets branch is LIVE (rebar auto-pushes on every write, and a concurrent agent
+    # session writes to it constantly), so re-fetching at assertion time samples a DIFFERENT
+    # commit and the counts differ for reasons unrelated to the extraction.
+    listing = subprocess.run(
+        ["git", "ls-tree", "--name-only", "FETCH_HEAD"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.split()
+    (work / ".j11-expected-entries.json").write_text(
+        json.dumps(sorted(e for e in listing if is_ticket_entry(e)))
+    )
+
+    # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
+    # cannot survive merely because its exact name is not enumerated.
+    for path in sorted(tracker.glob(".bridge_state*")):
+        subprocess.run(["rm", "-rf", str(path)], check=True)
+
+    _init(tracker, "tickets")
+    subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--no-verify", "-m", "scrubbed store copy for J11"],
+        cwd=tracker,
+        check=True,
+    )
+
+    # CONVERGE THE COPY INTO A WRITABLE STORE. A store materialised from `git archive` is NOT
+    # yet usable: rebar's store marker `.env-id` is the FIRST line of the tickets branch's own
+    # `.gitignore`, so it is absent from the archive by construction, and `composer.edit_core`
+    # refuses every library write with "ticket system not initialized". `run_ensures` is
+    # rebar's idempotent ensure-registry and the sanctioned remedy (see bug d220).
+    from rebar._store.ensures import run_ensures
+
+    for _outcome in run_ensures(str(tracker)):
+        pass
+    assert (tracker / ".env-id").is_file(), (
+        "ensure-registry did not create the store marker `.env-id`; every library write "
+        "against this copy would fail with 'ticket system not initialized'"
+    )
+
+    (work / "rebar.toml").write_text(
+        textwrap.dedent(f"""
+        [reconciler]
+        backend = "jira-datacenter"
+        base_url = "{_BASE}"
+        allow_insecure = true
+
+        [jira]
+        project = "{jira_dc_project}"
+        """).lstrip()
+    )
+    monkeypatch.setenv("JIRA_PAT", jira_dc_pat)
+    monkeypatch.setenv("JIRA_PROJECT", jira_dc_project)
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
+    # REBAR_ROOT is what a `rebar` SUBPROCESS resolves the store from. `rebar.edit_ticket(...,
+    # repo_root=...)` shells out to the CLI and the child does not inherit that argument.
+    monkeypatch.setenv("REBAR_ROOT", str(work))
+    for cloud_var in ("JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"):
+        monkeypatch.delenv(cloud_var, raising=False)
+    return work
+
+
+@pytest.fixture
+def bound_dc_issue(
+    dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, track_issue: Any
+):
+    """A DC issue BOUND to a local ticket in the store copy — `(local_id, dc_key)`.
+
+    Every outbound mutation except create is an UPDATE, and `outbound_differ.py:518-520`
+    routes a ticket with no binding to the CREATE path instead. The scrub deliberately removes
+    every binding, so without this fixture an outbound "edit" cell would CREATE a new DC issue
+    and its oracle would pass against that fresh issue rather than the one it meant to change —
+    green, and proving nothing.
+
+    Both identifiers go to `--filter-local-ids`. Filtering on the local id alone does NOT work
+    for the inbound leg: the filter can only derive a Jira key from an EXISTING binding, which
+    is precisely what does not exist yet, while an inbound create's `target` IS the key.
+    """
+    from _dc_support import run_reconcile, seed_searchable_issue
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    key = seed_searchable_issue(
+        dc_transport, jira_dc_project, track_issue, "rebar J11 — bound fixture"
+    )
+    local_id = _jira_key_to_local_id(key)
+
+    cp = run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"binding pass raised:\n{cp.stderr[-2000:]}"
+
+    # ASSERT the binding before yielding. If this pass silently failed, every dependent cell
+    # would fall back to the create path and pass for the wrong reason.
+    bound = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
+    assert bound == key, (
+        f"the fixture did not establish a binding: get_jira_key({local_id!r}) == {bound!r}, "
+        f"expected {key!r}. Every outbound UPDATE cell would silently become a CREATE.\n"
+        f"stdout:\n{cp.stdout[-1500:]}"
+    )
+    return local_id, key
+
+
+@pytest.fixture
+def dc_request() -> Any:
+    """The harness's authenticated raw-REST helper, exposed to test modules.
+
+    A FIXTURE rather than a cross-module `from conftest import _request`: three different
+    `conftest.py` files sit on this suite's path (`tests/`, `tests/external/`, and this one),
+    so a bare `import conftest` binds whichever landed in `sys.modules` first — ambiguous by
+    construction, and the kind of import that works locally and resolves differently in CI.
+    """
+    return _request
