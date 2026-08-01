@@ -64,11 +64,15 @@ def _find_fixing_commit(repo_root: str, bug_id: str, tracker: str) -> str | None
     return None
 
 
-def _blame_file_commits(repo_root: str, ref: str, path: str) -> list[str]:
-    """Per-line introducing-commit SHAs for ``path`` at ``ref`` (``git blame -l``)."""
+def _blame_file_commits(repo_root: str, ref: str, path: str) -> list[str] | None:
+    """Per-line introducing-commit SHAs, or ``None`` if blame could not run.
+
+    A successful blame of an empty file returns ``[]``.  Callers must retain that
+    distinction so they do not derive a culprit from only a subset of file impacts.
+    """
     out = _git(repo_root, "blame", "-l", ref, "--", path)
     if out is None:
-        return []
+        return None
     shas: list[str] = []
     for line in out.splitlines():
         if not line:
@@ -106,7 +110,10 @@ def derive_caused_by(bug_id: str, repo_root: str, tracker: str) -> str | None:
     total = 0
     prefix_ref = f"{fixing}~1"
     for path in paths:
-        for sha in _blame_file_commits(repo_root, prefix_ref, path):
+        shas = _blame_file_commits(repo_root, prefix_ref, path)
+        if shas is None:
+            return None
+        for sha in shas:
             tally[sha] = tally.get(sha, 0) + 1
             total += 1
     if total == 0:
