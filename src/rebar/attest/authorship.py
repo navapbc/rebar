@@ -153,11 +153,14 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
         proc = subprocess.run(
             [
                 "git",
+                "-c",
+                "log.showSignature=false",
                 "-C",
                 tracker,
                 "log",
                 "--diff-filter=A",
                 "--full-history",
+                "--no-renames",
                 "--format=%H",
                 "--",
                 pathspec,
@@ -194,11 +197,14 @@ def resolve_position_commit(position: str, tracker: str, *, repo_root=None) -> s
         proc = subprocess.run(
             [
                 "git",
+                "-c",
+                "log.showSignature=false",
                 "-C",
                 tracker,
                 "log",
                 "--diff-filter=A",
                 "--full-history",
+                "--no-renames",
                 "--format=%H",
                 "--",
                 pathspec,
