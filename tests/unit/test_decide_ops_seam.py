@@ -1,0 +1,142 @@
+"""`plan_review_decide` and the operator-attested cluster move to `decide_ops.py` (ticket b5fe).
+
+`plan_review/workflow_ops.py` was 794 LOC against the 800 hard cap. The pressure is NOT that the
+file accretes ops — all eight registered ops existed within two days of its creation and none has
+been added in 35 days — it is that existing bodies grow: 283 -> 794 with `plan_review_decide`
+alone taking +149 of it, 27% of the file and 2.05x the next-largest op.
+
+WHAT THIS CUT IS, and its honest limit. `decide` travels with the operator-attested enrichment
+cluster because that cluster has exactly ONE caller in `src/` — `decide` itself — and is documented
+as running BEFORE Pass-3 reads the verifications, so it is a Pass-3 pre-step by construction. This
+RELOCATES the absorber rather than dissolving it: `decide` is still ~213 lines, now in a file with
+room. The ADR-0056-correct follow-up is the verb cut inside it — lifting the prerequisite-coverage
+normalisation into `prerequisites.py` — which is deliberately NOT bundled here because it is
+behaviour-adjacent and needs its own RED-first test.
+
+THE RELOCATION MUST COST ZERO TEST EDITS apart from one constant in the seam test. Nine test modules
+reference the moved names, and unusually for this codebase NONE of them monkeypatches into this
+module — so a re-export is sufficient and any forced test edit means the cut is wrong. Two pins are
+load-bearing and are asserted here rather than trusted:
+
+  * `_OPERATOR_ATTESTED_AC_RE` must survive by OBJECT IDENTITY —
+    `tests/unit/test_det_floor_operator_attested.py:153` asserts `is` against the det-floor regex.
+  * `decide_ops` must reach `orchestrator` by MODULE FORM plus attribute access. Flattening to
+    bare-name imports silently defeats
+    `tests/interfaces/lifecycle/test_plan_review_execution_floor_lifecycle.py`'s monkeypatch of
+    `orchestrator.pass3_over_findings` — the patch still applies to the module while the flattened
+    name holds the original function, so that test passes while exercising unpatched code.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+_WORKFLOW_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "workflow_ops.py"
+_DECIDE_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "decide_ops.py"
+_SEAM = REPO_ROOT / "tests" / "unit" / "test_plan_review_workflow_ops_seam.py"
+
+_WORKFLOW_OPS_TARGET = 560
+_FLOOR = 100
+
+_MOVED = (
+    "plan_review_decide",
+    "enrich_operator_attested",
+    "operator_attested_ac_texts",
+    "_ticket_id",
+    "_OPERATOR_ATTESTED_AC_RE",
+)
+
+
+def _loc(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
+
+
+# ══ HAPPY PATH ════════════════════════════════════════════════════════════════════════
+
+
+def test_the_extracted_module_exists_and_workflow_ops_regains_headroom() -> None:
+    """The size outcome. `workflow_ops.py` holds two of the five `finalize_verdict` call sites, so
+    headroom there is what makes the next ordinary change landable."""
+    assert _DECIDE_OPS.exists(), "src/rebar/llm/plan_review/decide_ops.py was not created"
+    decide_loc = _loc(_DECIDE_OPS)
+    assert _FLOOR <= decide_loc < 800, f"decide_ops.py is {decide_loc} LOC"
+    ops_loc = _loc(_WORKFLOW_OPS)
+    assert ops_loc <= _WORKFLOW_OPS_TARGET, (
+        f"workflow_ops.py is {ops_loc} LOC; the extraction must bring it to "
+        f"{_WORKFLOW_OPS_TARGET} or below"
+    )
+
+
+def test_every_moved_name_is_still_reachable_from_workflow_ops() -> None:
+    """Nine test modules import these from `workflow_ops`. The re-export is what makes this a
+    zero-test-edit relocation; a missing name is an ImportError at collection."""
+    from rebar.llm.plan_review import workflow_ops
+
+    missing = [n for n in _MOVED if not hasattr(workflow_ops, n)]
+    assert missing == [], f"no longer reachable as workflow_ops.<name>: {missing}"
+
+
+def test_the_operator_attested_regex_survives_by_object_identity() -> None:
+    """`tests/unit/test_det_floor_operator_attested.py:153` asserts `is`, not equality. A re-export
+    that rebuilt the pattern would satisfy `==` and fail that test."""
+    from rebar.llm.plan_review import det_operator_attested, workflow_ops
+
+    assert workflow_ops._OPERATOR_ATTESTED_AC_RE is det_operator_attested._OPERATOR_ATTESTED_TAG_RE
+
+
+# ══ HELD OUT ══════════════════════════════════════════════════════════════════════════
+
+
+def test_decide_ops_is_a_leaf_at_import_time() -> None:
+    """`workflow_ops` imports `decide_ops` at module scope for registration, so the reverse would
+    close an import cycle — an import-time failure, not a lint nit."""
+    tree = ast.parse(_DECIDE_OPS.read_text(encoding="utf-8"))
+    bad = [
+        f"line {n.lineno}"
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and "workflow_ops" in (n.module or "")
+    ]
+    assert bad == [], f"decide_ops imports workflow_ops at module scope: {bad}"
+
+
+def test_decide_ops_reaches_orchestrator_by_attribute_access() -> None:
+    """THE SILENT-BREAK GUARD. `test_plan_review_execution_floor_lifecycle.py` monkeypatches
+    `orchestrator.pass3_over_findings` and then calls the decide op. That works only while the op
+    resolves the attribute off the MODULE at call time. Flattening to
+    `from .orchestrator import pass3_over_findings` binds the original function at import time, so
+    the patch still applies to the module, the op keeps calling the unpatched original, and the
+    lifecycle test PASSES WHILE ASSERTING NOTHING."""
+    tree = ast.parse(_DECIDE_OPS.read_text(encoding="utf-8"))
+    flattened = [
+        f"line {n.lineno}: {', '.join(a.name for a in n.names)}"
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and (n.module or "").endswith("orchestrator")
+    ]
+    assert flattened == [], (
+        "decide_ops flattens orchestrator imports; use `from . import orchestrator` plus attribute "
+        f"access so monkeypatching keeps working: {flattened}"
+    )
+
+
+def test_the_seam_bound_for_workflow_ops_is_tightened_to_the_policy_target() -> None:
+    """b300 built the per-file `_LOC_BOUNDS` table and left this file at the staged cap. This ticket
+    changes exactly one constant — it must NOT re-split anything."""
+    seam = _SEAM.read_text(encoding="utf-8")
+    assert "(_WORKFLOW_OPS, _HEADROOM_TARGET)" in seam, (
+        "the seam test still holds workflow_ops.py at the staged cap; tighten that one entry"
+    )
+    assert "(_LLM_CONFIG, _HEADROOM_TARGET)" in seam, "b300's config.py bound must be left intact"
+
+
+def test_the_registration_import_lives_in_workflow_ops_not_steps() -> None:
+    """Registration is an import side effect. `workflow/steps.py` deliberately imports only
+    `workflow_ops`, which chains to its own extracted modules — keeping `steps.py` unaware of
+    plan-review's internal layout, the precedent `prerequisite_workflow_ops` already set."""
+    ops = _WORKFLOW_OPS.read_text(encoding="utf-8")
+    steps = (REPO_ROOT / "src" / "rebar" / "llm" / "workflow" / "steps.py").read_text(
+        encoding="utf-8"
+    )
+    assert "decide_ops" in ops, "workflow_ops must import decide_ops for registration"
+    assert "decide_ops" not in steps, "steps.py must not learn plan-review's internal layout"
