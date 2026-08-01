@@ -38,7 +38,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
 | `REBAR_ENV_ID` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
-| `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/config.py` |  |
+| `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/gate_context.py` |  |
 | `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_snapshot/janitor.py` |  |
 | `REBAR_GATE_GRACE_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
 | `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
@@ -185,10 +185,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/config.py:280` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:287` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:396` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:430` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:445` — `os.environ.get(<non-literal>)`
-- `src/rebar/llm/config.py:465` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:234` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:268` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:283` — `os.environ.get(<non-literal>)`
+- `src/rebar/llm/config.py:303` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:59` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
