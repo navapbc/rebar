@@ -47,6 +47,7 @@ from rebar.review_bot.config import (
     ReceiverConfig,
     configure_logging,
     review_timeout_seconds,
+    shutdown_cancel_seconds,
     shutdown_drain_seconds,
 )
 
@@ -116,9 +117,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await asyncio.wait_for(queue.join(), timeout=shutdown_drain_seconds())
         for task in tasks:
             task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        # Bound the cancel + await (c2ba). A well-behaved task cancels promptly (its coroutine
+        # unwinds at the next await — including the await inside an ``asyncio.to_thread`` offload,
+        # which returns immediately without waiting for the orphaned OS thread). But a task slow
+        # to honor cancellation — a shielded region, a synchronous ``finally`` — would make an
+        # unbounded ``await task`` hang shutdown with no stateable upper bound. Await the join
+        # under ``shutdown_cancel_seconds()`` and ABANDON whatever is still pending (the process
+        # is exiting; any in-flight store write is bounded independently by event_append's
+        # per-git timeout). ``gather(return_exceptions=True)`` collects each task's CancelledError
+        # as a result rather than re-raising, so this never propagates out of the lifespan.
+        if tasks:
+            with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=shutdown_cancel_seconds(),
+                )
 
 
 async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:

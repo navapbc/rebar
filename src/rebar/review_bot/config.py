@@ -41,6 +41,19 @@ DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
 #: ``reviewbot`` extra is not installed in the default test tier).
 DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
 
+#: Bounded window (seconds) for the lifespan's post-drain ``cancel`` + ``await`` of the
+#: background tasks (``SHUTDOWN_CANCEL_SECONDS``). Cancelling a task blocked in an
+#: ``asyncio.to_thread`` offload unwinds the coroutine at its await point immediately, but a
+#: task slow to honor cancellation — a shielded cleanup, a synchronous ``finally``, or the
+#: orphaned OS thread of a to_thread worker that CANNOT be force-cancelled — would otherwise
+#: make the join unbounded. Bounding it lets total shutdown state an upper bound
+#: (drain + cancel); anything still running is abandoned (the process is exiting anyway) and
+#: its in-flight store write is bounded independently by ``event_append``'s per-git timeout.
+#: Lives here (not in ``app``) for the same reason as the two budgets above: the container's
+#: ``stop_grace_period`` is sized against it, and that test must read it WITHOUT importing the
+#: fastapi-laden ``app`` module.
+DEFAULT_SHUTDOWN_CANCEL_SECONDS = 10
+
 #: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
 #: is idempotent (a reload/re-import never stacks duplicate handlers).
 _REVIEWBOT_LOG_HANDLER_MARKER = "_reviewbot_handler"
@@ -75,6 +88,21 @@ def shutdown_drain_seconds() -> float:
     except ValueError:
         return float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
     return val if val > 0 else float(DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+
+
+def shutdown_cancel_seconds() -> float:
+    """Bounded lifespan cancel/await window on shutdown from ``SHUTDOWN_CANCEL_SECONDS``
+    (default :data:`DEFAULT_SHUTDOWN_CANCEL_SECONDS`); a missing / unparseable / non-positive
+    value falls back to the default (a 0 or negative bound would abandon every task instantly,
+    losing well-behaved tasks' prompt cancellation)."""
+    raw = os.environ.get("SHUTDOWN_CANCEL_SECONDS")
+    if not raw:
+        return float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
+    try:
+        val = float(raw.strip())
+    except ValueError:
+        return float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
+    return val if val > 0 else float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
 
 
 def configure_logging() -> None:
