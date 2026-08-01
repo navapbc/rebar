@@ -97,7 +97,7 @@ jobs:
           rm -rf .tickets-tracker
           ok=0
           for attempt in 1 2 3; do
-            if timeout 60 git fetch --depth=1 \
+            if timeout 60 git fetch --filter=blob:none --depth=1 \
                  "https://github.com/${{ github.repository }}" \
                  '+tickets:refs/remotes/gh-tickets'; then ok=1; break; fi
             echo "tickets-branch fetch attempt $attempt failed; retrying..." >&2
@@ -220,6 +220,8 @@ jobs:
     name: verify-identity (whole-store authorship gate)
     needs: clear-vote
     runs-on: ubuntu-latest
+    env:
+      REBAR_TICKETS_PACK_LIMIT_KIB: 131072
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
@@ -253,7 +255,7 @@ jobs:
           rm -rf .tickets-tracker
           ok=0
           for attempt in 1 2 3; do
-            if git fetch \
+            if git fetch --filter=blob:none \
                  "https://github.com/${{ github.repository }}" \
                  '+tickets:refs/remotes/gh-tickets'; then ok=1; break; fi
             echo "tickets-branch fetch attempt $attempt failed; retrying..." >&2
@@ -265,12 +267,35 @@ jobs:
             exit 1
           fi
           git worktree add -B tickets .tickets-tracker refs/remotes/gh-tickets
+      - name: Fail closed if the filtered tickets pack exceeds its limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          size_pack="$(git count-objects -v | awk '$1 == "size-pack:" { print $2; found=1 } END { if (!found) exit 1 }')"
+          if ! [[ "$size_pack" =~ ^[0-9]+$ ]]; then
+            echo "::error::git count-objects did not report a numeric size-pack" >&2
+            exit 1
+          fi
+          if (( size_pack > REBAR_TICKETS_PACK_LIMIT_KIB )); then
+            echo "::error::tickets pack is ${size_pack} KiB; limit is ${REBAR_TICKETS_PACK_LIMIT_KIB} KiB" >&2
+            exit 1
+          fi
       - name: verify-identity (config-driven posture; reads rebar.toml from this change)
         shell: bash
         run: |
           set -euo pipefail
+          before="$(mktemp)"
+          after="$(mktemp)"
+          trap 'rm -f "$before" "$after"' EXIT
           export REBAR_TRACKER_DIR="$PWD/.tickets-tracker"
+          git count-objects -v > "$before"
           rebar verify-identity
+          git count-objects -v > "$after"
+          if ! cmp -s "$before" "$after"; then
+            echo "::error::verify-identity changed the object database" >&2
+            diff -u "$before" "$after" >&2 || true
+            exit 1
+          fi
 
   vote:
     name: cast Verified

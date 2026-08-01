@@ -74,6 +74,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: true
+          filter: blob:none
           # Full history (NOT shallow): a shallow tickets graft defeats merge-base and
           # corrupts compaction reconciliation (bug f193). Reconcile with full history
           # + merge, never shallow + rebase.

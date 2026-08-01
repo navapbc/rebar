@@ -30,10 +30,26 @@ jobs:
   verify-identity:
     name: verify-identity (authenticated-authorship gate)
     runs-on: ubuntu-latest
+    env:
+      REBAR_CHECKOUT_PACK_LIMIT_KIB: 102400
     steps:
       - uses: actions/checkout@v7
         with:
+          filter: blob:none
           fetch-depth: 0
+      - name: Fail closed if the blobless checkout pack exceeds its limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          size_pack="$(git count-objects -v | awk '$1 == "size-pack:" { print $2; found=1 } END { if (!found) exit 1 }')"
+          if ! [[ "$size_pack" =~ ^[0-9]+$ ]]; then
+            echo "::error::git count-objects did not report a numeric size-pack" >&2
+            exit 1
+          fi
+          if (( size_pack > REBAR_CHECKOUT_PACK_LIMIT_KIB )); then
+            echo "::error::checkout pack is ${size_pack} KiB; limit is ${REBAR_CHECKOUT_PACK_LIMIT_KIB} KiB" >&2
+            exit 1
+          fi
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -59,7 +75,20 @@ jobs:
         # No --require-authenticated / --since flags: enforcement posture and the
         # grandfather boundary are read from rebar.toml (`identity.require_authenticated`,
         # `identity.enforce_since`). See the header comment.
-        run: rebar verify-identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(mktemp)"
+          after="$(mktemp)"
+          trap 'rm -f "$before" "$after"' EXIT
+          git count-objects -v > "$before"
+          rebar verify-identity
+          git count-objects -v > "$after"
+          if ! cmp -s "$before" "$after"; then
+            echo "::error::verify-identity changed the object database" >&2
+            diff -u "$before" "$after" >&2 || true
+            exit 1
+          fi
       - name: verify-opcert (required-environment op-cert gate)
         # Same merged-log walk; posture + grandfather boundary from rebar.toml
         # (verify.require_environment, verify.opcert_enforce_since) — no CI variable.
