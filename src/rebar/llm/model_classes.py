@@ -29,7 +29,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, infer_provider
+from rebar.llm.config import (
+    DEFAULT_MODEL,
+    VERIFIER_DEFAULT_MODEL,
+    infer_provider,
+    split_provider_qualifier,
+)
 from rebar.llm.errors import LLMConfigError
 
 logger = logging.getLogger(__name__)
@@ -217,8 +222,13 @@ def _deprecated_bare_model() -> str | None:
 
 
 def _resolve_target(model: str, provider: str | None) -> str:
-    # Already provider-qualified -- return as-is, never double-prefix.
-    if ":" in model:
+    # Already provider-qualified -- return as-is, never double-prefix. Decided by
+    # `split_provider_qualifier`, NOT by `":" in model`: a canonical Bedrock id carries a version
+    # suffix containing a colon (`...-v1:0`), and testing for a bare colon read that as "already
+    # qualified" and SILENTLY DISCARDED the operator's configured `provider` (ticket 03b0). Only the
+    # unversioned aliases worked, which is why it stayed hidden.
+    qualifier, _ = split_provider_qualifier(model)
+    if qualifier:
         return model
     resolved_provider = provider or infer_provider(model)
     return f"{resolved_provider}:{model}" if resolved_provider else model
