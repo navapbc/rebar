@@ -29,11 +29,34 @@ from typing import Any
 from rebar_reconciler._backend import BackendHTTPError
 from rebar_reconciler._errors import MAX_BACKOFF_S, parse_retry_after
 
-#: Atlassian's guidance for the Data Center token bucket is to honour ``Retry-After`` PLUS up to
-#: 20% random jitter. The jitter is not decoration: every rebar process sharing a bucket would
-#: otherwise wake in lockstep and re-collide. This is a DELIBERATE divergence from
-#: ``dispatch_one``'s 429 branch, which applies ``min(MAX_BACKOFF_S, retry_after)`` with no
-#: jitter — the parser and the ceiling are reused from ``_errors``; the delay arithmetic is not.
+#: PROVENANCE OF THE THREE RATE-LIMIT NUMBERS, labelled rather than stated as fact (story S2's
+#: own plan required each to be either confirmed against the target DC version or explicitly
+#: marked unverified, and the OSS research they came from retracted two of its other claims on a
+#: second pass — so an unlabelled number here would be exactly the over-trust that warning was
+#: about):
+#:
+#:   * "Data Center only" — CONFIRMED for this project's harness. `/rest/api/2/serverInfo`
+#:     reports `deploymentType != "Cloud"`, asserted live by
+#:     `test_instance_is_a_server_deployment_at_the_pinned_version`.
+#:   * "8.6+" — CONFIRMED to be SATISFIED, which is a weaker claim than confirming the threshold.
+#:     The harness runs Jira 8.17.1 and that same live test asserts `version >= (8, 14)`, so the
+#:     instance this code is exercised against is comfortably above 8.6. That 8.6 is the exact
+#:     version the limiter ARRIVED in is **UNVERIFIED** — sourced from Atlassian documentation,
+#:     not tested.
+#:   * "off by default (admin-enabled)" — **UNVERIFIED.** Whether the limiter is enabled is an
+#:     admin setting this suite never reads, and the harness has never had it switched on. This
+#:     is precisely why the retry is driven by the PRESENCE of a `Retry-After` header rather than
+#:     by any assumption about the limiter's configuration: with no header the code behaves
+#:     exactly as it did before, so being wrong about the default costs nothing.
+#:   * "Retry-After plus up to 20% jitter" — **UNVERIFIED against a live limiter.** Sourced from
+#:     Atlassian's guidance; no test has observed a real 429 from a real DC token bucket, because
+#:     the harness cannot produce one. The jitter is nonetheless load-bearing rather than
+#:     decorative: every rebar process sharing a bucket would otherwise wake in lockstep and
+#:     re-collide.
+#:
+#: The jitter is a DELIBERATE divergence from ``dispatch_one``'s 429 branch, which applies
+#: ``min(MAX_BACKOFF_S, retry_after)`` with none — the parser and the ceiling are reused from
+#: ``_errors``; the delay arithmetic is not.
 _RETRY_AFTER_JITTER = 0.20
 
 

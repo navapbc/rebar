@@ -1,8 +1,13 @@
 """HELD-OUT pin on the Data Center 429 / ``Retry-After`` policy (story S2, epic e369).
 
-Jira Data Center has a built-in per-user token bucket (8.6+, DC only, OFF BY DEFAULT — an admin
-enables it). Before this story a 429 propagated as a hard failure on the first occurrence, on an
-instance that was merely asking rebar to slow down.
+Jira Data Center has a built-in per-user token bucket. Before this story a 429 propagated as a
+hard failure on the first occurrence, on an instance that was merely asking rebar to slow down.
+
+THE VERSION/DEFAULT NUMBERS ARE LABELLED, NOT ASSERTED. "8.6+", "DC only" and "off by default"
+carry their provenance in `retry.py`'s comment on `_RETRY_AFTER_JITTER`: one is confirmed live
+against the harness, the rest are explicitly marked UNVERIFIED. None of them is load-bearing for
+this code, because the retry keys off the PRESENCE of a `Retry-After` header rather than off any
+assumption about the limiter's configuration.
 
 THE CONSTRAINT THAT SHAPES EVERYTHING HERE: ``_with_connection_retry`` is the single choke point
 for ALL transport call sites INCLUDING ``create_issue``, ``add_comment`` and ``add_label``. A 429
