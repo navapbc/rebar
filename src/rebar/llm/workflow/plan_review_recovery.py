@@ -217,8 +217,17 @@ def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | N
         title="",
         description="",
     )
+    # Pass-2 verify SUCCEEDED here (only the coach failed), so its outputs still carry the
+    # runner-stamped record for the call that ran — carry it forward rather than recompute
+    # one from cfg, which could name an endpoint/caps that never served this review.
     verdict = orchestrator.finalize_verdict(
-        pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
+        pctx,
+        parts,
+        coaching=[],
+        coverage=coverage,
+        runner_name=cfg.runner,
+        model=cfg.model,
+        provider_provenance=(succeeded.get(STEP_VERIFY) or {}).get("provider_provenance"),
     )
     return _findings.validate_structured(verdict, "plan_review_verdict")
 
@@ -281,6 +290,10 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
         title="",
         description="",
     )
+    # NO `provider_provenance` here, deliberately: verify failed by construction, so no
+    # verify-step record exists to carry. Synthesizing one from cfg would make the verdict
+    # claim a provider served a verification that never ran — the misattribution this
+    # record exists to remove. Absence is the honest answer (343b).
     verdict = orchestrator.finalize_verdict(
         pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
     )
@@ -318,6 +331,8 @@ def _degraded_plan_review_verdict(
     parts = orchestrator.partition_findings(
         det_blocks, det_advisories, [], advisory_cap=advisory_cap
     )
+    # NO `provider_provenance`, deliberately: coverage.llm_unavailable means no provider
+    # answered at all, so there is no record to carry and no honest one to build (343b).
     return orchestrator.finalize_verdict(
         ctx, parts, coaching=[], coverage=coverage, runner_name=runner_name, model=cfg.model
     )
