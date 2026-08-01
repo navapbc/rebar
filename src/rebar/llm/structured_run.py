@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from rebar.llm import usage_log
-from rebar.llm.capabilities import ModelCapabilities
+from rebar.llm.capabilities import CACHE_MIN_PREFIX_TOKENS, ModelCapabilities
 from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
@@ -404,12 +404,21 @@ def warn_if_cache_ineffective(usage: dict, *, caching_requested: bool, model: st
     fires on ``input_tokens == 0`` (a request that plausibly never happened), whereas here
     ``input_tokens`` is healthy/nonzero (a REAL request was billed) — the existing predicate
     would never fire for this case. An ineffective cache is a COST problem, not a correctness
-    one, so this is WARNING-level observability only and never raises/blocks."""
+    one, so this is WARNING-level observability only and never raises/blocks.
+
+    Bounded BELOW by ``CACHE_MIN_PREFIX_TOKENS`` (bug 7a79). The claim being made is "a
+    cacheable prompt silently failed to cache", which requires the prompt to have been
+    cacheable: below the floor the anthropic cache never writes or reads, so zero/zero is the
+    CORRECT reading and no configuration change could alter it. Unbounded, the predicate fired
+    on every small call — ~20 lines per ``rebar review-plan`` run, on the same runs whose
+    AGGREGATE usage reported ``cache_write_tokens > 0`` — which both contradicted the run's own
+    telemetry and trained operators to filter out the one signal that catches real cost bleed.
+    The floor makes the warning mean what it says; the above-floor detection is unchanged."""
     if (
         caching_requested
         and usage.get("cache_read_tokens", 0) == 0
         and usage.get("cache_write_tokens", 0) == 0
-        and usage.get("input_tokens", 0) > 0
+        and usage.get("input_tokens", 0) >= CACHE_MIN_PREFIX_TOKENS
     ):
         logger.warning(
             "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
