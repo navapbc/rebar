@@ -29,6 +29,16 @@ from rebar.opcert_service.config import OpcertServiceConfig
 #: clone" profile, for which it adopted the same 300s bound.
 _GIT_TIMEOUT = 300
 
+#: Write-lock acquisition budget (seconds × attempts) for the boot-time ensure sweep in
+#: :func:`_populate`. The review-bot's autodeploy health check is ``HEALTH_TIMEOUT=30``
+#: (autodeploy config), so the sweep must not be able to spend the ``write_lock`` default of
+#: 30s × 2 = 60s waiting on a contended lock — that alone can fail a deploy with no orphaned
+#: lock involved (bug e43f, split out of castoff-tigerseye-ammonite). The sweep is idempotent
+#: and re-runs on the next boot, so a contended lock is safely SKIPPED here rather than waited
+#: out. Mirrors the MCP-boot budget in ``src/rebar/mcp_server.py`` (5s × 1).
+_ENSURE_BOOT_TIMEOUT = 5
+_ENSURE_BOOT_ATTEMPTS = 1
+
 
 class WorkspaceError(Exception):
     """A workspace could not be prepared (a git/clone/fetch failure). Maps to an internal job
@@ -118,10 +128,13 @@ def _populate(root: str, cfg: OpcertServiceConfig) -> Workspace:
     _git_ok(tracker, "config", "commit.gpgsign", "false")
 
     # Converge the freshly-mounted tracker into a writable rebar store (`.env-id` marker etc.),
-    # mirroring reviewbot-ensure-tickets.sh. Idempotent — a no-op once converged.
+    # mirroring reviewbot-ensure-tickets.sh. Idempotent — a no-op once converged. A SHORT
+    # write-lock budget (bug e43f): this runs on the review-bot boot path behind a 30s deploy
+    # health check, so a contended lock must SKIP the sweep (it re-runs next boot) rather than
+    # burn write_lock's 60s default and fail the deploy on its own.
     from rebar._store.ensures import run_ensures
 
-    for _ in run_ensures(tracker):
+    for _ in run_ensures(tracker, timeout=_ENSURE_BOOT_TIMEOUT, attempts=_ENSURE_BOOT_ATTEMPTS):
         pass
 
     # 3. Store-read-only: strip EVERY remote so there is no push target/credential, defense in
