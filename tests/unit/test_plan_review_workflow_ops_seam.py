@@ -58,11 +58,11 @@ _HEADROOM_TARGET = 700
 # PER-FILE bounds, not one shared constant. Both files were staged at the hard cap while their
 # extraction tickets were open; b300 has since moved the gate read-root / snapshot-session domain
 # out of `config.py` into `llm/gate_context.py`, so that file now holds real headroom and is
-# asserted at the policy target. `workflow_ops.py` stays at the staged cap until b5fe lands —
-# tightening the SHARED constant instead would turn this test red on b5fe's file and name the
-# wrong ticket in the failure.
+# asserted at the policy target. b5fe has since moved `plan_review_decide` and its
+# operator-attested pre-step out of `workflow_ops.py` into `plan_review/decide_ops.py` (794 -> 511
+# LOC), so that file now holds real headroom too and is asserted at the policy target as well.
 _LOC_BOUNDS = (
-    (_WORKFLOW_OPS, _HARD_CAP),
+    (_WORKFLOW_OPS, _HEADROOM_TARGET),
     (_LLM_CONFIG, _HEADROOM_TARGET),
 )
 
