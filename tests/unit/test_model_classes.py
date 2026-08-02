@@ -218,22 +218,6 @@ def test_an_unknown_class_name_is_a_typed_error_not_a_silent_default() -> None:
         mc.resolve_class("fronteir", slots)
 
 
-def test_config_py_is_not_grown_past_the_cap() -> None:
-    """HELD OUT — a structural guard, not a behaviour test. config.py sits at 777 of the 800-LOC
-    hard cap, which is WHY this schema lives in its own module. An implementer who ignores that and
-    adds the slots to config.py breaches the cap and fails CI; catching it here is cheaper."""
-    import pathlib
-
-    cfg = pathlib.Path(__file__).resolve().parents[2] / "src" / "rebar" / "llm" / "config.py"
-    limit = int(
-        (pathlib.Path(__file__).resolve().parents[2] / ".github" / "module-size-limit.txt")
-        .read_text()
-        .strip()
-    )
-    loc = len(cfg.read_text().splitlines())
-    assert loc <= limit, f"llm/config.py is {loc} LOC, over the {limit} cap"
-
-
 # ── the integration point: the parser must be REACHABLE from real config ──────────────────
 def test_load_class_slots_reads_the_model_classes_table_from_real_config(monkeypatch) -> None:
     """`parse_class_slots` takes an already-loaded mapping, which leaves open who hands it the
