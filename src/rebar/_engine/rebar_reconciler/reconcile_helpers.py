@@ -493,3 +493,93 @@ class _NoOpSyncLogger:
 
     def close(self) -> None:
         return None
+
+
+# The differ emissions that are only sound when ``local_state`` really is local state:
+# ``(outbound, update)``/``field_drift`` (bug 727f) and ``(outbound, create)``/
+# ``unbound_local`` (bug d103-c3f8-2fbc-4c97). Keyed on BOTH ``source`` and ``reason`` so
+# an invariant SEED mutation that happens to reuse a reason string is never swept up.
+_SNAPSHOT_DIFFER_LOCAL_STATE_EMISSIONS: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        ("outbound", "update", "field_drift"),
+        ("outbound", "create", "unbound_local"),
+    }
+)
+
+
+def drop_snapshot_differ_local_state_emissions(mutations: list[Any]) -> list[Any]:
+    """Discard the differ emissions that presume a real ``local_state`` argument.
+
+    Bugs 727f-b351-59ba-4b3b and d103-c3f8-2fbc-4c97 — one cause, two symptoms.
+
+    ``differ.compute_mutations`` documents its arguments as ``(local_state, jira_state)``
+    — the LOCAL source of truth against the Jira working set — and says so precisely
+    because that contract REPLACED the legacy ``(prev_snapshot, next_snapshot)`` one.
+    ``run_differs`` was never migrated: it still passes the legacy pair, both halves of
+    which are REMOTE Jira state (``prev_snapshot`` is a persisted earlier fetch,
+    ``curr_snapshot`` a fresh one). At that one call site ``local_state`` is therefore not
+    local state at all, and the differ's two local-state-dependent arms misfire:
+
+    * **``field_drift``** (key in both) — ``_compute_mutations_emit_both`` reads every
+      prev->curr REMOTE field change as local-wins drift and emits an
+      ``(outbound, update)`` carrying the STALE prev value. It never converges:
+      ``reconcile.py`` advances the prev snapshot from the PRE-APPLY fetch, so an outbound
+      write applied during pass N is invisible to ``prev`` at pass N+1 — a fully converged
+      pair is re-planned as outbound work, and a read-only pass (which never advances
+      ``prev``) re-plans the same phantom forever. Applying it changes nothing either: the
+      payload is a bare field dict, not ``{"changed_fields": ...}``, so
+      ``batch_dispatch._mutation_to_batch_dict`` resolves its fields to ``{}``. It is
+      unsatisfiable while still spending the per-mode mutation cap and inflating
+      ``mutation_count``.
+    * **``unbound_local``** (key in ``local_state`` only) —
+      ``_compute_mutations_emit_local_only`` emits an ``(outbound, create)`` for a key
+      that is really just "present in the previous fetch, absent from this one". That is
+      indistinguishable from a key that merely aged out of the working-set query, and the
+      create RESURRECTS the issue from stale prev fields. It also violates ADR 0028
+      (``docs/adr/0028-reconciler-bound-but-absent-not-deleted.md``, Decision para 1): no
+      destructive or terminal action may be driven by a key's absence from the fetched
+      snapshot.
+
+    The differ's third arm — key in ``jira_state`` only, ``(inbound, create)`` with reason
+    ``jira_new`` — IS correct here: at this call site it means a genuinely new remote
+    issue, which is the snapshot diff's one real job. It is preserved, as is every other
+    differ emission (inbound conflict/probe, ``dangling_jira_local_id``,
+    ``duplicate_local_id``, ``ambiguous_local_binding``, ``repair_property`` follow-ons,
+    the absent-partner probes). Nothing is lost by the two suppressions: field sync and
+    creation for these keys are already owned in BOTH directions by the binding-aware
+    outbound and inbound differ phases that run immediately afterwards.
+
+    Scoped by ``(direction, action, provenance["source"], provenance["reason"])`` — the
+    ``source`` check matters: invariant SEED mutations are prepended by
+    ``compute_mutations``'s ``seed_mutations`` argument and carry
+    ``provenance["source"] == "invariants"``, and a seed may legitimately reuse one of
+    these reason strings. Keying on ``reason`` alone would drop it. Mutations that are
+    plain dicts (legacy shape) have no ``provenance`` attribute and pass through untouched.
+    Pure: returns a NEW list, never mutates in place.
+
+    ``differ.compute_mutations`` itself is deliberately NOT modified — its documented
+    local-vs-jira contract stays intact for callers that honour it, and the suppression
+    lives at the one call site that does not.
+
+    REMOVAL NOTE: if ``run_differs`` is ever migrated to pass REAL local state, this
+    suppression must be DELETED in the same change — at that point both emissions become
+    correct and dropping them would silently disable outbound create and outbound field
+    sync.
+    """
+    kept: list[Any] = []
+    for mutation in mutations:
+        provenance = getattr(mutation, "provenance", None)
+        if not isinstance(provenance, Mapping):
+            kept.append(mutation)
+            continue
+        signature = (
+            str(getattr(getattr(mutation, "direction", None), "value", "")),
+            str(getattr(getattr(mutation, "action", None), "value", "")),
+            str(provenance.get("reason") or ""),
+        )
+        if provenance.get("source") == "differ" and signature in (
+            _SNAPSHOT_DIFFER_LOCAL_STATE_EMISSIONS
+        ):
+            continue
+        kept.append(mutation)
+    return kept

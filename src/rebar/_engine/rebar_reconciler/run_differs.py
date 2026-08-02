@@ -206,6 +206,18 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     the outbound differ (with OM->Mutation conversion) + the binding-aware inbound
     differ (with IM->Mutation conversion). Accumulates the typed-Mutation list.
 
+    THE SNAPSHOT DIFF IS LEGACY-SHAPED, AND THAT IS LOAD-BEARING (bugs 727f / d103).
+    ``differ.compute_mutations``'s contract is ``(local_state, jira_state)`` and its
+    module docstring says that contract REPLACED the legacy
+    ``(prev_snapshot, next_snapshot)`` one — but this call site, its only production
+    caller, was never migrated and still passes the legacy pair. Both halves are remote
+    Jira fetches (``reconcile.py`` reads ``prev_snapshot`` from the persisted earlier
+    fetch and ``curr_snapshot`` from a fresh one), so the differ's local-state-dependent
+    arms cannot be trusted here and are dropped immediately below. Its useful output at
+    this call site is the ``jira_new`` inbound create for a key that appeared since the
+    last pass. If this caller is ever migrated to pass real local state, remove that
+    suppression in the same change.
+
     ``ctx`` is the shared ``reconcile._PassContext`` (typed loosely as ``Any`` so
     this module holds no import edge back to reconcile.py). ``route_inbound_probe``
     is reconcile.py's probe router, injected as a parameter for the same reason.
@@ -225,6 +237,11 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
         quarantine_set=quarantine_keys,
         seed_mutations=seed_repair_property_mutations,
     )
+    # Bugs 727f / d103: drop the differ arms that only make sense when `local_state` is
+    # really local state — see this function's docstring and the helper's.
+    from rebar_reconciler.reconcile_helpers import drop_snapshot_differ_local_state_emissions
+
+    mutations = drop_snapshot_differ_local_state_emissions(mutations)
 
     _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
     # Ticket 4af8/aff0: obtain the configured backend ONCE and thread its role Protocols

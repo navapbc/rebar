@@ -10,6 +10,17 @@ new Mutation-based contract:
 
     compute_mutations(local_state, jira_state) -> list[Mutation]
 
+CAVEAT — THE SOLE PRODUCTION CALLER WAS NEVER MIGRATED (bugs 727f / d103).
+``run_differs`` still passes ``(prev_snapshot, curr_snapshot)``, i.e. two remote
+Jira fetches, so for that caller ``local_state`` is NOT local state. Every arm
+below whose meaning depends on ``local_state`` genuinely being the local source of
+truth therefore misfires there: the local-only arm reads a key that left the fetch
+window as a ticket to (re)create, and the both-sides arm reads a remote-vs-remote
+field delta as local-wins drift. ``run_differs`` compensates at its own call site
+(``reconcile_helpers.drop_snapshot_differ_local_state_emissions``) rather than here,
+so this contract stays intact for callers that honour it. Do not "fix" that by
+weakening these semantics; migrate the caller and delete the suppression together.
+
 Fields listed in ``EXCLUDED_FIELDS`` (from ``config.py``) are ignored during
 field-level comparison and never appear in a Mutation's payload.
 
