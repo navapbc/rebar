@@ -11,9 +11,11 @@ never inverted. Surfaces at most `overlap_surface_cap` advisory findings; NEVER 
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
@@ -40,6 +42,20 @@ def judge_one(first: dict, second: dict, cfg: LLMConfig, runner: Runner | None) 
     dict; on ANY error (timeout / malformed output) → treated as abstain (dropped), logged,
     never raised to the caller."""
     try:
+        # MODEL CLASS: `standard`. Chosen on the prompt's shape, not on "it's a sub-call": the
+        # overlap-judge prompt is `execution_mode: single_turn`, tool-less and "Not a reviewer",
+        # but it must pick ONE relation from a closed 5-value set AND cite a named shared artifact
+        # while "false flags are costly" — precision-sensitive JUDGEMENT, which is what the
+        # operator's rule puts on the sonnet-equivalent `standard` class. NOT `frontier`: this is
+        # the volume site (18 of the 23 LLM calls in one measured plan review), so frontier would
+        # be the most expensive possible reading of the fix.
+        #
+        # Bound HERE, per call, rather than inherited from `cfg`: passing raw `cfg` made every
+        # judge call run `cfg.model` and ignore the configured class table entirely, so an operator
+        # who cut over by configuring the three classes left the MAJORITY of plan-review traffic on
+        # their old provider (bug afeb). Inside the try, so a config error is an abstain like any
+        # other judge failure — the overlap step stays advisory and never blocks a review.
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
         prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
         system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
         instructions = f"FIRST:\n{_digest_block(first)}\n\nSECOND:\n{_digest_block(second)}"
