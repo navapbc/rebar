@@ -270,16 +270,60 @@ class JiraDataCenterTransport:
             ) from exc
 
     def transition_issue_by_name(self, remote_id: str, target_status: str) -> None:
+        """Move ``remote_id`` to ``target_status``, resolving EITHER spelling.
+
+        **A transition's NAME is not its destination STATUS name, and every production caller
+        passes the latter** (bug 7f93). ``LOCAL_STATUS_TO_JIRA`` maps local ``in_progress`` to
+        ``"In Progress"`` — a workflow STATE name, which is what that map is documented to hold —
+        while Jira's classic workflow offers transitions called ``Start Progress`` and ``Done``.
+        Matching only on the transition's own name therefore missed, raised, and got SOFT-FAILED
+        into ``bridge_alerts`` by ``apply_handlers.record_backstop_failure``: the pass exited 0
+        with no traceback and the issue's status never changed.
+
+        It was a silent PARTIAL failure, which is worse than a loud one. ``Done`` happens to be
+        both a transition name and a status name on that workflow, so ``closed`` synced by
+        coincidence while ``in_progress`` did not. It never fired on Cloud because the DIG
+        workflow names its transitions after their destinations, so the two spellings coincide.
+
+        Resolution order, and the order matters:
+          1. an EXACT transition-name match wins, so a caller that genuinely passes a transition
+             name (the existing live round-trip test does) is unaffected — this is additive;
+          2. otherwise a UNIQUE destination-status match on ``to.name``, which the transitions
+             payload declares;
+          3. an AMBIGUOUS destination raises rather than guessing. Two transitions can lead to one
+             status by different routes (different screens or conditions), and silently picking
+             one would be a coin flip the caller cannot see.
+        """
         transitions = _with_connection_retry(lambda: self._client.transitions(remote_id))
-        match = next(
-            (t for t in transitions if isinstance(t, dict) and t.get("name") == target_status),
-            None,
-        )
+        entries = [t for t in transitions if isinstance(t, dict)]
+
+        match = next((t for t in entries if t.get("name") == target_status), None)
+
         if match is None:
-            available = sorted(t.get("name", "") for t in transitions if isinstance(t, dict))
+            by_destination = [
+                t
+                for t in entries
+                if isinstance(t.get("to"), dict) and t["to"].get("name") == target_status
+            ]
+            if len(by_destination) > 1:
+                routes = sorted(str(t.get("name", "")) for t in by_destination)
+                raise ValueError(
+                    f"transition to status {target_status!r} is AMBIGUOUS for {remote_id}: "
+                    f"{len(by_destination)} transitions declare it as their destination "
+                    f"({routes}). Name the transition explicitly rather than the status."
+                )
+            if by_destination:
+                match = by_destination[0]
+
+        if match is None:
+            available = sorted(
+                f"{t.get('name', '')!r} -> {(t.get('to') or {}).get('name', '?')!r}"
+                for t in entries
+            )
             raise ValueError(
-                f"no transition named {target_status!r} is available for {remote_id} "
-                f"(available: {available})"
+                f"no transition named {target_status!r} is available for {remote_id}, and none "
+                f"declares it as a destination status (available, as "
+                f"'transition' -> 'destination status': {available})"
             )
         _with_connection_retry(lambda: self._client.transition_issue(remote_id, match["id"]))
 
