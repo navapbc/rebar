@@ -612,19 +612,11 @@ class Backend(Protocol):
 # ``TicketTransport``-annotated parameter is reported ``[attr-defined]`` — correctly:
 # the annotated VIEW does not offer the member.
 #
-# These narrow such a site to the capability Protocol that actually declares it.
-# The narrowed value stays attribute-checked (a typo in the member name is still an
-# error), so this is a NARROWING, not a widening to ``Any`` — the one resolution the
-# story forbids, because it reinstates exactly the blindness cc77 removes.
-
-
-def as_commenting(transport: TicketTransport) -> SupportsComments:
-    """Narrow a transport to its :class:`SupportsComments` view for a call site
-    that reaches for ``add_comment`` / ``get_comment_map``."""
-    return transport  # type: ignore[return-value]
-
-
-def as_linking(transport: TicketTransport) -> SupportsLinks:
-    """Narrow a transport to its :class:`SupportsLinks` view for a call site that
-    reaches for ``set_relationship`` / ``get_issuelinks_map``."""
-    return transport  # type: ignore[return-value]
+# Such a site is resolved by narrowing to the capability Protocol that declares it,
+# spelled ``cast("SupportsComments", client).add_comment(...)`` (a string forward
+# reference, so the import stays under ``TYPE_CHECKING`` and nothing changes at
+# runtime). The narrowed value is still attribute-checked — a typo in the member
+# name remains an error — so this is a NARROWING, not a widening to ``Any``. Widening
+# is the one resolution cc77 forbids: it reinstates exactly the blindness the story
+# removes. Adding the member to :class:`TicketTransport`'s body is also wrong — it
+# would oblige every future transport to provide an opt-in feature.

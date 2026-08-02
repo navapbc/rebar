@@ -19,12 +19,10 @@ re-import the three phase functions back without a cycle. ``dispatch_one`` re-ex
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from ._backend import as_commenting
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from ._backend import TicketTransport
+    from ._backend import SupportsComments, TicketTransport
 
 import sys
 import time
@@ -164,7 +162,7 @@ def _update_one_dispatch_comments(
             _comments_computed += 1
             try:
                 # Story 9622 (D2): single-attempt, no retry (see create-path note).
-                as_commenting(client).add_comment(issue_key, body)
+                cast("SupportsComments", client).add_comment(issue_key, body)
                 _comments_applied += 1
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch
@@ -177,3 +175,52 @@ def _update_one_dispatch_comments(
                     file=sys.stderr,
                 )
     return _comments_computed, _comments_applied
+
+
+def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
+    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
+
+    Bug 3f04: local copy of ``apply_outbound._index_existing_links`` — this module
+    deliberately never imports the applier (cycle avoidance), so the helper is
+    duplicated. Records ``type.name`` plus the OTHER issue's key on EITHER side
+    (``inwardIssue``/``outwardIssue``), so the membership test is direction-agnostic
+    (a ``Blocks`` link to B is "present" whether B is the inward or outward side).
+    """
+    existing: set[tuple[str, str]] = set()
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        type_name = link_type.get("name") if isinstance(link_type, dict) else None
+        if not type_name:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict):
+                side_key_val = side.get("key")
+                if side_key_val:
+                    existing.add((type_name, side_key_val))
+    return existing
+
+
+def _find_link_id(issuelinks, link_type: str, to_key: str) -> str | None:
+    """Return the id of the issuelink of ``link_type`` to ``to_key`` (either direction).
+
+    The REMOVE counterpart of :func:`_index_existing_links` (wake-inn-parse): the differ
+    emits only (type, to_key) for a managed link to delete; the applier resolves the
+    concrete link id from a fresh ``get_issue_links`` probe. Direction-agnostic (matches
+    whether ``to_key`` is the inward or outward side). Returns None when no such link
+    exists (already removed — idempotent success)."""
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        link_t = link.get("type") or {}
+        type_name = link_t.get("name") if isinstance(link_t, dict) else None
+        if type_name != link_type:
+            continue
+        for side_key in ("inwardIssue", "outwardIssue"):
+            side = link.get(side_key)
+            if isinstance(side, dict) and side.get("key") == to_key:
+                link_id = link.get("id")
+                return str(link_id) if link_id is not None else None
+    return None

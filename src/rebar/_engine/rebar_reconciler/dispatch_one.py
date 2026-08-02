@@ -32,6 +32,7 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from rebar_reconciler._errors import (
     MAX_BACKOFF_S,
@@ -43,65 +44,22 @@ from rebar_reconciler._errors import (
 from rebar_reconciler.binding_store import BindingPersistError
 
 # Non-retrying update_one apply phases live in the sibling leaf (module-size split,
-# ticket 744a). Re-imported here so update_one's bare-name calls and
-# ``dispatch_one.<phase>`` attribute access resolve unchanged.
+# ticket 744a); the two pure link-probe helpers joined them there (ticket cc77) to
+# make room for this module's port annotations. Re-imported here so update_one's
+# bare-name calls and ``dispatch_one.<name>`` attribute access resolve unchanged.
 from rebar_reconciler.dispatch_apply_phases import (
+    _find_link_id,
+    _index_existing_links,
     _update_one_apply_reporter,
     _update_one_dispatch_comments,
     _update_one_filter_fields,
 )
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
+if TYPE_CHECKING:
+    from ._backend import SupportsComments, SupportsLinks, TicketTransport
+
 logger = logging.getLogger(__name__)
-
-
-def _index_existing_links(issuelinks) -> set[tuple[str, str]]:
-    """Index a ``get_issue_links`` result as a ``{(type_name, other_key)}`` set.
-
-    Bug 3f04: local copy of ``apply_outbound._index_existing_links`` — this module
-    deliberately never imports the applier (cycle avoidance), so the helper is
-    duplicated. Records ``type.name`` plus the OTHER issue's key on EITHER side
-    (``inwardIssue``/``outwardIssue``), so the membership test is direction-agnostic
-    (a ``Blocks`` link to B is "present" whether B is the inward or outward side).
-    """
-    existing: set[tuple[str, str]] = set()
-    for link in issuelinks or []:
-        if not isinstance(link, dict):
-            continue
-        link_type = link.get("type") or {}
-        type_name = link_type.get("name") if isinstance(link_type, dict) else None
-        if not type_name:
-            continue
-        for side_key in ("inwardIssue", "outwardIssue"):
-            side = link.get(side_key)
-            if isinstance(side, dict):
-                side_key_val = side.get("key")
-                if side_key_val:
-                    existing.add((type_name, side_key_val))
-    return existing
-
-
-def _find_link_id(issuelinks, link_type: str, to_key: str) -> str | None:
-    """Return the id of the issuelink of ``link_type`` to ``to_key`` (either direction).
-
-    The REMOVE counterpart of :func:`_index_existing_links` (wake-inn-parse): the differ
-    emits only (type, to_key) for a managed link to delete; the applier resolves the
-    concrete link id from a fresh ``get_issue_links`` probe. Direction-agnostic (matches
-    whether ``to_key`` is the inward or outward side). Returns None when no such link
-    exists (already removed — idempotent success)."""
-    for link in issuelinks or []:
-        if not isinstance(link, dict):
-            continue
-        link_t = link.get("type") or {}
-        type_name = link_t.get("name") if isinstance(link_t, dict) else None
-        if type_name != link_type:
-            continue
-        for side_key in ("inwardIssue", "outwardIssue"):
-            side = link.get(side_key)
-            if isinstance(side, dict) and side.get("key") == to_key:
-                link_id = link.get("id")
-                return str(link_id) if link_id is not None else None
-    return None
 
 
 # Per-pass REST-call budget: once create_one has issued this many REST calls in a
@@ -188,7 +146,7 @@ def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwa
 
 def create_one(
     mutation: dict,
-    client,
+    client: TicketTransport,
     rest_calls: int = 0,
     deferred_creates: list | None = None,
     events_list: list | None = None,
@@ -457,7 +415,7 @@ def create_one(
                     # comment has no cheap Jira idempotency key, so a retry could
                     # duplicate it; a failed post falls to comment_errors and is
                     # re-emitted by the comment differ next pass.
-                    client.add_comment(jira_key, body)
+                    cast("SupportsComments", client).add_comment(jira_key, body)
                 except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                     # Bug ea6d-e4b2-a316-45ec: non-fatal, but surface it so the
                     # batch outcome no longer reports error=None for an outbound
@@ -489,7 +447,7 @@ def _is_illegal_transition_400(exc: Exception) -> bool:
 
 def update_one(
     mutation: dict,
-    client,
+    client: TicketTransport,
     comment_errors: list[str] | None = None,
     subop_applied: dict[str, int] | None = None,
 ) -> dict | None:
@@ -562,7 +520,7 @@ def update_one(
     return result
 
 
-def _update_one_apply_parent(fields, issue_key, client) -> bool:
+def _update_one_apply_parent(fields, issue_key, client: TicketTransport) -> bool:
     """Phase: route a parent reparent/clear through client.set_parent (popped from
     ``fields`` before the allowlist filter). Returns whether a parent op was present."""
     # Parent reparent (ticket 8b25): the production outbound dispatch routes
@@ -621,7 +579,12 @@ def _update_one_apply_parent(fields, issue_key, client) -> bool:
 
 
 def _update_one_scalar_update(
-    client, issue_key, fields, _has_parent_op, _attempted_status, assignee_is_account_id=False
+    client: TicketTransport,
+    issue_key,
+    fields,
+    _has_parent_op,
+    _attempted_status,
+    assignee_is_account_id=False,
 ):
     """Phase: the scalar client.update_issue call + the 400 illegal-transition
     comment-fallback. Returns the update result (or None).
@@ -654,7 +617,7 @@ def _update_one_scalar_update(
             new_status = _attempted_status
             comment = f"local status changed to {new_status}"
             try:
-                client.add_comment(issue_key, comment)
+                cast("SupportsComments", client).add_comment(issue_key, comment)
             except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
                 pass  # secondary failure must not mask the comment-fallback path
             log_entry = json.dumps(
@@ -670,7 +633,7 @@ def _update_one_scalar_update(
     return result
 
 
-def _update_one_dispatch_labels(mutation, client, issue_key) -> tuple[int, int]:
+def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
     """Phase: dispatch label add/remove sub-ops. Returns (computed, applied) counts."""
     _labels_computed = _labels_applied = 0
 
@@ -699,7 +662,7 @@ def _update_one_dispatch_labels(mutation, client, issue_key) -> tuple[int, int]:
     return _labels_computed, _labels_applied
 
 
-def _update_one_dispatch_links(mutation, client, issue_key) -> tuple[int, int]:
+def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
     """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
     counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
     (computed, applied) counts."""
@@ -739,7 +702,7 @@ def _update_one_dispatch_links(mutation, client, issue_key) -> tuple[int, int]:
             _links_computed += 1
             frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _call_with_retry(client.set_relationship, frm, to, link_type)
+                _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
                 _links_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                 print(  # noqa: T201
