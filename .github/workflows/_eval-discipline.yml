@@ -54,12 +54,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install (dev)
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install rebar from the committed lock (dev extra)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Enforce eval discipline (offline)
         # The strict per-spec validation also lives in the default suite (via
         # _build-and-test.yml), so it already blocks Verified; this job runs the eval
