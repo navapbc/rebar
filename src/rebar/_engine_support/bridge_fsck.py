@@ -269,7 +269,9 @@ def audit_binding_drift(
       * ``unbound_jira`` — ADOPT: a Jira-native issue in the snapshot with no
         binding (drift class B).
       * ``retired_overlap`` — a jira_key present in BOTH the live and retired stores.
-
+      * ``indeterminate`` — a key-set snapshot proves a terminal local ticket's
+        Jira issue is present, but does not carry the Jira status needed to decide
+        whether a terminal transition is required.
     The Jira snapshot is taken from the persisted ``prev_snapshot.json`` artifact
     (no live fetch), so the whole audit is OFFLINE. Without a snapshot (none
     persisted, or ``use_prev_snapshot=False`` and none injected) only the
@@ -337,12 +339,25 @@ def audit_binding_drift(
             continue
         assert jira_snapshot is not None  # narrowed by have_snapshot
         if jira_key in jira_snapshot:
+            jira_fields = jira_snapshot[jira_key]
+            # A future key-set snapshot deliberately stores present keys as
+            # ``{jira_key: {}}``. Presence is enough for the other classifier
+            # cells, but terminal-local routing also needs Jira's status to
+            # distinguish an already-Done issue from one that needs a transition.
+            # Do not infer drift from that missing field value.
+            if classify_mod.local_state(local) is LocalState.TERMINAL and jira_fields == {}:
+                drift.setdefault("indeterminate", []).append(
+                    {
+                        "local_id": local_id,
+                        "jira_key": jira_key,
+                        "reason": "jira status unavailable in key-set snapshot",
+                    }
+                )
+                continue
             # Present in the window → run the full classifier (local × snapshot ×
             # binding). Present-bound decisions are TERMINAL_TRANSITION / ALERT /
             # steady-state NOOP — never PROBE_GET, so dangling is not sourced here.
-            obs = JiraObservation(
-                ObservedJira.PRESENT, key=jira_key, fields=jira_snapshot[jira_key]
-            )
+            obs = JiraObservation(ObservedJira.PRESENT, key=jira_key, fields=jira_fields)
             decision = classify_mod.classify(local, obs, entry, entry.get("baseline"))
             if decision.kind is DecisionKind.TERMINAL_TRANSITION:
                 drift["would_terminal"].append({"local_id": local_id, "jira_key": jira_key})
@@ -413,6 +428,7 @@ def _format_report(findings: dict) -> str:
     drift_total = sum(len(binding_drift.get(k, [])) for k in _ALERTING_DRIFT_CLASSES)
     info_dangling = binding_drift.get("dangling", [])
     info_unprobed = binding_drift.get("absent_in_window_unprobed", [])
+    info_indeterminate = binding_drift.get("indeterminate", [])
 
     lines: list[str] = ["=== Bridge FSck Report ==="]
     lines.append(f"Orphans: {len(orphaned)}" if orphaned else "Orphans: none found")
@@ -470,7 +486,7 @@ def _format_report(findings: dict) -> str:
         for entry in binding_drift.get("unbound_jira", []):
             lines.append(f"  unbound_jira: jira_key={entry.get('jira_key')}")
 
-    if info_dangling or info_unprobed:
+    if info_dangling or info_unprobed or info_indeterminate:
         lines.append("")
         lines.append("--- Binding-Level Drift (informational; not alerting) ---")
         for entry in info_dangling:
@@ -484,7 +500,12 @@ def _format_report(findings: dict) -> str:
                 f" jira_key={entry.get('jira_key')}"
                 " (absent from windowed snapshot; NOT a deletion signal — ADR 0028 §1)"
             )
-
+        for entry in info_indeterminate:
+            lines.append(
+                f"  indeterminate: local={entry.get('local_id')}"
+                f" jira_key={entry.get('jira_key')}"
+                f" ({entry.get('reason')})"
+            )
     if not (orphaned or duplicates or stale or drift_total):
         lines.append("")
         lines.append("No issues found.")

@@ -19,7 +19,8 @@
         "local_gone": { "type": "array", "items": { "type": "object" }, "description": "Bound but the local ticket is absent from the store (ALERT)." },
         "retired_overlap": { "type": "array", "items": { "type": "object" }, "description": "A jira_key present in BOTH the live and retired binding stores." },
         "dangling": { "type": "array", "items": { "type": "object" }, "description": "Confirmed binding whose Jira issue is gone (online arm only)." },
-        "unbound_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira-native issue with no binding (online arm only)." }
+        "unbound_jira": { "type": "array", "items": { "type": "object" }, "description": "Jira-native issue with no binding (online arm only)." },
+        "indeterminate": { "type": "array", "items": { "type": "object" }, "description": "Terminal-local binding whose Jira issue is present but whose key-set snapshot lacks the status needed to decide a terminal transition (informational; never alerts)." }
       }
     }
   }
