@@ -69,10 +69,18 @@ def _make_stub_fetcher(
 
 
 def _make_stub_differ(mutations: list | None = None) -> types.ModuleType:
-    """Return a stub differ whose compute_mutations() returns a fixed list."""
+    """Return a stub differ whose compute_mutations() returns a fixed list.
+
+    The stub returns a fresh COPY on every call (bugs 727f / d103). It previously
+    returned the caller's own list object, and the diff phase appends downstream
+    mutations to that list IN PLACE — so a test comparing an observed count against
+    ``len(mutations)`` was comparing an aliased list to itself and passed for ANY
+    number of appended mutations. Copying makes the expectation a fixed value the
+    production code cannot silently rewrite.
+    """
     mutations = mutations if mutations is not None else [{"op": "create", "key": "DIG-1"}]
     mod = types.ModuleType("reconcile_differ")
-    mod.compute_mutations = MagicMock(return_value=mutations)
+    mod.compute_mutations = MagicMock(side_effect=lambda *a, **k: list(mutations))
     return mod
 
 
@@ -107,11 +115,26 @@ def _make_stub_health() -> types.ModuleType:
 
 
 def test_health_record_pass_called_after_apply(tmp_path, reconcile_mod):
-    """reconcile_once() calls health.record_pass() with correct pass_id and mutation count."""
+    """reconcile_once() calls health.record_pass() with correct pass_id and mutation count.
+
+    WHY THE FIXTURE CHANGED (bugs 727f / d103). This cell used to run against the default
+    one-issue snapshot and pass only by accident: ``_make_stub_differ`` returned the test's
+    OWN list object, the diff phase appended the adopt walk's ``(inbound, create) DIG-1`` to
+    it in place, and the assertion below then compared 3 against ``len(mutations)`` — which
+    had itself become 3. The expectation tracked the observation, so the assertion held for
+    ANY number of appended mutations and pinned nothing. Verified directly at the pre-fix
+    commit: after ``reconcile_once`` returned, the test's own list had grown to 3 entries.
+
+    The intent — record_pass() receives the pass's real mutation count, not a stale or
+    hard-coded one — is unchanged and is now actually enforced: the stub returns a copy, so
+    the expectation is fixed, and the snapshot is EMPTY so the level-triggered adopt walk has
+    nothing to adopt and the stubbed mutations are the pass's whole output. That is the same
+    isolation ``test_health_record_pass_called_with_zero_mutations`` already relies on.
+    """
     pass_id = "test-pass"
     mutations = [{"op": "create", "key": "DIG-1"}, {"op": "update", "key": "DIG-2"}]
 
-    stub_fetcher = _make_stub_fetcher(tmp_path, pass_id)
+    stub_fetcher = _make_stub_fetcher(tmp_path, pass_id, snapshot={})
     stub_differ = _make_stub_differ(mutations)
     stub_applier = _make_stub_applier(tmp_path, pass_id)
     stub_health = _make_stub_health()
@@ -158,6 +181,13 @@ def test_health_record_pass_called_after_apply(tmp_path, reconcile_mod):
     # Verify the overall result is still correct
     assert result["pass_id"] == pass_id
     assert result["mutation_count"] == len(mutations)
+
+    # The wiring itself: the value handed to health and the value returned to the caller
+    # come from different plumbing and must agree.
+    assert actual_count == result["mutation_count"], (
+        "health.record_pass() and the returned result disagree about the pass's mutation "
+        f"count ({actual_count} vs {result['mutation_count']})"
+    )
 
 
 def test_health_record_pass_called_with_zero_mutations(tmp_path, reconcile_mod):
