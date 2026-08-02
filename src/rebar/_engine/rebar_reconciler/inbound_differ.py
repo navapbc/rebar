@@ -186,6 +186,18 @@ def _diff_jira_vs_local(
             local_assignee = local_ticket.get(ticket_field) or ""
             if not _assignee_matches(local_assignee, jira_fields.get("assignee")):
                 changed[local_field] = jira_mapped.get(local_field)
+                # Bug 8d68: forward the CANONICAL identity alongside the scalar. The scalar is
+                # a bare string (``_extract_jira_field_value``: ``name``, else ``displayName``)
+                # and the applier's ghost mint requires the opaque external id, so with only
+                # the scalar the mint at ``apply_inbound_records:374`` returned early and an
+                # inbound EDIT never minted — while an inbound CREATE, which is handed the raw
+                # user object, always did. ``_map_jira_to_local_fields:225`` already computes
+                # this at no extra extraction; ``account_id`` holds the accountId on Cloud and
+                # the username on Data Center (``_identity_of:154-179``, 5f48's precedence).
+                # Inert for event writing: ``_inbound_update_write_edit_event`` builds its EDIT
+                # from an explicit field list, so an extra key writes no extra ticket field.
+                if "assignee_identity" in jira_mapped:
+                    changed["assignee_identity"] = jira_mapped["assignee_identity"]
             continue
         if local_field == "status" and "status" not in jira_mapped:
             continue  # Bug 5886: unmapped Jira status → leave local status untouched.

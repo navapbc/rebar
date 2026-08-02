@@ -177,7 +177,121 @@ def test_the_mapper_already_carries_everything_the_mint_needs(store: Path) -> No
         {"assignee": "", "title": "t", "description": "", "status": "open"},
         inbound_mapper=_DCMapper(),
     )
-    assert "assignee_identity" not in changed, (
-        "the differ now forwards assignee_identity — if so the mint can key on it and this "
-        "defect's mechanism has changed"
+    # INVERTED WHEN 8d68 WAS FIXED, intent preserved. While the bug stood, this asserted
+    # `"assignee_identity" not in changed` — it pinned the DROP as the defect's mechanism, so
+    # that a fix elsewhere (e.g. loosening the mint's guard) could not be mistaken for
+    # addressing it. The fix forwards the key, so the same intent — "the mint's input comes
+    # from the mapper's canonical identity, not from the scalar" — is now asserted positively.
+    assert changed.get("assignee_identity") == mapped["assignee_identity"], (
+        f"the differ forwarded {changed.get('assignee_identity')!r}, which is not the mapper's "
+        f"canonical identity {mapped['assignee_identity']!r} — the applier must key the mint on "
+        f"the mapper's own value, not on a re-derivation of it"
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE FIX (bug 8d68-a740-4f56-4b3a): the canonical identity is plumbed through
+# ---------------------------------------------------------------------------
+#
+# Two boundaries, one cell each, so a regression names WHICH half broke:
+#   * the DIFFER must forward `assignee_identity` alongside the scalar;
+#   * the APPLIER must key the mint on that identity rather than on the scalar.
+# The guard against the WRONG fix stays above: `_the_mint_is_a_no_op_on_the_shape_the_update_
+# path_hands_it` keeps proving a BARE STRING mints nothing, because on Cloud that string is the
+# display name and minting on it would register users under the wrong external id.
+
+
+def _differ_fields(raw_assignee: dict[str, Any]) -> dict[str, Any]:
+    """The differ's output for an unassigned local ticket whose Jira issue IS assigned."""
+    return _diff_jira_vs_local(
+        {"assignee": dict(raw_assignee)},
+        {"assignee": "", "title": "t", "description": "", "status": "open"},
+        inbound_mapper=_DCMapper(),
+    )
+
+
+def test_the_differ_forwards_the_canonical_identity_with_the_assignee() -> None:
+    """BOUNDARY 1. The mutation must carry `assignee_identity`, not only the scalar.
+
+    The mapper already computes it (`_map_jira_to_local_fields:223-225`); before the fix the
+    differ dropped it on the floor, which is why the applier had nothing but a string to mint
+    from. Keyed on `account_id`, which holds the accountId on Cloud and the username on DC
+    (`_identity_of:154-179`).
+    """
+    changed = _differ_fields(_RAW_DC_ASSIGNEE)
+
+    assert "assignee_identity" in changed, (
+        "the inbound differ emitted an assignee change WITHOUT `assignee_identity`, so the "
+        "applier has only the scalar string to mint from and the mint no-ops (bug 8d68)"
+    )
+    assert changed["assignee_identity"]["account_id"] == _DC_USER, (
+        f"the forwarded identity keys on {changed['assignee_identity']!r}, which does not carry "
+        f"the DC username as `account_id`"
+    )
+
+
+def test_the_update_path_mints_from_the_forwarded_identity(store: Path) -> None:
+    """BOUNDARY 2, AND THE BUG'S HEADLINE. The real applier phase mints on an inbound UPDATE.
+
+    Drives `_inbound_update_write_edit_event` — the function that actually calls the mint at
+    `apply_inbound_records:369` — with the DIFFER'S OWN output, so nothing about the payload is
+    invented by this test.
+    """
+    written: list[str] = []
+    air._inbound_update_write_edit_event(
+        _differ_fields(_RAW_DC_ASSIGNEE),
+        store / ".tickets-tracker",
+        "some-local-id",
+        written,
+        repo_root=str(store),
+    )
+
+    minted = rebar.resolve_mapping("jira", _DC_USER, repo_root=store)
+    assert minted is not None, (
+        f"THE INBOUND UPDATE PATH MINTED NOTHING for jira/{_DC_USER!r} (bug 8d68): the applier "
+        f"still keys the mint on the scalar assignee string, which "
+        f"`_ensure_inbound_assignee_identity:105-106` rejects before reading any key"
+    )
+    assert rebar.is_placeholder(minted, repo_root=store), (
+        f"the update path minted {minted!r} as a non-placeholder; the inbound mint's contract is "
+        f"a GHOST identity a later outbound pass can key on"
+    )
+    assert rebar.resolve_mapping("jira-datacenter", _DC_USER, repo_root=store) is None, (
+        "the update-path mint forked the provider namespace under `jira-datacenter`"
+    )
+
+
+def test_the_cloud_update_path_keys_on_the_account_id_not_the_display_name(store: Path) -> None:
+    """THE CLOUD GUARD, and the reason the fix plumbs an identity instead of loosening a guard.
+
+    The differ and applier are deployment-NEUTRAL, so this fix reaches Cloud, where the scalar
+    `assignee` is the DISPLAY NAME and the external id is the opaque `accountId`. A fix that
+    made the mint accept a bare string would look correct on DC (there the scalar IS the
+    username) and would silently register every Cloud user under their display name — a data
+    defect strictly worse than the missing mint this bug is about. This cell fails on that fix
+    and passes on the identity-plumbing one.
+    """
+    cloud_assignee = {
+        "accountId": "5b10a2844c20165700ede21g",
+        "displayName": "Ada Lovelace",
+        "emailAddress": "ada@example.com",
+    }
+    changed = _diff_jira_vs_local(
+        {"assignee": dict(cloud_assignee)},
+        {"assignee": "", "title": "t", "description": "", "status": "open"},
+        inbound_mapper=_DCMapper(),  # the shared family mapper — Cloud uses the same one
+    )
+    written: list[str] = []
+    air._inbound_update_write_edit_event(
+        changed, store / ".tickets-tracker", "some-local-id", written, repo_root=str(store)
+    )
+
+    minted = rebar.resolve_mapping("jira", cloud_assignee["accountId"], repo_root=store)
+    assert minted is not None, (
+        f"the Cloud inbound update did not mint under the accountId {cloud_assignee['accountId']!r}"
+    )
+    assert rebar.resolve_mapping("jira", "Ada Lovelace", repo_root=store) is None, (
+        "an identity was registered under the DISPLAY NAME on Cloud. That is the wrong external "
+        "id: every later resolve keys on the accountId and will miss it, and two people sharing "
+        "a display name would collide. The mint must key on `assignee_identity.account_id`."
     )
