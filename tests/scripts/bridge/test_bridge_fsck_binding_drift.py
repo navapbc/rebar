@@ -212,6 +212,44 @@ def test_would_terminal_via_snapshot_when_jira_live(fsck, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.scripts
+def test_keyset_snapshot_marks_terminal_status_classification_indeterminate(fsck, tmp_path):
+    """A key-only snapshot proves presence, but not Jira terminal status."""
+    tracker = tmp_path / ".tickets-tracker"
+    _write_bindings(
+        tracker,
+        bindings={"loc-a": _confirmed("REB-464")},
+        reverse={"REB-464": "loc-a"},
+    )
+
+    drift = fsck.audit_binding_drift(
+        tracker,
+        local_states=[{"ticket_id": "loc-a", "status": "archived", "archived": True}],
+        jira_snapshot={"REB-464": {}},
+    )
+
+    assert drift["would_terminal"] == []
+    assert drift["indeterminate"] == [
+        {
+            "local_id": "loc-a",
+            "jira_key": "REB-464",
+            "reason": "jira status unavailable in key-set snapshot",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_bridge_fsck_schema_catalogs_indeterminate_drift(fsck):
+    schema_path = Path(fsck.__file__).resolve().parents[1] / "schemas" / "bridge_fsck.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    indeterminate = schema["properties"]["binding_drift"]["properties"]["indeterminate"]
+    assert indeterminate["type"] == "array"
+    assert "informational; never alerts" in indeterminate["description"]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
 def test_audit_bridge_mappings_includes_binding_drift_and_sets_exit(fsck, tmp_path):
     # The offline event-scan checks return clean, but binding_drift is non-empty →
     # the finding surfaces AND main() exits non-zero (class-D blindness healed).
