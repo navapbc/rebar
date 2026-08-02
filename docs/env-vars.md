@@ -149,6 +149,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_engine/rebar_reconciler/binding_store.py`, `src/rebar/_engine/rebar_reconciler/binding_walk.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
+| `RETRYABLE_GAP_MAX_ATTEMPTS` | `src/rebar/review_bot/config.py` |  |
 | `REVIEW_BOT_LOG_LEVEL` | `src/rebar/review_bot/config.py` |  |
 | `REVIEW_BOT_PORT` | `src/rebar/review_bot/app.py` |  |
 | `REVIEW_TIMEOUT_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -159,7 +160,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_149 variables._
+_150 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -193,5 +194,5 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:138` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:148` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:150` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:160` — `os.environ.get(<non-literal>)`

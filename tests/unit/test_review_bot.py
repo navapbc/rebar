@@ -1685,3 +1685,147 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
         f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
         "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."
     )
+
+
+# ── retryable coverage gaps: defer vote-less + bounded escalation (ticket 0347) ──
+def _gap_verdict(reason):
+    """A four-pass verdict whose coverage block yields the given retryable gap sub-reason."""
+    coverage = {
+        "gate-disabled": {"enabled": False},
+        "llm-unavailable": {"llm_unavailable": True, "llm_error": "outage"},
+        "scanner": {
+            "security_detectors": [
+                {"criterion": "sec", "reason": "fail-closed-abstain", "abstain_reasons": ["x"]}
+            ]
+        },
+    }[reason]
+    return {"verdict": "BLOCK", "blocking": [], "advisory": [], "coverage": coverage}
+
+
+def _patch_gap(monkeypatch, reason):
+    """Stub the gate so the adapter produces a coverage-gap decision with ``gap_reason``."""
+    if reason == "review-error":
+        _patch_verdict(monkeypatch, "not a dict")  # unparseable result → review-error
+    else:
+        _patch_verdict(monkeypatch, _gap_verdict(reason))
+
+
+def test_adapter_decision_carries_gap_reason(monkeypatch, tmp_path):
+    """The machine-readable ``gap_reason``: the retryable sub-reason on a coverage gap, and
+    None on both a PASS and a real finding (the voter's defer-vs-vote discriminator)."""
+    _patch_gap(monkeypatch, "llm-unavailable")
+    out = adapter.code_review_decision("diff", str(tmp_path), "ref")
+    assert out["gap_reason"] == "llm-unavailable"
+
+    _patch_review(monkeypatch, [])
+    assert adapter.code_review_decision("diff", str(tmp_path), "ref")["gap_reason"] is None
+
+    _patch_review(monkeypatch, [{"severity": "critical", "dimension": "sec", "detail": "rce"}])
+    assert adapter.code_review_decision("diff", str(tmp_path), "ref")["gap_reason"] is None
+
+
+def test_dedup_attempt_budget_record_count_reset(tmp_path):
+    store = DedupStore(str(tmp_path / "v.db"))
+    assert store.attempt_count("c1", "r1") == 0
+    assert store.record_attempt("c1", "r1") == 1
+    assert store.record_attempt("c1", "r1") == 2
+    assert store.attempt_count("c1", "r1") == 2
+    assert store.attempt_count("c1", "r2") == 0  # per-revision
+    store.reset_attempts("c1", "r1")
+    assert store.attempt_count("c1", "r1") == 0  # DELETE: as if never attempted
+
+
+@pytest.mark.parametrize("reason", ["review-error", "llm-unavailable", "scanner", "gate-disabled"])
+def test_voter_defers_voteless_on_retryable_gap(monkeypatch, tmp_path, caplog, reason):
+    """AC2: a retryable coverage gap casts NO vote, posts nothing, records one attempt in
+    the budget ledger (NOT the voted ledger), and emits the REVIEW_RETRY_DEFERRED marker."""
+    _patch_gap(monkeypatch, reason)
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.voter"):
+        res = asyncio.run(
+            voter.review_and_vote(_event(), config=_cfg(tmp_path), gerrit=g, dedup=store)
+        )
+    assert res["status"] == "deferred"
+    assert res["gap_reason"] == reason
+    assert g.votes == []  # genuinely vote-less: nothing posted to the change
+    assert store.already_voted("rebar~main~Iabc", "rev1") is False
+    assert store.attempt_count("rebar~main~Iabc", "rev1") == 1
+    assert "REVIEW_RETRY_DEFERRED" in caplog.text
+
+
+def test_voter_indeterminate_is_terminal_and_votes(monkeypatch, tmp_path):
+    """AC3: indeterminate ran to completion — a result, not an interruption — so it still
+    casts the fail-closed -1 immediately (PASS/finding covered by the vote tests above)."""
+    _patch_verdict(
+        monkeypatch,
+        {"verdict": "INDETERMINATE", "blocking": [], "advisory": [], "coverage": {}},
+    )
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    res = asyncio.run(voter.review_and_vote(_event(), config=_cfg(tmp_path), gerrit=g, dedup=store))
+    assert res["status"] == "voted" and res["vote_value"] == -1
+    assert g.votes and "coverage-gap (indeterminate)" in g.votes[0][3]
+    assert store.attempt_count("rebar~main~Iabc", "rev1") == 0  # no budget burned
+
+
+def test_voter_escalates_to_block_when_budget_exhausted(monkeypatch, tmp_path, capsys):
+    """AC4: the Nth (default 3rd) retryable failure on the same (change, revision) casts the
+    fail-closed -1 with the retries-exhausted note and emits VOTER_ERROR; the vote clears
+    the budget row."""
+    _patch_gap(monkeypatch, "llm-unavailable")
+    cfg = _cfg(tmp_path)
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    for expected_attempt in (1, 2):
+        res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
+        assert res["status"] == "deferred" and res["attempt"] == expected_attempt
+    assert g.votes == []
+
+    res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
+    assert res["status"] == "voted" and res["vote_value"] == -1
+    message = g.votes[0][3]
+    assert message.startswith("[LLM-Review: BLOCK — coverage-gap (llm-unavailable)]")  # tag intact
+    assert "Automatic retries exhausted (3 attempt(s))" in message
+    assert "VOTER_ERROR" in capsys.readouterr().err  # the escalation hits the alarm surface
+    assert store.attempt_count("rebar~main~Iabc", "rev1") == 0  # budget cleared with the vote
+
+
+def test_retryable_gap_max_attempts_is_env_overridable(monkeypatch, tmp_path):
+    monkeypatch.setenv("RETRYABLE_GAP_MAX_ATTEMPTS", "1")
+    cfg = ReceiverConfig.from_env()
+    assert cfg.retryable_gap_max_attempts == 1
+    # cap 1 → the FIRST retryable failure escalates straight to the -1
+    _patch_gap(monkeypatch, "review-error")
+    cfg = ReceiverConfig(
+        dedup_db_path=str(tmp_path / "voted.db"),
+        gerrit_bot_token="tok",
+        webhook_token="tok",
+        project="rebar",
+        retryable_gap_max_attempts=1,
+    )
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    res = asyncio.run(voter.review_and_vote(_event(), config=cfg, gerrit=g, dedup=store))
+    assert res["status"] == "voted" and res["vote_value"] == -1
+
+
+def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
+    """AC5: a deferred change has no ``voted`` row and no Gerrit vote, so the backfill
+    reconciler re-drives it on the next pass; the review_attempts row does NOT suppress
+    the re-drive (it accumulates toward escalation instead)."""
+    _patch_gap(monkeypatch, "llm-unavailable")
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    g = ReconcileGerrit(
+        events=[_events_log_event("rebar~main~Igap", "rev-gap", number=11, created_on=2000)],
+    )
+
+    asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    assert g.votes == []  # deferred, not voted
+    assert store.already_voted("rebar~main~Igap", "rev-gap") is False
+    assert store.attempt_count("rebar~main~Igap", "rev-gap") == 1
+
+    # Next pass: still vote-less → re-driven (the attempts row did not suppress it).
+    asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    assert store.attempt_count("rebar~main~Igap", "rev-gap") == 2

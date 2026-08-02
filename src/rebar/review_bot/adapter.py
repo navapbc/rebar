@@ -36,7 +36,7 @@ from typing import Any
 
 logger = logging.getLogger("rebar.review_bot.adapter")
 
-__all__ = ["code_review_decision"]
+__all__ = ["RETRYABLE_GAP_REASONS", "append_retries_exhausted_note", "code_review_decision"]
 
 #: The review-message first-line tag suffixes, keyed by reason. The message begins with
 #: ``[LLM-Review: <suffix>]`` so an infra-failure ``-1`` (a coverage-gap sub-reason) is
@@ -50,6 +50,16 @@ _TAG_SUFFIXES: dict[str, str] = {
     "review-error": "BLOCK — coverage-gap (review-error)",
     "indeterminate": "BLOCK — coverage-gap (indeterminate)",
 }
+
+#: Coverage-gap sub-reasons that are RETRYABLE (ticket 0347): the review never ran to a usable
+#: conclusion (a broken/missing gate, an LLM outage, a scanner that could not run, a disabled
+#: gate), so the voter defers vote-less — the vote-LESS change stays visible to the backfill
+#: reconciler, which re-drives it — instead of casting a fail-closed ``-1`` that would suppress
+#: that recovery. NOT retryable: ``finding`` (a real code veto) and ``indeterminate`` (the
+#: review RAN TO COMPLETION and concluded coverage could not be established — a result, not an
+#: interruption). The merge-path ``_merge_coverage_gap_decision`` (voter.py) deliberately
+#: carries no ``gap_reason`` and keeps its immediate fail-closed vote.
+RETRYABLE_GAP_REASONS = frozenset({"review-error", "llm-unavailable", "scanner", "gate-disabled"})
 
 #: Map the four-pass kernel severity ({critical,major,minor,none}) to the finding vocabulary the
 #: receiver logs ({critical,high,medium,info}) — mirrors the WS4 shim.
@@ -159,6 +169,9 @@ def _block(
         "message": f"{tag}\n{_summarize(reason, verdict)}",
         "findings": _translate_findings(verdict),
         "coverage_gap": reason != "finding",
+        # Machine-readable sub-reason (ticket 0347): drives the voter's defer-vs-vote split.
+        # None for a real finding — only coverage gaps carry a gap_reason.
+        "gap_reason": reason if reason != "finding" else None,
         # The FULL verdict is threaded up (story limestone-unethical-zebrafinch) so the voter can
         # emit a durable code_review artifact; {} on a fail-closed review-error (no artifact then).
         "verdict": verdict,
@@ -221,6 +234,7 @@ def code_review_decision(
             "message": f"{tag}\n{_summarize('PASS', verdict)}",
             "findings": _translate_findings(verdict),
             "coverage_gap": False,
+            "gap_reason": None,
             "verdict": verdict,  # threaded up for the code_review artifact
         }
     if gap is not None:
@@ -232,3 +246,17 @@ def code_review_decision(
     # "finding" rendered the misleading "[LLM-Review: BLOCK — finding] ... 0 blocking issue(s):"
     # false -1 on a clean change (bug spy-luge-wool, observed on change 223).
     return _block("indeterminate", verdict, merge_commits=merge_commits)
+
+
+def append_retries_exhausted_note(decision: dict[str, Any], attempts: int) -> dict[str, Any]:
+    """A copy of a coverage-gap ``decision`` with the retries-exhausted note appended to its
+    message BODY (the first-line ``_TAG_SUFFIXES`` tag is untouched, so the documented tag
+    vocabulary is unchanged). Used by the voter when a retryable gap's attempt budget is spent
+    and the fail-closed ``-1`` is finally cast (ticket 0347)."""
+    out = dict(decision)
+    out["message"] = (
+        f"{decision.get('message', '')}\n\n"
+        f"Automatic retries exhausted ({attempts} attempt(s)) — casting the fail-closed -1. "
+        "A contributor re-trigger or a new patchset restarts the retry budget."
+    )
+    return out
