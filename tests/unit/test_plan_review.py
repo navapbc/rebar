@@ -9,6 +9,7 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1184,7 +1185,73 @@ def test_largest_window_uses_configured_model_window() -> None:
     assert orchestrator.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
     assert orchestrator.largest_window_tokens("claude-opus-4-8") == 1_000_000
     assert orchestrator.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
-    assert orchestrator.largest_window_tokens("some-unknown-model") == sizing.MODEL_LADDER[-1][1]
+    # A model the ladder cannot LOCATE has no known window, so the honest answer is the
+    # conservative one — the ladder MINIMUM. Returning the maximum made P8 under-block.
+    assert orchestrator.largest_window_tokens("some-unknown-model") == min(
+        w for _, w in sizing.MODEL_LADDER
+    )
+
+
+# ── bug 48b3: the ladder cannot LOCATE a non-Anthropic-family primary ─────────────────
+# The start rung is found by substring-matching MODEL_LADDER's bare Anthropic family names
+# against the primary. A primary from another family matches nothing and used to fall through
+# to "the whole ladder" / "the ladder maximum" — so escalation DOWNGRADED the window and jumped
+# provider family, and P8's size budget was overstated.
+
+_UNLOCATED_PRIMARY = "bedrock:us.amazon.nova-pro-v1:0"
+
+
+class _ModelRecordingRunner:
+    """Always raises a context-limit error, recording the model each attempt ran on."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.models_seen: list[str | None] = []
+
+    def preflight(self) -> None:
+        pass
+
+    def run(self, req):  # noqa: ANN001, ANN202 - RunRequest
+        self.models_seen.append(req.config.model)
+        raise Exception("prompt is too long")
+
+
+def test_unlocated_primary_start_rung_is_the_primary_itself() -> None:
+    # The only proposed rung is the operator's own model: there is no rung to climb onto, and
+    # crucially no SMALLER-window, different-provider rung proposed as an "escalation".
+    rungs = orchestrator._models_at_or_above(_UNLOCATED_PRIMARY)
+    assert rungs == [_UNLOCATED_PRIMARY]
+    assert not any("claude-" in name for name in rungs)
+
+
+def test_unlocated_primary_window_is_the_ladder_minimum() -> None:
+    # Assert the identity of the window (the ladder MINIMUM), not just "not the maximum":
+    # MODEL_LADDER's sonnet and opus rungs share 1_000_000, so a bare inequality is weak.
+    assert orchestrator.largest_window_tokens(_UNLOCATED_PRIMARY) == min(
+        w for _, w in sizing.MODEL_LADDER
+    )
+    assert orchestrator.largest_window_tokens(_UNLOCATED_PRIMARY) < sizing.MODEL_LADDER[-1][1]
+
+
+def test_size_ladder_unlocated_primary_never_leaves_the_operator_model() -> None:
+    # Context-limited at every attempt on an unlocatable primary: the run still produces the
+    # existing _too_big failure finding, and every attempt stayed on the operator's model —
+    # the batch call plus exactly one single-criterion retry.
+    runner = _ModelRecordingRunner()
+    cfg = replace(_fake_cfg(), model=_UNLOCATED_PRIMARY)
+    events: list = []
+    out, _calls = orchestrator._pass1_with_ladder(
+        runner, cfg, "plan", [{"id": "E2"}], False, events
+    )
+    assert len(out) == 1 and out[0]["_too_big"] is True and out[0]["criteria"] == ["E2"]
+    assert runner.models_seen == [_UNLOCATED_PRIMARY, _UNLOCATED_PRIMARY]
+
+
+def test_located_anthropic_primary_start_rung_is_unchanged() -> None:
+    # Back-compat control: a primary the ladder CAN locate is untouched by the fix.
+    assert orchestrator._models_at_or_above("anthropic:claude-opus-4-8") == ["claude-opus-4-8"]
+    assert orchestrator._models_at_or_above(None) == [n for n, _w in sizing.MODEL_LADDER]
 
 
 def test_advisory_cap_assertion_guards_blocking_leak() -> None:
