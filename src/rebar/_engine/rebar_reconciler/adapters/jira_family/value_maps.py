@@ -27,6 +27,23 @@ LOCAL_PRIORITY_TO_JIRA: dict[int, str] = {
     4: "Lowest",
 }
 
+# Local ticket type -> Jira issue type name (story bd9e, epic 3e73).
+# De-duplicated against the two pre-existing copies read by the two CREATE paths
+# (``adapters/jira/outbound_fields.py`` for Cloud, ``adapters/jira_datacenter/
+# backend.py`` for DC). Both copies were diffed before the move and were
+# CONTENT-IDENTICAL — same four keys, same four values, differing only in literal
+# key order, which a dict does not carry semantically — so unlike J2's status map
+# (``"deleted"``) this unification is behaviour-preserving on BOTH deployments and
+# required no divergence decision. ``"session_log"`` is deliberately ABSENT: the
+# type is local-only and must never be created in Jira (pinned by
+# ``tests/.../diffing/test_outbound_differ_session_log_exclusion.py``).
+LOCAL_TYPE_TO_JIRA: dict[str, str] = {
+    "bug": "Bug",
+    "story": "Story",
+    "task": "Task",
+    "epic": "Epic",
+}
+
 # Jira hard limits we defend against (verified against Jira Cloud REST API 2026).
 # Note the deliberate off-by-one divergence between the two constants:
 #   - Summary: Jira's error is "Summary must be less than 255 characters"

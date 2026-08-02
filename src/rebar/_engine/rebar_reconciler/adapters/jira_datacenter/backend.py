@@ -40,7 +40,14 @@ from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_STATUS_TO_JIRA,
 )
 
-_LOCAL_TO_JIRA_TYPE = {"task": "Task", "story": "Story", "bug": "Bug", "epic": "Epic"}
+# Story bd9e (epic 3e73): the local->Jira TYPE map used to be re-declared here as a
+# second literal, read by the DC create path below. It is now imported from the
+# Jira-family shared layer alongside the priority/status maps, so both create paths
+# resolve to ONE object. Kept under the historical private name so the call site
+# below needs no change.
+from rebar_reconciler.adapters.jira_family.value_maps import (
+    LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE,
+)
 
 
 def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
