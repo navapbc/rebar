@@ -516,7 +516,7 @@ def test_link_dry_run_reports_ancestor_descendant_rejection(
     real command refuses has to be reported as a rejection here too — otherwise the
     preview contradicts the command it previews.
     """
-    from rebar._commands import composer
+    from rebar._commands import link_revert as composer
 
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -595,7 +595,7 @@ def test_quiet_link_core_returns_the_record_while_writing_nothing_to_stdout(
     record, never by relaxing `quiet`. Asserting both halves together is the point: a
     future "just print it" change would satisfy the return assertion alone.
     """
-    from rebar._commands import composer
+    from rebar._commands import link_revert as composer
 
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
@@ -630,7 +630,7 @@ def test_rebar_link_carries_the_record_through_the_whole_library_chain(
     test that fails if any one of them stops returning.
     """
     import rebar
-    from rebar._commands import composer
+    from rebar._commands import link_revert as composer
 
     tracker_dir = tmp_path / "tracker"
     tracker_dir.mkdir()
