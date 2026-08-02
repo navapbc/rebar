@@ -43,10 +43,19 @@ from typing import Any
 # anywhere under `tests/`), which is also why `_dc_support` is not a dotted path.
 from _dc_support import envelope as _envelope
 from _dc_support import is_ticket_entry as _is_ticket_entry
+from _dc_support import live_jira_ready
 from _dc_support import run_reconcile as _run_reconcile
 from _dc_support import seed_searchable_issue as _seed_searchable_issue
 from _dc_support import skip_no_extra as _skip_no_extra
 from _dc_support import skip_no_harness as _skip
+
+# THE ALL-SKIP CANARY KEYS ON THIS NAME. `tests/external/conftest.py`'s
+# `pytest_collection_modifyitems` applies the `jira_live` marker only to modules that define a
+# module-level `_live_jira_ready`, and the canary then fails a run in which live tests were
+# COLLECTED but none EXECUTED. Refactoring this helper into `_dc_support` silently removed this
+# module from that bookkeeping — so the cells carrying the epic's headline evidence could all-skip
+# and the run would be green and silent. Re-exported under the name the canary looks for.
+_live_jira_ready = live_jira_ready
 
 # ---------------------------------------------------------------------------
 # Isolation — the precondition for everything below it
