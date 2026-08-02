@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.config import infer_provider
+from rebar.llm.config import infer_provider, split_provider_qualifier
 from rebar.llm.model_classes import _resolve_target, parse_class_slots, resolve_class
 
 pytestmark = pytest.mark.unit
@@ -69,7 +69,7 @@ def test_the_class_table_end_to_end_qualifies_a_bedrock_id(model):
         f"bedrock:{_ALIAS}",
         "openai:gpt-4o",
         "openai-chat:gpt-4o",  # a provider name may contain a dash
-        "google_genai:gemini-2.0",  # ...or an underscore
+        "gateway/openai:gpt-4o",  # ...or a slash
     ],
 )
 def test_an_already_qualified_string_is_returned_unchanged(already):
@@ -160,3 +160,142 @@ def test_the_conflict_is_raised_not_silently_resolved():
     for model, provider in [("openai:gpt-4o", "bedrock"), ("anthropic:claude-opus-4-8", "openai")]:
         with pytest.raises(LLMConfigError):
             _resolve_target(model, provider)
+
+
+# ── qualification is decided by REGISTRY MEMBERSHIP, not by prefix shape ──────────────────────
+#
+# The shape test this replaces asked "does this prefix LOOK like a provider name?" (an
+# identifier-like `^[a-z][a-z0-9_-]*$`). The question that matters is "IS it one?". Upstream
+# already answers it that way: pydantic-ai 1.107.1's `infer_model` raises `Unknown provider: X`
+# for any qualifier outside its registry. Membership narrows AND widens — slashed gateway names
+# were rejected by the old regex and now split correctly.
+
+_KNOWN_24 = frozenset(
+    {
+        "anthropic",
+        "bedrock",
+        "cerebras",
+        "cohere",
+        "deepseek",
+        "gateway/anthropic",
+        "gateway/bedrock",
+        "gateway/google-cloud",
+        "gateway/groq",
+        "gateway/openai",
+        "google",
+        "google-cloud",
+        "google-gla",
+        "google-vertex",
+        "grok",
+        "groq",
+        "heroku",
+        "huggingface",
+        "mistral",
+        "moonshotai",
+        "openai",
+        "openai-chat",
+        "vertexai",
+        "xai",
+    }
+)
+
+
+def test_known_provider_names_is_exactly_the_registry():
+    """The set is a literal of plain strings so `import rebar.llm` stays stdlib-only; pinning it
+    exactly is what makes the drift test below meaningful."""
+    from rebar.llm.config import KNOWN_PROVIDER_NAMES
+
+    assert KNOWN_PROVIDER_NAMES == _KNOWN_24
+
+
+@pytest.mark.parametrize("name", sorted(_KNOWN_24))
+def test_every_known_provider_name_splits_as_a_qualifier(name):
+    """Back-compat enumerated, not assumed."""
+    assert split_provider_qualifier(f"{name}:some-model") == (name, "some-model")
+
+
+def test_a_slashed_provider_name_splits():
+    """The case the old shape regex REJECTED: membership widens as well as narrows."""
+    assert split_provider_qualifier("gateway/openai:gpt-4o") == ("gateway/openai", "gpt-4o")
+
+
+# ── no name is grandfathered: `test` and `google_genai` are not providers ─────────────────────
+#
+# pydantic-ai 1.107.1 rejects both — `infer_model("test:foo")` and
+# `infer_model("google_genai:gemini-2.0")` each raise `Unknown provider`. `test` is the special
+# bare string that builds a TestModel, never a provider. Admitting either would make rebar more
+# permissive than the library it wraps.
+
+
+@pytest.mark.parametrize("name", ["test", "google_genai"])
+def test_a_de_registered_name_is_not_a_provider(name):
+    from rebar.llm.config import KNOWN_PROVIDER_NAMES
+
+    assert name not in KNOWN_PROVIDER_NAMES
+
+
+@pytest.mark.parametrize(
+    "model", ["test:FunctionModel", "google_genai:gemini-2.0", "bedrok:claude-opus-4-8"]
+)
+def test_an_unknown_inline_prefix_is_unqualified_and_does_not_raise(model):
+    """Falling back to "not qualified" — rather than raising — is load-bearing: a raise would
+    break the canonical Bedrock ids 03b0 fixed, whose pre-colon prefix is not a provider name."""
+    assert split_provider_qualifier(model) == (None, model)
+    assert infer_provider(model) is None
+
+
+@pytest.mark.parametrize("model", [_VERSIONED, _VERSIONED_GLOBAL])
+def test_a_dotted_multi_colon_prefix_is_not_a_qualifier(model):
+    """The property that makes the permissive inline path safe."""
+    assert split_provider_qualifier(model) == (None, model)
+
+
+# ── the new capability: an explicitly configured provider is validated ────────────────────────
+
+
+def test_a_configured_provider_that_is_not_a_provider_name_is_rejected():
+    """The motivating case: a typo is reported where the operator made it, during config
+    resolution, instead of surviving into a composed target string and dying much later (or not
+    at all, in a command that never reaches an LLM)."""
+    from rebar.llm.errors import LLMConfigError
+
+    with pytest.raises(LLMConfigError) as exc:
+        _resolve_target("claude-opus-4-8", "bedrok")
+    msg = str(exc.value)
+    assert "bedrok" in msg, f"the error must name the offending value: {msg}"
+    assert any(name in msg for name in _KNOWN_24), f"the error must list valid names: {msg}"
+
+
+def test_a_configured_provider_that_is_a_member_still_composes():
+    """The control: validation must not disturb the happy path."""
+    assert _resolve_target("claude-opus-4-8", "anthropic") == "anthropic:claude-opus-4-8"
+    assert split_provider_qualifier("anthropic:claude-opus-4-8") == (
+        "anthropic",
+        "claude-opus-4-8",
+    )
+
+
+def test_the_inference_path_is_not_validated():
+    """Deliberately out of scope: `_PROVIDER_PREFIXES` maps `gemini` to `google_genai`, which no
+    builder can construct. This change validates only the EXPLICITLY CONFIGURED provider, so the
+    inference path must behave identically before and after — folding that unrelated bug fix in
+    here would widen the change."""
+    assert _resolve_target("gemini-2.5-pro", None) == "google_genai:gemini-2.5-pro"
+
+
+# ── the static set must not silently drift from the runtime registries ────────────────────────
+
+
+def test_the_static_set_does_not_drift_from_the_runtime_registries():
+    """A pydantic-ai upgrade that adds a provider fails loudly HERE, rather than silently in an
+    operator's config. One-directional on purpose: a future rebar builder for a name pydantic-ai
+    does not enumerate must not be a failure."""
+    pytest.importorskip("pydantic_ai")
+
+    from rebar.llm.config import KNOWN_PROVIDER_NAMES, LLMConfig
+    from rebar.llm.providers import ProviderSession, _pydantic_ai_known_providers
+
+    # `base_url` set so the conditional `openai` builder is registered too.
+    session = ProviderSession(LLMConfig(base_url="https://example.invalid"))
+    assert set(session._builders) <= KNOWN_PROVIDER_NAMES
+    assert _pydantic_ai_known_providers() <= KNOWN_PROVIDER_NAMES

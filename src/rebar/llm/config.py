@@ -36,7 +36,6 @@ import contextlib
 import contextvars
 import json
 import os
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from importlib.util import find_spec
@@ -180,16 +179,57 @@ _PROVIDER_PREFIXES = (
 # A provider-qualified model is ``<provider>:<model>`` — but a MODEL ID MAY ITSELF CONTAIN A COLON,
 # so "contains a colon" cannot decide whether a string is qualified. Bedrock's canonical ids carry a
 # version suffix with one (``anthropic.claude-haiku-4-5-20251001-v1:0``), which is the majority form
-# AWS publishes. Reading such an id as ``provider:model`` yielded a "provider" of
-# ``anthropic.claude-haiku-4-5-20251001-v1`` and killed the run with an error naming a fragment of
-# the operator's own model id (ticket 03b0).
+# AWS publishes. Reading such an id as ``provider:model`` yields a "provider" of
+# ``anthropic.claude-haiku-4-5-20251001-v1`` and kills the run with an error naming a fragment of
+# the operator's own model id.
 #
-# What separates the two is the SHAPE OF THE PREFIX: a provider name is a short identifier
-# (``anthropic``, ``bedrock``, ``openai-chat``, ``google_genai``), while a Bedrock model id is
-# DOTTED (``us.anthropic.claude-…``). Requiring an identifier — and so rejecting dots — separates
-# them without a provider registry to keep in sync, which matters because this runs during config
-# resolution where the optional provider packages may not be importable at all.
-_PROVIDER_QUALIFIER_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+# The deciding question is not what the prefix LOOKS like but whether it IS a provider name, so
+# this is a MEMBERSHIP test against the names below — the same move LangChain
+# (``prefix in _BUILTIN_PROVIDERS``), LiteLLM (``prefix in litellm.provider_list``) and pydantic-ai
+# (``infer_provider_class`` raising ``Unknown provider``) all make. A shape test cannot catch a
+# typo'd provider, and would silently promote any future model id whose pre-colon prefix happened
+# to look identifier-like.
+#
+# The set is a literal of plain strings on purpose: this runs during config resolution, where the
+# optional `[agents]` extra may not be importable at all, so it must not reach into
+# ``rebar.llm.providers`` (see that module's docstring on staying stdlib-only at import time).
+# ``tests/unit/test_core_optionality.py`` enforces that property. The names are exactly what
+# ``providers._pydantic_ai_known_providers()`` returns; a drift test pins the two together, and
+# also pins ``ProviderSession._builders`` as a subset.
+#
+# Membership answers "is this a provider QUALIFIER", which is NOT "can this provider be BUILT" —
+# the latter stays ``ProviderSession``'s job. No name is grandfathered in: notably ``test`` is
+# pydantic-ai's bare TestModel string rather than a provider, and it rejects both ``test:…`` and
+# ``google_genai:…`` as qualifiers, so admitting either here would make rebar more permissive than
+# the library it wraps.
+KNOWN_PROVIDER_NAMES: frozenset[str] = frozenset(
+    {
+        "anthropic",
+        "bedrock",
+        "cerebras",
+        "cohere",
+        "deepseek",
+        "gateway/anthropic",
+        "gateway/bedrock",
+        "gateway/google-cloud",
+        "gateway/groq",
+        "gateway/openai",
+        "google",
+        "google-cloud",
+        "google-gla",
+        "google-vertex",
+        "grok",
+        "groq",
+        "heroku",
+        "huggingface",
+        "mistral",
+        "moonshotai",
+        "openai",
+        "openai-chat",
+        "vertexai",
+        "xai",
+    }
+)
 
 
 def split_provider_qualifier(model: str) -> tuple[str | None, str]:
@@ -198,9 +238,16 @@ def split_provider_qualifier(model: str) -> tuple[str | None, str]:
 
     THE single place that answers "is this string provider-qualified?", so the qualifier and
     :func:`infer_provider` cannot drift apart (they were two independent colon scans before 03b0,
-    and both were wrong in the same way)."""
+    and both were wrong in the same way).
+
+    An UNRECOGNIZED prefix yields ``(None, model)`` rather than raising, and that is load-bearing:
+    ``"anthropic.claude-haiku-4-5-20251001-v1:0"`` splits to a prefix that is by construction not a
+    provider name, so "not qualified" is the only answer that keeps such an id intact. Rejecting a
+    bad provider is the job of the caller that was HANDED one explicitly
+    (:func:`~rebar.llm.model_classes._resolve_target`), where the operator can be told what they
+    typed wrong."""
     prefix, sep, rest = model.partition(":")
-    if sep and rest and _PROVIDER_QUALIFIER_RE.match(prefix):
+    if sep and rest and prefix in KNOWN_PROVIDER_NAMES:
         return prefix, rest
     return None, model
 

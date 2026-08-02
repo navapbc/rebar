@@ -118,7 +118,9 @@ def test_the_failure_row_carries_the_same_identifying_fields_as_a_success_row(
     assert row["step"] == "verify"
     assert row["model_class"] == "standard"
     assert row["model"] == "test:FunctionModel"
-    assert row["provider"] == "test"
+    # No provider backs a FunctionModel double — `test` is not a provider name. `record()` omits
+    # an unknown optional identity field rather than writing null, so absence IS the assertion.
+    assert "provider" not in row
     assert set(usage_log._FIELDS).issubset(row), "the failure row lacks the token counters"
 
 
