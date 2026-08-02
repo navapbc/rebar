@@ -60,7 +60,33 @@ class _FakePlanContext:
     ticket_type = "task"
 
 
-def _entry_model(monkeypatch, ladder: list[str]) -> str:
+def _retarget_frontier_only(monkeypatch) -> str:
+    """Point the `frontier` class at a distinctive target and return its resolved id.
+
+    Only `frontier` is retargeted, so the frontier id differs from the default any unresolved
+    `cfg.model` would carry — that difference is what makes "used the frontier class" observable.
+    The nine per-class env overrides are cleared so an ambient one on the developer's machine
+    cannot retarget a class behind the table.
+    """
+    from rebar.llm import config as llm_config
+    from rebar.llm.model_classes import FRONTIER_CLASS, load_class_slots, resolve_class
+
+    for cls in ("TRIVIAL", "STANDARD", "FRONTIER"):
+        for field in ("MODEL", "PROVIDER", "ENDPOINT"):
+            monkeypatch.delenv(f"REBAR_LLM_{cls}_{field}", raising=False)
+    monkeypatch.setattr(
+        llm_config,
+        "_read_llm_file_table",
+        lambda repo_root=None: {
+            "model_classes": {
+                "frontier": {"model": "us.anthropic.claude-opus-4-8", "provider": "bedrock"}
+            }
+        },
+    )
+    return resolve_class(FRONTIER_CLASS, load_class_slots(None))
+
+
+def _run_batch(monkeypatch, ladder: list[str], with_inputs: dict[str, Any] | None = None) -> str:
     """The `cfg.model` handed to `run_pass1` — the model the finder's calls actually run on."""
     from rebar.llm.plan_review import production_batch_runner as pbr
     from rebar.llm.runner import FakeRunner
@@ -86,10 +112,15 @@ def _entry_model(monkeypatch, ladder: list[str]) -> str:
         "repo_root": None,
         "run_id": "run-1",
         "step_id": "find",
+        "with_inputs": dict(with_inputs or {}),
     }
     result = pbr.ProductionBatchRunner(runner=FakeRunner()).run(BatchRunRequest(**req))
     assert isinstance(result, BatchRunResult)
     return captured["model"]
+
+
+def _entry_model(monkeypatch, ladder: list[str]) -> str:
+    return _run_batch(monkeypatch, ladder)
 
 
 # ── the finder runs on the frontier class, read from the SHIPPED document ─────────────────────
@@ -111,6 +142,53 @@ def test_the_finder_does_not_run_on_the_cheapest_class(monkeypatch):
 
     trivial = resolve_class(TRIVIAL_CLASS, load_class_slots(None))
     assert _entry_model(monkeypatch, _yaml_pass1_ladder()) != trivial
+
+
+# ── the prerequisite finder sizes its bins against the frontier window ────────────────────────
+
+
+def test_the_prerequisite_finder_packs_against_the_frontier_model(monkeypatch):
+    """The prerequisite arm of Pass-1 BIN-PACKS, and `pack_prerequisite_bins` sizes the bins from
+    whatever model it is handed. If that model is not the frontier one the finder over-chunks —
+    paying for extra calls and splitting prerequisites that would have fit in one window — while
+    every other assertion in this file still passes, because the packing model is a second,
+    independent path off the resolved config.
+
+    The observable is the model that REACHES `pack_prerequisite_bins`, captured with a spy. It is
+    NOT the resulting window number: `MODEL_LADDER` declares 1_000_000 for both the sonnet and
+    the opus rung, so the window alone cannot tell the frontier class from the one below it
+    (ticket 1157). `largest_window_tokens` is deliberately left unpatched for the same reason —
+    a synthetic window would make the wiring unobservable, which is what left this gap open.
+
+    The class table retargets `frontier` ONLY, so "resolved the frontier class" and "fell through
+    to the default `cfg.model`" are different strings. With no table configured they are the same
+    string and the assertion would hold no matter which path ran.
+    """
+    from rebar.llm.plan_review import sizing
+
+    frontier = _retarget_frontier_only(monkeypatch)
+    assert frontier != LLMConfig().model, "the discriminator collapsed; the test proves nothing"
+
+    captured: dict[str, Any] = {}
+
+    def _spy(blocks, **kwargs):  # noqa: ANN001, ANN003
+        captured["model"] = kwargs.get("model")
+        return [], []
+
+    monkeypatch.setattr(sizing, "pack_prerequisite_bins", _spy)
+    _run_batch(
+        monkeypatch,
+        _yaml_pass1_ladder(),
+        with_inputs={
+            "subject_plan": "plan",
+            "prerequisites": [{"canonical_id": "abcd-0000-0000-0002", "rendered_text": "prereq"}],
+        },
+    )
+
+    assert captured["model"] == frontier, (
+        f"the prerequisite finder packed against {captured.get('model')!r}; it must size its bins "
+        f"against the frontier class ({frontier!r}) that Pass-1 runs on (ticket 77ed)"
+    )
 
 
 # ── Pass-1 and Pass-2 must not collapse onto one model ───────────────────────────────────────
