@@ -108,11 +108,22 @@ def finding_listing(batch: list[tuple[int, dict[str, Any]]]) -> str:
     )
 
 
+EMPTY_BATCH_INSTRUCTIONS = "No findings to verify; return an empty verifications array."
+
+
 def verify_instructions(batch: list[tuple[int, dict[str, Any]]]) -> str:
     """The full Pass-2 verifier INSTRUCTIONS (header + :func:`finding_listing`) over one
-    batch of ``(global_index, finding)`` pairs. An empty batch yields a benign header only."""
+    batch of ``(global_index, finding)`` pairs.
+
+    An EMPTY batch states the empty-array contract instead of soliciting verifications: the
+    verify step still makes its single aggregate call when Pass-1 found nothing, and a request
+    that asks for "one verification per finding" while listing none solicits indices that
+    cannot exist. Every such index falls outside the caller's ``valid_indices`` and is
+    classified ``unexpected`` by :func:`reshape_verifications`, so a clean review carries an
+    ERROR log and a contract-violation record into its signed coverage. The focused
+    prerequisite verifier states the same contract for its own empty case."""
     if not batch:
-        return "Verify each finding below by its index. Emit one verification per finding."
+        return EMPTY_BATCH_INSTRUCTIONS
     return (
         "Verify each finding below by its index. Emit one verification per finding "
         f"(indices {batch[0][0]}–{batch[-1][0]}).\n\n{finding_listing(batch)}"
