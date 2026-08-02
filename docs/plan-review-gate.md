@@ -608,7 +608,8 @@ against. Re-gate (re-run `review-plan`) before implementing whenever `--status` 
 history** (every review that ran), **not** the current signed attestation. It is **newest-first**
 and each entry carries a `reviewed_at` ns-epoch timestamp (so ordering is checkable from the
 data — do **not** read `[-1]` as "current"; `[0]` is newest, and neither answers "is it approved
-*now*"). The history is pruned to a retention bound and is a *different store* from the
+*now*"). The history is append-only — emitting a review never deletes an earlier one, so it is
+bounded only by an explicit operator prune — and is a *different store* from the
 `SIGNATURE` attestation the gate consumes, so a fresh review can be reflected here while the
 current-approval question is still answered only by `--status` / `claim`. Use `audit show` to
 see *what reviews happened*; use `review-plan --status` to ask *is it approved right now*.
@@ -1009,8 +1010,8 @@ force-closes), which is mined from the `tickets` branch's git objects — a peri
 alone** — no outcome corpus, no git-object walk — so it accumulates at **zero marginal LLM cost**.
 It reads the persisted `REVIEW_RESULT` sidecars and appends one lean **firing row per
 (review-round, finding)** into an append-only, **prune-immune** ledger `runs/criterion_firings.jsonl`
-(prune-immune because the sidecar's own retention prune caps history at `RETAIN_PER_TICKET=50`
-rounds/ticket; the ledger captures firings before that prune). `--record --backfill` seeds it from
+(prune-immune because the ledger captures firings as they happen, so it survives an operator
+running the sidecar's retention prune down to `RETAIN_PER_TICKET=50` rounds/ticket). `--record --backfill` seeds it from
 the whole corpus; the default `--record` is incremental (append past the ledger watermark, idempotent
 by `(ticket, review_ts, round_uuid, norm_id)`); `--report` writes `runs/criterion_effectiveness.json`.
 

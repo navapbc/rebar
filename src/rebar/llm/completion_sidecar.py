@@ -34,14 +34,16 @@ SCHEMA = "completion_verifier_fail_v1"
 SCHEMA_PASS = "completion_verifier_pass_v1"
 
 # Retention bound: COMPLETION_VERDICT is reducer-IGNORED and compaction intentionally
-# PRESERVES it (never snapshots/absorbs a non-KNOWN type), so bound its growth here by
-# keeping the most-recent RETAIN_PER_TICKET events per ticket.
+# PRESERVES it (never snapshots/absorbs a non-KNOWN type). This is the default bound for an
+# EXPLICIT operator prune — the write path never invokes it (see `prune`).
 RETAIN_PER_TICKET = 10
 
 
 def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None) -> bool:
-    """Append a ``COMPLETION_VERDICT`` sidecar event from a completion FAIL verdict, then
-    prune to the retention bound. Returns True on success, False on any failure (the
+    """Append a ``COMPLETION_VERDICT`` sidecar event from a completion FAIL verdict.
+    Append-ONLY: it never deletes a committed event, so independent clones always
+    reconverge by union (store invariant I1) — bounding growth is :func:`prune`, invoked
+    explicitly by an operator. Returns True on success, False on any failure (the
     sidecar is observability — a failed persist must NEVER fail the close itself, and the
     FAIL that triggered it still raises regardless). Best-effort."""
     from rebar import config as _config
@@ -56,13 +58,17 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
         # the close, but the failure itself is a real signal worth a stderr diagnostic.
         logger.warning("COMPLETION_VERDICT sidecar emit failed; continuing", exc_info=True)
         return False
-    prune(str(verdict.get("ticket_id") or ""), repo_root=repo_root)  # best-effort retention
     return True
 
 
 def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> int:
     """Bound COMPLETION_VERDICT growth: keep the most-recent ``keep`` sidecar events for a
     ticket (filename timestamp order) and remove older ones. Returns the count removed.
+
+    EXPLICIT, operator-invoked: never call this from a write path. Deleting a committed
+    UUID event pairs with the appended replacement as a rename in each clone, so two
+    clones deleting the same base event conflict instead of reconverging (invariant I1).
+
     Best-effort and exception-swallowing — a failed prune never fails the close; the
     sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
     try:
