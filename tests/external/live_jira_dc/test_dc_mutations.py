@@ -44,6 +44,7 @@ from typing import Any
 import pytest
 from _dc_support import ADMIN_USER, BASE, live_jira_ready
 from _dc_support import envelope as _envelope
+from _dc_support import forget_identity_mapping as _forget_identity_mapping
 from _dc_support import read_local_ticket as _local
 from _dc_support import run_reconcile as _run
 from _dc_support import seed_searchable_issue as _seed
@@ -775,19 +776,68 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
     `RemoteRef.instance` rather than by forking the store vocabulary. So the mapping must
     resolve under `jira` AND must NOT exist under `jira-datacenter` — a positive-only check
     would pass a build that minted under both.
+
+    THE CELL ESTABLISHES ITS OWN PRECONDITION RATHER THAN HOPING FOR IT. Harness run 30763838558
+    showed the "absent before" assertion failing: jira/'admin' was already mapped. That is not
+    the scrub's doing — every identity on the real `tickets` branch carries `mappings: []`. It
+    is `bound_dc_issue`'s binding pass importing the seeded issue's DEFAULT assignee (the
+    project lead, i.e. the admin) and minting for it. Since the fixture will re-mint whichever
+    user its issue is assigned to, and the admin is the only user the harness guarantees, the
+    cell unassigns, syncs, removes that one mapping, and asserts the absence it just
+    established — the assertion stays, and now discriminates a failed setup instead of an
+    unwinnable one.
     """
     import rebar
 
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
 
-    # PRECONDITION, stated so its failure cannot be read as the product's. `resolve_mapping` is
-    # read-only, so this look does not create the thing we are about to attribute to the pass.
+    # SETUP, PART 1 — TAKE THE ASSIGNEE AWAY, so the pass under test has one to carry.
+    # `bound_dc_issue`'s seeded issue arrives ALREADY assigned to the harness admin (the
+    # project is created with `lead=admin` and no `assigneeType`, so DC default-assigns to the
+    # project lead), and its binding pass therefore already imported that assignee. Re-assigning
+    # the same user would leave the inbound differ nothing to report — `_assignee_matches`
+    # (`inbound_fields.py:102-128`) short-circuits an unchanged assignee — and the mint at
+    # `apply_inbound_records.py:369` only runs when `"assignee" in fields`. Unassigning first
+    # makes the later assignment a REAL transition. That this both works and propagates is not
+    # assumed: it is what cell `09-unassign` (`_in_unassign` / `_oracle_in_unassign` above)
+    # exercises, and it is green on the harness.
+    dc_transport.update_issue(key, assignee=None)
+    _wait_until_search_reflects(
+        dc_transport,
+        jira_dc_project,
+        key,
+        lambda h: (h.get("fields") or {}).get("assignee") in (None, {}),
+        "the unassignment (setup)",
+    )
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"the unassign setup pass raised:\n{cp.stderr[-2000:]}"
+    cleared = _local(dc_store_copy_repo, local_id).get("assignee")
+    assert not cleared, (
+        f"SETUP FAILED (not a product finding): the local ticket is still assigned to {cleared!r} "
+        f"after an inbound unassign, so the assignment this cell is about to make would not be a "
+        f"CHANGE and the pass would have no assignee to mint from. Cell `09-unassign` covers this "
+        f"propagation on its own; if that cell is also red, fix it there."
+    )
+
+    # SETUP, PART 2 — ESTABLISH THE ABSENCE THE ORACLE ASSERTS, then assert it.
+    # The mapping is NOT left behind by the scrub: every identity on the real `tickets` branch
+    # carries `mappings: []`, so the copied store maps no Jira user at all. It is minted DURING
+    # this test, by `bound_dc_issue`'s binding pass importing that default assignee
+    # (`apply_inbound_records.py:200-203`). So "pick a user the scrub leaves unmapped" is not
+    # available — the fixture re-mints whichever user its issue is assigned to, and the harness
+    # admin is the ONE user guaranteed to exist (`_dc_support.py:28-31`). The cell therefore
+    # removes that one mapping itself and then asserts the absence it just created. The
+    # assertion is NOT decoration: it fails if the removal did not take, if a second identity
+    # also carries the mapping, or if `resolve_mapping` ever stops being a pure read — each of
+    # which would let the post-pass check pass vacuously, which is the tautology this oracle
+    # was rewritten to remove.
+    _forget_identity_mapping(dc_store_copy_repo, "jira", ADMIN_USER)
     pre_existing = rebar.resolve_mapping("jira", ADMIN_USER, repo_root=dc_store_copy_repo)
     assert pre_existing is None, (
-        f"SETUP FAILED (not a product finding): the store copy ALREADY maps jira/{ADMIN_USER!r} "
-        f"to {pre_existing!r} before the pass runs, so a mapping afterwards would prove nothing "
-        f"about this pass. The scrub is expected to leave no identity for the harness admin."
+        f"SETUP FAILED (not a product finding): the store copy STILL maps jira/{ADMIN_USER!r} "
+        f"to {pre_existing!r} after this cell removed every identity carrying that mapping, so a "
+        f"mapping afterwards would prove nothing about this pass."
     )
 
     dc_transport.update_issue(key, assignee=ADMIN_USER)
