@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS voted (
     voted_at   INTEGER,
     PRIMARY KEY (change_id, revision)
 );
+CREATE TABLE IF NOT EXISTS review_attempts (
+    change_id       TEXT    NOT NULL,
+    revision        TEXT    NOT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER,
+    PRIMARY KEY (change_id, revision)
+);
 """
 
 
@@ -89,6 +96,54 @@ class DedupStore:
                 "event_type=excluded.event_type, vote_value=excluded.vote_value, "
                 "voted_at=excluded.voted_at",
                 (change_id, revision, event_type, int(vote_value), int(time.time())),
+            )
+        finally:
+            conn.close()
+
+    # ── retryable-gap attempt budget (ticket 0347) ──────────────────────────
+    # A RETRYABLE coverage-gap review defers vote-less (the backfill reconciler re-drives
+    # it) and burns one attempt here; at RETRYABLE_GAP_MAX_ATTEMPTS the voter escalates to
+    # the fail-closed -1. The budget is shared with the contributor re-trigger (ticket
+    # bb9b), whose reset is ``reset_attempts`` — a row DELETE, so a reset store is
+    # indistinguishable from "never attempted".
+
+    def record_attempt(self, change_id: str, revision: str) -> int:
+        """Record one review attempt for ``(change_id, revision)`` and return the new
+        total. Called on the deferral path BEFORE the vote-less return."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "INSERT INTO review_attempts (change_id, revision, attempts, last_attempt_at) "
+                "VALUES (?, ?, 1, ?) "
+                "ON CONFLICT(change_id, revision) DO UPDATE SET "
+                "attempts=attempts+1, last_attempt_at=excluded.last_attempt_at "
+                "RETURNING attempts",
+                (change_id, revision, int(time.time())),
+            ).fetchone()
+            return int(row[0])
+        finally:
+            conn.close()
+
+    def attempt_count(self, change_id: str, revision: str) -> int:
+        """The recorded attempt total for ``(change_id, revision)`` (0 if none)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT attempts FROM review_attempts WHERE change_id=? AND revision=?",
+                (change_id, revision),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
+    def reset_attempts(self, change_id: str, revision: str) -> None:
+        """DELETE the attempts row — the bb9b re-trigger's budget reset, also run after a
+        successfully-cast vote (the budget is per-revision and moot once a vote exists)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "DELETE FROM review_attempts WHERE change_id=? AND revision=?",
+                (change_id, revision),
             )
         finally:
             conn.close()

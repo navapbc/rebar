@@ -57,6 +57,27 @@ means *infra veto, not your code — the maintainer re-triggers it*; a `Verified
 means *CI failed — open the linked run*, and for a flake comment **`recheck`** to
 re-run CI on the same patchset.
 
+### Retryable vs terminal coverage gaps (automatic recovery)
+
+Most coverage-gap `-1`s should be rare: a review that fails RETRYABLY — the sub-reasons
+`review-error`, `llm-unavailable`, `scanner`, and `gate-disabled` — casts **no vote at
+all**. The change stays vote-less (and therefore unsubmittable — submit requires
+`LLM-Review +1`), the backfill reconciler re-drives it automatically within its interval
+(`RECONCILE_INTERVAL_SECONDS`, default 300s), and each deferral is logged with the
+greppable `REVIEW_RETRY_DEFERRED` marker. Only after the bounded per-revision retry budget
+(`RETRYABLE_GAP_MAX_ATTEMPTS`, default 3) is exhausted does the bot cast the fail-closed
+`-1`, appending an "Automatic retries exhausted" note to the message body and emitting the
+`VOTER_ERROR` marker (the `rebar/host:voter_errors` alarm surface) so an operator sees the
+escalation.
+
+Two sub-reasons remain **terminal** (voted immediately): `indeterminate` — the review ran
+to completion and concluded coverage could not be established, which is a result, not an
+interruption — and `merge-review` (a merge-change REST failure). And a `finding` is of
+course a real code veto, never retried automatically. A stuck coverage-gap `-1` (an
+exhausted budget or a terminal sub-reason after infra recovery) is cleared by a maintainer
+re-trigger (`/rerun`; see `infra/runbooks/review-bot-ops.md`) or a new patchset — a new
+patchset is a new revision, which starts with a fresh retry budget.
+
 > **Drift-guard.** If you see an `LLM-Review` tag that is **not** listed above, treat
 > it as coverage-gap-class (an infra veto, not a code finding) and ping the
 > maintainer. (A CI gate that mechanically ties this table to the code enums is

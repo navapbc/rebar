@@ -90,17 +90,18 @@ services:
     #
     # Sized from the app's own budgets, not from the drain window alone. Since c2ba every term
     # is now a BOUNDED budget, so this is a provable worst case rather than a risk reduction:
-    #     45s  SHUTDOWN_DRAIN_SECONDS  (app.py DEFAULT_SHUTDOWN_DRAIN_SECONDS)
+    #   1200s  SHUTDOWN_DRAIN_SECONDS  (config.py DEFAULT_SHUTDOWN_DRAIN_SECONDS — sized to the
+    #          per-review timeout so an IN-FLIGHT review finishes before the deploy proceeds;
+    #          ticket 0347. An empty queue drains instantly, so a no-review deploy pays nothing.)
     #   + 60s  store write-lock acquisition (_store/lock.py _DEFAULT_TIMEOUT 30 x _ATTEMPTS 2)
     #   + 45s  the push reconcile's re-taken lock (push.py _PUSH_MERGE_LOCK_TIMEOUT 15
     #          x _MAX_RETRIES 3)
-    #   = 150s
+    #   = 1305s, rounded up to a whole 22 minutes (1320s) for margin.
     # The lock-held git work done under those acquisitions is itself bounded by event_append's
     # _GIT_TIMEOUT (30s/call, matching push.py), and the lifespan's post-drain cancel/await is
-    # bounded by SHUTDOWN_CANCEL_SECONDS (10s) — both well inside the 150s above. The previous
-    # 60s was sized only against the 45s drain window, which is why a write that merely STARTED
-    # as that window closed had no room left. Docker's own default would be 10s. Anything not
-    # drained in the window still falls to the backfill reconciler.
+    # bounded by SHUTDOWN_CANCEL_SECONDS (10s) — both well inside the total above. Docker's own
+    # default would be 10s. Anything not drained in the window still falls to the backfill
+    # reconciler.
     #
     # c2ba (melting-resting-serpent) closed the two residues that previously made this constant
     # unprovable — event_append's lock-held git calls now carry _GIT_TIMEOUT, and voter.py runs
@@ -108,7 +109,7 @@ services:
     # actually fire — so the critical section now has an upper bound by construction.
     # tests/unit/test_review_bot.py::test_reviewbot_stop_grace_period_covers_an_in_flight_store_write
     # asserts the relationship, so raising either budget fails CI until this follows.
-    stop_grace_period: 150s
+    stop_grace_period: 1320s
     env_file:
       - .env
     environment:

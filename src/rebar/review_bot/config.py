@@ -31,15 +31,21 @@ DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
 
 #: Bounded grace (seconds) to DRAIN the in-memory review queue on shutdown BEFORE the worker is
 #: cancelled, so a routine autodeploy restart doesn't abandon acknowledged (``202``) webhooks.
-#: Anything still queued when the window elapses is left for the backfill reconciler (fail-safe,
-#: never fail-lose). Keep it below the container ``stop_grace_period`` (see docker-compose.yml)
-#: so the drain completes before Docker escalates SIGTERM → SIGKILL.
+#: Sized to the per-review timeout above (ticket 0347): the drain exists to let the IN-FLIGHT
+#: review finish (``queue.join()`` waits for it, and the review is already wall-clock-bounded
+#: by ``REVIEW_TIMEOUT_SECONDS``), and the previous 45s covered only queued-but-idle work —
+#: a deploy landing mid-review (observed at 260–911s) cancelled the worker and the
+#: teardown-corrupted review fail-closed a ``-1`` that then suppressed the backfill reconciler.
+#: An EMPTY queue drains instantly, so a no-review deploy pays nothing. Anything still queued
+#: when the window elapses is left for the backfill reconciler (fail-safe, never fail-lose).
+#: Keep it below the container ``stop_grace_period`` (see docker-compose.yml) so the drain
+#: completes before Docker escalates SIGTERM → SIGKILL.
 #:
 #: Lives here rather than in ``app`` for the same reason as the review timeout above: the
 #: container's ``stop_grace_period`` is sized against this value, so the test that asserts that
 #: relationship must be able to read it WITHOUT importing the fastapi-laden ``app`` module (the
 #: ``reviewbot`` extra is not installed in the default test tier).
-DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
+DEFAULT_SHUTDOWN_DRAIN_SECONDS = 1200
 
 #: Bounded window (seconds) for the lifespan's post-drain ``cancel`` + ``await`` of the
 #: background tasks (``SHUTDOWN_CANCEL_SECONDS``). Cancelling a task blocked in an
@@ -53,6 +59,12 @@ DEFAULT_SHUTDOWN_DRAIN_SECONDS = 45
 #: ``stop_grace_period`` is sized against it, and that test must read it WITHOUT importing the
 #: fastapi-laden ``app`` module.
 DEFAULT_SHUTDOWN_CANCEL_SECONDS = 10
+
+#: Max review attempts per ``(change_id, revision)`` before a RETRYABLE coverage gap stops
+#: deferring vote-less and escalates to the fail-closed ``-1`` (ticket 0347). Attempts are
+#: counted in the receiver's ``review_attempts`` ledger (see ``dedup.py``); the budget is
+#: reset by a successful vote or an explicit ``reset_attempts`` (the bb9b re-trigger).
+DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS = 3
 
 #: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
 #: is idempotent (a reload/re-import never stacks duplicate handlers).
@@ -185,6 +197,8 @@ class ReceiverConfig:
     webhook_token: str = ""
     #: Backfill reconciler cadence (seconds); startup + every interval.
     reconcile_interval_seconds: int = 300
+    #: Attempts before a retryable coverage gap escalates to the fail-closed ``-1``.
+    retryable_gap_max_attempts: int = DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS
     #: The Gerrit project the bot reviews; non-matching projects are skipped.
     project: str = "rebar"
     #: Remote holding the rebar ``tickets`` branch, fetched alongside the change clone so the
@@ -226,6 +240,9 @@ class ReceiverConfig:
             gerrit_bot_token=bot_token,
             webhook_token=webhook_token,
             reconcile_interval_seconds=_int_env("RECONCILE_INTERVAL_SECONDS", 300),
+            retryable_gap_max_attempts=_int_env(
+                "RETRYABLE_GAP_MAX_ATTEMPTS", DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS
+            ),
             project=os.environ.get("GERRIT_PROJECT", "rebar").strip(),
             reconcile_cursor_path=os.environ.get("RECONCILE_CURSOR_PATH", "").strip(),
             tickets_remote=os.environ.get("TICKETS_REMOTE", "https://github.com/navapbc/rebar")
