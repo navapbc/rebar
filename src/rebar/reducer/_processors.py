@@ -118,6 +118,10 @@ def process_create(
         _src_val = data.get(_src_key)
         if _src_val is not None:
             state[_src_key] = _src_val
+    # Detection-channel capture (ticket d3ed): present-only, mirrors source_* above.
+    _detected_by_val = data.get("detected_by")
+    if _detected_by_val is not None:
+        state["detected_by"] = _detected_by_val
     # Creation-channel provenance (epic jira-reb-977, story 6fe2): the public ingress
     # (cli/mcp/python/jira/import) that produced this genesis CREATE. Projected
     # UNCONDITIONALLY — a post-feature CREATE always carries it; a LEGACY CREATE with no

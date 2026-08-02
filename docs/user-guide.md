@@ -70,6 +70,10 @@ rebar create story "Add dark mode" --priority 2 --parent <epic-id>
 rebar create bug "Crash on empty search" --description "..." --tags ui,regression
 ```
 
+Automated filers can stamp the detection channel: set `REBAR_DETECTED_BY=<source>` in
+the environment, or pass `--detected-by <source>` (the flag overrides the env var).
+The value is normalized to lowercase; unknown tokens are accepted verbatim.
+
 Types are `bug`, `epic`, `story`, `task`. Containment is the **parent** relationship
 (`--parent <id>`), not a link — an epic contains stories, a story contains tasks/bugs.
 

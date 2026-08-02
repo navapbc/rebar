@@ -42,9 +42,11 @@ _FILE_IMPACT_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
 
 _USAGE = (
     "Usage: ticket create <ticket_type> <title> [--parent <id>] [--priority <n>] "
-    "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>]\n"
+    "[--assignee <name>] [--description <text>] [--tags <tag1,tag2>] "
+    "[--detected-by <source>]\n"
     "  ticket_type: bug | epic | story | task | session_log | code_review | identity\n"
-    "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)"
+    "  --priority, -p: 0-4 (0=critical, 4=backlog; default: 2)\n"
+    "  --detected-by: detection channel (overrides REBAR_DETECTED_BY env var)"
 )
 
 
@@ -84,6 +86,7 @@ def create_core(
     identity: dict | None = None,
     repo_root=None,
     creation_channel: str,
+    detected_by: str | None = None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
 
@@ -204,6 +207,17 @@ def create_core(
             if _id_val is not None:
                 data[_id_key] = _id_val
 
+    # Detection-channel capture (ticket d3ed): explicit param wins over the env var
+    # (an explicit empty string suppresses it); strip+lowercase, empty -> unset,
+    # never blocks the create. Present-only, mirroring source_* above.
+    _detected_candidate = (
+        detected_by if detected_by is not None else os.environ.get("REBAR_DETECTED_BY")
+    )
+    if _detected_candidate is not None:
+        _detected_norm = _detected_candidate.strip().lower()
+        if _detected_norm:
+            data["detected_by"] = _detected_norm
+
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     return {"id": ticket_id, "alias": alias or None, "title": title}
 
@@ -225,7 +239,7 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     ticket_type, title = rest[0], rest[1]
-    parent = priority = assignee = description = None
+    parent = priority = assignee = description = detected_by = None
     tags = ""
     i, args = 2, rest
     n = len(args)
@@ -242,6 +256,12 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             i += 2
         elif a.startswith("--priority="):
             priority = a[len("--priority=") :]
+            i += 1
+        elif a in ("--detected-by",) and i + 1 < n:
+            detected_by = args[i + 1]
+            i += 2
+        elif a.startswith("--detected-by="):
+            detected_by = a[len("--detected-by=") :]
             i += 1
         elif a in ("--assignee",) and i + 1 < n:
             assignee = args[i + 1]
@@ -283,6 +303,7 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             tags=tags,
             repo_root=repo_root,
             creation_channel="cli",
+            detected_by=detected_by,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
