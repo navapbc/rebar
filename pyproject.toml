@@ -261,6 +261,15 @@ conflicts = [
     [{ extra = "eval" }, { extra = "bedrock" }],
     [{ extra = "eval" }, { extra = "dev" }],
 ]
+# click override (PYSEC-2026-2132, command injection in click.edit(), fixed 8.3.3).
+# inspect-ai caps `click < 8.2.2` solely for pallets/click#3084, which upstream fixed
+# in click 8.3.2 (issue closed against that milestone) — the cap is stale. Without the
+# override uv's universal lock holds the WHOLE project (every extra) on vulnerable
+# 8.2.1 and CI's gating pip-audit fails on every change. Drop this override once
+# inspect-ai lifts its cap upstream.
+override-dependencies = [
+    "click>=8.3.3",
+]
 
 [tool.hatch.build.hooks.custom]
 
