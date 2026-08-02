@@ -262,6 +262,12 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             v = a[len("--tags=") :]
             tags = f"{tags},{v}" if tags else v
             i += 1
+        elif a.startswith("-"):
+            # An option-looking token must NOT fall through to `parent`, or a typo
+            # (or an option missing its value) resurfaces as the baffling
+            # "parent … '--body-file' does not exist".
+            print(f"Error: unrecognised option '{a}'\n{_USAGE}", file=sys.stderr)
+            return 2
         else:
             parent = a
             i += 1  # bare positional → parent (backward-compatible)
