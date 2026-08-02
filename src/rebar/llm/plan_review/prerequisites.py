@@ -257,7 +257,7 @@ def run_focused_finder(
                     *run_bin(bin_[:middle], model, attempt),
                     *run_bin(bin_[middle:], model, attempt),
                 ]
-            ladder = sizing.models_at_or_above(model)
+            ladder = sizing.escalation_rungs(model)
             try:
                 next_model = ladder[ladder.index(model) + 1] if model in ladder else ladder[0]
             except (ValueError, IndexError):
