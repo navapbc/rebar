@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from rebar.llm.config import infer_provider, split_provider_qualifier
+from rebar.llm.config import _PROVIDER_PREFIXES, infer_provider, split_provider_qualifier
 from rebar.llm.model_classes import _resolve_target, parse_class_slots, resolve_class
 
 pytestmark = pytest.mark.unit
@@ -276,11 +276,10 @@ def test_a_configured_provider_that_is_a_member_still_composes():
 
 
 def test_the_inference_path_is_not_validated():
-    """Deliberately out of scope: `_PROVIDER_PREFIXES` maps `gemini` to `google_genai`, which no
-    builder can construct. This change validates only the EXPLICITLY CONFIGURED provider, so the
-    inference path must behave identically before and after — folding that unrelated bug fix in
-    here would widen the change."""
-    assert _resolve_target("gemini-2.5-pro", None) == "google_genai:gemini-2.5-pro"
+    """The inference path composes without running the configured-provider raise: an INFERRED name
+    is trusted, which is exactly why the table it comes from has to be trustworthy — see the
+    whole-table invariant at the bottom of this module."""
+    assert _resolve_target("gemini-2.5-pro", None) == "google:gemini-2.5-pro"
 
 
 # ── the static set must not silently drift from the runtime registries ────────────────────────
@@ -299,3 +298,79 @@ def test_the_static_set_does_not_drift_from_the_runtime_registries():
     session = ProviderSession(LLMConfig(base_url="https://example.invalid"))
     assert set(session._builders) <= KNOWN_PROVIDER_NAMES
     assert _pydantic_ai_known_providers() <= KNOWN_PROVIDER_NAMES
+
+
+# ── every INFERRED provider name must be one a runtime registry can resolve ───────────────────
+#
+# `_PROVIDER_PREFIXES` is the inference table: a bare model id starting with a listed prefix is
+# qualified with the mapped name, and that composed string is what the runner dispatches on.
+# Nothing forced those mapped names to be names either registry knows — `gemini` mapped to
+# `google_genai`, which neither pydantic-ai nor `ProviderSession` recognizes — so a bare `gemini-*`
+# id composed a target that sailed through config resolution and could only fail at CALL time.
+#
+# The two composition sites differ, and only one broke: `anthropic_model._pai_model` passes the
+# inferred name through its own private `_PAI_PROVIDER_PREFIX` table, which happened to translate
+# the unusable name into a usable one; the model-class/ladder path below uses `infer_provider`'s
+# result VERBATIM. So the end-to-end assertion goes through `_resolve_target`, not `_pai_model`.
+#
+# The invariant is pinned over the WHOLE table, not the gemini row, so a future prefix cannot
+# reintroduce the class of defect.
+
+
+def _resolving_session():
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.providers import ProviderSession
+
+    # `base_url` set so the conditional `openai` builder is registered too.
+    return ProviderSession(LLMConfig(base_url="https://example.invalid"))
+
+
+@pytest.mark.parametrize(
+    ("prefix", "provider"), _PROVIDER_PREFIXES, ids=[p for p, _ in _PROVIDER_PREFIXES]
+)
+def test_every_inferred_provider_name_is_resolvable(prefix, provider):
+    """`is_resolvable` is the union of both registries — a rebar builder or a name pydantic-ai's
+    own `known_model_names()` enumerates — so this is one assertion covering both sides."""
+    pytest.importorskip("pydantic_ai")
+
+    assert _resolving_session().is_resolvable(provider), (
+        f"prefix {prefix!r} infers provider {provider!r}, which no rebar builder and no "
+        f"pydantic-ai provider name resolves; a bare {prefix}* model id cannot be constructed"
+    )
+
+
+def test_a_bare_gemini_id_composes_a_resolvable_target():
+    """End-to-end on the path that actually broke, from the operator's bare id to the qualifier a
+    provider would be built from."""
+    pytest.importorskip("pydantic_ai")
+
+    target = _resolve_target("gemini-2.5-pro", None)
+    qualifier, _ = split_provider_qualifier(target)
+    assert qualifier is not None, f"{target!r} is not even recognized as provider-qualified"
+    assert _resolving_session().is_resolvable(qualifier), (
+        f"{target!r} names provider {qualifier!r}, which cannot be built"
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("claude-opus-4-8", "anthropic"),
+        ("gpt-4o", "openai"),
+        ("gpt4-turbo", "openai"),
+        ("o1-preview", "openai"),
+        ("o3-mini", "openai"),
+        ("chatgpt-4o-latest", "openai"),
+        ("mystery-model", None),
+    ],
+)
+def test_inference_for_the_other_prefixes_is_unchanged(model, expected):
+    """The control: only the gemini row moves."""
+    assert infer_provider(model) == expected
+
+
+@pytest.mark.parametrize("model", ["google:gemini-2.5-flash", "google-gla:gemini-2.5-flash"])
+def test_an_already_qualified_gemini_id_is_left_alone(model):
+    """Qualified ids never reach the prefix table, so remapping it must not disturb them."""
+    assert infer_provider(model) == model.split(":", 1)[0]
+    assert _resolve_target(model, None) == model

@@ -331,7 +331,7 @@ def test_infer_provider() -> None:
     assert infer_provider("claude-opus-4-8") == "anthropic"
     assert infer_provider("gpt-4o") == "openai"
     assert infer_provider("chatgpt-4o-latest") == "openai"
-    assert infer_provider("gemini-2.5-pro") == "google_genai"
+    assert infer_provider("gemini-2.5-pro") == "google"
     assert infer_provider("openai:gpt-4o") == "openai"  # provider:model form
     assert infer_provider("local-model", explicit="openai") == "openai"
     assert infer_provider("mystery-model") is None

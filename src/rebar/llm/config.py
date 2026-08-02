@@ -165,6 +165,15 @@ RUNNERS = ("pydantic_ai", "fake")
 
 # Model-name prefix → provider (used for diagnostics + clear errors and to pick the
 # provider-qualified model string the pydantic_ai runtime dispatches on).
+#
+# EVERY value here must be a name a runtime registry can resolve — a rebar builder or a provider
+# pydantic-ai itself recognizes. The model-class/ladder path composes `<value>:<model>` VERBATIM
+# from this table, so a value neither side knows produces a target that passes config resolution
+# and can only fail at CALL time, when a gate finally runs — the whole point of inferring a
+# provider is defeated if the inferred name cannot be built. `google` is pydantic-ai's current
+# canonical name for the Gemini Developer API; `google-gla` and `google-vertex` also resolve but
+# are deprecated aliases it removes in v2.0, so they are not what a fresh mapping should emit.
+# `tests/unit/test_provider_qualifier.py` pins the invariant across the whole table.
 _PROVIDER_PREFIXES = (
     ("claude", "anthropic"),
     ("gpt-", "openai"),
@@ -172,7 +181,7 @@ _PROVIDER_PREFIXES = (
     ("o1", "openai"),
     ("o3", "openai"),
     ("chatgpt", "openai"),
-    ("gemini", "google_genai"),
+    ("gemini", "google"),
 )
 
 
@@ -432,7 +441,7 @@ class LLMConfig:
     runner: str = "pydantic_ai"
     model: str = DEFAULT_MODEL
     # Provider is OPTIONAL: it is inferred from the model name (claude-*→anthropic,
-    # gpt-*→openai, gemini-*→google_genai) to build the provider-qualified model
+    # gpt-*→openai, gemini-*→google) to build the provider-qualified model
     # string the pydantic_ai runtime dispatches on. Set it explicitly for ambiguous
     # names.
     model_provider: str | None = None
