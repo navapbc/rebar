@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from rebar.llm import contracts, parity
 from rebar.llm.config import LLMConfig
 from rebar.llm.plan_review import orchestrator, passes, prerequisites, sizing
@@ -322,3 +324,52 @@ def test_focused_general_index_domains_independent() -> None:
         item["finding"] == "prerequisite conflict" and item["prerequisite_id"] == prerequisite_id
         for item in decided
     )
+
+
+# ── bug 48b3: the prerequisite-coverage escalation inherits the start-rung fix ────────
+# `run_bin` takes `ladder[0]` when the primary is absent from its own returned ladder
+# (prerequisites.py), so an unlocatable primary used to be "escalated" to the ladder's
+# cheapest Anthropic rung — a smaller window on a different provider. Repaired entirely by
+# `sizing.models_at_or_above`; prerequisites.py itself is NOT edited.
+
+_UNLOCATED_PRIMARY = "bedrock:us.amazon.nova-pro-v1:0"
+
+
+class _AlwaysContextLimitRunner:
+    """Always raises a context-limit error, recording the model each attempt ran on."""
+
+    def __init__(self) -> None:
+        self.models_seen: list[str | None] = []
+
+    def run(self, req):  # noqa: ANN001, ANN202 - RunRequest
+        self.models_seen.append(req.config.model)
+        raise Exception("prompt is too long")
+
+
+def test_prerequisite_escalation_stays_on_an_unlocatable_operator_model(monkeypatch) -> None:
+    block = sizing.PrerequisiteBlock("aaaa-bbbb-cccc-dddd", "prereq text")
+    # One bin, one block -> the single-block path escalates up the ladder (no split).
+    monkeypatch.setattr(sizing, "pack_prerequisite_bins", lambda blocks, **kw: ([[block]], []))
+
+    from rebar.llm.prompting import prompts
+
+    monkeypatch.setattr(prompts, "get_prompt", lambda *a, **k: "prompt")
+    monkeypatch.setattr(prompts, "resolve_prompt", lambda *a, **k: ("system", None))
+
+    cfg = replace(LLMConfig(runner="fake"), model=_UNLOCATED_PRIMARY)
+    runner = _AlwaysContextLimitRunner()
+
+    records, _findings, _usage = prerequisites.run_focused_finder(
+        runner=runner,
+        cfg=cfg,
+        subject_plan="subject",
+        blocks=[{"canonical_id": block.canonical_id, "rendered_text": block.rendered_text}],
+        ticket_id="tkt0-tkt0-tkt0-tkt0",
+    )
+
+    # Exactly one attempt, on the operator's own model — no claude-haiku-4-5 second attempt.
+    assert runner.models_seen == [_UNLOCATED_PRIMARY]
+    assert len(records) == 1
+    assert records[0]["disposition"] == "indeterminate"
+    assert records[0]["reason_code"] == "evaluation-error"
+    assert records[0]["detail"] == "input-too-large"

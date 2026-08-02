@@ -268,7 +268,7 @@ def test_models_at_or_above_returns_todays_bare_ids_with_no_classes_configured(
     assert sizing.models_at_or_above(_TODAY_STANDARD) == [_TODAY_STANDARD, _TODAY_FRONTIER]
     assert sizing.models_at_or_above(_TODAY_FRONTIER) == [_TODAY_FRONTIER]
     assert sizing.models_at_or_above(None) == _TODAY_LADDER
-    assert sizing.models_at_or_above("some-unknown-model") == _TODAY_LADDER
+    assert sizing.models_at_or_above("some-unknown-model") == ["some-unknown-model"]
 
 
 @pytest.mark.parametrize("configured", [False, True])
@@ -322,7 +322,9 @@ def test_largest_window_tokens_still_matches_a_provider_qualified_id(bedrock_cla
     assert sizing.largest_window_tokens(_BEDROCK_STANDARD) == 1_000_000
     assert sizing.largest_window_tokens("bedrock:us.anthropic.claude-haiku-4-5") == 1_000_000
     assert sizing.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
-    assert sizing.largest_window_tokens("some-unknown-model") == sizing.MODEL_LADDER[-1][1]
+    assert sizing.largest_window_tokens("some-unknown-model") == min(
+        w for _, w in sizing.MODEL_LADDER
+    )
 
 
 def test_config_py_does_not_import_model_classes_at_module_level() -> None:
@@ -480,9 +482,14 @@ def test_dropped_rungs_still_produce_the_too_big_failure_finding(monkeypatch, no
     assert all(f["_too_big"] is True for f in findings)
 
 
-def test_start_rung_location_for_a_foreign_family_is_unchanged(no_classes) -> None:
-    """PINNED, deliberately NOT fixed here: a primary from a non-Anthropic model FAMILY matches
-    no ladder rung, so it falls through to the whole ladder. That is rung LOCATION, a different
-    mechanism owned by its own ticket; this change must leave it byte-for-byte."""
-    assert sizing.models_at_or_above("bedrock:us.amazon.nova-pro-v1:0") == _TODAY_LADDER
-    assert sizing.largest_window_tokens("bedrock:us.amazon.nova-pro-v1:0") == 1_000_000
+def test_start_rung_location_for_a_foreign_family_is_explicit(no_classes) -> None:
+    """A primary from a non-Anthropic model FAMILY matches no ladder rung. That is an explicit
+    outcome, not a silent substitution: the ladder is the primary alone, so a retry re-runs on
+    the operator's own model instead of DOWNGRADING onto a smaller Anthropic rung, and the window
+    is the ladder MINIMUM so the P8 size gate cannot under-block on an overstated budget."""
+    assert sizing.models_at_or_above("bedrock:us.amazon.nova-pro-v1:0") == [
+        "bedrock:us.amazon.nova-pro-v1:0"
+    ]
+    assert sizing.largest_window_tokens("bedrock:us.amazon.nova-pro-v1:0") == min(
+        w for _, w in sizing.MODEL_LADDER
+    )
