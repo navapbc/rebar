@@ -126,7 +126,10 @@ def emit(
     per (verdict-identity) is not attempted here (a code review is diff-scoped, not run-keyed);
     callers emit once per produced verdict. When change metadata is supplied (the reviewbot
     artifact path) the payload carries the ``(change_id, revision)`` key + ``change_fingerprint``.
-    Returns True on success, False on any failure (best-effort — never raises into the gate)."""
+    Append-ONLY: it never deletes a committed event, so independent clones always reconverge by
+    union (store invariant I1) — bounding growth is :func:`prune`, invoked explicitly by an
+    operator. Returns True on success, False on any failure (best-effort — never raises into the
+    gate)."""
     if not target_ticket:
         return False
     try:
@@ -145,13 +148,17 @@ def emit(
     except Exception:  # noqa: BLE001 — sidecar is best-effort; a failure must not fail the gate
         logger.warning("code-review REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
-    prune(target_ticket, repo_root=repo_root)  # best-effort retention (bounds code-review growth)
     return True
 
 
 def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> int:
     """Bound REVIEW_RESULT growth on a code-review target ticket: keep the most-recent ``keep``
     sidecar events (filename timestamp order) and remove older ones. Returns the count removed.
+
+    EXPLICIT, operator-invoked: never call this from a write path. Deleting a committed UUID
+    event pairs with the appended replacement as a rename in each clone, so two clones deleting
+    the same base event conflict instead of reconverging (invariant I1).
+
     The code-review analogue of :func:`rebar.llm.plan_review.sidecar.prune`, governed by the SAME
     :data:`RETAIN_PER_TICKET` constant (story fde0 — code-review previously had NO prune, so its
     sidecars grew unbounded). Best-effort and exception-swallowing — a failed prune never fails the

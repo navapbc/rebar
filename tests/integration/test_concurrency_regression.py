@@ -1463,3 +1463,151 @@ def test_enrichment_drain_preserves_two_clone_union(two_clones):
     assert after_a | after_b <= drain_event_paths(tracker_a, merge_tree)
     assert _git("status", "--porcelain", cwd=tracker_a).stdout == ""
     assert _git("status", "--porcelain", cwd=tracker_b).stdout == ""
+
+
+# ── I1 append-only: an LLM sidecar emit must never delete a committed event ────────────────
+def _sidecar_paths(tracker: Path, ticket_id: str, event_type: str, revision: str = "HEAD"):
+    """The committed sidecar event paths of *event_type* under *ticket_id* at *revision*."""
+    listing = _git("ls-tree", "-r", "--name-only", revision, cwd=tracker).stdout.splitlines()
+    return {
+        path
+        for path in listing
+        if path.startswith(f"{ticket_id}/") and path.endswith(f"-{event_type}.json")
+    }
+
+
+def _merge_tree(tracker_a: Path, tracker_b: Path, label: str) -> subprocess.CompletedProcess:
+    """Union-merge B's tracker history into A's, without touching either working tree."""
+    _git("fetch", "-q", str(tracker_b), f"HEAD:refs/remotes/debug/{label}", cwd=tracker_a)
+    return _git(
+        "merge-tree",
+        "--write-tree",
+        "HEAD",
+        f"refs/remotes/debug/{label}",
+        cwd=tracker_a,
+        check=False,
+    )
+
+
+def _assert_emit_is_append_only(two_clones, *, emit, event_type: str, retain: int) -> None:
+    """Two clones share a sidecar history padded to the retention bound, go offline, and each
+    performs ONE automatic emit. Emit must APPEND ONLY: no committed event may disappear, and
+    the two independently valid histories must still reconverge by union.
+
+    The base is padded with REAL emitted payloads so the pruned event and its replacement are
+    content-similar neighbours. Git's rename detection is similarity-based, so a synthetic
+    base whose events differ in length can fall under the 50% threshold and make a
+    delete+add pair merge cleanly by luck — masking the defect.
+    """
+    _remote, repo_a, repo_b, ticket_id = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # Shared base: exactly the retention bound, so the next emit is the one that prunes.
+    for _ in range(retain):
+        assert emit(repo_a, ticket_id) is True
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
+    _expire_sync_marker(tracker_b)
+    _engine_run(repo_b, "list")
+
+    base_a = _sidecar_paths(tracker_a, ticket_id, event_type)
+    assert len(base_a) == retain, f"base padding did not reach the bound: {sorted(base_a)}"
+    assert base_a == _sidecar_paths(tracker_b, ticket_id, event_type), "clones do not share a base"
+
+    # Both clones go offline, then each emits once against the shared base.
+    _remote_remove(tracker_a)
+    _remote_remove(tracker_b)
+
+    control = _merge_tree(tracker_a, tracker_b, f"pre-emit-{event_type.lower()}")
+    assert control.returncode == 0, "control merge of the shared base already conflicts"
+
+    assert emit(repo_a, ticket_id) is True
+    assert emit(repo_b, ticket_id) is True
+
+    merged = _merge_tree(tracker_a, tracker_b, f"post-emit-{event_type.lower()}")
+    assert merged.returncode == 0, (
+        f"automatic {event_type} sidecar retention made independently valid tracker histories "
+        "conflict:\n" + merged.stdout + merged.stderr
+    )
+
+    after_a = _sidecar_paths(tracker_a, ticket_id, event_type)
+    after_b = _sidecar_paths(tracker_b, ticket_id, event_type)
+    assert base_a <= after_a, (
+        f"emit deleted committed {event_type} events in clone A (I1 append-only): "
+        f"{sorted(base_a - after_a)}"
+    )
+    assert base_a <= after_b, (
+        f"emit deleted committed {event_type} events in clone B (I1 append-only): "
+        f"{sorted(base_a - after_b)}"
+    )
+
+    merged_tree = merged.stdout.splitlines()[0]
+    assert after_a | after_b <= _sidecar_paths(tracker_a, ticket_id, event_type, merged_tree)
+    assert _git("status", "--porcelain", cwd=tracker_a).stdout == ""
+    assert _git("status", "--porcelain", cwd=tracker_b).stdout == ""
+
+
+def test_plan_review_sidecar_emit_two_clone_union(two_clones):
+    from rebar.llm.plan_review import sidecar as plan_sidecar
+
+    def emit(repo: Path, ticket_id: str) -> bool:
+        return plan_sidecar.emit(
+            {
+                "verdict": "PASS",
+                "ticket_id": ticket_id,
+                "ticket_type": "task",
+                "advisory": [],
+                "coverage": {"metrics": {}},
+                "coaching": [],
+            },
+            material="shared-material",
+            repo_root=repo,
+        )
+
+    _assert_emit_is_append_only(
+        two_clones,
+        emit=emit,
+        event_type=plan_sidecar.EVENT_TYPE,
+        retain=plan_sidecar.RETAIN_PER_TICKET,
+    )
+
+
+def test_code_review_sidecar_emit_two_clone_union(two_clones):
+    from rebar.llm.code_review import sidecar as code_sidecar
+
+    def emit(repo: Path, ticket_id: str) -> bool:
+        return code_sidecar.emit(
+            {"verdict": "PASS", "blocking": [], "advisory": [], "coaching": []},
+            target_ticket=ticket_id,
+            repo_root=repo,
+        )
+
+    _assert_emit_is_append_only(
+        two_clones,
+        emit=emit,
+        event_type=code_sidecar.EVENT_TYPE,
+        retain=code_sidecar.RETAIN_PER_TICKET,
+    )
+
+
+def test_completion_sidecar_emit_two_clone_union(two_clones):
+    from rebar.llm import completion_sidecar
+
+    def emit(repo: Path, ticket_id: str) -> bool:
+        return completion_sidecar.emit(
+            {
+                "verdict": "FAIL",
+                "ticket_id": ticket_id,
+                "findings": [],
+                "criteria": [],
+                "runner": "two-clone",
+            },
+            material="shared-material",
+            repo_root=repo,
+        )
+
+    _assert_emit_is_append_only(
+        two_clones,
+        emit=emit,
+        event_type=completion_sidecar.EVENT_TYPE,
+        retain=completion_sidecar.RETAIN_PER_TICKET,
+    )

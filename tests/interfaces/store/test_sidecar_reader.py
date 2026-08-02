@@ -137,10 +137,16 @@ def test_latest_review_result_schema_guard_rejects_foreign_payload(rebar_repo: P
     assert sidecar.latest_review_result(tid, repo_root=str(rebar_repo)) is None
 
 
-def test_prune_bound_still_respected_after_prose_fields(rebar_repo: Path) -> None:
-    """Adding the prose fields to _slim does not bypass the RETAIN_PER_TICKET prune
-    bound: after emitting more than the bound, only the most-recent RETAIN remain, and
-    the reader still returns the newest."""
+def test_emit_appends_past_the_retain_bound_without_deleting(rebar_repo: Path) -> None:
+    """`emit` is APPEND-ONLY: it never deletes a committed event, even past
+    ``RETAIN_PER_TICKET``. Deleting one and adding a new UUID in each of two clones makes git
+    resolve the shared base file as renamed to a DIFFERENT name per clone, so a union merge hits
+    a rename/rename conflict and the trackers cannot reconverge (docs/concurrency.md invariant I1).
+    ``prune`` remains available as an explicit operator-invoked op.
+
+    The reader half of this test is unchanged: the prose fields on ``_slim`` must not stop
+    ``latest_review_result`` returning the newest record.
+    """
     tid = _make_ticket(rebar_repo)
     n = sidecar.RETAIN_PER_TICKET + 3
     for i in range(n):
@@ -154,11 +160,14 @@ def test_prune_bound_still_respected_after_prose_fields(rebar_repo: Path) -> Non
     rid = resolve_ticket_id(tid, tracker) or tid
     ticket_dir = os.path.join(tracker, rid)
     remaining = [f for f in os.listdir(ticket_dir) if f.endswith("-REVIEW_RESULT.json")]
-    assert len(remaining) == sidecar.RETAIN_PER_TICKET
+    assert len(remaining) == n, (
+        f"emit deleted committed events: {len(remaining)} of {n} remain. Retention must not "
+        "run automatically on the emit path — it breaks append-only reconvergence."
+    )
 
     got = sidecar.latest_review_result(tid, repo_root=str(rebar_repo))
     assert got is not None
-    assert got["material_fingerprint"] == f"m{n - 1}"  # newest survives the prune
+    assert got["material_fingerprint"] == f"m{n - 1}"
 
 
 def test_reader_accepts_both_v1_and_v2_schemas(rebar_repo: Path) -> None:

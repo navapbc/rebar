@@ -76,10 +76,12 @@ def test_code_review_prune_keeps_newest(store: Path) -> None:
     assert len(remaining) == 3  # the 3 newest (highest ns-timestamp filename prefix) are kept
 
 
-# ── AC1: after emitting MORE THAN the cap, the code-review sidecar retains exactly 50 ──────
-def test_code_review_emit_retains_the_cap(store: Path) -> None:
-    """AC1 for the code-review path: emitting more than RETAIN_PER_TICKET review results on one
-    target ticket leaves exactly the cap retained (the newest), via the emit->prune wiring."""
+# ── emit is APPEND-ONLY: exceeding the cap must NOT delete committed events ────────────────
+def test_code_review_emit_keeps_every_event_past_the_cap(store: Path) -> None:
+    """Emitting more than RETAIN_PER_TICKET review results on one target ticket retains ALL of
+    them. Physically deleting a committed UUID event breaks store invariant I1 (append-only):
+    delete(oldest)+add(new-uuid) in two clones reads to Git as a rename/rename conflict, which
+    wedges reconvergence. Retention is bounded only by an explicit operator-invoked prune."""
     tid = rebar.create_ticket("code_review", "code-review: session:cap", repo_root=str(store))
     n = code_sidecar.RETAIN_PER_TICKET + 3
     for _ in range(n):
@@ -88,14 +90,14 @@ def test_code_review_emit_retains_the_cap(store: Path) -> None:
             target_ticket=tid,
             repo_root=str(store),
         )
-    assert len(_events_in(store, tid)) == code_sidecar.RETAIN_PER_TICKET
+    assert len(_events_in(store, tid)) == n
 
 
-# ── emit wires prune in (AC3): the previously-absent path now prunes after appending ───────
-def test_code_review_emit_calls_prune(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+# ── emit must NOT auto-invoke prune: pruning is operator-invoked, never a write-path effect ─
+def test_code_review_emit_does_not_call_prune(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(code_sidecar, "prune", lambda tid, **kw: calls.append(tid))
     tid = rebar.create_ticket("code_review", "code-review: session:e", repo_root=str(store))
     verdict = {"verdict": "PASS", "advisory": [], "blocking": [], "coaching": []}
     assert code_sidecar.emit(verdict, target_ticket=tid, repo_root=str(store))
-    assert calls == [tid], "emit must prune the target ticket after appending"
+    assert calls == [], "emit must append only; prune is an explicit operator-invoked operation"

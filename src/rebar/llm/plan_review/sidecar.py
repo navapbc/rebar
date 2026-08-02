@@ -43,7 +43,8 @@ IMPACT_MODEL_VERSION = "plan-v4"
 # compaction therefore cannot bound its growth. A dedicated prune keeps the most-recent
 # RETAIN sidecars per ticket (recent history for offline analysis; each review
 # supersedes the prior, and prior runs were already captured at emit time) and removes
-# older ones, bounding growth without touching the reducer/compaction hot paths.
+# older ones, bounding growth without touching the reducer/compaction hot paths. That prune is
+# the DEFAULT bound for an EXPLICIT operator run — the write path never invokes it (see `prune`).
 #
 # Bound raised 10 -> 50 (story fde0): drift-refresh re-reviews on one ticket can exceed 10
 # rounds, so 10 dropped still-relevant recent history; 50 covers observed single-digit
@@ -62,9 +63,11 @@ def emit(
     repo_root=None,
     source: str | None = None,
 ) -> bool:
-    """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict, then prune
-    to the retention bound. Returns True on success, False on any failure (the sidecar
-    is observability — a failed emit must NEVER fail the review itself). Best-effort."""
+    """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict. Append-ONLY:
+    it never deletes a committed event, so independent clones always reconverge by union
+    (store invariant I1) — bounding growth is :func:`prune`, invoked explicitly by an
+    operator. Returns True on success, False on any failure (the sidecar is observability
+    — a failed emit must NEVER fail the review itself). Best-effort."""
     from rebar import config as _config
     from rebar._commands._seam import append_event
 
@@ -86,13 +89,17 @@ def emit(
         # stderr diagnostic (broad-but-logged; see rebar._logging).
         logger.warning("REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
-    prune(verdict.get("ticket_id", ""), repo_root=repo_root)  # best-effort retention
     return True
 
 
 def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> int:
     """Bound REVIEW_RESULT growth: keep the most-recent ``keep`` sidecar events for a
     ticket (filename timestamp order) and remove older ones. Returns the count removed.
+
+    EXPLICIT, operator-invoked: never call this from a write path. Deleting a committed
+    UUID event pairs with the appended replacement as a rename in each clone, so two
+    clones deleting the same base event conflict instead of reconverging (invariant I1).
+
     Best-effort and exception-swallowing — a failed prune never fails the review; the
     sidecars are reducer-ignored, so removing old ones is safe (not state-bearing)."""
     try:
