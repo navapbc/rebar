@@ -311,6 +311,47 @@ def test_exactly_one_priority_map_literal_within_adapters() -> None:
     )
 
 
+def test_exactly_one_type_map_literal_within_adapters() -> None:
+    """Story bd9e: the local->Jira TYPE map was the third instance of this defect
+    class — duplicated across the Cloud and DC create paths with no guard covering
+    it. Same shape as the status/priority guards above, so a future third copy fails
+    the build instead of silently diverging the two create paths."""
+    hits = _modules_defining_map(keys={"bug", "story", "task", "epic"}, value_sample="Bug")
+    assert len(hits) == 1, f"expected exactly one local->Jira type map literal, found: {hits}"
+    assert hits[0].startswith("jira_family/"), (
+        f"the sole ticket-type map must live in jira_family/, found {hits[0]}"
+    )
+
+
+def test_both_create_paths_resolve_to_the_single_type_definition() -> None:
+    """Identity, not equality: the Cloud create path and the DC create path must read
+    the SAME object, and Cloud must still expose it under the historical private name
+    (``test_outbound_differ_session_log_exclusion`` reads it as a module attribute)."""
+    from rebar_reconciler.adapters.jira import outbound_fields
+    from rebar_reconciler.adapters.jira_datacenter import backend
+    from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA
+
+    assert outbound_fields._LOCAL_TO_JIRA_TYPE is LOCAL_TYPE_TO_JIRA
+    assert backend._LOCAL_TO_JIRA_TYPE is LOCAL_TYPE_TO_JIRA
+
+
+@pytest.mark.parametrize(
+    ("local_type", "jira_type"),
+    [("task", "Task"), ("story", "Story"), ("bug", "Bug"), ("epic", "Epic")],
+)
+def test_create_paths_pin_the_issue_type_by_value(local_type: str, jira_type: str) -> None:
+    """Pinned BY VALUE through both create paths, not by the map's shape: the reason
+    the duplication mattered is that a drift would change the built ``issuetype``
+    field per deployment. The two copies were content-identical before the
+    unification, so both paths must still emit these exact values."""
+    from rebar_reconciler.adapters.jira.outbound_fields import _map_local_to_jira_fields
+    from rebar_reconciler.adapters.jira_datacenter.backend import _map_local_to_dc_fields
+
+    ticket = {"ticket_type": local_type, "title": "t", "description": "d"}
+    assert _map_local_to_jira_fields(dict(ticket))["issuetype"] == jira_type
+    assert _map_local_to_dc_fields(dict(ticket))["issuetype"] == jira_type
+
+
 def test_both_cloud_callers_resolve_to_the_single_definition() -> None:
     """The ACLI transport and the Backend port read the SAME object — not equal
     copies. Identity, not equality, is what proves de-duplication."""
@@ -384,6 +425,9 @@ def test_pinned_outbound_fields_still_loads_by_path_after_its_import_rewrite() -
     module = _load_by_path("adapters/jira/outbound_fields.py", "_j2_probe_outbound_fields")
     assert module._LOCAL_TO_JIRA_STATUS["idea"] == "IDEA"
     assert module._LOCAL_TO_JIRA_PRIORITY[0] == "Highest"
+    # Story bd9e: the type map became an import here too, so it is covered by the
+    # same absolute-import requirement.
+    assert module._LOCAL_TO_JIRA_TYPE["epic"] == "Epic"
 
 
 def test_relocated_value_map_module_loads_by_path() -> None:
