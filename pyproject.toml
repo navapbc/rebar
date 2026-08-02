@@ -114,7 +114,12 @@ agents = [
     # an OTLP endpoint, not an SDK dep here).
     # `[retries]` adds pydantic_ai.retries (AsyncTenacityTransport + wait_retry_after) and
     # pulls in tenacity — the transport-layer LLM retry (epic jira-reb-687 / story arcticduck).
-    "pydantic-ai-slim[anthropic,retries]>=1,<2",
+    # Floor >=1.107 (ticket ce5d): pydantic-ai-slim 1.38's direct-Anthropic module imports
+    # `UserLocation` from an anthropic submodule that renamed it, so any resolve that pairs
+    # <1.107 with a current anthropic SDK breaks `AnthropicModel` at import time. Floors only,
+    # no speculative upper cap (nava-rebar is consumed from PyPI); the committed uv.lock pins
+    # the repo's own envs to a verified pair.
+    "pydantic-ai-slim[anthropic,retries]>=1.107,<2",
     "json-repair>=0.61",  # >=0.61 for repair_json(schema=…) schema-guided repair (story drake)
     "pydantic>=2",
 ]
@@ -242,6 +247,21 @@ rebar-mcp = "rebar.mcp_server:main"
 # Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
 # jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,
 # git-ignored src/rebar/_build_info.py, force-included in the wheel below.
+[tool.uv]
+# Extras conflicts (ticket ce5d). uv's UNIVERSAL resolution locks every extra jointly, and
+# `[eval]` -> inspect-ai -> aioboto3 -> aiobotocore pins `boto3 < 1.40.62` while
+# `pydantic-ai-slim[bedrock] >= 1.107` (pulled by `[bedrock]` and `[dev]`) needs
+# `boto3 >= 1.42.63`. Without these declarations that diamond silently downgrades
+# pydantic-ai-slim below 1.107 (to the import-broken 1.38 line) for EVERY extra; with the
+# floor above it makes the whole project unresolvable. Declaring the conflict lets uv fork
+# the resolution instead. Minimal set on purpose: `eval`+`agents` stays co-installable (the
+# prompt-eval workflow uses exactly that pair); nothing installs `dev`+`eval` together.
+# Revisit when aiobotocore catches up to boto3 >= 1.42.63 upstream (harmless to keep).
+conflicts = [
+    [{ extra = "eval" }, { extra = "bedrock" }],
+    [{ extra = "eval" }, { extra = "dev" }],
+]
+
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel]

@@ -33,7 +33,20 @@ help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install rebar (editable) + dev deps + the pre-commit hook (the commit gate).
+install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev extra) + the pre-commit hook (the commit gate).
+	@# uv-canonical (ticket ce5d): the repo's own envs install THROUGH the committed lock so
+	@# every checkout gets the same verified-importable dependency set (the unlocked pip path
+	@# once resolved an import-broken pydantic-ai-slim/anthropic pair). `--locked` refuses to
+	@# resolve fresh — a drifted lock fails here exactly like CI's `uv lock --check` gate.
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "ERROR: 'uv' is required (canonical bootstrap installs through the committed uv.lock)."; \
+		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
+		echo "       Unlocked fallback (resolves fresh — NOT the canonical env): make install-unlocked"; \
+		exit 1; }
+	uv sync --locked --extra dev
+	$(MAKE) hooks
+
+install-unlocked:  ## Fallback: editable pip install (UNLOCKED — resolves fresh; prefer `make install`).
 	python -m pip install -e '.[dev]'
 	$(MAKE) hooks
 

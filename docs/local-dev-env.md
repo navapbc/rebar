@@ -17,8 +17,8 @@ working tree in two ways that matter:
 
 ```sh
 # from the repo root
-uv venv .venv && source .venv/bin/activate     # or: python -m venv .venv && source .venv/bin/activate
-make install                                    # editable '.[dev]' install + the pre-commit hook (the commit gate)
+make install                                    # uv sync --locked (dev extra) + the pre-commit hook (the commit gate)
+source .venv/bin/activate
 export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (review-plan, verify-completion)
 ```
 
@@ -37,20 +37,22 @@ export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (revi
 > a local dev / agent clone". The key never leaves your machine; only your public key lives in
 > the store.
 
-**Use `make install` — it is the one canonical setup path.** It runs `pip install -e
-'.[dev]'` (which pulls `nava-rebar[agents]` plus the lint/type/test tooling, so the
-editable install is a complete env for everything below) **and** wires the pre-commit hook
+**Use `make install` — it is the one canonical setup path.** It runs `uv sync --locked
+--extra dev`, installing the repo's env **through the committed `uv.lock`** (so every
+checkout gets the same verified-importable dependency set — the unlocked path once resolved
+an import-broken `pydantic-ai-slim`/`anthropic` pair; the dev extra pulls
+`nava-rebar[agents]` plus the lint/type/test tooling), **and** wires the pre-commit hook
 via `make hooks`, which is what makes lint/format run on every `git commit`. The Makefile
 is the single source of truth for lint/format/type/test — see `make help`.
 
-> **Why not just `pip install -e '.[dev]'`?** A bare editable install does **not** wire the
+> **Why not just `uv sync` / `pip install -e '.[dev]'`?** A bare install does **not** wire the
 > commit hook — `git` hooks are opt-in per clone and no `pip`/`uv` install step runs
 > `pre-commit install`. Skip the hook and lint/format errors sail through `git commit` and
 > are only caught later by CI (the slow gate). If you must run the install step by hand,
 > follow it with the hook step and verify it:
 >
 > ```sh
-> pip install -e '.[dev]'     # or: uv pip install -e '.[dev]'
+> uv sync --locked --extra dev  # the canonical locked install (pip -e '.[dev]' is the unlocked fallback)
 > make hooks                   # installs + VERIFIES the pre-commit hook; re-runnable anytime
 > ```
 >

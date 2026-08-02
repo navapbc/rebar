@@ -287,8 +287,9 @@ git clone https://github.com/navapbc/rebar && cd rebar
 pip install .              # library + CLI (runtime deps: pyyaml, jsonschema)
 pip install '.[mcp]'      # + MCP server (FastMCP)
 # Developing rebar itself — the full dev environment (test/lint/type tooling +
-# the agents stack so the LLM validation tests RUN, not skip):
-pip install -e '.[dev]'
+# the agents stack so the LLM validation tests RUN, not skip), installed through
+# the committed uv.lock (or `make install`, which adds the pre-commit gate):
+uv sync --extra dev
 ```
 
 > **pipx source installs and older uv.** If `pipx install "<path>[agents]"` stops
@@ -589,8 +590,7 @@ recommended); the interface-parity tests import the MCP server, so a bare
 interpreter without the `mcp` extra will **error** rather than skip.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'                       # editable + pytest, mcp, ruff, mypy
+uv sync --extra dev && source .venv/bin/activate  # locked install: pytest, mcp, ruff, mypy
 pytest -m "not integration"                   # the single entry point (CI runs this)
 pytest tests/interfaces                       # interface-parity tier only
 pytest tests/scripts                          # engine/reconciler tier only

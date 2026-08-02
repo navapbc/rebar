@@ -59,14 +59,15 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          # pip caching is now the setup-python built-in (keyed on pyproject.toml),
-          # replacing the previous manual `actions/cache@v4` step here (task bad4).
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install with the agents + eval extras
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install with the agents + eval extras (from the committed lock)
+        # `eval` conflicts with `dev`/`bedrock` in [tool.uv] (the inspect-ai boto3 diamond,
+        # ticket ce5d) but agents+eval is a declared-compatible pair.
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[agents,eval]'
+          uv sync --locked --extra agents --extra eval
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Run dataset-bearing prompt evals (live) → JUnit
         # Cost rails: cases run SEQUENTIALLY (run_eval has no model fan-out) under the
         # workflow-level concurrency cap, and REBAR_EVAL_MAX_CASES caps cases per spec

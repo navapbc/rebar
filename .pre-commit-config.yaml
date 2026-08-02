@@ -28,6 +28,9 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+        # uv.lock is a committed, machine-generated lockfile (~875 KB, ticket ce5d);
+        # exclude it rather than raise the global cap for human-authored files.
+        exclude: ^uv\.lock$
       # Fail a commit made directly on main/master AT COMMIT TIME, so the repo's
       # "land through Gerrit, never commit to main" rule (enforced server-side by the
       # GitHub ruleset + Gerrit gates) also fails fast locally instead of only at push.

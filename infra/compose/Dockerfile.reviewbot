@@ -72,11 +72,16 @@ ENV SEMGREP_SEND_METRICS=off \
 WORKDIR /app
 
 # Copy the whole repo (the build context is the repo root) and install the package
-# with the agents + reviewbot extras:
+# with the agents + reviewbot extras THROUGH the committed uv.lock (ticket ce5d):
 #   - reviewbot -> fastapi + uvicorn[standard] (the ASGI server)
 #   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it)
+# `uv sync --locked` refuses a drifted lock, so the image always runs the same
+# verified-importable dependency set as CI and local dev. The project venv lives at
+# /app/.venv; prepending it to PATH replaces the old system-site `pip install .`.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY . /app
-RUN pip install ".[agents,reviewbot]"
+RUN uv sync --locked --no-dev --extra agents --extra reviewbot
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Install the tickets-store ensure helper (bug desirous-judicial-hogget / d220) onto PATH
 # so the entrypoint can converge a freshly-cloned single-branch `tickets` worktree into a

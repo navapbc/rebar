@@ -35,8 +35,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
 
       # Fail loudly if no key is configured — otherwise the LLM tests would simply
       # skip and the job would go green without validating anything.
@@ -57,8 +58,8 @@ jobs:
 
       - name: Install rebar + the full agents stack
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Configure git identity
         run: |
@@ -174,8 +175,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
 
       - name: Require an LLM API key secret
         env:
@@ -192,12 +194,12 @@ jobs:
 
       - name: Install rebar + the full agents stack
         run: |
-          python -m pip install --upgrade pip
           # [tracing] pulls the OpenTelemetry SDK + OTLP exporter so setup_tracing()
           # actually exports spans to Langfuse (rebar emits traces via OTLP, NOT the
           # Langfuse SDK — see src/rebar/llm/tracing.py). Without it this job would run
           # tracing as a silent no-op and validate nothing.
-          python -m pip install -e '.[dev,tracing]'
+          uv sync --locked --extra dev --extra tracing
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Configure git identity
         run: |
@@ -273,8 +275,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
 
       # `[jira-datacenter]` is NOT implied by `[dev]` (which self-references only
       # `[agents,metrics]`), and it is what supplies `pycontribs/jira` — the library
@@ -289,8 +292,8 @@ jobs:
       # harness is reachable.
       - name: Install rebar (test-only; this harness needs no LLM API key)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,jira-datacenter]'
+          uv sync --locked --extra dev --extra jira-datacenter
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # Builds ./Dockerfile locally (never references pycontribs/jira-test-image, which is
       # NOT published to any registry — see the Dockerfile's own header). platform:

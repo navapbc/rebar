@@ -31,9 +31,12 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install the package with the agents (rebar.llm gate runtime) + reviewbot (fastapi +
-# uvicorn[standard] ASGI server + boto3 for the SSM key fetch) extras.
+# uvicorn[standard] ASGI server + boto3 for the SSM key fetch) extras THROUGH the
+# committed uv.lock (ticket ce5d) — same verified dependency set as CI/local dev.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY . /app
-RUN pip install ".[agents,reviewbot]"
+RUN uv sync --locked --no-dev --extra agents --extra reviewbot
+ENV PATH="/app/.venv/bin:$PATH"
 
 ENV REBAR_OPCERT_PORT=8080
 EXPOSE 8080

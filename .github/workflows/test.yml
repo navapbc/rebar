@@ -64,12 +64,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install rebar (editable) + test deps + agents extra
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install rebar from the committed lock (dev + agents extras)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev,agents]'
+          uv sync --locked --extra dev --extra agents
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Configure git identity
         run: |
           git config --global user.email "ci@example.com"
