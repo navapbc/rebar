@@ -20,7 +20,10 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
 # ACLI ceiling because DIG has > 1000 issues across active + Done):
@@ -253,7 +256,7 @@ def _extract_issues(result) -> list[dict]:
     return []
 
 
-def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
+def _iter_pages(client: TicketTransport, jql: str, page_size: int = 100, cap: int | None = None):
     """Generator yielding one page (list[dict]) per ACLI call.
 
     Termination:
@@ -380,7 +383,9 @@ def _iter_pages(client, jql: str, page_size: int = 100, cap: int | None = None):
         start_at += len(page)
 
 
-def collect(client, jql: str, page_size: int = 100, cap: int | None = None) -> list[dict]:
+def collect(
+    client: TicketTransport, jql: str, page_size: int = 100, cap: int | None = None
+) -> list[dict]:
     """Drain ``_iter_pages`` into a single flat list of issues."""
     issues: list[dict] = []
     for page in _iter_pages(client, jql, page_size=page_size, cap=cap):

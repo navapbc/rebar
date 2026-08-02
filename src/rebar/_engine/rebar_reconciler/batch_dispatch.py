@@ -18,6 +18,11 @@ cycle.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
+
 from rebar_reconciler._errors import (
     JiraAPIError,
     RetryExhaustedError,
@@ -46,7 +51,7 @@ __all__ = [
 ]
 
 
-def delete_one(mutation: dict, client) -> None:
+def delete_one(mutation: dict, client: TicketTransport) -> None:
     """Close a Jira issue by transitioning it to 'Closed'.
 
     F5: tolerate 404 — when the differ emits a delete it's precisely because

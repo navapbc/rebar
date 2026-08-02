@@ -20,7 +20,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler.apply_base import (
     ApplyResult,
@@ -59,7 +62,7 @@ def _rebar_env(name: str, default: str | None = None) -> str | None:
 
 
 def _apply_inbound_create(
-    mutation, *, client=None, repo_root=None, binding_store=None
+    mutation, *, client: TicketTransport | None = None, repo_root=None, binding_store=None
 ) -> ApplyResult:
     """Materialise a remote Jira issue as a local jira-* ticket.
 
@@ -127,7 +130,9 @@ def _apply_inbound_create(
     )
 
 
-def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_update(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Apply a remote-side update to an existing local jira-* ticket.
 
     Writes one EDIT event with the changed fields, plus an additional STATUS
@@ -167,7 +172,9 @@ def _apply_inbound_update(mutation, *, client=None, repo_root=None) -> ApplyResu
     )
 
 
-def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_delete(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Handle one of four probe-outcome branches when a Jira issue has
     disappeared from the working set.
 
@@ -276,7 +283,9 @@ def _apply_inbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResu
     return ApplyResult(mutation.direction, mutation.action, result_payload)
 
 
-def _apply_inbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_probe(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Inbound probe leaf: probe execution lives in reconcile_helpers.route_inbound_probe
     (re-exported as reconcile.route_inbound_probe).
 
@@ -303,7 +312,9 @@ def _apply_inbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResul
     )
 
 
-def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_clean_label(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Remove rebar-id-* labels from a Jira issue.
 
     Inbound-only leaf: invoked when the differ has detected stale or duplicated
@@ -329,7 +340,9 @@ def _apply_inbound_clean_label(mutation, *, client=None, repo_root=None) -> Appl
     return ApplyResult(mutation.direction, mutation.action, {"removed": removed})
 
 
-def _apply_inbound_repair_property(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_repair_property(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Repair a missing ``local_id`` entity property on a Jira issue.
 
     Delegates to the existing :func:`inbound_repair_property` implementation
@@ -346,7 +359,9 @@ def _apply_inbound_repair_property(mutation, *, client=None, repo_root=None) -> 
     return ApplyResult(mutation.direction, mutation.action, outcome)
 
 
-def _apply_inbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_inbound_conflict(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Emit a ``suppress_pair`` follow-on and a ``pending_bug_ticket`` directive
     for an unresolved (local, Jira) conflict.
 
@@ -403,7 +418,7 @@ def _apply_inbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyRe
     )
 
 
-def inbound_repair_property(mutation, client) -> dict:
+def inbound_repair_property(mutation, client: TicketTransport) -> dict:
     """Repair a missing entity property on a Jira issue.
 
     Happy path: invokes ``client.set_issue_property(target, 'local_id', local_id)``

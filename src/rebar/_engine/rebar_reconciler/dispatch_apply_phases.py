@@ -19,6 +19,13 @@ re-import the three phase functions back without a cycle. ``dispatch_one`` re-ex
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from ._backend import as_commenting
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
+
 import sys
 import time
 import urllib.error
@@ -88,7 +95,7 @@ def _record_reporter_alert(kind: str, jira_key, reason: str) -> None:
         pass
 
 
-def _update_one_apply_reporter(fields, issue_key, client) -> None:
+def _update_one_apply_reporter(fields, issue_key, client: TicketTransport) -> None:
     """Phase: apply the reporter via a dedicated REST sub-call (264f).
 
     Pops ``reporter`` off ``fields`` BEFORE the allowlist filter (so it never reaches
@@ -139,7 +146,9 @@ def _update_one_filter_fields(fields, mutation) -> dict:
     return {k: v for k, v in fields.items() if k in _OUTBOUND_BATCH_ALLOWLIST}
 
 
-def _update_one_dispatch_comments(mutation, client, issue_key, comment_errors) -> tuple[int, int]:
+def _update_one_dispatch_comments(
+    mutation, client: TicketTransport, issue_key, comment_errors
+) -> tuple[int, int]:
     """Phase: dispatch comment-add sub-ops (in-band capture into comment_errors).
     Returns (computed, applied) counts."""
     _comments_computed = _comments_applied = 0
@@ -155,7 +164,7 @@ def _update_one_dispatch_comments(mutation, client, issue_key, comment_errors) -
             _comments_computed += 1
             try:
                 # Story 9622 (D2): single-attempt, no retry (see create-path note).
-                client.add_comment(issue_key, body)
+                as_commenting(client).add_comment(issue_key, body)
                 _comments_applied += 1
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch

@@ -14,7 +14,10 @@ Imports downward only (apply_base + the leaf modules); never imports applier.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler.apply_base import (
     ApplyResult,
@@ -94,7 +97,9 @@ _LEAF_NAMES: dict[tuple[str, str], str] = {
 }
 
 
-def _apply_typed(mutation, *, client=None, repo_root=None, binding_store=None) -> ApplyResult:
+def _apply_typed(
+    mutation, *, client: TicketTransport | None = None, repo_root=None, binding_store=None
+) -> ApplyResult:
     """Typed-mutation dispatch via _LEAVES.
 
     Looks up (mutation.direction, mutation.action) in _LEAVES and invokes the

@@ -48,7 +48,10 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 # The convergence-foundation grace default (twin of binding_store /
 # classify defaults; kept in lock-step).
@@ -97,7 +100,7 @@ def compute_binding_walk_mutations(
     curr_snapshot: Mapping[str, Any],
     active_local_ids: set[str],
     *,
-    client: Any,
+    client: TicketTransport,
     local_reader: Callable[[str], Mapping[str, Any] | None],
     max_acting_fraction: float,
     classify_mod: Any,

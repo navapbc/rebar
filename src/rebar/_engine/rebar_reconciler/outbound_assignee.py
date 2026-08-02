@@ -24,7 +24,10 @@ Resolution order for :func:`_resolve_assignee_account_id`:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 # acli_rest exposes the /user/search email→accountId helper under this name; the
 # alias list tolerates a differently-named stub client in tests. First present
@@ -58,7 +61,7 @@ def _identity_email(assignee: str) -> str | None:
         return None
 
 
-def _bootstrap_account_id_via_user_search(assignee: str, client: Any) -> str | None:
+def _bootstrap_account_id_via_user_search(assignee: str, client: TicketTransport) -> str | None:
     """Best-effort TRANSIENT ``/user/search`` bootstrap: obtain the assignee's email
     (identity email, else the assignee itself if it already looks like an email) and
     ask the client for the exact-email accountId. ``None`` on no client / no email /
@@ -84,7 +87,7 @@ def _bootstrap_account_id_via_user_search(assignee: str, client: Any) -> str | N
 
 
 def _resolve_assignee_account_id(
-    assignee: str, jira_key: str, client: Any
+    assignee: str, jira_key: str, client: TicketTransport
 ) -> tuple[str | None, bool, bool]:
     """Resolve a local assignee to ``(accountId|None, authoritative, is_account_id)``.
 

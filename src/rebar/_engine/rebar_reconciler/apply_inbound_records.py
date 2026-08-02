@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
@@ -270,7 +273,9 @@ def _inbound_create_record_binding(mutation, binding_store, local_id, jira_key) 
             )
 
 
-def _inbound_create_writeback_jira(client, jira_key, local_id, tracker_dir) -> None:
+def _inbound_create_writeback_jira(
+    client: TicketTransport, jira_key, local_id, tracker_dir
+) -> None:
     """Phase: write identity markers + bootstrap pre-existing comments back to Jira."""
     # Write rebar-id label + local_id entity property back to Jira so the
     # differ recognizes this issue as mirrored on subsequent passes (dedup).
