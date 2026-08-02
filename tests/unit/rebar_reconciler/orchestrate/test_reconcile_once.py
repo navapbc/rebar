@@ -5,8 +5,11 @@ Covers:
   both produce mutation_count=0 (second call sees prev==curr snapshot).
 - EXCLUDED_FIELDS filter: a change only in an excluded field produces
   mutation_count=0 (excluded fields do not drive mutations).
-- Real field convergence: a genuine field change produces mutation_count=1
-  after the first pass (regression guard against over-filtering).
+- Remote field convergence: a Jira-side field change is detected without being
+  planned as an outbound REVERT of itself, while a never-before-seen key is still
+  planned (the regression guard against over-filtering).
+- Snapshot absence: a key that leaves the fetch window is never resurrected by an
+  outbound create (ADR 0028, ticket d103).
 """
 
 from __future__ import annotations
@@ -339,11 +342,35 @@ def test_excluded_fields_change_does_not_drive_mutations(
 def test_real_field_change_converges_after_one_pass(
     tmp_path, reconcile_mod, fetcher_mod, applier_mod
 ):
-    """A genuine field change produces mutation_count=1 after the first detecting pass.
+    """A remote field change is detected without planning an outbound REVERT of it.
 
-    Pass 1 primes the prev snapshot (issues at v1).
-    Pass 2 presents issues at v2 (summary changed) — must detect 1 mutation.
-    This is a regression guard against over-filtering in the differ.
+    WHAT THIS CELL USED TO ASSERT, AND WHY IT WAS WRONG (bugs 727f / d103). It required
+    ``mutation_count == 1`` on the detecting pass, calling that "a genuine field change".
+    Instrumenting the diff phase in this exact harness showed the one mutation it counted
+    was::
+
+        outbound update DIG-20 payload={'summary': 'Original summary'}
+                        provenance={'source':'differ','reason':'field_drift',...}
+
+    i.e. the STALE PREVIOUS value pushed BACK to Jira — a revert of the very edit the
+    fixture makes, not a sync of it. There is no local side here at all (stderr reports
+    ``local_tickets=[]``, ``outbound_differ total=0``, ``inbound_differ total=0``), so the
+    "field change" is purely Jira-side, and the count came entirely from the snapshot
+    differ reading a remote-vs-remote delta as local-wins drift. The cell was pinning the
+    defect's mechanism, not the behaviour its docstring described.
+
+    WHAT IT ASSERTS NOW, PRESERVING BOTH HALVES OF THE ORIGINAL INTENT.
+
+    * "detect a genuine change" -> pass 1 must still plan the inbound create for a key it
+      has never seen. That is the snapshot differ's real job on this fixture.
+    * "a regression guard against over-filtering" -> that pass-1 assertion is the guard: a
+      suppression broad enough to swallow real work fails it.
+    * added, and the actual contract: pass 2 must NOT plan an outbound revert of the
+      Jira-side edit. Correct handling of a Jira-side field edit is inbound mirroring by
+      the binding-aware differ (ADR 0026's arbitrated inbound-mirrored scalar set; ticket
+      b9b8 and ``diffing/test_inbound_field_sync_directionality.py``), which needs a
+      binding this snapshot-only harness never creates — so zero planned work here is the
+      correct outcome, not lost work.
     """
     pass_id = "real-change-pass"
     issues_v1 = [
@@ -379,11 +406,19 @@ def test_real_field_change_converges_after_one_pass(
         applier_mod._load_concurrency_bak2 = applier_mod._load_concurrency
         applier_mod._load_concurrency = lambda: ok_concurrency
         try:
-            reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
+            result1 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
         finally:
             applier_mod._load_concurrency = applier_mod._load_concurrency_bak2
 
-    # Pass 2: present v2 — differ must detect the real change
+    # The over-filtering guard, preserved: a key the reconciler has never seen is genuine
+    # work and must still be planned. A suppression broad enough to swallow real work
+    # fails right here.
+    assert result1["mutation_count"] >= 1, (
+        "pass 1 planned nothing for a Jira key it had never seen — the inbound-create "
+        "path has been over-filtered away"
+    )
+
+    # Pass 2: present v2 — the Jira-side edit must not be reverted outbound
     with (
         patch.object(fetcher_mod, "_load_acli", return_value=mock_acli_v2),
         patch.object(applier_mod, "_load_acli", return_value=mock_acli_v2),
@@ -394,9 +429,11 @@ def test_real_field_change_converges_after_one_pass(
         finally:
             applier_mod._load_concurrency = applier_mod._load_concurrency_bak2
 
-    assert result2["mutation_count"] == 1, (
-        f"A genuine field change must produce mutation_count=1 on the detecting pass, "
-        f"got {result2['mutation_count']}"
+    assert result2["mutation_count"] == 0, (
+        "the pass planned work for a Jira-side field edit on a key with no local "
+        "counterpart. The only thing the snapshot differ can emit here is an outbound "
+        "update carrying the STALE previous value — a revert of the edit, not a sync of "
+        f"it. Got mutation_count={result2['mutation_count']}"
     )
 
 
@@ -563,3 +600,87 @@ def test_live_mode_reconcile_once_still_persists(
         f"LIVE must persist the snapshot; files: {sorted(after)}"
     )
     assert result.get("no_write") is not True
+
+
+# ---------------------------------------------------------------------------
+# Ticket d103: a bound key that leaves the fetch window must never be planned
+# as an outbound CREATE — that resurrects it from stale snapshot fields.
+# ---------------------------------------------------------------------------
+
+
+def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
+    tmp_path, reconcile_mod, fetcher_mod, applier_mod
+):
+    """The live-path oracle for d103: absence must not drive a create.
+
+    Pass 1 primes prev_snapshot with DIG-9; pass 2 presents an EMPTY working set, so
+    DIG-9 is present in prev and absent from curr. That happens for a deleted issue AND
+    for one that merely ages out of the working-set query (``status = Done`` beyond the
+    recent cap), so the reconciler cannot tell the two apart from absence alone.
+
+    ADR 0028 Decision para 1: "No destructive or terminal action ... may be driven by a
+    key's absence from the fetched snapshot"; deletion is proven only by a bounded direct
+    GET returning 404 (para 2). A create targeted at the issue's own Jira key, built from
+    the stale prev fields, is exactly such a terminal action.
+
+    Neither downstream guard catches it, which is why the assertion is at the transport:
+    ``applier._cross_project_targets`` skips ``action == "create"`` outright, and
+    ``create_one``'s JQL dedup degenerates to ``labels = "rebar-id:"`` because
+    EXCLUDED_FIELDS strips ``local_id`` from the payload.
+    """
+    from unittest.mock import patch
+
+    issues_v1 = [
+        {
+            "key": "DIG-9",
+            "fields": {
+                "summary": "a bound issue that later leaves the window",
+                "status": {"name": "To Do"},
+                "labels": ["rebar-id:jira-dig-9"],
+            },
+        }
+    ]
+    acli_v1 = _make_acli_module(issues_v1)
+    acli_v2 = _make_acli_module([])  # DIG-9 gone from the working set
+    ok_concurrency = _make_ok_concurrency()
+
+    created: list = []
+    _orig_create = acli_v2.create_issue
+
+    def _recording_create(fields):
+        created.append(dict(fields))
+        return _orig_create(fields)
+
+    acli_v2.create_issue = _recording_create  # type: ignore[method-assign]
+
+    pass_id = "d103-absent-key"
+    with (
+        patch.object(fetcher_mod, "_load_acli", return_value=acli_v1),
+        patch.object(applier_mod, "_load_acli", return_value=acli_v1),
+    ):
+        _bak = applier_mod._load_concurrency
+        applier_mod._load_concurrency = lambda: ok_concurrency
+        try:
+            reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
+        finally:
+            applier_mod._load_concurrency = _bak
+
+    with (
+        patch.object(fetcher_mod, "_load_acli", return_value=acli_v2),
+        patch.object(applier_mod, "_load_acli", return_value=acli_v2),
+    ):
+        _bak = applier_mod._load_concurrency
+        applier_mod._load_concurrency = lambda: ok_concurrency
+        try:
+            result2 = reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
+        finally:
+            applier_mod._load_concurrency = _bak
+
+    assert created == [], (
+        "a key that merely left the fetch window was RESURRECTED: reconcile_once called "
+        f"client.create_issue with fields rebuilt from the stale prev snapshot: {created}"
+    )
+    assert result2["mutation_count"] == 0, (
+        "the pass planned work for a key that is absent from the current snapshot; "
+        f"absence alone licenses no action at all. Got {result2['mutation_count']}"
+    )
