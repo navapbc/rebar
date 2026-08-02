@@ -745,21 +745,50 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
 ) -> None:
     """An inbound assignee MINTS an identity, and it is minted under the SHARED `jira` family.
 
-    ASSERTED POSITIVELY. Bug 5f48 was exactly this failing SILENTLY — `jira-datacenter` was not
-    a valid creation channel and the mint was swallowed — so "the pass did not raise" is worth
-    nothing here. The observable is that the id the registry resolves for this DC user under
-    the family string `jira` IS the id now sitting on the local ticket's `.assignee`.
+    ASSERTED POSITIVELY, AND AGAINST THE REGISTRY RATHER THAN THE TICKET. Bug 5f48 was exactly
+    this failing SILENTLY — `jira-datacenter` was not a valid creation channel and the mint was
+    swallowed — so "the pass did not raise" is worth nothing here.
 
-    The family matters: the epic's shared-identity decision is that DC and Cloud tickets share
-    the `jira` provider and the `jira-` local-id prefix, with the DEPLOYMENT distinguished by
-    `RemoteRef.instance` rather than by forking the store vocabulary. If a DC assignee minted
-    under a `jira-datacenter` provider instead, that decision would be violated and the two
-    deployments would grow separate identity namespaces.
+    WHAT THIS CELL USED TO DO, AND WHY IT COULD NEVER FAIL. It read `.assignee` off the local
+    ticket and compared it to `rebar.ensure_identity_for("jira", "admin", ...)`. Two separate
+    errors compounded:
+
+      1. `.assignee` IS NOT THE IDENTITY. Local tickets store the assignee as a BARE STRING on
+         BOTH deployments by design — `inbound_fields._assignee_matches` exists precisely
+         because Jira returns an object and local holds a string — and the mint is ADDITIVE:
+         `apply_inbound_records._ensure_inbound_assignee_identity` says outright that it
+         "NEVER changes the human-readable name extraction". This story's own plan said the
+         same: the identity is NOT a field on the ticket JSON. So the field was never going to
+         carry the id.
+      2. `ensure_identity_for` IS CREATE-OR-REUSE. Calling it inside the oracle MINTS the
+         identity if the pass did not, so comparing its return value against itself can never
+         distinguish "the pass minted it" from "the assertion just minted it". Even with (1)
+         corrected, that comparison would be a tautology.
+
+    SO THE OBSERVABLE IS A BEFORE/AFTER ON THE REGISTRY, read through the READ-ONLY resolver
+    `rebar.resolve_mapping` — which returns None rather than creating. The mapping is absent
+    before the pass and present after it; that difference is the pass's own work and nothing
+    else's.
+
+    The FAMILY is asserted in both directions. The epic's shared-identity decision is that DC
+    and Cloud share the `jira` provider, with the DEPLOYMENT distinguished by
+    `RemoteRef.instance` rather than by forking the store vocabulary. So the mapping must
+    resolve under `jira` AND must NOT exist under `jira-datacenter` — a positive-only check
+    would pass a build that minted under both.
     """
     import rebar
 
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
+
+    # PRECONDITION, stated so its failure cannot be read as the product's. `resolve_mapping` is
+    # read-only, so this look does not create the thing we are about to attribute to the pass.
+    pre_existing = rebar.resolve_mapping("jira", ADMIN_USER, repo_root=dc_store_copy_repo)
+    assert pre_existing is None, (
+        f"SETUP FAILED (not a product finding): the store copy ALREADY maps jira/{ADMIN_USER!r} "
+        f"to {pre_existing!r} before the pass runs, so a mapping afterwards would prove nothing "
+        f"about this pass. The scrub is expected to leave no identity for the harness admin."
+    )
 
     dc_transport.update_issue(key, assignee=ADMIN_USER)
     _wait_until_search_reflects(
@@ -773,20 +802,32 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
     assert "Traceback" not in cp.stderr, f"inbound assignee pass raised:\n{cp.stderr[-2000:]}"
 
-    ticket = _local(dc_store_copy_repo, local_id)
-    assignee = ticket.get("assignee")
-    assert assignee, (
-        f"the inbound assignee minted NOTHING: .assignee on {local_id} is {assignee!r}. This is "
-        f"bug 5f48's silent-swallow signature."
+    minted = rebar.resolve_mapping("jira", ADMIN_USER, repo_root=dc_store_copy_repo)
+    assert minted is not None, (
+        f"THE PASS MINTED NOTHING: jira/{ADMIN_USER!r} still resolves to no identity in the "
+        f"store copy after an inbound pass that carried that assignee. This is bug 5f48's "
+        f"silent-swallow signature — the mint is best-effort and swallows its own failure, so "
+        f"the registry is the only place it is observable."
+    )
+    assert rebar.is_placeholder(minted, repo_root=dc_store_copy_repo), (
+        f"the identity the pass minted for {ADMIN_USER!r} ({minted!r}) is not a PLACEHOLDER. "
+        f"The inbound mint is documented to create a GHOST identity a later outbound pass can "
+        f"key on; a non-placeholder means it adopted or overwrote a real person's identity."
+    )
+    forked = rebar.resolve_mapping("jira-datacenter", ADMIN_USER, repo_root=dc_store_copy_repo)
+    assert forked is None, (
+        f"the DC pass ALSO minted under a `jira-datacenter` provider ({forked!r}), forking the "
+        f"identity namespace the epic decided the two deployments share. The deployment belongs "
+        f"in `RemoteRef.instance`, not in the provider string."
     )
 
-    expected = rebar.ensure_identity_for(
-        "jira", ADMIN_USER, ADMIN_USER, repo_root=dc_store_copy_repo
-    )
-    assert assignee == expected, (
-        f"the assignee on the ticket ({assignee!r}) is not the identity the SHARED `jira` family "
-        f"mints for DC user {ADMIN_USER!r} ({expected!r}). A mismatch means the DC path minted "
-        f"under a different provider, forking the identity namespace the epic decided to share."
+    # And, separately, that the human-readable name reached the ticket — the OTHER half of the
+    # additive contract. Asserted as its own statement so "no identity" and "no assignee" are
+    # never reported as one failure.
+    assignee = _local(dc_store_copy_repo, local_id).get("assignee")
+    assert assignee, (
+        f"the inbound assignee did not reach the local ticket: .assignee on {local_id} is "
+        f"{assignee!r} (the identity mint is additive — it must not be the only thing that lands)"
     )
 
 
