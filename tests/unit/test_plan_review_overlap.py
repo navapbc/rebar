@@ -60,9 +60,10 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 def test_config_flag_default_off_and_coerces() -> None:
-    assert VerifyConfig().overlap_enabled is False
-    assert "overlap_enabled" in _SECTIONS["verify"]
-    assert _SECTIONS["verify"]["overlap_enabled"]("true", "overlap_enabled") is True
+    assert VerifyConfig().suggest_duplicate_tickets is False
+    assert "suggest_duplicate_tickets" in _SECTIONS["verify"]
+    coerce = _SECTIONS["verify"]["suggest_duplicate_tickets"]
+    assert coerce("true", "verify.suggest_duplicate_tickets") is True
 
 
 def test_verdict_schema_accepts_overlap() -> None:
@@ -264,10 +265,11 @@ def test_runtime_error(repo: str, monkeypatch) -> None:
 
 
 def test_flag_off() -> None:
-    """overlap_enabled is a bool defaulting OFF on VerifyConfig, with its _SECTIONS coercer."""
-    assert VerifyConfig().overlap_enabled is False
-    assert "overlap_enabled" in _SECTIONS["verify"]
-    assert _SECTIONS["verify"]["overlap_enabled"]("true", "overlap_enabled") is True
+    """suggest_duplicate_tickets is a bool defaulting OFF on VerifyConfig, with its coercer."""
+    assert VerifyConfig().suggest_duplicate_tickets is False
+    assert "suggest_duplicate_tickets" in _SECTIONS["verify"]
+    coerce = _SECTIONS["verify"]["suggest_duplicate_tickets"]
+    assert coerce("true", "verify.suggest_duplicate_tickets") is True
 
 
 def test_render() -> None:
