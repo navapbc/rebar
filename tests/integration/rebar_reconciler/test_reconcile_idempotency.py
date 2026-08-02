@@ -287,6 +287,42 @@ def test_pass_2_over_unchanged_remote_is_idempotent(git_repo, reconciler_modules
     )
 
 
+def test_unchanged_second_pass_preserves_binding_store_bytes_and_head(
+    git_repo, reconciler_modules, monkeypatch
+):
+    state = _FakeJiraState()
+    _seed_working_set(state)
+
+    result1 = _run_pass(reconciler_modules, state, git_repo, monkeypatch, "baseline-idempotency")
+    assert result1["mutation_count"] == 3
+    tracker = git_repo / ".tickets-tracker"
+    bindings_path = tracker / ".bridge_state" / "bindings.json"
+    first_bytes = bindings_path.read_bytes()
+    first_head = subprocess.run(
+        ["git", "-C", str(tracker), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    # Advance the external clock deterministically so the pre-fix timestamp
+    # rewrite cannot hide behind two passes landing in the same second.
+    binding_store_mod = sys.modules["reconcile_binding_store"]
+    monkeypatch.setattr(binding_store_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
+
+    result2 = _run_pass(reconciler_modules, state, git_repo, monkeypatch, "baseline-idempotency")
+    second_head = subprocess.run(
+        ["git", "-C", str(tracker), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert result2["mutation_count"] == 0
+    assert bindings_path.read_bytes() == first_bytes
+    assert second_head == first_head
+
+
 def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, monkeypatch):
     """The pass-1 import lands in the exact state the binding-aware differs
     would compute: canonical status reverse-map, normalised ADF description,

@@ -97,7 +97,7 @@ _EMPTY_STORE: dict[str, Any] = {
 
 # ADR 0026 — the per-binding three-way-merge baseline: the last-synced Jira-side
 # values for the five inbound-mirrored scalar fields. Stored on the binding entry
-# as ``baseline`` (+ ``baseline_advanced_at``). An ABSENT baseline is VALID and
+# as ``baseline``. An ABSENT baseline is VALID and
 # degrades to local-wins (safe/lossy); a version-1 store (no baselines) reads fine.
 # These are the Jira field names as they appear in prev_snapshot (``summary`` is
 # the Jira term for the local ``title``).
@@ -452,16 +452,18 @@ class BindingStore:
         """Record the last-synced Jira-side values for a binding's 5 mirrored fields.
 
         Filters ``fields`` to ``_BASELINE_FIELDS`` (so a whole prev_snapshot entry
-        can be passed directly) and stamps ``baseline_advanced_at``. A no-op if the
-        local id is not bound (you cannot baseline an unbound pair). In-memory until
+        can be passed directly). A no-op if the local id is not bound (you cannot
+        baseline an unbound pair). In-memory until
         ``save()`` — persisted by the existing binding-store commit path, no new
         commit surface (ADR 0026 §Consequences).
         """
         entry = self._data["bindings"].get(local_id)
         if entry is None:
             return
-        entry["baseline"] = {k: fields.get(k) for k in _BASELINE_FIELDS if k in fields}
-        entry["baseline_advanced_at"] = _now_iso()
+        baseline = {k: fields.get(k) for k in _BASELINE_FIELDS if k in fields}
+        if entry.get("baseline") == baseline:
+            return
+        entry["baseline"] = baseline
 
     def seed_baselines_from_snapshot(self, prev_snapshot: dict[str, Any]) -> int:
         """One-shot: seed a baseline for every bound key present in a Jira snapshot.
