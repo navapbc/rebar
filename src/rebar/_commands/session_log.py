@@ -216,7 +216,12 @@ _USAGE = (
 def _parse_opts(argv: list[str]) -> tuple[dict, list[str]]:
     opts: dict = {"summary": None, "relates_to": None, "discovered_from": None}
     positionals: list[str] = []
-    for arg in argv:
+    for index, arg in enumerate(argv):
+        if arg == "--":
+            # End of options: everything after the FIRST bare `--` is a positional
+            # verbatim, so an entry that legitimately begins with "-" can be written.
+            positionals.extend(argv[index + 1 :])
+            break
         if arg.startswith("--summary="):
             opts["summary"] = arg[len("--summary=") :]
         elif arg.startswith("--relates-to="):

@@ -62,6 +62,16 @@ Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdi
 
 ```
 Usage: rebar comment <ticket_id> <body>
+
+Append a comment to a ticket. The body is a SINGLE positional argument — this
+command takes no options, so there is no --body / --body-file form; an
+option-looking argument is rejected rather than stored as the body.
+
+For a long body, substitute a file's contents in the shell:
+  rebar comment <ticket_id> "$(cat /path/to/body.md)"
+
+If the body itself begins with "-", end option parsing with "--" first:
+  rebar comment <ticket_id> -- "-starts with a dash"
 ```
 
 ### `compact`
