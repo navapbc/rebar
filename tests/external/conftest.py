@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -172,6 +172,60 @@ def build_scratch_rebar_repo(repo: Path) -> Path:
     # fails ref resolution before any gate op reaches its subject under test.
     _git("commit", "--allow-empty", "-q", "-m", "init", cwd=repo)
     return repo
+
+
+def write_project_prompt(repo: Path, prompt_id: str, text: str) -> Path:
+    """Write a project prompt override at ``<repo>/.rebar/prompts/<prompt_id>.md``, COMMITTED.
+
+    The commit is load-bearing, not hygiene. A workflow with LLM steps runs inside the
+    snapshot gate (``src/rebar/llm/workflow/runs.py``), and the suite defaults to
+    ``REBAR_GATE_SOURCE=attested`` / ``REBAR_GATE_REF=HEAD`` (``tests/conftest.py``), so
+    ``prompts.get_prompt`` re-roots onto the snapshot materialized at ``HEAD``. A prompt
+    left only in the working tree is simply ABSENT there, and the step dies on
+    ``PromptNotFound: unknown prompt '<id>'`` before reaching the model — which is how the
+    live ``single_turn`` test came back ``status='failed'`` (bug baa8).
+    """
+    path = repo / ".rebar" / "prompts" / f"{prompt_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    _git("add", str(path.relative_to(repo)), cwd=repo)
+    _git("commit", "-q", "-m", f"add project prompt {prompt_id}", cwd=repo)
+    return path
+
+
+# The plan the live plan-review guard reviews. It must CLEAR the blocking DET floor:
+# `review_plan` short-circuits before the LLM tier on any blocking DET finding and reports
+# `coverage.llm_ran=False` (src/rebar/llm/plan_review/workflow_ops.py), so a plan that trips
+# one makes "did we reach a real model?" unprovable. The `## Testing` section is what
+# satisfies the BLOCKING P10 verification-presence check
+# (src/rebar/llm/plan_review/det_clarity.py) — do not drop it (bug baa8).
+PLAN_REVIEW_FIXTURE_PLAN = (
+    "## Why\nThe in-memory review cache is lost on restart.\n\n"
+    "## What\nPersist it under `src/rebar/cache.py` behind the existing seam.\n\n"
+    "## Scope\nJust persistence; eviction is out of scope.\n\n"
+    "## Testing\nRun `pytest tests/unit/test_cache.py` to prove the round-trip survives a "
+    "process restart.\n\n"
+    "## Acceptance Criteria\n"
+    "- [ ] the cache survives a restart, proved by `pytest tests/unit/test_cache.py`\n"
+    "- [ ] the seam writes through to disk\n"
+)
+
+
+@pytest.fixture
+def project_prompt_writer() -> Callable[[Path, str, str], Path]:
+    """Hand the live tier :func:`write_project_prompt`.
+
+    Exposed as a fixture rather than imported: pytest registers BOTH this conftest and
+    the repo-root one under the module name ``conftest``, so a plain
+    ``from conftest import …`` in a test module is a collision waiting to happen.
+    """
+    return write_project_prompt
+
+
+@pytest.fixture
+def plan_review_fixture_plan() -> str:
+    """The plan body the live plan-review guard reviews (see PLAN_REVIEW_FIXTURE_PLAN)."""
+    return PLAN_REVIEW_FIXTURE_PLAN
 
 
 @pytest.fixture

@@ -95,6 +95,7 @@ def test_live_review_skeleton_workflow_end_to_end(rebar_repo: Path) -> None:
 @_skip
 def test_live_plan_review_workflow_engine_produces_real_verdict(
     rebar_repo: Path,
+    plan_review_fixture_plan: str,
 ) -> None:
     """The blind-spot GUARD (tepid-bus-pomp): run the plan-review gate through the WORKFLOW
     ENGINE against a LIVE model and assert it produces a real PASS/BLOCK verdict — NOT the
@@ -109,13 +110,7 @@ def test_live_plan_review_workflow_engine_produces_real_verdict(
     tid = rebar.create_ticket(
         "story",
         "Persist the review cache to disk",
-        description=(
-            "## Why\nThe in-memory review cache is lost on restart.\n\n"
-            "## What\nPersist it under `src/rebar/cache.py` behind the existing seam.\n\n"
-            "## Scope\nJust persistence; eviction is out of scope.\n\n"
-            "## Acceptance Criteria\n- [ ] the cache survives a restart\n"
-            "- [ ] the seam writes through to disk\n"
-        ),
+        description=plan_review_fixture_plan,
         repo_root=str(rebar_repo),
     )
 
