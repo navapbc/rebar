@@ -36,6 +36,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
+| `REBAR_DETECTED_BY` | `src/rebar/_commands/composer.py` |  |
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
 | `REBAR_ENV_ID` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
 | `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/gate_context.py` |  |
@@ -160,7 +161,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_150 variables._
+_151 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
