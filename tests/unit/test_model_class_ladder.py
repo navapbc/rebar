@@ -393,3 +393,96 @@ def test_resolve_model_leaves_a_literal_step_model_untouched(no_classes) -> None
     )
     assert llm_config.resolve_model(cfg, workflow="openai:gpt-4o") == "openai:gpt-4o"
     assert llm_config.resolve_model(cfg) == "claude-opus-4-8"
+
+
+# ══ Escalation targets must stay on the provider the RUN is on (bug 7de4) ═════════════
+#
+# The rungs above are about the class VOCABULARY. These are about the run's own model: with
+# no class table configured, `_rung_target` compared the rung against itself, so the model the
+# run is actually on was never an input and every escalation target degraded to MODEL_LADDER's
+# bare Anthropic name — relocating a Bedrock run onto direct Anthropic.
+
+_BEDROCK_PINNED_FRONTIER = "bedrock:us.anthropic.claude-opus-4-8-v1:0"
+_BEDROCK_PINNED_TRIVIAL = "bedrock:us.anthropic.claude-haiku-4-5-v1:0"
+
+
+def _recording_pass1_chunk(monkeypatch, *, fail_all: bool = False) -> list[tuple[str, tuple]]:
+    """Replace ``passes.pass1_chunk`` with a stub that raises a context-limit error on the
+    batch call (and, when ``fail_all``, on every single-criterion call too), recording the
+    ``cfg.model`` each attempt was dispatched with."""
+    observed: list[tuple[str, tuple]] = []
+
+    def _stub(runner, cfg, *, plan, chunk, agentic=False, extra_context=""):  # noqa: ANN001
+        observed.append((cfg.model, tuple(c["id"] for c in chunk)))
+        if fail_all or len(chunk) > 1:
+            raise RuntimeError("prompt is too long")
+        return [{"finding": "f", "criteria": [chunk[0]["id"]]}], {}
+
+    monkeypatch.setattr(sizing.passes, "pass1_chunk", _stub)
+    return observed
+
+
+def _run_ladder(cfg_model: str, *, events: list[str] | None = None):
+    cfg = dataclasses.replace(LLMConfig(runner="fake"), model=cfg_model)
+    return sizing.pass1_with_ladder(
+        object(),
+        cfg,
+        "plan",
+        [{"id": "A1"}, {"id": "A2"}],
+        False,
+        events if events is not None else [],
+    )
+
+
+def test_pass1_ladder_retry_stays_on_the_run_s_own_bedrock_model(monkeypatch, no_classes) -> None:
+    """AC: with no class table and a Bedrock-qualified primary, the model that reaches
+    ``passes.pass1_chunk`` on the one-criterion retry is the primary itself.
+
+    Observed on the ESCALATION PATH, not on ``models_at_or_above`` in isolation: the entry rung
+    is already class-resolved, so an entry-rung test structurally cannot catch this.
+    """
+    observed = _recording_pass1_chunk(monkeypatch)
+
+    findings, _calls = _run_ladder(_BEDROCK_PINNED_FRONTIER)
+
+    retries = [model for model, ids in observed if len(ids) == 1]
+    assert retries == [_BEDROCK_PINNED_FRONTIER, _BEDROCK_PINNED_FRONTIER]
+    assert len(findings) == 2
+
+
+def test_models_at_or_above_keeps_a_bedrock_primary_on_bedrock_with_no_classes(
+    no_classes,
+) -> None:
+    """AC (worked example): the primary's own rung is returned verbatim rather than degraded to
+    the bare Anthropic family name."""
+    assert sizing.models_at_or_above(_BEDROCK_PINNED_FRONTIER) == [_BEDROCK_PINNED_FRONTIER]
+
+
+def test_models_at_or_above_drops_unnameable_higher_rungs(no_classes) -> None:
+    """AC: a higher rung that cannot be named in the run's provider is DROPPED, never crossed.
+
+    The class vocabulary is the only thing that could name sonnet/opus on Bedrock and it is not
+    configured, so there is no honest target — escalation stops instead of jumping provider.
+    """
+    targets = sizing.models_at_or_above(_BEDROCK_PINNED_TRIVIAL)
+    assert targets == [_BEDROCK_PINNED_TRIVIAL]
+    assert not [t for t in targets if "claude-sonnet" in t or "claude-opus" in t]
+
+
+def test_dropped_rungs_still_produce_the_too_big_failure_finding(monkeypatch, no_classes) -> None:
+    """AC: dropping unnameable rungs must not turn escalation into a crash or a silent empty
+    result — the existing ``_too_big`` finding still reports the size failure."""
+    _recording_pass1_chunk(monkeypatch, fail_all=True)
+
+    findings, _calls = _run_ladder(_BEDROCK_PINNED_TRIVIAL)
+
+    assert [f["criteria"] for f in findings] == [["A1"], ["A2"]]
+    assert all(f["_too_big"] is True for f in findings)
+
+
+def test_start_rung_location_for_a_foreign_family_is_unchanged(no_classes) -> None:
+    """PINNED, deliberately NOT fixed here: a primary from a non-Anthropic model FAMILY matches
+    no ladder rung, so it falls through to the whole ladder. That is rung LOCATION, a different
+    mechanism owned by its own ticket; this change must leave it byte-for-byte."""
+    assert sizing.models_at_or_above("bedrock:us.amazon.nova-pro-v1:0") == _TODAY_LADDER
+    assert sizing.largest_window_tokens("bedrock:us.amazon.nova-pro-v1:0") == 1_000_000
