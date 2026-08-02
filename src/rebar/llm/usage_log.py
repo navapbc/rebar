@@ -36,6 +36,21 @@ _TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_wr
 
 #: The cost footer when the optional ``pricing`` extra is not installed.
 _PRICING_UNAVAILABLE = "unavailable (install rebar[pricing])"
+
+# Row-level call outcome, written under the ``"outcome"`` key on EVERY row (bug 8455).
+#
+# Before 8455 a call that RAISED — budget exceeded, provider 400/outage, unretryable output —
+# left no row at all, because `PydanticAIRunner.run()` only reached its `record()` call on the
+# success path: the except spine (`interpret_failure`) always re-raises. So a run whose late
+# steps failed read back as a short but perfectly clean log, silently under-reporting the input
+# tokens those failed calls had already burned.
+#
+# The discriminator is an EXPLICIT field on BOTH kinds of row, never "failure = some field is
+# missing": an absent field is already the truthful encoding of "not applicable" here (see
+# `record`'s omission pattern for model/step/model_class), so overloading absence to also mean
+# "this call failed" would make the two indistinguishable for a reader.
+OUTCOME_OK = "ok"
+OUTCOME_FAILED = "failed"
 _FAILURE_MESSAGE_SINK: ContextVar[list[object] | None] = ContextVar(
     "rebar_failure_message_sink", default=None
 )
@@ -249,6 +264,7 @@ def record(
     provider: str | None = None,
     step: str | None = None,
     model_class: str | None = None,
+    outcome: str = OUTCOME_OK,
 ) -> None:
     """Append one usage record for a single LLM call to ``$REBAR_USAGE_LOG`` (JSONL).
 
@@ -263,6 +279,11 @@ def record(
     model. ``model_class`` is the raw declared token when it names a class (see
     :func:`declared_model_class`), which is what makes "declared X, ran Y" visible in one row.
 
+    ``outcome`` is :data:`OUTCOME_OK` (the default, so every pre-8455 caller keeps its exact
+    behaviour) or :data:`OUTCOME_FAILED` for the row the runner writes when a call RAISED. It is
+    written unconditionally — unlike the optional identity fields above — because the whole point
+    is that a reader can tell the two apart without inferring anything from an absence.
+
     No-op when the env var is unset (the default) or ``usage`` is empty. Best-effort: a
     telemetry sink must never break the LLM call path, so any write error is logged and
     swallowed rather than raised into the runner.
@@ -274,7 +295,7 @@ def record(
     path = os.environ.get("REBAR_USAGE_LOG")
     if not path or not usage:
         return
-    row: dict[str, object] = {"op": op}
+    row: dict[str, object] = {"op": op, "outcome": outcome}
     if model:
         row["model"] = model
     if provider:
@@ -294,6 +315,61 @@ def record(
             handle.write(json.dumps(row) + "\n")
     except OSError as exc:  # pragma: no cover - telemetry must not fail a run
         logger.warning("usage-log record failed for op=%s: %s", op, exc)
+
+
+def record_failure(
+    messages: list[object],
+    op: str,
+    model: str | None,
+    request_limit: int,
+    eff_max_iter: int,
+) -> None:
+    """Append the one usage row for an LLM call that RAISED (bug 8455).
+
+    Positional rather than keyword-only purely so the runner's call fits its line budget — the
+    caller sits under a hard module-size gate; the arguments are ``(accumulated pydantic-ai
+    messages, op/prompt label, model that ran, request limit, effective max iterations)``.
+
+    ``PydanticAIRunner.run`` reaches :func:`record` only on its success path — its except spine
+    (``interpret_failure``) always re-raises — so before 8455 a call that burned input tokens and
+    then failed (budget exceeded, provider 400/outage, unrepairable output, rejected sampling
+    parameter) left NO row at all, and a run whose late steps failed read back as a short but
+    perfectly clean log. Called from the runner's OWN except block, this restores the missing row.
+
+    The row is deliberately the SAME shape a successful one has — same identity (``op``, ``step``,
+    ``model_class``, ``model``, ``provider``) and the same token-counter field set — so
+    :func:`summarize` folds it and the failed call's spend lands in the totals, which is the whole
+    point. It differs only by an explicit ``outcome`` of :data:`OUTCOME_FAILED`. Counters come from
+    :func:`failure_usage`, which reads what was actually burned off the accumulated pydantic-ai
+    messages; ``tool_calls_limit`` mirrors ``interpret_failure``'s own ``max(8, eff_max_iter)`` so
+    the two diagnostics of one failure agree. ``step``/``model_class`` resolve here because
+    :func:`step_identity` wraps the WHOLE step execution, the raise included.
+
+    Wholly best-effort — and load-bearingly so: the caller is an ``except`` block whose one job is
+    to re-raise the provider's exception unchanged, so an error escaping from telemetry would
+    REPLACE that exception and destroy the real diagnosis. Everything here is therefore wrapped
+    (not just the write, which :func:`record` already guards), including the lazy provider/class
+    lookups.
+    """
+
+    try:
+        from rebar.llm.config import infer_provider
+
+        step = active_step()
+        step_id, model_token = step if step is not None else (None, None)
+        record(
+            failure_usage(
+                messages, request_limit=request_limit, tool_calls_limit=max(8, eff_max_iter)
+            ),
+            op=op,
+            model=model,
+            provider=infer_provider(model) if model else None,
+            step=step_id,
+            model_class=declared_model_class(model_token),
+            outcome=OUTCOME_FAILED,
+        )
+    except Exception as exc:  # noqa: BLE001 — telemetry must never mask the provider's error
+        logger.warning("usage-log: failed-call record failed for op=%s: %s", op, exc)
 
 
 def _read(path: str) -> list[dict]:

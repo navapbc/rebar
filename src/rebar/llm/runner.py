@@ -514,6 +514,12 @@ class PydanticAIRunner:
                 # UsageLimitExceeded / LLMError / anything-else in that load-bearing order and
                 # always raises, so this broad catch is exactly as narrow as the three arms it
                 # replaces.
+                # Because it always raises, run()'s success-path `usage_log.record(...)` below is
+                # unreachable here, so a call that burned tokens and THEN failed used to leave no
+                # spend row (8455) — write it now; rules in `record_failure`'s docstring.
+                usage_log.record_failure(
+                    run_messages, _call_label, ran_model, req_limit, eff_max_iter
+                )
                 interpret_failure(
                     exc,
                     run_messages,
