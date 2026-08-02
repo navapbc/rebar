@@ -144,6 +144,27 @@ class _DCSanitizer:
         return _shared_sanitize_description(description, fit=self._codec.fit_outbound)
 
     def sanitize_comment(self, body: str) -> str:
+        # PROVENANCE OF THE COMMENT CEILING (story 79d5) — 32767 here is a decision
+        # backed by a primary source, not an assumption carried over from the
+        # description. Jira's own ``jpm.xml`` defines the advanced setting
+        # ``jira.text.field.character.limit`` with ``default-value 32767`` and a
+        # description covering "Description, Environment, Comments and Text custom
+        # fields"; JRASERVER-28519 records that 7.0.0 made 32767 the default (6.x
+        # shipped the same key defaulting to 0 = unlimited, already listing Comments
+        # in scope). Comments and descriptions are governed by ONE property on DC, so
+        # binding both to ``WIKI_DESCRIPTION_LIMIT`` is faithful to DC rather than a
+        # shortcut. Cloud needs its own ``adapters/jira/comment_limits`` module not
+        # because its numbers differ but because its UNITS do — Cloud descriptions are
+        # limited in ADF-SERIALIZED size, and DC has no ADF inflation to measure.
+        # Two known limits of this binding, both tracked elsewhere:
+        #   * the property is admin-configurable (0-2147483647), and rebar hardcodes
+        #     the default — on a raised instance rebar truncates comments Jira would
+        #     have accepted in full. Tracked as rebar:049e-9fac-a821-4ea2.
+        #   * ``fit_outbound`` is the DESCRIPTION fitter. Correct today (it is a plain
+        #     character truncation), but any future format-aware change to it would
+        #     silently retarget comments — Cloud shows why that coupling is dangerous.
+        # Convergence over this ceiling is pinned by
+        # ``tests/unit/rebar_reconciler/mutate/test_dc_outbound_comment_length_convergence.py``.
         return _shared_sanitize_comment(
             body, truncate=self._codec.fit_outbound, max_chars=WIKI_DESCRIPTION_LIMIT
         )
