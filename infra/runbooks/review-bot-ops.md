@@ -83,7 +83,17 @@ neither of which clears a stuck `-1`:
   carries a `-1`.
 
 So a transient outage that produced a `-1` will sit there until you `/rerun` it (or
-push a new patchset).
+push a new patchset). Contributors also have a self-service path: commenting
+**`recheck-review`** on the change re-triggers the review for any latest bot state
+that is not a real finding (see `docs/review-policy.md`); `/rerun` remains the
+operator-side equivalent and additionally works when the bot cannot read comments.
+(**Activation note:** the trigger depends on the `comment-added` webhook event in
+`infra/gerrit/webhooks.config`; after that file changes, an operator must re-run
+`infra/gerrit/service-user.sh` to push the rendered config to `refs/meta/config`.)
+
+**SEMANTICS (budget).** Both `/rerun` and an accepted `recheck-review` trigger also
+**reset the change's retry-budget row** in the dedup store, so a change that
+previously exhausted its automatic retries gets a fresh budget for the forced run.
 
 **SEMANTICS.** `/rerun` enqueues the change's current revision with a force marker;
 the worker calls `voter.review_and_vote(force=True)`, which **bypasses both

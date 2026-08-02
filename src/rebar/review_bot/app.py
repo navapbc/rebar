@@ -147,6 +147,19 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
     while True:
         event = await queue.get()
         try:
+            # A contributor `recheck-review` comment (ticket bb9b): decide eligibility
+            # privileged-side and, on acceptance, requeue the change's CURRENT revision
+            # as a forced review event (it then flows through the normal branch below on
+            # its next dequeue). Runs off the event loop — it makes blocking REST calls.
+            if isinstance(event, dict) and event.get("type") == "comment-added":
+                from rebar.review_bot import retrigger as _retrigger
+
+                follow_up = await asyncio.to_thread(
+                    _retrigger.handle_comment_added, event, config=cfg
+                )
+                if follow_up is not None:
+                    queue.put_nowait(follow_up)
+                continue
             # A manual /rerun enqueues the event with a _rebar_force marker so the
             # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
             force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
@@ -270,6 +283,21 @@ async def rerun(request: Request) -> JSONResponse:
         return JSONResponse(status_code=502, content={"status": "gerrit error"})
     if event is None:
         return JSONResponse(status_code=404, content={"status": "change not found"})
+
+    # Re-arm the 0347 automatic-retry budget (harmonized with the contributor
+    # `recheck-review` path): a force re-review on a stale exhausted budget would
+    # otherwise immediately re-escalate. Best-effort — a reset failure must not
+    # block the operator's rerun.
+    try:
+        from rebar.review_bot.dedup import DedupStore
+
+        await asyncio.to_thread(
+            DedupStore(cfg.dedup_db_path).reset_attempts,
+            str(event["change"]["id"]),
+            str(event["patchSet"]["revision"]),
+        )
+    except Exception:  # noqa: BLE001 — best-effort budget re-arm
+        logger.warning("review-bot rerun: attempts-budget reset failed (continuing)")
 
     event["_rebar_force"] = True
     queue: asyncio.Queue | None = getattr(request.app.state, "queue", None)
