@@ -262,6 +262,27 @@ conflicts = [
     [{ extra = "eval" }, { extra = "dev" }],
 ]
 
+# Security override (ticket e47e): keep `click` off the PYSEC-2026-2132 line, which the
+# GATING pip-audit job in _build-and-test.yml fails on. click is a TRANSITIVE dependency
+# (nothing under src/ imports it; `click.edit()`, the vulnerable function, is called
+# nowhere in the repo) reached via `uvicorn` (`[ui]`) and `inspect-ai` (`[eval]`).
+#
+# An override rather than a floor because inspect-ai — every release up to 0.3.251 — caps
+# `click!=8.2.0,<8.2.2,>=8.1.3`, which pins the universal resolution to the vulnerable
+# 8.2.1 and makes `uv lock --upgrade-package click` a silent no-op. The cap is stale, not a
+# real incompatibility: inspect-ai 0.3.251's CLI (`inspect --help`, `inspect eval --help`)
+# and `import inspect_ai` all work under click 8.4.2, and upstream has a PR open to relax it
+# (UKGovernmentBEIS/inspect_ai#4596, tracking issue #4594). Overriding it is what lets the
+# lock carry a non-vulnerable click at all.
+#
+# `[tool.uv]` overrides govern THIS repo's lock/envs only — they are not published in
+# nava-rebar's wheel metadata, so no consumer resolve is affected.
+#
+# REMOVE WHEN inspect-ai ships a release whose click cap admits >= 8.3.3 (i.e. #4596 lands
+# and the `[eval]` floor moves past it); the floor is then redundant and the lock can
+# resolve click freely.
+override-dependencies = ["click>=8.3.3"]
+
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel]
