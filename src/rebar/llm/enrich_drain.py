@@ -230,7 +230,7 @@ def maybe_drain(tracker: str, *, repo_root=None) -> None:
             return
         # Gate on the feature flag (the common default-off path) so an ordinary write pays
         # only one config read: no enrichment $ is spent unless overlap detection is on.
-        if not _root_config.load_config(repo_root).verify.overlap_enabled:
+        if not _root_config.load_config(repo_root).verify.suggest_duplicate_tickets:
             return
         cfg = LLMConfig.from_env(repo_root=repo_root)
         if cfg.overlap_drain == "off":

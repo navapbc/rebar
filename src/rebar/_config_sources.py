@@ -308,6 +308,13 @@ _LEGACY_ENV_ALIASES: dict[str, tuple[str, str, str]] = {
         "REBAR_RECONCILER_DELETION_PROBE_LIMIT",
     ),
     "REBAR_ID_GUARD_MODE": ("reconciler", "id_guard_bypass_unsafe", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
+    # verify.suggest_duplicate_tickets (story 9416): a pure rename, so the derived env
+    # name moved with it and the pre-rename one is kept forever.
+    "REBAR_VERIFY_OVERLAP_ENABLED": (
+        "verify",
+        "suggest_duplicate_tickets",
+        "REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS",
+    ),
 }
 
 

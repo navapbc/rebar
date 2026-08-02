@@ -55,9 +55,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setattr(ds, "_active_model", lambda repo_root: "claude-opus-4-8")
     # Pin the opportunistic write-path drain OFF for this fixture's baseline. The write
     # path calls maybe_drain() with repo_root=None, so its overlap gate reads the AMBIENT
-    # checkout config (cwd) — and this repo enables verify.overlap_enabled. Without this,
-    # every create_ticket/enqueue during test setup would spawn a drain child, polluting
-    # the _spawn_detached_drain spies and racing the queue in test_batch_cap. Tests that
+    # checkout config (cwd) — and this repo enables verify.suggest_duplicate_tickets.
+    # Without this, every create_ticket/enqueue during test setup would spawn a drain child,
+    # polluting the _spawn_detached_drain spies and racing the queue in test_batch_cap. Tests
     # exercise a drain mode opt in explicitly via _mock_flags(drain=...) / direct D.drain.
     monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN", "off")
     return str(r)
@@ -173,7 +173,7 @@ def _mock_flags(monkeypatch, *, enabled=True, drain="always", agents=True):
 
     def _patched(repo_root=None):
         c = real_load(repo_root)
-        c.verify.overlap_enabled = enabled  # VerifyConfig is a mutable dataclass
+        c.verify.suggest_duplicate_tickets = enabled  # VerifyConfig is a mutable dataclass
         return c
 
     monkeypatch.setattr(rc, "load_config", _patched)

@@ -63,7 +63,9 @@ Four load-bearing choices, each derisked by a measured experiment (2026-07-09):
   the completion gate depend on — so the tool NEVER auto-links. Precision lives in the Stage-2
   pairwise judge (both orderings, a required cited shared artifact, default related-but-distinct,
   abstain-when-unsure), directed so the emitted `rebar link` command is never inverted.
-- **Gated off by default** (`verify.overlap_enabled`); all tunables live on `LLMConfig`
+- **Gated off by default** (`verify.suggest_duplicate_tickets`, renamed from the
+  `verify.overlap_enabled` this ADR was written against — the old key remains a permanent
+  alias); all tunables live on `LLMConfig`
   (`[tool.rebar.llm]`, `REBAR_LLM_OVERLAP_*`).
 - **Graceful skip, no fallback.** If the `[agents]` extra / plan-review / an API key is absent,
   the whole feature silently no-ops. A cold store surfaces little until drains warm the digest

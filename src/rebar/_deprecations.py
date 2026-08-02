@@ -84,9 +84,14 @@ _ENTRIES: tuple[Deprecation, ...] = (
     _permanent("env", "REBAR_ACLI_TIMEOUT", "REBAR_JIRA_CLI_TIMEOUT"),
     _permanent("env", "RECONCILER_ABSENT_GET_BUDGET", "REBAR_RECONCILER_DELETION_PROBE_LIMIT"),
     _permanent("env", "REBAR_ID_GUARD_MODE", "REBAR_UNSAFE_ID_GUARD_BYPASS"),
+    _permanent("env", "REBAR_VERIFY_OVERLAP_ENABLED", "REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS"),
+    # ── config-key aliases: PERMANENT renames (no removal planned) ─────────────
+    # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
+    # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
+    _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
     # ── env aliases: SCHEDULED (a SUPERSESSION, not a rename) ──────────────────
     # The distinction that decides `_scheduled` vs `_permanent` here, recorded because
-    # it took two wrong turns to settle. The six entries above are permanent because
+    # it took two wrong turns to settle. The entries above are permanent because
     # they are RENAMES — the same knob under a better name, so removing them would buy
     # nothing. REBAR_LLM_MODEL is different in kind: it is SUPERSEDED by a different
     # interface (the per-class `[tool.rebar.llm.model_classes]` slots), so the old knob
