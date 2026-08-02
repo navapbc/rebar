@@ -41,8 +41,9 @@ from rebar.llm.runner import FakeRunner, Runner, RunRequest
 pytestmark = pytest.mark.unit
 
 # `cfg.model` and the three class slots are deliberately DISTINCT strings: a probe can then name
-# which one arrived. `test:` survives `split_provider_qualifier` as a provider qualifier, so these
-# are returned by `resolve_class` unchanged rather than re-prefixed.
+# which one arrived. `test` is NOT a provider name, so `split_provider_qualifier` reads these as
+# unqualified — and since no inference prefix matches them either, `resolve_class` returns them
+# unchanged rather than re-prefixed.
 _CFG_MODEL = "anthropic:cfg-model-must-not-be-inherited"
 _STANDARD = "test:standard-class-model"
 _FRONTIER = "test:frontier-class-model"

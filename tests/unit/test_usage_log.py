@@ -327,5 +327,9 @@ def test_runner_records_usage_at_seam(tmp_path, monkeypatch):
     assert set(usage_log._FIELDS).issubset(rows[0])
     # The runner call site passes model + inferred provider; record() stamps the time.
     assert rows[0]["model"] == "test:FunctionModel"
-    assert rows[0]["provider"] == "test"  # infer_provider: provider:model prefix
+    # `test` is not a provider name (pydantic-ai builds a TestModel from the bare string `test`
+    # and rejects `test:` as a qualifier), so there is no provider behind a FunctionModel double.
+    # `record()` omits an unknown optional identity field rather than writing null, so "no
+    # provider" is the ABSENCE of the key — the same convention as `model`/`step`/`model_class`.
+    assert "provider" not in rows[0]
     assert "timestamp" in rows[0]

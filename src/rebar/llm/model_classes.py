@@ -31,6 +31,7 @@ from typing import Any
 
 from rebar.llm.config import (
     DEFAULT_MODEL,
+    KNOWN_PROVIDER_NAMES,
     VERIFIER_DEFAULT_MODEL,
     infer_provider,
     split_provider_qualifier,
@@ -232,10 +233,23 @@ def _resolve_target(model: str, provider: str | None) -> str:
     configured provider for any model id containing a colon — which is every canonical Bedrock id
     (``...-v1:0``).
 
-    Whether a string is ALREADY qualified is decided by :func:`split_provider_qualifier`, never by
-    ``":" in model``.
+    Whether a string is ALREADY qualified is decided by :func:`split_provider_qualifier` — a
+    MEMBERSHIP test against :data:`~rebar.llm.config.KNOWN_PROVIDER_NAMES`, never ``":" in model``
+    and never a guess at the prefix's shape.
+
+    An explicitly configured ``provider`` is VALIDATED against that same set before anything is
+    composed. This is the half membership buys that a shape test cannot: a typo (``bedrok``) is
+    reported where the operator made it — during config resolution, which runs in commands that
+    never reach an LLM — instead of surviving into a composed target string and failing much later
+    at provider construction, if it is reached at all. An unrecognized INLINE qualifier is
+    deliberately NOT rejected here; see :func:`split_provider_qualifier`.
     """
     if provider:
+        if provider not in KNOWN_PROVIDER_NAMES:
+            raise LLMConfigError(
+                f"unknown provider {provider!r} configured for model {model!r}; "
+                f"valid providers: {sorted(KNOWN_PROVIDER_NAMES)}"
+            )
         qualifier, _ = split_provider_qualifier(model)
         if qualifier == provider:
             return model  # already qualified with the SAME provider — never double-prefix
