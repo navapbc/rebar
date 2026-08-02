@@ -57,8 +57,27 @@ def test_set_and_get_baseline_round_trip(tmp_path):
         "status": "In Progress",
         "assignee": "a@x",
     }
-    # baseline_advanced_at stamped.
-    assert s.all_bindings()["loc-1"].get("baseline_advanced_at")
+    assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
+
+
+def test_unchanged_baseline_keeps_serialized_bytes_identical(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    s.bind_confirm("loc-1", "REB-1")
+    monkeypatch.setattr(
+        _mod,
+        "_now_iso",
+        lambda: pytest.fail("setting a baseline must not read the clock"),
+    )
+
+    s.set_baseline("loc-1", _FIELDS)
+    s.save()
+    bindings_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json"
+    first_bytes = bindings_path.read_bytes()
+
+    s.set_baseline("loc-1", dict(_FIELDS))
+    s.save()
+
+    assert bindings_path.read_bytes() == first_bytes
 
 
 def test_baseline_persists_across_reload(tmp_path):
@@ -135,6 +154,56 @@ def test_seed_baselines_from_snapshot(tmp_path):
     assert s.get_baseline("loc-1")["summary"] == "one"
     assert s.get_baseline("loc-2")["status"] == "Done"
     assert s.get_baseline("loc-3") is None
+
+
+def test_changed_baseline_updates_serialized_bytes(tmp_path):
+    s = _store(tmp_path)
+    s.bind_confirm("loc-1", "REB-1")
+    s.set_baseline("loc-1", _FIELDS)
+    s.save()
+    bindings_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json"
+    first_bytes = bindings_path.read_bytes()
+
+    changed = {**_FIELDS, "status": "Done"}
+    s.set_baseline("loc-1", changed)
+    s.save()
+
+    assert bindings_path.read_bytes() != first_bytes
+    assert _store(tmp_path).get_baseline("loc-1")["status"] == "Done"
+    assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
+
+
+def test_present_null_baseline_field_round_trips(tmp_path):
+    s = _store(tmp_path)
+    s.bind_confirm("loc-1", "REB-1")
+
+    s.set_baseline("loc-1", {"description": None})
+
+    baseline = s.get_baseline("loc-1")
+    assert "description" in baseline
+    assert baseline["description"] is None
+    assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
+
+
+def test_seed_baselines_unchanged_keeps_serialized_bytes_identical(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    s.bind_confirm("loc-1", "REB-1")
+    monkeypatch.setattr(
+        _mod,
+        "_now_iso",
+        lambda: pytest.fail("seeding a baseline must not read the clock"),
+    )
+    snapshot = {"REB-1": dict(_FIELDS)}
+
+    assert s.seed_baselines_from_snapshot(snapshot) == 1
+    s.save()
+    bindings_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json"
+    first_bytes = bindings_path.read_bytes()
+
+    assert s.seed_baselines_from_snapshot(snapshot) == 1
+    s.save()
+
+    assert bindings_path.read_bytes() == first_bytes
 
 
 def test_corrupt_bindings_json_still_fails_closed(tmp_path):
