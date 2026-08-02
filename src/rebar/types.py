@@ -131,6 +131,7 @@ class TicketState(TypedDict):
     source_env: NotRequired[str | None]
     creation_channel: NotRequired[CreationChannel]
     creation_channel_inferred: NotRequired[Literal[True]]
+    detected_by: NotRequired[str]
     close_class: NotRequired[CloseClass]
 
 
