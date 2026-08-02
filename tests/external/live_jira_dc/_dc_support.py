@@ -241,3 +241,38 @@ def forget_identity_mapping(repo: Path, provider: str, external_id: str) -> list
             )
         shutil.rmtree(directory)
         removed.append(identity_id)
+
+
+def assert_mint_registered(repo: Path, external_id: str) -> str:
+    """The inbound-mint oracle's registry half: MINTED, a PLACEHOLDER, and NOT forked.
+
+    Returns the resolved identity id. Lives here rather than inline in the cell so the
+    harness-free mutation check can run THE ORACLE ITSELF (see
+    ``tests/unit/rebar_reconciler/test_inbound_assignee_oracle_discriminates_5200.py``) rather
+    than a paraphrase of it — a paraphrase can stay red while the live cell has gone vacuous.
+
+    Read through ``rebar.resolve_mapping``, which is a pure READ: it returns None rather than
+    creating, so a caller that establishes the absence first can attribute the presence here to
+    the pass and to nothing else.
+    """
+    import rebar
+
+    minted = rebar.resolve_mapping("jira", external_id, repo_root=repo)
+    assert minted is not None, (
+        f"THE PASS MINTED NOTHING: jira/{external_id!r} still resolves to no identity in the "
+        f"store copy after an inbound pass that carried that assignee. This is bug 5f48's "
+        f"silent-swallow signature — the mint is best-effort and swallows its own failure, so "
+        f"the registry is the only place it is observable."
+    )
+    assert rebar.is_placeholder(minted, repo_root=repo), (
+        f"the identity the pass minted for {external_id!r} ({minted!r}) is not a PLACEHOLDER. "
+        f"The inbound mint is documented to create a GHOST identity a later outbound pass can "
+        f"key on; a non-placeholder means it adopted or overwrote a real person's identity."
+    )
+    forked = rebar.resolve_mapping("jira-datacenter", external_id, repo_root=repo)
+    assert forked is None, (
+        f"the DC pass ALSO minted under a `jira-datacenter` provider ({forked!r}), forking the "
+        f"identity namespace the epic decided the two deployments share. The deployment belongs "
+        f"in `RemoteRef.instance`, not in the provider string."
+    )
+    return minted
