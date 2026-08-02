@@ -258,6 +258,26 @@ _CLASS_BINDERS = (
 # reaches a RunRequest from one of these without crossing a binder above is exactly bug afeb.
 _RAW_ORIGIN = "LLMConfig.from_env"
 
+# Helpers that return a COPY of the config with a NON-model field adjusted — the output-token
+# budget. They are transparent to MODEL provenance, so the analysis follows through them to their
+# argument instead of stopping at the call. Stopping would be the dangerous reading: it renders a
+# site `unresolved`, and the only way to pass then is to register it as unfollowable, which would
+# blind this guard at the very plan-review passes bug afeb is about.
+_MODEL_TRANSPARENT = ("max_output_cfg", "_max_output_cfg")
+
+
+def _unwrap_model_transparent(expr: str) -> str | None:
+    """The inner config expression of a model-transparent wrapper call, else ``None``."""
+    try:
+        node = ast.parse(expr, mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(node, ast.Call) or len(node.args) != 1:
+        return None
+    name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+    return ast.unparse(node.args[0]) if name in _MODEL_TRANSPARENT else None
+
+
 # Sites that inherit `cfg.model` ON PURPOSE. Registration is a DELIBERATE act, and it is the
 # ONLY way a raw site passes: a new hand-built sub-call fails until someone either declares a
 # class or writes down why the operator's bare model is the right one there.
@@ -384,7 +404,12 @@ def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
         return "bound"
     if _RAW_ORIGIN in expr:
         return "raw"
-    if depth > 6 or not expr.isidentifier():
+    if depth > 6:
+        return "unresolved"
+    inner = _unwrap_model_transparent(expr)
+    if inner is not None:
+        return _verdict(tree, site, inner, depth + 1)
+    if not expr.isidentifier():
         return "unresolved"  # attribute/subscript/deep chain: out of this analysis's reach
 
     chain = _enclosing(tree, site)
