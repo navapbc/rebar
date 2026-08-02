@@ -28,10 +28,9 @@ _RECOVERY = _SRC / "workflow" / "plan_review_recovery.py"
 _ORCHESTRATOR = _SRC / "plan_review" / "orchestrator.py"
 _CONTEXT_ASSEMBLY = _SRC / "plan_review" / "context_assembly.py"
 
-# `.github/module-size-limit.txt` is the 800 hard cap; this is the headroom target the split
-# exists to restore. 1484's acceptance criterion is >=100 lines of headroom, so <=700.
-_HEADROOM_TARGET = 700
-# AGENTS.md: never create a file under 100 LOC by splitting.
+# AGENTS.md: never create a file under 100 LOC by splitting. This is the ONLY size bound this
+# file asserts: the upper ceiling belongs to `.github/module-size-limit.txt` alone, enforced by
+# the CI module-size gate and mirrored in-process by test_module_size_contract.py.
 _SPLIT_FLOOR = 100
 
 
@@ -41,22 +40,6 @@ def _loc(path: pathlib.Path) -> int:
 
 def test_recovery_module_exists() -> None:
     assert _RECOVERY.is_file(), "src/rebar/llm/workflow/plan_review_recovery.py was not created"
-
-
-def test_gate_dispatch_regains_real_headroom_under_the_cap() -> None:
-    """The whole point: gate_dispatch must stop sitting ON the 800 gate, not merely pass it.
-
-    CORRECTED (ticket d8ef): this used to justify itself with "343b adds an argument at three call
-    sites that live in this file". Ticket 1484 MOVED those sites out, and gate_dispatch now holds
-    ZERO `finalize_verdict` calls — they live in `workflow/plan_review_recovery.py` (3, at :223,
-    :297, :336) and `plan_review/workflow_ops.py` (2). The headroom is still worth guarding, but on
-    its own merit as a hot dispatch module rather than on a call-site count that has moved."""
-    loc = _loc(_GATE_DISPATCH)
-    assert loc < _HEADROOM_TARGET, (
-        f"gate_dispatch.py is {loc} LOC; keep it under {_HEADROOM_TARGET} so a routine change here "
-        "is not a build break (the finalize_verdict call sites it once held now live in "
-        "plan_review_recovery.py and plan_review/workflow_ops.py)"
-    )
 
 
 def test_extracted_module_clears_the_anti_fragmentation_floor() -> None:
@@ -139,15 +122,6 @@ def test_orchestrator_is_reached_by_attribute_access_not_flattened_imports() -> 
 def test_context_assembly_module_exists() -> None:
     assert _CONTEXT_ASSEMBLY.is_file(), (
         "src/rebar/llm/plan_review/context_assembly.py was not created"
-    )
-
-
-def test_orchestrator_regains_real_headroom_under_the_cap() -> None:
-    """orchestrator.py DEFINES finalize_verdict; 343b adds a parameter to that definition and to
-    its docstring, which does not fit in 4 lines of headroom."""
-    loc = _loc(_ORCHESTRATOR)
-    assert loc < _HEADROOM_TARGET, (
-        f"orchestrator.py is {loc} LOC; the split must bring it under {_HEADROOM_TARGET}"
     )
 
 

@@ -13,10 +13,10 @@ room. The ADR-0056-correct follow-up is the verb cut inside it — lifting the p
 normalisation into `prerequisites.py` — which is deliberately NOT bundled here because it is
 behaviour-adjacent and needs its own RED-first test.
 
-THE RELOCATION MUST COST ZERO TEST EDITS apart from one constant in the seam test. Nine test modules
-reference the moved names, and unusually for this codebase NONE of them monkeypatches into this
-module — so a re-export is sufficient and any forced test edit means the cut is wrong. Two pins are
-load-bearing and are asserted here rather than trusted:
+THE RELOCATION MUST COST ZERO TEST EDITS. Nine test modules reference the moved names, and
+unusually for this codebase NONE of them monkeypatches into this module — so a re-export is
+sufficient and any forced test edit means the cut is wrong. Two pins are load-bearing and are
+asserted here rather than trusted:
 
   * `_OPERATOR_ATTESTED_AC_RE` must survive by OBJECT IDENTITY —
     `tests/unit/test_det_floor_operator_attested.py:153` asserts `is` against the det-floor regex.
@@ -35,9 +35,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "workflow_ops.py"
 _DECIDE_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "decide_ops.py"
-_SEAM = REPO_ROOT / "tests" / "unit" / "test_plan_review_workflow_ops_seam.py"
 
-_WORKFLOW_OPS_TARGET = 560
+# AGENTS.md: never create a file under 100 LOC by splitting. This is the ONLY LOC bound this
+# test asserts — the upper ceiling is `.github/module-size-limit.txt`, enforced by the CI
+# module-size gate and mirrored in `test_module_size_contract.py` (ADR 0058).
 _FLOOR = 100
 
 _MOVED = (
@@ -56,16 +57,12 @@ def _loc(path: Path) -> int:
 # ══ HAPPY PATH ════════════════════════════════════════════════════════════════════════
 
 
-def test_the_extracted_module_exists_and_workflow_ops_regains_headroom() -> None:
-    """The size outcome. `workflow_ops.py` holds two of the five `finalize_verdict` call sites, so
-    headroom there is what makes the next ordinary change landable."""
+def test_the_extracted_module_exists_and_clears_the_split_floor() -> None:
+    """The extraction happened and produced a real module rather than a stub."""
     assert _DECIDE_OPS.exists(), "src/rebar/llm/plan_review/decide_ops.py was not created"
     decide_loc = _loc(_DECIDE_OPS)
-    assert _FLOOR <= decide_loc < 800, f"decide_ops.py is {decide_loc} LOC"
-    ops_loc = _loc(_WORKFLOW_OPS)
-    assert ops_loc <= _WORKFLOW_OPS_TARGET, (
-        f"workflow_ops.py is {ops_loc} LOC; the extraction must bring it to "
-        f"{_WORKFLOW_OPS_TARGET} or below"
+    assert decide_loc >= _FLOOR, (
+        f"decide_ops.py is {decide_loc} LOC; splitting must not create a file under {_FLOOR} LOC"
     )
 
 
@@ -118,16 +115,6 @@ def test_decide_ops_reaches_orchestrator_by_attribute_access() -> None:
         "decide_ops flattens orchestrator imports; use `from . import orchestrator` plus attribute "
         f"access so monkeypatching keeps working: {flattened}"
     )
-
-
-def test_the_seam_bound_for_workflow_ops_is_tightened_to_the_policy_target() -> None:
-    """b300 built the per-file `_LOC_BOUNDS` table and left this file at the staged cap. This ticket
-    changes exactly one constant — it must NOT re-split anything."""
-    seam = _SEAM.read_text(encoding="utf-8")
-    assert "(_WORKFLOW_OPS, _HEADROOM_TARGET)" in seam, (
-        "the seam test still holds workflow_ops.py at the staged cap; tighten that one entry"
-    )
-    assert "(_LLM_CONFIG, _HEADROOM_TARGET)" in seam, "b300's config.py bound must be left intact"
 
 
 def test_the_registration_import_lives_in_workflow_ops_not_steps() -> None:

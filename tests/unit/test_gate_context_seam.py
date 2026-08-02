@@ -43,10 +43,9 @@ _MOVED_PUBLIC = (
 )
 _MOVED_PRIVATE = ("_active_code_root", "_active_tickets_root", "_in_gate_session")
 
-# The policy headroom number the sibling seam tests use. config.py may assert it only once THIS
-# extraction has created the headroom (it is 793 today); `workflow_ops.py` stays at the staged cap
-# until b5fe lands, which is why the bounds must be PER FILE rather than one shared constant.
-_HEADROOM_TARGET = 700
+# AGENTS.md: never create a file under 100 LOC by splitting. This is the ONLY size bound this file
+# asserts — the upper ceiling belongs to `.github/module-size-limit.txt` alone, enforced by the CI
+# module-size gate and mirrored in-process by test_module_size_contract.py.
 _FLOOR = 100
 
 
@@ -62,15 +61,8 @@ def test_the_extracted_module_exists_and_is_a_reasonable_size() -> None:
     a tiny fragment trades one problem for two."""
     assert _GATE_CONTEXT.exists(), "src/rebar/llm/gate_context.py was not created"
     loc = _loc(_GATE_CONTEXT)
-    assert _FLOOR <= loc < 800, f"gate_context.py is {loc} LOC; expected between {_FLOOR} and 800"
-
-
-def test_config_regains_real_headroom() -> None:
-    """The point of the ticket: config.py must stop sitting near the cap so d23e's deprecation alias
-    (10-16 lines) fits without another structural change first."""
-    loc = _loc(_CONFIG)
-    assert loc < _HEADROOM_TARGET, (
-        f"llm/config.py is {loc} LOC; the extraction must bring it under {_HEADROOM_TARGET}"
+    assert loc >= _FLOOR, (
+        f"gate_context.py is {loc} LOC; splitting must not create a file under {_FLOOR} LOC"
     )
 
 

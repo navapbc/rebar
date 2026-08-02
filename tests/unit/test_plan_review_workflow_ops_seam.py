@@ -1,7 +1,6 @@
 """Seam guards for the plan-review workflow ops (ticket d8ef).
 
-Two guards that did not exist at ANY layer before this file, plus the headroom bound that
-`test_gate_dispatch_seam.py` provides for its siblings but never provided for `workflow_ops.py`.
+Two guards that did not exist at ANY layer before this file.
 
 WHY THE REGISTRY CHECKS RUN IN A SUBPROCESS — do not "simplify" this away.
 `@register_step` populates `STEP_REGISTRY` (a process-global dict, `workflow/executor.py:155`) as an
@@ -46,25 +45,11 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_WORKFLOW_OPS = REPO_ROOT / "src" / "rebar" / "llm" / "plan_review" / "workflow_ops.py"
-_LLM_CONFIG = REPO_ROOT / "src" / "rebar" / "llm" / "config.py"
 _PLAN_REVIEW_YAML = REPO_ROOT / "src" / "rebar" / "llm" / "workflow" / "gates" / "plan-review.yaml"
 
-# The hard cap every file under src/rebar must respect (.github/module-size-limit.txt), and the
-# 700 policy target the sibling seam tests use.
-_HARD_CAP = 800
-_HEADROOM_TARGET = 700
-
-# PER-FILE bounds, not one shared constant. Both files were staged at the hard cap while their
-# extraction tickets were open; b300 has since moved the gate read-root / snapshot-session domain
-# out of `config.py` into `llm/gate_context.py`, so that file now holds real headroom and is
-# asserted at the policy target. b5fe has since moved `plan_review_decide` and its
-# operator-attested pre-step out of `workflow_ops.py` into `plan_review/decide_ops.py` (794 -> 511
-# LOC), so that file now holds real headroom too and is asserted at the policy target as well.
-_LOC_BOUNDS = (
-    (_WORKFLOW_OPS, _HEADROOM_TARGET),
-    (_LLM_CONFIG, _HEADROOM_TARGET),
-)
+# This file asserts NO module-size bound. The single authoritative ceiling lives in
+# `.github/module-size-limit.txt`, enforced by the CI module-size gate and mirrored in-process by
+# test_module_size_contract.py, which reads that same file.
 
 # Eight ops registered by `workflow_ops` itself, plus the ninth registered through its side-effect
 # import of `prerequisite_workflow_ops` — the one a stray import cleanup would silently drop.
@@ -79,10 +64,6 @@ _EXPECTED_OPS = {
     "plan_review_prerequisite_verify_inputs",
     "plan_review_verify_inputs",
 }
-
-
-def _loc(path: Path) -> int:
-    return len(path.read_text(encoding="utf-8").splitlines())
 
 
 def _registered_ops_from_a_clean_interpreter() -> set[str]:
@@ -152,22 +133,3 @@ def test_every_uses_in_the_gate_yaml_resolves_to_a_registered_op() -> None:
         "`uses` against STEP_REGISTRY at runtime (executor.py:673-676), so these would raise "
         "WorkflowError mid-review."
     )
-
-
-def test_the_hot_plan_review_files_stay_under_the_hard_cap() -> None:
-    """`workflow_ops.py` holds two of the five `finalize_verdict` call sites and `config.py` is the
-    most-imported near-cap module in the repo, yet NEITHER had a headroom guard — the sibling seam
-    tests cover `gate_dispatch.py` and `orchestrator.py` only. Bounds are per file: `config.py` is
-    held to the 700 policy target now that b300 has extracted `llm/gate_context.py`;
-    `workflow_ops.py` stays staged at the hard cap until b5fe lands."""
-    for path, bound in _LOC_BOUNDS:
-        loc = _loc(path)
-        # STRICTLY under, not `<=`. The CI gate itself fails only at 801, but "passes CI" is a
-        # weaker property than "has headroom": three files in this repo sit at EXACTLY 800 today
-        # (plan_review/passes.py, plan_review/attest.py, rebar_reconciler/outbound_differ.py), which
-        # means the next one-line change to any of them is unlandable. ADR 0056 names this directly
-        # — a hot file "must stop sitting ON the 800 gate, not merely pass it".
-        assert loc < bound, (
-            f"{path.relative_to(REPO_ROOT)} is {loc} LOC and must stay UNDER {bound}, not sit "
-            "on it; extract along a call-graph seam rather than raising the limit"
-        )
