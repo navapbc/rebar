@@ -259,12 +259,32 @@ class JiraDataCenterTransport:
         return _unwrap(issue)
 
     def update_issue(self, remote_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Apply an outbound field update, ROUTING ``status`` to a transition.
+
+        ``status`` is not an editable Jira field. It arrives here anyway —
+        ``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST`` contains it and
+        ``dispatch_one._update_one_scalar_update`` forwards the whole allowlisted
+        dict as ``update_issue(key, **fields)`` — and this method used to hand it
+        straight to ``issue.update(fields=…)``, a REST field EDIT. Jira rejected it,
+        the rejection was soft-failed, and the outbound status silently never
+        changed (bug d067). Cloud does the same translation inside its own transport
+        (``adapters/jira/acli.py:170,182-183``); the status→transition seam lives
+        PER TRANSPORT, and Data Center simply never got its half.
+
+        ``status`` and ``assignee`` are therefore both popped BEFORE the field edit,
+        which then carries only genuinely editable fields — the field edit and the
+        transition happen in this one call, in that order, so a mutation that
+        changes a summary and a status still does both.
+        """
         assignee = kwargs.pop("assignee", _MISSING)
+        status = kwargs.pop("status", _MISSING)
         if kwargs:
             issue = _with_connection_retry(lambda: self._client.issue(remote_id))
             _with_connection_retry(lambda: issue.update(fields=kwargs))
         if assignee is not _MISSING:
             self._assign(remote_id, assignee)
+        if status is not _MISSING and status is not None:
+            route_status_to_transition(self._client, remote_id, str(status))
         return self.get_issue(remote_id)
 
     def _assign(self, remote_id: str, assignee: Any) -> None:
