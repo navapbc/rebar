@@ -142,14 +142,17 @@ def test_an_empty_project_yields_an_empty_map_without_raising() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _search_issues_calls_taking_the_default() -> list[str]:
+def _search_issues_calls_taking_the_default(src: str | None = None) -> list[str]:
     """Every `self.search_issues(...)` / `self._client.search_issues(...)` call in the
     transport that passes NO explicit result cap.
 
     An AST scan rather than a grep: the point is to catch a call, not a mention in a
     docstring or comment (this module's own prose names the method repeatedly).
+
+    `src` exists ONLY so the teeth test below can aim this same predicate at a synthetic
+    offender; omitting it scans the live transport, which is what the real guard does.
     """
-    tree = ast.parse(_TRANSPORT_SRC.read_text())
+    tree = ast.parse(src if src is not None else _TRANSPORT_SRC.read_text())
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -177,23 +180,35 @@ def test_no_search_issues_call_relies_on_the_default_page_size() -> None:
     )
 
 
-def test_the_structural_guard_fires_on_a_synthetic_unpaginated_caller(tmp_path) -> None:
+_SYNTHETIC_OFFENDER_SRC = """\
+class T:
+    def unpaginated(self, k):
+        return self.search_issues(f'project = {k}')
+
+    def camel(self, k):
+        return self._client.search_issues(f'project = {k}', startAt=0, maxResults=100)
+
+    def snake(self, k):
+        return self._client.search_issues(f'project = {k}', max_results=100)
+"""
+
+
+def test_the_structural_guard_fires_on_a_synthetic_unpaginated_caller() -> None:
     """TEETH for the guard itself. A structural test that cannot fail is decoration — and
-    this one exists precisely because the previous audit of this seam under-counted."""
-    synthetic = tmp_path / "fake_transport.py"
-    synthetic.write_text(
-        "class T:\n    def m(self, k):\n        return self.search_issues(f'project = {k}')\n"
+    this one exists precisely because the previous audit of this seam under-counted.
+
+    This drives the SAME predicate the real guard consumes (no second inline copy of the
+    AST walk — that duplication is what let the guard rot unnoticed), and asserts it names
+    the offending line: "returns a list" is satisfied by `return []`. The two paginated
+    calls are the negative control — the predicate must accept BOTH spellings of the cap,
+    so narrowing the accepted keyword set turns this red too.
+    """
+    offenders = _search_issues_calls_taking_the_default(_SYNTHETIC_OFFENDER_SRC)
+    assert offenders == ["line 3"], (
+        f"the shared AST predicate must report exactly the unpaginated call on line 3 of "
+        f"the synthetic source and neither paginated call (maxResults on line 6, "
+        f"max_results on line 9); it reported {offenders!r}"
     )
-    tree = ast.parse(synthetic.read_text())
-    found = [
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr == "search_issues"
-        and not ({"maxResults", "max_results"} & {kw.arg for kw in n.keywords})
-    ]
-    assert found, "the AST audit does not detect an unpaginated search_issues call"
 
 
 @pytest.mark.parametrize("method", ["get_issuelinks_map", "get_comment_map", "get_parent_map"])

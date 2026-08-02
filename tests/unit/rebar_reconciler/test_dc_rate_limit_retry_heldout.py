@@ -135,12 +135,19 @@ def test_every_mutating_transport_member_still_fails_on_the_first_429(
     for name, call in mutations.items():
         attempts.clear()
         no_sleep.clear()
-        with pytest.raises(Exception):  # noqa: B017 - the TYPE is asserted per-member below
+        with pytest.raises(BackendHTTPError) as caught:
             call()
+        assert caught.value.code == 429, (
+            f"{name} surfaced HTTP {caught.value.code}, not the 429 the client raised — the "
+            f"translation lost the status, so callers cannot tell a rate limit from anything "
+            f"else"
+        )
         total = sum(attempts.values())
-        assert total <= 1, (
-            f"{name} issued {total} client calls under a 429 — a mutation retried on an HTTP "
-            f"error is the duplicate-issue class bug 21fc fixed"
+        assert total == 1, (
+            f"{name} issued {total} client calls under a 429 — exactly one is the contract. "
+            f"More than one is the duplicate-issue class bug 21fc fixed; ZERO means the "
+            f"member failed BEFORE reaching the client, so the 429 branch was never "
+            f"exercised and this member is not actually covered"
         )
         assert no_sleep == [], f"{name} slept on a 429; mutations must fail fast"
 

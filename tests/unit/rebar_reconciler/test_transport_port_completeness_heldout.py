@@ -190,13 +190,82 @@ def test_identity_of_prefers_accountId_over_name() -> None:
     ), "accountId must WIN when both are present, or Cloud regresses"
 
 
+#: The shape a Cloud accountId takes. DC has no such thing, so a DC return that looks
+#: like this is a mis-identified user, not a username.
+_ACCOUNT_ID_SHAPED = "5b10a2844c20165700ede21g"
+
+
 def test_validate_assignee_exists_returns_the_dc_username(monkeypatch) -> None:
     """HELD-OUT edge. `outbound_assignee.py:108-109` does `acct = client.validate_...` then
     `return (acct or None, True, False)` — the value flows on AS the resolved identity.
     Cloud returns an accountId; DC has none, so DC must return the USERNAME. Returning
-    `True`, or an accountId-shaped value, corrupts the identity."""
-    cls = _dc_transport_class()
-    assert hasattr(cls, "validate_assignee_exists")
+    `True`, or an accountId-shaped value, corrupts the identity.
+
+    Presence is NOT the contract here — the parametrized member-set test above already
+    asserts `hasattr`, so a `hasattr` check adds nothing. This one CALLS the member and
+    pins the returned VALUE, which is the part that flows on as the identity.
+    """
+    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    class _MatchingClient:
+        """Exact match on `name`, with an accountId also present on the record —
+        so a transport that reached for the Cloud-shaped field would be visible."""
+
+        def search_users(self, user=None, maxResults=50, **kw):  # noqa: N803
+            return [
+                {"name": "dcuser-other", "emailAddress": "o@x", "displayName": "Other"},
+                {
+                    "name": "dcuser",
+                    "emailAddress": "d@x",
+                    "displayName": "DC User",
+                    "accountId": _ACCOUNT_ID_SHAPED,
+                },
+            ]
+
+    transport = JiraDataCenterTransport.__new__(JiraDataCenterTransport)
+    transport._client = _MatchingClient()  # type: ignore[attr-defined]
+
+    resolved = transport.validate_assignee_exists("dcuser", project_key="DC")
+
+    assert resolved == "dcuser", (
+        f"DC must resolve to the USERNAME that flows on as the identity; got {resolved!r}"
+    )
+    assert isinstance(resolved, str) and not isinstance(resolved, bool), (
+        f"a bool return is truthy, so `acct or None` keeps it and the identity becomes "
+        f"`True`; got {resolved!r} of type {type(resolved).__name__}"
+    )
+    assert resolved != _ACCOUNT_ID_SHAPED, (
+        "DC returned the Cloud-shaped accountId from the user record — DC identities are "
+        "minted under `name`, so this would mis-identify every DC assignee"
+    )
+
+
+def test_cloud_validate_assignee_exists_returns_the_account_id_not_the_username() -> None:
+    """The OTHER half of the same contract, and it is deliberately DIFFERENT: Cloud's
+    resolved identity is the `accountId`, not the display name or email. Asserting only
+    the DC half would leave the divergence itself untested — and the two implementations
+    are the pair most likely to be "harmonised" by mistake."""
+    from rebar_reconciler.adapters.jira.acli import AcliClient
+
+    client = AcliClient.__new__(AcliClient)
+    client._direct_rest_get = lambda _path: [  # type: ignore[method-assign]
+        {
+            "accountId": _ACCOUNT_ID_SHAPED,
+            "emailAddress": "d@x",
+            "displayName": "DC User",
+        }
+    ]
+
+    resolved = client.validate_assignee_exists("d@x", project_key="CLOUD")
+
+    assert resolved == _ACCOUNT_ID_SHAPED, (
+        f"Cloud must resolve to the accountId — the caller forwards this value to ACLI as "
+        f"the assignee identity, and an email or display name there is ambiguous; got "
+        f"{resolved!r}"
+    )
+    assert isinstance(resolved, str) and not isinstance(resolved, bool), (
+        f"a bool return is truthy and survives `acct or None`; got {resolved!r}"
+    )
 
 
 def test_dc_transport_has_a_logger() -> None:
