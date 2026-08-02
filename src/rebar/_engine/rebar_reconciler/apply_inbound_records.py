@@ -105,14 +105,21 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
     if not isinstance(assignee, dict):
         return
     external_id = ""
-    for key in ("accountId", "name"):  # Cloud key first, then DC's
+    # Cloud's key first, then DC's, then ``account_id`` — the CANONICAL
+    # ``assignee_identity`` shape the inbound differ forwards on an UPDATE (bug 8d68).
+    # ``_identity_of:154-179`` already resolved accountId-or-DC-username into that one key,
+    # with accountId winning, so reading it here inherits 5f48's precedence rather than
+    # restating it. The dict guard above is deliberately NOT relaxed to accept a bare string:
+    # on DC the scalar assignee happens to be the username, but on Cloud it is the DISPLAY
+    # NAME, and minting on it would register every Cloud user under the wrong external id.
+    for key in ("accountId", "name", "account_id"):
         candidate = assignee.get(key)
         if isinstance(candidate, str) and candidate.strip():
             external_id = candidate
             break
     if not external_id:
         return
-    display_name = _extract_name(assignee)
+    display_name = _extract_name(assignee) or assignee.get("display") or ""
     try:
         import rebar
         from rebar.config import load_config
@@ -370,8 +377,15 @@ def _inbound_update_write_edit_event(
 
     # 2f13 (additive): mint/reuse a ghost identity for the inbound assignee when it
     # carries an opaque accountId — best-effort, never fails the update.
+    # Bug 8d68: key on the CANONICAL identity the differ forwards, not on ``fields["assignee"]``
+    # — that is a bare STRING here (the differ's local-keyed shape, see this function's opening
+    # comment), and the mint rejects a non-dict, so this call silently did nothing on every
+    # inbound EDIT. The raw-object fallback keeps a caller that BYPASSES the differ (and so
+    # still passes the Jira user object under ``assignee``) working exactly as before.
     if "assignee" in fields:
-        _ensure_inbound_assignee_identity(fields["assignee"], repo_root)
+        _ensure_inbound_assignee_identity(
+            fields.get("assignee_identity") or fields["assignee"], repo_root
+        )
 
     if edit_fields:
         path = _write_event_file(tracker_dir, local_id, "EDIT", {"fields": edit_fields})
