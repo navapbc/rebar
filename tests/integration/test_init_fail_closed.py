@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +67,33 @@ def _env(repo: Path) -> dict[str, str]:
     env["REBAR_SYNC_PUSH"] = "off"
     env["REBAR_SYNC_PULL"] = "off"
     env.pop("REBAR_TRACKER_DIR", None)
+    return env
+
+
+def _env_with_failing_fetch(repo: Path, tmp_path: Path) -> dict[str, str]:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    shim_dir = tmp_path / "git-shim"
+    shim_dir.mkdir()
+    shim = shim_dir / "git"
+    shim.write_text(
+        f"""#!{sys.executable}
+import os
+import sys
+
+if "fetch" in sys.argv[1:]:
+    print("injected fetch failure", file=sys.stderr)
+    raise SystemExit(1)
+
+real_git = os.environ["REBAR_TEST_REAL_GIT"]
+os.execv(real_git, [real_git, *sys.argv[1:]])
+""",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    env = _env(repo)
+    env["REBAR_TEST_REAL_GIT"] = real_git
+    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
     return env
 
 
@@ -135,36 +163,45 @@ def test_library_override_is_required_for_unreachable_remote(tmp_path: Path) -> 
 
 def test_force_cannot_override_an_advertised_branch_fetch_failure(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     remote, _sha = _bare_remote(tmp_path, advertised=True)
     repo = _host_repo(tmp_path, remote=remote)
-    monkeypatch.setattr(
-        init,
-        "_git_fetch",
-        lambda *_a, **_k: subprocess.CompletedProcess(
-            ["git", "fetch", "origin", "tickets"], 1, "", "injected fetch failure"
-        ),
+
+    result = subprocess.run(
+        [sys.executable, "-m", "rebar", "init", "--force-new-store"],
+        cwd=repo,
+        env=_env_with_failing_fetch(repo, tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
 
-    assert init.init_core(repo, force_new_store=True) != 0
+    assert result.returncode != 0
     assert not (repo / ".tickets-tracker").exists()
-    err = capsys.readouterr().err
-    assert "no effect" in err and "origin" in err and "tickets" in err
-    assert "fetch" in err and "retry" in err
+    assert _git(repo, "show-ref", "--verify", "refs/heads/tickets", check=False).returncode != 0
+    assert "no effect" in result.stderr and "origin" in result.stderr
+    assert "tickets" in result.stderr and "fetch" in result.stderr
+    assert "retry" in result.stderr
 
 
 def test_force_warns_but_preserves_reachable_absent_bootstrap(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     remote, _sha = _bare_remote(tmp_path, advertised=False)
     repo = _host_repo(tmp_path, remote=remote)
 
-    assert init.init_core(repo, force_new_store=True) == 0
+    result = subprocess.run(
+        [sys.executable, "-m", "rebar", "init", "--force-new-store"],
+        cwd=repo,
+        env=_env(repo),
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
     assert (repo / ".tickets-tracker").is_dir()
-    assert "no effect" in capsys.readouterr().err
+    assert "no effect" in result.stderr
 
 
 def test_best_effort_unreachable_does_not_mount_or_prompt_and_strict_reuses_probe(
