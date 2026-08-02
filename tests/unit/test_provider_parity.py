@@ -189,6 +189,59 @@ def test_error_classification_precedence_is_ordered() -> None:
     assert pp.classify_error("connection reset by peer") == pp.GENERIC
 
 
+def test_each_arms_config_reaches_every_worker_under_concurrency() -> None:
+    """The split-brain guard. Items run in parallel, and a bare thread does NOT inherit the
+    `gate_config` ContextVar — a worker would then resolve the AMBIENT model and the "Bedrock"
+    arm would silently measure something else. Every worker must see its OWN arm's model."""
+    from rebar.llm.config import resolve_gate_config
+
+    seen: dict[str, set[str]] = {"v1": set(), "v2": set()}
+
+    def spy(arm: str):
+        def solve(item: pp.CorpusItem) -> dict:
+            seen[arm].add(str(resolve_gate_config().model))
+            return {"verdict": "FAIL" if item.label == "block" else "PASS"}
+
+        return solve
+
+    items = _fixture_corpus()
+    v1_cfg = LLMConfig(runner="fake", model="claude-sonnet-4-6")
+    v2_cfg = LLMConfig(runner="fake", model="bedrock:us.anthropic.claude-sonnet-4-6")
+    block = pp.run_slot(
+        "standard",
+        items,
+        v1_config=v1_cfg,
+        v2_config=v2_cfg,
+        v1_solve=spy("v1"),
+        v2_solve=spy("v2"),
+        epochs=1,
+        concurrency=6,
+    )
+    assert seen["v1"] == {"claude-sonnet-4-6"}
+    assert seen["v2"] == {"bedrock:us.anthropic.claude-sonnet-4-6"}
+    assert block["passed"] is True
+
+
+def test_concurrency_keeps_records_aligned_with_the_corpus_order() -> None:
+    """Records must stay index-aligned with `items` regardless of thread scheduling, or the
+    paired comparison would diff unrelated cases."""
+    items = _fixture_corpus()
+    block = pp.run_slot(
+        "standard",
+        items,
+        v1_config=_cfg(),
+        v2_config=_cfg(),
+        v1_solve=_solver(),
+        v2_solve=_solver(flip={"B03"}),
+        epochs=1,
+        concurrency=6,
+    )
+    assert [r["case_id"] for r in block["records"]] == [i.case_id for i in items]
+    flipped = [r for r in block["records"] if r["v1"]["decision"] != r["v2"]["decision"]]
+    assert [r["case_id"] for r in flipped] == ["B03"]
+    assert block["metrics"]["decision_flips"] == 1
+
+
 # ── 3. the corpus selector ──────────────────────────────────────────────────────────
 def test_the_corpus_excludes_every_agentic_solver_and_clears_the_gold_floor() -> None:
     eligible = pp.eligible_cases()
