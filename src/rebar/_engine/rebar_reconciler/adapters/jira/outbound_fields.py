@@ -35,6 +35,14 @@ from typing import Any
 from rebar_reconciler.adapters.jira_family import LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY
 from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL_TO_JIRA_STATUS
 
+# Story bd9e (epic 3e73) extended the same de-duplication to the local->Jira TYPE
+# map, whose second copy lived in ``adapters/jira_datacenter/backend.py``; both
+# copies were content-identical, so the move is behaviour-preserving. Kept under
+# the historical private name because it is read as a MODULE ATTRIBUTE by
+# ``tests/.../diffing/test_outbound_differ_session_log_exclusion.py``. Absolute
+# import for the same ``spec_from_file_location`` reason as above.
+from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE
+
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
     """Read ``REBAR_<name>`` from the environment."""
@@ -79,18 +87,6 @@ def _load_adf():
     if _AdfModule is None:
         _AdfModule = lazy_load(_ADF_KEY, "adapters/jira/adf.py")
     return _AdfModule
-
-
-# ---------------------------------------------------------------------------
-# Field mapping constants
-# ---------------------------------------------------------------------------
-
-_LOCAL_TO_JIRA_TYPE: dict[str, str] = {
-    "bug": "Bug",
-    "story": "Story",
-    "task": "Task",
-    "epic": "Epic",
-}
 
 
 # ---------------------------------------------------------------------------
