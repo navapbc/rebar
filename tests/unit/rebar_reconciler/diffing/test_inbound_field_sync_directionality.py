@@ -132,3 +132,95 @@ def test_no_prev_degrades_to_local_wins(differ):
     assert changed.get("assignee") == "alice@x.com", (
         "without prev, behaviour is unchanged local-wins"
     )
+
+
+# --- title, on the LIVE canonical path (outbound_field_diff) --------------------
+#
+# The cases above drive ``adapters/jira/outbound_fields._diff_fields``, which no
+# production caller reaches any more: since ticket 625b the pass runs
+# ``outbound_field_diff.diff_canonical_fields`` (outbound_differ.py imports
+# ``compute_update_fields`` from it). ``title`` is the one inbound-mirrored field
+# whose local and Jira names differ (``title`` vs ``summary``), and it is the field
+# the module docstring above names first — so it is pinned here against the module
+# the pass actually executes.
+
+
+def _canonical(**ov) -> dict:
+    """A canonical (LOCAL-shaped) field dict, the shape the InboundMapper emits."""
+    f = {
+        "title": "T",
+        "description": "D",
+        "priority": 2,
+        "status": "open",
+        "assignee": "",
+    }
+    f.update(ov)
+    return f
+
+
+class _PassthroughOutboundMapper:
+    """The OutboundMapper port, reduced to the two operations the diff calls."""
+
+    def map_fields_to_remote(self, changed, **_kw):
+        return dict(changed)
+
+    def resolve_assignee(self, local_value, _remote_identity):
+        return (local_value, False, False)
+
+
+def _live_diff(ticket: dict, remote: dict, baseline: dict | None) -> dict:
+    from rebar_reconciler.outbound_field_diff import diff_canonical_fields
+
+    return diff_canonical_fields(
+        ticket,
+        remote,
+        baseline,
+        outbound_mapper=_PassthroughOutboundMapper(),
+        jira_key="DIG-1",
+        local_id="loc-1",
+    )
+
+
+def test_jira_side_title_change_suppressed_on_the_canonical_path() -> None:
+    """A Jira-side SUMMARY edit, with local unchanged since the baseline, must NOT be
+    reverted by an outbound local-wins push.
+
+    ADR 0026 names the arbitrated set as the five inbound-mirrored scalar fields
+    ``title``/``description``/``priority``/``status``/``assignee`` and mandates
+    "local == baseline -> mirror Jira inbound (suppress outbound)". Emitting ``title``
+    here makes the inbound differ drop its own title update as a contradiction
+    (inbound_differ bidirectional suppression, bug 3bf8), so the Jira-side title never
+    reaches the local ticket and the stale local title is pushed back over it.
+    """
+    baseline = _canonical(title="OLD")
+    ticket = {"ticket_id": "loc-1", "ticket_type": "task", **_canonical(title="OLD")}
+    remote = _canonical(title="NEW from Jira")
+
+    changed = _live_diff(ticket, remote, baseline)
+
+    assert "title" not in changed, (
+        "a Jira-side title edit must mirror inbound, not be reverted by local-wins; "
+        f"changed={ {k: v for k, v in changed.items() if not k.startswith('_')} }"
+    )
+
+
+def test_local_title_change_still_emits_on_the_canonical_path() -> None:
+    """The other half of the arbitration: local != baseline is a genuine local edit,
+    so local-wins still pushes the title outbound."""
+    baseline = _canonical(title="OLD")
+    ticket = {"ticket_id": "loc-1", "ticket_type": "task", **_canonical(title="locally edited")}
+    remote = _canonical(title="OLD")
+
+    changed = _live_diff(ticket, remote, baseline)
+
+    assert changed.get("title") == "locally edited", "a genuine local title edit still pushes"
+
+
+def test_title_without_a_baseline_degrades_to_local_wins() -> None:
+    """No ancestor for ``title`` -> no arbitration possible -> unchanged local-wins."""
+    ticket = {"ticket_id": "loc-1", "ticket_type": "task", **_canonical(title="LOCAL")}
+    remote = _canonical(title="NEW from Jira")
+
+    assert _live_diff(ticket, remote, None).get("title") == "LOCAL"
+    # A baseline that simply omits ``title`` is the same "no ancestor" case.
+    assert _live_diff(ticket, remote, {"description": "D"}).get("title") == "LOCAL"

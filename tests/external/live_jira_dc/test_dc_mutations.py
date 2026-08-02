@@ -527,12 +527,39 @@ def test_inbound_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Rows 10-11 inbound: a Jira issue link surfaces as a local dep, and its removal removes it."""
+    """Rows 10-11 inbound: a Jira issue link surfaces as a local dep, and its removal removes it.
+
+    THE FAR END MUST BE BOUND *AND* LOCALLY PRESENT BEFORE THE LINK PASS. The inbound link
+    translator resolves the counterpart through the binding store and skips an unresolvable
+    one — `inbound_differ.py:402-404`, "unbound — retry next pass" — and then skips again when
+    the counterpart is missing from the pass's active local set (`inbound_differ.py:409-412`,
+    built once at pass start from `rebar list`). Neither can be satisfied within the SAME pass
+    that first imports the target: the inbound differ runs before the binding walk that adopts
+    it (`run_differs.py:586` then `:688`). A single-pass version of this cell therefore
+    asserted an outcome that is structurally unreachable and reported an empty `deps` as a
+    bridge defect. `test_outbound_link_round_trips` below already carries the same priming
+    pass, with the same reasoning, which is why it passes.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
     local_id, key = bound_dc_issue
     other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 link target"))
     other_local = _jira_key_to_local_id(other)
+
+    # Priming pass: import + bind the link TARGET, so the link pass can resolve it.
+    scope = f"{local_id},{key},{other_local},{other}"
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the link target raised:\n{cp.stderr}"
+    bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
+    assert bound_other == other, (
+        f"SETUP FAILED: the link target {other_local} is not bound (got {bound_other!r}); an "
+        f"inbound link naming an unresolvable target is skipped, not attempted."
+    )
+    assert _local(dc_store_copy_repo, other_local).get("ticket_id") == other_local, (
+        f"SETUP FAILED: the link target {other_local} is bound but not in the ACTIVE local set; "
+        f"the inbound differ refuses to mirror a dep onto a dormant counterpart."
+    )
 
     dc_transport.set_relationship(key, other, "Blocks")
     deadline = time.monotonic() + 90.0
@@ -543,7 +570,7 @@ def test_inbound_link_round_trips(
     else:  # pragma: no cover
         raise AssertionError(f"the issue link never became readable on {key}")
 
-    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key},{other_local},{other}")
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"inbound link pass raised:\n{cp.stderr[-2000:]}"
 
     deps = _local(dc_store_copy_repo, local_id).get("deps") or []
@@ -634,24 +661,40 @@ def test_set_parent_declines_the_epic_case_loudly(
 
 
 # ---------------------------------------------------------------------------
-# Row 14 — deletion, observed as an inbound absence probe
+# Row 14 — deletion never plans a teardown of the local side (ADR 0028 §1)
 # ---------------------------------------------------------------------------
 
 
 @_skip
 @_skip_no_extra
-def test_a_deleted_dc_issue_is_planned_as_an_inbound_probe(
+def test_a_deleted_dc_issue_never_plans_a_local_teardown(
     dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
 ) -> None:
-    """Row 14 inbound: deleting the DC issue makes the next pass PLAN an (inbound, probe).
+    """Row 14 inbound: deleting the DC issue must NOT plan any teardown of the local side.
 
-    The probe — not a delete — is the correct observable: rebar does not tear down a local
-    ticket because a remote read failed once. `differ.py:630-650` emits the probe only for a
-    local entry that ALREADY has a binding, which is exactly what `bound_dc_issue` guarantees,
-    so this cell cannot pass for the trivial reason that no binding existed.
+    ORACLE CORRECTED. This cell previously asserted an `(inbound, probe)` plan entry and cited
+    `differ.py:630-650` as its emitter. That citation was wrong and the assertion was
+    unsatisfiable: `_compute_mutations_emit_absent_partner_probes` reads
+    `local_state[key]["jira_key"]`, but its only production caller passes the PREVIOUS JIRA
+    SNAPSHOT as `local_state` (`run_differs.py:222` — `compute_mutations(ctx.prev_snapshot,
+    ctx.curr_snapshot, ...)`), and a snapshot entry is the raw Jira `fields` dict
+    (`fetcher.py:479`, contract shape `_snapshot_schema.py:96-135`) which carries no
+    `jira_key`. So that loop never fires in production and NOTHING emits an `(inbound, probe)`
+    for a bound pair whose local ticket is active. The pair's real owner is the outbound
+    differ's bounded direct GET, which on a confirmed 404 records the absence toward grace and
+    deliberately emits no mutation (`outbound_differ.py:692-702`); `binding_walk.py:167-170`
+    skips active-local pairs precisely to leave them to it.
 
-    Asserted from a DRY-RUN plan so the deletion's consequence is observed without applying
-    anything to the store copy.
+    THE AUTHORITATIVE OBSERVABLE IS THE ONE THIS DOCSTRING ALWAYS DESCRIBED — "rebar does not
+    tear down a local ticket because a remote read failed once". ADR 0028 §1: snapshot-absence
+    is NOT a signal of deletion, and no destructive or terminal action may be driven by it;
+    deletion is proven only by a bounded GET 404 counted to grace (§2). So the assertion is
+    that the plan carries NO local teardown for this pair and the local ticket survives.
+
+    Asserted from a DRY-RUN. That is not merely tidiness here: a writing pass over a key that
+    has left the snapshot also plans an `(outbound, create)` for it, which is a separate
+    finding filed on its own — running this cell in a writing mode would file a duplicate
+    issue into the harness.
     """
     local_id, key = bound_dc_issue
 
@@ -659,16 +702,26 @@ def test_a_deleted_dc_issue_is_planned_as_an_inbound_probe(
 
     cp = _run(dc_store_copy_repo, "dry-run", only=f"{local_id},{key}")
     plan = _envelope(cp).get("plan", [])
-    probes = [
+    mine = [e for e in plan if e.get("local_id") == local_id or key in str(e.get("target"))]
+    teardown = [
         e
-        for e in plan
-        if e.get("direction") == "inbound"
-        and e.get("action") == "probe"
-        and (key in str(e.get("target")) or e.get("local_id") == local_id)
+        for e in mine
+        if e.get("action") in ("delete", "retire", "archive")
+        or (e.get("direction") == "inbound" and e.get("action") == "conflict")
     ]
-    assert probes, (
-        f"deleting {key} did not produce an inbound probe for {local_id}. Plan entries for this "
-        f"pair: {[e for e in plan if e.get('local_id') == local_id or key in str(e.get('target'))]}"
+    assert not teardown, (
+        f"deleting {key} planned a local teardown for {local_id}, but ADR 0028 §1 forbids any "
+        f"destructive action driven by snapshot absence. Teardown entries: {teardown}. "
+        f"All entries for this pair: {mine}"
+    )
+
+    survivor = _local(dc_store_copy_repo, local_id)
+    assert survivor.get("ticket_id") == local_id, (
+        f"the local ticket {local_id} did not survive a pass over its hard-deleted DC partner"
+    )
+    assert survivor.get("status") not in ("deleted", "archived"), (
+        f"the local ticket {local_id} was torn down to {survivor.get('status')!r} because its "
+        f"DC partner was deleted — ADR 0028 §1 forbids acting on absence alone"
     )
 
 
