@@ -43,6 +43,7 @@ from typing import Any
 
 import pytest
 from _dc_support import ADMIN_USER, BASE, live_jira_ready
+from _dc_support import assert_mint_registered as _assert_mint_registered
 from _dc_support import envelope as _envelope
 from _dc_support import forget_identity_mapping as _forget_identity_mapping
 from _dc_support import read_local_ticket as _local
@@ -852,24 +853,7 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
     assert "Traceback" not in cp.stderr, f"inbound assignee pass raised:\n{cp.stderr[-2000:]}"
 
-    minted = rebar.resolve_mapping("jira", ADMIN_USER, repo_root=dc_store_copy_repo)
-    assert minted is not None, (
-        f"THE PASS MINTED NOTHING: jira/{ADMIN_USER!r} still resolves to no identity in the "
-        f"store copy after an inbound pass that carried that assignee. This is bug 5f48's "
-        f"silent-swallow signature — the mint is best-effort and swallows its own failure, so "
-        f"the registry is the only place it is observable."
-    )
-    assert rebar.is_placeholder(minted, repo_root=dc_store_copy_repo), (
-        f"the identity the pass minted for {ADMIN_USER!r} ({minted!r}) is not a PLACEHOLDER. "
-        f"The inbound mint is documented to create a GHOST identity a later outbound pass can "
-        f"key on; a non-placeholder means it adopted or overwrote a real person's identity."
-    )
-    forked = rebar.resolve_mapping("jira-datacenter", ADMIN_USER, repo_root=dc_store_copy_repo)
-    assert forked is None, (
-        f"the DC pass ALSO minted under a `jira-datacenter` provider ({forked!r}), forking the "
-        f"identity namespace the epic decided the two deployments share. The deployment belongs "
-        f"in `RemoteRef.instance`, not in the provider string."
-    )
+    _assert_mint_registered(dc_store_copy_repo, ADMIN_USER)
 
     # And, separately, that the human-readable name reached the ticket — the OTHER half of the
     # additive contract. Asserted as its own statement so "no identity" and "no assignee" are
