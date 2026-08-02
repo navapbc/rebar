@@ -238,8 +238,10 @@ def test_listing_preserves_global_index() -> None:
     listing = kverify.verify_instructions([(3, _fnd("f3")), (4, _fnd("f4"))])
     assert "indices 3–4" in listing
     assert "### finding index 3" in listing and "### finding index 4" in listing
-    # an empty batch is a benign header (the single aggregate call with no findings)
-    assert "Emit one verification per finding" in kverify.verify_instructions([])
+    # an empty batch states the empty-array contract (the single aggregate call with no
+    # findings must not solicit verifications for indices that cannot exist)
+    assert kverify.verify_instructions([]) == kverify.EMPTY_BATCH_INSTRUCTIONS
+    assert "empty verifications array" in kverify.verify_instructions([])
 
 
 def test_chunks_split_over_budget_preserving_global_indices() -> None:
