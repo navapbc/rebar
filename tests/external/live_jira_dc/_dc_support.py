@@ -193,3 +193,51 @@ def read_local_ticket(repo: Path, local_id: str) -> dict[str, Any]:
     import rebar
 
     return rebar.show_ticket(local_id, repo_root=repo)
+
+
+def forget_identity_mapping(repo: Path, provider: str, external_id: str) -> list[str]:
+    """Remove every identity in the STORE COPY that maps ``(provider, external_id)``.
+
+    Returns the ids removed (possibly empty). Used to (re-)establish the "this user has no
+    identity yet" precondition an inbound-mint oracle needs.
+
+    WHY THIS IS NEEDED AT ALL, since the fixture's scrub already leaves the copy identity-free.
+    It does: every identity on the real `tickets` branch carries ``mappings: []``, so nothing
+    in the copied store maps a Jira user. The pre-existing mapping the oracle trips over is
+    minted DURING the test, by `bound_dc_issue`'s own binding pass — the seeded issue is
+    default-assigned to the project lead (the harness admin, `conftest._create_scratch_project`
+    passes ``lead=admin`` and no ``assigneeType``), and `_apply_inbound_create`
+    (`apply_inbound_records.py:200-203`) mints on any inbound ``fields["assignee"]``. So the
+    subject cannot simply be "a user the scrub leaves unmapped": the scrub leaves them ALL
+    unmapped, and the fixture re-mints whichever one the seeded issue is assigned to.
+
+    Removal is a directory removal against the throwaway copy, matching how the fixture's own
+    scrub removes `.bridge_state*` (`conftest.py:581-583`). There is no library delete for a
+    ticket, and `identity._iter_identities` reads the WORKING TREE, so this is what makes
+    `resolve_mapping` miss. The loop drains multiple carriers of the same mapping and refuses
+    to spin: a second sighting of an id already removed is raised rather than retried.
+    """
+    import shutil
+
+    import rebar
+
+    removed: list[str] = []
+    tracker = Path(repo) / ".tickets-tracker"
+    while True:
+        identity_id = rebar.resolve_mapping(provider, external_id, repo_root=repo)
+        if identity_id is None:
+            return removed
+        if identity_id in removed:
+            raise AssertionError(
+                f"{provider}/{external_id!r} still resolves to {identity_id!r} after that "
+                f"identity was removed from {tracker} — removal is not what makes "
+                f"resolve_mapping miss, so the oracle's precondition cannot be established"
+            )
+        directory = tracker / identity_id
+        if not directory.is_dir():
+            raise AssertionError(
+                f"{provider}/{external_id!r} resolves to {identity_id!r} but there is no "
+                f"ticket directory at {directory} to remove"
+            )
+        shutil.rmtree(directory)
+        removed.append(identity_id)
