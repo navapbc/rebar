@@ -59,9 +59,15 @@ steps:
         with:
           subject_plan: ${{ steps.precheck.outputs.subject_plan }}
           relation_snapshot: ${{ steps.precheck.outputs.relation_snapshot }}
+        # Pass-1 GENERATES the findings that become blocking, so it runs on the FRONTIER class
+        # (ticket 77ed). Pass-2 verify and Pass-4 coach run on `standard` instead — that downgrade
+        # is deliberate and lives in `_verifier_cfg`; this rung must not be conflated with it.
+        #
+        # ONLY RUNG 0 IS READ: every consumer takes `model_ladder[0]` and nothing else, and the
+        # full list is journaled for observability only. Context-limit escalation comes from the
+        # separate `sizing.MODEL_LADDER` (bug 7de4), so a second rung here would be decorative
+        # rather than a fallback.
         model_ladder:
-        - trivial
-        - standard
         - frontier
         criteria:
         - prompt: plan-review-A1

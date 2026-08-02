@@ -220,11 +220,19 @@ def test_plan_review_yaml_ladder_carries_no_literal_model_id() -> None:
     """AC: `grep -n "claude-" plan-review.yaml` returns no model_ladder entry."""
     import yaml
 
+    from rebar.llm.model_classes import CLASS_NAMES
+
     doc = yaml.safe_load(_PLAN_REVIEW_YAML.read_text())
     ladders = _collect_ladders(doc)
     assert ladders, "no model_ladder found in plan-review.yaml — the AC would pass vacuously"
     for ladder in ladders:
-        assert ladder == ["trivial", "standard", "frontier"], ladder
+        # This checks THIS test's stated AC — every entry names a model CLASS, so no literal
+        # vendor id can pin the gate to one provider. It deliberately does NOT pin the exact
+        # list: the entry rung is a separate, ticketed decision (77ed moved it to `frontier`,
+        # restoring the opus finder), and only rung 0 is ever read. Asserting the exact triple
+        # made an unrelated policy change look like a regression in the class-vocabulary AC.
+        assert ladder, ladder
+        assert all(e in CLASS_NAMES for e in ladder), ladder
         assert not [e for e in ladder if "claude-" in e]
 
 

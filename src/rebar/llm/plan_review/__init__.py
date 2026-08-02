@@ -68,10 +68,14 @@ def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
 
     Still applied on cfg rather than as a static per-step ``model:`` in ``gates/plan-review.yaml``,
     because ``resolve_model`` precedence is ``step > workflow > cfg`` — a literal step model would
-    always beat the operator's configuration. The Pass-1 finder is unaffected: it runs the
-    YAML
-    ``model_ladder`` via the ProductionBatchRunner (ticket 7761 expresses those rungs as
-    classes)."""
+    always beat the operator's configuration.
+
+    "THE PASS-1 FINDER IS UNAFFECTED" IS AN INVARIANT, NOT AN OBSERVATION — this result becomes the
+    WHOLE RUN's cfg at the ``produce_plan_review_verdict`` boundary, so the runner is built from it
+    and Pass-1 will inherit this downgrade unless two things hold: ``RunRequest.config`` takes
+    precedence over the runner's own (b690), and the Pass-1 ladder's entry rung names ``frontier``
+    (77ed). Both are pinned by ``tests/unit/test_pass1_finder_model.py``, which asserts the model
+    REACHING THE RUNNER — the YAML declaration alone is not evidence. See 77ed for the history."""
     from dataclasses import replace
 
     from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
