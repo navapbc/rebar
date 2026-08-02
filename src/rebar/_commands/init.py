@@ -1,18 +1,11 @@
 """In-process ``init`` — bootstrap the event-sourced ticket store.
 
-Port of ticket-init.sh. Creates (or mounts) the orphan ``tickets`` branch as a
-linked worktree at ``.tickets-tracker/``, commits ``.gitignore`` +
-``.pre-commit-config.yaml`` + ``.gitattributes`` (``merge=ours`` for the per-pass
-mutable root files) on it, generates ``.env-id`` + ``.signing-key``,
-normalizes gc config (``--unset gc.auto`` + ``gc.autoDetach=false`` +
-``maintenance.autoDetach=false`` — keep stock ``git gc`` but run it FOREGROUND so a
-background repack of the shared object DB never races concurrent writers, bug 88eb /
-ADR 0051; see the ``gc-config`` ensure unit ``_gc_config_unit`` run via
-``rebar._store.ensures.run_ensures``),
-and excludes the tracker from the host repo. Idempotent: re-running on an
-initialized repo recovers any stale rebase/merge on the tickets branch, re-applies
-the gc-config migration, and returns 0. A 30s mkdir lock
-(``.git/ticket-init.lock``) serializes concurrent inits.
+Creates or mounts the ``tickets`` branch as a linked worktree at
+``.tickets-tracker/``. Fresh stores commit their bootstrap files, generate local
+identity/signing material, and normalize GC plus merge-driver configuration through
+the ensure registry. Existing stores converge idempotently on re-init. Remote branch
+discovery fails closed when reachability is unknown so a transient fetch problem
+cannot split ticket history. A 30-second mkdir lock serializes concurrent inits.
 
 init resolves the repo from the git toplevel of ``repo_root`` (or cwd) — it
 deliberately ignores an inherited repo-root override (it must initialize the
@@ -29,6 +22,7 @@ import sys
 import time
 import uuid
 
+from rebar._commands import _init_probe
 from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
 from rebar._store.gitutil import run_git, run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
@@ -98,15 +92,12 @@ _FETCH_TIMEOUT = 300
 
 
 def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    try:
-        return run_git(cwd, *args, check=False, timeout=_FETCH_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", *args],
-            124,
-            "",
-            f"git {' '.join(args)} timed out after {_FETCH_TIMEOUT}s",
-        )
+    return _init_probe.run_bounded_git(
+        cwd,
+        *args,
+        timeout=_FETCH_TIMEOUT,
+        run_git_fn=run_git,
+    )
 
 
 def _git_ok(cwd: str, *args: str) -> bool:
@@ -247,7 +238,7 @@ def _exclude(git_dir: str, *entries: str) -> None:
                 lines.append(e)
 
 
-def init_core(repo_root=None, *, silent: bool = False) -> int:
+def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = False) -> int:
     """Bootstrap (or verify) the tracker. Returns 0 on success / already-init,
     1 on a fatal error (message already emitted to stderr)."""
     repo = _resolve_repo_root(repo_root)
@@ -313,7 +304,7 @@ def init_core(repo_root=None, *, silent: bool = False) -> int:
         sys.stderr.write("Error: could not acquire ticket-init lock within 30s\n")
         return 1
     try:
-        rc = _mount_or_create_branch(repo, tracker)
+        rc = _mount_or_create_branch(repo, tracker, force_new_store=force_new_store)
         if rc != 0:
             return rc
         # Fresh-init-only bootstrap (NOT ensure-registry units): these run once at
@@ -380,7 +371,13 @@ def _acquire_init_lock(lock_dir: str) -> bool:
     return False
 
 
-def _mount_or_create_branch(repo: str, tracker: str) -> int:
+def _warn_force_no_effect(reason: str) -> None:
+    sys.stderr.write(
+        f"WARNING: --force-new-store has no effect because {reason}; continuing normally.\n"
+    )
+
+
+def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = False) -> int:
     from rebar.config import tickets_branch, tickets_remote
 
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
@@ -388,12 +385,16 @@ def _mount_or_create_branch(repo: str, tracker: str) -> int:
     local = _git_ok(repo, "rev-parse", "--verify", branch)
     remote = _git_ok(repo, "rev-parse", "--verify", f"{remote_name}/{branch}")
     if local:
+        if force_new_store:
+            _warn_force_no_effect("the local ticket branch exists")
         cp = _git(repo, "worktree", "add", tracker, branch)
         if cp.returncode != 0:
             sys.stderr.write(f"ERROR: git worktree add (local branch) failed: {cp.stderr}\n")
             return 1
         return 0
     if remote:
+        if force_new_store:
+            _warn_force_no_effect("the remote-tracking ticket branch exists")
         fetch = _git_fetch(repo, "fetch", remote_name, branch)
         if fetch.returncode != 0:
             # Non-fatal: the remote-tracking ref already exists (that is why this arm
@@ -410,6 +411,40 @@ def _mount_or_create_branch(repo: str, tracker: str) -> int:
             sys.stderr.write(f"ERROR: git worktree add (remote branch) failed: {cp.stderr}\n")
             return 1
         return 0
+    if _init_probe.remote_exists(repo, remote_name, run_git_fn=run_git):
+        state = _init_probe.probe_remote_branch(repo, remote_name, branch, run_git_fn=run_git)
+        if state == _init_probe.ADVERTISED:
+            if force_new_store:
+                _warn_force_no_effect("the remote ticket branch is advertised")
+            fetch = _git_fetch(repo, "fetch", remote_name, branch)
+            if fetch.returncode != 0:
+                sys.stderr.write(
+                    f"ERROR: could not fetch advertised ticket store {remote_name}/{branch} "
+                    f"({fetch.stderr.strip() or 'fetch failed'}); retry after connectivity "
+                    "returns. Refusing to create an orphan store.\n"
+                )
+                return 1
+            cp = _git(repo, "worktree", "add", "-b", branch, tracker, "FETCH_HEAD")
+            if cp.returncode != 0:
+                sys.stderr.write(
+                    f"ERROR: git worktree add (advertised branch) failed: {cp.stderr}\n"
+                )
+                return 1
+            return 0
+        if state == _init_probe.UNREACHABLE:
+            if not force_new_store:
+                sys.stderr.write(
+                    f"ERROR: could not determine whether {remote_name}/{branch} exists within "
+                    f"{_init_probe.REMOTE_PROBE_TIMEOUT}s; retry after connectivity returns "
+                    "or use 'rebar init --force-new-store' to explicitly create a new store.\n"
+                )
+                return 1
+            sys.stderr.write(
+                f"WARNING: {remote_name}/{branch} could not be reached within "
+                f"{_init_probe.REMOTE_PROBE_TIMEOUT}s; --force-new-store is creating a new store.\n"
+            )
+        elif force_new_store:
+            _warn_force_no_effect("the reachable remote has no ticket branch")
     # Orphan branch.
     cp = _git(repo, "worktree", "add", "--orphan", "-b", branch, tracker)
     if cp.returncode != 0:
@@ -675,8 +710,36 @@ def pending_init_attaches_to_existing(repo_root=None) -> bool:
 
     branch = tickets_branch(repo)
     remote_name = tickets_remote(repo)
-    return _git_ok(repo, "rev-parse", "--verify", branch) or _git_ok(
+    if _git_ok(repo, "rev-parse", "--verify", branch) or _git_ok(
         repo, "rev-parse", "--verify", f"{remote_name}/{branch}"
+    ):
+        return True
+    return _init_probe.remote_exists(repo, remote_name, run_git_fn=run_git) and (
+        _init_probe.probe_remote_branch(repo, remote_name, branch, run_git_fn=run_git)
+        == _init_probe.ADVERTISED
+    )
+
+
+def pending_init_remote_unreachable(repo_root=None) -> bool:
+    """Whether missing-tracker auto-init must fail closed before prompting.
+
+    A locally absent remote is a known greenfield case.  A configured remote whose
+    branch cannot be classified is not: prompting there could otherwise create a
+    divergent orphan store merely because the network or credentials are unavailable.
+    """
+    repo = _resolve_repo_root(repo_root)
+    if repo is None:
+        return False
+    from rebar.config import tickets_branch, tickets_remote
+
+    branch = tickets_branch(repo)
+    remote_name = tickets_remote(repo)
+    return _init_probe.remote_branch_unreachable(
+        repo,
+        remote_name,
+        branch,
+        has_ref=lambda ref: _git_ok(repo, "rev-parse", "--verify", ref),
+        run_git_fn=run_git,
     )
 
 
@@ -720,5 +783,10 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
 
 
 def init_cli(argv: list[str], *, repo_root=None) -> int:
+    allowed = {"--silent", "--force-new-store"}
+    unknown = [arg for arg in argv if arg not in allowed]
+    if unknown:
+        sys.stderr.write(f"Error: unknown init option: {unknown[0]}\n")
+        return 1
     silent = "--silent" in argv
-    return init_core(repo_root, silent=silent)
+    return init_core(repo_root, silent=silent, force_new_store="--force-new-store" in argv)

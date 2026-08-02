@@ -104,6 +104,18 @@ def _create_tracker(repo_root: str) -> None:
             )
             raise SystemExit(1)
         return
+    if _init_cmd.pending_init_remote_unreachable(repo_root):
+        from rebar import config as _config
+        from rebar._commands import _init_probe
+
+        remote = _config.tickets_remote(repo_root)
+        branch = _config.tickets_branch(repo_root)
+        sys.stderr.write(
+            f"Error: could not determine whether {remote}/{branch} exists within "
+            f"{_init_probe.REMOTE_PROBE_TIMEOUT}s; auto-init is refusing to create a new store. "
+            "Retry after connectivity returns, or run 'rebar init --force-new-store' explicitly.\n"
+        )
+        raise SystemExit(1)
     _confirm_and_init(repo_root)
 
 
