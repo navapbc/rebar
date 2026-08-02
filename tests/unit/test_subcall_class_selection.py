@@ -164,18 +164,21 @@ def test_ticket_digest_holds_on_the_store_write_path() -> None:
     assert _only_model(rec) == _TRIVIAL
 
 
-def test_ticket_quality_review_selects_the_frontier_class(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`frontier`, NOT `standard`: `review_ticket` is the default reviewer for the whole `rebar
-    review` operation — an AGENTIC, file-tool-using, open-ended reviewer (the Pass-1/finder
-    analogue). The operator's `standard` rule covers Pass-2/Pass-4 verification, not finders."""
+def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BY DESIGN, and registered as such: `review_ticket` is a top-level op's single LLM call, so
+    there are no passes to differentiate and the operator's configured model is the right knob. The
+    class vocabulary exists to spend differently ACROSS a gate's passes. Binding a class here would
+    remove `llm.model` as a steering knob for this command and give nothing back. Same reasoning as
+    `spec_scan`. (Retirement of this op is ticket 316a; if it goes, so does this test.)"""
     from rebar.llm import operations
 
     monkeypatch.setattr(
         operations, "assemble_context", lambda tid, *, graph, repo_root: ("ctx", [tid])
     )
     rec = _Recorder()
-    operations.review_ticket("abc123", "ticket-quality", config=_cfg(), runner=rec)
-    assert _only_model(rec) == _FRONTIER
+    cfg = _cfg()
+    operations.review_ticket("abc123", "ticket-quality", config=cfg, runner=rec)
+    assert _only_model(rec) == cfg.model
 
 
 def test_code_novelty_selects_the_standard_class() -> None:
@@ -259,6 +262,12 @@ _RAW_ORIGIN = "LLMConfig.from_env"
 # ONLY way a raw site passes: a new hand-built sub-call fails until someone either declares a
 # class or writes down why the operator's bare model is the right one there.
 _CFG_MODEL_BY_DESIGN: dict[str, str] = {
+    "llm/operations.py::review_ticket": (
+        "`rebar review`'s PRIMARY op call, not a sub-call. A top-level op makes ONE call, so there "
+        "are no passes to differentiate and the operator's configured model is the right knob; the "
+        "class vocabulary exists to spend differently ACROSS a gate's passes. Same reasoning as "
+        "spec_scan below. Retirement of this op is ticket 316a."
+    ),
     "llm/spec_scan.py::_scan_epics_inner": (
         "`scan-spec`'s PRIMARY op call, not a sub-call — a top-level op runs the operator's "
         "configured model. It was also the one site the ticket's measurement could not exercise "
