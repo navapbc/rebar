@@ -329,8 +329,11 @@ _RUNG_CLASSES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _rung_target(bare: str) -> str:
+def _rung_target(bare: str, primary: str | None = None, *, own_rung: bool = False) -> str | None:
     """The escalation target for ladder rung ``bare``, resolved through its model class.
+
+    ``primary`` is the model the RUN is actually on, and ``own_rung`` marks the rung the primary
+    itself sits at. Returning ``None`` means the rung has no honest target and must be DROPPED.
 
     THE BACK-COMPAT RULE: when the rung's class has NOT been retargeted, return TODAY'S BARE
     NAME byte-for-byte. ``resolve_class`` runs every name through ``_resolve_target``, which
@@ -343,6 +346,21 @@ def _rung_target(bare: str) -> str:
     configured ⇒ keep the bare name; different ⇒ a config table or ``REBAR_LLM_<CLASS>_MODEL``
     env override retargeted the class, and THAT retarget is what escalation must follow.
 
+    THE PROVIDER-AGREEMENT RULE: the back-compat rule above is decided entirely from the LADDER
+    CONSTANT — both sides of the comparison derive from ``bare`` — so the provider the run is on
+    is not an input, and an unretargeted class table degrades every rung to a bare, direct-
+    Anthropic-inferring name. Once the target is resolved, the RUN's provider and the TARGET's
+    provider are therefore compared:
+
+    * they agree, or either is undeterminable ⇒ today's value, byte-for-byte;
+    * they differ on the primary's OWN rung ⇒ the primary verbatim, so the same-model
+      one-criterion retry (the step that most often succeeds, one criterion being a far smaller
+      prompt than the batch) still runs on the operator's model;
+    * they differ on a HIGHER rung ⇒ ``None``. The class vocabulary is the only thing that can
+      name that rung in the run's provider and it has not been configured, so there is no honest
+      target: escalation stops and the too-big failure finding reports it, rather than silently
+      relocating the call to another provider.
+
     A rung with no class mapping, or any failure resolving a class, degrades to the bare name —
     escalation is a recovery path and must never become a new failure mode."""
     class_name = next((cls for family, cls in _RUNG_CLASSES if family in bare), None)
@@ -354,9 +372,16 @@ def _rung_target(bare: str) -> str:
         resolved = resolve_model_string(class_name)
         provider = infer_provider(bare)
         own = f"{provider}:{bare}" if provider else bare
-        return bare if resolved == own else resolved
+        target = bare if resolved == own else resolved
     except Exception:  # noqa: BLE001 — best-effort: an unresolvable class must not break escalation
         return bare
+    if primary is None:
+        return target
+    run_provider = infer_provider(primary)
+    target_provider = infer_provider(target)
+    if not run_provider or not target_provider or run_provider == target_provider:
+        return target
+    return primary if own_rung else None
 
 
 def models_at_or_above(model: str | None) -> list[str]:
@@ -367,13 +392,19 @@ def models_at_or_above(model: str | None) -> list[str]:
     already-resolved ``provider:model`` primary positions correctly; each at-or-above rung is
     then mapped through its MODEL CLASS by :func:`_rung_target`, so a Bedrock-configured run
     escalates to Bedrock rather than to direct Anthropic (task 7761). ORDER is unchanged:
-    cheapest rung first, frontier last."""
+    cheapest rung first, frontier last.
+
+    Once a start rung IS located, ``_rung_target`` also applies the provider-agreement rule
+    against ``model`` and a rung it cannot name in the run's provider is dropped. The no-match
+    fallback keeps today's behaviour untouched: with no located start rung there is no
+    "primary's own rung" to preserve."""
     names = [n for n, _w in MODEL_LADDER]
     if model:
         for i, n in enumerate(names):
             if n in model:
-                return [_rung_target(name) for name in names[i:]]
-    return [_rung_target(name) for name in names]
+                targets = [_rung_target(name, model, own_rung=(name == n)) for name in names[i:]]
+                return [t for t in targets if t is not None]
+    return [t for name in names if (t := _rung_target(name)) is not None]
 
 
 def pass1_with_ladder(
