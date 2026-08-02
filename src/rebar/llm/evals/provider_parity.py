@@ -239,6 +239,7 @@ def run_arm(
     epochs: int = DEFAULT_EPOCHS,
     repo_root: str | None = None,
     source: str = "local",
+    concurrency: int = 1,
 ) -> ArmOutcome:
     """Run one arm over the corpus at ``epochs`` repeats per case, reducing to the MAJORITY
     decision. The whole loop runs inside ``gate_config(config)``, which is what makes the model
@@ -248,50 +249,68 @@ def run_arm(
     The loop also runs inside the gate-source read context (``source`` default ``local`` = the
     in-place checkout), because the code-review arm's prompts are tool-using: the
     raze-vet-ditch guard refuses agentic runs outside it, and every such case would otherwise be
-    scored as a runtime error on BOTH arms rather than as a verdict."""
+    scored as a runtime error on BOTH arms rather than as a verdict.
+
+    ``concurrency`` > 1 runs ITEMS in parallel — a corpus item is an independent gate op, and a
+    fully sequential live run costs hours. Each worker runs under a context COPIED inside the two
+    scopes above, so the arm's config and read root propagate explicitly: a bare thread would not
+    inherit either ContextVar and the worker would silently resolve the AMBIENT model, which is
+    precisely the split-brain that makes a parity verdict unattributable. Results are folded back
+    in corpus order, so the records stay index-aligned with ``items`` regardless of scheduling."""
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
     from rebar.llm import gate_source
 
     solve = solve or _run_case_solver(runner=runner, repo_root=repo_root)
-    out = ArmOutcome()
     handle = gate_source.resolve_gate_handle(None, source, repo_root)
-    with gate_config(config), gate_source.gate_read_root(handle):
-        for item in items:
-            decisions: list[str] = []
-            item_latency = 0.0
-            for _ in range(max(1, epochs)):
-                start = time.perf_counter()
-                try:
-                    result = solve(item)
-                except Exception as exc:  # noqa: BLE001 — an epoch failure is data, not a crash
-                    text = f"{type(exc).__name__}: {exc}"
-                    out.errors[classify_error(text)] += 1
-                    out.error_messages.append(f"{item.spec}/{item.case_id}: {text}")
-                else:
-                    decisions.append(verdict_decision(result))
-                finally:
-                    elapsed = time.perf_counter() - start
-                    item_latency += elapsed
-                    out.latency_s += elapsed
-                    out.calls += 1
-            if decisions:
-                out.records.append(
-                    ItemRecord(
-                        valid=True,
-                        decision=majority_decision(decisions),
-                        label=item.label,
-                        latency_s=item_latency,
-                    )
-                )
+
+    def _run_item(item: CorpusItem) -> tuple[ItemRecord, list[str], int, float]:
+        decisions: list[str] = []
+        failures: list[str] = []
+        latency = 0.0
+        calls = 0
+        for _ in range(max(1, epochs)):
+            start = time.perf_counter()
+            try:
+                result = solve(item)
+            except Exception as exc:  # noqa: BLE001 — an epoch failure is data, not a crash
+                failures.append(f"{item.spec}/{item.case_id}: {type(exc).__name__}: {exc}")
             else:
-                out.records.append(
-                    ItemRecord(
-                        valid=False,
-                        decision="dropped",
-                        errored=True,
-                        label=item.label,
-                        latency_s=item_latency,
-                    )
-                )
+                decisions.append(verdict_decision(result))
+            finally:
+                latency += time.perf_counter() - start
+                calls += 1
+        if decisions:
+            record = ItemRecord(
+                valid=True,
+                decision=majority_decision(decisions),
+                label=item.label,
+                latency_s=latency,
+            )
+        else:
+            record = ItemRecord(
+                valid=False, decision="dropped", errored=True, label=item.label, latency_s=latency
+            )
+        return record, failures, calls, latency
+
+    out = ArmOutcome()
+    with gate_config(config), gate_source.gate_read_root(handle):
+        if concurrency > 1 and len(items) > 1:
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                futures = [
+                    pool.submit(contextvars.copy_context().run, _run_item, item) for item in items
+                ]
+                folded = [f.result() for f in futures]
+        else:
+            folded = [_run_item(item) for item in items]
+    for record, failures, calls, latency in folded:
+        out.records.append(record)
+        out.calls += calls
+        out.latency_s += latency
+        for message in failures:
+            out.errors[classify_error(message)] += 1
+            out.error_messages.append(message)
     return out
 
 
@@ -351,14 +370,12 @@ def run_slot(
     v2_solve: Callable[[CorpusItem], dict] | None = None,
     runner: Any = None,
     repo_root: str | None = None,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     """Run BOTH arms of one class slot over ``items`` and score them with the parity bar."""
-    arm1 = run_arm(
-        items, config=v1_config, solve=v1_solve, runner=runner, epochs=epochs, repo_root=repo_root
-    )
-    arm2 = run_arm(
-        items, config=v2_config, solve=v2_solve, runner=runner, epochs=epochs, repo_root=repo_root
-    )
+    kw = {"runner": runner, "epochs": epochs, "repo_root": repo_root, "concurrency": concurrency}
+    arm1 = run_arm(items, config=v1_config, solve=v1_solve, **kw)
+    arm2 = run_arm(items, config=v2_config, solve=v2_solve, **kw)
     kept1, kept2, dropped = _drop_errored_pairs(arm1.records, arm2.records)
     report = parity.parity_report(kept1, kept2)  # DEFAULT min_gold — the floor is never lowered
     reasons = [
@@ -509,6 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--limit", type=int, default=0, help="cap the corpus (smoke runs only)")
+    parser.add_argument("--concurrency", type=int, default=1, help="parallel corpus items per arm")
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true", help="print the corpus, call no model")
     args = parser.parse_args(argv)
