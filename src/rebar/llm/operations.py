@@ -135,6 +135,13 @@ def review_ticket(
     with gate_source.gate_read_root(handle):
         cfg = config or LLMConfig.from_env(repo_root=repo_root)
         cfg = gate_source.apply_handle(cfg, handle)
+        # Runs the OPERATOR'S configured model, deliberately — no class is bound here. This is a
+        # top-level op's single LLM call, so there are no passes to differentiate, and the class
+        # vocabulary exists to spend differently ACROSS the passes of a multi-pass gate. Binding a
+        # class here would take `llm.model` away as a steering knob for this command while giving
+        # nothing back. Same reasoning as `spec_scan`; both are registered as by-design in
+        # `tests/unit/test_subcall_class_selection.py`. Whether this op should exist at all is
+        # ticket 316a — if it is retired the question is moot.
         if cfg.max_iterations < _REVIEW_MIN_STEPS:
             cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
         rid = reviewer_id or default_reviewer_id()
