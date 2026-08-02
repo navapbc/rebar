@@ -68,10 +68,28 @@ skip_no_harness = pytest.mark.skipif(
         "`docker compose -f tests/external/live_jira_dc/docker-compose.yml up -d`"
     ),
 )
+#: The harness is UP but the extra is missing — the one combination in which skipping is a LIE.
+#: Without this, a CI lane that forgot `[jira-datacenter]` would silently skip every DC transport
+#: cell and report green having validated nothing. `test_transport.py` has carried this guard
+#: since J6; `_dc_support` did not, so the modules that import from here (the mutation table and
+#: the store-copy slice) were unprotected.
+extra_missing_but_harness_up = live_jira_ready() and not jira_extra_installed()
+
 skip_no_extra = pytest.mark.skipif(
-    not jira_extra_installed(),
+    not jira_extra_installed() and not extra_missing_but_harness_up,
     reason="the [jira-datacenter] extra is not installed",
 )
+
+
+def fail_if_extra_missing_while_harness_is_up() -> None:
+    """Turn a silent all-skip into a loud failure when the harness is reachable."""
+    if extra_missing_but_harness_up:
+        pytest.fail(
+            f"the Jira DC harness is reachable at {BASE} but the 'jira-datacenter' extra "
+            "(pycontribs/jira) is NOT installed, so these tests would silently skip and this "
+            "run would report green having validated nothing. Install it with: "
+            "pip install -e '.[dev,jira-datacenter]'"
+        )
 
 
 def source_repo_root() -> Path:
