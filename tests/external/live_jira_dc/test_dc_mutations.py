@@ -42,13 +42,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _dc_support import ADMIN_USER, BASE
+from _dc_support import ADMIN_USER, BASE, live_jira_ready
 from _dc_support import envelope as _envelope
 from _dc_support import read_local_ticket as _local
 from _dc_support import run_reconcile as _run
 from _dc_support import seed_searchable_issue as _seed
 from _dc_support import skip_no_extra as _skip_no_extra
 from _dc_support import skip_no_harness as _skip
+
+# THE ALL-SKIP CANARY KEYS ON THIS NAME. `tests/external/conftest.py`'s
+# `pytest_collection_modifyitems` applies the `jira_live` marker only to modules that define a
+# module-level `_live_jira_ready`, and the canary then fails a run in which live tests were
+# COLLECTED but none EXECUTED. Refactoring this helper into `_dc_support` silently removed this
+# module from that bookkeeping — so the cells carrying the epic's headline evidence could all-skip
+# and the run would be green and silent. Re-exported under the name the canary looks for.
+_live_jira_ready = live_jira_ready
 
 _WRITING_MODE = "bootstrap-strict"
 
