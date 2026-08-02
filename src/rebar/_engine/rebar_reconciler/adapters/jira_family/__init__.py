@@ -8,9 +8,9 @@ second Jira-family backend consumes ONE implementation instead of forking Cloud'
 
 What lives here, and why:
 
-* the local <-> Jira value maps (``LOCAL_STATUS_TO_JIRA`` / ``LOCAL_PRIORITY_TO_JIRA``)
-  and the link-relation vocabulary (``RELATION_TO_JIRA_LINK``) — pure data, Jira-family
-  general;
+* the local <-> Jira value maps (``LOCAL_STATUS_TO_JIRA`` / ``LOCAL_PRIORITY_TO_JIRA``
+  / ``LOCAL_TYPE_TO_JIRA``) and the link-relation vocabulary
+  (``RELATION_TO_JIRA_LINK``) — pure data, Jira-family general;
 * the field sanitizers (``sanitize_label`` / ``sanitize_summary`` are pure; ``sanitize_
   description`` / ``sanitize_comment`` take their vendor dependency (the rich-text fit
   function / the comment-truncation function) as an INJECTED contract parameter,
@@ -45,6 +45,7 @@ from rebar_reconciler.adapters.jira_family.value_maps import (
     JIRA_SUMMARY_MAX_CHARS,
     LOCAL_PRIORITY_TO_JIRA,
     LOCAL_STATUS_TO_JIRA,
+    LOCAL_TYPE_TO_JIRA,
     RELATION_TO_JIRA_LINK,
 )
 
@@ -53,6 +54,7 @@ __all__ = [
     "JIRA_SUMMARY_MAX_CHARS",
     "LOCAL_PRIORITY_TO_JIRA",
     "LOCAL_STATUS_TO_JIRA",
+    "LOCAL_TYPE_TO_JIRA",
     "RELATION_TO_JIRA_LINK",
     "InvalidLabelError",
     "JiraIdentityConvention",
