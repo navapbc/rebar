@@ -137,12 +137,25 @@ def plan_budget_cap(ctx: PlanContext) -> float:
 def largest_window_tokens(model: str | None) -> int:
     """The largest context window the gate can escalate to for P8's budget. A model on
     the ladder uses the max window at-or-above it; a model SMALLER than the ladder top
-    caps P8 there so P8 doesn't under-block. Unknown/absent → the ladder maximum."""
+    caps P8 there so P8 doesn't under-block.
+
+    ABSENT model → the ladder maximum: with nothing configured the gate runs its own default,
+    which IS a ladder model. But a model the ladder cannot LOCATE → the ladder MINIMUM (bug
+    48b3). The rung lookup is a substring match against MODEL_LADDER's bare Anthropic family
+    names, so any other family matched nothing and inherited the ladder maximum — overstating
+    the window, which makes P8 UNDER-block: material that will not fit is judged to fit and the
+    review truncates instead of telling the author to decompose. The two error directions are
+    not symmetric — under-blocking is silent, over-blocking is loud and actionable — so with no
+    window entry for the operator's model the honest default is the conservative one. It is also
+    safe for the other consumers (:func:`verify_request_chunks`, :func:`pack_prerequisite_bins`,
+    :func:`pack_prerequisite_verifier_bins` all DIVIDE by this number, so a smaller value yields
+    more, smaller chunks — never an overflow)."""
     if model:
         for name, _window in MODEL_LADDER:
             if name in model:
                 idx = [n for n, _ in MODEL_LADDER].index(name)
                 return max(w for _, w in MODEL_LADDER[idx:])
+        return min(w for _, w in MODEL_LADDER)
     return MODEL_LADDER[-1][1]
 
 
@@ -386,7 +399,7 @@ def _rung_target(bare: str, primary: str | None = None, *, own_rung: bool = Fals
 
 def models_at_or_above(model: str | None) -> list[str]:
     """The model ladder from ``model`` upward (by window), for runtime escalation.
-    Unknown/absent model → the whole ladder.
+    ABSENT model → the whole ladder; a model the ladder cannot LOCATE → just that model.
 
     The START rung is still located by substring match against MODEL_LADDER's bare names, so an
     already-resolved ``provider:model`` primary positions correctly; each at-or-above rung is
@@ -395,15 +408,28 @@ def models_at_or_above(model: str | None) -> list[str]:
     cheapest rung first, frontier last.
 
     Once a start rung IS located, ``_rung_target`` also applies the provider-agreement rule
-    against ``model`` and a rung it cannot name in the run's provider is dropped. The no-match
-    fallback keeps today's behaviour untouched: with no located start rung there is no
-    "primary's own rung" to preserve."""
+    against ``model`` and a rung it cannot name in the run's provider is dropped.
+
+    A TRUTHY primary the ladder cannot locate returns ``[model]`` — the operator's own model and
+    nothing else (bug 48b3). Falling through to the whole ladder made the first "escalation" for
+    e.g. a Nova primary ``claude-haiku-4-5``: a SMALLER window and a different provider than the
+    operator configured, so escalation DOWNGRADED. Returning ``[]`` instead would be wrong the
+    other way: :func:`pass1_with_ladder` has two independent recovery steps — batch →
+    one-criterion-per-call, and only THEN rung climbing — and an empty list makes the escalation
+    loop body never execute, jumping straight to the too-big failure finding and discarding the
+    single-criterion retry, the step that most often succeeds because one criterion is a far
+    smaller prompt than the batch. ``[model]`` preserves that retry and stops before the first
+    cross-family rung, so the failure finding fires only when the criterion genuinely does not
+    fit. ``prerequisites.run_focused_finder``'s escalation inherits the same repair without being
+    edited: its ``ladder.index(model) + 1`` runs off the end of a one-element ladder and its
+    existing ``IndexError`` handler already yields the explicit input-too-large indeterminate."""
     names = [n for n, _w in MODEL_LADDER]
     if model:
         for i, n in enumerate(names):
             if n in model:
                 targets = [_rung_target(name, model, own_rung=(name == n)) for name in names[i:]]
                 return [t for t in targets if t is not None]
+        return [model]
     return [t for name in names if (t := _rung_target(name)) is not None]
 
 
