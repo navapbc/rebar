@@ -23,6 +23,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
 from rebar.llm import usage_log
+from rebar.llm.agent_call import build_agent_kwargs, log_call_success, record_call_spend
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
     _anthropic_web_search_capabilities,
@@ -35,7 +36,7 @@ from rebar.llm.capabilities import (
     capabilities_for,
     provenance_for,
 )
-from rebar.llm.config import LLMConfig, infer_provider
+from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMError
 from rebar.llm.model_classes import (
     build_fallback_model,
@@ -368,28 +369,6 @@ class PydanticAIRunner:
                     getattr(model, "models", [model]), candidates, strict=True
                 ):
                     _check_tool_capability(candidate_model, candidate)
-            if req.tool_step_limit is not None and tools:
-                # Executable convergence boundary — intentionally not a forced tool.
-                from pydantic_ai.toolsets import FunctionToolset
-
-                limit = max(0, int(req.tool_step_limit))
-
-                def available(run_ctx, _tool_def):
-                    return run_ctx.run_step <= limit
-
-                all_toolsets = [FunctionToolset(tools), *toolsets]
-                tools = []
-                toolsets = [toolset.filtered(available) for toolset in all_toolsets]
-
-            kwargs: dict[str, Any] = {
-                "system_prompt": req.system_prompt,
-                "tools": tools,
-                "toolsets": toolsets,
-                # Per-tool execution timeout (story hoopoe): bounds a hung ASYNC/MCP tool. A
-                # no-op on single_turn (tools=[]) and for sync in-process tools (async cancel
-                # can't interrupt a blocking call — those are bounded by the derived step caps).
-                "tool_timeout": float(cfg.llm_tool_timeout_s),
-            }
             # Prompt caching (story 0250; capability-based since story S2). The stable bytes
             # re-sent across the container fan-out live in `system_prompt`;
             # `anthropic_cache_instructions` puts a `cache_control` breakpoint on that block
@@ -433,8 +412,6 @@ class PydanticAIRunner:
             web_caps = _anthropic_web_search_capabilities(
                 resolved if not self._model_override else "", web=req.web
             )
-            if web_caps is not None:
-                kwargs["capabilities"] = web_caps
             # Model settings + usage limits are built by the ADR 0056 decision-3 leaf helpers
             # (structured_run.py); see their docstrings for the max_tokens/timeout/temperature/
             # step-budget rationale (bug ids, measured numbers, and invariants preserved there).
@@ -457,8 +434,13 @@ class PydanticAIRunner:
                         "(capabilities.supports_temperature is False)",
                         resolved,
                     )
-            if model_settings:
-                kwargs["model_settings"] = model_settings
+            # The Agent kwargs (incl. the `tool_step_limit` convergence rewrite of the tool
+            # surface) are assembled by the ADR 0056 decision-3 leaf helper in `agent_call.py`.
+            # `web_caps` is resolved HERE and passed IN so the patchable
+            # `_anthropic_web_search_capabilities` global stays a `runner` name.
+            kwargs = build_agent_kwargs(
+                cfg, req, tools, toolsets, model_settings=model_settings, web_caps=web_caps
+            )
             usage_limits, req_limit, eff_max_iter = build_usage_limits(cfg, req, UsageLimits)
             # Observability (one structured record per LLM call): which reviewer/criterion,
             # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
@@ -544,24 +526,16 @@ class PydanticAIRunner:
             if answered is not None:
                 ran_model = answered
             provider_provenance["ran_model"] = ran_model
-        logger.info(
-            "llm call [%s] mode=%s model=%s ok in %.1fs "
-            "steps=%d/%d budget=%d (in=%d out=%d cache_read=%d cache_write=%d)",
-            _call_label,
-            req.execution_mode,
-            ran_model,
-            time.monotonic() - _t0,
-            # Step-usage telemetry: model requests CONSUMED vs the request ceiling
-            # (≈ max_iterations/2) and the authored step budget. One structured line per
-            # run, so the verifier/reviewer step floors can be sized from observed headroom
-            # (grep `llm call [completion-verifier]` / `[plan-reviewer]` and aggregate).
-            usage.get("requests", 0),
-            req_limit,
-            eff_max_iter,
-            usage.get("input_tokens", 0),
-            usage.get("output_tokens", 0),
-            usage.get("cache_read_tokens", 0),
-            usage.get("cache_write_tokens", 0),
+        # Emitted BEFORE finalize_outcome and it must stay there — see log_call_success's
+        # docstring: finalization can raise, and this record is wanted when it does.
+        log_call_success(
+            usage,
+            call_label=_call_label,
+            execution_mode=req.execution_mode,
+            ran_model=ran_model,
+            req_limit=req_limit,
+            eff_max_iter=eff_max_iter,
+            started_at=_t0,
         )
         result = _findings.finalize_outcome(
             outcome,
@@ -580,23 +554,8 @@ class PydanticAIRunner:
         # record cache efficacy into coverage/observability. Private key — non-breaking
         # for every existing consumer of the review_result/structured dict.
         result["_usage"] = usage
-        # Durable, opt-in spend record for the weekly billable CI jobs (no-op unless
-        # REBAR_USAGE_LOG is set) — the runner is the one chokepoint shared by both the
-        # external tier and the live prompt-eval, so a single sink covers both.
-        # Attribute the row to the workflow step that made the call (b690). `op` is the PROMPT
-        # name, which cannot separate steps that share a prompt, so the step id and the raw
-        # declared class token ride in on a ContextVar the step executor binds. Both are absent
-        # for a call made outside any step, and `record` omits them accordingly.
-        _step = usage_log.active_step()
-        _step_id, _model_token = _step if _step is not None else (None, None)
-        usage_log.record(
-            usage,
-            op=_call_label,
-            model=ran_model,
-            provider=infer_provider(ran_model),
-            step=_step_id,
-            model_class=usage_log.declared_model_class(_model_token),
-        )
+        # The opt-in spend row (rules, and the step-attribution rationale, in its docstring).
+        record_call_spend(usage, call_label=_call_label, ran_model=ran_model)
         return result
 
 
