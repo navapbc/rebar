@@ -28,15 +28,15 @@ if TYPE_CHECKING:
 
 
 # ── Initialization ───────────────────────────────────────────────────────────
-def init_repo(*, repo_root=None) -> None:
-    """Initialize the ticket system (orphan ``tickets`` branch + worktree).
+def init_repo(*, repo_root=None, force_new_store: bool = False) -> None:
+    """Initialize or mount the ticket system explicitly without prompting.
 
-    This is the explicit library init path (Tier E E4, in-process): it always
-    bootstraps and never prompts. Other library calls do NOT auto-init — they
-    require this to have run first (or ``rebar init`` interactively)."""
+    Remote discovery fails closed by default; ``force_new_store=True`` deliberately
+    permits bootstrap only while reachability is unknown. Other library calls do not
+    auto-init and require this to have run first (or ``rebar init`` interactively)."""
     from rebar._commands import init as _init_cmd
 
-    rc = _init_cmd.init_core(repo_root, silent=True)
+    rc = _init_cmd.init_core(repo_root, silent=True, force_new_store=force_new_store)
     if rc != 0:
         raise RebarError(f"rebar init failed (exit {rc})", returncode=rc)
 
