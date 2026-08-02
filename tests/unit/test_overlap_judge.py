@@ -8,7 +8,13 @@ from pathlib import Path
 import pytest
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.overlap.judge import aggregate, judge
+from rebar.llm.overlap.judge import (
+    _SHARED_DIGEST_REF,
+    _digest_block,
+    aggregate,
+    judge,
+    judge_one,
+)
 from rebar.llm.runner import Runner, RunRequest
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "overlap_pairs"
@@ -276,3 +282,85 @@ def test_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REBAR_LLM_OVERLAP_SURFACE_CAP", "9")
     cfg = LLMConfig.from_env()
     assert cfg.overlap_conf_threshold == 0.55 and cfg.overlap_surface_cap == 9
+
+
+class _RecordingRunner(Runner):
+    """A fake runner that keeps the ACTUAL ``RunRequest`` payload of every call.
+
+    Lets a test assert on the request the judge really builds — the system/user split and the
+    bytes in each — rather than on a stand-in that would read the same either way."""
+
+    name = "recording"
+
+    def __init__(self, verdicts: list[dict]):
+        self._verdicts = list(verdicts)
+        self._i = 0
+        self.requests: list[RunRequest] = []
+
+    def preflight(self) -> None:
+        pass
+
+    def run(self, req: RunRequest) -> dict:
+        self.requests.append(req)
+        v = self._verdicts[self._i % len(self._verdicts)]
+        self._i += 1
+        return dict(v)
+
+
+def _judge_recording(query: dict, corpus: dict[str, dict]) -> _RecordingRunner:
+    runner = _RecordingRunner([_v("related_distinct")])
+    judge("Q", query, sorted(corpus), corpus, config=_cfg(), runner=runner)
+    return runner
+
+
+def test_shared_query_digest_lives_only_in_the_system_prompt() -> None:
+    # The query digest is IDENTICAL on every call of a batch, so it belongs in the stable system
+    # block (which carries the cache breakpoint), not re-sent in each volatile user message.
+    query = _digest(area="overlap", ent=["QueryTicket"], props=["the query side"])
+    corpus = {"C1": _digest(area="alpha", ent=["Alpha"]), "C2": _digest(area="beta", ent=["Beta"])}
+    runner = _judge_recording(query, corpus)
+
+    assert len(runner.requests) == 4  # two candidates x two orderings
+    systems = {r.system_prompt for r in runner.requests}
+    assert len(systems) == 1, "the hoisted prefix must be byte-identical across the batch"
+    query_block = _digest_block(query)
+    assert query_block in systems.pop()
+    assert [r.instructions for r in runner.requests if query_block in r.instructions] == []
+    for cand_id, req_pair in (("C1", runner.requests[:2]), ("C2", runner.requests[2:])):
+        for req in req_pair:
+            assert _digest_block(corpus[cand_id]) in req.instructions
+
+
+def test_hoisted_reference_keeps_the_ordered_pair_slots() -> None:
+    # The prompt reads "FIRST <relation> SECOND" directionally, so the hoisted digest must still
+    # be identified as the FIRST side in ordering 1 and the SECOND side in ordering 2.
+    query = _digest(area="overlap", ent=["QueryTicket"])
+    corpus = {"C1": _digest(area="alpha", ent=["Alpha"])}
+    runner = _judge_recording(query, corpus)
+
+    first_ordering, second_ordering = (r.instructions for r in runner.requests)
+    cand_block = _digest_block(corpus["C1"])
+    assert first_ordering == f"FIRST:\n{_SHARED_DIGEST_REF}\n\nSECOND:\n{cand_block}"
+    assert second_ordering == f"FIRST:\n{cand_block}\n\nSECOND:\n{_SHARED_DIGEST_REF}"
+
+
+def test_judge_one_default_shape_is_unchanged() -> None:
+    # Omitting the hoist reproduces the pre-change request bytes exactly, so no other caller of
+    # judge_one changes behaviour.
+    first, second = _digest(area="alpha"), _digest(area="beta")
+    runner = _RecordingRunner([_v("related_distinct")])
+    judge_one(first, second, _cfg(), runner)
+
+    req = runner.requests[0]
+    assert req.instructions == f"FIRST:\n{_digest_block(first)}\n\nSECOND:\n{_digest_block(second)}"
+    assert _digest_block(first) not in req.system_prompt
+    assert _SHARED_DIGEST_REF not in req.system_prompt
+
+
+def test_missing_corpus_digest_makes_no_call() -> None:
+    # A candidate absent from the corpus is skipped outright — the advisory step never pays for a
+    # call it cannot ground, and nothing propagates to the caller.
+    runner = _RecordingRunner([_v("duplicates")])
+    out = judge("Q", _digest(), ["missing"], {}, config=_cfg(), runner=runner)
+    assert out == []
+    assert runner.requests == []

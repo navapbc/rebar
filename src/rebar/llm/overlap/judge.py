@@ -37,10 +37,47 @@ def _digest_block(digest: dict) -> str:
     )
 
 
-def judge_one(first: dict, second: dict, cfg: LLMConfig, runner: Runner | None) -> dict:
+# The text substituted into the FIRST/SECOND slot whose digest has been hoisted into the system
+# prompt, and the orientation that introduces it there. The base prompt tells the model it is
+# "given TWO ticket digests in a fixed order"; the header below reconciles that framing with the
+# split, so `reviewers/overlap_judge.md` keeps describing the default (non-hoisted) shape.
+_SHARED_DIGEST_REF = "the QUERY TICKET DIGEST given in your system prompt"
+_SHARED_DIGEST_HEADER = (
+    "QUERY TICKET DIGEST — one of the two digests named below is given HERE rather than in the\n"
+    "user message, because it is the same ticket in every pair of this batch. The user message\n"
+    "names whether it is FIRST or SECOND for the pair at hand; read it in that position."
+)
+
+
+def _hoisted_system_prompt(base: str, shared: dict) -> str:
+    return f"{base}\n\n{_SHARED_DIGEST_HEADER}\n\n{_digest_block(shared)}"
+
+
+def _pair_instructions(first: dict, second: dict, shared_side: str | None) -> str:
+    first_text = _SHARED_DIGEST_REF if shared_side == "first" else _digest_block(first)
+    second_text = _SHARED_DIGEST_REF if shared_side == "second" else _digest_block(second)
+    return f"FIRST:\n{first_text}\n\nSECOND:\n{second_text}"
+
+
+def judge_one(
+    first: dict,
+    second: dict,
+    cfg: LLMConfig,
+    runner: Runner | None,
+    *,
+    shared_side: str | None = None,
+) -> dict:
     """One ORDERED-pair judge call ("first <relation> second"). Returns the overlap_verdict
     dict; on ANY error (timeout / malformed output) → treated as abstain (dropped), logged,
-    never raised to the caller."""
+    never raised to the caller.
+
+    ``shared_side`` names the side of the pair — ``"first"`` or ``"second"`` — whose digest is
+    IDENTICAL across every call of the batch, so it can be carried in the system prompt (the
+    block the runner puts a cache breakpoint on) instead of being re-sent in each volatile user
+    message. The vacated slot keeps its FIRST/SECOND label and holds a reference to the hoisted
+    block, so the prompt's directional "FIRST <relation> SECOND" reading is unchanged. ``None``
+    (the default) reproduces the un-hoisted request bytes exactly.
+    """
     try:
         # MODEL CLASS: `standard`. Chosen on the prompt's shape, not on "it's a sub-call": the
         # overlap-judge prompt is `execution_mode: single_turn`, tool-less and "Not a reviewer",
@@ -58,7 +95,11 @@ def judge_one(first: dict, second: dict, cfg: LLMConfig, runner: Runner | None) 
         cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
         prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
         system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
-        instructions = f"FIRST:\n{_digest_block(first)}\n\nSECOND:\n{_digest_block(second)}"
+        if shared_side is not None:
+            system_prompt = _hoisted_system_prompt(
+                system_prompt, first if shared_side == "first" else second
+            )
+        instructions = _pair_instructions(first, second, shared_side)
         req = RunRequest(
             system_prompt=system_prompt,
             instructions=instructions,
@@ -149,8 +190,10 @@ def judge(
         cand_digest = corpus.get(cand_id)
         if not isinstance(cand_digest, dict):
             continue
-        r1 = judge_one(query_digest, cand_digest, cfg, runner)
-        r2 = judge_one(cand_digest, query_digest, cfg, runner)
+        # The query digest is the batch-invariant side in BOTH orderings, so both calls carry the
+        # same hoisted system block — one cache write on the first call, reads on the rest.
+        r1 = judge_one(query_digest, cand_digest, cfg, runner, shared_side="first")
+        r2 = judge_one(cand_digest, query_digest, cfg, runner, shared_side="second")
         finding = aggregate(query_id, cand_id, r1, r2, cfg)
         if finding is not None:
             findings.append(finding)
