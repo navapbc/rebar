@@ -597,3 +597,34 @@ class Backend(Protocol):
         var(s) rather than letting a downstream call fail with a cryptic error
         (ticket 97f2)."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# Capability narrowing (ticket cc77)
+# ---------------------------------------------------------------------------
+#
+# The four opt-in capability members (``set_relationship`` / ``get_issuelinks_map``
+# / ``add_comment`` / ``get_comment_map``) live on :class:`_TransportPortMeta`, NOT
+# in :class:`TicketTransport`'s body — deliberately, so ``hasattr`` attributes them
+# while ``typing``'s protocol-attribute collection does not, letting a links-less or
+# comment-less transport still conform. mypy does not consult metaclass attributes
+# for a Protocol-typed value, so a core call site reaching for one through a
+# ``TicketTransport``-annotated parameter is reported ``[attr-defined]`` — correctly:
+# the annotated VIEW does not offer the member.
+#
+# These narrow such a site to the capability Protocol that actually declares it.
+# The narrowed value stays attribute-checked (a typo in the member name is still an
+# error), so this is a NARROWING, not a widening to ``Any`` — the one resolution the
+# story forbids, because it reinstates exactly the blindness cc77 removes.
+
+
+def as_commenting(transport: TicketTransport) -> SupportsComments:
+    """Narrow a transport to its :class:`SupportsComments` view for a call site
+    that reaches for ``add_comment`` / ``get_comment_map``."""
+    return transport  # type: ignore[return-value]
+
+
+def as_linking(transport: TicketTransport) -> SupportsLinks:
+    """Narrow a transport to its :class:`SupportsLinks` view for a call site that
+    reaches for ``set_relationship`` / ``get_issuelinks_map``."""
+    return transport  # type: ignore[return-value]

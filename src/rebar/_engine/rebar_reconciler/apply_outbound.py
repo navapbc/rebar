@@ -13,7 +13,10 @@ Imports downward only (apply_base, batch_dispatch); never imports applier.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler._errors import is_not_found
 from rebar_reconciler.apply_base import (
@@ -85,7 +88,9 @@ def _get_commit_subject(repo_root, commit_sha: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_outbound_create(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.outbound)
     if client is None:
@@ -118,7 +123,9 @@ def _apply_outbound_create(mutation, *, client=None, repo_root=None) -> ApplyRes
 # (REST PUT /rest/api/3/issue/{key} {"fields":{"parent":{"key":K}}}) rather
 # than client.update_issue — ACLI edit does not support reparenting
 # (ticket 8b25-ae7a-efc3-47f6).
-def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_outbound_update(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Outbound update — delegate to the ONE production applier (batch update_one).
 
     Story D (33d0) of epic f89d. Production applies every outbound update via
@@ -157,7 +164,9 @@ def _apply_outbound_update(mutation, *, client=None, repo_root=None) -> ApplyRes
     return ApplyResult(mutation.direction, mutation.action, payload)
 
 
-def _apply_outbound_delete(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_outbound_delete(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Outbound delete: route through the legacy batch path's delete_one()
     when a client is supplied. Typed-mutation callers can also drive a direct
     delete via this leaf.
@@ -177,7 +186,9 @@ def _apply_outbound_delete(mutation, *, client=None, repo_root=None) -> ApplyRes
     return ApplyResult(mutation.direction, mutation.action, {"deleted": mutation.target})
 
 
-def _apply_outbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_outbound_probe(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Outbound probe: read-only sanity check via client.get_issue when supplied.
 
     Returns the probe outcome (key + present flag) in the result payload so
@@ -200,7 +211,9 @@ def _apply_outbound_probe(mutation, *, client=None, repo_root=None) -> ApplyResu
         raise
 
 
-def _apply_outbound_conflict(mutation, *, client=None, repo_root=None) -> ApplyResult:
+def _apply_outbound_conflict(
+    mutation, *, client: TicketTransport | None = None, repo_root=None
+) -> ApplyResult:
     """Outbound conflict: emit a structured conflict-marker comment on the Jira
     issue when a client is supplied. Conflicts are durable signals — the
     follow-on is consumed by reconcile_once via the standard suppress_pair

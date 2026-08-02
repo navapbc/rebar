@@ -39,6 +39,8 @@ from rebar_reconciler.outbound_field_diff import compute_update_fields
 if TYPE_CHECKING:
     from rebar_reconciler._backend import InboundMapper, OutboundMapper
 
+    from ._backend import TicketTransport
+
 # The identity-mapping assignee-resolution cluster (264f) lives in
 # outbound_assignee.py (split for module size; a leaf that imports rebar core
 # lazily inside its functions). All five symbols are re-exported so
@@ -120,7 +122,7 @@ def _rest_issue_to_snapshot_fields(issue: dict[str, Any]) -> dict[str, Any]:
     return issue.get("fields", {})
 
 
-def _safe_get_issue(client: Any, jira_key: str) -> Any:
+def _safe_get_issue(client: TicketTransport, jira_key: str) -> Any:
     """Direct GET a single Jira issue's raw fields, classifying failures.
 
     Returns:
@@ -555,7 +557,12 @@ def compute_outbound_mutations(
 
 
 def _compute_outbound_select_absent_gets(
-    local_tickets, jira_snapshot, binding_store, excluded_statuses, excluded_sync_types, client
+    local_tickets,
+    jira_snapshot,
+    binding_store,
+    excluded_statuses,
+    excluded_sync_types,
+    client: TicketTransport,
 ) -> set[str]:
     """Phase: rotation pre-selection of bound-but-absent keys eligible for a direct
     GET this pass (bug 1e08). Returns the K least-recently-GET'd selected keys."""
@@ -646,7 +653,7 @@ def _compute_outbound_update_mutation(
     jira_key,
     jira_snapshot,
     binding_store,
-    client,
+    client: TicketTransport,
     pass_id,
     _selected_for_get_this_pass,
     prev_snapshot,

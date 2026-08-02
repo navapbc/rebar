@@ -34,7 +34,10 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 from rebar_reconciler.timeutil import utc_now_iso
 
@@ -135,7 +138,7 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     return value
 
 
-def _current_key_by_id(client: Any, jira_id: str) -> str:
+def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
     """The issue's CURRENT key, looked up by its immutable numeric id (bug 7c26).
 
     ``GET /rest/api/{2,3}/issue/{issueIdOrKey}`` accepts an id wherever it accepts a
@@ -551,7 +554,7 @@ class BindingStore:
         if entry["absent_404_count"] >= grace:
             self._retire(local_id, jira_key, entry)
 
-    def note_absent_or_rekey(self, jira_key: str, client: Any = None) -> bool:
+    def note_absent_or_rekey(self, jira_key: str, client: TicketTransport | None = None) -> bool:
         """404 bookkeeping that first asks whether the issue MOVED (bug 7c26).
 
         A bound key stops resolving for TWO different reasons, and the pre-7c26 code
@@ -663,7 +666,7 @@ class BindingStore:
     # -- recovery ----------------------------------------------------------
 
     def recover_pending_bindings(
-        self, client: Any, *, failure_sink: list[dict[str, Any]] | None = None
+        self, client: TicketTransport, *, failure_sink: list[dict[str, Any]] | None = None
     ) -> int:
         """Scan for pending bindings and attempt to recover (story 9622).
 

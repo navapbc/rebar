@@ -33,7 +33,10 @@ be available at import.
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
 
 # Sentinel: presence of the "comment" key in a snapshot entry confirms the
 # snapshot carries real comment data (fixture/synthetic path). Absence means
@@ -161,7 +164,7 @@ def _diff_comments(
     ticket: dict[str, Any],
     jira_key: str,
     jira_snapshot: dict[str, Any],
-    client: Any = None,
+    client: TicketTransport | None = None,
     *,
     inbound_mapper: Any | None = None,
     sanitizer: Any | None = None,

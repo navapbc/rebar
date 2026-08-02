@@ -24,6 +24,11 @@ resolving for reconcile.py's getattr dispatch table and the test suite.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._backend import TicketTransport
+
 import importlib.util
 import json
 import logging
@@ -377,7 +382,7 @@ def apply(
     pass_id: str | None = None,
     repo_root: Path | None = None,
     *,
-    client=None,
+    client: TicketTransport | None = None,
     mode=None,
     binding_store=None,
     persist: bool = True,
