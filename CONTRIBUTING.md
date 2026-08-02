@@ -158,10 +158,13 @@ the `Verified` requirement was activated 2026-07-02; see the status note above.)
 **Reading a `-1` (quick version).** An `LLM-Review` `-1` is either a **finding** in
 your code (`[LLM-Review: BLOCK — finding]`, with inline comments → fix, amend, re-push,
 §2d) or a **coverage-gap** infra veto (`[LLM-Review: BLOCK — coverage-gap (…)]` → the
-review couldn't fully run; **not your code** — a maintainer re-triggers it once infra
-recovers, don't "fix" your diff). A `Verified` `-1` means CI failed: open the linked
-run, fix a real failure and re-push (§2d), or comment **`recheck`** to re-run CI on the
-same patchset for a flake.
+review couldn't fully run; **not your code** — once infra recovers, comment
+**`recheck-review`** on the change to have the bot re-review it yourself, don't "fix"
+your diff; the bot refuses the trigger only when the `-1` is a real finding). A
+`Verified` `-1` means CI failed: open the linked run, fix a real failure and re-push
+(§2d), or comment **`recheck`** to re-run CI on the same patchset for a flake. (The two
+triggers mirror each other: `recheck` re-runs CI, `recheck-review` re-runs the LLM
+review.)
 
 > **Full vote semantics live in one place:** [docs/review-policy.md](docs/review-policy.md)
 > has the complete tag table (every coverage-gap sub-reason and the merge-change
