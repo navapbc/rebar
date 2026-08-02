@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import subprocess
 from pathlib import Path
 
@@ -25,8 +26,9 @@ _DIGEST = {
 
 
 class _PipelineRunner(Runner):
-    """Returns a canned ticket_digest for enrich calls and a canned overlap_verdict for judge
-    calls (dispatched by output_schema), so the full wire pipeline runs deterministically."""
+    """Returns a canned ticket_digest for enrich calls and the canned verdict for judge calls
+    (dispatched by output_schema), so the full wire pipeline runs deterministically. The judge
+    batches its candidates, so the verdict is echoed once per candidate the request labelled."""
 
     name = "pipeline"
 
@@ -38,8 +40,11 @@ class _PipelineRunner(Runner):
         pass
 
     def run(self, req: RunRequest) -> dict:
-        base = self._digest if req.output_schema == "ticket_digest" else self._verdict
-        return {**base, "runner": self.name, "model": None, "trace_id": None}
+        envelope = {"runner": self.name, "model": None, "trace_id": None}
+        if req.output_schema == "ticket_digest":
+            return {**self._digest, **envelope}
+        labels = re.findall(r"\[candidate_id: ([^\]]+)\]", req.instructions)
+        return {"verdicts": [{**self._verdict, "candidate_id": c} for c in labels], **envelope}
 
 
 @pytest.fixture

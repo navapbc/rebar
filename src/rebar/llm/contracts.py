@@ -198,6 +198,33 @@ def overlap_verdict_response_model() -> type:
     return OverlapVerdict
 
 
+def overlap_verdict_batch_response_model() -> type:
+    """Structured-output model for ONE BATCHED overlap-judge call (c403): the shared digest is
+    judged against several candidates at once, so the response is a LIST of verdicts, each
+    echoing the ``candidate_id`` it was given.
+
+    The entry SUBCLASSES the single-pair model so the relation enum, its normalizing validator
+    and the three other fields stay single-sourced — a batched relation and a single-pair one
+    must never be able to drift apart. No JSON Schema file: like ``plan_review_novelty``, this
+    is an internal contract with no ``--output`` surface."""
+    from pydantic import BaseModel, Field
+
+    OverlapVerdict = overlap_verdict_response_model()
+
+    class OverlapVerdictEntry(OverlapVerdict):  # type: ignore[misc,valid-type]
+        candidate_id: str = Field(
+            default="",
+            description="The candidate_id given in the request, echoed back verbatim.",
+        )
+
+    class OverlapVerdictBatch(BaseModel):
+        verdicts: list[OverlapVerdictEntry] = Field(
+            default_factory=list, description="Exactly one entry per candidate in the request."
+        )
+
+    return OverlapVerdictBatch
+
+
 # Built-ins. ``review_result`` (the default findings shape) and ``completion_verdict``.
 register_contract("review_result", findings.findings_response_model)
 register_contract("completion_verdict", completion_verdict_response_model)
@@ -207,3 +234,5 @@ register_contract("completion_verdict", completion_verdict_response_model)
 register_contract("ticket_digest", ticket_digest_response_model)
 # Stage-2 overlap judge (9022) — same co-location guarantee.
 register_contract("overlap_verdict", overlap_verdict_response_model)
+# The batched form of the same judge call (c403) — one entry per candidate.
+register_contract("overlap_verdict_batch", overlap_verdict_batch_response_model)

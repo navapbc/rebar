@@ -59,6 +59,36 @@ def _pair_instructions(first: dict, second: dict, shared_side: str | None) -> st
     return f"FIRST:\n{first_text}\n\nSECOND:\n{second_text}"
 
 
+# How many candidate digests ride in ONE judge call. Bounded rather than "all of them": the
+# Stage-1 candidate set is capped at ``overlap_k`` (20), and a single prompt listing twenty
+# digests asks the model to hold twenty independent judgements at once, which is the
+# cross-contamination risk the prompt's per-candidate independence rules exist to contain.
+_CANDIDATES_PER_CALL = 6
+
+
+def _candidate_listing(pairs: list[tuple[str, dict]]) -> str:
+    """The labelled candidate digests. The label is the key the response is matched back on, so
+    it is emitted verbatim and read back verbatim — never positionally."""
+    return "\n\n".join(f"[candidate_id: {cid}]\n{_digest_block(digest)}" for cid, digest in pairs)
+
+
+def _batch_instructions(pairs: list[tuple[str, dict]], *, shared_side: str) -> str:
+    listing = _candidate_listing(pairs)
+    if shared_side == "first":
+        return f"FIRST:\n{_SHARED_DIGEST_REF}\n\nSECOND CANDIDATES:\n{listing}"
+    return f"FIRST CANDIDATES:\n{listing}\n\nSECOND:\n{_SHARED_DIGEST_REF}"
+
+
+def _verdict(payload: dict) -> dict:
+    """The four overlap_verdict fields, defaulted so a sparse payload is still readable."""
+    return {
+        "relation": payload.get("relation", "related_distinct"),
+        "shared_artifact": payload.get("shared_artifact"),
+        "confidence": float(payload.get("confidence", 0.0)),
+        "abstain": bool(payload.get("abstain", False)),
+    }
+
+
 def judge_one(
     first: dict,
     second: dict,
@@ -109,16 +139,66 @@ def judge_one(
             output_schema="overlap_verdict",
             execution_mode="single_turn",
         )
-        res = get_runner(cfg, override=runner).run(req)
-        return {
-            "relation": res.get("relation", "related_distinct"),
-            "shared_artifact": res.get("shared_artifact"),
-            "confidence": float(res.get("confidence", 0.0)),
-            "abstain": bool(res.get("abstain", False)),
-        }
+        return _verdict(get_runner(cfg, override=runner).run(req))
     except Exception:  # noqa: BLE001 — a judge failure is an abstain, never blocks the caller
         logger.warning("overlap judge call failed; treating as abstain", exc_info=True)
         return dict(_ABSTAIN)
+
+
+def judge_batch(
+    shared: dict,
+    pairs: list[tuple[str, dict]],
+    cfg: LLMConfig,
+    runner: Runner | None,
+    *,
+    shared_side: str,
+) -> dict[str, dict]:
+    """ONE judge call carrying ``shared`` against every candidate in ``pairs``, returning
+    ``{candidate_id: verdict}``.
+
+    Every id in ``pairs`` is present in the result: a candidate the model did not answer for —
+    or answered unreadably — gets an abstain, so a partial batch degrades per candidate instead
+    of taking its neighbours down with it. On ANY error the whole batch abstains, logged, never
+    raised: the overlap step is advisory and must not fail a review.
+
+    ``shared_side`` names which side of the ordered pair the shared digest occupies, exactly as
+    on :func:`judge_one`; the other side becomes the labelled candidate list.
+    """
+    verdicts = {cid: dict(_ABSTAIN) for cid, _ in pairs}
+    try:
+        # Same per-call class binding as judge_one, and for the same reason (bug afeb).
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
+        prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
+        system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
+        req = RunRequest(
+            system_prompt=_hoisted_system_prompt(system_prompt, shared),
+            instructions=_batch_instructions(pairs, shared_side=shared_side),
+            config=cfg,
+            reviewers=["overlap-judge"],
+            mode="structured",
+            output_schema="overlap_verdict_batch",
+            execution_mode="single_turn",
+        )
+        res = get_runner(cfg, override=runner).run(req)
+        entries = res.get("verdicts") if isinstance(res, dict) else None
+        if not isinstance(entries, list):
+            return verdicts
+        seen: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            cid = entry.get("candidate_id")
+            # Matched on the LABEL, never on position: a reordered response must not attribute
+            # one candidate's relation to another. An id we did not ask about, and a second
+            # answer for one already read, are both dropped rather than allowed to revise a
+            # verdict — one question, one answer.
+            if cid not in verdicts or cid in seen:
+                continue
+            seen.add(cid)
+            verdicts[cid] = _verdict(entry)
+    except Exception:  # noqa: BLE001 — a judge failure is an abstain, never blocks the caller
+        logger.warning("overlap judge batch call failed; treating as abstain", exc_info=True)
+    return verdicts
 
 
 def _finding(
@@ -184,18 +264,24 @@ def judge(
     highest-confidence advisory findings (each a ready-to-run ``rebar link`` command).
     ``candidates`` may be ``OverlapCandidate``s or bare ticket-id strings."""
     cfg = config or LLMConfig.from_env()
-    findings: list[dict] = []
+    pairs: list[tuple[str, dict]] = []
     for cand in candidates:
         cand_id = getattr(cand, "ticket_id", cand)
         cand_digest = corpus.get(cand_id)
-        if not isinstance(cand_digest, dict):
-            continue
-        # The query digest is the batch-invariant side in BOTH orderings, so both calls carry the
-        # same hoisted system block — one cache write on the first call, reads on the rest.
-        r1 = judge_one(query_digest, cand_digest, cfg, runner, shared_side="first")
-        r2 = judge_one(cand_digest, query_digest, cfg, runner, shared_side="second")
-        finding = aggregate(query_id, cand_id, r1, r2, cfg)
-        if finding is not None:
-            findings.append(finding)
+        if isinstance(cand_digest, dict):  # a candidate we cannot ground is never paid for
+            pairs.append((cand_id, cand_digest))
+
+    findings: list[dict] = []
+    for start in range(0, len(pairs), _CANDIDATES_PER_CALL):
+        batch = pairs[start : start + _CANDIDATES_PER_CALL]
+        # Two calls per batch, not two per candidate: each carries the hoisted system block once
+        # for the whole batch instead of once per pair. The query digest is the batch-invariant
+        # side in BOTH orderings, so the block is byte-identical across them.
+        r1 = judge_batch(query_digest, batch, cfg, runner, shared_side="first")
+        r2 = judge_batch(query_digest, batch, cfg, runner, shared_side="second")
+        for cand_id, _digest in batch:
+            finding = aggregate(query_id, cand_id, r1[cand_id], r2[cand_id], cfg)
+            if finding is not None:
+                findings.append(finding)
     findings.sort(key=lambda f: -f["confidence"])
     return findings[: cfg.overlap_surface_cap]
