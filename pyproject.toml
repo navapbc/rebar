@@ -432,6 +432,19 @@ check_untyped_defs = true
 # test_mypy_ratchet.py enforces that the enabled set never loses a member. To promote
 # a package: annotate its remaining defs until `mypy src/rebar/<pkg> --disallow-untyped-defs`
 # is clean, then add it here. See docs/architecture.md "mypy strictness ratchet".
+#
+# THIS RATCHET DOES NOT PROTECT A PORT BOUNDARY (ticket cc77). It requires *an*
+# annotation, never a *useful* one, and there are TWO spellings that satisfy it while
+# leaving a Protocol-typed parameter exactly as blind as no annotation at all:
+#   1. `client: Any` — satisfies disallow_untyped_defs; every member access is accepted.
+#   2. a port annotation imported through `rebar_reconciler.` — that name is a runtime
+#      sys.path injection, not an importable distribution, so `ignore_missing_imports`
+#      above widens it to `Any`. `reveal_type` prints "Any" and a bogus member produces
+#      no error; the RELATIVE form (`from ._backend import ...`) resolves and checks.
+# Route 2 is invisible in review: the diff shows a correct-looking port annotation and
+# `make typecheck` stays green. Promoting `_engine` here is therefore NOT evidence its
+# transport boundaries are typed — see docs/architecture.md and
+# tests/unit/rebar_reconciler/test_transport_param_typing_cc77.py, which fails on both.
 [[tool.mypy.overrides]]
 module = ["rebar.graph.*", "rebar.grounding.*"]
 disallow_untyped_defs = true

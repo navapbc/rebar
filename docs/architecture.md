@@ -399,3 +399,32 @@ discipline:
 `mypy src/rebar/<pkg> --disallow-untyped-defs` is clean, then add `rebar.<pkg>.*` to the
 override `module` list. New `type: ignore` must carry a specific code (e.g.
 `type: ignore[arg-type]`); blanket `ignore_errors` is not used.
+
+### The ratchet does not protect a port boundary — two ways to pass it blind
+
+`disallow_untyped_defs` requires *an* annotation, never a *useful* one. At a port
+boundary — a parameter carrying `TicketTransport` or another Protocol — there are two
+distinct spellings that satisfy the ratchet while leaving the parameter exactly as
+unchecked as no annotation at all. Both were measured (ticket cc77); both are why
+promoting a package must not be treated as evidence its port boundaries are typed:
+
+1. **`client: Any`.** Satisfies `disallow_untyped_defs`. A call to any member —
+   declared or not — is accepted. Promoting a package by spraying `Any` closes the
+   ratchet ticket and changes nothing.
+2. **A port annotation imported through `rebar_reconciler.`.** `rebar_reconciler` is not
+   an importable distribution — it is a top-level name created at runtime by injecting
+   `src/rebar/_engine` onto `sys.path`. mypy is never told about that injection, and
+   `ignore_missing_imports = true` is set above, so `from rebar_reconciler._backend import
+   TicketTransport` resolves to `Any`. `reveal_type` on such a parameter prints `Any`,
+   and a call to a bogus member produces no error. The **relative** form
+   (`from ._backend import TicketTransport`) resolves to the real type and restores
+   attribute checking against the same class, metaclass and all.
+
+Route 2 is the dangerous one: the diff shows a correct-looking port annotation, and
+`make typecheck` stays green because it was never going to say anything. This is the
+enabling condition behind [rebar:a357-b747-ece9-4cf5], where a writing reconcile pass
+crashed on `set_entity_property` — a method the core calls from three sites and the port
+never declared. `tests/unit/rebar_reconciler/test_transport_param_typing_cc77.py` fails
+on all three spellings (bare, `Any`, shim-path) for the core reconciler's
+`client`/`transport` parameters, so a later "annotate it to pass the ratchet" change
+cannot reintroduce the blindness.
