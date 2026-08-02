@@ -128,18 +128,22 @@ def test_overlap_judge_selects_the_standard_class() -> None:
 def test_overlap_judge_selects_the_standard_class_for_every_pair() -> None:
     """The volume site: one plan review made 18 of its 23 calls here, so the binding has to hold
     per call and not only on the first."""
-    from rebar.llm.overlap.judge import judge
+    from rebar.llm.overlap.judge import _CANDIDATES_PER_CALL, judge
 
+    # Enough candidates to fill more than one BATCH: the judge sends one call per batch per
+    # ordering, so a corpus one over the bound is the smallest that still proves the binding is
+    # re-applied on a LATER call rather than only on the first.
+    ids = [f"C{i}" for i in range(_CANDIDATES_PER_CALL + 1)]
     rec = _Recorder({"relation": "unrelated", "confidence": 0.0, "abstain": True})
     judge(
         "Q",
         dict(_DIGEST),
-        ["C1", "C2"],
-        {"C1": dict(_DIGEST), "C2": dict(_DIGEST)},
+        ids,
+        {i: dict(_DIGEST) for i in ids},
         config=_cfg(),
         runner=rec,
     )
-    assert len(rec.models) == 4  # two candidates x both orderings
+    assert len(rec.models) == 4  # two batches x both orderings
     assert _only_model(rec) == _STANDARD
 
 
