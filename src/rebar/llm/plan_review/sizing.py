@@ -433,6 +433,55 @@ def models_at_or_above(model: str | None) -> list[str]:
     return [t for name in names if (t := _rung_target(name)) is not None]
 
 
+def _rung_window(target: str) -> int | None:
+    """The MODEL_LADDER-declared window for an escalation TARGET, or ``None`` if no rung matches.
+
+    Uses the same bare-name substring match as :func:`largest_window_tokens`, so a target the
+    model-class vocabulary retargeted (e.g. ``bedrock:us.anthropic.claude-sonnet-4-6``) still
+    resolves to the window of the rung it stands for."""
+    for name, window in MODEL_LADDER:
+        if name in target:
+            return window
+    return None
+
+
+def escalation_rungs(model: str | None) -> list[str]:
+    """The rungs a CONTEXT-LIMIT retry should climb: :func:`models_at_or_above` with every rung
+    that buys no additional context removed.
+
+    A rung above the start is only ever reached after :func:`is_context_limit_error`, so a retry
+    whose declared window is not strictly LARGER than the one that just failed cannot succeed —
+    it re-hits the identical limit a full round-trip later, at the higher rung's price, and the
+    trace reads as "even the bigger model could not fit it" when in fact nothing got bigger.
+    MODEL_LADDER's sonnet and opus rungs both declare 1_000_000 — both figures are CORRECT, the
+    two models genuinely share a window — so sonnet -> opus is exactly such a no-op (bug 1157).
+
+    The START rung is always kept: it is the operator's own model rather than an escalation, and
+    the single-criterion retry there is the step that most often succeeds. Above it a rung is kept
+    only when its window is strictly greater than the last KEPT rung's; comparing against the last
+    kept rung rather than the immediate predecessor stays correct for a ladder carrying several
+    equal-window rungs in a row. A target whose rung window cannot be determined is KEPT, never
+    silently dropped — escalation is a recovery path and must not become a new failure mode.
+
+    :func:`models_at_or_above` deliberately keeps its own contract (every rung at or above the
+    start, class-resolved, cheapest first): it answers "which rungs sit above this one", which is
+    still a truthful question and is what task 7761's provider-stickiness tests observe."""
+    rungs = models_at_or_above(model)
+    if not rungs:
+        return rungs
+    kept = [rungs[0]]
+    best = _rung_window(rungs[0])
+    for target in rungs[1:]:
+        window = _rung_window(target)
+        if window is None:
+            kept.append(target)  # unknown window ⇒ keep; never drop a rung we cannot size
+            continue
+        if best is None or window > best:
+            kept.append(target)
+            best = window
+    return kept
+
+
 def pass1_with_ladder(
     runner: Runner,
     cfg: LLMConfig,
@@ -481,7 +530,7 @@ def pass1_with_ladder(
     out: list[dict[str, Any]] = []
     for crit in chunk:
         produced = False
-        for model in models_at_or_above(cfg.model):
+        for model in escalation_rungs(cfg.model):
             try:
                 crit_findings, usage = passes.pass1_chunk(
                     runner,
@@ -669,6 +718,7 @@ __all__ = [
     "usage_record",
     "is_context_limit_error",
     "models_at_or_above",
+    "escalation_rungs",
     "pass1_with_ladder",
     "shed_to_budget",
     "load_checkpoint",

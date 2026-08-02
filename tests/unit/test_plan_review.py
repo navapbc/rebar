@@ -1254,6 +1254,106 @@ def test_located_anthropic_primary_start_rung_is_unchanged() -> None:
     assert orchestrator._models_at_or_above(None) == [n for n, _w in sizing.MODEL_LADDER]
 
 
+# ── bug 1157: a rung that buys no additional context is not an escalation ────────────
+# MODEL_LADDER's sonnet and opus rungs both declare 1_000_000. BOTH FIGURES ARE CORRECT — the
+# two models genuinely share a 1M window (checked against the provider's live Models API field
+# `max_input_tokens`). The table is honest; its CONSUMPTION was not: a context-limit retry from
+# sonnet onto opus re-hits the identical limit, one round-trip later, at opus pricing.
+#
+# Asserting `window == 1_000_000` would NOT discriminate sonnet from opus — it holds for both,
+# so such a test passes for the wrong reason. Every assertion below is on rung IDENTITY or on
+# the observed per-attempt model sequence.
+
+
+def _rung_window(target: str) -> int | None:
+    """The MODEL_LADDER window declared for the rung ``target`` sits on (test-local mirror)."""
+    for name, window in sizing.MODEL_LADDER:
+        if name in target:
+            return window
+    return None
+
+
+def test_escalation_rungs_drops_the_no_op_same_window_rung() -> None:
+    # The opus rung is absent BY NAME from a sonnet escalation — the discriminating assertion.
+    assert sizing.escalation_rungs("claude-sonnet-4-6") == ["claude-sonnet-4-6"]
+    assert not any("opus" in rung for rung in sizing.escalation_rungs("claude-sonnet-4-6"))
+    # ...while the at-or-above ACCESSOR is untouched: it still reports both rungs.
+    assert sizing.models_at_or_above("claude-sonnet-4-6") == [
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+    ]
+
+
+def test_escalation_rungs_keeps_the_real_haiku_increase() -> None:
+    # AC4: haiku -> sonnet IS a real capacity increase (200K -> 1M) and must survive; only the
+    # sonnet -> opus no-op tail is dropped.
+    assert sizing.escalation_rungs("claude-haiku-4-5") == [
+        "claude-haiku-4-5",
+        "claude-sonnet-4-6",
+    ]
+    assert sizing.escalation_rungs(None) == ["claude-haiku-4-5", "claude-sonnet-4-6"]
+    # A single-rung start and the 48b3 unlocatable-primary path are unaffected.
+    assert sizing.escalation_rungs("claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.escalation_rungs(_UNLOCATED_PRIMARY) == [_UNLOCATED_PRIMARY]
+
+
+def test_model_ladder_windows_are_non_decreasing() -> None:
+    # STRUCTURAL GUARD (a): a rung may REPEAT the window below it (sonnet/opus really do), but it
+    # must never offer LESS context than the rung beneath it — that would make the table itself
+    # dishonest about the ordering `largest_window_tokens` assumes.
+    windows = [w for _n, w in sizing.MODEL_LADDER]
+    assert windows == sorted(windows), sizing.MODEL_LADDER
+
+
+def test_escalation_rung_windows_are_strictly_increasing() -> None:
+    # STRUCTURAL GUARD (b) — the guard that actually enforces the fix. From EVERY start rung the
+    # proposed escalation sequence must gain context at each step, even though the table itself
+    # holds two equal-window rungs. Re-introducing a no-op rung fails here.
+    starts: list[str | None] = [None, *[n for n, _w in sizing.MODEL_LADDER]]
+    for start in starts:
+        rungs = sizing.escalation_rungs(start)
+        windows = [_rung_window(r) for r in rungs]
+        assert all(w is not None for w in windows), (start, rungs)
+        assert all(a < b for a, b in zip(windows, windows[1:], strict=False)), (start, rungs)
+
+
+def test_size_ladder_sonnet_primary_never_pays_for_the_no_op_opus_retry() -> None:
+    # THE BEHAVIOURAL ASSERTION: drive the real ladder with a runner that context-limits every
+    # attempt and records the model each ran on. A sonnet primary makes exactly two calls — the
+    # batch and one single-criterion retry, both on sonnet — and never a third on opus.
+    runner = _ModelRecordingRunner()
+    cfg = replace(_fake_cfg(), model="claude-sonnet-4-6")
+    events: list = []
+    out, _calls = orchestrator._pass1_with_ladder(
+        runner, cfg, "plan", [{"id": "E2"}], False, events
+    )
+    assert runner.models_seen == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+    assert not any("opus" in str(m) for m in runner.models_seen)
+    # The genuine outcome is still reported — the criterion really does not fit.
+    assert len(out) == 1 and out[0]["_too_big"] is True
+
+
+def test_size_ladder_haiku_primary_still_escalates_onto_sonnet() -> None:
+    # AC4 control, observed through the ladder rather than the returned list: the one real
+    # capacity increase is still attempted, and the no-op opus rung still is not.
+    runner = _ModelRecordingRunner()
+    cfg = replace(_fake_cfg(), model="claude-haiku-4-5")
+    events: list = []
+    out, _calls = orchestrator._pass1_with_ladder(
+        runner, cfg, "plan", [{"id": "E2"}], False, events
+    )
+    assert runner.models_seen == [
+        "claude-haiku-4-5",  # the batch call
+        "claude-haiku-4-5",  # single-criterion retry at the primary
+        "claude-sonnet-4-6",  # the one real capacity increase — still attempted
+    ]
+    # ...and the ladder still terminates on the honest outcome once the real rungs run out.
+    # (No "escalated to" event: that is appended only when an escalated attempt SUCCEEDS, and
+    # this runner context-limits every call.)
+    assert len(out) == 1 and out[0]["_too_big"] is True
+    assert any("too big" in e for e in events)
+
+
 def test_advisory_cap_assertion_guards_blocking_leak() -> None:
     # A blocking finding must never reach the advisory cap — partition_findings asserts loud.
     # Feed a DET block + a DET advisory through the shared partition core and confirm the
