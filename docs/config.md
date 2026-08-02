@@ -102,6 +102,23 @@ verify.require_completion_verification_for_close = false  # gate work-ticket clo
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
+verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate detection during
+                                             # `review-plan`: emits up to three suggested
+                                             # `duplicates`/`supersedes`/`depends_on` links in a
+                                             # separate `overlap[]` verdict key (ready-to-run
+                                             # `rebar link` commands). Three stages — the query
+                                             # ticket's digest via `enrich`, BM25F retrieval over
+                                             # the WHOLE tracker with the query's own graph
+                                             # excluded, then a bounded pairwise LLM judge. It is
+                                             # advisory and NEVER blocks a claim or a close, and
+                                             # never affects the plan-review verdict. Cost scales
+                                             # with TRACKER SIZE, not with the reviewed ticket, so
+                                             # it grows as the store grows. Algorithm tunables are
+                                             # the `[tool.rebar.llm] overlap_*` keys (`overlap_k`,
+                                             # `overlap_drain`, `overlap_conf_threshold`, …). env
+                                             # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS; the former
+                                             # name `verify.overlap_enabled` is a permanent alias.
+                                             # See docs/adr/0037-cross-ticket-overlap.md.
 verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env
@@ -450,7 +467,10 @@ names as aliases (with a warning): `REBAR_NO_SYNC`→`REBAR_SYNC_PULL`
 `SCRATCH_BASE_DIR`→`REBAR_SCRATCH_BASE_DIR`, `REBAR_ACLI_TIMEOUT`→`REBAR_JIRA_CLI_TIMEOUT`,
 `RECONCILER_ABSENT_GET_BUDGET`→`REBAR_RECONCILER_DELETION_PROBE_LIMIT`,
 `REBAR_ID_GUARD_MODE`→
-`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true). Also removed (no alias):
+`REBAR_UNSAFE_ID_GUARD_BYPASS` (raise→false/warn→true),
+`REBAR_VERIFY_OVERLAP_ENABLED`→`REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS`. The same rename
+is a permanent **config-key** alias too: `verify.overlap_enabled`→
+`verify.suggest_duplicate_tickets` (when both are set the canonical key wins). Also removed (no alias):
 `PROJECT_ROOT` (use `REBAR_ROOT`), `REBAR_LLM_RUNNER` (runner is derived), and the
 dead `TICKET_CMD`/`REBAR_TICKET_CLI`/`TICKET_WORDLIST_PATH`/`TICKET_SYNC_CMD`/
 `_REBAR_GC_AUTO_ZERO`/`REBAR_FSCK_NO_MUTATE` internals. See the env-var

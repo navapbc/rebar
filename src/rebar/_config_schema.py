@@ -170,12 +170,12 @@ class VerifyConfig:
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
     # read-via: _commands/gates.py string key
     require_plan_review_for_claim: bool = False
-    # Opt-in store-wide cross-ticket overlap detection (epic only-crave-art). When true, the
-    # plan-review invocation runs an ADVISORY store-wide overlap step (enrich → BM25F retrieve
-    # → pairwise judge) that surfaces ≤3 candidate duplicate/supersede/dependency link
-    # suggestions in a separate `overlap[]` verdict key. NEVER blocks claim, never affects the
-    # claim-gate verdict. Default off; all tunables live on LLMConfig (`[tool.rebar.llm]`).
-    overlap_enabled: bool = False
+    # Opt-in store-wide duplicate-ticket suggestions (epic only-crave-art). ADVISORY: adds an
+    # overlap step (enrich → BM25F retrieve → pairwise judge) surfacing ≤3 duplicate/supersede/
+    # dependency link suggestions under an `overlap[]` verdict key; NEVER blocks claim. Cost
+    # scales with TRACKER SIZE, not the ticket. Off by default; tunables on LLMConfig
+    # (`[tool.rebar.llm] overlap_*`). Pre-rename spelling stays honored — see `_ALIASES`.
+    suggest_duplicate_tickets: bool = False
     # Opt-in commit-ticket gate: when true, `rebar verify-commit-ticket` (run in CI, the
     # Gerrit Verified leg) requires every commit message to reference a rebar ticket that
     # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
@@ -604,7 +604,7 @@ _SECTIONS: dict[str, dict] = {
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
-        "overlap_enabled": lambda v, k: _as_bool(v, k),
+        "suggest_duplicate_tickets": lambda v, k: _as_bool(v, k),
         "require_ticket_for_commit": lambda v, k: _as_bool(v, k),
         "enable_code_review": lambda v, k: _as_bool(v, k),
         "verify_window_headroom": lambda v, k: _as_float(v, k, minimum=0.1, maximum=1.0),
@@ -726,10 +726,10 @@ _SECTIONS: dict[str, dict] = {
     },
 }
 
-# section -> {deprecated_key -> canonical_key}. Empty since the pre-1.0 breaking
-# removal (DE7) dropped verify.require_verdict_for_close; kept as the extension point
-# for any future config-key rename window (the coerce_sparse loop below consumes it).
-_ALIASES: dict[str, dict[str, str]] = {}
+# section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below. Every
+# entry needs a matching `cfg:<section>.<old>` row in rebar._deprecations, else warn_deprecated
+# raises. The 9416 entry is a PERMANENT rename: same boolean, untouched configs keep working.
+_ALIASES: dict[str, dict[str, str]] = {"verify": {"overlap_enabled": "suggest_duplicate_tickets"}}
 
 # Config sections owned by an OPTIONAL layer rather than the stdlib core typed
 # Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
