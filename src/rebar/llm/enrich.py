@@ -12,7 +12,10 @@ review/verify ops. It reads the ticket via the ``rebar.llm`` facade ``_reads.sho
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from rebar.llm.config import LLMConfig
+from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
@@ -65,6 +68,18 @@ def enrich(
         raise ValueError("enrich() requires exactly one of ticket_id or text")
 
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    # MODEL CLASS: `trivial`. Chosen on the prompt's shape: ticket-digest is `execution_mode:
+    # single_turn`, has NO tools, is explicitly "Not a reviewer", and extracts four constrained
+    # structured fields from text it is handed — narrow, canonicalizing work with no open-ended
+    # reasoning. It is also the highest-VOLUME site of bug afeb's four, because it runs on the
+    # ticket STORE WRITE path (enrich_drain.maybe_drain, from _store/event_append and _store/push),
+    # so it is the cheapest win of the four.
+    #
+    # Bound HERE rather than at the callers: `cfg` was previously handed to the RunRequest raw, so
+    # the digest ran `cfg.model` and ignored the class table — and because the write path builds its
+    # own config from the environment and passes none in, a caller-side fix would have missed
+    # exactly the path that matters most. Every route into enrich() inherits this one.
+    cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS))
 
     if text is not None:
         source = text
