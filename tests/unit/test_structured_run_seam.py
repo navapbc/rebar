@@ -6,8 +6,12 @@ it. This pins the split that bought the headroom back.
 
 A relocation has no new behaviour, so the real regression net is the existing suite passing
 unchanged. What CAN be asserted here is the structure the split has to preserve: the new
-module is a genuine leaf, both files sit inside the size policy, and nothing in the move
+module is a genuine leaf, the split did not fragment into a stub, and nothing in the move
 dragged a heavy import into the stdlib-only ``import rebar.llm`` path.
+
+The upper LOC ceiling is NOT asserted here: `.github/module-size-limit.txt` is the single
+authoritative bound (ADR 0058), enforced by the CI module-size gate and mirrored in
+`tests/unit/test_module_size_contract.py`.
 """
 
 from __future__ import annotations
@@ -25,10 +29,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "rebar" / "llm"
 _RUNNER = _SRC / "runner.py"
 _STRUCTURED_RUN = _SRC / "structured_run.py"
 
-# `.github/module-size-limit.txt` is the 800 hard cap; this is the headroom target the split
-# exists to restore, deliberately stricter so runner.py stops sitting on the gate.
-_RUNNER_HEADROOM_TARGET = 700
-# AGENTS.md: never create a file under 100 LOC by splitting.
+# AGENTS.md: never create a file under 100 LOC by splitting. This is the ONLY LOC bound this
+# test asserts — the upper ceiling is `.github/module-size-limit.txt`, enforced by the CI
+# module-size gate and mirrored in `test_module_size_contract.py` (ADR 0058).
 _SPLIT_FLOOR = 100
 
 
@@ -36,7 +39,7 @@ def _loc(path: pathlib.Path) -> int:
     return len(path.read_text().splitlines())
 
 
-# ── §A given: the split happened and both files sit inside the size policy ───────────────
+# ── §A given: the split happened and did not fragment into a stub ────────────────────────
 
 
 def test_structured_run_module_exists():
@@ -44,22 +47,12 @@ def test_structured_run_module_exists():
     assert _STRUCTURED_RUN.is_file(), "src/rebar/llm/structured_run.py was not created"
 
 
-def test_runner_regains_real_headroom_under_the_cap():
-    """The whole point: runner.py must stop sitting ON the 800 gate, not merely pass it."""
-    loc = _loc(_RUNNER)
-    assert loc < _RUNNER_HEADROOM_TARGET, (
-        f"runner.py is {loc} LOC; the split must bring it under {_RUNNER_HEADROOM_TARGET} so "
-        "adding a line is not a build break"
-    )
-
-
 def test_structured_run_clears_the_split_floor():
     """AGENTS.md forbids creating a sub-100-LOC file by splitting — a split that small is a
     sign the seam was mechanical rather than real."""
     loc = _loc(_STRUCTURED_RUN)
-    assert _SPLIT_FLOOR <= loc < 500, (
-        f"structured_run.py is {loc} LOC; expected >= {_SPLIT_FLOOR} (the anti-fragmentation "
-        "floor) and < 500 (the AGENTS.md target ceiling)"
+    assert loc >= _SPLIT_FLOOR, (
+        f"structured_run.py is {loc} LOC; splitting must not create a file under {_SPLIT_FLOOR} LOC"
     )
 
 
