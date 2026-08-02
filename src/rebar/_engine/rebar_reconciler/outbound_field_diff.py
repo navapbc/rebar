@@ -37,12 +37,13 @@ if TYPE_CHECKING:
 
 # Fields the INBOUND differ mirrors Jira→local. A Jira-side change to one of
 # these, when local is unchanged since the last sync (matches the baseline),
-# flows inbound rather than being reverted by local-wins. NOTE: ``title`` is
-# deliberately absent — the pre-625b differ iterated the Jira-shaped mapped
-# fields, whose title key is ``summary`` (never a member of the local-named
-# set), so title was never inbound-suppressed. Preserving that exact behaviour,
-# the canonical set is the four fields whose local and Jira names coincided.
-_INBOUND_MIRRORED_FIELDS = frozenset({"description", "priority", "status", "assignee"})
+# flows inbound rather than being reverted by local-wins. This is the arbitrated
+# set named by ADR 0026 ("the five inbound-mirrored scalar fields") — title
+# included: the pre-625b differ iterated Jira-shaped keys (whose title key is
+# ``summary``) and so never suppressed title, which silently reverted a remote
+# summary edit over an unmodified local title. See
+# ``docs/adr/0026-reconciler-three-way-merge-baseline.md``.
+_INBOUND_MIRRORED_FIELDS = frozenset({"title", "description", "priority", "status", "assignee"})
 
 
 def _text_matches(a: Any, b: Any) -> bool:
@@ -262,9 +263,11 @@ def diff_canonical_fields(
     # entry still diffs. ``status``/``parent``/``reporter`` are genuinely optional and
     # stay partial-tolerant (compared only when their source is present / local drives).
 
-    # --- title (never inbound-suppressed; see _INBOUND_MIRRORED_FIELDS note) ---
+    # --- title (inbound-mirrored per ADR 0026; local==baseline defers to inbound) ---
     local_title = ticket.get("title") or ""
-    if not _text_matches(local_title, canonical_remote.get("title", "")):
+    if not _suppressed_by_inbound("title", local_title) and not _text_matches(
+        local_title, canonical_remote.get("title", "")
+    ):
         changed["title"] = local_title
 
     # --- description (inbound-mirrored; ADF-fit via the outbound port) ---
@@ -374,6 +377,7 @@ def _local_matches_baseline(field: str, ticket: dict[str, Any], baseline: dict[s
             baseline.get("assignee_identity"),
         )
     local_val = {
+        "title": ticket.get("title") or "",
         "description": ticket.get("description") or "",
         "priority": ticket.get("priority", 2),
         "status": ticket.get("status", "open"),
