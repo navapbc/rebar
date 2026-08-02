@@ -18,7 +18,6 @@ from dataclasses import replace
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMError
-from rebar.llm.model_classes import FRONTIER_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.prompting.prompts import select_reviewers  # re-export (rules layer)
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -136,20 +135,13 @@ def review_ticket(
     with gate_source.gate_read_root(handle):
         cfg = config or LLMConfig.from_env(repo_root=repo_root)
         cfg = gate_source.apply_handle(cfg, handle)
-        # MODEL CLASS: `frontier`. Chosen on the reviewer prompt's shape, and deliberately NOT
-        # `standard`: the catalog default (`ticket-quality`) is `execution_mode: agentic`, category
-        # `review`, and runs WITH file + MCP tools, instructing the agent to inspect the code paths
-        # a ticket references. That is an open-ended FINDER — the Pass-1 analogue — not a
-        # verification pass, and the operator's "verification/judging work runs `standard`" rule
-        # covers Pass-2/Pass-4, not finders.
-        #
-        # Routed through the class vocabulary rather than left on `cfg.model` (bug afeb): the class
-        # table is the documented steering wheel, the same reason `_verifier_cfg` and the completion
-        # verifier resolve their model through it. Consequence worth stating: an operator who
-        # retargets by setting the bare `llm.model` no longer steers this op — they configure the
-        # `frontier` class (the DEPRECATED bare REBAR_LLM_MODEL still feeds every class slot as its
-        # default, so that env path is unchanged).
-        cfg = replace(cfg, model=resolve_model_string(FRONTIER_CLASS))
+        # Runs the OPERATOR'S configured model, deliberately — no class is bound here. This is a
+        # top-level op's single LLM call, so there are no passes to differentiate, and the class
+        # vocabulary exists to spend differently ACROSS the passes of a multi-pass gate. Binding a
+        # class here would take `llm.model` away as a steering knob for this command while giving
+        # nothing back. Same reasoning as `spec_scan`; both are registered as by-design in
+        # `tests/unit/test_subcall_class_selection.py`. Whether this op should exist at all is
+        # ticket 316a — if it is retired the question is moot.
         if cfg.max_iterations < _REVIEW_MIN_STEPS:
             cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
         rid = reviewer_id or default_reviewer_id()

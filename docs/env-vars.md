@@ -159,7 +159,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_148 variables._
+_149 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
