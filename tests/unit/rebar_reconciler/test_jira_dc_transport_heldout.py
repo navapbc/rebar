@@ -24,6 +24,7 @@ Three are worth stating explicitly, because each has a specific way of being
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -103,12 +104,43 @@ def test_the_pat_is_sent_as_bearer_token_not_basic_auth(monkeypatch: Any) -> Non
     assert "basic_auth" not in kwargs, "DC must not fall back to basic auth"
 
 
-def test_the_pat_never_appears_in_the_repr_of_the_transport(monkeypatch: Any) -> None:
+_PAT = "pat-xyz"
+
+
+class _CredentialCarryingClient:
+    """A client that genuinely HOLDS the PAT and prints it in its own repr.
+
+    Auth/session objects routinely repr their own attributes, so a transport that
+    folds its client into its repr discloses the credential. Passing ``object()``
+    here — as this test's earlier form did — puts no credential within reach at
+    all, which is precisely why the assertion below could not fail.
+    """
+
+    def __init__(self, token: str) -> None:
+        self.token_auth = token
+
+    def __repr__(self) -> str:
+        return f"<Client token_auth={self.token_auth!r}>"
+
+
+def test_the_pat_never_appears_in_the_repr_of_the_transport() -> None:
     """A credential that leaks into logs via repr is a real disclosure path."""
     from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
-    t = JiraDataCenterTransport(client=object(), project="DC")
-    assert "pat-xyz" not in repr(t)
+    client = _CredentialCarryingClient(_PAT)
+    assert _PAT in repr(client), (
+        "fixture self-check: the client must actually carry the credential, or this "
+        "test is asserting the absence of something that was never present"
+    )
+
+    t = JiraDataCenterTransport(client=client, project="DC")
+
+    for rendering, how in ((repr(t), "repr()"), (f"{t}", "f-string/str()")):
+        assert _PAT not in rendering, (
+            f"the PAT reached a log-facing rendering of the transport via {how}: "
+            f"{rendering!r}. A transport must not surface its client's credential — "
+            f"not directly, and not by delegating to the client's own repr."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -132,17 +164,47 @@ def test_the_dc_backend_is_registered_and_selectable() -> None:
     )
 
 
+def _config_naming_backend(key: str) -> Any:
+    """The minimal duck-typed config ``select_backend`` reads: ``.reconciler.backend``."""
+    return SimpleNamespace(reconciler=SimpleNamespace(backend=key))
+
+
 def test_an_unknown_backend_raises_the_registry_error_not_key_error() -> None:
-    """Pins the exception TYPE the negative path uses.
+    """Pins the exception the negative path actually RAISES, not just a class
+    relationship: the earlier form never called ``select_backend`` at all.
 
     ``_backend_registry`` raises ``BackendRegistryError``; a guard written as
     ``pytest.raises(KeyError)`` would never match and would protect nothing.
     """
-    from rebar_reconciler._backend_registry import BackendRegistryError
+    from rebar_reconciler._backend_registry import (
+        BackendRegistryError,
+        _reset_registry_for_test,
+        register,
+        select_backend,
+    )
 
-    assert not issubclass(BackendRegistryError, KeyError), (
-        "if this ever became a KeyError subclass, tests written against either "
-        "type would silently both pass — keep the distinction explicit"
+    sentinel = object()
+
+    with _reset_registry_for_test():
+        register("known-backend-for-this-test")(lambda _config: sentinel)
+
+        # Positive control: the lookup path resolves, so the miss below is a real
+        # miss and not a selector that raises on everything.
+        assert select_backend(_config_naming_backend("known-backend-for-this-test")) is sentinel
+
+        with pytest.raises(BackendRegistryError) as excinfo:
+            select_backend(_config_naming_backend("definitely-not-a-registered-backend"))
+
+    assert not isinstance(excinfo.value, KeyError), (
+        "the miss must not surface as a KeyError: if these types ever converged, "
+        "tests written against either would silently both pass"
+    )
+    assert "definitely-not-a-registered-backend" in str(excinfo.value), (
+        f"the error must name the key that missed; got {excinfo.value!s}"
+    )
+    assert "known-backend-for-this-test" in str(excinfo.value), (
+        f"the error must enumerate the registered keys so an operator can see the "
+        f"correct spelling; got {excinfo.value!s}"
     )
 
 
