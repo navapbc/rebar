@@ -558,10 +558,24 @@ def score_code_novelty(
     if not findings or not prior_findings:
         return {}
     try:
+        from dataclasses import replace
+
+        from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
         from rebar.llm.prompting import prompts as _prompts
         from rebar.llm.review_kernel import decide, verify
         from rebar.llm.runner import RunRequest, get_runner
 
+        # MODEL CLASS: `standard`. This IS a code-review pass — `execution_mode: single_turn`,
+        # category `code-review-pass`, factual tri-state matching of current findings against prior
+        # ones — so the operator's Pass-2/Pass-4 rule applies directly. It also makes this
+        # function's claimed parity with plan-review's `_score_floor_novelty` (which runs on
+        # `_verifier_cfg`, i.e. the standard class) actually hold; it did not before.
+        #
+        # Bound here instead of inheriting `cfg` (bug afeb): the raw config sent this sub-call to
+        # `cfg.model`, so the diff and the prior findings went to the operator's default provider
+        # even with every class configured elsewhere. Inside the existing try, so a config error
+        # still lands on the fail-safe below — a broken novelty signal keeps MORE findings.
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
         runner_sel = runner or get_runner(cfg)
         prompt = _prompts.get_prompt("code-review-novelty", repo_root=cfg.repo_path)
         system, _meta = _prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
