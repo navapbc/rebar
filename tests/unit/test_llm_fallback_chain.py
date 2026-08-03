@@ -15,6 +15,7 @@ values, constructed object state, and what the run attests — never on private 
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -36,6 +37,23 @@ _PRIMARY = "claude-sonnet-4-6"
 # MEASURED to reject `temperature` (capabilities.py's exact-id override) — the discriminating
 # fallback entry for the whole-chain capability test.
 _NO_TEMPERATURE = "claude-opus-4-8"
+
+#: The endpoint a fallback entry is configured against. Single-sourced so the configured value and
+#: the asserted value cannot drift.
+_FALLBACK_ENDPOINT = "https://fallback.test"
+
+
+def _origin(url: object) -> tuple[str, str]:
+    """The ``(scheme, host)`` pair of ``url``, for comparing endpoints by ORIGIN.
+
+    A URL must never be checked with ``startswith`` or ``in``: ``https://fallback.test.evil.example``
+    starts with ``https://fallback.test``, so a prefix test would accept an entirely different host
+    (CodeQL ``py/incomplete-url-substring-sanitization``). Comparing the parsed origin by exact
+    equality has no substring semantics at all, while still tolerating the trailing-slash and path
+    normalisation a client applies to a configured endpoint — which is what the prefix test was
+    reaching for."""
+    parts = urlsplit(str(url))
+    return parts.scheme, parts.netloc
 
 
 def _mc():
@@ -240,14 +258,33 @@ def test_a_fallback_entry_endpoint_is_built_against_that_endpoint(seam, monkeypa
     would defeat the main reason to configure a fallback: a local proxy backing a hosted primary."""
     _configure_chain(
         monkeypatch,
-        [{"model": _NO_TEMPERATURE, "provider": "anthropic", "endpoint": "https://fallback.test"}],
+        [{"model": _NO_TEMPERATURE, "provider": "anthropic", "endpoint": _FALLBACK_ENDPOINT}],
     )
     cfg = _cfg()
     PydanticAIRunner(cfg).run(_req(cfg))
 
     model = seam["captured"]["model"]
-    assert str(model.models[1].base_url).startswith("https://fallback.test")
-    assert not str(model.models[0].base_url).startswith("https://fallback.test")
+    assert _origin(model.models[1].base_url) == _origin(_FALLBACK_ENDPOINT)
+    # The PRIMARY entry must still go to the provider default, not the fallback's endpoint.
+    assert _origin(model.models[0].base_url) != _origin(_FALLBACK_ENDPOINT)
+
+
+def test_a_host_that_merely_shares_the_endpoint_prefix_is_not_the_same_origin():
+    """The comparison must reject a look-alike host, which is what a prefix test could not.
+
+    `https://fallback.test.evil.example` STARTS WITH `https://fallback.test`, so the assertion this
+    file used to make would have accepted it as "built against that endpoint". Pinned here so the
+    weak form cannot come back: an origin comparison rejects it, and the prefix test it replaced
+    would have accepted it."""
+    look_alike = "https://fallback.test.evil.example/v1"
+    assert _origin(look_alike) != _origin(_FALLBACK_ENDPOINT)
+    # ...and this is exactly what the replaced prefix check would have got wrong:
+    assert look_alike.startswith(_FALLBACK_ENDPOINT)
+
+    # Normalisation the client may apply must still compare EQUAL — the tolerance the prefix
+    # check was reaching for, kept without the weakness.
+    assert _origin(_FALLBACK_ENDPOINT + "/") == _origin(_FALLBACK_ENDPOINT)
+    assert _origin(_FALLBACK_ENDPOINT + "/v1/messages") == _origin(_FALLBACK_ENDPOINT)
 
 
 # ── selection: what does and does not trigger failover ────────────────────────────────────
