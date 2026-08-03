@@ -1,0 +1,1086 @@
+{
+  "corpus": "provider-parity-v1",
+  "corpus_note": "The run enumerated a 30-item corpus (corpus_digest). Two of those items -- the plan-review-container G3 cases -- raised on BOTH arms at every epoch before any model call, because a container criterion needs a `children` payload those fixtures do not carry; they are counted in error_counts and were excluded as errored pairs, so the SCORED pair set is the 28 items of corpus_digest_current, which is what the selector now returns after that exclusion was added. No model call was spent on them, so the measured numbers are unaffected.",
+  "region": "us-east-1",
+  "schema_version": 1,
+  "slots": {
+    "frontier": {
+      "calls": {
+        "v1": 90,
+        "v2": 90
+      },
+      "corpus_digest": "9d707f762efbaad3bd1190373af1a878c41d801c28f7824c5a532d41eef00c2a",
+      "corpus_digest_current": "6eb72a518909e33596cdaf0d75afdfb4adeef615238c64b8b689061bfacaa141",
+      "epochs": 3,
+      "error_counts": {
+        "v1": {
+          "auth_validation": 0,
+          "generic": 6,
+          "sampling_parameter": 0
+        },
+        "v2": {
+          "auth_validation": 0,
+          "generic": 6,
+          "sampling_parameter": 0
+        }
+      },
+      "error_messages": {
+        "v1": [
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
+        ],
+        "v2": [
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
+        ]
+      },
+      "excluded_errored_pairs": 2,
+      "gating_failures": [
+        "verdict agreement 0.929 below 0.95",
+        "2 decision-level flip(s) on the gold set (must be 0)",
+        "false-accept rose 0.143 > margin 0.02"
+      ],
+      "invalid": false,
+      "invalid_reasons": [],
+      "latency_s": {
+        "v1": 2103.318963503465,
+        "v2": 2105.298938867403
+      },
+      "measured": true,
+      "metrics": {
+        "cost": {
+          "v1": 0.0,
+          "v2": 0.0
+        },
+        "decision_flips": 2,
+        "error_rate": {
+          "v1": 0.0,
+          "v2": 0.0
+        },
+        "false_accept": {
+          "v1": 0.7857142857142857,
+          "v2": 0.9285714285714286
+        },
+        "latency_s": {
+          "v1": 2103.116499837255,
+          "v2": 2105.149094866356
+        },
+        "n": 28,
+        "n_gold": 28,
+        "recall": {
+          "v1": 0.9285714285714286,
+          "v2": 0.9285714285714286
+        },
+        "validity": {
+          "v1": 1.0,
+          "v2": 1.0
+        },
+        "verdict_agreement": 0.9285714285714286
+      },
+      "n_items": 30,
+      "passed": false,
+      "recorded_at": "2026-08-02T23:39:53.656405+00:00",
+      "records": [
+        {
+          "case_id": "FP-rename-all-callsites-updated",
+          "label": "advisory",
+          "spec": "code-review-api-compat",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-removed-public-json-key",
+          "label": "block",
+          "spec": "code-review-api-compat",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-sourced-bash",
+          "label": "advisory",
+          "spec": "code-review-base",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-dangling-deletion",
+          "label": "block",
+          "spec": "code-review-base",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-create-index-concurrently",
+          "label": "advisory",
+          "spec": "code-review-db-migrations",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-drop-column-no-backfill",
+          "label": "block",
+          "spec": "code-review-db-migrations",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-prose-reword-preserves-contract",
+          "label": "advisory",
+          "spec": "code-review-llm-prompts",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-frontmatter-field-removed",
+          "label": "block",
+          "spec": "code-review-llm-prompts",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-micro-optimization",
+          "label": "advisory",
+          "spec": "code-review-performance",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-n-plus-1-in-loop",
+          "label": "block",
+          "spec": "code-review-performance",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-list-form-subprocess",
+          "label": "advisory",
+          "spec": "code-review-security",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-shell-injection",
+          "label": "block",
+          "spec": "code-review-security",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-valid-observable-test",
+          "label": "advisory",
+          "spec": "code-review-tests",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-tautological-test",
+          "label": "block",
+          "spec": "code-review-tests",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "V-clean-rename",
+          "label": "advisory",
+          "spec": "code-review-verify",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "V-real-defect",
+          "label": "block",
+          "spec": "code-review-verify",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G7-P-consistent-narrowing",
+          "label": "advisory",
+          "spec": "plan-review-G7",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G7-R-out-of-parent-scope",
+          "label": "block",
+          "spec": "plan-review-G7",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "ACAP-F1-dc58",
+          "label": "block",
+          "spec": "plan-review-asserted-capability",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "ACAP-N1-no-claim",
+          "label": "advisory",
+          "spec": "plan-review-asserted-capability",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G3-FP-covered-by-named-consumer-rebar",
+          "label": "advisory",
+          "spec": "plan-review-container",
+          "v1": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          },
+          "v2": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          }
+        },
+        {
+          "case_id": "G3-R-uncovered-ac-rebar",
+          "label": "block",
+          "spec": "plan-review-container",
+          "v1": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          },
+          "v2": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          }
+        },
+        {
+          "case_id": "DSHAPE-F1-layer-cake",
+          "label": "block",
+          "spec": "plan-review-decomp-shape",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "DSHAPE-N1-vertical-slices",
+          "label": "advisory",
+          "spec": "plan-review-decomp-shape",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP1-T5c",
+          "label": "advisory",
+          "spec": "plan-review-finder",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-E2-rebar",
+          "label": "block",
+          "spec": "plan-review-finder",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NEC-F1-unmotivated-cache",
+          "label": "block",
+          "spec": "plan-review-necessity",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NEC-N1-reproduced-bug",
+          "label": "advisory",
+          "spec": "plan-review-necessity",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NFI-F1-source-change",
+          "label": "block",
+          "spec": "plan-review-no-file-impact",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NFI-P1-external-operator-action",
+          "label": "advisory",
+          "spec": "plan-review-no-file-impact",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        }
+      ],
+      "slot": "frontier",
+      "v1_model": "claude-opus-4-8",
+      "v2_model": "bedrock:us.anthropic.claude-opus-4-8"
+    },
+    "standard": {
+      "calls": {
+        "v1": 90,
+        "v2": 90
+      },
+      "corpus_digest": "9d707f762efbaad3bd1190373af1a878c41d801c28f7824c5a532d41eef00c2a",
+      "corpus_digest_current": "6eb72a518909e33596cdaf0d75afdfb4adeef615238c64b8b689061bfacaa141",
+      "epochs": 3,
+      "error_counts": {
+        "v1": {
+          "auth_validation": 0,
+          "generic": 6,
+          "sampling_parameter": 0
+        },
+        "v2": {
+          "auth_validation": 0,
+          "generic": 6,
+          "sampling_parameter": 0
+        }
+      },
+      "error_messages": {
+        "v1": [
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
+        ],
+        "v2": [
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-FP-covered-by-named-consumer-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan",
+          "plan-review-container/G3-R-uncovered-ac-rebar: ValueError: container criterion 'G3' needs a non-empty `children` list in the eval fixture (each {ticket_id, title, description}); inline `input` is the parent plan"
+        ]
+      },
+      "excluded_errored_pairs": 2,
+      "gating_failures": [
+        "1 decision-level flip(s) on the gold set (must be 0)"
+      ],
+      "invalid": false,
+      "invalid_reasons": [],
+      "latency_s": {
+        "v1": 2756.5762701639906,
+        "v2": 2484.75677930424
+      },
+      "measured": true,
+      "metrics": {
+        "cost": {
+          "v1": 0.0,
+          "v2": 0.0
+        },
+        "decision_flips": 1,
+        "error_rate": {
+          "v1": 0.0,
+          "v2": 0.0
+        },
+        "false_accept": {
+          "v1": 0.7857142857142857,
+          "v2": 0.7857142857142857
+        },
+        "latency_s": {
+          "v1": 2756.5112515385263,
+          "v2": 2484.617536471458
+        },
+        "n": 28,
+        "n_gold": 28,
+        "recall": {
+          "v1": 0.8571428571428571,
+          "v2": 0.9285714285714286
+        },
+        "validity": {
+          "v1": 1.0,
+          "v2": 1.0
+        },
+        "verdict_agreement": 0.9642857142857143
+      },
+      "n_items": 30,
+      "passed": false,
+      "recorded_at": "2026-08-02T23:57:01.083760+00:00",
+      "records": [
+        {
+          "case_id": "FP-rename-all-callsites-updated",
+          "label": "advisory",
+          "spec": "code-review-api-compat",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-removed-public-json-key",
+          "label": "block",
+          "spec": "code-review-api-compat",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-sourced-bash",
+          "label": "advisory",
+          "spec": "code-review-base",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-dangling-deletion",
+          "label": "block",
+          "spec": "code-review-base",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-create-index-concurrently",
+          "label": "advisory",
+          "spec": "code-review-db-migrations",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-drop-column-no-backfill",
+          "label": "block",
+          "spec": "code-review-db-migrations",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-prose-reword-preserves-contract",
+          "label": "advisory",
+          "spec": "code-review-llm-prompts",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-frontmatter-field-removed",
+          "label": "block",
+          "spec": "code-review-llm-prompts",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-micro-optimization",
+          "label": "advisory",
+          "spec": "code-review-performance",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-n-plus-1-in-loop",
+          "label": "block",
+          "spec": "code-review-performance",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-list-form-subprocess",
+          "label": "advisory",
+          "spec": "code-review-security",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-shell-injection",
+          "label": "block",
+          "spec": "code-review-security",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP-valid-observable-test",
+          "label": "advisory",
+          "spec": "code-review-tests",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-tautological-test",
+          "label": "block",
+          "spec": "code-review-tests",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "V-clean-rename",
+          "label": "advisory",
+          "spec": "code-review-verify",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "V-real-defect",
+          "label": "block",
+          "spec": "code-review-verify",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G7-P-consistent-narrowing",
+          "label": "advisory",
+          "spec": "plan-review-G7",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G7-R-out-of-parent-scope",
+          "label": "block",
+          "spec": "plan-review-G7",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "ACAP-F1-dc58",
+          "label": "block",
+          "spec": "plan-review-asserted-capability",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "ACAP-N1-no-claim",
+          "label": "advisory",
+          "spec": "plan-review-asserted-capability",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "G3-FP-covered-by-named-consumer-rebar",
+          "label": "advisory",
+          "spec": "plan-review-container",
+          "v1": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          },
+          "v2": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          }
+        },
+        {
+          "case_id": "G3-R-uncovered-ac-rebar",
+          "label": "block",
+          "spec": "plan-review-container",
+          "v1": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          },
+          "v2": {
+            "decision": "dropped",
+            "errored": true,
+            "valid": false
+          }
+        },
+        {
+          "case_id": "DSHAPE-F1-layer-cake",
+          "label": "block",
+          "spec": "plan-review-decomp-shape",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "DSHAPE-N1-vertical-slices",
+          "label": "advisory",
+          "spec": "plan-review-decomp-shape",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "FP1-T5c",
+          "label": "advisory",
+          "spec": "plan-review-finder",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "R-E2-rebar",
+          "label": "block",
+          "spec": "plan-review-finder",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NEC-F1-unmotivated-cache",
+          "label": "block",
+          "spec": "plan-review-necessity",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NEC-N1-reproduced-bug",
+          "label": "advisory",
+          "spec": "plan-review-necessity",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NFI-F1-source-change",
+          "label": "block",
+          "spec": "plan-review-no-file-impact",
+          "v1": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "block",
+            "errored": false,
+            "valid": true
+          }
+        },
+        {
+          "case_id": "NFI-P1-external-operator-action",
+          "label": "advisory",
+          "spec": "plan-review-no-file-impact",
+          "v1": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          },
+          "v2": {
+            "decision": "advisory",
+            "errored": false,
+            "valid": true
+          }
+        }
+      ],
+      "slot": "standard",
+      "v1_model": "claude-sonnet-4-6",
+      "v2_model": "bedrock:us.anthropic.claude-sonnet-4-6"
+    }
+  }
+}
