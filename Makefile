@@ -77,6 +77,7 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 		fi; \
 	fi; \
 	pre-commit install; \
+	sh scripts/install-gerrit-hook.sh || true; \
 	hook="$$common/hooks/pre-commit"; \
 	msg_hook="$$common/hooks/commit-msg"; \
 	if [ -f "$$hook" ]; then \
@@ -97,10 +98,12 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 		echo "✓ Gerrit Change-Id stamping preserved (chained as commit-msg.legacy)"; \
 	else \
 		echo "WARNING: no Change-Id stamping found in $$msg_hook or its .legacy chain."; \
-		echo "         Pushes to Gerrit will be rejected without a Change-Id. Reinstall it:"; \
-		echo "           curl -sLo \"\$$(git rev-parse --git-path hooks/commit-msg.legacy)\" \\"; \
-		echo "             https://rebar.solutions.navateam.com/tools/hooks/commit-msg"; \
-		echo "           chmod +x \"\$$(git rev-parse --git-path hooks/commit-msg.legacy)\""; \
+		echo "         Pushes to Gerrit will be rejected without a Change-Id. The install"; \
+		echo "         above failed (offline? host unreachable?) — re-run once you have"; \
+		echo "         network access to the Gerrit host:"; \
+		echo "           make hooks     # -> scripts/install-gerrit-hook.sh"; \
+		echo "         Do NOT curl over \$$(git rev-parse --git-path hooks/commit-msg):"; \
+		echo "         from a linked worktree that clobbers the SHARED pre-commit wrapper."; \
 	fi
 
 worktree:  ## Create a fresh worktree from origin/main + provision its venv & hooks. Usage: make worktree name=<branch> [dir=<path>]

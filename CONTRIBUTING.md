@@ -52,19 +52,29 @@ cd rebar
 
 # REQUIRED: the commit-msg hook stamps each commit with a Change-Id trailer, which is
 # how Gerrit tracks a change across re-pushes. Without it, your push is REJECTED.
-curl -Lo .git/hooks/commit-msg \
-  "https://rebar.solutions.navateam.com/tools/hooks/commit-msg"
-chmod +x .git/hooks/commit-msg
+# `make hooks` installs it (and the pre-commit gates) idempotently and worktree-safely;
+# `make install` runs it for you.
+make hooks
 ```
 Git will prompt for your HTTP password on the first authenticated fetch/push; use a
 credential helper (`git config --global credential.helper store`/`osxkeychain`) so you
 aren't re-prompted.
 
 Set up the local dev env per [`docs/local-dev-env.md`](docs/local-dev-env.md) (run
-`make install`). Note these are **two independent git hooks** that do not conflict:
-`make install` wires the check-only **`pre-commit`** hook (lint/format, `.git/hooks/pre-commit`),
-while the step above installs the Gerrit **`commit-msg`** hook (Change-Id stamping,
-`.git/hooks/commit-msg`) — different hook files, safe in either order.
+`make install`, which calls `make hooks` for you). `make hooks` wires **both** gates in one
+idempotent step: the check-only **`pre-commit`** hook (lint/format/typecheck) and Gerrit's
+**`commit-msg`** Change-Id stamper, the latter via
+[`scripts/install-gerrit-hook.sh`](scripts/install-gerrit-hook.sh).
+
+> **Never install the Gerrit hook by downloading it straight onto
+> `$(git rev-parse --git-path hooks/commit-msg)` or `.git/hooks/commit-msg`.** Git hooks
+> live in the **shared common dir**, so from inside a linked worktree both spellings
+> resolve to the *main* checkout's hook file — the slot pre-commit's wrapper occupies. The
+> curl clobbers that wrapper for **every worktree on the host**, and nothing complains
+> until a Gerrit push is rejected for a missing `Change-Id`, possibly from a different
+> worktree (bug 84aa). `scripts/install-gerrit-hook.sh` resolves the common dir
+> deliberately, installs into `commit-msg.legacy` when pre-commit owns the slot, and
+> refuses loudly rather than overwriting a hook it does not recognise.
 
 ---
 
@@ -423,9 +433,7 @@ the hook** — if it is missing, the merge push is rejected with *missing Change
 Install it before you create the merge commit:
 
 ```bash
-curl -sLo .git/hooks/commit-msg \
-  https://rebar.solutions.navateam.com/tools/hooks/commit-msg
-chmod +x .git/hooks/commit-msg
+make hooks   # idempotent + worktree-safe; see §1b for why not a bare curl
 ```
 
 Then create the no-fast-forward merge and push it to `refs/for/main`:

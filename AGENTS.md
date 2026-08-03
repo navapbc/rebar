@@ -219,9 +219,13 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   `Signed-off-by: <that name> <that email>`. A machine/operator that runs commits under a
   dedicated automation identity (e.g. a bot account) scopes that identity to its own
   machine-local config, never to this canonical guidance (see `rebar explain review` /
-  `CONTRIBUTING.md` §"Sign your work (DCO)" for the full policy). A fresh
-  worktree lacks the `commit-msg` hook that stamps the `Change-Id` — install it:
-  `curl -sLo "$(git rev-parse --git-path hooks/commit-msg)" https://rebar.solutions.navateam.com/tools/hooks/commit-msg && chmod +x "$(git rev-parse --git-path hooks/commit-msg)"`.
+  `CONTRIBUTING.md` §"Sign your work (DCO)" for the full policy). If the `commit-msg` hook
+  that stamps the `Change-Id` is missing, install it with **`make hooks`** — the one
+  idempotent path, which puts the Gerrit stamper in the slot pre-commit chains to. Never
+  download the hook straight onto `$(git rev-parse --git-path hooks/commit-msg)`: hooks
+  live in the SHARED common dir, so from a linked worktree that overwrites the pre-commit
+  wrapper for every worktree at once and silently breaks Change-Id stamping host-wide
+  (bug 84aa).
 - **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref creates a Gerrit
   change; it does not touch `main`). Iterate on findings with `git commit --amend --no-edit`
   (keep the `Change-Id`) + re-push.
