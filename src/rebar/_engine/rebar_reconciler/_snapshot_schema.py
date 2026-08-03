@@ -107,7 +107,13 @@ class SnapshotEntry(TypedDict, total=False):
     issuetype: dict[str, Any] | str
     comment: JiraCommentField
     issuelinks: list[JiraIssueLink]
-    parent: JiraParent
+    # ``None`` is the AUTHORITATIVE-PARENTLESS shape (ticket 88d9): the key is PRESENT
+    # with a falsy value, meaning the parent map was queried and Jira genuinely has no
+    # parent. That is DISTINCT from the key being ABSENT, which means never queried —
+    # a truncated page walk, a cross-project issue, or get_parent_map's ``{}``
+    # degradation on any REST failure. Only the former may authorise an inbound CLEAR.
+    # Mirrors the authoritative-empty-list treatment ``issuelinks`` already gets.
+    parent: JiraParent | None
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +125,8 @@ class SnapshotEntry(TypedDict, total=False):
 #     a flat top-level ``comments`` array does NOT satisfy it (bug 0ee6);
 #   * ``issuelinks`` is an ARRAY of link objects each with a ``type.name``
 #     (bug 3f04);
-#   * ``parent`` is ``{"key": str}``.
+#   * ``parent`` is ``{"key": str}``, or ``None`` for an issue that was QUERIED and has
+#     no parent (key present + falsy); an ABSENT key means never queried (ticket 88d9).
 # ---------------------------------------------------------------------------
 
 SNAPSHOT_ENTRY_SCHEMA: dict[str, Any] = {
@@ -148,7 +155,11 @@ SNAPSHOT_ENTRY_SCHEMA: dict[str, Any] = {
         },
         "issuelinks": {"type": "array", "items": {"$ref": "#/$defs/issuelink"}},
         "parent": {
-            "type": "object",
+            # ["object","null"] — the same shape ``assignee`` above already uses. ``null`` is
+            # the AUTHORITATIVE-PARENTLESS value (queried, Jira has no parent); an ABSENT key
+            # means never queried. Only the former authorises an inbound CLEAR (ticket 88d9).
+            # ``required`` applies only when the value IS an object, per JSON Schema.
+            "type": ["object", "null"],
             "required": ["key"],
             "properties": {"key": {"type": "string"}},
         },

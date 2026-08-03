@@ -43,6 +43,8 @@ from rebar_reconciler.inbound_fields import (  # noqa: F401
     _extract_jira_field_value,
     _load_adf,
     _normalize_jira_body,
+    classify_inbound_parent,
+    diff_inbound_parent,
 )
 
 if TYPE_CHECKING:
@@ -87,29 +89,6 @@ class BindingStoreProtocol(Protocol):
     """Minimal interface for the inbound binding store lookup."""
 
     def get_local_id(self, jira_key: str) -> str | None: ...
-
-
-def _extract_parent_local_id(
-    jira_fields: dict[str, Any],
-    binding_store: Any,
-) -> str | None:
-    """Extract the local parent_id from a Jira snapshot entry's parent field.
-
-    Jira REST returns ``parent`` as ``{"key": "DIG-N", ...}`` (ticket 8b25).
-    Resolves the parent Jira key to a local id via
-    ``binding_store.get_local_id(key)``.  Returns ``None`` when:
-      - the snapshot entry has no ``parent`` field (top-level issue)
-      - the parent key is not yet bound (retry on next pass)
-    """
-    parent_raw = jira_fields.get("parent")
-    if not parent_raw:
-        return None
-    if not isinstance(parent_raw, dict):
-        return None
-    parent_jira_key = parent_raw.get("key")
-    if not parent_jira_key:
-        return None
-    return binding_store.get_local_id(parent_jira_key)
 
 
 # ---------------------------------------------------------------------------
@@ -254,19 +233,16 @@ def _diff_jira_vs_local(
         if jira_val != local_val:
             changed[local_field] = jira_emit
 
-    # Parent sync (ticket 8b25): diff Jira parent against local parent_id.
+    # Parent sync (ticket 8b25; three-state + gated CLEAR in ticket 88d9). The decision —
+    # observed/unobserved/unresolvable, and the managed-ref gate on a clear — lives in
+    # ``inbound_fields.diff_inbound_parent``, which already owns parent-field extraction.
     # Skip when no binding_store provided (legacy call path).
     if binding_store is not None:
-        jira_parent_local_id = _extract_parent_local_id(jira_fields, binding_store)
-        local_parent_id = local_ticket.get("parent_id") or None
-        if jira_parent_local_id is not None:
-            # Parent key IS bound — compare and emit diff when changed
-            if jira_parent_local_id != local_parent_id:
-                changed["parent_id"] = jira_parent_local_id
-        # When jira_parent_local_id is None: either Jira has no parent (skip),
-        # or parent key is unbound this pass (skip + retry next pass).
-        # We do NOT emit parent_id=None to avoid accidentally clearing
-        # a locally-set parent when we just can't resolve it yet.
+        emit_parent, parent_value = diff_inbound_parent(
+            jira_fields, local_ticket, binding_store.get_local_id
+        )
+        if emit_parent:
+            changed["parent_id"] = parent_value
 
     return changed
 
