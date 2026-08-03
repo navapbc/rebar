@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/epic_bug_screen_verdict.schema.json",
+  "title": "EpicBugScreenVerdict",
+  "description": "Output of one single-turn epic-close bug-screen call (ticket 4b54). The screen is a narrow forced-choice relevance triage of one open/in_progress out-of-hierarchy bug against the epic under close: A = the bug describes a defect in something this epic changed/built or behavior its acceptance criteria claim; B = same subsystem but pre-existing or adjacent; C = unrelated. Only A-verdicts are forwarded to the completion verifier. Consumers normalize any out-of-vocabulary verdict to C (the non-surfacing safe default) — a garbled screen output degrades open and never fabricates a candidate.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "The forced choice. A = defect in the epic's own deliverable; B = same subsystem, pre-existing or adjacent; C = unrelated.",
+      "enum": ["A", "B", "C"]
+    },
+    "citation": {
+      "type": "string",
+      "description": "One line naming the epic deliverable / bug content that justifies the verdict."
+    }
+  }
+}
