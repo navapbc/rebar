@@ -130,8 +130,20 @@ def configure_logging() -> None:
     ``print()``-to-stderr markers ``VOTER_ERROR`` / ``ARTIFACT_EMIT_ERROR`` survived).
 
     Idempotent (marker-guarded); level from ``REVIEW_BOT_LOG_LEVEL`` (default INFO, invalid →
-    INFO); ``propagate=False`` so records do not double-log through uvicorn/root. Targets the
-    ``rebar`` logger specifically (not root) to avoid duplicating uvicorn's access logs."""
+    INFO). Targets the ``rebar`` logger specifically (not root) to avoid duplicating uvicorn's
+    access logs.
+
+    Deliberately does NOT touch ``propagate`` (bug b718). It used to set
+    ``logging.getLogger("rebar").propagate = False`` "so records do not double-log through
+    uvicorn/root" — but that mutation is process-global and never restored, and under uvicorn
+    it buys nothing: uvicorn's logging config sets up only the ``uvicorn.*`` loggers and adds
+    no root handler, so a propagated ``rebar.*`` record finds no second sink. Because the
+    marker-guarded handler above is installed at most once, each record is emitted exactly
+    once either way (pinned by ``test_configure_logging_is_idempotent``). The cost of the
+    mutation was severe: pytest's ``caplog`` captures through a handler on the ROOT logger, so
+    one call anywhere in a process — and ``rebar.review_bot.app`` calls this at IMPORT time —
+    silently voided every later ``caplog`` assertion on a ``rebar.*`` logger for the rest of
+    that process, with the affected assertions still reporting success."""
     level_name = os.environ.get("REVIEW_BOT_LOG_LEVEL", "INFO").strip().upper()
     level = getattr(logging, level_name, logging.INFO)
     if not isinstance(level, int):  # e.g. an attr that exists but is not a level constant
@@ -143,7 +155,6 @@ def configure_logging() -> None:
         setattr(handler, _REVIEWBOT_LOG_HANDLER_MARKER, True)
         lg.addHandler(handler)
     lg.setLevel(level)
-    lg.propagate = False
 
 
 def _int_env(name: str, default: int) -> int:
