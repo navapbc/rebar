@@ -437,6 +437,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
 # section report on stdout + failure detail on stderr ARE the tool's output.
 # Legitimate-print category. KEEPS T201.
 "scripts/probe_rebar.py" = ["T201"]
+# Canary alert-logic CLI (ticket e602, extraction from reconcile-bridge-canary.yml) —
+# prints ::warning::/::error:: workflow annotations + rebar-write failure detail to
+# stdout (the Actions log surface). Legitimate-print category. KEEPS T201.
+"scripts/canary_bridge.py" = ["T201"]
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]
