@@ -377,3 +377,225 @@ def test_the_harness_is_never_invoked_from_a_workflow() -> None:
         check=False,
     )
     assert proc.returncode == 1, f"provider_parity is referenced from a workflow: {proc.stdout}"
+
+
+# ── 7. PAYLOAD + TOOL PARITY: the outbound request, captured per provider ───────────
+#
+# Epic 061c's scope is that the same PAYLOAD reaches the model and the same TOOLS are offered,
+# whatever the provider. Comparing two models' JUDGEMENTS is out of scope: LLMs are
+# non-deterministic, so a verdict difference between two different models is expected rather
+# than a defect. Parity is therefore proven STRUCTURALLY, from the request that actually leaves
+# the process — not by reading code.
+#
+# Neither arm reaches the network, so this costs nothing. The Anthropic arm's real builder runs
+# and wraps an `httpx.MockTransport` (the technique `test_llm_provider_factory` already uses), so
+# the genuine SDK assembles the body; the Bedrock arm's real boto3 client is constructed and only
+# its `converse` is intercepted. Both abort at the provider boundary.
+
+#: Envelope differences the two provider APIs REQUIRE. Enumerated rather than waved at: the
+#: comparison normalizes exactly these away and nothing else, so a NEW divergence shows up as a
+#: differing field instead of being silently absorbed.
+ENVELOPE_DIFFERENCES = (
+    "model id: Anthropic `model` takes the bare id; Bedrock `modelId` takes the "
+    "inference-profile id (the `us.` form) -- a plain on-demand id is refused.",
+    "max tokens: Anthropic top-level `max_tokens`; Bedrock `inferenceConfig.maxTokens`.",
+    "sampling: Anthropic top-level `temperature`; Bedrock `inferenceConfig.temperature`.",
+    "system prompt: Anthropic a list of `{type: text, text}` blocks; Bedrock a list of `{text}` "
+    "blocks. Same concatenated text.",
+    "prompt cache marker: Anthropic a `cache_control: {type: ephemeral, ttl}` ATTRIBUTE on the "
+    "block it terminates; Bedrock a standalone `{cachePoint: {type: default}}` LIST ENTRY, "
+    "carrying no TTL.",
+    "tools: Anthropic `tools: [{name, description, input_schema}]`; Bedrock "
+    "`toolConfig.tools: [{toolSpec: {name, description, inputSchema: {json}}}]` plus its own "
+    "`{cachePoint}` entry.",
+    "tool choice: Anthropic sends `tool_choice: {type: auto}` explicitly; Converse omits it and "
+    "defaults to auto.",
+    "streaming: Anthropic a `stream` field; Bedrock a different METHOD (`converse` vs "
+    "`converse_stream`).",
+)
+
+
+def _normalize(payload: dict, *, provider: str) -> dict:
+    """Reduce a captured request to the provider-neutral content under test. Everything
+    normalized away is an entry in ENVELOPE_DIFFERENCES."""
+    if provider == "bedrock":
+        inference = payload.get("inferenceConfig") or {}
+        tools = {
+            t["toolSpec"]["name"]: (
+                t["toolSpec"].get("description"),
+                json.dumps(t["toolSpec"]["inputSchema"]["json"], sort_keys=True),
+            )
+            for t in (payload.get("toolConfig") or {}).get("tools") or []
+            if "toolSpec" in t
+        }
+        model_id, max_tokens = payload["modelId"], inference.get("maxTokens")
+        temperature = inference.get("temperature")
+    else:
+        tools = {
+            t["name"]: (t.get("description"), json.dumps(t.get("input_schema"), sort_keys=True))
+            for t in payload.get("tools") or []
+            if "name" in t
+        }
+        model_id, max_tokens = payload["model"], payload.get("max_tokens")
+        temperature = payload.get("temperature")
+    return {
+        "model_id": model_id,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system_text": "".join(s.get("text", "") for s in payload.get("system") or []),
+        "messages": [
+            (m["role"], "".join(c.get("text", "") for c in m["content"]))
+            for m in payload.get("messages") or []
+        ],
+        "tools": tools,
+    }
+
+
+def _capture(model: str, monkeypatch, *, temperature=None) -> dict:
+    """Capture the outbound request for ONE logical agentic call, aborting at the boundary."""
+    import contextlib
+
+    import boto3
+    import httpx
+    import pydantic_ai.models
+
+    from rebar.llm import gate_source
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-capture-dummy")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "capture-dummy")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "capture-dummy")
+    monkeypatch.setattr(pydantic_ai.models, "ALLOW_MODEL_REQUESTS", True)
+
+    captured: dict = {}
+    bedrock = model.startswith("bedrock:")
+
+    class _Abort(Exception):
+        pass
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content.decode())
+        captured["endpoint"] = str(request.url)
+        raise _Abort()
+
+    real_client = boto3.Session.client
+
+    def _patched_client(self, *a, **kw):
+        client = real_client(self, *a, **kw)
+        if a and a[0] == "bedrock-runtime":
+
+            def _converse(**params):
+                captured["payload"] = params
+                captured["endpoint"] = str(client.meta.endpoint_url)
+                raise _Abort()
+
+            client.converse = _converse
+        return client
+
+    if bedrock:
+        monkeypatch.setattr(boto3.Session, "client", _patched_client)
+    else:
+        monkeypatch.setattr(
+            httpx, "AsyncHTTPTransport", lambda *a, **kw: httpx.MockTransport(_handler)
+        )
+
+    cfg = LLMConfig(
+        model=model,
+        repo_path=".",
+        runner="pydantic_ai",
+        temperature=temperature,
+        bedrock_region_name="us-east-1",
+    )
+    handle = gate_source.resolve_gate_handle(None, "local", None)
+    with gate_source.gate_read_root(handle):
+        gcfg = gate_source.apply_handle(cfg, handle)
+        request = RunRequest(
+            system_prompt="You are a code reviewer. Report findings as structured JSON.",
+            instructions="Review the diff in the repository and report any defect you find.",
+            config=gcfg,
+            reviewers=["code-quality"],
+            mode="findings",
+            output_schema="review_result",
+            execution_mode="agentic",
+        )
+        with contextlib.suppress(Exception):
+            PydanticAIRunner(gcfg).run(request)
+    assert "payload" in captured, f"no outbound request captured for {model!r}"
+    captured["provider"] = "bedrock" if bedrock else "anthropic"
+    return captured
+
+
+def _compare(model_v1: str, model_v2: str, monkeypatch, *, temperature=None) -> tuple[dict, dict]:
+    a = _capture(model_v1, monkeypatch, temperature=temperature)
+    b = _capture(model_v2, monkeypatch, temperature=temperature)
+    return (
+        _normalize(a["payload"], provider=a["provider"]),
+        _normalize(b["payload"], provider=b["provider"]),
+    )
+
+
+@pytest.mark.parametrize("slot", sorted(pp.CLASS_SLOTS))
+def test_the_outbound_payload_is_equivalent_across_providers(slot, monkeypatch) -> None:
+    """PAYLOAD PARITY. For the same logical call, the request reaching the provider carries the
+    same system prompt, the same messages and the same sampling settings under both providers.
+    Only the model id differs -- that is the variable under test."""
+    v1_model, v2_model = pp.CLASS_SLOTS[slot]
+    a, b = _compare(v1_model, v2_model, monkeypatch)
+    assert a["system_text"] == b["system_text"] and a["system_text"]
+    assert a["messages"] == b["messages"] and a["messages"]
+    assert a["max_tokens"] == b["max_tokens"]
+    assert a["temperature"] == b["temperature"]
+    differing = [f for f in a if f != "model_id" and a[f] != b[f]]
+    assert differing == [], f"{slot}: payload diverges beyond the model id: {differing}"
+    assert a["model_id"] != b["model_id"]
+    assert b["model_id"].startswith("us.anthropic.")
+
+
+@pytest.mark.parametrize("slot", sorted(pp.CLASS_SLOTS))
+def test_the_tool_set_offered_to_the_model_is_identical_across_providers(slot, monkeypatch) -> None:
+    """TOOL PARITY. Same tool names, same descriptions, same input schemas -- the model is
+    offered exactly the same capabilities whichever provider carries the call."""
+    v1_model, v2_model = pp.CLASS_SLOTS[slot]
+    a, b = _compare(v1_model, v2_model, monkeypatch)
+    assert a["tools"], "the captured call offered no tools; it cannot prove tool parity"
+    assert sorted(a["tools"]) == sorted(b["tools"])
+    for name, spec in a["tools"].items():
+        assert spec == b["tools"][name], f"{slot}: tool {name} differs across providers"
+
+
+def test_the_temperature_capability_difference_is_symmetric_and_explicit(monkeypatch) -> None:
+    """The one capability difference that legitimately alters the payload, made explicit.
+
+    `us.anthropic.claude-opus-4-8` refuses `temperature` (MEASURED: Converse returns
+    `ValidationException: ... \\`temperature\\` is deprecated for this model`), and
+    `capabilities._MODEL_ID_CAPABILITY_OVERRIDES` carries `supports_temperature: False` for it.
+    The withdrawal must be driven by the MODEL's capability, not by the provider: it applies to
+    opus on BOTH providers and to neither sonnet arm."""
+    sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
+    opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
+    s1, s2 = _compare(sonnet_v1, sonnet_v2, monkeypatch, temperature=0.0)
+    o1, o2 = _compare(opus_v1, opus_v2, monkeypatch, temperature=0.0)
+    # Requested temperature reaches sonnet on both providers...
+    assert s1["temperature"] == 0.0 and s2["temperature"] == 0.0
+    # ...and is withdrawn from opus on both providers. Symmetric => model-driven, not provider.
+    assert o1["temperature"] is None and o2["temperature"] is None
+    # Withdrawing it changes nothing else about the payload.
+    assert [f for f in o1 if f != "model_id" and o1[f] != o2[f]] == []
+
+
+def test_the_enumerated_envelope_differences_are_the_only_ones_normalized() -> None:
+    """The envelope list is documentation with teeth: it must name every field the comparison
+    normalizes away, so a future divergence cannot hide behind a vague 'modulo envelope'."""
+    joined = " ".join(ENVELOPE_DIFFERENCES).lower()
+    for token in (
+        "modelid",
+        "maxtokens",
+        "temperature",
+        "system",
+        "cachepoint",
+        "toolconfig",
+        "tool_choice",
+        "converse_stream",
+    ):
+        assert token in joined, f"envelope difference list does not name {token}"
