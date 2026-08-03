@@ -468,6 +468,44 @@ class BindingStore:
             return
         entry["baseline"] = baseline
 
+    # -- last-OBSERVED peer parent (ticket 88d9) ---------------------------
+
+    def get_peer_parent(self, local_id: str) -> str | None:
+        """The peer parent key rebar last OBSERVED for this binding, or None.
+
+        The evidence channel for an inbound parent CLEAR — it answers "did the peer ever have
+        a parent", which ``managed_refs`` cannot (``add_managed_ref`` fires on the LOCAL
+        parent-set event, so managed never meant pushed; reading the peer's silence as a
+        deletion orphaned 63 tickets, ticket 88d9). None is VALID and MUST fail safe to no
+        clear: a v1 store, a pre-field binding, an unconfirmed binding and an out-of-window
+        key all present as None.
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            return None
+        value = entry.get("peer_parent")
+        return value if isinstance(value, str) and value else None
+
+    def set_peer_parent(self, local_id: str, parent_key: str | None) -> None:
+        """Record the peer parent key OBSERVED this pass (None = observed to have none).
+
+        No-op for an unbound id; in-memory until ``save()``, persisted by the existing
+        binding-store commit path (no new commit surface, mirroring ``set_baseline``).
+
+        **Callers MUST NOT call this for a pass that did not OBSERVE the parent field.** A
+        fail-open read (``get_parent_map`` degrades to ``{}``; a truncated page walk omits
+        issues) would overwrite a good observation with "no parent", and the next pass would
+        read that as a deletion — the orphaning incident by a longer route. Only the caller can
+        see whether the snapshot entry carried the key, so only the caller can decide.
+        """
+        entry = self._data["bindings"].get(local_id)
+        if entry is None:
+            return
+        normalized = parent_key if isinstance(parent_key, str) and parent_key else ""
+        if entry.get("peer_parent", None) == normalized:
+            return
+        entry["peer_parent"] = normalized
+
     def seed_baselines_from_snapshot(self, prev_snapshot: dict[str, Any]) -> int:
         """One-shot: seed a baseline for every bound key present in a Jira snapshot.
 
