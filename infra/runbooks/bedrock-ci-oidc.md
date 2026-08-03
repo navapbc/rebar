@@ -6,10 +6,17 @@ The external suite's live-LLM lane runs one arm per provider
 credentials on a **GitHub-hosted `ubuntu-latest` runner**, and this runbook is the definition of
 the IAM role it assumes.
 
-> **This role does not exist yet.** Nothing in this repository creates it. Until an operator
-> creates it and sets the two repository variables below, the Bedrock arm **fails its preflight
-> step with an `::error::`** — deliberately, so an unconfigured arm can never be mistaken for a
-> passing one.
+> **This role NOW EXISTS**, created by an operator on 2026-08-03 exactly as specified below:
+> `arn:aws:iam::896586841071:role/rebar-external-ci-bedrock`, with inline policy
+> `rebar-external-ci-bedrock-converse` and no managed policies attached. Both repository
+> variables are set (`AWS_BEDROCK_CI_ROLE_ARN`, `AWS_BEDROCK_CI_REGION=us-east-1`).
+> Nothing in this repository creates it — it is operator-owned, and this file remains its
+> definition of record. Verify the live state against the JSON below with the commands in
+> §"Verify"; if they ever diverge, the JSON here is the intent and the live role is the drift.
+>
+> Were the role or either variable absent, the Bedrock arm **fails its preflight step with an
+> `::error::`** rather than skipping — deliberately, so an unconfigured arm can never be mistaken
+> for a passing one.
 
 ---
 
@@ -164,11 +171,16 @@ aws iam get-role --role-name rebar-external-ci-bedrock \
 ### Terraform: intentionally NOT committed here
 
 `infra/terraform/` is guarded by `.github/workflows/terraform-drift.yml`, which runs
-`terraform plan -detailed-exitcode` and **fails on a non-empty plan** — that is, on committed HCL
-that has not been applied. Committing an `iam_ci_bedrock.tf` for a role that does not exist yet
-would therefore turn the drift check **red** the moment it merged, for every change, until someone
-applied it. So the definition lives here as JSON, and the equivalent HCL is below for whoever
-adopts it into terraform **in the same change as the apply**:
+`terraform plan -detailed-exitcode` and **fails on a non-empty plan** — that is, on any committed
+HCL whose state does not already match reality. Committing an `iam_ci_bedrock.tf` would turn the
+drift check **red** the moment it merged, for every change, until someone reconciled it.
+
+That is still true now that the role exists, for a different reason: the role was created with the
+AWS CLI, so terraform has **no state entry** for it. Committed HCL would therefore plan a CREATE of
+a role that already exists — which fails on a name collision rather than converging. Adopting it
+into terraform requires `terraform import` (or an equivalent `plan`-clean apply) **in the same
+change as the HCL**. So the definition lives here as JSON, and the equivalent HCL is below for
+whoever does that adoption:
 
 ```hcl
 # infra/terraform/iam_f124.tf — add ONLY together with an apply (see the drift-gate note above).
