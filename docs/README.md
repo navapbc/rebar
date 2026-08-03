@@ -171,6 +171,10 @@ The LLM-agent operations and the gate / workflow machinery behind them.
 - **[llm-example-configs.md](llm-example-configs.md)** — four complete, paste-able
   `[tool.rebar.llm]` configurations (Anthropic-only, Bedrock-only, mixed-provider, and
   local+hosted-fallback), each sizing the three model classes.
+- **[ci-provider-matrix.md](ci-provider-matrix.md)** — the external suite's live-provider
+  matrix: how CI runs the live-LLM tests once per provider (Anthropic, Bedrock, OpenAI),
+  how an arm with no credential fails instead of skipping to green, and the **measured**
+  per-trigger cost behind the cadence decision.
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
 - **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the

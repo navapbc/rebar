@@ -1,0 +1,17 @@
+# OpenAI arm of the external suite's provider matrix (story f124).
+#
+# OpenAI is rebar's BEST-EFFORT provider tier (the OpenAI-compatible builder in
+# `rebar.llm.providers`), not a first-class one like Anthropic and Bedrock. It is covered here
+# because the repository DOES hold an `OPENAI_API_KEY` secret, so leaving it uncovered would be a
+# blind spot we are paying for anyway.
+#
+# Model ids VERIFIED (not guessed) against this repository's own OPENAI_API_KEY on 2026-08-03 by a
+# read-only `GET https://api.openai.com/v1/models`: `gpt-5.4`, `gpt-5.4-mini` and `gpt-5.4-nano`
+# are all present on that account.
+#
+# Credential: OPENAI_API_KEY.
+
+[llm.model_classes]
+frontier = { model = "openai:gpt-5.4" }
+standard = { model = "openai:gpt-5.4-mini" }
+trivial  = { model = "openai:gpt-5.4-nano" }

@@ -10,7 +10,9 @@ and checks the rules behaviorally:
   deliberately FALSE claim should not be uniformly affirmed).
 
 Marked ``external`` (excluded from the default + the blocking CI path; needs
-REBAR_RUN_EXTERNAL=1) and SKIPS unless an API key + the ``agents`` extra are present.
+REBAR_RUN_EXTERNAL=1) and SKIPS unless the ``agents`` extra plus a credential for the CONFIGURED
+provider are present (``_live_llm``, story f124). The Pass-2 config comes from
+``LLMConfig.from_env()``, so a matrix arm's ``REBAR_LLM_CONFIG_FILE`` overlay repoints it.
 MULTI-RUN with a LENIENT threshold (majority of N) — informational, never a hard gate
 (threshold calibration is deferred per the epic). Run locally::
 
@@ -21,13 +23,16 @@ MULTI-RUN with a LENIENT threshold (majority of N) — informational, never a ha
 from __future__ import annotations
 
 import importlib
-import os
 
+import _live_llm
 import pytest
 
 from rebar.llm import review_kernel
 
 pytestmark = pytest.mark.external
+
+# Auto-marks this module's tests `llm_live` (tests/external/conftest.py).
+_live_llm_ready = _live_llm.live_llm_ready()
 
 kverify = importlib.import_module("rebar.llm.review_kernel.verify")
 
@@ -35,17 +40,7 @@ _RUNS = 3  # multi-run
 _LENIENT_MAJORITY = 2  # ≥2/3 runs must obey — lenient, informational
 
 
-def _have_live_model() -> bool:
-    try:
-        import rebar.llm as llm
-    except ImportError:
-        return False
-    if not llm.agents_extra_installed():
-        return False
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
-
-
-_skip = pytest.mark.skipif(not _have_live_model(), reason="no ANTHROPIC_API_KEY / agents extra")
+_skip = _live_llm.skip_without_live_llm
 
 # A deliberately UNGROUNDED, FALSE claim: the plan context contradicts it. An honest,
 # independent verifier should NOT uniformly affirm it (independence) and should answer

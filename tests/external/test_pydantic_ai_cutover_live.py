@@ -15,15 +15,24 @@ Coverage (the operations the cutover repoints onto pydantic_ai):
   * text mode      — the non-findings output path, via the runner directly
   * workflow agent step — the run_workflow → RunnerAgentStep → pydantic_ai path
 
+PROVIDER-PARAMETRIC (story f124). These tests construct ``LLMConfig`` DIRECTLY, which bypasses
+config discovery — so before f124 they pinned two literal Anthropic model ids and asserted
+``result["model"] == "anthropic:claude-opus-4-8"``. That made this module the one live module a
+provider matrix could NOT repoint: on a Bedrock arm it would either skip (no Anthropic key) or
+call Anthropic anyway. The models are now read from the RESOLVED model classes
+(``resolve_model_string``), which honour the arm's ``REBAR_LLM_CONFIG_FILE`` overlay, and the
+provenance assertion checks the resolved string rather than a hardcoded provider — so the
+"forces the pydantic_ai runner" intent is preserved while the PROVIDER stays a matrix dimension.
+
 Run::  REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external \
            tests/external/test_pydantic_ai_cutover_live.py
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+import _live_llm
 import pytest
 
 import rebar
@@ -31,18 +40,21 @@ from rebar import schemas
 
 pytestmark = pytest.mark.external
 
-_SONNET = "claude-sonnet-4-6"
+# Auto-marks this module's tests `llm_live` (tests/external/conftest.py).
+_live_llm_ready = _live_llm.live_llm_ready()
+
+_skip = _live_llm.skip_without_live_llm
 
 
-def _have_live() -> bool:
-    try:
-        import rebar.llm as llm
-    except ImportError:
-        return False
-    return llm.agents_extra_installed() and bool(os.environ.get("ANTHROPIC_API_KEY"))
+def _class_model(class_name: str) -> str:
+    """The resolved model string for a model class, honouring REBAR_LLM_CONFIG_FILE.
 
+    Resolved LAZILY inside each test rather than at import: the module is imported during
+    collection, before a test's fixtures set up their repo, and resolution is cheap.
+    """
+    from rebar.llm.model_classes import resolve_model_string
 
-_skip = pytest.mark.skipif(not _have_live(), reason="no ANTHROPIC_API_KEY / agents extra")
+    return resolve_model_string(class_name)
 
 
 def _cfg(repo: Path, model: str):
@@ -69,11 +81,11 @@ def test_pydantic_review_ticket_opus(rebar_repo: Path) -> None:
         epic,
         "ticket-quality",
         repo_root=str(rebar_repo),
-        config=_cfg(rebar_repo, "claude-opus-4-8"),
+        config=_cfg(rebar_repo, _class_model("frontier")),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "pydantic_ai"
-    assert result["model"] == "anthropic:claude-opus-4-8"
+    assert result["model"] == _class_model("frontier")
     assert isinstance(result["findings"], list)
 
 
@@ -96,7 +108,7 @@ def test_pydantic_review_code(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch)
         changed_files=["auth.py"],
         reviewers=["code-quality"],
         repo_root=str(rebar_repo),
-        config=_cfg(rebar_repo, _SONNET),
+        config=_cfg(rebar_repo, _class_model("standard")),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     # The enabled four-pass gate runs via the pydantic_ai runner and reports it as the
@@ -119,7 +131,7 @@ def test_pydantic_scan_spec(rebar_repo: Path) -> None:
     result = llm.scan_epics_for_spec(
         "The product must support multi-factor authentication and password reset.",
         repo_root=str(rebar_repo),
-        config=_cfg(rebar_repo, _SONNET),
+        config=_cfg(rebar_repo, _class_model("standard")),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "pydantic_ai"
@@ -143,7 +155,9 @@ def test_pydantic_verify_completion(rebar_repo: Path) -> None:
     (rebar_repo / "greet.py").write_text(
         "def greet(name):\n    return f'hello, {name}'\n", encoding="utf-8"
     )
-    result = verify_completion(t, repo_root=str(rebar_repo), config=_cfg(rebar_repo, _SONNET))
+    result = verify_completion(
+        t, repo_root=str(rebar_repo), config=_cfg(rebar_repo, _class_model("standard"))
+    )
     schemas.validator(schemas.COMPLETION_VERDICT).validate(result)
     assert result["runner"] == "pydantic_ai"
     assert result["verdict"] in ("PASS", "FAIL")
@@ -154,7 +168,7 @@ def test_pydantic_text_mode(rebar_repo: Path) -> None:
     """The non-findings (text) output path on the pydantic_ai runner."""
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 
-    cfg = _cfg(rebar_repo, _SONNET)
+    cfg = _cfg(rebar_repo, _class_model("standard"))
     runner = PydanticAIRunner(cfg)
     runner.preflight()
     req = RunRequest(
@@ -194,7 +208,8 @@ def test_pydantic_workflow_agent_step(rebar_repo: Path) -> None:
         "steps": [{"id": "review", "prompt": "ticket-quality", "mode": "findings"}],
     }
     agent_runner = RunnerAgentStep(
-        runner=PydanticAIRunner(_cfg(rebar_repo, _SONNET)), repo_root=str(rebar_repo)
+        runner=PydanticAIRunner(_cfg(rebar_repo, _class_model("standard"))),
+        repo_root=str(rebar_repo),
     )
     res = run_workflow(
         doc, {"ticket_id": t}, target_ticket=t, repo_root=str(rebar_repo), agent_runner=agent_runner

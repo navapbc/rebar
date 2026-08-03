@@ -6,17 +6,19 @@ workflow. This is the external counterpart: the retained ``review_skeleton`` sam
 run against a LIVE model, so the full overlay→batch-finder→verify→decide path is
 proven on the real runner (the RunnerAgentStep bridge), not just the fake.
 
-Marked ``external`` (excluded from the default run; needs REBAR_RUN_EXTERNAL=1) and
-skips unless an API key + the ``agents`` extra are present. Run locally::
+Marked ``external`` (excluded from the default run; needs REBAR_RUN_EXTERNAL=1) and skips unless
+the ``agents`` extra plus a credential for the CONFIGURED provider are present (``_live_llm``,
+story f124). The workflow agent step resolves its model through the config, so a matrix arm's
+``REBAR_LLM_CONFIG_FILE`` overlay repoints this whole path at that arm's provider. Run locally::
 
     REBAR_RUN_EXTERNAL=1 ANTHROPIC_API_KEY=… pytest -m external tests/external/test_workflow_live.py
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+import _live_llm
 import pytest
 
 import rebar
@@ -24,21 +26,10 @@ from rebar import schemas
 
 pytestmark = pytest.mark.external
 
+# Auto-marks this module's tests `llm_live` (tests/external/conftest.py).
+_live_llm_ready = _live_llm.live_llm_ready()
 
-def _have_live_model() -> bool:
-    try:
-        import rebar.llm as llm
-    except ImportError:
-        return False
-    if not llm.agents_extra_installed():
-        return False
-    # The workflow agent step uses REBAR_LLM_MODEL (default claude-opus-4-8); an
-    # Anthropic key is the default credential. An OpenAI key also works if the
-    # model is overridden, but the default path needs Anthropic.
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
-
-
-_skip = pytest.mark.skipif(not _have_live_model(), reason="no ANTHROPIC_API_KEY / agents extra")
+_skip = _live_llm.skip_without_live_llm
 
 
 @_skip

@@ -5,6 +5,11 @@ The review bot reaches Claude through **AWS Bedrock** using the EC2 instance rol
 verify that access after changing it, and — more importantly — **how not to verify it**, because two plausible
 methods silently prove nothing.
 
+> **Not the CI path.** The instance role documented here is **not reachable from a GitHub-hosted
+> runner** — there is no instance role on `ubuntu-latest` and no IMDS route to the Gerrit host. The
+> external suite's Bedrock arm assumes its own OIDC-federated role instead; see
+> [bedrock-ci-oidc.md](bedrock-ci-oidc.md). The two share a policy shape, not a delivery path.
+
 Terraform owns the grant: `infra/terraform/iam_s7.tf`, `aws_iam_role_policy.bedrock_converse`. It is NOT in
 `iam.tf` — that file is owned by story S1 under a single-owner contract (`iam.tf:4-9`) and downstream stories
 attach their own separately-named scoped policies from their own file, the `iam_s2.tf` / `iam_s4a.tf` pattern.
