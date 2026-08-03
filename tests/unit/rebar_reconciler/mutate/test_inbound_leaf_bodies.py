@@ -371,8 +371,8 @@ def test_inbound_conflict_emits_suppress_pair(applier, mut_mod, fixture_repo, mo
     # ticket CLI being available inside the fixture tree.
     called = {}
 
-    def fake_file_bug(cli_path, title, description, parent_id):
-        called["title"] = title
+    def fake_file_bug(cli_path, pending):
+        called["title"] = pending.get("title", "")
         return "bug-id-1234"
 
     monkeypatch.setattr(applier, "_file_conflict_bug_ticket", fake_file_bug)

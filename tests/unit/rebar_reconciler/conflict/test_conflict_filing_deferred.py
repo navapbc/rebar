@@ -174,12 +174,12 @@ def test_apply_files_pending_bug_tickets_after_apply_batch_returns(
     deleted and the negative test would still pass."""
     call_log: list[dict] = []
 
-    def _capture_filing(cli_path, title, description, parent_id):
+    def _capture_filing(cli_path, pending):
         call_log.append(
             {
-                "title": title,
-                "description": description,
-                "parent_id": parent_id,
+                "title": pending.get("title", ""),
+                "description": pending.get("description", ""),
+                "parent_id": pending.get("parent_id", ""),
             }
         )
         return "bug-id-mocked"
@@ -226,8 +226,8 @@ def test_apply_files_pending_bug_tickets_when_apply_batch_raises(
     runs unconditionally before the exception propagates."""
     call_log: list[dict] = []
 
-    def _capture_filing(cli_path, title, description, parent_id):
-        call_log.append({"title": title})
+    def _capture_filing(cli_path, pending):
+        call_log.append({"title": pending.get("title", "")})
         return "bug-id-mocked"
 
     class _SimulatedDriftError(Exception):
