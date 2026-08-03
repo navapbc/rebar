@@ -392,6 +392,12 @@ Phase 1.
 the ticket under debug in the project's own tracker (pre-approved; see the approval-gate
 carve-out): the root-cause mechanism and the discriminating evidence that confirmed it. This is
 the durable record the next reader searches for — it must exist even if Phase 2 is interrupted.
+For a **non-trivial fix** — one whose planned blast radius reaches non-test code — also write
+the fix plan into the ticket's description, declare the expected files in `file_impact`, and run
+`rebar review-plan <id>` before starting Phase 2: a bug whose declared blast radius names
+non-test paths escalates to the full blocking rubric (the light advisory tier is sized for
+small fixes), and the Gerrit bugfix-size gate expects exactly this attestation when the fix's
+non-test diff exceeds the size floor.
 
 **Not-a-bug guard (must clear before Phase 2 auto-applies any fix).** A confirmed mechanism is
 necessary but **not sufficient** to unlock repair. Before crossing into Phase 2, resolve the

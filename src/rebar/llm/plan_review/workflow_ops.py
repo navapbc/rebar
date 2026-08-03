@@ -112,7 +112,17 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     # so the bug always PASSes. run_llm=True so the (restricted) LLM tier runs. The CLI claim-time
     # bug exemption (rebar._commands.gates) is unchanged — a bug still needs no signed attestation
     # to be claimed; this only makes an explicit review / gate run substantive instead of exempt.
-    if pctx.ticket_type == "bug":
+    #
+    # BLAST-RADIUS ESCALATION (ad0d B1): a bug whose persisted file_impact declares any
+    # NON-TEST path skips this light-tier arm and falls through to the normal
+    # (blocking-capable) path below — DET findings keep their real posture (the DET
+    # short-circuit applies exactly as for a non-bug ticket) and route_criteria, keyed on
+    # the same orchestrator.bug_blast_radius_escalates predicate, routes the FULL criteria
+    # set. Coverage records the escalation (bug_tier: False + bug_blast_escalated: True).
+    escalated_bug = pctx.ticket_type == "bug" and orchestrator.bug_blast_radius_escalates(
+        pctx.state.get("file_impact")
+    )
+    if pctx.ticket_type == "bug" and not escalated_bug:
         det_results = det_floor.run_det_floor(pctx)
         det_blocks = det_floor.det_blocking_findings(det_results)
         det_advisories = det_floor.det_advisory_findings(det_results)
@@ -130,6 +140,8 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     det_blocks = det_floor.det_blocking_findings(det_results)
     det_advisories = det_floor.det_advisory_findings(det_results)
     det_cov = det_floor.det_coverage(det_results)
+    if escalated_bug:
+        det_cov = {**det_cov, "bug_tier": False, "bug_blast_escalated": True}
     base = {
         **base,
         "det_blocking": det_blocks,

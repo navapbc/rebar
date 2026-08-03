@@ -276,6 +276,19 @@ def finalize_code_review_verdict(
     _detectors.apply_failclosed(
         verdict, changed_files=list(prep.dc.changed_files), repo_root=request.repo_root
     )
+    # Bugfix-size attestation criterion (ticket ad0d B2): a Gerrit bug-fix change over the
+    # non-test size floor must carry a valid plan-review attestation on its trailer ticket.
+    # Gerrit-only (change_id) — a local `review-code` preview never blocks on it; the gate
+    # itself never raises (infra trouble degrades to an advisory finding).
+    if request.change_id:
+        from rebar.llm.code_review import bugfix_size_gate as _bugfix_size
+
+        _bugfix_size.apply_bugfix_size_gate(
+            verdict,
+            diff_text=prep.dc.diff_text,
+            commit_message=getattr(request, "commit_message", "") or "",
+            repo_root=request.repo_root,
+        )
     # deps (story revenued-thickset-dassie): the content-addressed reviewed-file hash map the
     # region-gated novelty floor (blameless-grindable-noctule) compares against next run.
     # Computed UNCONDITIONALLY (regardless of target_ticket) and stashed on the verdict, so BOTH

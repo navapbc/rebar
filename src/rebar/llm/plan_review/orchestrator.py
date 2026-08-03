@@ -187,6 +187,29 @@ def mint_finding_id(finding: dict[str, Any]) -> str:
 
 
 # ── routing ──────────────────────────────────────────────────────────────────────
+def bug_blast_radius_escalates(file_impact: object) -> bool:
+    """ad0d B1: True iff a bug's PERSISTED ``file_impact`` declares any NON-TEST path —
+    the deterministic blast-radius key that escalates the bug out of the light advisory
+    tier (epic 6982/R4) into the full blocking rubric. Derived at review time from ticket
+    state (no diff exists yet); a path is "test" iff it lives under ``tests/`` or its
+    basename is ``conftest.py`` — the same classification rule B2's Gerrit criterion and
+    the backtest apply to diff lines. Shared by BOTH enforcement steps and the
+    batch-runner fan-in (all reach :func:`route_criteria`); module-level so
+    ``plan_review_precheck`` keys its escalation on the identical predicate."""
+    if not isinstance(file_impact, (list, tuple)):
+        return False
+    for raw in file_impact:
+        p = str(raw).strip().replace("\\", "/")
+        while p.startswith("./"):
+            p = p[2:]
+        if not p:
+            continue
+        if p.startswith("tests/") or p.rsplit("/", 1)[-1] == "conftest.py":
+            continue
+        return True
+    return False
+
+
 def route_criteria(
     ctx: PlanContext, gate_log: dict[str, str] | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -211,7 +234,15 @@ def route_criteria(
     # be fanned into a bug review and could block it. Bugs did not flow through route_criteria
     # before (they short-circuited to exempt in plan_review_precheck), so this narrows nothing
     # that previously ran.
-    bug_tier = ctx.ticket_type == "bug"
+    #
+    # BLAST-RADIUS ESCALATION (ad0d B1): a bug whose persisted file_impact declares any
+    # NON-TEST path leaves the light tier — it routes the FULL criteria set. Both bug axes
+    # are lifted: the BUG_TIER_CRITERIA restriction here, and the packaged
+    # `suppress_types: ["bug"]` applicability axis (EVERY full-suite criterion carries it,
+    # so lifting only the tier restriction would deliver an empty escalation) via
+    # ticket_type=None in the applies() call below.
+    escalated_bug = ctx.ticket_type == "bug" and bug_blast_radius_escalates(file_impact)
+    bug_tier = ctx.ticket_type == "bug" and not escalated_bug
     # Load the EFFECTIVE criteria (built-ins ∪ activated project criteria from the
     # `.rebar/criteria_routing.json` overlay). repo_root may be None here (the lightweight
     # context builder); registry resolves it to config.repo_root() so the overlay is honored.
@@ -236,7 +267,9 @@ def route_criteria(
             has_children=ctx.has_children,
             has_parent=bool(ctx.state.get("parent_id")),
             file_impact_scope=ctx.state.get("file_impact_scope"),
-            ticket_type=ctx.ticket_type,
+            # applies() consumes ticket_type ONLY for suppress_types; an escalated bug
+            # bypasses that axis (None) so the full non-bug set routes (ad0d B1).
+            ticket_type=None if escalated_bug else ctx.ticket_type,
             plan=plan,
         ):
             continue
