@@ -131,6 +131,20 @@ writes (import/export/migration), the batch-write primitive belongs in
 `rebar._store`; do **not** route local writes through, or "extract" a shared
 primitive out of, the reconciler.
 
+**The field-symmetry registration contract.** Every reconciled field must declare
+its symmetry class in `rebar_reconciler/_field_contract.py` — `bidirectional`
+(value codec round-trips on its canonical preimages; declared lossy edges only),
+`add_wins` (a value added and removed in the same pass stays added — the reducer's
+intra-event TAG_DELTA contract), or `one_way_gated` (removals propagate to the peer
+only through the `should_propagate_removal` managed-ref gate). The registry is
+declarative — call sites keep their existing mechanisms (`config` status maps,
+`link_direction`, `conflict_resolver.FIELD_CLASSES`, the managed-ref gate) — and
+`tests/unit/rebar_reconciler/test_field_contract_properties.py` enforces it: a
+field handled by the conflict resolver or the differ's name-canonicalization map
+without a registry entry fails test collection, and each declared class is
+asserted against the real code path. Adding a reconciled field means declaring its
+symmetry here first.
+
 **Overloaded vocabulary.** The same words mean different things inside vs. outside
 the reconciler: *reconcile* = the local↔Jira bridge pass; *apply* (in the
 reconciler) = applying *inbound Jira changes* as local events; *batch* (in the
