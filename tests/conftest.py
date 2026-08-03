@@ -455,6 +455,59 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
         )
 
 
+# ── caplog coverage integrity (bug 9ac2) ─────────────────────────────────────
+#
+# Every other gate in this repo fails closed; an unreachable log assertion fails
+# OPEN. `assert not [unexpected]` is trivially true against an empty list, so a
+# test whose caplog records never arrive verifies nothing and still reports
+# success — indistinguishable, in the run output, from a real verification.
+#
+# caplog captures via a handler on the ROOT logger, so records only reach it if
+# the shared `rebar` parent logger both emits and propagates them. Two
+# process-global, never-restored mutations sever that, and both are real:
+#   * propagate = False — nothing under `rebar` reaches the root handler
+#     (rebar.review_bot.config.configure_logging did this at import time; b718).
+#     pytest >= 8.4 re-attaches the capture handler to loggers that are ALREADY
+#     non-propagating, so the damage is bounded to the test that flips it
+#     mid-capture — but that window is silent, and the mitigation is an internal
+#     detail of _pytest.logging, not a contract;
+#   * setLevel(WARNING) — INFO/DEBUG records are dropped at the originating
+#     logger, and caplog.at_level(INFO) without a `logger=` argument cannot undo
+#     it because it raises the ROOT level (rebar._logging.install_stderr_handler
+#     does this, and every in-process rebar._cli.main() call goes through it).
+#
+# The two are handled differently on purpose. Disabling propagation is never
+# legitimate, so it FAILS the test that did it — at the SOURCE, not at whichever
+# unrelated victim happens to run next. Raising the level IS a legitimate side
+# effect of exercising a real entrypoint, so it is CONTAINED: restored per-test,
+# which is strictly stronger for coverage integrity than blame would be, because
+# every test then starts from the same level and its log assertions hold
+# regardless of run order. Detection lives in tests/_log_integrity.py so the
+# guard's self-test (tests/unit/test_caplog_coverage_integrity.py) runs the same
+# code.
+
+import _log_integrity  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _rebar_log_propagation_guard(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keep the shared ``rebar`` logger able to reach ``caplog``, and blame whoever breaks it."""
+    nodeid = request.node.nodeid
+    problem = _log_integrity.propagation_failure(nodeid, phase="setup")
+    if problem is not None:
+        _log_integrity.restore_propagation()
+        pytest.fail(problem, pytrace=False)
+    baseline_level = _log_integrity.current_level()
+    try:
+        yield
+    finally:
+        _log_integrity.restore_level(baseline_level)
+    problem = _log_integrity.propagation_failure(nodeid, phase="teardown")
+    if problem is not None:
+        _log_integrity.restore_propagation()
+        pytest.fail(problem, pytrace=False)
+
+
 # Session-level working-tree backstop: snapshot `git status --porcelain` at the
 # start and compare at the end, failing the run if any NEW dirty entry appeared.
 # Compares net-new (not absolute) so a developer's pre-existing uncommitted work
