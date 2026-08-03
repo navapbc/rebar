@@ -43,7 +43,7 @@ steps:
       usd_budget: 2.0
       # Classes, not literal ids: a bare `claude-*` id infers provider `anthropic`, so this
       # example would pin an Anthropic ladder into any provider's run. MEASURED in run
-      # 30836378745, where this file's ladder called direct Anthropic on the bedrock arm.
+      # [rebar:f124-f14a-fd62-4973], where this ladder called direct Anthropic on the bedrock arm.
       model_ladder: [trivial, standard, frontier]
 
   # 3. Pass-2 verify: ONE aggregate verifier call over the Pass-1 findings.
