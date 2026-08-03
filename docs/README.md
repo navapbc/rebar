@@ -175,6 +175,11 @@ The LLM-agent operations and the gate / workflow machinery behind them.
   matrix: how CI runs the live-LLM tests once per provider (Anthropic, Bedrock, OpenAI),
   how an arm with no credential fails instead of skipping to green, and the **measured**
   per-trigger cost behind the cadence decision.
+- **[jira-dc-capability-map.md](jira-dc-capability-map.md)** — the on-demand
+  `workflow_dispatch` CI job that maps the pinned Jira Data Center harness's live
+  capabilities with an agentic Opus run, so the DC environment contract is declared
+  (committed data) instead of discovered at test time. When to re-run it, and how its
+  artifact becomes committed data.
 - **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
   work **starts** (on entry to `in_progress`), and its attestation model.
 - **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the

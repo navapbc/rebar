@@ -43,6 +43,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "codeql.yml": "CodeQL SAST",
     "reconcile-bridge.yml": "Reconcile Bridge",
     "reconcile-bridge-canary.yml": "Reconciler Heartbeat Canary",
+    "jira-dc-capability-map.yml": "Jira DC Capability Map",
 }
 
 # The one filename permitted to keep the `.yaml` extension (Gerrit g2p match).

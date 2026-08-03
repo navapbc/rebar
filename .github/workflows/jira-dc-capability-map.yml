@@ -1,0 +1,127 @@
+name: Jira DC Capability Map
+
+# On-demand mapping run for the pinned Jira Data Center harness (ticket 259b-b7da-a346-4785).
+#
+# THIS IS AN AUTHORING TOOL, NOT A TEST-PATH COMPONENT. It boots the SAME digest-pinned,
+# ephemeral Jira DC image the `jira-dc-harness` job in external-integration.yml uses (built
+# from the vendored tests/external/live_jira_dc/Dockerfile, whose FROM line pins
+# addono/jira-software-standalone by digest — see that file and its README for the exact
+# pin), runs an Opus agent (rebar.llm's own agentic runtime — scripts/jira_dc_capability_map.py)
+# against it to answer a fixed checklist (issue types, workflows/statuses, priorities, link
+# types + direction, and Jira's hardcoded length limits), and uploads the answers PLUS the raw
+# REST request/response evidence behind every one of them as a build artifact.
+#
+# It produces a CANDIDATE environment contract for a human to review and land as committed
+# data (docs/jira-dc-capability-map.md documents the re-run/review process) — it does not
+# commit anything itself, and the agent is instructed to REPORT what it finds, never to fix
+# the harness, the repository, or rebar's own configuration.
+#
+# `workflow_dispatch` ONLY — never push, PR, or schedule (tests/unit/
+# test_jira_dc_capability_map_workflow.py asserts this, not just this comment).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  map-jira-dc-capabilities:
+    name: map Jira DC capabilities (live, ephemeral)
+    runs-on: ubuntu-latest
+    # Native amd64 is a hard requirement for this harness to finish booting at all — see
+    # tests/external/live_jira_dc/README.md's measured arm64 findings. ubuntu-latest is
+    # native x86_64, mirroring the jira-dc-harness job in external-integration.yml.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Require an LLM API key secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Set the ANTHROPIC_API_KEY repository secret to run the Jira DC capability map (an agentic Opus run)."
+            exit 1
+          fi
+
+      # `[dev]` self-references `nava-rebar[agents,metrics]` (pyproject.toml), so this ONE
+      # sync already pulls the LLM runtime rebar.llm.runner needs (pydantic-ai-slim[anthropic]
+      # + json-repair + pydantic) — mirroring the external-integration.yml jobs' own install
+      # step. This job runs no pytest suite at all — scripts/jira_dc_capability_map.py is a
+      # standalone script, not a test — so it deliberately does NOT install
+      # `[jira-datacenter]` (that extra supplies pycontribs/jira for the reconciler's OWN
+      # transport, which this job never calls: every REST round trip here is raw urllib,
+      # "no rebar transport in the path").
+      - name: Install rebar + the agentic LLM runtime
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      # Builds the vendored ./Dockerfile — the SAME one the jira-dc-harness job in
+      # external-integration.yml builds — so the digest pin on its base image
+      # (addono/jira-software-standalone@sha256:...) applies here too, by construction
+      # rather than by a second literal that could drift from the first.
+      - name: Build and start the Jira DC harness
+        working-directory: tests/external/live_jira_dc
+        run: docker compose up -d --build
+
+      - name: Wait for Jira DC to become ready
+        run: |
+          ok=
+          for i in $(seq 1 240); do
+            if curl -fsS http://localhost:2990/jira/rest/api/2/serverInfo >/dev/null 2>&1; then
+              echo "Jira DC ready after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Jira DC harness never became ready (see tests/external/live_jira_dc/README.md)"
+            (cd tests/external/live_jira_dc && docker compose logs --tail=200)
+            exit 1
+          fi
+
+      # ONE boot, ONE batched agent run over the whole checklist (inventory, workflows/
+      # statuses, priorities, link types + direction, length limits, the 37e7/1a9f
+      # falsifiers) — the harness took minutes to become ready, so every question is
+      # answered in this single pass rather than iterating boots per question.
+      - name: Run the capability-mapping agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JIRA_DC_BASE_URL: http://localhost:2990/jira
+          # A generous agentic step budget (~450 tool-call cycles at 2 steps/call): this run
+          # makes MANY REST round trips across a five-part checklist in one boot, well above
+          # the framework's 250-step (~125-cycle) default (docs/llm-framework.md).
+          REBAR_LLM_MAX_STEPS: "900"
+          # Hard, deterministic guarantee (not just a prompt instruction) that the agent's
+          # rebar ticket tool is read-only: withholds `comment_ticket` regardless of gate
+          # mode, so this run cannot write to rebar's own ticket store even if it tried.
+          REBAR_MCP_READONLY: "1"
+          JIRA_DC_MAP_OUTPUT_DIR: ${{ runner.temp }}/jira-dc-capability-map
+        run: python scripts/jira_dc_capability_map.py
+
+      - name: Jira DC container logs on failure
+        if: failure()
+        run: cd tests/external/live_jira_dc && docker compose logs --tail=200
+
+      - name: Tear down the Jira DC harness
+        if: always()
+        run: cd tests/external/live_jira_dc && docker compose down -v
+
+      - name: Upload capability-map artifact (answers + raw evidence)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jira-dc-capability-map
+          path: ${{ runner.temp }}/jira-dc-capability-map
+          if-no-files-found: error
