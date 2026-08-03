@@ -422,6 +422,14 @@ class ReconcilerConfig:
     # Cloud's hardcoded classifier names verbatim would misclassify a resolved
     # DC issue as PRESENT_FILTERED.
     resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
+    # Ceiling (characters) the DC comment sanitizer truncates a comment body to —
+    # this instance's `jira.text.field.character.limit`, which is ADMIN-SETTABLE on
+    # Data Center (documented range 0-2147483647, where 0 means UNLIMITED). The
+    # default is Jira's own default for that property, so a stock instance needs no
+    # configuration; raise it here to match an instance whose administrator raised it,
+    # or rebar truncates comments Jira would have accepted in full (bug 049e). Env
+    # override REBAR_RECONCILER_COMMENT_MAX_CHARS is auto-derived from this field.
+    comment_max_chars: int = 32767
 
     def __post_init__(self) -> None:
         _validate_reconciler_tls(self.base_url, self.allow_insecure)
@@ -615,6 +623,10 @@ _SECTIONS: dict[str, dict] = {
         "allow_insecure": lambda v, k: _as_bool(v, k),
         "ca_bundle": lambda v, k: _as_str(v, k),
         "resolved_statuses": lambda v, k: _as_str_list(v, k),
+        # `jira.text.field.character.limit`'s own documented range: 0 (= unlimited)
+        # through 2147483647 (bug 049e). A negative value is a configuration error,
+        # not a synonym for unlimited.
+        "comment_max_chars": lambda v, k: _as_int(v, k, minimum=0, maximum=2147483647),
     },
     "jira": {
         "url": lambda v, k: _as_str(v, k),
