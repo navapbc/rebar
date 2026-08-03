@@ -50,6 +50,8 @@ from _dc_support import assert_outbound_provenance_markers as _assert_outbound_p
 from _dc_support import assert_remote_parent_is as _assert_remote_parent_is
 from _dc_support import envelope as _envelope
 from _dc_support import forget_identity_mapping as _forget_identity_mapping
+from _dc_support import probe_subtask_parent_editmeta_ops as _probe_subtask_parent_editmeta_ops
+from _dc_support import probe_subtask_parent_put as _probe_subtask_parent_put
 from _dc_support import raw_indexed_issue_count as _raw_indexed_issue_count
 from _dc_support import read_local_ticket as _local
 from _dc_support import run_reconcile as _run
@@ -1379,13 +1381,32 @@ def test_inbound_set_subtask_parent_round_trips(
         f"without any mutation having happened."
     )
 
+    # DIAGNOSTIC PROBES — [rebar:1a9f-50c0-e7a5-4fda] AC1: does DC 8.17.1 return SUCCESS or an
+    # ERROR for this reparent? `dc_transport.set_parent` cannot answer that itself (pycontribs
+    # does not surface the raw HTTP response), and the `bridge_alerts` store cannot either — this
+    # cell calls the transport DIRECTLY, bypassing the dispatch code that writes alerts, so the
+    # store would read empty regardless of what DC does (see 1a9f's second design comment). None
+    # of these three probes assert; their results are folded into the existing oracle's failure
+    # message below so a CI reader sees the raw platform response without a rerun.
+    editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
+    probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
+    update_verb_status, update_verb_body = _probe_subtask_parent_put(
+        dc_request, child, second, verb="update"
+    )
+    probe_diagnostics = (
+        f"raw PUT (fields form) for the reparent -> HTTP {probe_status}, body "
+        f"{str(probe_body)[:300]}; raw PUT (update-verb form) -> HTTP {update_verb_status}, "
+        f"body {str(update_verb_body)[:300]}; /editmeta for 'parent' (HTTP {editmeta_status}) "
+        f"exposes operations {editmeta_ops!r}"
+    )
+
     dc_transport.set_parent(child, second)
     _wait_until_parent_map_reflects(
         dc_transport,
         jira_dc_project,
         child,
         lambda mapping: mapping.get(child) == second,
-        f"the reparent to {second}",
+        f"the reparent to {second} (raw platform probes: {probe_diagnostics})",
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
@@ -1395,7 +1416,8 @@ def test_inbound_set_subtask_parent_round_trips(
     assert after == second_local, (
         f"the DC reparent did not reach the local ticket: .parent_id on {child_local} is "
         f"{after!r} (it was {before!r} before), expected {second_local!r} — the local id of "
-        f"{second}, which `get_parent_map` confirms is now the sub-task's parent."
+        f"{second}, which `get_parent_map` confirms is now the sub-task's parent. Raw platform "
+        f"probes: {probe_diagnostics}"
     )
 
 
@@ -1670,11 +1692,36 @@ def test_outbound_set_subtask_parent_round_trips(
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
     _assert_remote_parent_is(child, status, body, first, stage="SETUP (not the reparent)")
 
+    # DIAGNOSTIC PROBES — [rebar:1a9f-50c0-e7a5-4fda] AC1: does DC 8.17.1 return SUCCESS or an
+    # ERROR for this reparent? `dc_transport.set_parent` cannot answer that itself — pycontribs'
+    # `issue.update(...)` does not surface the raw HTTP response to its caller. These bypass it
+    # entirely over raw REST. None of the three assert; their results are folded into the
+    # existing oracle's failure message below so a CI reader sees the raw platform response
+    # without a rerun.
+    editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
+    probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
+    update_verb_status, update_verb_body = _probe_subtask_parent_put(
+        dc_request, child, second, verb="update"
+    )
+    probe_diagnostics = (
+        f"raw PUT (fields form) for the reparent -> HTTP {probe_status}, body "
+        f"{str(probe_body)[:300]}; raw PUT (update-verb form) -> HTTP {update_verb_status}, "
+        f"body {str(update_verb_body)[:300]}; /editmeta for 'parent' (HTTP {editmeta_status}) "
+        f"exposes operations {editmeta_ops!r}"
+    )
+
     # THE MUTATION UNDER TEST — rebar's own write path for a DC parent.
     dc_transport.set_parent(child, second)
 
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
-    _assert_remote_parent_is(child, status, body, second, previous_parent=first)
+    _assert_remote_parent_is(
+        child,
+        status,
+        body,
+        second,
+        previous_parent=first,
+        stage=f"the outbound parent set (raw platform probes: {probe_diagnostics})",
+    )
 
 
 # ---------------------------------------------------------------------------
