@@ -8,7 +8,9 @@ per-item records:
 
   (a) structured-output VALIDITY: v2 >= v1 (target >= 99% valid parses, no regression);
   (b) per-criterion verdict AGREEMENT >= 95% AND ZERO decision-level flips
-      (block/advisory/dropped) on the gold set;
+      (block/advisory/dropped) on the gold set, counting only pairs where BOTH sides
+      produced a verdict — a gold pair with an errored side is excluded and reported as
+      ``errored_pairs``, since criterion (d) already owns runtime errors;
   (c) RECALL and FALSE-ACCEPT each within +/-2pp of v1 (non-inferiority margin);
   (d) runtime ERROR/timeout rate v2 <= v1;
   (e) cost/latency recorded (informational, NON-gating).
@@ -113,7 +115,17 @@ def parity_report(
     agreement = _rate(pairs, lambda p: p[0].decision == p[1].decision)
     gold_pairs = [(a, b) for a, b in pairs if a.label in _DECISIONS]
     n_gold = len(gold_pairs)
-    decision_flips = sum(1 for a, b in gold_pairs if a.decision != b.decision)
+    # An ERRORED side never produced a model verdict (see ``ItemRecord.errored``), so its
+    # decision is synthetic and comparing it would score a runtime event as a quality
+    # regression — one transient throttle failing criterion (b), which is documented as
+    # never acceptable. Criterion (d) below already gates the error rate, so excluding the
+    # pair here attributes the event once instead of twice. The guard reads ``errored``,
+    # NOT decision-vocabulary membership: ``gold_pairs`` is selected on the gold ``label``
+    # alone, so no value of ``decision`` can exempt an errored pair.
+    errored_pairs = sum(1 for a, b in gold_pairs if a.errored or b.errored)
+    decision_flips = sum(
+        1 for a, b in gold_pairs if not (a.errored or b.errored) and a.decision != b.decision
+    )
     rec1, fa1 = _recall_false_accept(v1)
     rec2, fa2 = _recall_false_accept(v2)
 
@@ -127,7 +139,10 @@ def parity_report(
     if agreement + 1e-9 < AGREEMENT_FLOOR:
         failures.append(f"verdict agreement {agreement:.3f} below {AGREEMENT_FLOOR}")
     if decision_flips:
-        failures.append(f"{decision_flips} decision-level flip(s) on the gold set (must be 0)")
+        excluded = f"; {errored_pairs} errored pair(s) excluded" if errored_pairs else ""
+        failures.append(
+            f"{decision_flips} decision-level flip(s) on the gold set (must be 0){excluded}"
+        )
     # (c) recall + false-accept non-inferiority.
     if (rec1 - rec2) > NONINFERIORITY_MARGIN + 1e-9:
         failures.append(f"recall dropped {rec1 - rec2:.3f} > margin {NONINFERIORITY_MARGIN}")
@@ -149,6 +164,9 @@ def parity_report(
             "validity": {"v1": val1, "v2": val2},
             "verdict_agreement": agreement,
             "decision_flips": decision_flips,
+            # Gold pairs excluded from the flip count because a side errored — reported so a
+            # reader can tell a fabricated flip from a genuine one.
+            "errored_pairs": errored_pairs,
             "n_gold": n_gold,
             "recall": {"v1": rec1, "v2": rec2},
             "false_accept": {"v1": fa1, "v2": fa2},
