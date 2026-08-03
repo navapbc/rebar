@@ -245,6 +245,17 @@ enumeration is the test plan. (The existing-coverage *search* is cheap-shaped, b
 *what to test* from it is strong-tier judgment — so keep 4a inline on the strong tier by
 explicit choice, not by omission.)
 
+**Surface-parity census.** When the change touches an operation reachable through **more than
+one parallel surface**, enumerate five slots — **CLI command / MCP-or-API tool / library facade
+(public import path) / automated callers (reconcilers, workflows, bots) / dual-direction (does
+the mirror operation — read vs write, inbound vs outbound — carry the same rule?)** — and give
+each slot exactly one disposition: **in scope, proven through that surface** (a test exercises
+the behavior *through that entry point*), or **out of scope, with a reason**. Derive the caller
+set of the shared core you are changing: a surface that performs the operation but does *not*
+route through that core is exactly where a parity bug lives. Out-of-scope slots feed the
+Phase-5 residual-gap sweep — they are recorded, not dropped. (This census is defined here
+self-contained; the debug skill's sibling sweep gains its own analog independently.)
+
 ### 4b. Write the tests RED-first — all of them
 
 Author the full test set yourself to the shared standard's oracle minimum (`test-design.md`:
@@ -261,6 +272,17 @@ Run the whole set and **confirm every test fails, for the right reason** (right 
 absence of behavior — not an import error or typo). Capture the RED output as evidence in the
 session log. A test that passes now, or fails for the wrong reason, is off — fix it before
 proceeding.
+
+**Contention triggers (op-level semantics only).** Add contention cases when — and only when —
+the change (i) composes **two or more locked operations** or a check-then-act across store
+reads/writes, (ii) adds its **own retry/backoff/reclamation** logic, or (iii) introduces a
+**cache/snapshot over store state**. Route each shape to the EXISTING shared suite — never a
+bespoke harness (meaning: reuse these shared fixtures/harnesses): composed/check-then-act
+writes → `tests/integration/test_concurrency_regression.py` (two_clones fixture);
+write-storm/retry-reclamation → `tests/integration/test_store_concurrency.py` (storm suite);
+read-integrity-under-contention → `tests/interfaces/store/test_reads_under_sync_contention.py`
+via the shared `tests/interfaces/store/sync_contention_harness.py`. A change that rides an
+existing seam (a single already-locked operation) is exempt — the seam's own suite covers it.
 
 ### 4c. Hold out the oracle
 
@@ -357,6 +379,13 @@ Then let the gates run. On a real finding (LLM review or CI `Verified -1` that i
 fix it, `git commit --amend --no-edit` to keep the `Change-Id`, and re-push — never a new
 commit for a fix. Iterate until the change is green.
 
+**A behavioral gate finding gets a RED test first.** When a review-gate finding describes
+wrong/missing *behavior* (not naming, docs, or style), treat it exactly like a held-out
+failure: write the test that fails for that reason **before** the fix, then fix, then amend —
+test and fix land in the same amended change. A gate finding fixed without an oracle upgrade
+is how the same bug ships twice. Non-behavioral findings (naming, formatting, docs wording,
+comment accuracy) are fixed directly — do **not** manufacture change-detector tests for them.
+
 > **Large / parallel efforts.** If the project documents a **feature-branch** pattern for
 > multi-story work (rebar does — reviewing each story into `refs/heads/feature/<name>`, then a
 > single `--no-ff` merge change into `main`), prefer it over a long fragile relation chain when
@@ -374,6 +403,14 @@ commit for a fix. Iterate until the change is green.
 - **A parent closes when all its children are closed** — rebar's open-children guard enforces
   this structurally. Close interior tickets as their subtrees complete, walking up.
 - **The epic closes last**, when every descendant is closed.
+
+**Residual-gap disposition sweep (before the epic closes).** Walk the enumerable gap sources
+this run produced — the 4a census slots marked out-of-scope, the 4b cases you excluded from the
+test set, any 4e-bis escalation compromises (a leaf landed on a weaker validation than planned),
+and 4g advisory findings you deferred — and give each item exactly one disposition: **filed**
+(a ticket, linked `discovered_from` its origin), **accepted** (+ one-line reason), or **fixed in
+scope** (+ where). "None" is a legitimate answer when the checklist sources are empty; an
+enumerated gap with no disposition is not.
 
 Log each close with the evidence that justified it (the green vote, the verifier verdict).
 
@@ -419,6 +456,9 @@ Restate the outcome in your own message text (tool output isn't a completion sig
   implementer saw only the happy path, and that the full held-out suite validated GREEN (with
   the teeth/mutation check where run).
 - **Board state** — every ticket closed bottom-up, the epic closed, with the evidence per close.
+- **Residual gaps** — the Phase-5 disposition sweep's outcome: each census out-of-scope slot,
+  test exclusion, escalation compromise, and deferred advisory as filed / accepted / fixed (or
+  "none").
 - **Handoff** — the session log id, so the trail is resumable.
 
 If you **stopped at preflight** (ticket missing or not decomposed), say so plainly and name the
