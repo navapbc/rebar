@@ -1,0 +1,1 @@
+{"author":"Unknown","author_email":"","data":{"body":"{\"exception_type\": \"UnexpectedModelBehavior\", \"message\": \"Tool 'list_directory' exceeded max retries count of 1\", \"model\": \"anthropic:claude-opus-4-8\"}"},"env_id":"b2b5c498-2f67-4ae3-bafc-eca40294bec2","event_type":"COMMENT","timestamp":1785735857893747873,"uuid":"dbeb0e04-cb45-4228-8ad8-d7a4fdb5790e"}
