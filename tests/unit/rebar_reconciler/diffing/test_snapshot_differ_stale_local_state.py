@@ -224,6 +224,46 @@ def test_a_key_that_left_the_fetch_window_plans_no_outbound_create(
     )
 
 
+def test_key_set_prev_emits_no_outbound_creates_for_large_departed_window(differ_mod):
+    """Empty membership entries cannot resurrect 900+ keys that leave the fetch window."""
+    full_prev = {f"RB-{index}": _issue(f"departed {index}") for index in range(1000)}
+    key_set_prev = {key: {} for key in full_prev}
+
+    full_creates = _of_kind(
+        differ_mod.compute_mutations(local_state=full_prev, jira_state={}),
+        "outbound",
+        "create",
+    )
+    key_set_creates = _of_kind(
+        differ_mod.compute_mutations(local_state=key_set_prev, jira_state={}),
+        "outbound",
+        "create",
+    )
+
+    assert len(full_creates) == 1000, "positive control must exercise the local-only arm"
+    assert key_set_creates == []
+
+
+def test_key_set_prev_field_drift_never_survives_the_production_filter(
+    run_differs_mod, differ_mod, monkeypatch
+):
+    """The both-arm may see empty entries, but no field-bearing outbound effect survives."""
+    prev = {"RB-8": {}}
+    curr = {"RB-8": _issue("current remote fields")}
+
+    raw_updates = _of_kind(
+        differ_mod.compute_mutations(local_state=prev, jira_state=curr),
+        "outbound",
+        "update",
+    )
+    assert raw_updates, "positive control must exercise the both-sides field-drift arm"
+    assert raw_updates[0].payload
+
+    planned = _drive_diff_phase(run_differs_mod, differ_mod, monkeypatch, prev, curr)
+
+    assert _of_kind(planned, "outbound", "update") == []
+
+
 # ---------------------------------------------------------------------------
 # Positive controls — the suppression must not over-filter
 # ---------------------------------------------------------------------------

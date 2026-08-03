@@ -60,6 +60,30 @@ def test_returns_quarantine_and_seed_mutations(inv):
     assert isinstance(repairs, list)
 
 
+def test_realistic_full_and_key_set_prev_entries_have_identical_invariant_result(inv):
+    """Raw fetch fields and empty membership entries carry no local identity contract."""
+    full_prev = {
+        "PROJ-1": {
+            "summary": "remote issue",
+            "status": {"name": "To Do"},
+            "labels": ["rebar-id:local-1"],
+        }
+    }
+    key_set_prev = {"PROJ-1": {}}
+    current = {
+        "PROJ-1": {
+            "summary": "remote issue",
+            "status": {"name": "To Do"},
+            "labels": ["rebar-id:local-1"],
+        }
+    }
+
+    full_result = inv.check_dual_identity_complete(full_prev, current)
+    key_set_result = inv.check_dual_identity_complete(key_set_prev, current)
+
+    assert full_result == key_set_result == (set(), [])
+
+
 def test_report_schema_drift_dedup_key(inv):
     """report_schema_drift fires subprocess with dedup_key=bridge-alert:schema-drift:<issue_key>."""
     mock_alert_store = MagicMock()
