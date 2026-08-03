@@ -44,7 +44,7 @@
       },
       "excluded_errored_pairs": 2,
       "gating_failures": [
-        "verdict agreement 0.929 below 0.95",
+        "verdict agreement 0.923 below 0.95",
         "2 decision-level flip(s) on the gold set (must be 0)"
       ],
       "invalid": false,
@@ -55,34 +55,35 @@
       },
       "measured": true,
       "metrics": {
-        "cost": {
-          "v1": 0.0,
-          "v2": 0.0
+        "validity": {
+          "v1": 1.0,
+          "v2": 1.0
         },
+        "verdict_agreement": 0.9230769230769231,
         "decision_flips": 2,
+        "errored_pairs": 0,
+        "n_gold": 26,
+        "recall": {
+          "v1": 1.0,
+          "v2": 1.0
+        },
+        "false_accept": {
+          "v1": 0.23076923076923078,
+          "v2": 0.07692307692307693
+        },
         "error_rate": {
           "v1": 0.0,
           "v2": 0.0
         },
-        "false_accept": {
-          "v1": 0.21428571428571427,
-          "v2": 0.07142857142857142
+        "cost": {
+          "v1": 0.0,
+          "v2": 0.0
         },
         "latency_s": {
           "v1": 0.0,
           "v2": 0.0
         },
-        "n": 28,
-        "n_gold": 28,
-        "recall": {
-          "v1": 0.9285714285714286,
-          "v2": 0.9285714285714286
-        },
-        "validity": {
-          "v1": 1.0,
-          "v2": 1.0
-        },
-        "verdict_agreement": 0.9285714285714286
+        "n": 26
       },
       "n_items": 30,
       "passed": false,
@@ -541,7 +542,8 @@
       ],
       "slot": "frontier",
       "v1_model": "claude-opus-4-8",
-      "v2_model": "bedrock:us.anthropic.claude-opus-4-8"
+      "v2_model": "bedrock:us.anthropic.claude-opus-4-8",
+      "scoring_note": "Rows from a polarity-free spec (code-review-verify) are retained above for provenance but EXCLUDED from scoring: that arm emits no block/advisory decision, so every such case scored advisory regardless of gold label and the gold-BLOCK case was a guaranteed miss on both arms (bug ed82-08f3-a693-425f). n_gold drops by the excluded pair; no gating verdict changes."
     },
     "standard": {
       "calls": {
@@ -593,34 +595,35 @@
       },
       "measured": true,
       "metrics": {
-        "cost": {
-          "v1": 0.0,
-          "v2": 0.0
+        "validity": {
+          "v1": 1.0,
+          "v2": 1.0
         },
+        "verdict_agreement": 0.9615384615384616,
         "decision_flips": 1,
+        "errored_pairs": 0,
+        "n_gold": 26,
+        "recall": {
+          "v1": 0.9230769230769231,
+          "v2": 1.0
+        },
+        "false_accept": {
+          "v1": 0.23076923076923078,
+          "v2": 0.23076923076923078
+        },
         "error_rate": {
           "v1": 0.0,
           "v2": 0.0
         },
-        "false_accept": {
-          "v1": 0.21428571428571427,
-          "v2": 0.21428571428571427
+        "cost": {
+          "v1": 0.0,
+          "v2": 0.0
         },
         "latency_s": {
           "v1": 0.0,
           "v2": 0.0
         },
-        "n": 28,
-        "n_gold": 28,
-        "recall": {
-          "v1": 0.8571428571428571,
-          "v2": 0.9285714285714286
-        },
-        "validity": {
-          "v1": 1.0,
-          "v2": 1.0
-        },
-        "verdict_agreement": 0.9642857142857143
+        "n": 26
       },
       "n_items": 30,
       "passed": false,
@@ -1079,7 +1082,8 @@
       ],
       "slot": "standard",
       "v1_model": "claude-sonnet-4-6",
-      "v2_model": "bedrock:us.anthropic.claude-sonnet-4-6"
+      "v2_model": "bedrock:us.anthropic.claude-sonnet-4-6",
+      "scoring_note": "Rows from a polarity-free spec (code-review-verify) are retained above for provenance but EXCLUDED from scoring: that arm emits no block/advisory decision, so every such case scored advisory regardless of gold label and the gold-BLOCK case was a guaranteed miss on both arms (bug ed82-08f3-a693-425f). n_gold drops by the excluded pair; no gating verdict changes."
     }
   }
 }

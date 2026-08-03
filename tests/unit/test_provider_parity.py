@@ -256,6 +256,64 @@ def test_the_corpus_excludes_every_agentic_solver_and_clears_the_gold_floor() ->
     assert sum(1 for i in selected if i.label == "advisory") >= 1
 
 
+def test_a_polarity_free_spec_is_excluded_from_the_corpus() -> None:
+    """A spec whose scorer has no block/advisory polarity must not enter the corpus.
+
+    RED before the fix: `code-review-verify` resolved to the `code-review` arm and was eligible,
+    so its gold-BLOCK case `V-real-defect` was scored `advisory` on BOTH arms — a guaranteed recall
+    miss that looked like agreement (bug ed82-08f3-a693-425f)."""
+    eligible = pp.eligible_cases()
+    selected = pp.select_corpus(eligible)
+    assert {i.solver_id for i in eligible} & pp.POLARITY_FREE_SOLVERS == set()
+    assert {i.spec for i in eligible} & pp.POLARITY_FREE_SOLVERS == set()
+    assert {i.spec for i in selected} & pp.POLARITY_FREE_SOLVERS == set()
+    for solver_id in pp.POLARITY_FREE_SOLVERS:
+        assert pp.solver_arm(solver_id) is None
+
+
+def test_the_polarity_free_exclusion_is_not_folded_into_the_agentic_one() -> None:
+    """The two exclusions must stay separately named — they exclude for unrelated reasons.
+
+    AGENTIC_SOLVERS excludes ops `gate_config` cannot reach (both arms would read the same ambient
+    model). POLARITY_FREE_SOLVERS excludes a scorer with no decision to compare. Collapsing them
+    would lose one reason, and a future reader deleting the "redundant" set would silently
+    re-admit mis-scored cases."""
+    assert pp.POLARITY_FREE_SOLVERS
+    assert pp.POLARITY_FREE_SOLVERS.isdisjoint(pp.AGENTIC_SOLVERS)
+    # Each polarity-free solver is excluded ON ITS OWN, not incidentally by the agentic set.
+    for solver_id in pp.POLARITY_FREE_SOLVERS:
+        assert solver_id not in pp.AGENTIC_SOLVERS
+        assert pp.solver_arm(solver_id) is None
+
+
+def test_a_verifications_only_output_carries_no_decision_polarity() -> None:
+    """Why exclusion is the fix and "presence -> block" is NOT.
+
+    `code-review-verify` is scored on the PRESENCE of a `verifications` list, "independently of any
+    FAIL/BLOCK polarity", and its dataset requires a non-empty list for the CLEAN diff as much as
+    the real-defect one. So the same output shape is correct for a gold-block case and a
+    gold-advisory case: mapping presence to `block` would fix the recall miss and simultaneously
+    score the clean case as a block, manufacturing a false accept."""
+    verify_shaped = {"verifications": [{"id": "F1", "binary": {"path_reachable": "yes"}}]}
+    # It has neither key the two-bucket mapping reads, so it cannot yield a meaningful decision.
+    assert "verdict" not in verify_shaped
+    assert not verify_shaped.get("findings")
+    assert pp.verdict_decision(verify_shaped) == "advisory"
+    # ...which is why the arm is excluded rather than adapted: `advisory` is wrong for a gold-block
+    # case, and `block` would be wrong for the gold-advisory one.
+
+
+def test_the_gold_floor_still_holds_after_the_polarity_free_exclusion() -> None:
+    """Excluding a spec must not drop the corpus below the gold floor.
+
+    Pinned so a future exclusion cannot silently shrink the corpus under `MIN_GOLD_ITEMS`, which
+    would make the parity verdict rest on too few gold items."""
+    selected = pp.select_corpus(pp.eligible_cases())
+    assert len(selected) >= parity.MIN_GOLD_ITEMS
+    assert sum(1 for i in selected if i.label == "block") >= 1
+    assert sum(1 for i in selected if i.label == "advisory") >= 1
+
+
 def test_the_corpus_selection_is_deterministic_and_stratified_per_spec() -> None:
     eligible = pp.eligible_cases()
     first = pp.select_corpus(eligible)
