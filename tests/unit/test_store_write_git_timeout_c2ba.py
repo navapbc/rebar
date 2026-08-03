@@ -6,7 +6,8 @@ the recovery paths' ``diff``/``rm``/``checkout``/``read-tree``/``ls-files``). Be
 those ran via bare ``subprocess.run(...)`` with no ``timeout=`` (unlike ``push.py``, which
 passes ``_GIT_TIMEOUT``), so a stuck or contended tracker volume could hold the write lock
 indefinitely — the residue that made the review-bot ``stop_grace_period`` unprovable and, when
-a SIGKILL landed mid-write, orphaned the lock (the 2026-07-31 autodeploy incident).
+a SIGKILL landed mid-write, orphaned the lock (the autodeploy incident recorded on ticket
+c2ba-98bf-ca2d-481a).
 
 Every lock-held git call now funnels through ``event_append._run_git``, which mirrors
 ``push.py._git``: it bounds the child with ``_GIT_TIMEOUT`` and folds a

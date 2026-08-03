@@ -7,7 +7,7 @@ RED → GREEN specification:
   - call site in reconcile_once: on False, logs loud ERROR naming the
     consequence (bindings at risk of clobber on next merge); does NOT abort pass
 
-These tests exercise the cf93b2b7ad failure class: a silent commit failure
+These tests exercise the clobbered-bindings failure class: a silent commit failure
 followed by a ``git merge origin/tickets`` loses bindings and causes the next
 pass to see bound tickets as unbound.
 """

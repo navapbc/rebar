@@ -17,7 +17,8 @@ HERE, harness-free:
     legitimately pass, and passes for the mint rather than for its own side effect;
   * the cell's SETUP step — ``_dc_support.forget_identity_mapping`` — really does re-establish
     the absence the oracle asserts, even on a store where the mapping was already minted. That
-    is the shape harness run 30763838558 forced: the mapping is not left by the scrub (every
+    is the shape the J11 harness (ticket 5200-e04e-246e-4aae) forced: the mapping is not
+    left by the scrub (every
     identity on the real ``tickets`` branch carries ``mappings: []``) but minted DURING the test
     by ``bound_dc_issue``'s binding pass importing the seeded issue's default assignee. Without
     a working removal the cell can only ever fail at setup;
@@ -132,7 +133,7 @@ def test_the_oracle_goes_green_on_the_real_dc_mint(store: Path) -> None:
 def test_the_cells_setup_step_really_re_establishes_the_absence(store: Path) -> None:
     """THE SETUP THE LIVE CELL NOW DOES FOR ITSELF, verified against a store that HAS the mapping.
 
-    Harness run 30763838558 failed the precondition, and the reason matters: the mapping is
+    The J11 harness failed the precondition, and the reason matters: the mapping is
     minted during the run by ``bound_dc_issue``'s binding pass importing the seeded issue's
     default assignee, so no choice of subject avoids it. The cell removes the mapping instead.
     If that removal did not work the cell could only ever fail at setup — this is what proves it

@@ -441,6 +441,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
 # prints ::warning::/::error:: workflow annotations + rebar-write failure detail to
 # stdout (the Actions log surface). Legitimate-print category. KEEPS T201.
 "scripts/canary_bridge.py" = ["T201"]
+# Comment-hygiene drift gate CLI (ticket b047) — prints its violation report +
+# teaching message to stdout (the CI gate surface). Legitimate-print category.
+# KEEPS T201.
+"scripts/check_comment_hygiene.py" = ["T201"]
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]

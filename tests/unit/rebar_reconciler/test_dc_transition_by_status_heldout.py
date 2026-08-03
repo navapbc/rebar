@@ -7,7 +7,8 @@ which that map is documented to hold ("Local status string -> Jira workflow stat
 
 Matching only on the transition's own name therefore missed, raised ``ValueError``, and got
 SOFT-FAILED into ``bridge_alerts`` by ``apply_handlers.record_backstop_failure`` — the pass exited
-0 with no traceback and the status never changed. Measured live in harness run 30724309686:
+0 with no traceback and the status never changed. Measured live by the J11 harness
+(ticket 5200-e04e-246e-4aae):
 ``outbound status did not reach DC: fields.status.name is 'To Do'``, alongside the transport's own
 ``no transition named 'In Progress' is available ... (available: ['Done', 'Start Progress'])``.
 

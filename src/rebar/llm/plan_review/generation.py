@@ -72,8 +72,8 @@ class _UnderLockMismatch(RuntimeError):
 # the material fingerprint and are already orphaned by the edit. The cancel
 # predicate is scoped EXACTLY like the sign-time one: the subject's OWN material
 # only. It never reads tracker HEAD, the relation snapshot, or related_material —
-# store-wide equality false-cancels on unrelated tickets' writes (commit 7c3c08df8 /
-# bug d70a), and related-material drift keeps reusable checkpoints and is still
+# store-wide equality false-cancels on unrelated tickets' writes (bug d70a), and
+# related-material drift keeps reusable checkpoints and is still
 # refused at sign time. Monotone by construction: a cancel can only WITHHOLD an
 # attestation (the cancelled verdict is unsigned INDETERMINATE); a missed cancel
 # degrades to today's sign-time refusal.

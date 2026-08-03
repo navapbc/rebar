@@ -230,7 +230,7 @@ def _apply_inbound_delete(
         new_local_id = _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"
         src = tracker_dir / local_id
         dst = tracker_dir / new_local_id
-        # Collision protection (PR #375 review thread 3307104042): when both
+        # Collision protection (PR #375 review): when both
         # src and dst already exist on disk (prior failed pass, or the
         # destination key was imported by another path) we cannot silently
         # skip the rename — that leaves the tracker holding two ticket dirs

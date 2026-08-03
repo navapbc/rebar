@@ -96,7 +96,7 @@ def test_single_turn_runner_builds_agent_with_no_tools(rebar_repo: Path, monkeyp
     monkeypatch.setattr(runner_mod, "cache_settings_for", lambda caps, *, execution_mode: None)
     monkeypatch.setattr(runner_mod, "_import_pydantic_ai", lambda: object)
     monkeypatch.setattr(runner_mod, "_pai_model", lambda cfg: "anthropic:fake")
-    # Env-independence: the loopback-proxy bypass (commit 4b9e49a57) fires inside run()
+    # Env-independence: the loopback-proxy bypass (story 454a-9266-ada6-43cc) fires inside run()
     # when ANTHROPIC_BASE_URL is a loopback host and imports the REAL
     # pydantic_ai.models.anthropic — which explodes against the empty pydantic_ai stub
     # below. Stub the bypass off so this test builds the agent regardless of the local

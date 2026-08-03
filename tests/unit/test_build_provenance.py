@@ -137,8 +137,8 @@ def test_install_from_sdist_preserves_commit(tmp_path: Path) -> None:
     out1 = tmp_path / "dist1"
     assert _build(tree, out1, {"REBAR_BUILD_COMMIT": "abc1234"}).returncode == 0
     sdist = next(out1.glob("*.tar.gz"))
-    # Extract the sdist (it carries _build_info.py with COMMIT=abc1234) and rebuild the wheel
-    # from it with the env var UNSET — the preserve-existing path must keep abc1234.
+    # Extract the sdist (its _build_info.py pins the commit seeded above) and rebuild the wheel
+    # from it with the env var UNSET — the preserve-existing path must keep that pinned value.
     import tarfile
 
     extracted = tmp_path / "extracted"

@@ -1,6 +1,6 @@
 """CI-reliability guard: ``make actionlint-bin`` must FAIL-FAST on a bad/corrupt download.
 
-Recurring CI flake (Gerrit-verify run 29619392619, job 88011385914): the ``actionlint-bin``
+Recurring CI flake (bug 4e99-b2ae-1791-4760): the ``actionlint-bin``
 recipe chained its download / checksum / extract steps with ``;`` and ended in an
 unconditional ``echo "...installed"``, so a transient GitHub download failure (a ``curl``
 error) was MASKED as success — the recipe returned exit 0 with **no binary**, the caller then

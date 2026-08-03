@@ -106,7 +106,7 @@ def acli_capture(
 # _network_guard) that real GET raises RuntimeError. This fixture mocks the
 # urlopen seam so create_issue tests stay fully offline without an
 # allow_network bridge. Mirrors the _mock_urlopen_verify helper landed for
-# test_acli_integration.py (commit 27024174e7, bug 1c68).
+# test_acli_integration.py (bug 1c68).
 
 
 @pytest.fixture

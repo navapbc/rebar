@@ -1,6 +1,6 @@
 """The inbound UPDATE path never mints an identity, because it hands the mint a STRING.
 
-Found by J11's inbound-assignee cell (ticket 5200) on harness run 30767546938 once its setup
+Found by J11's inbound-assignee cell (ticket 5200-e04e-246e-4aae) once its setup
 was fixed and it reached its real assertion for the first time. This module localises the
 mechanism harness-free, one variable at a time.
 

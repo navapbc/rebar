@@ -431,8 +431,8 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # Direction-aware dispatch lives inside applier.apply (PR #371 / defect
     # #8): the applier partitions typed Mutations by direction internally and
     # routes inbound via _apply_typed per-mutation, outbound via the batch
-    # path. The previous reconcile_once-level typed/legacy split (commit
-    # cb858e468d) was a parallel workaround for the same gap; with cap
+    # path. The previous reconcile_once-level typed/legacy split was a
+    # parallel workaround for the same gap; with cap
     # enforcement landing in applier.apply (story 286b), all mutations must
     # flow through that single entry point so caps apply uniformly across
     # both directions.
@@ -617,7 +617,8 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 # branch. A concurrent ``git merge origin/tickets`` between now
                 # and the next pass can clobber the working-tree bindings.json
                 # with the remote version, making bound tickets appear unbound
-                # (cf93b2b7ad class). _commit_binding_store_snapshot already
+                # (the clobbered-bindings class that
+                # test_commit_binding_store_failure.py pins). The helper already
                 # logged the error and filed the alert. Do NOT abort the pass —
                 # commit failure must never break sync.
                 print(  # noqa: T201

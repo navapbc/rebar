@@ -122,6 +122,13 @@ jobs:
       - name: Verified-gate parity gate
         run: python scripts/check_verify_gate_parity.py
 
+      # Comment-hygiene gate (ticket b047): comments/docstrings must not anchor on
+      # rot-prone history tokens (bare commit SHAs, CI run ids, dated incident
+      # narratives). Cite a resolvable ticket/ADR id or describe behavior instead —
+      # the ticket system owns history; source comments carry current state.
+      - name: comment-hygiene gate
+        run: python scripts/check_comment_hygiene.py
+
   pip-audit:
     # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
     # installed dependency closure against the PyPI advisory / OSV database and
