@@ -55,8 +55,9 @@ _skip_unless_ci_arm = pytest.mark.skipif(
 def test_the_ambient_default_model_also_resolves_to_the_declared_provider() -> None:
     """`cfg.model` is a SECOND resolution path, and checking only the CLASSES misses it.
 
-    This test exists because its sibling above did NOT catch a real leak. In run 30836378745 the
-    class assertion PASSED on all three arms while three tests still called
+    This test exists because its sibling above did NOT catch a real leak. In the live
+    provider-matrix run recorded on story f124, the class assertion PASSED on all three arms
+    while three tests still called
     `model=anthropic:claude-opus-4-8`, because an op that resolves `cfg.model` rather than naming a
     class never consults the class table at all: `config.py` falls back to `DEFAULT_MODEL`, the bare
     literal "claude-opus-4-8", which infers provider `anthropic`. On a non-Anthropic arm those calls
