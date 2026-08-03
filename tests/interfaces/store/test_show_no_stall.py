@@ -11,69 +11,15 @@ briefly for the lock and otherwise proceeds with local state.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import shutil
-import subprocess
-import sys
 import threading
 import time
-from pathlib import Path
 
-import pytest
+from sync_contention_harness import _clear_sync_throttle, _rebar_cli
 
 import rebar
 from rebar._engine_support import reads
 from rebar._store import lock as _lock
-
-
-def _git(*args: str, cwd: Path) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
-
-
-def _rebar_cli(*args: str, repo: Path, push: str) -> subprocess.CompletedProcess:
-    """Invoke the real `rebar` CLI in a subprocess (the consumer-facing path), with
-    REBAR_SYNC_PUSH set so background pushes contend exactly as the bug describes."""
-    env = dict(os.environ)
-    env["REBAR_ROOT"] = str(repo)
-    env["REBAR_SYNC_PUSH"] = push
-    rebar_bin = shutil.which("rebar")
-    cmd = [rebar_bin, *args] if rebar_bin else [sys.executable, "-m", "rebar", *args]
-    return subprocess.run(cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=60)
-
-
-@pytest.fixture
-def repo_with_origin_tickets(tmp_path, monkeypatch):
-    """A repo whose tracker has an `origin/tickets` upstream, so `ensure_fresh`
-    actually reconverges (it early-returns when there's no remote branch). Yields
-    (repo_path, tracker_path, ticket_id)."""
-    monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git("init", "-q", cwd=repo)
-    _git("config", "user.email", "t@t", cwd=repo)
-    _git("config", "user.name", "t", cwd=repo)
-    _git("commit", "-q", "--allow-empty", "-m", "root", cwd=repo)
-    _git("remote", "add", "origin", str(origin), cwd=repo)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
-    rebar.init_repo(repo_root=str(repo))
-    tid = rebar.create_ticket("task", "no-stall target", repo_root=str(repo))
-    tracker = repo / ".tickets-tracker"
-    _git("push", "-q", "origin", "tickets:tickets", cwd=tracker)
-    return repo, tracker, tid
-
-
-def _clear_sync_throttle(tracker: Path) -> None:
-    tracker_abs = os.path.realpath(str(tracker))
-    md5_12 = hashlib.md5(tracker_abs.encode()).hexdigest()[:12]
-    marker = f"/tmp/.ticket-sync-{md5_12}"
-    try:
-        os.unlink(marker)
-    except OSError:
-        pass
 
 
 def test_ensure_fresh_does_not_stall_on_held_write_lock(repo_with_origin_tickets):
