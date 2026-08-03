@@ -70,7 +70,7 @@ def _seed(repo: Path) -> str:
     return rebar.create_ticket(
         "task",
         "verify task",
-        description="Body.\n\n## Acceptance Criteria\n- [ ] the thing exists\n",
+        description="Body.\n\n## Acceptance Criteria\n- [x] the thing exists\n",
         repo_root=str(repo),
     )
 

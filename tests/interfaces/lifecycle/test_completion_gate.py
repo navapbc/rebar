@@ -43,7 +43,7 @@ def _commit(repo: Path) -> None:
 
 
 def _make(repo: Path, ttype: str = "task") -> str:
-    desc = "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n## Context\nc\n"
+    desc = "Body.\n\n## Acceptance Criteria\n- [x] done\n\n## Context\nc\n"
     tid = rebar.create_ticket(ttype, f"gate {ttype}", description=desc, repo_root=str(repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
     return tid

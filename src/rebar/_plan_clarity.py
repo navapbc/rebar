@@ -14,7 +14,7 @@ _ACTIVE_SECTIONS = frozenset({"approach", "scope", "testing", "acceptance criter
 _AC_SECTION = "acceptance criteria"
 
 _H2_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$")
-_CHECKBOX_RE = re.compile(r"^- \[(?: |x|X)\](?:[ \t]+(.*))?$")
+_CHECKBOX_RE = re.compile(r"^- \[( |x|X)\](?:[ \t]+(.*))?$")
 _INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 _FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
@@ -48,6 +48,7 @@ class PlanClarityFloor:
     ac_items: tuple[str, ...]
     empty_ac_items: tuple[int, ...]
     sentinel_assignments: tuple[SentinelAssignment, ...]
+    unchecked_ac_lines: tuple[str, ...] = ()
 
     @property
     def passes(self) -> bool:
@@ -104,20 +105,27 @@ def evaluate_plan_clarity(text: str) -> PlanClarityFloor:
     ac_items: list[str] = []
     empty_ac_items: list[int] = []
     sentinels: list[SentinelAssignment] = []
+    unchecked: list[str] = []
 
     section: str | None = None
     fence: str | None = None
     item_lines: list[str] | None = None
+    item_unchecked: bool = False
+    item_verbatim: str = ""
 
     def finish_item() -> None:
-        nonlocal item_lines
+        nonlocal item_lines, item_unchecked, item_verbatim
         if item_lines is None:
             return
         body = "\n".join(item_lines).strip()
         ac_items.append(body)
         if not body:
             empty_ac_items.append(len(ac_items))
+        if item_unchecked and item_verbatim:
+            unchecked.append(item_verbatim)
         item_lines = None
+        item_unchecked = False
+        item_verbatim = ""
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         marker = _fence_marker(line)
@@ -143,7 +151,9 @@ def evaluate_plan_clarity(text: str) -> PlanClarityFloor:
             checkbox = _CHECKBOX_RE.fullmatch(line)
             if checkbox is not None:
                 finish_item()
-                item_lines = [checkbox.group(1) or ""]
+                item_unchecked = checkbox.group(1) == " "
+                item_verbatim = line
+                item_lines = [checkbox.group(2) or ""]
             elif item_lines is not None:
                 item_lines.append(line)
 
@@ -157,4 +167,5 @@ def evaluate_plan_clarity(text: str) -> PlanClarityFloor:
         ac_items=tuple(ac_items),
         empty_ac_items=tuple(empty_ac_items),
         sentinel_assignments=tuple(sentinels),
+        unchecked_ac_lines=tuple(unchecked),
     )

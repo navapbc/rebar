@@ -433,3 +433,37 @@ def claim_core(
         raise CommandError(f"Error: {exc}", returncode=1) from None
     finally:
         handle.release()
+
+
+def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
+    """Fail the close (CommandError, exit 1) when unchecked ``- [ ]`` AC items remain.
+
+    Deterministic, pre-LLM. Items whose text begins with ``[operator-attested]`` (the
+    shared ADR-0043 tag) are exempt. Silently returns on any read / reduce failure so an
+    unreadable ticket is never blocked here (other guards own that)."""
+    try:
+        state = reduce_ticket(os.path.join(tracker, ticket_id))
+        if not isinstance(state, dict):
+            return
+        description = state.get("description", "") or ""
+    except Exception:  # noqa: BLE001
+        return
+
+    from rebar._plan_clarity import evaluate_plan_clarity
+    from rebar.llm.plan_review.det_operator_attested import _OPERATOR_ATTESTED_TAG_RE
+
+    floor = evaluate_plan_clarity(description)
+    offenders = [ln for ln in floor.unchecked_ac_lines if not _OPERATOR_ATTESTED_TAG_RE.match(ln)]
+    if not offenders:
+        return
+
+    items_fmt = "\n".join(f"  {ln}" for ln in offenders)
+    raise CommandError(
+        f"Error: ticket {ticket_id} has unchecked Acceptance Criteria items:\n"
+        f"{items_fmt}\n"
+        "Resolve each item before closing, then check the box (edit the description).\n"
+        "Items with done-evidence outside the snapshot may be tagged [operator-attested] "
+        "to exempt them from this check.\n"
+        'To override: --force-close="<reason>"',
+        returncode=1,
+    )
