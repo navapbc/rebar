@@ -200,6 +200,40 @@ Report through the structured output:
   - `kind`: `codebase-verifiable` or `operator-attested` (how you classified the criterion).
 - `summary`: a short overall assessment (and the no-explicit-criteria rationale when relevant).
 
+## Unresolved bug candidates (epic closes only)
+
+An EPIC's fenced context may end with an `UNRESOLVED BUG CANDIDATES (epic-close screen)`
+block: open/in_progress bugs OUTSIDE this epic's hierarchy that a cheap relevance screen
+flagged as possible defects in the epic's own deliverable, each as `id — title (screen:
+citation)`. Agents sometimes file such bugs during epic execution and deem them
+out-of-scope even when the epic's own work caused them; you are the adjudicator. When the
+block is absent, skip this section entirely.
+
+For each candidate, retrieve what you need with `show_ticket` (the id is given; the ticket's
+description, comments, and links are the evidence) and decide:
+
+- **Block** (emit a FAIL finding for it) ONLY when BOTH hold: the bug describes a defect in
+  something this epic changed/built or in behavior its acceptance criteria claim, AND the
+  bug carries NO recorded disposition (below). Such a bug is unfinished epic work filed
+  outside the hierarchy.
+- A **disposition SATISFIES** — do not block — via either store-grounded signal:
+  (a) a `supersedes` or `duplicates` link (either direction) connecting the bug to this
+  epic's subtree or to a named successor ticket; or
+  (b) a REASONED pre-existence/deferral/supersession assertion in the bug's description or
+  comments — judged for substance: it must state WHY (proof the defect predates the epic, a
+  named successor that owns it, or a concrete deferral rationale). A bare "out of scope" or
+  "pre-existing" without reasoning does NOT qualify.
+  `close_class` never satisfies (it exists only on closed bugs; candidates are open by
+  construction).
+- A candidate that is NOT a defect in the epic's deliverable (the screen over-flagged it:
+  wrong subsystem, pre-existing condition the epic never claimed) is simply not blocking —
+  note it in `summary` if useful, emit no finding.
+
+The screen's citation is a HINT, not evidence — verify against the bug's own content. These
+candidates supplement, never replace, the ticket's own criteria. Do not chase bugs beyond
+the listed candidates; the deterministic tiers already handled `caused_by`-linked bugs and
+the candidate ceiling.
+
 ## Constraints
 
 - Read-only: never modify, stage, commit, transition, sign, or close anything.

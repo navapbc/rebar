@@ -516,6 +516,21 @@ it never re-walks the whole subtree (which is impractical and re-does work the c
 already did). The **close gate** runs the verifier with `graph=False` for exactly this reason (the
 standalone `rebar verify-completion <id> --graph` still inlines the subtree for a human review).
 
+**The epic-close bug screen (epics only, ticket 4b54).** The precheck additionally guards an
+epic's close against OUT-OF-HIERARCHY bugs in the epic's own deliverable: a deterministic
+`caused_by` floor (an open/in_progress bug with a `caused_by` link into the subtree blocks
+exactly like an unclosed child, no LLM), then a deterministic candidate filter
+(open/in_progress bugs created after the epic's first claim OR linked to the subtree, ceiling
+32), then one single-turn TRIVIAL-class call per candidate — the packaged `epic_bug_screen`
+prompt emitting the registered `epic_bug_screen_verdict` schema (forced choice A/B/C + one-line
+citation; out-of-vocabulary output normalizes to the non-surfacing `C`). A-verdicts are
+forwarded (≤8 compact rows) inside the verifier's fenced context; the verifier adjudicates
+each via `show_ticket` under its "Unresolved bug candidates" directive (block only an
+undispositioned defect-in-deliverable). The screen degrades open on any failure and records
+its per-bug tally + unevaluated-overflow count on the completion sidecar
+(`epic_bug_screen_v1`). Full protocol: `docs/plan-review-gate.md` §"The epic-close bug
+screen". Module: `rebar.llm.epic_bug_screen`; filter + floor: `rebar.llm.completion`.
+
 > **Why the verifier uses natural termination, not forced structured output (root cause).**
 > Forcing a tool-using agent's output (forced `tool_choice`) makes it **not terminate
 > naturally** — it keeps calling exploration tools instead of concluding, so on a code-heavy
