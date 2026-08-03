@@ -225,6 +225,36 @@ def overlap_verdict_batch_response_model() -> type:
     return OverlapVerdictBatch
 
 
+def epic_bug_screen_verdict_response_model() -> type:
+    """Structured-output model for one single-turn epic-close bug-screen call (ticket 4b54),
+    mirroring ``epic_bug_screen_verdict.schema.json``. The normalizing validator's DEFAULT is
+    ``C`` (unrelated) — any out-of-vocabulary, malformed, or missing verdict coerces to the
+    NON-SURFACING value (the overlap_verdict safe-default idiom): a garbled screen output
+    degrades open and never fabricates an A-candidate. pydantic imported inside the body."""
+    from pydantic import BaseModel, Field, field_validator
+
+    class EpicBugScreenVerdict(BaseModel):
+        verdict: str = Field(
+            default="C",
+            description=(
+                "Forced choice: A = defect in something this epic changed/built or behavior "
+                "its AC claims; B = same subsystem, pre-existing or adjacent; C = unrelated."
+            ),
+        )
+        citation: str = Field(
+            default="",
+            description="One line naming the epic deliverable / bug content that justifies it.",
+        )
+
+        @field_validator("verdict")
+        @classmethod
+        def _norm_verdict(cls, v: str) -> str:
+            r = str(v).strip().upper()
+            return r if r in {"A", "B", "C"} else "C"
+
+    return EpicBugScreenVerdict
+
+
 # Built-ins. ``review_result`` (the default findings shape) and ``completion_verdict``.
 register_contract("review_result", findings.findings_response_model)
 register_contract("completion_verdict", completion_verdict_response_model)
@@ -236,3 +266,5 @@ register_contract("ticket_digest", ticket_digest_response_model)
 register_contract("overlap_verdict", overlap_verdict_response_model)
 # The batched form of the same judge call (c403) — one entry per candidate.
 register_contract("overlap_verdict_batch", overlap_verdict_batch_response_model)
+# The epic-close bug screen's forced-choice verdict (4b54) — same co-location guarantee.
+register_contract("epic_bug_screen_verdict", epic_bug_screen_verdict_response_model)
