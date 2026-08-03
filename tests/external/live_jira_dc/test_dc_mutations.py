@@ -572,6 +572,82 @@ def test_outbound_remove_label_round_trips(
     _oracle_out_remove_label(dc_transport.get_issue_by_rest(key), label)
 
 
+@_skip
+@_skip_no_extra
+def test_outbound_unassign_round_trips(
+    dc_store_copy_repo: Path, dc_transport: Any, bound_dc_issue: Any
+) -> None:
+    """Row 9 outbound: clearing the local assignee must leave `fields.assignee` NULL in DC.
+
+    STANDALONE, NOT A `_OUTBOUND_CELLS` ROW, for the reason row 6 (remove-label) is standalone:
+    the table driver runs exactly ONE pass, and a clear needs a CONVERGED ASSIGN before it or
+    the absence afterwards proves nothing — the issue starts out assigned to the project lead in
+    some runs and unassigned in others, so an unconditional "is it null?" could pass without any
+    mutation happening at all. Two passes, so it cannot be a row.
+
+    THE ORACLE IS THE REMOTE FIELD BEING EMPTY, not that the payload carried a clear
+    instruction and not that the pass exited 0. That distinction is the entire point here: every
+    layer on this path degrades quietly — the resolver treats an unmappable assignee as "desired
+    = unassigned" (`outbound_differ.py:479-505`) and the transport's assign call is wrapped in
+    error translation — so the only thing that discriminates "unassigned" from "silently left
+    alone" is reading `fields.assignee` back off the instance.
+
+    EXPECTED RED, AND THE MECHANISM IS PROVEN BY CODE PATH, not guessed. An empty local assignee
+    is resolved to the EMPTY STRING, not to None: `_assignee_resolver` returns `("", True,
+    False)` when `not assignee` (`outbound_differ.py:504-505`), and `assignee` is in
+    `_OUTBOUND_BATCH_ALLOWLIST` (`dispatch_apply_phases.py:46`), so `update_issue(key,
+    assignee="")` is what the transport receives. DC's `update_issue` pops `assignee` and calls
+    `_assign(remote_id, "")` with no empty-value branch (`transport.py:281-303`), and
+    pycontribs/jira treats ONLY None / -1 / "-1" as Unassigned — `JIRA._get_user_id` (jira
+    3.10.5) otherwise runs a user search and raises `JIRAError("No matching user found for:
+    '')`. Cloud has the fix and DC never got its half: `adapters/jira/acli.py:342-345,357-359`
+    routes an empty/None assignee through `unassign_issue` precisely because passing it on
+    "silently no-ops" (bug 85a1). That is the same Cloud-has-it/DC-doesn't shape as bug d067,
+    which this transport's own docstring records at `transport.py:265-275`. Filed as
+    [rebar:751e-06f1-bb0b-464c]; this cell asserts the AC's oracle (row 9 outbound:
+    "`fields.assignee` is null") rather than pinning the current behaviour.
+    """
+    import rebar
+
+    local_id, key = bound_dc_issue
+
+    # SETUP — get the issue ASSIGNED through the bridge, and prove it landed. Reuses row 8's
+    # mutate + oracle so the two cannot drift on how an assignment is expressed.
+    expected = _out_assign(dc_store_copy_repo, local_id)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"outbound assign pass raised:\n{cp.stderr[-2000:]}"
+    assigned = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("assignee") or {}
+    assert assigned.get("name") == expected, (
+        f"SETUP FAILED (not the unassign): the assignment never reached DC, so a null assignee "
+        f"below would prove nothing — it could simply never have been set. fields.assignee is "
+        f"{assigned!r}. Cell `08-assign` covers this propagation on its own; if that cell is "
+        f"also red, fix it there."
+    )
+
+    # THE MUTATION UNDER TEST — clear the local assignee. An empty string is what the CLI/library
+    # writes for a cleared assignee (verified: `edit_ticket(..., assignee="")` leaves `.assignee`
+    # as `""`), and it is also exactly the value the differ then resolves as "unassigned".
+    rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, assignee="")
+    cleared_local = _local(dc_store_copy_repo, local_id).get("assignee")
+    assert not cleared_local, (
+        f"SETUP FAILED (not the unassign): the LOCAL assignee is still {cleared_local!r} after "
+        f"an edit that clears it, so the outbound pass has no clear to carry."
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"outbound unassign pass raised:\n{cp.stderr[-2000:]}"
+
+    after = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("assignee")
+    assert not after, (
+        f"the DC issue is STILL ASSIGNED after the local assignee was cleared and the pass ran: "
+        f"fields.assignee on {key} is {after!r}, expected null. The empty string reaches "
+        f"`assign_issue` unchanged (`transport.py:281-303`) and pycontribs only treats "
+        f"None/-1/'-1' as Unassigned — see [rebar:751e-06f1-bb0b-464c]. NOTE the failure mode "
+        f"this also catches: a search on the empty string that MATCHES a user would leave the "
+        f"issue assigned to an arbitrary account, which is worse than a no-op."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Rows 10-11 — links, in both directions. ADD and REMOVE are SEPARATE cells.
 # ---------------------------------------------------------------------------
@@ -961,6 +1037,67 @@ def test_a_deleted_dc_issue_never_plans_a_local_teardown(
         f"the local ticket {local_id} was torn down to {survivor.get('status')!r} because its "
         f"DC partner was deleted — ADR 0028 §1 forbids acting on absence alone"
     )
+
+
+@_skip
+@_skip_no_extra
+def test_outbound_delete_leaves_the_issue_absent_by_key_AND_by_id(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
+) -> None:
+    """Row 14 outbound: a deleted DC issue must be unreachable by KEY *and* by NUMERIC ID.
+
+    ASSERTED DIRECTLY AGAINST THE TRANSPORT, like row 12's epic case, and for a structural
+    reason rather than convenience: NO differ emits an `(outbound, delete)` mutation. The only
+    production callers of `delete_issue` are the create-ROLLBACK
+    (`apply_outbound.py:100-113`, which deletes an issue it had just created before re-raising)
+    and the typed leaf `_apply_outbound_delete` (`apply_outbound.py:168-183`), which no diff
+    path reaches. Nor could one: rebar has no local ticket deletion to diff against (see
+    `_dc_support.forget_identity_mapping` — "There is no library delete for a ticket"), and
+    ADR 0028 §1 forbids driving a destructive action from absence, which is what the INBOUND
+    row-14 cell above asserts. So the reachable claim is about the PRIMITIVE, and routing it
+    through a pass would mean asserting a mutation nothing emits.
+
+    WHY BOTH LOOKUPS, which is the whole reason this row exists rather than a bare 404 check. A
+    Jira issue MOVED to another project is re-KEYED, and its old key then 404s exactly like a
+    deleted one — bug 7c26, whose fix has the binding store re-ask by immutable numeric id and
+    re-key on a hit (`binding_store.py:142`, `:488-506`, `:558`; the outbound differ's
+    `note_absent_or_rekey` at `outbound_differ.py:703-707`). A cell that checked only the key
+    would therefore report "deleted" for an issue that is alive under a new key. The numeric id
+    is captured BEFORE the delete, because afterwards there is nothing left to read it from.
+
+    ABSENCE IS ASSERTED POSITIVELY, via raw REST status codes, so "no exception was raised" is
+    nowhere in the oracle: `delete_issue` absorbs a 404 as idempotent success
+    (`transport.py:529-554`), which means a delete that never happened and a delete of an
+    already-absent issue return the SAME value. Only the post-state discriminates them, and
+    this cell first asserts the issue is READABLE (HTTP 200 by both handles) so the later 404s
+    are a change it caused rather than a state it inherited.
+    """
+    key = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outbound delete"))
+
+    raw = dc_transport.get_issue_by_rest(key)
+    numeric_id = str(raw.get("id") or "")
+    assert numeric_id.isdigit(), (
+        f"SETUP FAILED (not the deletion): {key} carries no numeric id ({numeric_id!r}), so the "
+        f"by-id half of the 7c26 pair cannot be asserted at all."
+    )
+    for handle, what in ((key, "key"), (numeric_id, "numeric id")):
+        status, _body = dc_request(f"/rest/api/2/issue/{handle}")
+        assert status == 200, (
+            f"SETUP FAILED (not the deletion): {key} is not readable by {what} {handle!r} "
+            f"BEFORE the delete (HTTP {status}), so a 404 afterwards would not be this cell's "
+            f"doing."
+        )
+
+    dc_transport.delete_issue(key)
+
+    for handle, what in ((key, "key"), (numeric_id, "numeric id")):
+        status, body = dc_request(f"/rest/api/2/issue/{handle}")
+        assert status == 404, (
+            f"{key} is STILL REACHABLE by {what} {handle!r} after delete_issue (HTTP {status}) "
+            f"— the deletion did not take, or the issue was MOVED and re-keyed rather than "
+            f"deleted (bug 7c26: an old key 404s either way, which is why this cell asks by "
+            f"both handles). Body: {str(body)[:300]}"
+        )
 
 
 # ---------------------------------------------------------------------------
