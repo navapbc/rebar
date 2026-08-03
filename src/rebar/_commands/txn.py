@@ -116,6 +116,7 @@ def _parent_status_uuid(ticket_dir_path: str) -> str | None:
     return None
 
 
+# raw-git-ok: locked store seam internal
 def _git(tracker_dir: str, *args: str) -> None:
     """Run a git command in the tracker, raising :class:`CommandError` (exit 2) on
     failure with the exact bash stderr prefix.
@@ -130,6 +131,7 @@ def _git(tracker_dir: str, *args: str) -> None:
         raise CommandError(f"Error: git operation failed: {cp.stderr}", returncode=2)
 
 
+# raw-git-ok: locked store seam internal
 def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
     """Best-effort: drop ``abs_paths`` from the git index (and working tree). On a
     commit failure the event file was already ``git add``-ed; removing it from disk
@@ -183,6 +185,7 @@ def bug_close_class_ok(close_class: str) -> bool:
     return close_class in CLOSE_CLASSES
 
 
+# raw-git-ok: locked store seam internal
 def transition_core(
     tracker_dir: str,
     ticket_id: str,
@@ -321,6 +324,7 @@ def transition_core(
         handle.release()
 
 
+# raw-git-ok: locked store seam internal
 def claim_core(
     tracker_dir: str,
     ticket_id: str,

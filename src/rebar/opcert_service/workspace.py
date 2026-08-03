@@ -54,6 +54,7 @@ class Workspace:
     merged_log_commit: str
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     """Run one git command in ``cwd``, bounded by :data:`_GIT_TIMEOUT`.
 
@@ -75,6 +76,7 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
         ) from exc
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _git_ok(cwd: str, *args: str) -> None:
     proc = _git(cwd, *args)
     if proc.returncode != 0:

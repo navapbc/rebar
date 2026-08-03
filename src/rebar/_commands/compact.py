@@ -55,6 +55,7 @@ def _usage() -> int:
     return 1
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str):
     return run_git_write(tracker, *args, check=False)
 
@@ -161,6 +162,7 @@ def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
         time.sleep(0.02)
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _compact_locked(
     tracker: str,
     ticket_id: str,
@@ -406,6 +408,7 @@ def _read_event_uuid(path: str) -> str:
         return os.path.basename(path)
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def rebuild_snapshot_from_full_log(
     tracker: str,
     ticket_id: str,
@@ -668,6 +671,7 @@ def _scan_snapshot_state(tracker: str) -> tuple[list[str], int]:
     return needs, already
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar compact-all`` entry — backfill SNAPSHOTs for tickets lacking one."""
     import contextlib

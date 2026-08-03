@@ -327,6 +327,7 @@ def _has_missing_blobs(repo_root: str, sha: str) -> bool:
     return any(line.startswith("?") for line in proc.stdout.splitlines())
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
     """Best-effort: guarantee ``sha``'s blobs are local BEFORE the plumbing runs.
 

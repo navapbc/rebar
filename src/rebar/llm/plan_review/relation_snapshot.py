@@ -123,6 +123,7 @@ def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool 
 
         ticket_reads.ensure_fresh(tracker_text)
 
+        # raw-git-ok: generic command runner, argv supplied by caller
         def run(*args: str) -> str:
             proc = subprocess.run(
                 ["git", "-C", tracker_text, *args],

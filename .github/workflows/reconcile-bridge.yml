@@ -282,6 +282,7 @@ jobs:
           BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
         run: |
           set -euo pipefail
+          # raw-git-ok: commit-back CAS push loop stays verbatim in YAML per ticket 4c4f
           cd .tickets-tracker
           git config user.name "${BRIDGE_BOT_NAME}"
           git config user.email "${BRIDGE_BOT_EMAIL}"

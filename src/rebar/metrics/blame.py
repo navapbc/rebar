@@ -25,6 +25,7 @@ from rebar._engine_support import field_reads
 from rebar._engine_support.resolver import resolve_ticket_id
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def _git(repo_root: str, *args: str) -> str | None:
     """Run ``git -C <repo_root> <args>`` and return stdout, or ``None`` on any failure."""
     try:

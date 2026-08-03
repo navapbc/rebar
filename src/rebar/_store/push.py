@@ -57,6 +57,7 @@ def _push_mode(root: str | None = None) -> str:
 _GIT_TIMEOUT = 30
 
 
+# raw-git-ok: locked store seam internal
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     try:
         return run_git(base, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
@@ -69,6 +70,7 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
         )
 
 
+# raw-git-ok: locked store seam internal
 def _resolve_conflicted_pop(base: str, stash: subprocess.CompletedProcess) -> None:
     """Repair a ``git stash pop`` that applied-with-conflict (bug 6818).
 

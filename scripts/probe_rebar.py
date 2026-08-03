@@ -84,6 +84,7 @@ def section(title: str) -> None:
 
 
 # ── assertion helpers (continue-on-failure: never raise) ────────────────────
+# raw-git-ok: generic command runner, argv supplied by caller
 def run(*argv: str) -> None:
     global OUT, STDOUT, RC
     cp = subprocess.run(list(argv), capture_output=True, text=True)
@@ -167,10 +168,12 @@ _CLEAN_DIRS: list[str] = []
 _CREATED: list[str] = []
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _git(*args: str, cwd: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _setup() -> tuple[str, str, str]:
     if os.environ.get("PROBE_LIVE") == "1":
         mode = "LIVE (real project store)"
@@ -224,6 +227,7 @@ def mk(*create_args: str) -> str:
     return tid
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _cleanup(tracker: str, pre_ids: str) -> None:
     # Remove only the tickets this probe created; leave pre-existing ones intact.
     if _CREATED and os.path.isdir(tracker):

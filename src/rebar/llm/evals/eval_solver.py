@@ -24,6 +24,7 @@ from rebar.llm.runner import Runner
 __all__ = ["run_case", "case_store"]
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _git_init(d: str) -> None:
     subprocess.run(["git", "init", "-q", d], check=True)
     subprocess.run(["git", "-C", d, "config", "user.email", "eval@rebar.local"], check=True)
@@ -33,6 +34,7 @@ def _git_init(d: str) -> None:
     subprocess.run(["git", "-C", d, "commit", "-q", "-m", "init"], check=True)
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _write_files(root: str, files: dict | None) -> None:
     if not files:
         return

@@ -30,6 +30,7 @@ _BINDINGS_PATH = ".bridge_state/bindings.json"
 _PROJECTED_FIELDS = ("description", "priority", "status")
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand (show/archive reads only)
 def _git(repo: Path, *args: str) -> bytes:
     return subprocess.run(
         ["git", "-C", str(repo), *args],

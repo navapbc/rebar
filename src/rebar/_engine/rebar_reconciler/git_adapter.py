@@ -168,6 +168,7 @@ def read_tree(
     return run_git(_root(repo_root), "read-tree", tree, check=check, env=env)
 
 
+# raw-git-ok: reconciler write seam (git_adapter/_ref_lock)
 def rm_cached(
     repo_root: RepoRoot,
     *paths: str,
@@ -213,6 +214,7 @@ def commit_tree(
     ).stdout.strip()
 
 
+# raw-git-ok: reconciler write seam (git_adapter/_ref_lock)
 def update_ref(
     repo_root: RepoRoot,
     ref: str,
@@ -228,11 +230,13 @@ def update_ref(
     return run_git(_root(repo_root), *args, check=check)
 
 
+# raw-git-ok: reconciler write seam (git_adapter/_ref_lock)
 def add(repo_root: RepoRoot, *paths: str, check: bool = True) -> subprocess.CompletedProcess:
     """``git add <paths…>`` (stage the given paths only — never ``-A``)."""
     return run_git(_root(repo_root), "add", *paths, check=check)
 
 
+# raw-git-ok: reconciler write seam (git_adapter/_ref_lock)
 def commit(
     repo_root: RepoRoot,
     message: str,

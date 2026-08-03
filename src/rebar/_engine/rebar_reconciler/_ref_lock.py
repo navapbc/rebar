@@ -241,7 +241,7 @@ def _decode_blob(raw: bytes, oid: str) -> RefLockState:
 # ---------------------------------------------------------------------------
 
 
-def _git(
+def _git(  # raw-git-ok: write seam internal
     repo_root: Path,
     args: list[str],
     *,
@@ -282,7 +282,7 @@ def _git(
 
 
 def _git_bytes(repo_root: Path, args: list[str], *, timeout: float) -> bytes:
-    """Run git capturing raw stdout bytes (for blob content)."""
+    """Run git capturing raw stdout bytes (for blob content)."""  # raw-git-ok: write seam internal
     return _git(repo_root, args, timeout=timeout, text=False).stdout
 
 
@@ -359,7 +359,7 @@ def _fetch_ref(repo_root: Path, ref: str, remote: str) -> None:
         _delete_local_ref(repo_root, ref)
 
 
-def _delete_local_ref(repo_root: Path, ref: str) -> None:
+def _delete_local_ref(repo_root: Path, ref: str) -> None:  # raw-git-ok: write seam internal
     """Best-effort unconditional delete of the LOCAL *ref* (a cache of the remote truth).
 
     Used to prune an orphaned local copy (see :func:`_fetch_ref`) and to clear the
@@ -454,7 +454,7 @@ def acquire(
     blob = _encode_blob(holder, lease_secs, time.time_ns(), 0)
     oid = _hash_object(repo_root, blob)
 
-    def _plant() -> None:
+    def _plant() -> None:  # raw-git-ok: write seam internal
         if remote is None:
             _git(repo_root, ["update-ref", ref, oid, _ZERO_OID], timeout=_LOCAL_TIMEOUT_SECS)
         else:
@@ -483,7 +483,7 @@ def release(repo_root: Path, ref: str, *, oid: str, remote: str | None = None) -
     strands a local orphan that later reads would mistake for a live lock.
     """
 
-    def _delete() -> None:
+    def _delete() -> None:  # raw-git-ok: write seam internal
         if remote is None:
             _git(repo_root, ["update-ref", "-d", ref, oid], timeout=_LOCAL_TIMEOUT_SECS)
         else:
@@ -537,7 +537,7 @@ def _cas_advance(
     create-only CAS uses ``old_oid`` = 40 zeros.
     """
 
-    def _do() -> None:
+    def _do() -> None:  # raw-git-ok: write seam internal
         if remote is None:
             _git(repo_root, ["update-ref", ref, new_oid, old_oid], timeout=_LOCAL_TIMEOUT_SECS)
         else:

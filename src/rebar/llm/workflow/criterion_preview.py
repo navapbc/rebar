@@ -375,6 +375,7 @@ def _infer_filename(reg_slice: Any, fixture: dict[str, Any]) -> str:
     return "preview.txt"
 
 
+# raw-git-ok: disposable sandbox repo, not the tracker
 def _preview_det(
     criterion_id: str | None,
     routing: dict[str, Any],

@@ -58,6 +58,7 @@ Flags:
 """
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str, **kw) -> subprocess.CompletedProcess:
     return run_git(tracker, *args, check=False, **kw)
 

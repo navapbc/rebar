@@ -129,6 +129,14 @@ jobs:
       - name: comment-hygiene gate
         run: python scripts/check_comment_hygiene.py
 
+      # Raw-git-write gate (ticket d37e): direct git mutations of the tickets
+      # store must flow through the sanctioned write seams (gitutil.run_git_write,
+      # event_append, txn, git_adapter/_ref_lock). Any raw `git add/commit/push`
+      # against the tracker outside a seam needs a reasoned `# raw-git-ok:` marker
+      # — see docs/architecture.md §"Sanctioned git-write seams".
+      - name: raw-git-write gate
+        run: python scripts/check_raw_git_writes.py
+
   pip-audit:
     # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
     # installed dependency closure against the PyPI advisory / OSV database and

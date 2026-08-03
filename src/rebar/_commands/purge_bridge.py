@@ -116,6 +116,7 @@ def purge_bridge_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
+# raw-git-ok: locked store seam internal
 def _commit_deletion(tracker: str, delete_list: list[str], deleted: int, keep_project: str) -> None:
     """Commit the removal on the tickets branch under the store write lock (I5).
 

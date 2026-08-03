@@ -123,6 +123,7 @@ def fetch_lock_for(repo_root: str) -> threading.Lock:
 _GIT_TIMEOUT = 300
 
 
+# raw-git-ok: generic command runner, argv supplied by caller
 def git_run(
     repo_root: str, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -232,6 +233,7 @@ def is_stall_abort(stderr: str) -> bool:
     return _STALL_STDERR_MARKER in stderr.lower()
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def fetch_origin(
     repo_root: str,
     *,

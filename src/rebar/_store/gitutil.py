@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable, Mapping
 
 
+# raw-git-ok: locked store seam internal
 def run_git(
     cwd: str | os.PathLike[str] | None,
     *args: str,
@@ -236,6 +237,7 @@ def _with_transient_head_retry(
     return result
 
 
+# raw-git-ok: locked store seam internal
 def run_git_write(
     tracker: str | os.PathLike[str],
     *args: str,

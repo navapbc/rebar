@@ -30,6 +30,7 @@ from rebar.llm.errors import LLMConfigError
 DIFF_CHAR_CAP = 60000
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def _git(repo: str, args: list[str]) -> str:
     """Run a git subcommand in ``repo``, returning stdout (raises :class:`LLMConfigError`
     on failure with an actionable hint to pass ``diff_text`` instead)."""

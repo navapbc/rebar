@@ -58,6 +58,7 @@ _SYNC_LOCK_TIMEOUT = 15  # bash TICKET_SYNC_LOCK_TIMEOUT default
 _GIT_TIMEOUT = 30
 
 
+# raw-git-ok: locked store seam internal
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     try:
         return run_git(tracker, *args, check=False, timeout=_GIT_TIMEOUT)
@@ -70,6 +71,7 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
         )
 
 
+# raw-git-ok: locked store seam internal
 def _ok(tracker: str, *args: str) -> bool:
     return _git(tracker, *args).returncode == 0
 
@@ -101,6 +103,7 @@ def _carries_ticket_events(tracker: str) -> bool:
     return any(line.strip() and not line.startswith(".") for line in tree.stdout.splitlines())
 
 
+# raw-git-ok: locked store seam internal
 def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     """The locked mutation critical section (lock held, fetch already ran)."""
     remote = f"{remote_name}/{branch}"
@@ -163,6 +166,7 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     _union_merge(tracker, remote)
 
 
+# raw-git-ok: locked store seam internal
 def _union_merge(tracker: str, remote: str, *extra: str) -> None:
     """Merge ``origin/<branch>`` into HEAD as a union — both parents are kept, so no
     local commit is ever orphaned (this is what lets a SERIAL ``git gc`` be safe; the
