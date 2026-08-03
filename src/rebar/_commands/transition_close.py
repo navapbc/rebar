@@ -256,6 +256,9 @@ def _completion_precheck(
     if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
         return None
 
+    # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
+    txn.ensure_ac_boxes_checked(ticket_id, tracker)
+
     # Deterministic precheck BEFORE the billable LLM call (alongside the open-children guard):
     # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has

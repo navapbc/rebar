@@ -18,7 +18,7 @@ import pytest
 import rebar
 import rebar.llm
 
-_DESC = "Body.\n\n## Acceptance Criteria\n- [ ] done\n\n## Context\nc\n"
+_DESC = "Body.\n\n## Acceptance Criteria\n- [x] done\n\n## Context\nc\n"
 
 
 def _enable(repo: Path) -> None:

@@ -34,7 +34,7 @@ from rebar._snapshot.repo_snapshot import resolve_ref
 
 _DESC = (
     "Body with enough detail to be a real plan describing the change so the gate has something "
-    "to check.\n\n## Acceptance Criteria\n- [ ] the story's change is present\n\n## Context\nc\n"
+    "to check.\n\n## Acceptance Criteria\n- [x] the story's change is present\n\n## Context\nc\n"
 )
 
 

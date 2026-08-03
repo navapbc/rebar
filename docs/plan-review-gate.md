@@ -898,6 +898,15 @@ A non-empty `--force-close` reason bypasses this and completion verification whi
 audit comment. Closing `idea → closed` also bypasses the plan gate because it is a rejection,
 not delivery. Neither bypass relaxes the structural child-closure invariant.
 
+### AC-checkbox completeness precheck (deterministic, pre-LLM)
+
+Before the completion verifier runs, the close gate performs a deterministic check: if the
+ticket's `## Acceptance Criteria` section contains any unchecked `- [ ]` item, the close
+fails immediately (exit 1) **without making any LLM call**. Items whose text begins with the
+`[operator-attested]` tag (ADR-0043) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
+from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
+a gate-level bypass is warranted, pass `--force-close="<reason>"`.
+
 ### Which commit the completion gate verifies — `--ref`
 
 When `verify.require_completion_verification_for_close = true`, the completion-verification close
