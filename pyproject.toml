@@ -430,6 +430,13 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
 # server.json env-contract drift gate CLI — prints its guard report + ::error::
 # annotations to stdout (the CI surface). Legitimate-print category. KEEPS T201.
 "scripts/check_server_manifest.py" = ["T201"]
+# Config-read drift gate CLI (ticket 6754) — prints its violation report + OK line
+# to stdout (the CI gate surface). Legitimate-print category. KEEPS T201.
+"scripts/check_config_reads.py" = ["T201"]
+# End-to-end CLI probe (ticket f1eb, port of probe-rebar.sh) — its PASS/FAIL
+# section report on stdout + failure detail on stderr ARE the tool's output.
+# Legitimate-print category. KEEPS T201.
+"scripts/probe_rebar.py" = ["T201"]
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]
