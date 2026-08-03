@@ -114,6 +114,13 @@ representative input; parameterize when the mechanism applies to a family. The c
 proves the test distinguishes broken from working. Omit only for a genuinely
 single-point bug, and say so.
 
+**Config-effect contrast.** For each configuration key the change reads — or *should*
+read — include one test proving the key **changes behavior through the real read path**:
+run the mechanism at the default and at a non-default value and assert the observable
+outcomes differ as specified. A test that only proves a value parses, or that stubs the
+config lookup, misses the read-but-miswired class (a key honored on one surface and
+silently ignored on another).
+
 ## 7. Fault realism
 
 Inject the fault **inside the code whose recovery/cleanup behavior is under test** — at
