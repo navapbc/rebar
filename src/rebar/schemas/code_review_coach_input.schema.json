@@ -4,5 +4,14 @@
   "title": "CodeReviewCoachInput",
   "description": "Inputs to code_review_coach: blocking/surfaced findings + the coach move-picks.",
   "type": "object",
+  "properties": {
+    "provider_provenance": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Provider provenance record from the Pass-2 verify agent step (resolved provider/model, the endpoint actually called, the effective capability record). Carried onto the verdict, never recomputed here. Null when the runner resolved no provider (e.g. the fake runner) — the verdict then omits the key."
+    }
+  },
   "additionalProperties": true
 }

@@ -260,7 +260,14 @@ def _inert_code_review_verdict() -> dict[str, Any]:
 def _degraded_code_review_verdict(*, error, runner_name: str | None) -> dict[str, Any]:
     """Unsigned INDETERMINATE degrade (outage / mid-run failure) — never a hollow PASS. Carries
     the LLM disposition (story blackbear) when the raised error classified one, so the CLI can
-    map a retryable code-review outage → exit 11 the same way plan-review does."""
+    map a retryable code-review outage → exit 11 the same way plan-review does.
+
+    NO ``provider_provenance`` here, deliberately (task e951, mirroring 343b's three no-record
+    sites): ``coverage.llm_unavailable`` means no provider record accompanies this verdict. This
+    site holds ``cfg``, so deriving one from ``cfg.model`` is the obvious move and it is WRONG —
+    nothing ran, and a cfg-derived record would make the verdict claim a provider served it when
+    none did, the exact misattribution the record exists to remove. The sidecar tolerates absence.
+    """
     from rebar.llm import failure as _failure
 
     outcome = _failure.outcome_of(error)

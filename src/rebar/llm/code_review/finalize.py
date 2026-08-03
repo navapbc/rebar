@@ -225,6 +225,25 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
         )
 
 
+def _verify_step_provenance(rec) -> dict[str, Any] | None:
+    """The provenance record the runner stamped onto the Pass-2 ``verify`` agent step's outputs,
+    read back off the recorder — the SAME record ``code-review.yaml`` wires into the verdict step,
+    NOT a fresh resolution (``capabilities.provenance_for`` forbids recomputing it: a second
+    resolution can diverge from the endpoint/caps that served the run). Mirrors
+    ``workflow/plan_review_recovery.py``'s read of the verify step's outputs.
+
+    ``None`` when no record is there — no provider resolved, or the doc in play has no ``verify``
+    agent step. Absence must stay absence; a cfg-derived stand-in would make the verdict claim a
+    provider served it when none did."""
+    for s in getattr(rec, "steps", None) or []:
+        if not isinstance(s, dict) or s.get("step_id") != _STEP_VERIFY:
+            continue
+        record = (s.get("outputs") or {}).get("provider_provenance")
+        if isinstance(record, dict):
+            return record
+    return None
+
+
 def finalize_code_review_verdict(
     verdict: dict[str, Any],
     *,
@@ -243,6 +262,14 @@ def finalize_code_review_verdict(
     _attach_code_review_metrics(verdict, prep.rec, total_ms)
     verdict.setdefault("runner", runner_sel.name)
     verdict.setdefault("model", cfg.model)
+    # `model` above is CONFIGURED INTENT (cfg.model). What actually served the run is the runner's
+    # provenance record, which `code-review.yaml` wires from the Pass-2 verify agent step into the
+    # verdict; this backstop recovers the same record straight off the recorder for a verdict that
+    # arrived without it (e.g. a gate doc that omits the wire), so the signed sidecar never records
+    # a bare model string alone. Only ever the OBSERVED record — absent stays absent (task e951).
+    observed_provenance = verdict.get("provider_provenance") or _verify_step_provenance(prep.rec)
+    if observed_provenance is not None:
+        verdict["provider_provenance"] = observed_provenance
     # WS5 fail-CLOSED: a security detector abstain/match forces BLOCK (+ coverage-gap note).
     from rebar.llm.code_review import detectors as _detectors
 
