@@ -48,9 +48,18 @@ def build_bedrock_provider(cfg: LLMConfig):
 
     ``cfg.bedrock_region_name`` (``REBAR_LLM_BEDROCK_REGION``) is passed through when set;
     otherwise ``BedrockProvider`` falls back to boto3's own region resolution
-    (``AWS_REGION``/``AWS_DEFAULT_REGION``/the active profile's config) — never a
-    rebar-invented default region, since a wrong region is a silent-until-call
-    misconfiguration, not a value rebar can safely guess.
+    (``AWS_DEFAULT_REGION`` or the active profile's config) — never a rebar-invented
+    default region, since a wrong region is a silent-until-call misconfiguration, not a
+    value rebar can safely guess.
+
+    ``AWS_REGION`` is NOT one of those sources: MEASURED on botocore/boto3 1.43.62, with
+    ``AWS_DEFAULT_REGION`` genuinely unset and ``AWS_REGION=us-east-1``,
+    ``boto3.session.Session().region_name`` is ``None``, so setting ``AWS_REGION`` alone
+    leaves this path failing. ``AWS_DEFAULT_REGION`` is botocore's canonical region
+    variable and does resolve — the same asymmetry the review-bot service in
+    ``infra/compose/docker-compose.yml`` records, which is why it sets both
+    ``REBAR_LLM_BEDROCK_REGION`` and ``AWS_DEFAULT_REGION``. Re-measure before trusting
+    this on a materially newer botocore.
 
     Authentication is deliberately NOT parameterized here beyond region: no
     ``aws_access_key_id``/``aws_secret_access_key`` argument is ever threaded through, so
@@ -79,9 +88,13 @@ def build_bedrock_provider(cfg: LLMConfig):
             raise LLMConfigError(
                 "a bedrock model/provider is configured but no AWS region could be resolved. "
                 "Set REBAR_LLM_BEDROCK_REGION (rebar's own knob, so the value is visible to "
-                "rebar's config layer and to the verdict's provider provenance), or a standard "
-                "AWS region source (AWS_REGION / AWS_DEFAULT_REGION / the active profile's "
-                "config). NOTE: instance-metadata (IMDS) reachability does NOT supply a region "
+                "rebar's config layer and to the verdict's provider provenance), or "
+                "AWS_DEFAULT_REGION / the active profile's config. NOTE: AWS_REGION alone does "
+                "NOT resolve a region — MEASURED on botocore/boto3 1.43.62, with "
+                "AWS_DEFAULT_REGION unset and AWS_REGION set, boto3 resolves no region at all, "
+                "so if you have only set AWS_REGION that is why you are seeing this. "
+                "AWS_DEFAULT_REGION is botocore's canonical region variable. NOTE ALSO: "
+                "instance-metadata (IMDS) reachability does NOT supply a region "
                 "— credential discovery and region discovery are independent, so a working "
                 "instance role does not remove the need to set one."
             )

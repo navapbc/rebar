@@ -642,7 +642,7 @@ def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
     """The local-dev / AWS_PROFILE path must keep working. rebar deliberately does NOT invent a
     default region, so when boto3 CAN resolve one ambiently the provider is built and rebar passes
     None through — letting boto3 use what it resolved. An implementation that demanded the rebar
-    knob unconditionally would break every developer using AWS_REGION or a profile."""
+    knob unconditionally would break every developer using AWS_DEFAULT_REGION or a profile."""
     import boto3
 
     from rebar.llm.bedrock_model import build_bedrock_provider
@@ -661,3 +661,37 @@ def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
 
     build_bedrock_provider(cfg)
     assert "region_name" in seen  # built, not rejected
+
+
+def test_aws_region_alone_resolves_nothing_and_still_raises(monkeypatch, tmp_path) -> None:
+    """4e71. Pins the BEHAVIOUR the corrected docstring/error message rests on, not its prose.
+
+    Uses the REAL boto3 resolution chain (no Session stub) so this is an oracle on botocore
+    itself: with AWS_DEFAULT_REGION genuinely absent from the environment — deleted, not set
+    empty — and AWS_REGION set, botocore resolves no region, and the typed LLMConfigError is
+    still raised. Profile config files are pointed at nonexistent paths so an ambient
+    ~/.aws/config on a developer machine cannot supply a region and mask the asymmetry.
+
+    If a future botocore starts honouring AWS_REGION this test goes RED, which is the signal
+    to re-measure and re-word the docstring rather than let the claim decay into folklore.
+    A test on the message text would instead be a change-detector on prose.
+    """
+    import boto3
+
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMConfigError
+
+    _stub_bedrock_provider(monkeypatch)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent-credentials"))
+
+    # the claim under test: AWS_REGION alone is not a region source for botocore
+    assert boto3.session.Session().region_name is None
+
+    cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
+    with pytest.raises(LLMConfigError):
+        build_bedrock_provider(cfg)
