@@ -52,6 +52,31 @@ _skip_unless_ci_arm = pytest.mark.skipif(
 
 @_live_llm.skip_without_live_llm
 @_skip_unless_ci_arm
+def test_the_ambient_default_model_also_resolves_to_the_declared_provider() -> None:
+    """`cfg.model` is a SECOND resolution path, and checking only the CLASSES misses it.
+
+    This test exists because its sibling above did NOT catch a real leak. In run 30836378745 the
+    class assertion PASSED on all three arms while three tests still called
+    `model=anthropic:claude-opus-4-8`, because an op that resolves `cfg.model` rather than naming a
+    class never consults the class table at all: `config.py` falls back to `DEFAULT_MODEL`, the bare
+    literal "claude-opus-4-8", which infers provider `anthropic`. On a non-Anthropic arm those calls
+    then failed with "Could not resolve authentication method" — the arm's `ANTHROPIC_API_KEY` is
+    blanked deliberately.
+
+    So the class assertion alone is over the WRONG SURFACE for this story's stated goal of removing
+    the ambient default. The overlay now sets `[llm] model` as well, and this pins it."""
+    from rebar.llm.config import LLMConfig
+
+    resolved = LLMConfig.from_env().model
+    assert resolved.startswith(f"{_expected}:"), (
+        f"arm declares provider {_expected!r} but the ambient cfg.model resolves to {resolved!r} — "
+        f"an op that reads cfg.model instead of naming a class would call the wrong provider. "
+        f"Check that REBAR_LLM_CONFIG_FILE "
+        f"({os.environ.get('REBAR_LLM_CONFIG_FILE')!r}) sets an [llm] model key, not only "
+        f"[llm.model_classes]"
+    )
+
+
 def test_every_model_class_resolves_to_the_declared_provider() -> None:
     """The overlay actually took effect, for ALL THREE classes — not just the one a given op
     happens to use. A partial overlay would leave some ops on the default provider, which is the
