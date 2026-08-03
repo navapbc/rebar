@@ -223,3 +223,12 @@ steps:
       indeterminate: ${{ steps.decide.outputs.indeterminate }}
       notes: ${{ steps.coach.outputs.notes }}
       outcome_counts: ${{ steps.decide.outputs.outcome_counts }}
+      # The Pass-2 `verify` step is an AGENT step, so its outputs are the runner result
+      # VERBATIM (workflow/runs.py) — and the runner already stamped the provenance record
+      # for the call that actually ran (capabilities.provenance_for via
+      # findings.finalize_outcome). Carry THAT record; never recompute one at the verdict
+      # site (capabilities.provenance_for docstring: a second resolution can diverge from
+      # what ran). Sourcing it from a scripted op instead would silently wire None forever.
+      # Without this wire the signed code-review sidecar records provenance as absent on
+      # every run — the 343b defect, which skipped code review (task e951).
+      provider_provenance: ${{ steps.verify.outputs.provider_provenance }}

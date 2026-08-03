@@ -521,7 +521,7 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
     violations = review_kernel.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
-    return {
+    verdict = {
         "verdict": "BLOCK" if blocking else "PASS",
         "blocking": blocking,
         "advisory": surfaced,
@@ -530,6 +530,17 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
         "dropped": list(ctx.inputs.get("dropped") or []),
         "indeterminate": list(ctx.inputs.get("indeterminate") or []),
     }
+    # The provenance record the RUNNER assembled for the Pass-2 verify call, wired in by
+    # code-review.yaml from that agent step's outputs (343b's mechanism; task e951). CARRIED,
+    # never recomputed — `capabilities.provenance_for` documents that a second resolution here
+    # can diverge from the endpoint/caps that actually served the run. Set ONLY when a record
+    # came in: an absent key means no provider record backs this verdict (e.g. the fake runner,
+    # or a gate doc that does not wire it), and a sidecar reader must be able to tell that apart
+    # from "a provider served it". Synthesizing one from cfg is the misattribution 343b removed.
+    provenance = ctx.inputs.get("provider_provenance")
+    if provenance is not None:
+        verdict["provider_provenance"] = provenance
+    return verdict
 
 
 # ── region-gated novelty rising floor (story blameless-grindable-noctule) ─────────────────────────
