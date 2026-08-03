@@ -393,47 +393,6 @@ def collect(
     return issues
 
 
-def merge_parent_map(
-    snapshot: dict[str, dict],
-    parent_map: dict[str, str | None],
-) -> dict[str, dict]:
-    """Merge a ``{jira_key → parent_key | None}`` map into the snapshot entries.
-
-    THE THREE-STATE CONTRACT this function exists to establish (ticket 88d9). An
-    inbound parent CLEAR is a write that DESTROYS local data, so the differ may only
-    fire it on POSITIVE evidence that Jira was asked and answered "no parent" — never
-    on the mere absence of data. That distinction has to be made HERE, because this is
-    the only place that knows whether a key was queried:
-
-      * the map does NOT mention the key  → no ``parent`` key is written at all. This is
-        the UNOBSERVED case: a truncated page walk, a cross-project issue, a client with
-        no ``get_parent_map``, or the whole-map ``{}`` degradation
-        (``jira_datacenter/transport.py`` logs a warning and returns ``{}`` on ANY REST
-        failure). Downstream must never read a clear out of it.
-      * the map maps the key to a TRUTHY parent key → ``{"key": <parent>}`` as before.
-      * the map maps the key to None → ``"parent": None``, i.e. the key is PRESENT with a
-        falsy value. This is "queried, and Jira genuinely has no parent" — the only shape
-        that authorises a clear.
-
-    Before 88d9 the None case deliberately left the field ABSENT ("consistent with Jira
-    REST shape"), which collapsed it into the unobserved case and made a de-parented issue
-    indistinguishable from one that never had a parent — so an inbound de-parenting was
-    invisible to rebar forever.
-
-    Extracted from the inline merge in ``fetch_snapshot`` so the guard tests can drive the
-    PRODUCTION merge directly instead of hand-mirroring it (ticket 2b16's
-    ``_enrich_like_fetcher`` is exactly the byte-faithful copy this avoids: it guards the
-    boundary between a truncated read and deleted local data, and it silently drifts).
-
-    Mutates and returns ``snapshot``.
-    """
-    for snap_key, parent_jira_key in parent_map.items():
-        if snap_key not in snapshot:
-            continue
-        snapshot[snap_key]["parent"] = {"key": parent_jira_key} if parent_jira_key else None
-    return snapshot
-
-
 def _build_snapshot(
     pass_id: str,
     repo_root: Path | None = None,
@@ -545,9 +504,13 @@ def _build_snapshot(
             first_key = next(iter(snapshot))
             project_key = first_key.rsplit("-", 1)[0] if "-" in first_key else ""
         if project_key and hasattr(client, "get_parent_map"):
-            # The merge lives in ``merge_parent_map`` (ticket 88d9) so the three-state
-            # queried/absent/unobserved contract it establishes is directly testable.
-            merge_parent_map(snapshot, client.get_parent_map(project_key))
+            parent_map = client.get_parent_map(project_key)
+            for snap_key, parent_jira_key in parent_map.items():
+                if snap_key in snapshot:
+                    if parent_jira_key:
+                        snapshot[snap_key]["parent"] = {"key": parent_jira_key}
+                    # When parent_jira_key is None, leave the field absent
+                    # (top-level issue) — consistent with Jira REST shape.
     except urllib.error.HTTPError as exc:
         # API retirements (HTTP 410 GONE) must be loud — a transient WARNING
         # would let a permanent endpoint removal hide in the noise. Transient
