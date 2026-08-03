@@ -104,6 +104,14 @@ endpoints with side effects; or any destructive local action that can't be trivi
 When an experiment *needs* such a mutation to be conclusive, state exactly what you want to
 run, why it's necessary, and its blast radius, then wait. Prefer a local reproduction first.
 
+**Carve-out — the project's own tracker.** The tracker this debug session is already operating
+within — the one that produced or holds the ticket under debug — is the project's own mandated
+tracker, and the **prescribed writebacks this protocol requires** (the Phase-1-exit RCA comment,
+the Step-7 sibling tickets, the not-a-bug classification comment, and the final report comment)
+are pre-approved on it: post them without asking. Everything else stays gated: any *other*
+tracker is third-party and needs approval per the paragraph above, as does any own-tracker
+mutation beyond the prescribed writebacks (transitions, edits to others' tickets, bulk changes).
+
 ## Triage: full protocol or fast path?
 
 The full protocol is built for ambiguity. When a bug has none, the dossier + investigation
@@ -380,6 +388,11 @@ through Phase 2's RED→GREEN discipline independently (one RED test per mechani
 confirmed, cited, parsimonious account is the earned key to Phase 2. Until it exists, stay in
 Phase 1.
 
+**Write the RCA back before crossing into Phase 2.** Post the confirmed account as a comment on
+the ticket under debug in the project's own tracker (pre-approved; see the approval-gate
+carve-out): the root-cause mechanism and the discriminating evidence that confirmed it. This is
+the durable record the next reader searches for — it must exist even if Phase 2 is interrupted.
+
 **Not-a-bug guard (must clear before Phase 2 auto-applies any fix).** A confirmed mechanism is
 necessary but **not sufficient** to unlock repair. Before crossing into Phase 2, resolve the
 Stage 2 `defect_legitimacy` judgment for the confirmed root cause:
@@ -399,7 +412,9 @@ Stage 2 `defect_legitimacy` judgment for the confirmed root cause:
   intended behavior. Instead, report back the confirmed mechanism, the not-a-bug classification
   with its citation (or the absence of any authority found), and the recommended non-fix
   disposition (e.g. file a feature request, correct the misunderstanding, fix the environment,
-  or update the docs/spec) — then **hand the decision to the user**. Proceed into a repair only if
+  or update the docs/spec) — then **hand the decision to the user**. Also post the
+  classification + cited source as a comment on the ticket under debug (pre-approved own-tracker
+  writeback) so the not-a-bug verdict survives the session and the next reporter finds it. Proceed into a repair only if
   the user explicitly confirms the behavior *should* change (which is a scope/design decision, not a
   bug fix) and names the intended-behavior target the new test should encode.
 
@@ -552,21 +567,49 @@ evidence.
 
 ## Step 7 — Sweep for siblings of this bug class
 
-**Run this only when the root cause is a repeatable pattern** (a construct that could plausibly
-recur elsewhere — a missing guard, a wrong API idiom, an unhandled case). A genuinely one-off bug
-has no siblings: note that and skip the sweep. When it does apply, treat the root cause as a
-*class*, not an incident. Derive from the confirmed mechanism a search (the exact construct + a
-few search terms + a one-line "why it's wrong") and sweep the codebase for other live instances:
+Step 7 has **two independent axes with independent triggers** — enter it when **either**
+applies; run each axis only under its own condition. A genuinely one-off, single-surface bug
+has neither: note that and skip the sweep.
+
+**Axis 1 — construct sweep.** Run when the root cause is a **repeatable pattern** (a construct
+that could plausibly recur elsewhere — a missing guard, a wrong API idiom, an unhandled case).
+Treat the root cause as a *class*, not an incident. Derive from the confirmed mechanism a search
+(the exact construct + a few search terms + a one-line "why it's wrong") and sweep the codebase
+for other live instances:
 
 - **Confirm each hit semantically** (read ±10 lines) — a string match is a candidate, not a
   sibling. Exclude tests, vendored code, generated files, dead/commented code, and the file you
   just fixed.
 - **Fix each confirmed sibling under the same RED→GREEN discipline** — a RED test that exercises
   that occurrence *before* the edit, the same category of fix (don't invent a new approach),
-  GREEN + suite after. Group same-file occurrences into one pass.
+  GREEN + suite after. Group same-file occurrences into one pass. A confirmed sibling you
+  *don't* fix in scope (too large, different owner, needs design) is not dropped: file a ticket
+  for it and link it `discovered_from` the bug you're fixing (pre-approved own-tracker
+  writeback).
 - **Report what you swept.** List siblings found and fixed. If the class is broad or the sweep
   is expensive and you bounded it, say what you scanned and what you deliberately left — a
   bounded sweep must not read as "the whole class is clear."
+
+**Axis 2 — parity sweep.** Run when the **fixed code sits on one of several parallel surfaces**
+(the same operation reachable through more than one channel). A parity sibling is an *absence*
+— the surface that never got the rule — so it is invisible to the construct grep above and can
+exist even for a one-off construct. Answer four questions, each with a forced artifact:
+
+1. **NAME THE RULE** — state the invariant you just enforced as *operation + property* (e.g.
+   "link creation must reject unknown relation names"), **without naming the fixed site**. If
+   you can only state it in terms of the file you fixed, you haven't found the rule yet.
+2. **CHANNEL CENSUS** — walk a fixed five-slot checklist of surfaces the operation may have:
+   CLI command / MCP-or-API tool / library facade (public `import` path) / automated callers
+   (reconcilers, workflows, bots) / dual-direction (does the mirror operation — read vs write,
+   inbound vs outbound — need the same rule?). Derive the real caller set of the shared core
+   you fixed: a surface that performs the operation but does **not** call through that core is
+   the parity signature.
+3. **PER-SURFACE PROBE** — for each slot: cite the `path:line` where the rule holds on that
+   surface, or mark it **MISSING** (or **N/A** with a reason — the surface doesn't exist).
+4. **DISPOSITION** — every MISSING slot gets exactly one: fix it now under the same RED→GREEN
+   discipline (a RED test through *that* surface first), or file a ticket for it and link it
+   `discovered_from` the bug you're fixing (pre-approved own-tracker writeback). Silence is not
+   a disposition.
 
 ---
 
@@ -584,9 +627,20 @@ signal):
 - **Fix** — what changed and why it addresses the root cause (not the symptom).
 - **Scope & safety** — the caller-dependency sweep result, and confirmation the fix restores
   (not creates) behaviour, adds no new dependency, and weakened no existing test.
-- **Siblings** — other instances of this bug class found/fixed by the Step 7 sweep (or "none",
-  or "not swept — scope: …").
+- **Siblings** — other instances of this bug class found/fixed by the Step 7 sweep, on both
+  axes (construct hits and parity-census MISSING slots with their dispositions) — or "none",
+  or "not swept — scope: …".
+- **Residual risk & prevention** — for each fragility you *observed with a citation* during the
+  investigation but did not fix (a brittle seam, a missing guard elsewhere, a test gap, a
+  confusing contract), give exactly one disposition: **ticket filed** (+ id; may propose a
+  structural guard), **accepted** (+ one-line reason), or **fixed in scope** (+ where). "None
+  observed" is a legitimate answer; an observed-but-undispositioned fragility is not.
 - **Replication** — confirmation the original report no longer reproduces.
+
+Post this report (or its per-problem summary) as a comment on the ticket under debug in the
+project's own tracker — the pre-approved writeback that closes the loop: cause, proof, test,
+fix, siblings, replication. Prior tickets are only as useful as what the last debugger wrote
+back.
 
 If a problem is *not* solved (looped out without a confirmed cause, or blocked on an approval
 you don't have), say so plainly with the current best evidence and the specific blocker —
@@ -597,7 +651,8 @@ Phase 2), report it as such rather than as a fix: state the **proven mechanism**
 **classification** (`feature-request` / `intended-behavior` / `misunderstanding` /
 `environment-or-config` / `cannot-determine`) with the **cited authoritative source** (or the
 absence of one), and the **recommended non-fix disposition**. Do not present a code change; the
-next move is the user's decision.
+next move is the user's decision. (The classification comment on the ticket — see the not-a-bug
+guard — should already exist by this point.)
 
 ## Notes
 
