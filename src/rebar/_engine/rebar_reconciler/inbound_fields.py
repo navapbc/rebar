@@ -145,6 +145,15 @@ def normalize_rich_text(body: Any) -> str:
     return str(body) if body is not None else ""
 
 
+def normalize_baseline_value(field: str, value: Any) -> Any:
+    """Project a raw mirrored Jira field into its stored baseline value."""
+    if field == "description":
+        return normalize_rich_text(value)
+    if field in ("priority", "status") and isinstance(value, dict):
+        return value.get("name")
+    return value
+
+
 def _normalize_jira_body(body: Any) -> str:
     """Coerce a Jira comment body (ADF dict or string) to plain text.
 

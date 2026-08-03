@@ -71,8 +71,10 @@ def test_adopt_seeds_baseline_from_jira_fields(tmp_path: Path) -> None:
     baseline = bs.get_baseline(local_id)
     assert baseline is not None
     assert baseline["summary"] == "native issue"
-    assert baseline["status"] == {"name": "To Do"}
-    assert baseline["priority"] == {"name": "High"}
+    assert baseline["description"] == "a body"
+    assert baseline["status"] == "To Do"
+    assert baseline["priority"] == "High"
+    assert baseline["assignee"] == {"displayName": "Someone"}
 
 
 def test_adopt_skips_a_retired_key(tmp_path: Path) -> None:

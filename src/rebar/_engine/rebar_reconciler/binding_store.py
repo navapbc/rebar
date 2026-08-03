@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from ._backend import TicketTransport
 
 from rebar_reconciler import get_rotation
+from rebar_reconciler.inbound_fields import normalize_baseline_value
 from rebar_reconciler.timeutil import utc_now_iso
 
 
@@ -99,12 +100,8 @@ _EMPTY_STORE: dict[str, Any] = {
     "reverse": {},
 }
 
-# ADR 0026 — the per-binding three-way-merge baseline: the last-synced Jira-side
-# values for the five inbound-mirrored scalar fields. Stored on the binding entry
-# as ``baseline``. An ABSENT baseline is VALID and
-# degrades to local-wins (safe/lossy); a version-1 store (no baselines) reads fine.
-# These are the Jira field names as they appear in prev_snapshot (``summary`` is
-# the Jira term for the local ``title``).
+# ADR 0026 stores five last-synced Jira-side inbound-mirrored fields per binding.
+# An absent baseline (including v1) is valid and degrades to local-wins.
 _BASELINE_FIELDS: tuple[str, ...] = (
     "summary",
     "description",
@@ -112,6 +109,7 @@ _BASELINE_FIELDS: tuple[str, ...] = (
     "status",
     "assignee",
 )
+
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
@@ -468,7 +466,9 @@ class BindingStore:
         entry = self._data["bindings"].get(local_id)
         if entry is None:
             return
-        baseline = {k: fields.get(k) for k in _BASELINE_FIELDS if k in fields}
+        baseline = {
+            k: normalize_baseline_value(k, fields[k]) for k in _BASELINE_FIELDS if k in fields
+        }
         if entry.get("baseline") == baseline:
             return
         entry["baseline"] = baseline

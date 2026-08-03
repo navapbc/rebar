@@ -44,6 +44,17 @@ _FIELDS = {
     "extraneous": "dropped",  # not a mirrored field — must be filtered out
 }
 
+_ADF_DESCRIPTION = {
+    "type": "doc",
+    "version": 1,
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [{"type": "text", "text": "hello baseline"}],
+        }
+    ],
+}
+
 
 def test_set_and_get_baseline_round_trip(tmp_path):
     s = _store(tmp_path)
@@ -58,6 +69,36 @@ def test_set_and_get_baseline_round_trip(tmp_path):
         "assignee": "a@x",
     }
     assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
+
+
+def test_set_baseline_normalizes_vendor_text_shapes_but_keeps_assignee_raw(tmp_path):
+    """A3 happy path: shrink only the three text-like vendor-shaped values."""
+    s = _store(tmp_path)
+    s.bind_confirm("loc-1", "REB-1")
+    assignee = {
+        "displayName": "Ada Lovelace",
+        "emailAddress": "ada@example.test",
+        "accountId": "acct-ada",
+    }
+
+    s.set_baseline(
+        "loc-1",
+        {
+            "summary": "S",
+            "description": _ADF_DESCRIPTION,
+            "priority": {"id": "1", "name": "High"},
+            "status": {"id": "3", "name": "In Progress"},
+            "assignee": assignee,
+        },
+    )
+
+    assert s.get_baseline("loc-1") == {
+        "summary": "S",
+        "description": "hello baseline",
+        "priority": "High",
+        "status": "In Progress",
+        "assignee": assignee,
+    }
 
 
 def test_unchanged_baseline_keeps_serialized_bytes_identical(tmp_path, monkeypatch):
@@ -173,7 +214,7 @@ def test_changed_baseline_updates_serialized_bytes(tmp_path):
     assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
 
 
-def test_present_null_baseline_field_round_trips(tmp_path):
+def test_present_null_description_uses_exact_normalizer_projection(tmp_path):
     s = _store(tmp_path)
     s.bind_confirm("loc-1", "REB-1")
 
@@ -181,7 +222,7 @@ def test_present_null_baseline_field_round_trips(tmp_path):
 
     baseline = s.get_baseline("loc-1")
     assert "description" in baseline
-    assert baseline["description"] is None
+    assert baseline["description"] == ""
     assert "baseline_advanced_at" not in s.all_bindings()["loc-1"]
 
 
