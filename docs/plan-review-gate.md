@@ -907,6 +907,44 @@ fails immediately (exit 1) **without making any LLM call**. Items whose text beg
 from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
 a gate-level bypass is warranted, pass `--force-close="<reason>"`.
 
+### The epic-close bug screen (three stages, epic closes only)
+
+Agents file bugs OUTSIDE an epic's hierarchy during epic execution and deem them
+out-of-scope/pre-existing even when they are defects in the epic's own deliverable; the
+direct-children invariant cannot see them (backtest over 56 epic closes: 2 real at-close
+escapes). Closing an **epic** therefore adds three stages, cheapest-first (ticket 4b54):
+
+1. **Deterministic `caused_by` floor** (hard tier, no LLM). Any open/in_progress bug carrying
+   a `caused_by` link into the epic's subtree (the epic or any descendant, any depth) blocks
+   the close exactly like an unclosed direct child — the bug RECORDS that this work broke it.
+   The verdict teaches the three exits: fix (close) the bug, re-parent it under the epic, or
+   dispute the `caused_by` link.
+2. **Deterministic candidate filter.** Candidates for the screen are open/in_progress
+   **bugs** outside the subtree that were created after the epic's FIRST `open →
+   in_progress` transition (fallback: the epic's creation time when it was never claimed)
+   OR are linked — any relation, either direction — to any subtree member. At most 32 are
+   evaluated per close (linked first, then newest); any remainder is recorded as an
+   unevaluated-overflow count, never silently dropped.
+3. **LLM relevance screen + verifier adjudication.** Each candidate gets one single-turn
+   trivial-class call (`epic_bug_screen` prompt → `epic_bug_screen_verdict`): forced choice
+   **A** (defect in something this epic changed/built or behavior its AC claims) / **B**
+   (same subsystem, pre-existing or adjacent) / **C** (unrelated) plus a one-line citation.
+   A-verdicts are forwarded to the completion verifier as a compact block (≤8 rows of
+   title + citation + id) inside the fenced context; the verifier retrieves detail via
+   `show_ticket` and **blocks only a defect-in-deliverable with NO recorded disposition** —
+   a disposition satisfies via (a) a `supersedes`/`duplicates` link (either direction) to
+   the subtree or a named successor, or (b) a REASONED pre-existence/deferral/supersession
+   assertion in the bug's description or comments (a bare "out of scope" does not qualify).
+   Prose-only supersession is deliberately handled by (b): agents routinely record
+   supersession in comments without linking, and blocking those would teach agents to stop
+   linking.
+
+The screen **degrades open**: any failure (model down, malformed output — normalized to the
+non-surfacing `C` — or a store read error) logs and skips; only the deterministic floor is a
+hard tier, and `--force-close` remains the operator escape hatch. The full per-bug tally +
+overflow count lands on the completion sidecar (`epic_bug_screen_v1`) for audit and live
+false-negative calibration.
+
 ### Which commit the completion gate verifies — `--ref`
 
 When `verify.require_completion_verification_for_close = true`, the completion-verification close

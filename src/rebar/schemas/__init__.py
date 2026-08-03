@@ -62,6 +62,7 @@ __all__ = [
     "COMPLETION_VERDICT",
     "TICKET_DIGEST",
     "OVERLAP_VERDICT",
+    "EPIC_BUG_SCREEN_VERDICT",
     "PLAN_REVIEW_VERDICT",
     "CODE_REVIEW_VERDICT",
     "SIGN_RESULT",
@@ -128,6 +129,10 @@ TICKET_DIGEST = "ticket_digest"
 # only-crave-art, 9022). No CLI --output arm; registered in OUTPUT_SCHEMAS under a synthetic
 # "overlap_judge" key so the schema-coverage guard sees it and the runner validates output.
 OVERLAP_VERDICT = "overlap_verdict"
+# rebar.llm — output of one single-turn epic-close bug-screen call (4b54). No CLI --output
+# arm; registered in OUTPUT_SCHEMAS under a synthetic "epic_bug_screen" key so the
+# schema-coverage guard sees it and the runner validates the screen's structured output.
+EPIC_BUG_SCREEN_VERDICT = "epic_bug_screen_verdict"
 # rebar.llm — output of the plan-review gate (`rebar review-plan`). The inverse of
 # completion_verdict; same exemption (the MCP `review_plan` tool is NO_SCHEMA_EXEMPT
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
@@ -316,6 +321,9 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # Stage-2 overlap judge (9022): synthetic key, no CLI arm; wired so the schema-coverage
     # guard sees overlap_verdict and the runner validates the judge's structured output.
     "overlap_judge": OVERLAP_VERDICT,
+    # Epic-close bug screen (4b54): synthetic key, no CLI arm; wired so the schema-coverage
+    # guard sees epic_bug_screen_verdict and the runner validates the screen's output.
+    "epic_bug_screen": EPIC_BUG_SCREEN_VERDICT,
     # plan-review gate: like `review`/`verify_completion`, no CLI help arm (the
     # --output coverage guard never drives it live) and the MCP tool is
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees

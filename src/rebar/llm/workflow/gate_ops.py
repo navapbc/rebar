@@ -22,9 +22,12 @@ close-gate signs) — that is the B5 cutover's concern.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .executor import StepContext, register_step
+
+logger = logging.getLogger(__name__)
 
 _REVIEWER_ID = "completion-verifier"
 _OUTPUT_SCHEMA = "completion_verdict"
@@ -46,9 +49,19 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     """Run the child-closure/certification gate. An UNCLOSED direct child short-circuits to a
     deterministic FAIL verdict (no LLM call — closure BLOCKED). A closed-but-UNCERTIFIED
     (force-closed) direct child does NOT block: it emits ``certifiable=False`` and the LLM still
-    runs on the parent's OWN criteria (the parent may close but not certify)."""
+    runs on the parent's OWN criteria (the parent may close but not certify).
+
+    EPIC closes additionally run the epic-close bug screen (ticket 4b54): the deterministic
+    ``caused_by`` floor short-circuits exactly like an unclosed child (an open/in_progress bug
+    the epic's own work broke is delegated work unfinished), and the candidate screen appends
+    its compact A-verdict block INSIDE the fenced context below — the screen degrades open on
+    any failure and never blocks by itself."""
     from rebar import _reads
-    from rebar.llm.completion import child_closure_findings, deterministic_child_failure
+    from rebar.llm.completion import (
+        child_closure_findings,
+        deterministic_child_failure,
+        epic_bug_floor_findings,
+    )
     from rebar.llm.config import resolve_gate_config
 
     tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
@@ -59,11 +72,50 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         )
     root = _reads.show_ticket(str(tid), repo_root=ctx.repo_root)
     canonical = root.get("ticket_id", str(tid))
+    is_epic = root.get("ticket_type") == "epic"
     blocking, uncertified = child_closure_findings(canonical, ctx.repo_root)
-    if blocking:
-        # A direct child is NOT closed → the parent is incomplete: fail fast, NO LLM call, BLOCK.
+    floor: list[dict] = []
+    if is_epic and not blocking:
+        # The DET caused_by floor (4b54): only reached when the direct-children gate passes,
+        # so the two deterministic tiers never mix in one verdict's messaging. A read error
+        # mirrors the child-closure arm: never block (a glitch shouldn't stop a legitimate
+        # close) and never crash the workflow, but WITHHOLD certification — an unread bug set
+        # must not be laundered into a signed "no caused_by bugs" attestation.
+        try:
+            floor = epic_bug_floor_findings(canonical, ctx.repo_root)
+        except Exception as exc:  # noqa: BLE001 — degrade open, withhold certification
+            logger.warning(
+                "epic-close caused_by floor read failed for %s; withholding certification",
+                canonical,
+                exc_info=True,
+            )
+            uncertified = list(uncertified) + [
+                {
+                    "criterion": f"open caused_by bugs against {canonical} could not be read",
+                    "severity": "high",
+                    "dimension": "completion",
+                    "detail": (
+                        f"could not enumerate open bugs to compute the caused_by floor for "
+                        f"{canonical} ({exc}); the close may proceed on the epic's own "
+                        "criteria but UNSIGNED. Re-close once the store read succeeds."
+                    ),
+                    "citations": [
+                        {"kind": "source", "description": f"epic_bug_floor_findings: {exc}"}
+                    ],
+                }
+            ]
+    if blocking or floor:
+        # A direct child is NOT closed (or an open caused_by bug indicts the epic's own work)
+        # → the parent is incomplete: fail fast, NO LLM call, BLOCK.
         cfg = resolve_gate_config(ctx.repo_root)  # caller-resolved run config (veiny-trout-brink)
-        verdict = deterministic_child_failure(canonical, blocking, cfg)
+        summary = None
+        if floor:
+            summary = (
+                f"{len(floor)} open/in_progress bug(s) record caused_by against this epic's "
+                "subtree — the epic's own work broke them. Fix (close) each bug, re-parent it "
+                "under the epic, or dispute the caused_by link, then re-close."
+            )
+        verdict = deterministic_child_failure(canonical, blocking + floor, cfg, summary=summary)
         return {
             "run_verify": False,
             "precheck_failed": True,
@@ -90,6 +142,17 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
 
     graph = bool(ctx.inputs.get("graph"))
     context, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
+    if is_epic:
+        # Epic-close bug screen (4b54), stages 2-3: filter + haiku screen; A-verdicts land as
+        # a compact evidence block INSIDE the fence (untrusted, like all ticket content). The
+        # screen degrades open on ANY failure — an empty block costs the verifier nothing.
+        from rebar.llm import epic_bug_screen
+
+        screen = epic_bug_screen.run_screen(
+            canonical, root, ctx.repo_root, cfg=resolve_gate_config(ctx.repo_root)
+        )
+        if screen["block"]:
+            context = f"{context}\n\n{screen['block']}"
     fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
     return {
         "run_verify": True,
