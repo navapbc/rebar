@@ -33,10 +33,21 @@ resolving at all is a hard error rather than a silent default.
 
 ```toml
 [tool.rebar.llm.model_classes]
-frontier = { model = "bedrock:us.anthropic.claude-opus-4-8-v1:0" }
-standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6-v1:0" }
-trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-v1:0" }
+frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
 ```
+
+Only **inference-profile** ids (the `us.`/`global.` prefix) are invokable — a bare on-demand
+`anthropic.claude-*` id returns a `ValidationException` directing you to a profile. Take each id
+**verbatim** from `aws bedrock list-inference-profiles --region <region>`: the suffixes are not
+uniform, so a plausible-looking id can simply not exist. MEASURED against account 896586841071 /
+`us-east-1` (story 1aa2): `us.anthropic.claude-sonnet-4-6` and
+`us.anthropic.claude-haiku-4-5-20251001-v1:0` invoke; `us.anthropic.claude-sonnet-4-6-v1:0` and
+`us.anthropic.claude-haiku-4-5-v1:0` raise `ValidationException: The provided model identifier is
+invalid`. For a developer machine, prefer pointing `REBAR_LLM_CONFIG_FILE` at a file holding this
+table over editing `pyproject.toml` — see
+[local-dev-env.md](local-dev-env.md#running-your-local-gates-on-aws-bedrock-instead-of-direct-anthropic).
 
 ## 3. Mixed provider
 
