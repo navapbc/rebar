@@ -257,6 +257,121 @@ Merged code is still safe on the GitHub mirror up to the last successful push;
 unmerged review work continues in Gerrit. Re-enable by restoring the remote url and
 reloading the plugin once the divergence is resolved.
 
+## Kill-switch: revert the LLM path from Bedrock to direct Anthropic
+
+The review-bot's LLM inference runs through **AWS Bedrock** (story eb6e). If Bedrock
+misbehaves — throttling, a region outage, a model id that stops resolving, an IAM or
+inference-profile change — this is how to put the gate back on the **direct Anthropic
+API** without rebuilding the image or touching Gerrit.
+
+> This safety net is written and landed **before** the cutover itself, by design — an
+> operator must never be looking for the escape hatch after the flip. The three env vars
+> below therefore appear in `docker-compose.yml` only from the cutover commit onward; if
+> `docker compose exec review-bot env | grep REBAR_LLM_` shows no class-slot overrides,
+> the bot is still on the direct-Anthropic path and there is nothing to revert.
+
+### The lever: delete the three class-slot env vars, recreate the container
+
+The lever is the **three model-class-slot env vars** in the `review-bot` service's
+`environment:` block in `infra/compose/docker-compose.yml` — the resolver reads them as
+`REBAR_LLM_<CLASS>_MODEL` (`src/rebar/llm/model_classes.py`, `_env_override`), one per
+class slot:
+
+```yaml
+      REBAR_LLM_FRONTIER_MODEL: "bedrock:<opus inference-profile id>"
+      REBAR_LLM_STANDARD_MODEL: "bedrock:<sonnet inference-profile id>"
+      REBAR_LLM_TRIVIAL_MODEL: "bedrock:<haiku inference-profile id>"
+```
+
+**Delete all three lines and recreate the container.** That is the whole switch.
+
+*Fast path (seconds, on the box — but TRANSIENT, see the caveat below):*
+
+```bash
+# SSM Session Manager onto the box, then:
+cd /opt/rebar/infra/compose             # the deployed COPY of main (autodeploy's DEPLOY_REPO)
+sudo -e docker-compose.yml              # delete the three REBAR_LLM_*_MODEL lines
+docker compose up -d --force-recreate review-bot
+# Confirm the overrides are gone from the running container:
+docker compose exec review-bot env | grep REBAR_LLM_ || echo "no class-slot overrides set"
+```
+
+> **CAVEAT — the on-box edit does not survive the next deploy.** `/opt/rebar` is a *copy*
+> of `main` that `autodeploy.sh` refreshes with `rsync -a --delete`, and
+> `infra/compose/docker-compose.yml` is in that script's `BOT_PATHS`. So the next `main`
+> advance touching any bot path silently restores the three Bedrock lines and puts the gate
+> back on Bedrock. Use the fast path to stop the bleeding, then land the **durable** revert:
+> a commit to `main` deleting the three lines, which autodeploy applies on its own
+> (rebuild + recreate `review-bot`). Do not leave the box hand-edited.
+
+**Why deleting them is sufficient.** With no per-class env override set, rebar falls
+back to the **built-in class defaults** in `src/rebar/llm/model_classes.py`
+(`_DEFAULT_MODEL_BY_CLASS`): `frontier` = `claude-opus-4-8`, `standard` =
+`claude-sonnet-4-6`, `trivial` = `claude-haiku-4-5`. None of these carries a provider
+qualifier, so `infer_provider` resolves each to the **`anthropic:`** provider — i.e.
+deleting the overrides restores the direct-Anthropic path exactly. Nothing else in
+`infra/` competes for that resolution: **`REBAR_LLM_MODEL` appears nowhere under
+`infra/`**, so there is no lower-precedence infra-set value left behind to surprise you.
+
+**Do NOT reach for `REBAR_LLM_MODEL` here.** It is a **deprecated alias** (scheduled for
+removal — see `src/rebar/_deprecations.py`), and its deprecation shim
+(`model_classes._deprecated_bare_model`) fans a single value out to **all three** class
+slots at once. Setting it would collapse the per-pass frontier/standard split the review
+kernel depends on (frontier for the review pass, standard for the verifier downgrade) —
+the exact defect the class slots were introduced to fix. Set the three per-class vars, or
+set none of them.
+
+### `ANTHROPIC_API_KEY` stays in the container — deliberately
+
+`ANTHROPIC_API_KEY` is **retained** in the review-bot container even while the bot runs
+on Bedrock, precisely so this lever has a working credential the moment you pull it. A
+kill-switch that needs a secret provisioned before it works is not a kill-switch.
+
+It is also **not expressible** to "retire the key for this container", because the
+secrets pipeline writes ONE shared `.env`:
+
+- `infra/scripts/fetch-secrets.sh:81` reads `anthropic-api-key` via `get_param`, the
+  **REQUIRED** (fail-fast) reader — a missing/empty/`CHANGEME` value aborts the whole
+  fetch before the `.env` is rewritten.
+- `infra/scripts/fetch-secrets.sh:116` writes `ANTHROPIC_API_KEY=` into that single
+  `.env`.
+- That one file is named by an `env_file: [- .env]` pair under **both** services in
+  `infra/compose/docker-compose.yml` — at `:113-114` (`review-bot`) and `:196-197`
+  (`opcert`). There is no second, per-service env file to differentiate them.
+- **`opcert` consumes it** for its own LLM gate ops. So removing the key from the `.env`
+  would break opcert, and there is no per-service split to remove it from `review-bot`
+  alone.
+
+Leave it in place. Its presence costs nothing while Bedrock is in use (the Bedrock path
+authenticates off the ambient AWS credential chain — the instance role — and reads no
+rebar-managed key) and it is what makes the revert above instant.
+
+### Retry / timeout posture on Bedrock: botocore stock defaults ONLY
+
+Know this before you tune anything during a Bedrock incident:
+
+- `rebar.llm.bedrock_model.build_bedrock_provider` ends at
+  `src/rebar/llm/bedrock_model.py:88` with `return BedrockProvider(region_name=region)`.
+  It passes **no** `botocore.config.Config(retries=...)` and opens no custom client or
+  transport. The Bedrock client therefore runs on **botocore's stock client defaults** for
+  retries, retry mode, and socket/connect timeouts.
+- The tenacity retry envelope (`AsyncTenacityTransport` + `RetryConfig` +
+  `wait_retry_after`) and the `httpx.Timeout` wiring live **only** in
+  `src/rebar/llm/anthropic_model.py` (`_build_retrying_anthropic_model`), on the
+  direct-Anthropic transport.
+- Consequence: **`llm_retry_max_attempts` and `timeout_s` do NOT apply to Bedrock.**
+  Turning them up during a Bedrock throttling incident changes nothing. Your actual
+  options are: wait out the throttle, or pull the kill-switch above and let the
+  direct-Anthropic path (which *does* honour those settings) carry the gate.
+
+This describes the posture **as it stands**, not a design intent. The gap is tracked as
+bug `61d8-ff23-8ee0-4289` ("Bedrock ignores `llm_retry_max_attempts` and `timeout_s`: no
+botocore retry envelope", discovered from eb6e) — check that ticket before assuming the
+paragraph above is still current.
+
+Reverting back to Bedrock is the same edit in reverse: restore the three
+`REBAR_LLM_*_MODEL` lines and `docker compose up -d --force-recreate review-bot`.
+
 ## Where the logs live
 
 All review-bot logs are structured JSON on the container's stderr/stdout, shipped to
