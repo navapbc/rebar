@@ -453,3 +453,57 @@ def raw_indexed_issue_count(
         f"than this measurement is budgeted for, or the search endpoint is returning pages "
         f"without advancing — do NOT read the partial count as an index-lag verdict."
     )
+
+
+def assert_remote_parent_is(
+    key: str,
+    issue_status: int,
+    issue_body: Any,
+    expected_parent: str,
+    *,
+    previous_parent: str = "",
+    stage: str = "the outbound parent set",
+) -> None:
+    """Row 12 outbound oracle: ``fields.parent`` on ``key`` is EXACTLY ``expected_parent``.
+
+    READ FROM A RAW REST DOCUMENT, not through ``get_issue_by_rest`` and not through
+    ``get_parent_map``. Two different reasons, both load-bearing:
+
+      * the write goes out as ``issue.update(fields={"parent": {"key": …}})``
+        (``jira_datacenter/transport.py:711-712``), so reading back through the same
+        transport cannot separate "DC stored it" from "the client object we just mutated
+        reports what we set";
+      * ``get_parent_map`` is a JQL PAGED SEARCH (the read the INBOUND path uses), so it is
+        both eventually consistent and the subject of a different row. A parent that is
+        genuinely on the issue but not yet indexed would read as a failed write.
+
+    ``previous_parent`` is the value the issue carried BEFORE the mutation. Naming it in the
+    failure message is what distinguishes DC's signature failure — a SILENT NO-OP, which
+    leaves the old parent in place and raises nothing — from a write that landed somewhere
+    unexpected or cleared the field. Every "Cloud has the translation, DC never got its half"
+    defect in this epic (d067, 8d68, 751e, 2b16, 88d9) presented exactly that way: no
+    traceback, pass reported OK, field unchanged.
+    """
+    assert issue_status == 200 and isinstance(issue_body, dict), (
+        f"{stage}: {key} is not readable by raw REST (HTTP {issue_status}, body "
+        f"{str(issue_body)[:200]}), so the parent cannot be asserted at all."
+    )
+    parent = (issue_body.get("fields") or {}).get("parent")
+    got = parent.get("key") if isinstance(parent, dict) else None
+    if got == expected_parent:
+        return
+    if previous_parent and got == previous_parent:
+        raise AssertionError(
+            f"{stage}: fields.parent on {key} is STILL {got!r} — the parent it had BEFORE the "
+            f"mutation. Expected {expected_parent!r}. This is the silent-no-op signature: "
+            f"`set_parent` writes `fields.parent` for a sub-task "
+            f"(`jira_datacenter/transport.py:711-712`) and every core caller swallows its "
+            f"failure (`dispatch_one.py:571-578` warns and continues), so an unchanged field is "
+            f"the ONLY place the failure is observable."
+        )
+    raise AssertionError(
+        f"{stage}: fields.parent on {key} is {parent!r} (key {got!r}), expected {expected_parent!r}"
+        + (f" (it was {previous_parent!r} before)" if previous_parent else "")
+        + ". A null/absent parent means the write cleared the field instead of setting it; any "
+        "other key means it landed on the wrong issue."
+    )

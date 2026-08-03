@@ -46,6 +46,7 @@ from _dc_support import ADMIN_USER, BASE, live_jira_ready
 from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
 from _dc_support import assert_mint_registered as _assert_mint_registered
 from _dc_support import assert_outbound_provenance_markers as _assert_outbound_provenance_markers
+from _dc_support import assert_remote_parent_is as _assert_remote_parent_is
 from _dc_support import envelope as _envelope
 from _dc_support import forget_identity_mapping as _forget_identity_mapping
 from _dc_support import raw_indexed_issue_count as _raw_indexed_issue_count
@@ -1464,6 +1465,84 @@ def test_outbound_clear_parent_round_trips(
         f"swallowed (`dispatch_one.py:571-578` warns and continues); or Data Center accepted "
         f"PUT {{'parent': None}} and ignored it (`transport.py:688-689`)."
     )
+
+
+@_skip
+@_skip_no_extra
+def test_outbound_set_subtask_parent_round_trips(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
+) -> None:
+    """Row 12 OUTBOUND, the SUB-TASK case: rebar WRITING a parent onto a DC issue.
+
+    THIS ROW HAD NO TEST IN THIS DIRECTION, and the gap was invisible because a neighbour
+    looked like it. `test_outbound_clear_parent_round_trips` (row 13 outbound) does assert a
+    parent is present — but that parent came from ISSUE CREATION
+    (`extra={"parent": {"key": parent}}`), not from a rebar write, so nothing anywhere proved
+    rebar can SET a parent on Data Center. This is the untested corner of the exact area every
+    "Cloud has the translation, DC never got its half" defect in this epic has landed in —
+    d067 (status), 8d68 (inbound identity mint), 751e (unassign), 2b16 / 88d9 (link removal,
+    parent clear) — and every one of them was a SILENT success.
+
+    ASSERTED AGAINST THE TRANSPORT, NOT THROUGH A PASS, and unlike row 12's epic case this is
+    not because of the swallow. It is because the pass-level round-trip is STRUCTURALLY
+    UNREACHABLE on Data Center: two independent gates, each correct on its own terms, do not
+    compose.
+
+      * TO BE APPLIED, the DC transport requires the CHILD to be a SUB-TASK. `set_parent`
+        writes `fields.parent` only for a sub-task and raises `NotImplementedError` for
+        anything else, because epic membership on DC is an "Epic Link" custom field written
+        through the Agile API under the `greenhopper` path
+        (`adapters/jira_datacenter/transport.py:668-712`, the decline at `:702-710`).
+      * TO BE EMITTED, the outbound differ requires the LOCAL PARENT to be an EPIC.
+        `outbound_field_diff._resolve_local_parent:136-139` returns `(False, None)` — the
+        field is omitted entirely — for any parent whose local `ticket_type` is not `epic`
+        (bug 8b25's hierarchy guard; unit-covered by
+        `tests/unit/rebar_reconciler/conflict/test_parent_hierarchy_guard.py`).
+
+    A DC sub-task's parent is a STANDARD issue, whose local ticket_type is `task` — so the one
+    child DC will accept a `fields.parent` write for is exactly the one whose parent the differ
+    suppresses. Routing this row through a pass would therefore assert a mutation nothing
+    emits. That is the same reason row 14 outbound
+    (`test_outbound_delete_leaves_the_issue_absent_by_key_AND_by_id`) asserts the PRIMITIVE,
+    and it is the shape reused here. THIS IS STILL A GENUINE ROUND-TRIP — rebar writes, the
+    instance is read back independently — it is just scoped to the layer that can actually run.
+
+    THE ORACLE READS RAW REST, deliberately not `get_issue_by_rest` (the same transport that
+    wrote, which cannot separate "DC stored it" from "the object we mutated reports what we
+    set") and not `get_parent_map` (a JQL paged search — eventually consistent, and the read
+    the INBOUND row already owns). The reasoning lives with the oracle in
+    `_dc_support.assert_remote_parent_is`, which is where the harness-free mutation check
+    drives it.
+
+    RE-PARENTS RATHER THAN PARENTS, for the reason the inbound row-12 cell gives: a sub-task
+    cannot be created parentless, so it arrives already pointing at one parent and asserting
+    THAT value would re-read a field this cell did not write. The precondition asserts the
+    starting parent, so the ending value is attributable to the mutation and a silent no-op is
+    named as one.
+    """
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outset par A"))
+    second = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outset par B"))
+    child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 outset subtask"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": first}},
+    )
+
+    # SETUP — the sub-task must START under `first`, or "it is under `second` afterwards" could
+    # be true before the mutation. Asserted through the SAME raw-REST oracle as the result, so
+    # the two cannot disagree about where `fields.parent` lives.
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
+    _assert_remote_parent_is(child, status, body, first, stage="SETUP (not the reparent)")
+
+    # THE MUTATION UNDER TEST — rebar's own write path for a DC parent.
+    dc_transport.set_parent(child, second)
+
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
+    _assert_remote_parent_is(child, status, body, second, previous_parent=first)
 
 
 # ---------------------------------------------------------------------------
