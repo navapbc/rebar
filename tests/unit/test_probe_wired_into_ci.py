@@ -1,13 +1,13 @@
 """Anti-rot gate: the end-to-end probe must stay wired into CI (ticket 6cca).
 
-``scripts/probe-rebar.sh`` is the reusable end-to-end CLI probe. To keep it from
+``scripts/probe_rebar.py`` is the reusable end-to-end CLI probe. To keep it from
 silently rotting, the ``golden-path`` job in BOTH CI entry points must invoke it:
 
 * ``.github/workflows/test.yml`` (the GitHub push/PR mirror), and
 * ``.github/workflows/gerrit-verify.yaml`` (the pre-merge Verified gate).
 
 This test parses each workflow, locates the ``golden-path`` job, and asserts one
-of its steps runs ``scripts/probe-rebar.sh``. If either job drops the probe
+of its steps runs ``scripts/probe_rebar.py``. If either job drops the probe
 step, this test fails.
 """
 
@@ -42,7 +42,7 @@ def _job_run_scripts(workflow: str, job: str) -> list[str]:
 @pytest.mark.parametrize(("workflow", "job"), sorted(_PROBE_JOBS.items()))
 def test_golden_path_job_invokes_probe(workflow: str, job: str) -> None:
     runs = _job_run_scripts(workflow, job)
-    assert any("scripts/probe-rebar.sh" in run for run in runs), (
-        f"{workflow}: the {job!r} job has no step running scripts/probe-rebar.sh — "
+    assert any("scripts/probe_rebar.py" in run for run in runs), (
+        f"{workflow}: the {job!r} job has no step running scripts/probe_rebar.py — "
         f"the end-to-end probe is not wired into CI and can silently rot"
     )

@@ -398,13 +398,13 @@ pipx install "nava-rebar[mcp]==X.Y.Z" --force
 
 # 2) Probe the INSTALLED (distribution-channel) build — not the repo's editable
 #    .venv. Point $REBAR at the pipx shim so the probe drives the shipped binary.
-REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" bash scripts/probe-rebar.sh
+REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" python scripts/probe_rebar.py
 
 # Optional: also exercise the REAL project store (it snapshots the existing
 # tickets, removes only what it creates, and verifies the store is unchanged):
-REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" PROBE_LIVE=1 bash scripts/probe-rebar.sh
+REBAR="$(pipx environment --value PIPX_BIN_DIR)/rebar" PROBE_LIVE=1 python scripts/probe_rebar.py
 ```
-`scripts/probe-rebar.sh` exercises every command + edge cases and prints
+`scripts/probe_rebar.py` exercises every command + edge cases and prints
 `PROBE RESULT: N passed, 0 failed`; a non-zero exit means the published build is
 broken. Since **PyPI is immutable**, recover by *yanking* the bad version and
 shipping a fixed version bump (re-run this step on the new version).
