@@ -130,6 +130,50 @@ def test_fit_is_idempotent(factory: Any) -> None:
     assert codec.fit_outbound(once) == once
 
 
+# ---------------------------------------------------------------------------
+# The codec law (ticket a32a, AC #4): normalize_outbound(t) == decode_inbound(to_wire(t))
+#
+# This is the invariant the outbound comment differ's dedup key now RELIES on
+# (outbound_comments._resolve_codec / the `codec` parameter of `_diff_comments`):
+# the Jira-side comparison key is always `decode_inbound(<what Jira stores>)`,
+# and the local-side key is `normalize_outbound(<the fitted local value>)`. The
+# two only converge if this law holds — a codec whose `to_wire` encoding, once
+# decoded, does NOT equal its own `normalize_outbound` would make the comment
+# differ re-emit an already-mirrored comment forever, or (if the mismatch runs
+# the other way) silently swallow the human's Jira-native formatting. Today's
+# ``WikiTextCodec`` satisfies this trivially (every operation is the identity
+# on `str`); a pandoc-backed converter that got this wrong would pass every
+# OTHER test in this file while breaking comment-diff convergence in
+# production. Pinned here directly, over a small corpus of realistic bodies,
+# not just the interchangeability example above.
+# ---------------------------------------------------------------------------
+
+_CODEC_LAW_BODIES = [
+    pytest.param("a single short line", id="short-line"),
+    pytest.param("one\ntwo\nthree", id="soft-wrapped"),
+    pytest.param("```python\ndef f(x):\n    return x * 2\n```", id="code-fence"),
+    pytest.param("- first item\n- second item\n* third (asterisk)", id="bullet-list"),
+    pytest.param("this is **bold** and this is *emphasis*", id="bold-and-emphasis"),
+    pytest.param("a pipe table cell: `a | b | c`", id="literal-pipe-backtick"),
+]
+
+
+@pytest.mark.parametrize("factory", _CODECS)
+@pytest.mark.parametrize("text", _CODEC_LAW_BODIES)
+def test_normalize_outbound_equals_decode_of_to_wire(factory: Any, text: str) -> None:
+    """The codec law every ``RichTextCodec`` implementation must satisfy:
+    ``normalize_outbound(t) == decode_inbound(to_wire(t))``.
+
+    This is what makes ``normalize_outbound`` a truthful preview of "what a
+    reader will see after Jira round-trips this value" — the property the
+    outbound comment differ's dedup key (ticket a32a) depends on to compare
+    the local value against what Jira will actually store.
+    """
+    codec = factory()
+
+    assert codec.normalize_outbound(text) == codec.decode_inbound(codec.to_wire(text))
+
+
 @pytest.mark.parametrize("factory", _CODECS)
 def test_decode_inbound_of_none_is_empty_string(factory: Any) -> None:
     assert factory().decode_inbound(None) == ""
