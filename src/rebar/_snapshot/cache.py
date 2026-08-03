@@ -29,12 +29,12 @@ import os
 import threading
 from pathlib import Path
 
+from rebar._snapshot.git_fetch import interprocess_lock
 from rebar._snapshot.repo_snapshot import (
     DEFAULT_REF,
     SOURCE_ATTESTED,
     SOURCE_LOCAL,
     SnapshotHandle,
-    _interprocess_lock,
     entry_path,
     materialize,
     resolve_ref,
@@ -114,7 +114,7 @@ def add_bytes(delta: int, root: Path | None = None) -> int:
     janitor's decrement cannot lose an update (no read-modify-write TOCTOU)."""
     root = root or store_root()
     path = _byte_total_path(root)
-    with _interprocess_lock(root / "locks" / "bytes.total.lock"):
+    with interprocess_lock(root / "locks" / "bytes.total.lock"):
         try:
             current = int(path.read_text().strip() or "0")
         except (OSError, ValueError):
@@ -191,7 +191,7 @@ def acquire(
         if dest.is_dir():
             touch_entry(dest)
             return materialize(sha, source_mode=SOURCE_ATTESTED, repo_root=repo_root, fetch=False)
-        with _interprocess_lock(_sha_lock_path(root, sha)):
+        with interprocess_lock(_sha_lock_path(root, sha)):
             if dest.is_dir():
                 touch_entry(dest)
                 return materialize(
