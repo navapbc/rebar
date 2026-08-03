@@ -13,6 +13,7 @@ Stdlib-only so it loads cleanly under both the package import (production) and t
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 # Jira link-type name -> base rebar relation (the OUTWARD-side meaning).
@@ -45,6 +46,35 @@ def resolve_inbound_link(link: dict[str, Any]) -> tuple[str | None, str | None]:
     if isinstance(inward, dict) and inward.get("key"):
         return inward["key"], INVERSE_RELATION.get(base, base)  # X is blocked by Y
     return None, None
+
+
+def observed_peer_deps(
+    issuelinks: Any, get_local_id: Callable[[str], str | None]
+) -> set[tuple[str, str]]:
+    """The peer's link set as ``{(relation, local_target_id)}``, in LOCAL relation vocabulary.
+
+    The counterpart of :func:`deps_as_set` for the REMOVE paths (ticket 2b16): it renders what
+    the peer currently carries in the same ``(relation, target)`` shape the local deps use, so
+    the two sets can be compared directly. It belongs here beside
+    :func:`resolve_inbound_link` because rendering it is exactly the direction problem this
+    module exists to own once — comparing raw peer keys, or the un-inverted base relation,
+    makes an ``inwardIssue``/``Blocks`` entry read as ``blocks`` against a ``depends_on`` dep,
+    so a link that is STILL on the peer reads as deleted.
+
+    Entries with an unmapped link type, a malformed shape, or an unbound counterpart are
+    omitted — an unbound counterpart has no local id to compare a dep against.
+    """
+    out: set[tuple[str, str]] = set()
+    for link in issuelinks or []:
+        if not isinstance(link, dict):
+            continue
+        other_key, relation = resolve_inbound_link(link)
+        if other_key is None or relation is None:
+            continue
+        target_id = get_local_id(other_key)
+        if target_id:
+            out.add((relation, target_id))
+    return out
 
 
 def deps_as_set(ticket: dict[str, Any] | None) -> set[tuple[str, str]]:
