@@ -89,7 +89,7 @@ def test_in_process_lock_collapses_without_flock(store, repo, monkeypatch):
     """Pin the IN-PROCESS single-flight specifically: with the cross-process flock
     disabled, the per-SHA threading lock alone must still collapse to one build."""
     sha = _commit(repo, "f.txt", "v1\n")
-    monkeypatch.setattr(cache, "_interprocess_lock", lambda _p: contextlib.nullcontext())
+    monkeypatch.setattr(cache, "interprocess_lock", lambda _p: contextlib.nullcontext())
     builds: list[str] = []
     real = rs._materialize_tree
 

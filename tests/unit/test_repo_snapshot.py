@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar._snapshot import git_fetch
 from rebar._snapshot import repo_snapshot as rs
 
 
@@ -203,9 +204,9 @@ def test_unresolvable_ref_fails_closed(tmp_path):
 
 
 def test_auth_marker_detection():
-    assert rs._is_auth_failure("fatal: Authentication failed for 'https://...'")
-    assert rs._is_auth_failure("git@github.com: Permission denied (publickey).")
-    assert not rs._is_auth_failure("fatal: couldn't find remote ref main")
+    assert git_fetch.is_auth_failure("fatal: Authentication failed for 'https://...'")
+    assert git_fetch.is_auth_failure("git@github.com: Permission denied (publickey).")
+    assert not git_fetch.is_auth_failure("fatal: couldn't find remote ref main")
 
 
 def test_malicious_ref_in_targeted_fetch_does_not_execute(tmp_path):

@@ -60,15 +60,23 @@ import os
 import shutil
 import subprocess
 import tempfile
-import threading
 import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rebar._snapshot.git_fetch import (
+    _GIT_TIMEOUT,
+    SnapshotError,
+    SnapshotFetchError,
+    SnapshotRefError,
+    fetch_origin,
+    git_run,
+    has_remote,
+    rev_parse,
+    stall_abort_args,
+)
 from rebar._store import fsutil
-from rebar._store.gitutil import run_git
 
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
     import fcntl
@@ -89,38 +97,6 @@ SOURCE_LOCAL = "local"
 _SOURCE_MODES = (SOURCE_ATTESTED, SOURCE_LOCAL)
 
 DEFAULT_REF = "origin/main"
-
-# stderr fragments that mean "the remote rejected us for AUTH reasons" — surfaced as a
-# credential error with an actionable remedy rather than a raw git dump.
-_AUTH_STDERR_MARKERS = (
-    "authentication failed",
-    "could not read username",
-    "could not read password",
-    "permission denied (publickey)",
-    "permission denied, please try again",
-    "fatal: could not read from remote repository",
-    "remote: invalid username or password",
-    "remote: support for password authentication",
-    "terminal prompts disabled",
-    "403 forbidden",
-    "401 unauthorized",
-)
-
-
-class SnapshotError(RuntimeError):
-    """A snapshot could not be materialized (fail-closed in attested mode)."""
-
-
-class SnapshotFetchError(SnapshotError):
-    """``git fetch`` failed — typically missing/invalid credentials for a private repo.
-
-    Carries an actionable remedy (configure a credential helper / deploy key / token);
-    see the MCP-server setup docs. Attested mode treats this as fail-closed."""
-
-
-class SnapshotRefError(SnapshotError):
-    """A client ``ref`` did not resolve to a commit (after fetching)."""
-
 
 # --------------------------------------------------------------------------------------
 # Store layout
@@ -148,6 +124,15 @@ def store_root() -> Path:
     except OSError:  # best-effort on platforms without full POSIX perms
         pass
     return root
+
+
+def _fetch_lock_path() -> Path:
+    """The cross-process ``git fetch`` lock file, inside the snapshot store.
+
+    The store owns this layout, so the path is computed here and handed to
+    :func:`~rebar._snapshot.git_fetch.fetch_origin` rather than that lower layer
+    importing the store back (which would close an import cycle)."""
+    return store_root() / "locks" / "fetch.lock"
 
 
 def _tmp_root(root: Path) -> Path:
@@ -225,175 +210,6 @@ class SnapshotHandle:
             self._cleanup()
 
 
-# --------------------------------------------------------------------------------------
-# Cross-process locking (flock, with an atomic-mkdir fallback)
-# --------------------------------------------------------------------------------------
-@contextmanager
-def _interprocess_lock(lock_path: Path) -> Iterator[None]:
-    """Hold an exclusive cross-process lock for the duration of the block.
-
-    Uses ``fcntl.flock(LOCK_EX)`` where available; otherwise falls back to an atomic
-    ``mkdir`` spin-lock (``mkdir`` is atomic on a local FS). A lost race here is only
-    ever *wasteful* (a redundant fetch), never *wrong*, so the fallback's coarseness is
-    acceptable."""
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if fcntl is not None:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
-        return
-    # Fallback: atomic mkdir spin-lock.
-    mkdir_lock = lock_path.with_suffix(lock_path.suffix + ".d")
-    import time
-
-    while True:
-        try:
-            os.mkdir(str(mkdir_lock))
-            break
-        except FileExistsError:
-            time.sleep(0.02)
-    try:
-        yield
-    finally:
-        try:
-            os.rmdir(str(mkdir_lock))
-        except OSError:  # pragma: no cover - best effort
-            pass
-
-
-# In-process fetch coalescing: at most one fetch per repo at a time within this process
-# (the cross-process flock handles the multi-process case).
-_fetch_locks: dict[str, threading.Lock] = {}
-_fetch_locks_guard = threading.Lock()
-
-
-def _fetch_lock_for(repo_root: str) -> threading.Lock:
-    key = os.path.realpath(repo_root)
-    with _fetch_locks_guard:
-        lk = _fetch_locks.get(key)
-        if lk is None:
-            lk = threading.Lock()
-            _fetch_locks[key] = lk
-        return lk
-
-
-# --------------------------------------------------------------------------------------
-# git plumbing
-# --------------------------------------------------------------------------------------
-# Bound every git call on this path so a stuck remote (or hung credential helper) can never
-# wedge the long-lived MCP server. Deliberately MUCH larger than the 30s in _store/push.py
-# and _store/sync.py: those bound a tickets push/fetch (a few tiny event files), whereas a
-# materialization fetch here is UNFILTERED and transfers every blob of a whole tree in one
-# RPC — legitimately minutes on a cold clone. A timeout surfaces as a failed
-# CompletedProcess (returncode 124), never a hang.
-_GIT_TIMEOUT = 300
-
-
-def _git(
-    repo_root: str, *args: str, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    try:
-        return run_git(repo_root, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", "-C", repo_root, *args],
-            124,
-            "",
-            f"git timed out after {_GIT_TIMEOUT}s",
-        )
-
-
-def _has_remote(repo_root: str, remote: str = "origin") -> bool:
-    proc = _git(repo_root, "remote")
-    remotes = {ln.strip() for ln in proc.stdout.splitlines()}
-    return remote in remotes
-
-
-def _rev_parse(repo_root: str, ref: str) -> str | None:
-    """Resolve ``ref`` to a full commit SHA, or ``None`` if it does not resolve."""
-    proc = _git(
-        repo_root,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        "--end-of-options",
-        f"{ref}^{{commit}}",
-    )
-    sha = proc.stdout.strip()
-    return sha or None
-
-
-def _is_auth_failure(stderr: str) -> bool:
-    low = stderr.lower()
-    return any(marker in low for marker in _AUTH_STDERR_MARKERS)
-
-
-def _fetch_origin(
-    repo_root: str, *, ref: str | None = None, remote: str = "origin", blobless: bool = True
-) -> None:
-    """Coalesced ``git fetch <remote>`` (optionally a targeted ref/SHA).
-
-    Serialized in-process (one fetch per repo at a time) and cross-process (an exclusive
-    flock), since fetch is the only lock-taking step. ``blobless`` selects the filtering
-    policy (see the module docstring): ``True`` (the default, preserving today's behaviour
-    for pure-resolution callers) fetches ``--filter=blob:none`` — commits and trees only. A
-    caller whose ref WILL be materialized must pass ``blobless=False`` → ``--no-filter``, so
-    blobs arrive with the commit in a single RPC and an ordinary clone is never latched into
-    a promisor remote.
-
-    Raises :class:`SnapshotFetchError` (fail-closed) on failure, with an actionable
-    credential remedy when the remote rejected us for auth reasons; a timeout is likewise
-    surfaced as a descriptive error rather than a hang."""
-    # Disable any interactive credential prompt so a missing credential fails fast with a
-    # descriptive error instead of hanging the long-lived server on a TTY prompt.
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    filter_arg = "--filter=blob:none" if blobless else "--no-filter"
-    args = ["fetch", "--quiet", filter_arg, remote]
-    if ref is not None:
-        # SECURITY: a client ref reaches this positional, so it MUST be terminated with
-        # --end-of-options. Without it, git reorders interspersed options and a ref like
-        # "--upload-pack=<cmd>" would be parsed as an option and EXECUTE (RCE). With it,
-        # git treats the value strictly as a refspec (invalid refspec -> fail closed).
-        args += ["--end-of-options", ref]
-    lock_path = store_root() / "locks" / "fetch.lock"
-    with _fetch_lock_for(repo_root), _interprocess_lock(lock_path):
-        try:
-            proc = subprocess.run(
-                ["git", "-C", repo_root, *args],
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=_GIT_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired as exc:
-            # Fail closed with a description (this function's contract) — never leave the
-            # caller, or the long-lived server, blocked on a stuck remote.
-            raise SnapshotFetchError(
-                f"git fetch from '{remote}' timed out after {_GIT_TIMEOUT}s (attested mode "
-                "fails closed) — the remote may be unreachable or the transfer too large."
-            ) from exc
-    if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()
-        if _is_auth_failure(stderr):
-            raise SnapshotFetchError(
-                f"git fetch from '{remote}' was rejected for authentication — the rebar "
-                "MCP server needs read credentials to fetch the verified ref from a "
-                "private repository. Configure a git credential helper, a deploy key, "
-                "or a token for the server's clone (see the MCP-server setup docs), "
-                f"then retry. git said: {stderr or '<no detail>'}"
-            )
-        raise SnapshotFetchError(
-            f"git fetch from '{remote}' failed (attested mode fails closed): "
-            f"{stderr or '<no detail>'}"
-        )
-
-
 def resolve_ref(
     ref: str,
     repo_root: str | None = None,
@@ -409,22 +225,24 @@ def resolve_ref(
     local copy. A SHA that is not present locally triggers a targeted fetch (requires the
     remote's ``uploadpack.allowReachableSHA1InWant``). Raises :class:`SnapshotRefError`
     (fail-closed) if the ref still does not resolve. ``blobless`` is forwarded verbatim to
-    :func:`_fetch_origin`; it defaults to ``True`` (commits/trees only) because a bare
-    resolution never needs file content. A caller about to MATERIALIZE the resolved SHA must
-    pass ``blobless=False``."""
+    :func:`~rebar._snapshot.git_fetch.fetch_origin`; it defaults to ``True``
+    (commits/trees only) because a bare resolution never needs file content. A caller
+    about to MATERIALIZE the resolved SHA must pass ``blobless=False``."""
     root = str(repo_root) if repo_root else "."
-    has_remote = fetch and _has_remote(root, remote)
-    if has_remote:
-        _fetch_origin(root, remote=remote, blobless=blobless)
-    sha = _rev_parse(root, ref)
-    if sha is None and has_remote:
+    remote_present = fetch and has_remote(root, remote)
+    if remote_present:
+        fetch_origin(root, lock_path=_fetch_lock_path(), remote=remote, blobless=blobless)
+    sha = rev_parse(root, ref)
+    if sha is None and remote_present:
         # A bare SHA (or a ref only reachable by an explicit want) not present after the
         # general fetch — try a targeted fetch (allowReachableSHA1InWant on the remote).
         try:
-            _fetch_origin(root, ref=ref, remote=remote, blobless=blobless)
+            fetch_origin(
+                root, lock_path=_fetch_lock_path(), ref=ref, remote=remote, blobless=blobless
+            )
         except SnapshotFetchError:
             pass  # fall through to the descriptive ref error below
-        sha = _rev_parse(root, ref)
+        sha = rev_parse(root, ref)
     if sha is None:
         raise SnapshotRefError(
             f"cannot resolve ref {ref!r} to a commit in {root!r}. Name a valid branch, "
@@ -448,7 +266,7 @@ def is_lfs_pointer(path: Path) -> bool:
 def _list_submodules(repo_root: str, sha: str) -> tuple[str, ...]:
     """Gitlink (mode 160000) paths in the tree at ``sha`` — submodules, omitted from the
     materialized tree by construction."""
-    proc = _git(repo_root, "ls-tree", "-r", "--full-tree", sha)
+    proc = git_run(repo_root, "ls-tree", "-r", "--full-tree", sha)
     paths: list[str] = []
     for line in proc.stdout.splitlines():
         # "<mode> <type> <oid>\t<path>"
@@ -503,7 +321,7 @@ def _has_missing_blobs(repo_root: str, sha: str) -> bool:
     for materialization to fail."""
     probe = ["rev-list", "--objects", "--missing=print", "--no-object-names", "--no-walk"]
     # --end-of-options: the SHA is a positional, so it must never be read as an option.
-    proc = _git(repo_root, *probe, "--end-of-options", sha)
+    proc = git_run(repo_root, *probe, "--end-of-options", sha)
     if proc.returncode != 0:
         return False
     return any(line.startswith("?") for line in proc.stdout.splitlines())
@@ -526,16 +344,19 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
     remote may be absent, offline, or reject our credentials. Production still has lazy fetch
     as the fallback, so a failed top-up degrades to today's behaviour and never adds a NEW
     failure mode. Exactly ONE fetch per materialization; a loop would defeat the point."""
-    if not _has_missing_blobs(repo_root, sha) or not _has_remote(repo_root, remote):
+    if not _has_missing_blobs(repo_root, sha) or not has_remote(repo_root, remote):
         return
     # SECURITY: the SHA reaches a fetch positional, so it MUST be terminated with
-    # --end-of-options — same reasoning as the targeted fetch in _fetch_origin (without it,
+    # --end-of-options — same reasoning as the targeted fetch in git_fetch.fetch_origin (without it,
     # a value like "--upload-pack=<cmd>" would be parsed as an option and EXECUTE).
     argv = ["fetch", "--no-filter", "--refetch", "--quiet", remote, "--end-of-options", sha]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
+        # Same throughput-keyed abort as fetch_origin: this is the OTHER network fetch on
+        # the materialization path, so without it a stalled remote parks this child on the
+        # 300s wall clock too. The -c pairs must precede the subcommand.
         subprocess.run(
-            ["git", "-C", repo_root, *argv],
+            ["git", "-C", repo_root, *stall_abort_args(), *argv],
             capture_output=True,
             text=True,
             env=env,
@@ -551,20 +372,21 @@ def _materialize_tree(repo_root: str, sha: str, dest_tmp: Path) -> None:
     Uses a throwaway index (``GIT_INDEX_FILE``) so the repo's own index/working tree is
     never touched — this is what keeps concurrent materializations of different SHAs from
     contending on ``index.lock``. ``GIT_TERMINAL_PROMPT=0`` is set for the same reason
-    :func:`_fetch_origin` sets it — this path can drive git's own (lazy) network fetch, so
-    without it a missing credential would block on a TTY prompt and hang the server."""
+    :func:`~rebar._snapshot.git_fetch.fetch_origin` sets it — this path can drive git's
+    own (lazy) network fetch, so without it a missing credential would block on a TTY
+    prompt and hang the server."""
     dest_tmp.mkdir(parents=True, exist_ok=True)
     index_file = dest_tmp.parent / (dest_tmp.name + ".index")
     env = {**os.environ, "GIT_INDEX_FILE": str(index_file), "GIT_TERMINAL_PROMPT": "0"}
     try:
-        read = _git(repo_root, "read-tree", sha, env=env)
+        read = git_run(repo_root, "read-tree", sha, env=env)
         if read.returncode != 0:
             raise SnapshotError(
                 f"git read-tree {sha[:12]} failed: {(read.stderr or '').strip() or '<no detail>'}"
             )
         # checkout-index creates leading directories under --prefix automatically.
         prefix = str(dest_tmp) + os.sep
-        checkout = _git(
+        checkout = git_run(
             repo_root,
             "checkout-index",
             "--all",
@@ -742,7 +564,7 @@ def materialize_tickets(
     except _ConfigError:
         remote = "origin"
     # blobless=False on every fetching resolution — this ref is about to be materialized.
-    if fetch and _has_remote(root_dir, remote):
+    if fetch and has_remote(root_dir, remote):
         try:
             sha = resolve_ref(
                 f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote, blobless=False

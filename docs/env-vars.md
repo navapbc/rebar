@@ -142,6 +142,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/health.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine_support/reads.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
+| `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_snapshot/git_fetch.py` |  |
+| `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_snapshot/git_fetch.py` |  |
+| `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_snapshot/git_fetch.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py`, `src/rebar/opcert_service/jobs.py` |  |
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
@@ -161,7 +164,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_151 variables._
+_154 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

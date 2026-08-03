@@ -220,14 +220,14 @@ def test_materialize_tree_disables_interactive_credential_prompt(tmp_path, monke
     sha = _git(repo, "rev-parse", "HEAD")
 
     seen: list[dict[str, str]] = []
-    real_git = rs._git
+    real_git = rs.git_run
 
     def spy(repo_root, *args, env=None):  # noqa: ANN001, ANN002, ANN003
         if env is not None:
             seen.append(env)
         return real_git(repo_root, *args, env=env)
 
-    monkeypatch.setattr(rs, "_git", spy)
+    monkeypatch.setattr(rs, "git_run", spy)
     rs.materialize(sha, repo_root=str(repo), fetch=False)
 
     assert seen, "expected _materialize_tree to pass an explicit env"

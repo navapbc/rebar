@@ -302,7 +302,7 @@ def test_materialize_tickets_resolves_configured_remote_ref(
         seen["blobless"] = blobless
         raise _Stop  # short-circuit before real FS materialization
 
-    monkeypatch.setattr(repo_snapshot, "_has_remote", lambda root, remote="origin": True)
+    monkeypatch.setattr(repo_snapshot, "has_remote", lambda root, remote="origin": True)
     monkeypatch.setattr(repo_snapshot, "resolve_ref", _fake_resolve)
 
     with pytest.raises(_Stop):
