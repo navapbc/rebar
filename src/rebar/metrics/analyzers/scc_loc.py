@@ -18,6 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+# raw-git-ok: generic command runner, argv supplied by caller
 def _run_scc(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     """Run an scc command with text output captured for parsing."""
 

@@ -72,6 +72,7 @@ ADJUDICATED_SUBSTANTIVE = frozenset(
 _SUBJECT_TICKET_PREFIX = re.compile(r"^([0-9a-f]{4}(?:-[0-9a-f]{4}){0,3}):")
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def _git(*args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True, check=True

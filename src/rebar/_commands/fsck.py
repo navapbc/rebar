@@ -383,6 +383,7 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
     rather than a crash.
     """
 
+    # raw-git-ok: store-maintenance command, seam-internal
     def _git(*args: str) -> subprocess.CompletedProcess:
         return run_git(tracker, *args, check=False)
 

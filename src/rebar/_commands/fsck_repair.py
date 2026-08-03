@@ -53,6 +53,7 @@ _HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
 )
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     return run_git(tracker, *args, check=False)
 
@@ -66,6 +67,7 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
 _PUSH_TIMEOUT = 30
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git_push(tracker: str, *args: str) -> subprocess.CompletedProcess:
     try:
         return run_git(tracker, *args, check=False, timeout=_PUSH_TIMEOUT)
@@ -269,6 +271,7 @@ def _reconciler_in_flight(repo_root=None) -> bool:
         return True  # indeterminate lock state → fail-closed (do not repair)
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _repair_run(
     tracker: str, *, dry_run: bool, limit: int | None = None, repo_root=None
 ) -> tuple[list[str], int]:

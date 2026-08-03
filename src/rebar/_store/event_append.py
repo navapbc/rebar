@@ -242,6 +242,7 @@ def _with_transient_add_retry(
 _GIT_TIMEOUT = 30
 
 
+# raw-git-ok: locked store seam internal
 def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """``subprocess.run`` a git command (captured, text) bounded by :data:`_GIT_TIMEOUT`.
 
@@ -258,6 +259,7 @@ def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {_GIT_TIMEOUT}s")
 
 
+# raw-git-ok: locked store seam internal
 def _git_add(
     tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
 ) -> subprocess.CompletedProcess[str]:
@@ -281,6 +283,7 @@ def _git_add(
     )
 
 
+# raw-git-ok: locked store seam internal
 def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
     """``git -C tracker commit -q --no-verify -m <msg>``, riding out three transients:
     index.lock contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`;
@@ -305,6 +308,7 @@ def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[st
     )
 
 
+# raw-git-ok: locked store seam internal
 def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[str]:
     """``git -C tracker rm -q -- <relpaths>``, riding out index.lock contention (and
     reclaiming a stale lock) via :func:`_with_index_lock_retry`. Stages the deletions AND
@@ -316,6 +320,7 @@ def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[st
     )
 
 
+# raw-git-ok: locked store seam internal
 def _git_commit_paths(
     tracker: str, commit_msg: str, relpaths: list[str]
 ) -> subprocess.CompletedProcess[str]:
@@ -337,6 +342,7 @@ def _git_commit_paths(
     )
 
 
+# raw-git-ok: locked store seam internal
 def _restore_paths(tracker: str, relpaths: list[str]) -> None:
     """Restore *relpaths* to their committed HEAD state in both index and worktree
     (best-effort). Undoes a staged ``git rm`` whose commit then failed, so a failed delete
@@ -640,6 +646,7 @@ def _silent_unlink(path: str) -> None:
         pass
 
 
+# raw-git-ok: locked store seam internal
 def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
     """Drop a staged event from the git index (best-effort).
 
@@ -661,6 +668,7 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
 _REGENERABLE_PREFIX = ".bridge_state/"
 
 
+# raw-git-ok: locked store seam internal
 def _recover_from_unmerged(
     tracker: str, event_relpaths: list[str], commit_msg: str
 ) -> tuple[bool, str | None]:
@@ -728,6 +736,7 @@ def _staged_index_paths(tracker: str) -> list[str]:
     return r.stdout.splitlines() if r.returncode == 0 else []
 
 
+# raw-git-ok: locked store seam internal
 def _recover_from_invalid_object(
     tracker: str, event_relpaths: list[str], commit_msg: str, commit_stderr: str
 ) -> bool:
