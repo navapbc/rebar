@@ -569,3 +569,55 @@ def assert_bridge_alert_for_mutation(
                 if rec.get("local_id") == local_id or (key is not None and rec.get("key") == key):
                     records.append(rec)
     return records
+
+
+def probe_subtask_parent_put(
+    dc_request: Any, key: str, new_parent: str | None, *, verb: str = "fields"
+) -> tuple[int, Any]:
+    """Raw REST `PUT` on `key`'s parent, bypassing pycontribs — for [rebar:1a9f-50c0-e7a5-4fda].
+
+    Settles that ticket's AC1 (does DC 8.17.1 return SUCCESS or an ERROR for a sub-task reparent
+    that does not take effect?) DIRECTLY: `dc_transport.set_parent` calls pycontribs'
+    `issue.update(...)`, which does not surface the raw HTTP status/body to its caller, so
+    nothing in the existing code path can answer this. This probe issues the identical
+    operation over ``dc_request`` and returns exactly what DC said.
+
+    ``verb="fields"`` (the default) sends the SAME shape `set_parent` sends —
+    ``{"fields": {"parent": {...}}}`` (`jira_datacenter/transport.py:711-712`).
+    ``verb="update"`` sends the alternative ``{"update": {"parent": [{"set": ...}]}}`` form
+    instead, one of the two cheap falsifiers recorded on [rebar:37e7-d751-0042-4b94]: if the two
+    verbs disagree (one accepted, one rejected), the `fields` shape itself — not sub-task
+    reparenting in general — is implicated.
+
+    ``new_parent=None`` sends a clearing PUT (`{"parent": None}` / `{"set": None}`); a non-None
+    value sends a set/reparent. Purely a DIAGNOSTIC CAPTURE — this does not assert anything;
+    the caller folds the returned `(status, body)` into its own assertion message so a CI
+    reader can see what DC returned without needing this probe to pass or fail on its own.
+    """
+    target = {"key": new_parent} if new_parent else None
+    if verb == "update":
+        payload: dict[str, Any] = {"update": {"parent": [{"set": target}]}}
+    else:
+        payload = {"fields": {"parent": target}}
+    return dc_request(f"/rest/api/2/issue/{key}", method="PUT", payload=payload)
+
+
+def probe_subtask_parent_editmeta_ops(dc_request: Any, key: str) -> tuple[int, list[str]]:
+    """The operations `/editmeta` lists for `key`'s `parent` field — the other cheap falsifier.
+
+    Recorded on [rebar:37e7-d751-0042-4b94]: if `parent` exposes no operations (or is absent
+    from `editmeta` entirely), DC is declaring the field non-editable through this endpoint
+    independent of whatever a raw `PUT` returns, which would point the reparent question at a
+    field-permission problem rather than at DC silently no-op'ing an accepted write.
+
+    Returns ``(status, [])`` on anything but a clean 200/dict body, so a caller never has to
+    guess whether an empty list meant "no operations" or "the read itself failed" — the status
+    code carries that distinction. Diagnostic only, like `probe_subtask_parent_put`: it does
+    not assert, so the caller decides what to do with the result.
+    """
+    status, body = dc_request(f"/rest/api/2/issue/{key}/editmeta")
+    if status != 200 or not isinstance(body, dict):
+        return status, []
+    parent_meta = (body.get("fields") or {}).get("parent") or {}
+    ops = parent_meta.get("operations") or []
+    return status, [str(op) for op in ops]
