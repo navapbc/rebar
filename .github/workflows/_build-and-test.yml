@@ -425,6 +425,14 @@ jobs:
           fi
           echo "Public-types drift gate: OK (types.py is up to date)."
 
+      # Config-read gate (ticket 6754): every _config_schema.py dataclass field must
+      # have at least one attribute-read site outside the schema/config plumbing, or
+      # carry a ``# read-via: <pointer>`` escape marker.
+      - name: Config-read gate
+        shell: bash
+        run: |
+          python scripts/check_config_reads.py
+
       - name: Run the default suite (Python tiers; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
         # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp

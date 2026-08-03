@@ -120,9 +120,11 @@ class VerifyConfig:
     # LLM completion-verifier (rebar.llm.verify_completion) and blocks on FAIL / unavailable
     # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
     # Default off.
+    # read-via: _commands/gates.py gate_enabled string key
     require_completion_verification_for_close: bool = False
     # Opt-in local plan-review close gate. It verifies a separately attested review with the
     # CLOSE validity profile; it never launches an LLM review. Default off.
+    # read-via: _commands/gates.py string key
     require_plan_review_for_close: bool = False
     # Opt-in plan-review gate (epic 5fd2): when true, claiming a work ticket
     # (open→in_progress) requires a fresh, certified plan-review attestation (run
@@ -131,6 +133,7 @@ class VerifyConfig:
     # justification. A FAST local HMAC check only — no LLM on the claim path. Bugs
     # and session_logs are exempt. Default off ⇒ `claim` keeps today's behavior;
     # turning it off is the rollback (an ordinary preference, no kill-switch needed).
+    # read-via: _commands/gates.py string key
     require_plan_review_for_claim: bool = False
     # Opt-in store-wide cross-ticket overlap detection (epic only-crave-art). When true, the
     # plan-review invocation runs an ADVISORY store-wide overlap step (enrich → BM25F retrieve
@@ -215,8 +218,8 @@ class VerifyConfig:
     #     and drop the contradicted/weaker one (5e40 A1: a false BLOCK refuted by a true advisory).
     #   - comment_trail_xcheck_active: consult the ticket's recorded comment trail and drop a
     #     finding that re-litigates a point the trail already RESOLVED (5e40 B3: rebase:chain).
-    contradiction_xcheck_active: bool = False
-    comment_trail_xcheck_active: bool = False
+    contradiction_xcheck_active: bool = False  # read-via: llm/plan_review/xcheck.py getattr
+    comment_trail_xcheck_active: bool = False  # read-via: llm/plan_review/xcheck.py getattr
     # Opt-in per-gate required-signing-environment (story 42d1). When set to an env_id, a gate's
     # operation certificate must come from that pinned trusted environment
     # (`.rebar/trusted_environments.yaml`), verified against its out-of-band-pinned key. Default
@@ -390,7 +393,7 @@ class ReconcilerConfig:
     # Lease (seconds) the ref-backend pass-lock holds; the heartbeat renews at
     # max(1, lease // 3). Consumed by the refs/reconciler/* CAS lock (epic
     # dust-troth-naval / ADR 0031), the only pass-lock backend.
-    lock_lease_secs: int = 120
+    lock_lease_secs: int = 120  # read-via: _engine/rebar_reconciler/_advisory_lock.py getattr
     deletion_probe_limit: int = 20
     id_guard_bypass_unsafe: bool = False
     # Convergence circuit breaker (epic 3006-e198): refuse a pass whose ACTING
@@ -464,6 +467,7 @@ class CodeHealthConfig:
 
     enabled: bool = False
     scan_roots: list[str] = field(default_factory=list)
+    # read-via: inert pending bug dce2-b93d-4112-451c
     analyzers: dict[str, str] = field(default_factory=dict)
     size_cap: int | None = None
     size_near_fraction: float = 0.1
