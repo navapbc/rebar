@@ -139,6 +139,68 @@ deterministic-floor-only result instead of failing loudly — a known defect (bu
 `fuel-posse-ball`). Until it's fixed, treat any `review-plan` output with
 `coverage.llm_ran == false` as **not a real review**, regardless of the `PASS` verdict.
 
+### Running your local gates on AWS Bedrock instead of direct Anthropic
+
+Bedrock is a first-class provider (`docs/llm-example-configs.md` §2), so a developer can point
+`review-plan` / `review-code` / `verify-completion` at it without touching `src/`. Prefer the
+**layered config file** over the deprecated bare `REBAR_LLM_MODEL`: the pointer sets the three
+model classes at once, deep-merges over (rather than replaces) the discovered config, and is
+reverted by unsetting one variable.
+
+Write the file once — anywhere readable; `~/.config/rebar/bedrock.toml` keeps it out of the
+checkout, and the table is `[llm.model_classes]` (not `[tool.rebar.llm…]`, which is the
+`pyproject.toml` spelling):
+
+```toml
+# ~/.config/rebar/bedrock.toml
+[llm.model_classes]
+frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+```
+
+**Opt in** (one variable) and **revert** (unset it):
+
+```sh
+export REBAR_LLM_CONFIG_FILE=~/.config/rebar/bedrock.toml   # opt in
+unset  REBAR_LLM_CONFIG_FILE                                # revert to Anthropic
+```
+
+Confirm which way you are pointed without spending a token — this reads config only:
+
+```sh
+python -c "from rebar.llm.model_classes import resolve_model_string as r; \
+print([ (c, r(c)) for c in ('trivial','standard','frontier') ])"
+# opted in : [('trivial', 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0'), …]
+# reverted : [('trivial', 'anthropic:claude-haiku-4-5'), …]
+```
+
+Things that bite:
+
+- **Only inference-profile ids work.** A bare on-demand id (`anthropic.claude-sonnet-4-6`)
+  is not invokable and returns a `ValidationException` telling you to use an inference
+  profile. Use the `us.`/`global.` prefixed form, and take the id verbatim from
+  `aws bedrock list-inference-profiles --region <region>` — the profile ids do **not** all
+  carry a `-v1:0` suffix, and an id that does not exist fails only at call time.
+- **Credentials are ambient, never rebar-managed** — the AWS chain (`AWS_PROFILE`, env keys,
+  instance role). `ANTHROPIC_API_KEY` is not consulted on this path.
+- **A region must resolve.** `REBAR_LLM_BEDROCK_REGION` is rebar's own knob (and so is
+  visible to the verdict's provider provenance); otherwise boto3's resolution applies.
+  Nothing resolving at all is a hard error, not a silent default.
+- `pip install 'pydantic-ai-slim[bedrock]'` if the provider package is missing; the error
+  names the package.
+- **Prompt-cache lifetime is the same on both paths, so caching needs no per-provider
+  tuning.** Bedrock expresses a breakpoint as a `cachePoint` block whose `ttl` is
+  *optional and defaults to 5 minutes* — the same default Anthropic's `cache_control`
+  applies — so rebar emitting no explicit TTL yields a 5-minute lifetime on either
+  provider rather than an unbounded or absent one. Measured on Bedrock, caching engages on
+  all three gates: `review-plan` read 226,668 cached tokens across 18 of 27 calls,
+  `review-code` 18,292, and `verify-completion` 45,122. Non-zero cache **reads** are what
+  carry the signal; a write-only tally would prove nothing. The 1-hour TTL that Bedrock
+  offers for some Claude models is opt-in and unused here, so it is not a difference
+  either. Untested edge: a gap longer than 5 minutes *between* calls, which no gate run
+  exercises because each completes well inside one TTL window.
+
 ## No-install alternative (run repo code without an editable install)
 
 If you can't or don't want to install rebar into the env (e.g. to avoid writing
