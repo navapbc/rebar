@@ -164,6 +164,30 @@ def test_ticket_dirs_prose_is_not_an_acceptor(tmp_path: Path) -> None:
     assert _run(tmp_path).returncode == 1
 
 
+def test_a_hyphenated_file_path_is_not_an_alias_acceptor(tmp_path: Path) -> None:
+    """A hyphen-joined FILE NAME must not read as a word-triple alias: the b047 close
+    verification found a live raw SHA masked by 'docs/designs/sync-hardening-proposal.md'
+    accepting its block."""
+    _write(
+        tmp_path,
+        "src/mod.py",
+        "# Canonical reference: 183fd51ac2; pending consolidation per\n"
+        "# docs/designs/sync-hardening-proposal.md Item 3.\nX = 1\n",
+    )
+    assert _run(tmp_path).returncode == 1
+
+
+def test_a_sentence_final_alias_still_accepts(tmp_path: Path) -> None:
+    """The path/extension tightening must not reject a real alias that ends a
+    sentence — '.' followed by whitespace is not a file extension."""
+    _write(
+        tmp_path,
+        "src/mod.py",
+        "# Run 30721408463's census drift is recorded on robe-creek-zealot. See there.\nX = 1\n",
+    )
+    assert _run(tmp_path).returncode == 0
+
+
 def test_hash_algorithm_names_do_not_trigger(tmp_path: Path) -> None:
     """ed25519 is 7 hex-alphabet chars with digits+letters — the denylist keeps
     algorithm names from reading as commit SHAs."""

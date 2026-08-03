@@ -86,8 +86,14 @@ _EVIDENCE_VERB = re.compile(
 _GROUPED_HEX_ID = re.compile(r"\b[0-9a-f]{4}(?:-[0-9a-f]{4}){1,3}\b")
 
 # Word-triple store alias: exactly three hyphen-joined lowercase words, not embedded
-# in a longer hyphen chain.
-_WORD_TRIPLE_ALIAS = re.compile(r"(?<![a-z0-9-])[a-z]{3,}-[a-z]{3,}-[a-z]{3,}(?![a-z0-9-])")
+# in a longer hyphen chain, and NOT path/filename context — a hyphenated file name like
+# docs/designs/sync-hardening-proposal.md must not accept a block (it masked a live raw
+# SHA in the b047 close verification). Rejects a preceding path separator and a trailing
+# file extension; a sentence-final alias ("…robe-creek-zealot.") still accepts because
+# the extension shape requires letters after the dot.
+_WORD_TRIPLE_ALIAS = re.compile(
+    r"(?<![a-z0-9./\\-])[a-z]{3,}-[a-z]{3,}-[a-z]{3,}(?![a-z0-9-])(?!\.[a-z]{1,4}\b)"
+)
 
 _ADR_ID = re.compile(r"(?i)\bADR[- ]?\d{3,4}\b")
 

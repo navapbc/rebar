@@ -9,8 +9,9 @@ Asserts:
 
 Per docs contract: any field whose outbound name differs from its inbound name
 MUST appear in _OUTBOUND_TO_INBOUND_FIELD.  This test is the enforcement gate.
-Canonical reference: 183fd51ac2; pending consolidation into _field_contract.py
-per docs/designs/sync-hardening-proposal.md Item 3.
+Canonical reference: the CONTRACT block in inbound_differ.py (cross-direction
+field-name canonicalization); consolidation into _field_contract.py is tracked
+by story a130-2b7c-429c-43d1.
 """
 
 from __future__ import annotations
