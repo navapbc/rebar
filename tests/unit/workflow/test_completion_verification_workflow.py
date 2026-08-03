@@ -91,9 +91,18 @@ def _patch_rebar(monkeypatch, *, ticket_type="story", children=None, child_sig="
         "rebar._reads.show_ticket",
         lambda tid, repo_root=None: {"ticket_id": "T-1", "ticket_type": ticket_type},
     )
-    monkeypatch.setattr(
-        "rebar._reads.list_tickets", lambda parent=None, repo_root=None: list(children or [])
-    )
+
+    # Model the precheck's FULL read surface (keyword-only, like the real _reads.list_tickets):
+    # parent queries feed the child-closure gate and the epic-subtree BFS; the epic-close bug
+    # screen's `status=`/`ticket_type="bug"` queries see an EMPTY store (no bugs). A fake pinned
+    # to `(parent, repo_root)` alone would TypeError inside the 4b54 floor and kill the step
+    # before the LLM.
+    def _fake_list(*, parent=None, status=None, ticket_type=None, repo_root=None, **_kw):
+        if ticket_type == "bug":
+            return []
+        return list(children or []) if parent is not None else []
+
+    monkeypatch.setattr("rebar._reads.list_tickets", _fake_list)
     # Match the REAL call site (completion.child_closure_findings):
     # verify_signature(cid, kind="completion-verifier", repo_root=…). A fake missing `kind`
     # raises TypeError, which the child-closure path swallows into `uncertified` — so the

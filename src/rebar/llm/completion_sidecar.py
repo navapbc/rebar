@@ -32,6 +32,11 @@ SCHEMA = "completion_verifier_fail_v1"
 # (`latest_fail_verdict`, guarded to SCHEMA) and the PASS reader (`latest_pass_record`, guarded
 # to SCHEMA_PASS) never confuse the two. The FAIL path/schema/reader are UNCHANGED.
 SCHEMA_PASS = "completion_verifier_pass_v1"
+# The epic-close bug-screen tally schema (ticket 4b54): one record per screened epic close,
+# carrying the per-bug forced-choice verdict + citation and the unevaluated-overflow count
+# (candidates beyond the screen ceiling), for audit and live false-negative calibration.
+# Distinct schema tag so the FAIL/PASS readers never confuse it with a verdict record.
+SCHEMA_SCREEN = "epic_bug_screen_v1"
 
 # Retention bound: COMPLETION_VERDICT is reducer-IGNORED and compaction intentionally
 # PRESERVES it (never snapshots/absorbs a non-KNOWN type). This is the default bound for an
@@ -182,6 +187,67 @@ def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | No
             "COMPLETION_VERDICT PASS sidecar read failed; treating as no prior record",
             exc_info=True,
         )
+        return None
+
+
+def emit_screen_tally(
+    ticket_id: str, tally: list[dict[str, Any]], *, overflow: int = 0, repo_root=None
+) -> bool:
+    """Append the epic-close bug-screen tally (ticket 4b54) as a ``COMPLETION_VERDICT``
+    sidecar event under :data:`SCHEMA_SCREEN`.
+
+    Best-effort like :func:`emit` — the tally is observability (audit + live false-negative
+    calibration); a failed persist must NEVER fail the close. Returns True on success."""
+    from rebar import config as _config
+    from rebar._commands._seam import append_event
+
+    payload: dict[str, Any] = {
+        "schema": SCHEMA_SCREEN,
+        "ticket_id": ticket_id,
+        "tally": tally,
+        "evaluated": len(tally),
+        "overflow": overflow,
+    }
+    try:
+        tracker = _config.tracker_dir(repo_root)
+        append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — best-effort observability sidecar, never fails the close
+        logger.warning("epic bug screen tally sidecar emit failed; continuing", exc_info=True)
+        return False
+    return True
+
+
+def latest_screen_tally(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
+    """The most-recent :data:`SCHEMA_SCREEN` sidecar payload for ``ticket_id`` (or None).
+
+    Mirrors :func:`latest_pass_record`: newest-first walk, schema-guarded, best-effort —
+    never raises."""
+    try:
+        from rebar import config as _config
+        from rebar._engine_support.resolver import resolve_ticket_dir_name
+
+        tracker = str(_config.tracker_dir(repo_root))
+        rid = resolve_ticket_dir_name(ticket_id, tracker)
+        ticket_dir = os.path.join(tracker, rid)
+        files = sorted(
+            f
+            for f in os.listdir(ticket_dir)
+            if f.endswith(f"-{EVENT_TYPE}.json") and not f.startswith(".")
+        )
+        for fname in reversed(files):
+            try:
+                with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+                    event = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            payload = event.get("data") if isinstance(event, dict) else None
+            if isinstance(payload, dict) and payload.get("schema") == SCHEMA_SCREEN:
+                return payload
+        return None
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 — best-effort observability reader, never raises
+        logger.warning("epic bug screen tally read failed; treating as absent", exc_info=True)
         return None
 
 
