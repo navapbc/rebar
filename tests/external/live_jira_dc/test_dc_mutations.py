@@ -1103,32 +1103,125 @@ def test_outbound_delete_link_round_trips(
 
 
 # ---------------------------------------------------------------------------
-# Rows 12-13 — parent. DC splits what Cloud unifies, and the epic case is DECLINED.
+# Rows 12-13 — parent. DC splits what Cloud unifies: a SUB-TASK's parent is `fields.parent`,
+# an EPIC parent is the instance-discovered 'Epic Link' custom field (ticket 39c1).
 # ---------------------------------------------------------------------------
 
 
 @_skip
 @_skip_no_extra
-def test_set_parent_declines_the_epic_case_loudly(
-    dc_transport: Any, jira_dc_project: str, track_issue: Any
+def test_outbound_epic_parent_round_trips_via_the_epic_link(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
 ) -> None:
-    """Row 12, the EPIC case: `set_parent` raises NotImplementedError NAMING the limitation.
+    """Row 12, the EPIC case: `set_parent` WRITES the Epic Link, and it round-trips.
 
-    ASSERTED DIRECTLY AGAINST THE TRANSPORT, not through a reconcile pass, and that is not a
-    shortcut: `dispatch_one.py:564` SWALLOWS NotImplementedError, so a pass-level assertion is
-    untestable by construction — the exception never escapes to anything the test can observe.
+    REWRITTEN, and the reason is recorded rather than quietly applied. This cell used to assert
+    `pytest.raises(NotImplementedError)` — the loud decline that was correct while ticket 39c1's
+    fix did not exist. Two harness runs changed what is correct here:
 
-    This is the documented DC behaviour, not a defect: epic membership on DC is an "Epic Link"
-    custom field written through the Agile API under the `greenhopper` path, which
-    pycontribs/jira does not target by default. Declining loudly beats writing `fields.parent`
-    and letting DC silently no-op it.
+      * run 30834117797 confirmed the decline meant NO parent could ever reach DC, because the
+        outbound emit gate only emits an EPIC parent (bug 8b25) and that was precisely the shape
+        this side refused;
+      * run 30840572608 refuted the FIRST attempt at the fix (change 1302, `add_issues_to_epic`
+        under `agile_rest_path="greenhopper"`) — DC 8.17.1 answers
+        POST /rest/greenhopper/1.0/epic/{key}/issue with HTTP 404 "null for uri".
+
+    The cell's INTENT is unchanged: prove what `set_parent` does with an epic parent, and refuse to
+    let `fields.parent` be written where DC would silently no-op it. What changed is the expected
+    outcome, from "declines loudly" to "writes the Epic Link" — so this is not an inverted
+    assertion hiding a failure, it is the oracle for the behaviour the ticket now ships.
+
+    ASSERTED AGAINST A RAW REST READ-BACK, not the transport's return value, for the reason every
+    row here follows: the write path and the proving read must not share code, or a broken writer
+    that returns cleanly still passes.
     """
-    key = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 parent-decline"))
-    with pytest.raises(NotImplementedError) as caught:
-        dc_transport.set_parent(key, key)
-    message = str(caught.value)
-    assert "sub-task" in message.lower(), (
-        f"the decline must NAME the limitation so an operator can act on it; got: {message!r}"
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the epic-parent path cannot be exercised. That is the same platform shape the "
+            "transport declines on; see rebar ticket 39c1."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 epic-child"))
+
+    dc_transport.set_parent(child, epic_key)
+
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    assert status == 200 and isinstance(body, dict), (
+        f"could not read {child} back to verify the Epic Link (HTTP {status})"
+    )
+    got = (body.get("fields") or {}).get(epic_field)
+    assert got == epic_key, (
+        f"the epic parent did not land: {child}'s Epic Link ({epic_field}) is {got!r}, expected "
+        f"{epic_key!r}. This is the silent-no-op signature the whole ticket is about — "
+        "`dispatch_one` swallows set_parent's failure, so an unchanged field is the only place "
+        "it is observable."
+    )
+
+    # A CLEAR must null the SAME field, since dispatch_one routes both through this one call.
+    dc_transport.set_parent(child, None)
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    cleared = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert not cleared, (
+        f"the epic parent was detached locally but {child}'s Epic Link still reads {cleared!r}"
+    )
+
+
+def _named_field_id(dc_request: Any, name: str) -> str | None:
+    """The id of the field called `name` on THIS instance, or None.
+
+    `customfield_NNNNN` numbers differ per deployment, so every epic-related field has to be
+    asked for by name — the same reason `_subtask_type_name` asks for the issue type rather
+    than hardcoding "Sub-task".
+    """
+    status, body = dc_request("/rest/api/2/field")
+    if status != 200 or not isinstance(body, list):
+        return None
+    return next(
+        (str(f.get("id")) for f in body if isinstance(f, dict) and f.get("name") == name),
+        None,
+    )
+
+
+def _epic_link_field_id(dc_request: Any) -> str | None:
+    """This instance's "Epic Link" field id — the field a non-sub-task's parent lives in."""
+    return _named_field_id(dc_request, "Epic Link")
+
+
+def _seed_epic(dc_request: Any, dc_transport: Any, project: str, track_issue: Any) -> str:
+    """Create an EPIC in `project` and return its key.
+
+    Two things are discovered rather than assumed, and both fail as SETUP rather than as a
+    bridge defect: the project must actually offer an "Epic" issue type (the scratch project is
+    built from whichever template the image ships), and DC requires the "Epic Name" field on
+    creation — omitting it is rejected with a validation error that would otherwise read as a
+    transport bug.
+    """
+    status, body = dc_request(f"/rest/api/2/project/{project}")
+    assert status == 200 and isinstance(body, dict), (
+        f"SETUP FAILED: could not read project {project} to find its Epic type (HTTP {status})"
+    )
+    names = {str(it.get("name")) for it in (body.get("issueTypes") or []) if isinstance(it, dict)}
+    if "Epic" not in names:
+        pytest.fail(
+            f"SETUP FAILED (not a rebar defect): project {project} offers no 'Epic' issue type "
+            f"(has {sorted(names)}), so the epic-parent path cannot be exercised here."
+        )
+    epic_name_field = _named_field_id(dc_request, "Epic Name")
+    if epic_name_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Name' field, "
+            "which Data Center requires to create an Epic."
+        )
+    summary = _uniq("rebar J11 epic-parent")
+    return _seed(
+        dc_transport,
+        project,
+        track_issue,
+        summary,
+        issuetype="Epic",
+        extra={epic_name_field: summary},
     )
 
 
