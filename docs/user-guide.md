@@ -284,10 +284,14 @@ It is read-only and derives everything from the durable event store, git, and th
 sidecars.
 
 Each metric is tagged with a **lens** — one of `agent_process` (attempts/rework/recovery
-per ticket), `code_health` (module-size distribution and trend vs the locked cap, churn,
-refactor-to-addition ratio, cap-change events), `delivery` (commit cadence), and
-`gate_economics` (LLM cost-per-accepted-change, first-pass verification, env-diagnosis
-intervals) — plus a `source` and a `confidence` label. A metric whose signal has not
+per ticket), `bug_trends` (bug close-class mix by month, time-to-close, open-bug age,
+detection channels, caused-by fan-in), `code_health` (module-size distribution and trend
+vs the locked cap, churn, refactor-to-addition ratio, cap-change events), `delivery`
+(commit cadence), and `gate_economics` (LLM cost-per-accepted-change, first-pass
+verification, env-diagnosis intervals) — plus a `source` and a `confidence` label.
+`bug_trends` mixes flow dimensions (respect `--since`/`--until`, filtered on close time)
+and stock dimensions (point-in-time snapshots that deliberately ignore the range). A
+metric whose signal has not
 accrued yet reports a structured `{"unavailable": {"reason", "accruing_since"}}` rather
 than a zero, and lights up automatically as data arrives — so **treat `unavailable` as
 "no data", never as zero**. Backfilled/classified values (`source=backfill_classified`,
