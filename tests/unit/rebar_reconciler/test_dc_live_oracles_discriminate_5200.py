@@ -431,17 +431,32 @@ class _FakeIssue:
 
 
 class _FakeClient:
-    def __init__(self, issue: _FakeIssue) -> None:
+    """A pycontribs `JIRA`-shaped double.
+
+    `fields()` is present because the REAL client has it and `set_parent` now uses it to find
+    the instance's "Epic Link" id (ticket 39c1). Omitting it would make the epic path decline
+    for a reason the epic cells are not testing — see the note on the epic-path cell below.
+    `epic_link` set to None simulates an instance that has no such field.
+    """
+
+    def __init__(self, issue: _FakeIssue, *, epic_link: str | None = "customfield_10014") -> None:
         self._issue = issue
+        self._epic_link = epic_link
 
     def issue(self, _remote_id: str) -> _FakeIssue:
         return self._issue
 
+    def fields(self) -> list[dict[str, Any]]:
+        out = [{"id": "summary", "name": "Summary"}]
+        if self._epic_link is not None:
+            out.append({"id": self._epic_link, "name": "Epic Link"})
+        return out
 
-def _dc_transport_for(issue: _FakeIssue) -> Any:
+
+def _dc_transport_for(issue: _FakeIssue, *, epic_link: str | None = "customfield_10014") -> Any:
     from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
-    return JiraDataCenterTransport(client=_FakeClient(issue), project="RBJ")
+    return JiraDataCenterTransport(client=_FakeClient(issue, epic_link=epic_link), project="RBJ")
 
 
 def test_dc_set_parent_WRITES_fields_parent_for_a_subtask() -> None:
@@ -464,23 +479,56 @@ def test_dc_set_parent_WRITES_fields_parent_for_a_subtask() -> None:
     )
 
 
-def test_dc_set_parent_DECLINES_the_non_subtask_case_by_raising() -> None:
+def test_dc_set_parent_USES_A_DIFFERENT_PATH_for_the_non_subtask_case() -> None:
     """CONTRACT, HALF TWO: epic and sub-task are DIFFERENT PATHS — they do not collapse into
     one already-covered case, which is why row 12 outbound needed a cell rather than an
     amended criterion.
 
-    The decline is `NotImplementedError` NAMING the limitation
-    (`jira_datacenter/transport.py:702-710`): epic membership on DC is an "Epic Link" custom
-    field written through the Agile API under the `greenhopper` path. Writing `fields.parent`
-    there would silently no-op, which is the failure class this story exists to eliminate.
+    REWRITTEN (ticket 39c1), and the reason matters more than the edit. This cell used to
+    assert `pytest.raises(NotImplementedError)`, which was correct while the epic case was
+    declined. Change 1311 makes it WRITE the instance-discovered "Epic Link" custom field
+    instead (the Agile-API route change 1302 tried was refuted live by harness run
+    30840572608 — DC 8.17.1 404s on the greenhopper epic path).
+
+    **It would have kept passing if left alone, and that is the point.** This module's client
+    double had no `fields()`, so after 1311 the epic path declined because the double could not
+    enumerate fields — NOT because epic membership is a different field. The assertion would
+    have stayed green while testing nothing about the contract it names: the same vacuous-oracle
+    class as the `08-assign` cell this very story had to repair. The double now carries
+    `fields()` because the real client does.
+
+    The INTENT is unchanged: the two paths must remain distinguishable, and a non-sub-task must
+    never get a `fields.parent` write, which DC silently no-ops.
+    """
+    issue = _FakeIssue("RBJ-9", subtask=False)
+
+    _dc_transport_for(issue).set_parent("RBJ-9", "RBJ-1")
+
+    assert issue.updates == [{"customfield_10014": "RBJ-1"}], (
+        f"the epic path must write the discovered Epic Link field; got {issue.updates!r}"
+    )
+    assert not any("parent" in u for u in issue.updates), (
+        f"a `fields.parent` write on a non-subtask is exactly the silent no-op this path exists "
+        f"to prevent: {issue.updates!r}"
+    )
+
+
+def test_dc_set_parent_DECLINES_when_the_instance_has_no_epic_link_field() -> None:
+    """The decline SURVIVES, narrowed to the case where it is still correct.
+
+    Removing the old decline assertion outright would drop coverage of the behaviour that keeps
+    the failure attributed: an instance with no "Epic Link" field genuinely cannot represent the
+    parent, and must say so rather than fall back to `fields.parent`. Since change 1305 the
+    exception type is load-bearing — `dispatch_one` classifies it as
+    `outbound-parent-unrepresentable` rather than the retryable `outbound-parent-failed`.
     """
     issue = _FakeIssue("RBJ-9", subtask=False)
 
     with pytest.raises(NotImplementedError) as excinfo:
-        _dc_transport_for(issue).set_parent("RBJ-9", "RBJ-1")
+        _dc_transport_for(issue, epic_link=None).set_parent("RBJ-9", "RBJ-1")
 
     message = str(excinfo.value)
-    assert "sub-task" in message.lower() and "Epic Link".lower() in message.lower(), (
+    assert "sub-task" in message.lower() and "epic link" in message.lower(), (
         f"the decline must name the limitation an operator can act on; got {message!r}"
     )
     assert issue.updates == [], (

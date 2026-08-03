@@ -158,14 +158,7 @@ def build_client_from_settings(settings: Any) -> Any:
         )
 
     jira_cls = _jira_client_class()
-    # Ticket 39c1: DC serves the Agile API under ``greenhopper``, while pycontribs'
-    # ``AGILE_BASE_REST_PATH`` defaults to ``agile`` (``jira/resources.py``). ``set_parent``
-    # writes a non-sub-task's parent as an EPIC LINK through ``add_issues_to_epic``, so without
-    # this option that call targets a path Data Center does not expose and the write fails —
-    # i.e. the epic-link route is only reachable when the client is built this way. Set here,
-    # at the single DC construction site, rather than per call: the option is read off
-    # ``self._options`` inside the library, so a caller cannot override it at the call site.
-    options: dict[str, Any] = {"agile_rest_path": "greenhopper"}
+    options: dict[str, Any] = {}
     if settings.ca_bundle:
         options["verify"] = settings.ca_bundle
     return jira_cls(server=settings.url, token_auth=settings.pat, options=options or None)
@@ -243,6 +236,10 @@ class JiraDataCenterTransport:
     ) -> None:
         self._client = client
         self.project = project
+        # Ticket 39c1 (follow-up): cache the discovered "Epic Link" field id across calls —
+        # `_MISSING` (not yet looked up) is distinguished from `None` (looked up, this instance
+        # has no such field), so a fieldless instance is not re-probed on every `set_parent`.
+        self._epic_link_field_id: Any = _MISSING
         if resolved_statuses is None:
             from rebar_reconciler.adapters.jira_datacenter.settings import (
                 DEFAULT_RESOLVED_STATUSES,
@@ -680,24 +677,21 @@ class JiraDataCenterTransport:
         ``{"parent": None}`` to clear — the same call path for a SET and a CLEAR,
         which is what ``dispatch_one`` relies on). But EPIC membership on DC is not
         ``parent`` at all: it is the "Epic Link" **custom field**
-        (``customfield_NNNNN``, whose id differs per instance), written through the
-        Agile API — which DC serves under ``greenhopper`` while the library's
-        ``AGILE_BASE_REST_PATH`` defaults to ``agile`` (``jira/resources.py:1518``),
-        so ``add_issues_to_epic`` with default options targets a path DC does not
-        expose.
+        (``customfield_NNNNN``, whose id is instance-specific).
 
-        **Ticket 39c1 lifted the former decline.** This method used to raise
-        ``NotImplementedError`` for a non-sub-task, which made the outbound parent
-        UNREACHABLE on DC: the emit gate omits the parent unless the local parent is
-        an ``epic`` (bug 8b25), and that is precisely the shape this side refused, so
-        the two gates were DISJOINT and no pass could ever carry a parent. The epic
-        case is now WRITTEN, through ``add_issues_to_epic`` (greenhopper sentinel
-        epic ``"none"`` expresses a CLEAR), which is what the original decline named
-        as its own lift. ``build_client_from_settings`` sets
-        ``agile_rest_path="greenhopper"`` so that call reaches DC at all.
+        **Ticket 39c1 lifted the former decline and replaced its route.** The
+        original lift wrote the Epic Link through the Agile API
+        (``add_issues_to_epic``); a live run against DC 8.17.1 answered that call
+        with HTTP 404 "null for uri" — ``POST /rest/greenhopper/1.0/epic/{key}/issue``
+        does not exist on this instance. That route is REFUTED. The Epic Link is
+        instead written as an ORDINARY field update, same mechanism as the
+        sub-task branch below: discover the field's id by matching ``name ==
+        "Epic Link"`` in ``self._client.fields()`` (``GET /rest/api/2/field``,
+        never hardcoded — the id differs per deployment), then
+        ``issue.update(fields={field_id: parent_key})``.
 
-        The decline survives only where the parent is genuinely unrepresentable — an
-        injected client with no ``add_issues_to_epic`` — because writing
+        The decline survives only where the parent is genuinely unrepresentable —
+        no "Epic Link" field discoverable on this instance — because writing
         ``fields.parent`` for a non-sub-task would be silently no-op'd by DC, which is
         the failure mode this method exists to refuse.
         """
@@ -707,32 +701,39 @@ class JiraDataCenterTransport:
         issue_type = fields.get("issuetype") if isinstance(fields, dict) else None
         is_subtask = bool(issue_type.get("subtask")) if isinstance(issue_type, dict) else False
         if not is_subtask:
-            # Ticket 39c1: a NON-sub-task's parent is the EPIC LINK, written through the Agile
-            # API — never ``fields.parent``, which DC silently no-ops. Routing here (rather than
-            # declining) is what makes the outbound emit gate and this apply side OVERLAP: the
-            # gate emits ONLY for an epic parent (bug 8b25), which is exactly this shape, so
-            # before this branch existed no reconcile pass could carry a parent to DC at all.
-            #
-            # ``add_issues_to_epic`` targets ``{agile_rest_path}/1.0/epics/{epic}/add``, and DC
-            # serves that under ``greenhopper`` while pycontribs defaults to ``agile`` — so the
-            # CLIENT must be built with ``agile_rest_path="greenhopper"`` for this to reach DC.
-            # The sentinel epic ``"none"`` is greenhopper's documented way to REMOVE an issue
-            # from its epic, which is how a CLEAR is expressed here.
-            adder = getattr(self._client, "add_issues_to_epic", None)
-            if adder is None:
+            # Ticket 39c1: a NON-sub-task's parent is the EPIC LINK custom field, written as a
+            # plain field update — never ``fields.parent``, which DC silently no-ops, and never
+            # ``add_issues_to_epic`` (REFUTED: DC 8.17.1 404s on the greenhopper epic-issue path).
+            if self._epic_link_field_id is _MISSING:
+                # Cached on the INSTANCE, once: a reparent-heavy pass calls set_parent many
+                # times, and ticket b586 already made REST cost on this transport a live
+                # concern. A lookup that finds nothing is cached too — see ``_MISSING`` above.
+                lister = getattr(self._client, "fields", None)
+                if lister is None:
+                    self._epic_link_field_id = None
+                else:
+                    self._epic_link_field_id = next(
+                        (f.get("id") for f in lister() if f.get("name") == "Epic Link"),
+                        None,
+                    )
+            epic_link_id = self._epic_link_field_id
+            if epic_link_id is None:
+                # Whether the client can't enumerate fields at all, or it can and this
+                # instance simply has none named "Epic Link", the parent is equally
+                # unrepresentable — both must raise NotImplementedError (not AttributeError)
+                # so `dispatch_one` classifies it as `outbound-parent-unrepresentable`
+                # (change 1305), not the retryable `outbound-parent-failed`.
                 raise NotImplementedError(
                     f"set_parent cannot represent the parent of {remote_id!r} on Jira Data "
-                    "Center: the issue is not a sub-task, so its parent is an EPIC LINK written "
-                    "through the Agile API, but the injected client exposes no "
-                    "'add_issues_to_epic'. Declining rather than writing fields.parent, which "
-                    "DC would silently no-op."
+                    "Center: the issue is not a sub-task, so its parent is the 'Epic Link' "
+                    "custom field, but this instance's field inventory has no field named "
+                    "'Epic Link'. Declining rather than writing fields.parent, which DC would "
+                    "silently no-op."
                 )
-            _epic = parent_key if parent_key else "none"
-            _call_logged(
-                "set_parent", remote_id, lambda: adder(_epic, [raw.get("key") or remote_id])
-            )
+            body: dict[str, Any] = {epic_link_id: parent_key}
+            _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
             return
-        body: dict[str, Any] = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
+        body = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
         _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
 
     def validate_assignee_exists(
