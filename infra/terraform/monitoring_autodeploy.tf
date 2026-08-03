@@ -65,6 +65,76 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
 }
 
 # ---------------------------------------------------------------------------
+# Reviews KILLED by a deploy (bug 34cd).
+#
+# `docker compose up -d` stops the review-bot container, and uvicorn's shutdown drain covers
+# only the webhook QUEUE — the backfill reconciler's inline review is cancelled outright, and
+# that is the path that RETRIES a killed review. On 2026-08-03 seven recreations in 90 minutes
+# (gaps of 18/7/22/4/15/20 min) repeatedly killed a ~10-minute review and changes 1302/1303 sat
+# `Verified +1` with `LLM-Review = 0` for 20-35 minutes, unsubmittable.
+#
+# WHY THIS ALARM EXISTS AT ALL: that outage was INVISIBLE to every other alarm. A killed review
+# fails nothing — the process was asked to stop — so the fail-closed voter path never runs, no
+# VOTER_ERROR is emitted, `restarts` stays 0, and the deploy itself logs "redeployed + healthy".
+# All 11 alarms read OK while the gate was live-locked. `rebar-gerrit-voter-errors`
+# (monitoring_s4b.tf) provably CANNOT observe this failure mode, which matters because the
+# Bedrock cutover (eb6e) names that alarm as its safety net. autodeploy.sh now defers a deploy
+# that would interrupt a review; this alarm watches the cases where it recreated anyway — the
+# DEPLOY_DEFER_MAX bound was exhausted (a chronically busy bot), or the /health in_flight signal
+# was unreadable so the deploy ran blind. Routine, healthy deferrals are a SEPARATE metric
+# (deploy_deferrals) and deliberately do not page.
+#
+# Custom metric contract (what the host probe must PutMetricData):
+#   Namespace  = rebar/host
+#   MetricName = review_interrupts
+#   Dimensions = NONE — dimensionless on BOTH sides (see monitoring_s4b.tf rationale).
+#   Unit       = Count  (per-period count of new AUTODEPLOY_REVIEW_INTERRUPT journal lines)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "review_interrupts" {
+  alarm_name        = "rebar-autodeploy-review-interrupts"
+  alarm_description = <<-EOT
+    A rebar auto-deploy recreated the review-bot container while a review was in flight, so an
+    LLM-Review was killed (AUTODEPLOY_REVIEW_INTERRUPT in the rebar-autodeploy.service journal:
+    either the DEPLOY_DEFER_MAX deferral bound was exhausted, or /health's in_flight signal was
+    unreadable and the deploy proceeded without a drain check). Published as
+    rebar/host:review_interrupts by the host observability probe (4e). Interrupted reviews are
+    retried by the backfill reconciler, so this is not itself an outage — but it is the ONLY
+    signal for a failure mode that leaves voter_errors, restarts and the deploy log all green,
+    and repeated interruptions live-lock the gate: changes reach `Verified +1` with
+    `LLM-Review = 0` and cannot submit. Investigate `journalctl -u rebar-autodeploy` for the
+    marker's reason field: `bound-exceeded` means the bot is chronically busy (reviews are
+    queueing faster than they complete), `signal-unavailable` means the drain check itself is
+    broken and every deploy is now running blind.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "review_interrupts"
+  statistic   = "Sum"
+
+  # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=1800s): a
+  # bound-exceeded interrupt cannot recur faster than one per episode, so a single 900s
+  # period > 0 is enough to latch, and `signal-unavailable` recurs on EVERY tick while the
+  # probe is broken. One datapoint keeps the "deploys are running blind" case from waiting
+  # an hour to surface — the blindness is the thing being alarmed.
+  period              = 900
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Bug     = "34cd"
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Root-filesystem disk pressure (incident 2731). The box's 30G ROOT disk holds
 # docker's image/build-cache storage and the review-bot's working tmp; when it
 # filled, every LLM-Review fail-closed (clone/pip ENOSPC) — yet the only disk

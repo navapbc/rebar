@@ -210,9 +210,24 @@ app.state.config = _config()
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Liveness probe. Returns 200 with ``{"status": "ok"}`` (no kernel call)."""
-    return {"status": "ok"}
+async def health() -> dict[str, str | int]:
+    """Liveness probe + in-flight review count. Returns 200 with
+    ``{"status": "ok", "in_flight": N}`` (no kernel call).
+
+    ``in_flight`` is the deploy loop's drain signal (bug 34cd): recreating this container
+    mid-review KILLS the review, and does so invisibly — the process was asked to stop, so
+    nothing fails, no ``VOTER_ERROR`` is emitted, and ``restarts`` stays 0. During a landing
+    burst that can live-lock the ``LLM-Review`` gate with every health signal green.
+    ``infra/scripts/autodeploy.sh`` reads this field and DEFERS the recreation while it is
+    non-zero, so the count is a load-bearing contract, not a debugging nicety — see the
+    ``in_flight`` assertions in ``tests/scripts/test_autodeploy_review_drain.py``.
+
+    Carried on the EXISTING liveness route rather than a new one on purpose: the deploy
+    loop already polls ``HEALTH_URL`` for its post-deploy readiness gate, so the drain
+    needs no second endpoint, no second URL to configure, and no new exposed surface. The
+    ``status`` key is unchanged, so every existing caller keeps working.
+    """
+    return {"status": "ok", "in_flight": _voter.in_flight_reviews()}
 
 
 @app.post("/webhook", status_code=202)

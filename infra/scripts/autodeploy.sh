@@ -26,6 +26,11 @@
 #   - capped exponential backoff (NOT hard-disable), keyed to the target SHA: a new `main`
 #     tip RESETS the backoff (fix-forward deploys promptly); a known-bad SHA is retried no
 #     faster than the cap. (Flux retryInterval, Argo CD retry backoff, systemd RestartSteps.)
+#   - drain gate: a recreation that would KILL an in-flight review is DEFERRED to the next
+#     timer tick (bounded by DEPLOY_DEFER_MAX, then it proceeds and emits a countable
+#     AUTODEPLOY_REVIEW_INTERRUPT marker). Without it a landing burst live-locks the gate
+#     while every health signal reads green — a killed review fails nothing, so it emits no
+#     VOTER_ERROR and leaves restarts=0 (bug 34cd).
 #   - flock: overlapping timer fires never overlap.
 #   - config-check runs at CI (make config-check) so a malformed config never reaches `main`.
 # ---------------------------------------------------------------------------
@@ -42,6 +47,9 @@ STATE_DIR="${STATE_DIR:-/var/lib/rebar}"
 LOCK="$STATE_DIR/deploy.lock"
 SHA_FILE="$STATE_DIR/deployed-sha"
 BACKOFF_FILE="$STATE_DIR/deploy-backoff"              # "<target-sha> <fail-count> <next-epoch>"
+# Deferral episode marker: "<epoch of the FIRST tick that deferred>". Deliberately NOT keyed
+# to the target SHA the way BACKOFF_FILE is — see the drain gate below for why.
+DEFER_FILE="$STATE_DIR/deploy-defer"
 BOT_SERVICE="${BOT_SERVICE:-review-bot}"              # compose service name (NEVER 'gerrit')
 BOT_IMAGE="${BOT_IMAGE:-compose-review-bot}"
 GERRIT_CONTAINER="${GERRIT_CONTAINER:-compose-gerrit-1}"
@@ -60,6 +68,19 @@ FETCH_TIMEOUT="${FETCH_TIMEOUT:-60}"                  # a hung fetch must not ho
 # SHA-keyed backoff still bound the retry rate. Keep this ABOVE the app's own budgets if either
 # side changes (tests/scripts/test_autodeploy_health_gate.py asserts the relationship).
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+# Drain-gate bound (bug 34cd): the longest a deferral EPISODE may hold a deploy back before
+# we recreate the container anyway. It MUST exceed one whole review, or we would force-deploy
+# through a review that was about to finish and gain nothing. The review-bot's own hard cap on
+# a single review is REVIEW_TIMEOUT_SECONDS (src/rebar/review_bot/config.py
+# DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200): the worker and the backfill reconciler both wrap
+# review_and_vote in asyncio.wait_for at that value, so NO single review can outlive it —
+# in-flight necessarily falls to 0 within 1200s of the last review starting. 1800s is 1.5x that
+# ceiling (and ~3x the ~10-minute review measured on 2026-08-03), so the bound can only be
+# reached by a bot that is CHRONICALLY busy — a standing queue of reviews — never by one
+# ordinary review. Keep this ABOVE the app's per-review cap if either side changes
+# (tests/scripts/test_autodeploy_review_drain.py asserts the relationship).
+DEPLOY_DEFER_MAX="${DEPLOY_DEFER_MAX:-1800}"
+INFLIGHT_TIMEOUT="${INFLIGHT_TIMEOUT:-5}"             # bound the in-flight probe itself
 HEALTH_FAIL_LOG_LINES="${HEALTH_FAIL_LOG_LINES:-100}"   # bounded stderr tail captured on bot-unhealthy
 HEALTH_FAIL_LOG_BYTES="${HEALTH_FAIL_LOG_BYTES:-20000}" # …and a hard byte cap on that tail
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
@@ -120,7 +141,30 @@ RSYNC_EXCLUDES=(--exclude '/.git' --exclude 'infra/compose/.env' --exclude '/.de
 mkdir -p "$STATE_DIR"
 now() { date +%s; }
 log() { printf '{"event":"autodeploy","ts":%s,"msg":%s}\n' "$(now)" "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$*")"; }
-err() { printf 'AUTODEPLOY_ERROR %s\n' "$(python3 -c 'import json,sys;print(json.dumps({"ts":int(sys.argv[1]),"reason":sys.argv[2],"detail":sys.argv[3]}))' "$(now)" "$1" "${2:-}")" >&2; }
+# Emit a COUNTABLE journal marker: "<TOKEN> {json}" on stderr -> journald. observability.sh
+# greps this unit's journal for each token and publishes the per-interval delta as a CloudWatch
+# metric, so a token is an alarm contract — never reuse one for a different meaning, and never
+# let captured text carry one (see capture_bot_logs' redaction).
+marker() { printf '%s %s\n' "$1" "$(python3 -c 'import json,sys;print(json.dumps({"ts":int(sys.argv[1]),"reason":sys.argv[2],"detail":sys.argv[3]}))' "$(now)" "$2" "${3:-}")" >&2; }
+err() { marker AUTODEPLOY_ERROR "$1" "${2:-}"; }
+
+# How many reviews the review-bot is running RIGHT NOW, from its /health `in_flight` field.
+# Echoes -1 for "unknown" (bot unreachable / field missing / unparseable), which the drain gate
+# below treats as fail-OPEN — see there for why that direction is the safe one.
+bot_in_flight_reviews() {
+  local body count
+  body="$(curl -fsS -m "$INFLIGHT_TIMEOUT" "$HEALTH_URL" 2>/dev/null)" || { echo -1; return 0; }
+  count="$(printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    value = int(json.load(sys.stdin)["in_flight"])
+except Exception:
+    value = -1
+print(value if value >= 0 else -1)
+' 2>/dev/null)" || count=-1
+  case "$count" in '' | *[!0-9-]*) count=-1 ;; esac
+  echo "$count"
+}
 
 # Copy a BOUNDED tail of the failing review-bot container's own output into the deploy journal.
 # The rollback below replaces that container immediately, so without this its stderr is
@@ -178,7 +222,10 @@ if [ -z "$DEPLOYED" ]; then
   echo "$seed" > "$SHA_FILE.tmp" && mv "$SHA_FILE.tmp" "$SHA_FILE"
   log "first run: adopting $seed as deployed-sha (no deploy)"; exit 0
 fi
-[ "$TARGET" = "$DEPLOYED" ] && { log "up to date ($TARGET); no-op"; exit 0; }
+# Up to date: no deploy is pending, so any deferral episode is over. Clearing it here (and at
+# the success footer) is what keeps a STALE episode from making the NEXT episode's bound look
+# already-exhausted and killing a review on the first busy tick.
+[ "$TARGET" = "$DEPLOYED" ] && { rm -f "$DEFER_FILE"; log "up to date ($TARGET); no-op"; exit 0; }
 
 # backoff: same failed TARGET, not time yet -> skip. NEW target -> reset (fix-forward).
 read -r bo_sha bo_cnt bo_next < <(cat "$BACKOFF_FILE" 2>/dev/null || echo "- 0 0")
@@ -227,6 +274,58 @@ fi
 
 # ── review-bot: rebuild + restart ONLY on a source change ─────────────────────
 if changed "$BOT_PATHS" || changed "$SECRETS_PATHS"; then
+  # ── drain gate: never recreate the container mid-review (bug 34cd) ───────────
+  # `docker compose up -d` STOPS the running container, and uvicorn's shutdown drains only
+  # the webhook QUEUE (app.py waits on queue.join()) — the backfill reconciler's inline
+  # review is cancelled outright, and that is the very path that retries a killed review.
+  # A killed review is SILENT: nothing failed, so no VOTER_ERROR is emitted, `restarts`
+  # stays 0, and the deploy still logs "redeployed + healthy". On 2026-08-03 seven
+  # recreations in 90 minutes (gaps of 18/7/22/4/15/20 min) repeatedly killed a ~10-minute
+  # review, and changes 1302/1303 sat `Verified +1` with `LLM-Review = 0` for 20-35 minutes
+  # with all 11 CloudWatch alarms OK. So: ask the bot whether it is busy and DEFER if it is.
+  #
+  # DEFER (skip this tick, retry on the next ~2-minute timer fire) rather than DRAIN
+  # (sleep here until idle): this unit is an idempotent oneshot timer, so "come back later"
+  # is free, whereas sleeping would hold the deploy `flock` for the whole wait. Deferral also
+  # COALESCES a burst for nothing extra — TARGET is recomputed from the mirror on every tick,
+  # so a run of deferred ticks collapses into ONE deploy at the newest tip, which is what a
+  # debounce would have bought, without delaying deploys when the bot is idle.
+  inflight="$(bot_in_flight_reviews)"
+  defer_since="$(cat "$DEFER_FILE" 2>/dev/null || echo 0)"
+  case "$defer_since" in '' | *[!0-9]*) defer_since=0 ;; esac
+  if [ "$inflight" -gt 0 ]; then
+    # Bound the EPISODE (a continuous run of busy ticks), NOT the target SHA. Keying it to
+    # TARGET the way BACKOFF_FILE does would defeat AC2's bound outright: during a landing
+    # burst TARGET advances on almost every tick, so a SHA-keyed timer would reset before it
+    # could ever expire and a permanently-busy bot would block deploys forever — exactly the
+    # unbounded wait the bound exists to prevent. The episode is cleared whenever the bot is
+    # found idle, a deploy proceeds, or the box is up to date, so it only accumulates while a
+    # deploy is genuinely pending AND the bot is genuinely busy.
+    [ "$defer_since" -eq 0 ] && { defer_since="$(now)"; echo "$defer_since" >"$DEFER_FILE"; }
+    waited=$(( $(now) - defer_since ))
+    if [ "$waited" -lt "$DEPLOY_DEFER_MAX" ]; then
+      marker AUTODEPLOY_DEFERRED review-in-flight \
+        "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s"
+      log "review-bot busy ($inflight review(s) in flight); DEFERRING the deploy of $TARGET (${waited}s of the ${DEPLOY_DEFER_MAX}s bound used); deployed-sha unchanged; retrying on the next timer tick"
+      exit 0
+    fi
+    # Bound exhausted: recreate anyway, but make the kill COUNTABLE. Without this marker the
+    # interruption is unobservable — which is the whole reason a fully live-locked gate could
+    # sit behind green health signals.
+    marker AUTODEPLOY_REVIEW_INTERRUPT bound-exceeded \
+      "target=$TARGET in_flight=$inflight deferred_for=${waited}s bound=${DEPLOY_DEFER_MAX}s; recreating anyway, so an in-flight review IS being killed"
+    log "deferral bound ${DEPLOY_DEFER_MAX}s exhausted with $inflight review(s) still in flight; proceeding (a review is interrupted; the backfill reconciler retries it)"
+  elif [ "$inflight" -lt 0 ]; then
+    # Fail OPEN on an unreadable signal: a bot that cannot answer /health is likely broken or
+    # down, and deploying is how a broken bot gets FIXED — blocking deploys on an unparseable
+    # field would invent a NEW way to freeze the gate, strictly worse than the bug. But do not
+    # let that be silent: a signal that quietly stops working (renamed field, wedged bot) puts
+    # us back in the original blind state, so it emits the same countable interrupt marker.
+    marker AUTODEPLOY_REVIEW_INTERRUPT signal-unavailable \
+      "target=$TARGET; /health in_flight unreadable at $HEALTH_URL — deploying WITHOUT a drain check, so a review may be killed unobserved"
+    log "in-flight review signal unavailable at $HEALTH_URL; proceeding without the drain check (fail-open: a broken bot is fixed BY deploying)"
+  fi
+  rm -f "$DEFER_FILE"
   log "review-bot sources or secrets changed; sync + refresh .env + rebuild + restart (blast radius = $BOT_SERVICE only)"
   # sync the target source into the copy-based build context (git checkout in the MIRROR).
   if ! git -C "$MIRROR_DIR" checkout -q "$TARGET" 2>/dev/null; then
@@ -327,4 +426,5 @@ fi
 # ── success: advance deployed-sha atomically, clear backoff ───────────────────
 echo "$TARGET" > "$SHA_FILE.tmp" && mv "$SHA_FILE.tmp" "$SHA_FILE"
 clear_backoff
+rm -f "$DEFER_FILE"          # the deferral episode ended with a deploy; do not carry it forward
 log "deploy complete: env now reflects $TARGET"

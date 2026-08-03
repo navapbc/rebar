@@ -29,6 +29,7 @@ import logging
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from rebar.review_bot import adapter
@@ -49,6 +50,49 @@ logger = logging.getLogger("rebar.review_bot.voter")
 # longer-lived deployment would add an LRU cap / post-release eviction.
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
+
+# ── in-flight review accounting (bug 34cd) ───────────────────────────────────────
+# How many reviews are executing IN THIS PROCESS right now. Exported over ``/health`` so
+# the deploy loop (infra/scripts/autodeploy.sh) can DEFER a container recreation that
+# would otherwise KILL a running review — a recreation mid-review is INVISIBLE to every
+# health signal the box has (the process was asked to stop, so nothing fails and no
+# VOTER_ERROR is emitted), which is how a landing burst can live-lock the LLM-Review gate
+# with `restarts=0` and all alarms OK.
+#
+# Counted around the WHOLE of ``review_and_vote``, including its cheap dedup /
+# already-voted short-circuits, rather than only the expensive clone+LLM region. That
+# over-counts by the few hundred ms such a skip takes, which is deliberate: the two error
+# directions are NOT symmetric — over-counting delays a deploy by one ~2-minute timer tick,
+# under-counting kills a ~10-minute review. Bias toward the recoverable one.
+#
+# A plain int needs no lock: every mutation below happens on the asyncio event-loop thread
+# (the increment/decrement bracket the coroutine's own body, and the blocking work inside
+# is offloaded with ``asyncio.to_thread`` while the count stays held by this coroutine), and
+# ``/health`` is served on that same loop, so a reader never observes a torn value.
+_in_flight = 0
+
+
+def in_flight_reviews() -> int:
+    """Number of reviews executing in this process right now (0 when idle).
+
+    Covers BOTH review paths — the webhook queue worker and the backfill reconciler —
+    because both funnel through :func:`review_and_vote`. That coverage is the point: the
+    reconciler's inline backfill review is the path that RETRIES a killed review, so a
+    busy-signal blind to it would let the deploy loop keep killing the very work that is
+    supposed to heal the gate.
+    """
+    return _in_flight
+
+
+@contextlib.contextmanager
+def _counting_in_flight() -> Iterator[None]:
+    """Hold :data:`_in_flight` up for the duration of one review."""
+    global _in_flight
+    _in_flight += 1
+    try:
+        yield
+    finally:
+        _in_flight -= 1
 
 
 async def _lock_for(key: tuple[str, str]) -> asyncio.Lock:
@@ -346,7 +390,27 @@ async def review_and_vote(
     Returns a small status dict (``{status, change_id, revision, vote_value?}``) for
     observability/tests. ``status`` is one of ``skipped`` (non-rebar / malformed /
     already voted), ``voted`` (a vote was cast), or ``error`` (fail-closed: logged
-    VOTER_ERROR, no vote / a BLOCK vote, never MAX-on-failure)."""
+    VOTER_ERROR, no vote / a BLOCK vote, never MAX-on-failure).
+
+    This is the single funnel for BOTH review paths (the webhook queue worker and the
+    backfill reconciler), so bracketing it with :func:`_counting_in_flight` is what makes
+    ``/health``'s ``in_flight`` count — and therefore the deploy loop's deferral — see
+    every review that a container recreation could kill (bug 34cd).
+    """
+    with _counting_in_flight():
+        return await _review_and_vote(event, config=config, gerrit=gerrit, dedup=dedup, force=force)
+
+
+async def _review_and_vote(
+    event: dict,
+    *,
+    config: ReceiverConfig | None = None,
+    gerrit: GerritClient | None = None,
+    dedup: DedupStore | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """The review itself. Call :func:`review_and_vote` instead — it maintains the
+    in-flight count the deploy loop reads."""
     cfg = config or ReceiverConfig.from_env()
     info = _extract(event)
     if info is None:
