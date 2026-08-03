@@ -280,6 +280,23 @@ def test_the_isf_finder_spec_is_excluded_because_it_resolves_to_no_arm() -> None
     assert all(i.spec != "plan-review-isf-finder" for i in pp.eligible_cases())
 
 
+def test_container_cases_without_a_children_payload_are_excluded() -> None:
+    """A container criterion runs over a (parent, children, roster) decomposition, so a fixture
+    that carries only the parent plan raises instead of returning a verdict. MEASURED in the
+    recorded live run: both plan-review-container G3 cases raised on BOTH arms, at every epoch,
+    before any model call. Such a case is not corpus."""
+    from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA
+
+    for item in pp.eligible_cases():
+        if item.solver_id in CONTAINER_CRITERIA:
+            assert item.case.get("children"), f"{item.spec}/{item.case_id} has no children payload"
+    # The rule is real, not vacuous: the container spec DOES carry such cases and they are gone.
+    assert not pp._runnable("G3", {"input": "parent plan only"})
+    assert pp._runnable("G3", {"children": [{"ticket_id": "t"}]})
+    assert pp._runnable("T2", {"input": "inline text"})  # non-container arms are unaffected
+    assert all(i.spec != "plan-review-container" for i in pp.eligible_cases())
+
+
 # ── 4. the provider-clean tally reads the JSONL usage log ───────────────────────────
 def test_usage_model_tally_parses_jsonl_rows_not_key_equals_value_text(tmp_path) -> None:
     log = tmp_path / "usage.jsonl"
