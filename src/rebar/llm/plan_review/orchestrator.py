@@ -262,6 +262,14 @@ def route_criteria(
             if gate_log is not None:
                 gate_log[cid] = registry._DET_LEAF_GATE_RULES[cid].name
             continue
+        # Project-criterion deterministic trigger (ticket a584). Each project criterion
+        # may carry a ``trigger`` list in the routing overlay; the conjunction must fire
+        # for the criterion to route. None (malformed/absent) is fail-open — no gate.
+        fired = registry.project_trigger_fires(c.get("trigger"), plan, file_impact)
+        if fired is False:
+            if gate_log is not None:
+                gate_log[cid] = "project-trigger"
+            continue
         if registry.exec_tier(c) == "AGENT":
             agent.append(c)
         else:

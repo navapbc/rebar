@@ -3,7 +3,12 @@
     "project.portability": {
       "exec": "1-TURN",
       "facet": "project-invariants",
-      "applies_at": { "scope": ["container", "leaf"] },
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
       "default_posture": "blocking",
       "block_threshold": 0.9,
       "checklist": []
@@ -11,24 +16,69 @@
     "project.symbol-reference-completeness": {
       "exec": "AGENT",
       "facet": "project-invariants",
-      "applies_at": { "scope": ["container", "leaf"] },
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
       "default_posture": "advisory",
       "block_threshold": 0.9,
       "checklist": []
+    },
+    "project.engine-layer-enforcement": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
+      "default_posture": "advisory",
+      "block_threshold": 0.9,
+      "checklist": [],
+      "trigger": [
+        {
+          "text_all": [
+            "\\b(validat\\w*|guard\\w*|invariant\\w*|enforc\\w*|precondition\\w*|sanitiz\\w*|reject\\w*|refus\\w*|check\\w*)\\b"
+          ]
+        },
+        {
+          "text_all": [
+            "src/rebar/(_commands|_cli|_lib_\\w+|mcp_server)"
+          ],
+          "file_impact_globs": [
+            "src/rebar/_commands/*",
+            "src/rebar/_cli/*",
+            "src/rebar/mcp_server.py",
+            "src/rebar/_lib_*.py"
+          ]
+        }
+      ]
     }
   },
   "code_review": {
     "project.review-phase-boundaries": {
       "exec": "1-TURN",
       "default_posture": "advisory",
-      "block_threshold": 0.90,
+      "block_threshold": 0.9,
       "blocking_enabled": false,
       "applies_to": []
     }
   },
   "activate": {
-    "project.portability": ["plan_review"],
-    "project.symbol-reference-completeness": ["plan_review"],
-    "project.review-phase-boundaries": ["code_review"]
+    "project.portability": [
+      "plan_review"
+    ],
+    "project.symbol-reference-completeness": [
+      "plan_review"
+    ],
+    "project.review-phase-boundaries": [
+      "code_review"
+    ],
+    "project.engine-layer-enforcement": [
+      "plan_review"
+    ]
   }
 }

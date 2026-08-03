@@ -1,0 +1,193 @@
+# Project eval corpus for the plan-review criterion `project.engine-layer-enforcement`
+# (task a584, epic 2f4c). Resolves as the user override for logical criterion
+# `project.engine-layer-enforcement` (prompt id plan-review-project-engine-layer-enforcement).
+#
+# Balanced semantic fixture set: three must-fire cases (enforcement placed in one interface
+# surface while other ingress paths bypass it) and three must-not-fire cases (engine-seam
+# placement, interface-local concern, and docs-only plan). Offline shape checks live in
+# tests/unit/test_project_engine_layer_enforcement.py; the live semantic run is the
+# ticket's [operator-attested] criterion
+# (`rebar criteria eval project.engine-layer-enforcement --runs 3`). See eval_specs/README.plan-review.md.
+prompt: plan-review-project-engine-layer-enforcement
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the criterion emits a schema-valid finding set — >=1 finding on a
+  # fire case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      project.engine-layer-enforcement finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: enforcement in one interface surface while others bypass ──────────
+  - id: ELE-F1
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: finding
+    note: >-
+      Plan citation: "Add duplicate-alias validation inside the CLI create command handler".
+      Causal mechanism: rebar.create_ticket (library) and the MCP create_ticket tool both
+      write the alias event through _seam.append_event without passing through the CLI
+      handler, so alias collisions are unchecked on those paths.
+      Observable effect: a client calling rebar.create_ticket or the MCP tool can silently
+      create a colliding alias that the CLI would have rejected.
+    input: >
+      ## What
+
+      Add duplicate-alias validation to the CLI `create` command so a colliding alias is
+      rejected with a clear error message before the ticket event is written.
+
+      ## Approach
+
+      Inside `src/rebar/_commands/create.py`, after the alias argument is parsed, query
+      the existing tickets for a matching alias and raise `UsageError` if one is found.
+      The check lives in the CLI handler; no changes to the library or MCP paths.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar create --alias foo` fails with a clear error when alias `foo` already
+        exists.
+      - [ ] `rebar create --alias bar` succeeds when alias `bar` is unused.
+
+  - id: ELE-F2
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: finding
+    note: >-
+      Plan citation: "Add the status-transition guard in the MCP tool handler for
+      `transition`".
+      Causal mechanism: the library's rebar.transition() and the CLI `rebar transition`
+      command call the same _core write path without passing through the MCP handler's
+      guard, so they can perform the forbidden transition.
+      Observable effect: a caller using rebar.transition() or the CLI bypasses the guard
+      and can execute an invalid status transition that the MCP path would block.
+    input: >
+      ## What
+
+      Add a status-transition guard to the MCP `transition` tool handler so that
+      transitioning a ticket to `closed` from `open` (skipping `in_progress`) is rejected
+      with a clear error.
+
+      ## Approach
+
+      In `src/rebar/mcp_server.py`, inside the `transition` tool handler, check the
+      current ticket status before writing the event. If the transition is
+      `open → closed` (skipping `in_progress`), raise a tool error. The library and CLI
+      paths are unchanged.
+
+      ## Acceptance Criteria
+
+      - [ ] MCP `transition` call from `open` to `closed` returns a tool error.
+      - [ ] MCP `transition` call from `in_progress` to `closed` succeeds.
+
+  - id: ELE-F3
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: finding
+    note: >-
+      Plan citation: "Add close-precondition checking in the CLI close path".
+      Causal mechanism: the library close path (rebar.transition to closed) invokes
+      _core directly without routing through the CLI close handler, so the precondition
+      check is bypassed by library callers and by the MCP transition tool.
+      Observable effect: a library or MCP caller can close a ticket that does not satisfy
+      the preconditions that the CLI would enforce.
+    input: >
+      ## What
+
+      Add a close-precondition check to the CLI `close` path that ensures all required
+      checklist items are ticked before the ticket transitions to `closed`.
+
+      ## Approach
+
+      In `src/rebar/_commands/transition.py`, when the target status is `closed`, iterate
+      the ticket's checklist and raise `UsageError` if any required item is unchecked.
+      The library `rebar.transition` and MCP `transition` tool are not modified.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar transition <id> in_progress closed` fails when required checklist items
+        remain unchecked.
+      - [ ] `rebar transition <id> in_progress closed` succeeds when all items are checked.
+
+  # ── must-not-fire: engine-seam placement, interface-local, or docs-only ─────────
+  - id: ELE-N1
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: pass
+    note: >-
+      Engine-seam placement with interfaces delegating: the duplicate-alias check lives in
+      the *_core write function; CLI, MCP, and library all call through it and inherit the
+      invariant automatically.
+    input: >
+      ## What
+
+      Add duplicate-alias validation at the engine seam so every ingress path inherits it.
+
+      ## Approach
+
+      In `src/rebar/_core/ticket_core.py`, inside the `create_ticket_core` function,
+      check the alias against the existing ticket index before appending the event. Raise
+      `RebarError` on a collision. The CLI command, MCP tool, and library facade all call
+      `create_ticket_core` and get the check for free; no per-surface duplication.
+
+      ## Acceptance Criteria
+
+      - [ ] A duplicate alias is rejected regardless of whether the caller is the CLI,
+        MCP, or library.
+      - [ ] The check is implemented once in `create_ticket_core`; no per-surface copies.
+
+  - id: ELE-N2
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: pass
+    note: >-
+      Interface-local concern by design: output formatting and argument validation are
+      legitimately CLI-only (interface-local). No domain invariant is placed behind the
+      CLI gate; the other surfaces have no corresponding write path to bypass.
+    input: >
+      ## What
+
+      Improve the `rebar create` command's argument handling and output presentation.
+
+      ## Approach
+
+      In `src/rebar/_commands/create.py`:
+      - Validate that `--title` is non-empty and not longer than 200 characters, raising
+        a `UsageError` with a helpful message if violated.
+      - Format the success output to include the new ticket's alias in bold when stdout is
+        a TTY.
+
+      No changes to the library or MCP surfaces; these are CLI-only UX affordances.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar create --title ""` fails with a clear usage error.
+      - [ ] `rebar create` success output shows the alias in bold on a TTY.
+
+  - id: ELE-N3
+    corpus: rebar
+    criterion: project.engine-layer-enforcement
+    expect: pass
+    note: >-
+      Docs-only plan naming no validation: the plan adds no guard, check, invariant, or
+      enforcement logic. There is nothing to flag.
+    input: >
+      ## What
+
+      Update the `docs/ticket-model.md` section on alias uniqueness to clarify that aliases
+      must be unique within a store and document the error users will see on a collision.
+
+      ## Approach
+
+      Edit `docs/ticket-model.md` to add a "Alias uniqueness" subsection explaining the
+      constraint, the error message, and how to choose a non-colliding alias. No code
+      changes.
+
+      ## Acceptance Criteria
+
+      - [ ] `docs/ticket-model.md` contains a clear "Alias uniqueness" subsection.
+      - [ ] The subsection documents the error message and resolution steps.

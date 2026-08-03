@@ -1,4 +1,9 @@
 {
+  "project-engine-layer-enforcement": {
+    "name": "enforce at the engine seam",
+    "template": "Move {subject}'s enforcement from the interface surface to the shared engine seam (the *_core write path), so CLI, MCP, and library ingress all inherit the same invariant; keep interface layers to parsing and presentation.",
+    "applies_when": ["project.engine-layer-enforcement"]
+  },
   "project-portability": {
     "name": "restore rebar portability",
     "template": "Rework {subject} so it remains portable across supported rebar client shapes; keep project-specific behavior in project configuration or an explicit extension boundary.",
