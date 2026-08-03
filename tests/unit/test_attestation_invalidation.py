@@ -585,6 +585,60 @@ def test_normal_sign_container_scope_contract(
     assert attest.manifest_file_scope(verified["manifest"]) == expected_scope
 
 
+def test_checkbox_flip_keeps_signed_material_valid(store: Path) -> None:
+    """Bug 330c: the 433c close precheck REQUIRES flipping AC boxes before close;
+    a pure box-flip edit must not trip stale-material on the signed review."""
+    ticket_id = rebar.create_ticket(
+        "task",
+        "box flip",
+        description="## Acceptance Criteria\n- [ ] alpha\n- [ ] beta\n",
+        repo_root=str(store),
+    )
+    before_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    before_material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert before_material is not None
+    manifest = attest.build_manifest(
+        {
+            "verdict": "PASS",
+            "ticket_id": before_state["ticket_id"],
+            "coverage": {"counts": {}},
+        },
+        material=before_material,
+        regver=attest.registry_version(str(store)),
+        file_scope="none",
+    )
+    record = _sign_scope_opcert(
+        store,
+        ticket_id,
+        manifest,
+        material=before_material,
+        commit=signing.head_sha(str(store)),
+    )
+
+    rebar.edit_ticket(
+        ticket_id,
+        description="## Acceptance Criteria\n- [x] alpha\n- [x] beta\n",
+        repo_root=str(store),
+    )
+    after_state = rebar.show_ticket(ticket_id, repo_root=str(store))
+    after_material = attest.current_material_fingerprint(ticket_id, repo_root=str(store))
+    assert after_material == before_material, "a pure box flip must not move the fingerprint"
+    verified = verify_opcert_record(
+        record,
+        after_state["ticket_id"],
+        kind="plan-review",
+        repo_root=str(store),
+    )
+    result = attest.compute_validity(
+        verified,
+        after_state,
+        "plan-review",
+        repo_root=str(store),
+    )
+    assert result["valid"] is True
+    assert result["verdict"] != "stale-material"
+
+
 def test_none_reason_edit_invalidates_signed_material(store: Path) -> None:
     ticket_id = rebar.create_ticket("task", "reason drift", repo_root=str(store))
     rebar.declare_no_file_impact(ticket_id, "external action alpha", repo_root=str(store))

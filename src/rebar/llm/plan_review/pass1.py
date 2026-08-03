@@ -19,6 +19,7 @@ import contextvars
 import hashlib
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -736,13 +737,24 @@ def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+_CHECKBOX_STATE_RE = re.compile(r"^(\s*[-*]\s*\[)[xX ](\])", re.MULTILINE)
+
+
+def _normalize_checkbox_state(description: str) -> str:
+    """Erase checkbox STATE (``[x]``/``[X]`` → ``[ ]``) for fingerprinting. Box state
+    is progress metadata — the close precheck (433c) requires flipping it, so it must
+    not stale a signed review (bug 330c). Item TEXT stays material."""
+    return _CHECKBOX_STATE_RE.sub(r"\g<1> \g<2>", description)
+
+
 def material_fingerprint(ctx: PlanContext) -> str:
     """A hash of the ticket's MATERIAL plan content (description / AC / file_impact /
     decomposition) — bound into the attestation so a material edit invalidates the
-    signature. Tags/comments/links/assignee are NOT material (excluded)."""
+    signature. Tags/comments/links/assignee are NOT material (excluded), and neither
+    is AC checkbox STATE (normalized away — see :func:`_normalize_checkbox_state`)."""
     basis = {
         "ticket_id": ctx.ticket_id,
-        "description": ctx.description,
+        "description": _normalize_checkbox_state(ctx.description),
         "file_impact": ctx.state.get("file_impact") or [],
         "children": sorted(c.get("ticket_id", "") for c in ctx.children),
     }
