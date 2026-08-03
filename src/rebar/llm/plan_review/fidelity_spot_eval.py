@@ -354,17 +354,10 @@ def _run_prerequisite_mode(*, packed: bool, cfg: LLMConfig, runner: Runner) -> l
             prerequisite_id = str(block["canonical_id"])
             is_conflict = prerequisite_id in scenario["conflict_ids"]
             # Two gold lanes exercise both metrics in parity._recall_false_accept:
-            # ordinary conflicts are recall gold; confusion/multi-bin conflicts are
-            # false-accept gold (they must still be blocked, never shipped).
-            label = (
-                (
-                    "advisory"
-                    if scenario["name"] in {"attribution-confusion", "multi-bin"}
-                    else "block"
-                )
-                if is_conflict
-                else None
-            )
+            # every CONFLICT block must be blocked (recall gold), and every CONSISTENT
+            # block must NOT be blocked (false-accept gold — false-accept is the
+            # wrongly-blocked rate over gold-safe items).
+            label = "block" if is_conflict else "advisory"
             record = observed.get(prerequisite_id)
             findings = list(record.get("findings") or []) if record else []
             pred_id = (
