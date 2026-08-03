@@ -103,6 +103,21 @@ def drift_env(tmp_path: Path, **over: str) -> dict[str, str]:
     return env
 
 
+# Consecutive-red threshold fixture (ticket 4527): the heartbeat filer only
+# CREATES a ticket when the previous completed canary run was also red, so
+# create-path tests must supply the run-history env + a prior-red response.
+THRESHOLD_ENV = {
+    "GITHUB_REPOSITORY": "navapbc/rebar",
+    "GITHUB_RUN_ID": "42",
+    "CANARY_WORKFLOW_FILE": "reconcile-bridge-canary.yml",
+}
+
+
+def prev_red() -> tuple[int, str, str]:
+    runs = [{"id": 41, "conclusion": "failure", "updated_at": _iso(NOW - 1200)}]
+    return (0, json.dumps(runs), "")
+
+
 # --------------------------------------------------------------------------
 # check-heartbeat boundaries and math
 # --------------------------------------------------------------------------
@@ -189,9 +204,11 @@ def test_find_failure_is_soft_open_proceeds(mod: ModuleType, tmp_path: Path) -> 
         {
             ("rebar", "list"): (1, "", "store busy"),
             ("rebar", "create"): (0, "", ""),
+            ("gh", "api"): prev_red(),
         }
     )
-    rc = mod.main(["heartbeat-alert"], runner=runner, environ=alert_env(tmp_path), now_epoch=NOW)
+    env = alert_env(tmp_path, **THRESHOLD_ENV)
+    rc = mod.main(["heartbeat-alert"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     assert [c[1] for c in runner.rebar_writes()] == ["create"]
 
@@ -201,9 +218,11 @@ def test_find_garbage_json_is_soft(mod: ModuleType, tmp_path: Path) -> None:
         {
             ("rebar", "list"): (0, "certainly not json", ""),
             ("rebar", "create"): (0, "", ""),
+            ("gh", "api"): prev_red(),
         }
     )
-    rc = mod.main(["heartbeat-alert"], runner=runner, environ=alert_env(tmp_path), now_epoch=NOW)
+    env = alert_env(tmp_path, **THRESHOLD_ENV)
+    rc = mod.main(["heartbeat-alert"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     assert [c[1] for c in runner.rebar_writes()] == ["create"]
 
@@ -237,9 +256,10 @@ def test_each_write_failure_fails_loud(mod: ModuleType, tmp_path: Path, verb: st
         {
             ("rebar", "list"): (0, listing, ""),
             ("rebar", verb): (1, "", "kaboom"),
+            ("gh", "api"): prev_red(),
         }
     )
-    env = alert_env(tmp_path, STALE=stale)
+    env = alert_env(tmp_path, STALE=stale, **THRESHOLD_ENV)
     rc = mod.main(["heartbeat-alert"], runner=runner, environ=env, now_epoch=NOW)
     assert rc != 0
 

@@ -174,6 +174,10 @@ jobs:
           LAST_RUN_AGO: ${{ steps.check.outputs.last_run_ago }}
           STATUS_MSG: ${{ steps.check.outputs.status_msg }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Consecutive-red threshold: the filer queries this workflow's own run
+          # history via gh api before opening a ticket (4527).
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANARY_WORKFLOW_FILE: reconcile-bridge-canary.yml
         run: |
           set -euo pipefail
           python scripts/canary_bridge.py heartbeat-alert

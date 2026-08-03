@@ -75,6 +75,15 @@ from rebar_reconciler.apply_base import (  # noqa: E402
     _MutationModule,
 )
 
+# Per-action batch handlers + the per-pass context live in apply_handlers.py.
+# Imported (not re-exported) — _apply_batch's per-mutation step dispatches through
+# dispatch_mutation; the handlers wrap batch_dispatch's create/update/delete_one.
+from rebar_reconciler.apply_handlers import (  # noqa: E402
+    BatchApplyContext,
+    dispatch_mutation,
+    record_backstop_failure,
+)
+
 # Inbound leaf appliers live in apply_inbound.py.
 # Re-exported so _build_leaves (resident) binds them.
 from rebar_reconciler.apply_inbound import (  # noqa: E402
@@ -110,6 +119,29 @@ from rebar_reconciler.apply_outbound import (  # noqa: E402
     _get_commit_subject,
 )
 
+# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
+# Re-exported so resident _apply_batch/apply()/outbound leaves and the
+# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
+from rebar_reconciler.batch_dispatch import (  # noqa: E402
+    JiraAPIError,
+    RetryExhaustedError,
+    _call_with_retry,
+    _is_illegal_transition_400,
+    _mutation_to_batch_dict,
+    create_one,
+    delete_one,
+    update_one,
+)
+
+# Deferred conflict bug filing lives in conflict_bug_filing.py (ticket 4527):
+# dedup tag per (local_id, jira_key) pair, 24h accumulation cap, abort-if-empty,
+# --detected-by provenance. Imported under the historic private name so the
+# monkeypatch seam tests rely on (applier._file_conflict_bug_ticket) survives —
+# the deferred loop below resolves this module-global at call time.
+from rebar_reconciler.conflict_bug_filing import (  # noqa: E402
+    file_conflict_bug_ticket as _file_conflict_bug_ticket,
+)
+
 # Jira→local translation + local-event-store IO live in inbound_translate.py.
 # Re-imported so the resident inbound leaves resolve them as module globals.
 from rebar_reconciler.inbound_translate import (  # noqa: E402
@@ -129,61 +161,6 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _resolve_priority,
     _resolve_tracker_dir,
     _write_event_file,
-)
-
-
-def _file_conflict_bug_ticket(cli_path: Path, title: str, description: str, parent_id: str) -> str:
-    """Spawn the ticket CLI as a subprocess to file a bug ticket.
-
-    Returns the canonical bug id on success, '' otherwise. Isolated as its
-    own function so tests can monkeypatch this single seam without touching
-    the broader subprocess module (which is used by _concurrency).
-    """
-    import subprocess
-
-    if not cli_path.exists():
-        return ""
-    cmd: list[str] = [
-        str(cli_path),
-        "create",
-        "bug",
-        title,
-        "-d",
-        description,
-    ]
-    if parent_id:
-        cmd.extend(["--parent", parent_id])
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if res.returncode != 0:
-        return ""
-    lines = [ln for ln in res.stdout.splitlines() if ln.strip()]
-    return lines[-1] if lines else ""
-
-
-# Per-action batch handlers + the per-pass context live in apply_handlers.py.
-# Imported (not re-exported) — _apply_batch's per-mutation step dispatches through
-# dispatch_mutation; the handlers wrap batch_dispatch's create/update/delete_one.
-from rebar_reconciler.apply_handlers import (  # noqa: E402
-    BatchApplyContext,
-    dispatch_mutation,
-    record_backstop_failure,
-)
-
-# Outbound batch dispatch + Jira-call retry live in batch_dispatch.py.
-# Re-exported so resident _apply_batch/apply()/outbound leaves and the
-# patch.object(applier, '_call_with_retry'/'JiraAPIError') tests resolve.
-from rebar_reconciler.batch_dispatch import (  # noqa: E402
-    JiraAPIError,
-    RetryExhaustedError,
-    _call_with_retry,
-    _is_illegal_transition_400,
-    _mutation_to_batch_dict,
-    create_one,
-    delete_one,
-    update_one,
 )
 
 # Pass-write persistence + the reschedule contract live in pass_io.py.
@@ -519,12 +496,7 @@ def apply(
             cli_path = Path(in_process_cli())
             for pending in pending_bug_tickets:
                 try:
-                    _file_conflict_bug_ticket(
-                        cli_path,
-                        pending.get("title", ""),
-                        pending.get("description", ""),
-                        pending.get("parent_id", ""),
-                    )
+                    _file_conflict_bug_ticket(cli_path, pending)
                 except Exception as exc:  # noqa: BLE001 — best-effort deferred bug filing must not fail pass
                     print(  # noqa: T201
                         f"deferred_bug_filing_failed: "
