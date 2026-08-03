@@ -512,6 +512,25 @@ class JiraDataCenterTransport:
         links = fields.get("issuelinks") if isinstance(fields, dict) else None
         return links if isinstance(links, list) else []
 
+    def _resolve_epic_link_field_id(self) -> str | None:
+        """Discover + cache the "Epic Link" custom field id BY NAME (id differs per
+        deployment, never hardcoded). ``getattr``/``setattr`` on ``_epic_link_field_id``
+        (default ``_MISSING``) rather than a bare attribute read: a transport built via
+        ``__new__`` (some pagination tests) skips ``__init__``'s assignment entirely,
+        so a bare read would raise. SHARED by ``set_parent`` (outbound, 39c1) and
+        ``get_parent_map`` (inbound, 9bb9) — one discovery, never two that could disagree.
+        """
+        cached = getattr(self, "_epic_link_field_id", _MISSING)
+        if cached is _MISSING:
+            lister = getattr(self._client, "fields", None)
+            cached = (
+                None
+                if lister is None
+                else next((f.get("id") for f in lister() if f.get("name") == "Epic Link"), None)
+            )
+            self._epic_link_field_id = cached
+        return cached  # type: ignore[return-value]
+
     def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
         """``{issue_key → parent_key | None}`` for a project, via DC REST **v2**
         OFFSET pagination.
@@ -525,6 +544,10 @@ class JiraDataCenterTransport:
         ``maxResults``, which is exactly what ``jira.JIRA.search_issues`` drives —
         so the library's native offset paging IS the DC-correct mechanism.
 
+        Also reads a non-sub-task's parent back from the "Epic Link" field
+        :meth:`_resolve_epic_link_field_id` discovers, closing 9bb9's round trip
+        with ``set_parent``; ``fields.parent`` wins where both are present.
+
         Degradation contract (mirrors Cloud, and what ``fetcher`` expects): a
         failure logs a WARNING and returns ``{}``, so the inbound pass falls back
         to its parentless path rather than aborting.
@@ -532,10 +555,12 @@ class JiraDataCenterTransport:
         query = jql or f"project = {project_key}"
         out: dict[str, str | None] = {}
         try:
-            # Routed through the SHARED pager (9263). It was correct here first, and
-            # leaving it as a fourth hand-rolled loop would mean the helper exists while
-            # the method that motivated it does not use it — the two would drift.
-            for issue in self._paged_search(query, fields="parent", rate_limit_retry=True):
+            # Discovery is called INSIDE this try (it never swallows its own ``fields()``
+            # failure — ``set_parent`` relies on that propagating) so it still hits the
+            # degradation contract below. Pager choice per 9263: was correct here first.
+            epic_field = self._resolve_epic_link_field_id()
+            search_fields = "parent" if epic_field is None else f"parent,{epic_field}"
+            for issue in self._paged_search(query, fields=search_fields, rate_limit_retry=True):
                 if not isinstance(issue, dict):
                     continue
                 key = issue.get("key")
@@ -543,7 +568,11 @@ class JiraDataCenterTransport:
                     continue
                 fields = issue.get("fields")
                 parent = fields.get("parent") if isinstance(fields, dict) else None
-                out[key] = parent.get("key") if isinstance(parent, dict) else None
+                parent_key = parent.get("key") if isinstance(parent, dict) else None
+                if not parent_key and epic_field and isinstance(fields, dict):
+                    epic_value = fields.get(epic_field)
+                    parent_key = epic_value if isinstance(epic_value, str) and epic_value else None
+                out[key] = parent_key
         except Exception as exc:  # noqa: BLE001 — degradation contract: a parent-map failure must not abort the inbound pass
             logger.warning(
                 "jira-datacenter transport: get_parent_map degraded to {} for project %r: %r",
@@ -704,19 +733,8 @@ class JiraDataCenterTransport:
             # Ticket 39c1: a NON-sub-task's parent is the EPIC LINK custom field, written as a
             # plain field update — never ``fields.parent``, which DC silently no-ops, and never
             # ``add_issues_to_epic`` (REFUTED: DC 8.17.1 404s on the greenhopper epic-issue path).
-            if self._epic_link_field_id is _MISSING:
-                # Cached on the INSTANCE, once: a reparent-heavy pass calls set_parent many
-                # times, and ticket b586 already made REST cost on this transport a live
-                # concern. A lookup that finds nothing is cached too — see ``_MISSING`` above.
-                lister = getattr(self._client, "fields", None)
-                if lister is None:
-                    self._epic_link_field_id = None
-                else:
-                    self._epic_link_field_id = next(
-                        (f.get("id") for f in lister() if f.get("name") == "Epic Link"),
-                        None,
-                    )
-            epic_link_id = self._epic_link_field_id
+            # Discovery is SHARED with ``get_parent_map`` (9bb9) via ``_resolve_epic_link_field_id``
+            epic_link_id = self._resolve_epic_link_field_id()
             if epic_link_id is None:
                 # Whether the client can't enumerate fields at all, or it can and this
                 # instance simply has none named "Epic Link", the parent is equally
