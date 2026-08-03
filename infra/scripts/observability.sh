@@ -11,6 +11,9 @@
 #   4. review-bot voter failures (VOTER_ERROR in journald) -> rebar/host:voter_errors (S4b alarm).
 #   4c. review-bot merge-change failures (MERGE_CHANGE_ERROR) -> rebar/host:review_bot_merge_change_errors (epic 88ab/S2 alarm).
 #   4d. continuous auto-deploy failures (AUTODEPLOY_ERROR in the unit journal) -> rebar/host:deploy_errors (epic 88ab/8903 alarm).
+#   4e. auto-deploys DEFERRED to avoid killing an in-flight review (AUTODEPLOY_DEFERRED) ->
+#       rebar/host:deploy_deferrals, and deploys that recreated the container ANYWAY
+#       (AUTODEPLOY_REVIEW_INTERRUPT) -> rebar/host:review_interrupts (bug 34cd alarm).
 #   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
@@ -176,6 +179,44 @@ echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
 aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null || true
 [ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
+
+
+# --- 4e. review-drain outcomes: deferrals + interrupted reviews (bug 34cd) --
+# autodeploy.sh will not recreate the review-bot container while a review is in flight —
+# recreating it KILLS the review, and does so INVISIBLY: nothing fails, so the voter emits no
+# VOTER_ERROR (§4 above stays 0), `restarts` stays 0, and the deploy still logs "redeployed +
+# healthy". That is why a fully live-locked LLM-Review gate could sit behind eleven green
+# alarms. These two counters are what make the failure mode visible at all:
+#   deploy_deferrals   — deploys skipped to protect a review. NOT an error: expected during a
+#                        landing burst, and each one is bounded (DEPLOY_DEFER_MAX). A sustained
+#                        signal means `main` is reaching the box more slowly than usual.
+#   review_interrupts  — a review WAS (or may have been) killed: the deferral bound was
+#                        exhausted, or the in-flight signal itself was unreadable so the deploy
+#                        ran blind. This is the alarm-worthy one.
+# Counted from the UNIT journal with the same offset-delta shape as §4d, and published
+# dimensionless to match the alarms. Kept as distinct tokens from AUTODEPLOY_ERROR on purpose:
+# folding a routine, healthy deferral into deploy_errors would page on normal burst behaviour.
+DEFER_OFFSET_FILE="${DEFER_OFFSET_FILE:-/var/lib/rebar/autodeploy-defer-offset}"
+INTERRUPT_OFFSET_FILE="${INTERRUPT_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-offset}"
+mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")"
+publish_autodeploy_marker_delta() {
+  local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
+  total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
+  total=${total:-0}
+  prev=$(cat "$offset_file" 2>/dev/null || echo 0)
+  case "$prev" in '' | *[!0-9]*) prev=0 ;; esac
+  new=$((total - prev))
+  [ "$new" -lt 0 ] && new=$total
+  echo "$total" >"$offset_file"
+  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name "$metric" --unit Count --value "$new" 2>/dev/null || true
+  [ "$new" -gt 0 ] && logger -t rebar-health "${label} (new this interval)=${new}"
+  return 0
+}
+publish_autodeploy_marker_delta AUTODEPLOY_DEFERRED deploy_deferrals \
+  "$DEFER_OFFSET_FILE" "auto-deploys deferred for an in-flight review"
+publish_autodeploy_marker_delta AUTODEPLOY_REVIEW_INTERRUPT review_interrupts \
+  "$INTERRUPT_OFFSET_FILE" "review-bot reviews interrupted by a deploy"
 
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
