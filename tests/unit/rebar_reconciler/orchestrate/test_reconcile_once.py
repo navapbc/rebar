@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -271,6 +272,22 @@ def test_idempotency_two_passes_with_unchanged_remote(
     )
     assert result1["pass_id"] == pass_id
     assert result2["pass_id"] == pass_id
+
+
+def test_live_pass_persists_prev_snapshot_as_a_bare_key_set(
+    tmp_path, reconcile_mod, fetcher_mod, applier_mod
+):
+    """The cross-pass artifact retains membership but no Jira field bodies."""
+    issues = _make_stable_issues()
+
+    with _patch_acli_and_concurrency(fetcher_mod, applier_mod, issues):
+        reconcile_mod.reconcile_once("key-set-shape", repo_root=tmp_path)
+
+    prev_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "prev_snapshot.json"
+    persisted = json.loads(prev_path.read_text())
+
+    assert persisted == {"DIG-1": {}, "DIG-2": {}}
+    assert prev_path.stat().st_size <= 64 * 1024
 
 
 def test_excluded_fields_change_does_not_drive_mutations(

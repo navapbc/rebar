@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -536,6 +535,12 @@ def _advance_baselines(binding_store: Any, curr_snapshot: Mapping[str, Any]) -> 
     return advanced
 
 
+def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
+    """Persist only Jira-key membership for the next pass's edge detection."""
+    key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
+    prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n")
+
+
 def _persist_and_log(ctx: _PassContext) -> dict:
     """Persist phase: save+commit the binding store, advance the prev snapshot
     (idempotency), tally the truthful applied/failure counts from the manifest,
@@ -544,7 +549,6 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     persist = ctx.persist
     binding_store = ctx.binding_store
     repo_root = ctx.repo_root
-    curr_path = ctx.curr_path
     prev_path = ctx.prev_path
     manifest_path = ctx.manifest_path
     nowrite_plan = ctx.nowrite_plan
@@ -606,13 +610,13 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 file=sys.stderr,
             )
 
-        # Advance prev snapshot so the next call converges to zero mutations.
-        # Only in persist mode: curr_path is None in no-write mode and the
-        # prev_snapshot must stay untouched (no store write). Both paths are
-        # guaranteed set by _load_snapshots in persist mode (the invariant the
-        # surrounding ``if persist`` encodes) — assert it to narrow the Optional.
-        assert curr_path is not None and prev_path is not None
-        shutil.copy2(curr_path, prev_path)
+        # Advance only Jira-key membership so the next call preserves edge detection
+        # without retaining remote field bodies. The full current snapshot remains
+        # available as the per-pass diagnostic artifact under bridge_state/snapshots/.
+        # In no-write mode prev_path must stay untouched, so this remains inside the
+        # persistence gate.
+        assert prev_path is not None
+        _write_prev_snapshot_key_set(prev_path, ctx.curr_snapshot)
 
     # Bug 85a1: surface the truthful applied-count and failure-count by parsing
     # the manifest written by _apply_batch. Before this fix, sync_pass_end and
