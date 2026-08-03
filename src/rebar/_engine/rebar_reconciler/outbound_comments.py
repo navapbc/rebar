@@ -28,6 +28,32 @@ default to ``None`` and are resolved lazily via ``select_backend(load_config())`
 INSIDE the function body — never at import time — because this module is
 spec-loaded standalone in tests, where package-relative config resolution may not
 be available at import.
+
+Ticket a32a: ``_diff_comments`` additionally accepts an injected ``codec`` — any
+object exposing ``normalize_outbound(text) -> str`` (typically a real
+``adapters/jira_family/rich_text.RichTextCodec``) — so the LOCAL comparison key
+is routed through the SAME outbound normalization the send path's landed form
+would embody, the way ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote``
+already composes ``normalize_outbound(fit_outbound(value))`` for descriptions.
+``codec`` defaults to ``None``, which resolves to an identity no-op
+(:class:`_IdentityCodec`) — today's actual behaviour for both deployments (Cloud
+sends comment bodies as plain text via ACLI with no ADF encoding computed; DC's
+own codec is already the identity), so nothing here changes what a caller sees
+until a real, non-identity codec is wired in.
+
+**The invariant this depends on, and why there is no origin-aware gate for
+it:** this module does NOT distinguish "a body that originated in Jira and was
+pulled inbound" from "a body a human typed locally" before computing the
+outbound comparison key — both are normalized identically. That is safe ONLY
+because ``RichTextCodec.normalize_outbound(t) == RichTextCodec.decode_inbound(
+RichTextCodec.to_wire(t))`` for every real implementation (pinned in
+``test_rich_text_codec.py::test_normalize_outbound_equals_decode_of_to_wire``):
+degradation is symmetric. If that law ever stops holding — if encode-then-
+decode stops being the same fixed point as normalize-outbound — a body pulled
+FROM Jira starts being re-emitted on the next outbound pass, silently
+overwriting the human's Jira-native formatting with the reconciler's own
+(wrong) idea of it. This is currently load-bearing and was, before this
+ticket, unwritten anywhere.
 """
 
 from __future__ import annotations
@@ -75,6 +101,40 @@ def _resolve_sanitizer(sanitizer: Any | None) -> Any:
     from rebar_reconciler._backend_registry import select_backend
 
     return select_backend(load_config()).sanitizer
+
+
+class _IdentityCodec:
+    """No-op outbound rich-text codec: ``normalize_outbound`` is the identity.
+
+    Ticket a32a: the default when a caller does not inject a real
+    ``RichTextCodec`` (``adapters/jira_family/rich_text.RichTextCodec``).
+    This matches TODAY's actual comment send path exactly — Cloud sends
+    comment bodies as plain text via ACLI with no ADF encoding computed
+    (see the module docstring), and Data Center's own codec
+    (``WikiTextCodec.normalize_outbound``) is already the identity — so
+    falling back to identity here changes nothing for any caller that does
+    not (yet) inject a real codec.
+    """
+
+    def normalize_outbound(self, text: str) -> str:
+        return text
+
+
+def _resolve_codec(codec: Any | None) -> Any:
+    """Resolve the injected outbound rich-text codec for the LOCAL comparison
+    key (ticket a32a).
+
+    Mirrors :func:`_resolve_inbound_mapper`/:func:`_resolve_sanitizer`'s
+    injection seam: a caller (or a test) may pass any object exposing
+    ``normalize_outbound(text) -> str`` — typically a real
+    ``adapters/jira_family/rich_text.RichTextCodec`` implementation
+    (``AdfCodec``/``WikiTextCodec``) — so the local comment key can be routed
+    through it the same way ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote``
+    composes ``normalize_outbound(fit_outbound(value))`` for descriptions.
+    ``None`` (the default — no caller wires a real codec into the comment
+    path yet) resolves to :class:`_IdentityCodec`, so behaviour is unchanged
+    for every existing caller."""
+    return codec if codec is not None else _IdentityCodec()
 
 
 def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
@@ -168,19 +228,36 @@ def _diff_comments(
     *,
     inbound_mapper: Any | None = None,
     sanitizer: Any | None = None,
+    codec: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Compare local comments to Jira comments. Return mutations for new comments.
 
     Matching rule: emit a comment "add" only for local comment bodies NOT
     already present in Jira, after normalising both sides via
     :func:`_normalize_comment_body` (rich-text→text conversion + RECONCILER_MARKER
-    strip + whitespace strip). Body equality after normalisation → skip
-    (already mirrored); otherwise emit with outbound decoration.
+    strip + whitespace strip), and — ticket a32a — routing the LOCAL side
+    additionally through the injected ``codec``'s ``normalize_outbound`` (after
+    ``sanitizer.fit_comment``, mirroring the fit-then-normalize order
+    ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote`` composes for
+    descriptions: ``normalize_outbound(fit_outbound(value))``). Without this,
+    the Jira-side key is always a DECODED value while the local-side key
+    never accounts for what the send path would actually produce — the exact
+    asymmetry that already bit the description path before that composition
+    was added, and that bites the comment path's truncation guard below (bug
+    6afc) for the ONE transform it does know about. Body equality after
+    normalisation → skip (already mirrored); otherwise emit with outbound
+    decoration.
 
     ``inbound_mapper``/``sanitizer``: the injected Backend-port ``InboundMapper``/
     ``FieldSanitizer`` (ticket 21ca); ``None`` resolves the configured backend via
     :func:`_resolve_inbound_mapper`/:func:`_resolve_sanitizer`. Threaded from
     ``outbound_differ.compute_outbound_mutations`` (which already holds the backend).
+
+    ``codec``: the injected outbound rich-text codec (ticket a32a) — any object
+    exposing ``normalize_outbound(text) -> str``, typically a real
+    ``adapters/jira_family/rich_text.RichTextCodec``. ``None`` resolves to
+    :func:`_resolve_codec`'s identity default, so no existing caller's
+    behaviour changes until one is wired in.
 
     Snapshot lookup: the Jira REST API places comments at
     fields["comment"]["comments"] (outer key is "comment", not "comments").
@@ -206,6 +283,7 @@ def _diff_comments(
     # than re-resolving per comment below.
     inbound_mapper = _resolve_inbound_mapper(inbound_mapper)
     sanitizer = _resolve_sanitizer(sanitizer)
+    codec = _resolve_codec(codec)
 
     local_comments = ticket.get("comments", [])
     jira_issue = jira_snapshot.get(jira_key, {})
@@ -311,7 +389,16 @@ def _diff_comments(
         # test; otherwise the full local body never matches the truncated Jira
         # body and the diff re-emits forever. The local store is NOT mutated —
         # `body` here is an in-memory comparison key only.
-        compare_body = sanitizer.fit_comment(body)
+        #
+        # Ticket a32a: then route the fitted body through the injected codec's
+        # ``normalize_outbound`` — fit-then-normalize, the SAME order
+        # ``OutboundFieldMapper.map_fields_to_remote`` composes for
+        # descriptions (``normalize_outbound(fit_outbound(value))``). The
+        # Jira-side key (``jira_bodies``, above) is already a DECODED value;
+        # this is the missing local-side half of that same fixed point. With
+        # no codec injected this is `_IdentityCodec`, so `compare_body` is
+        # unchanged from before this ticket.
+        compare_body = codec.normalize_outbound(sanitizer.fit_comment(body))
         if compare_body and compare_body not in jira_bodies:
             # Decorate the outbound body with the reconciler marker so the
             # inbound differ can identify (and filter) our own echoes on the
