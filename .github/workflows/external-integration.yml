@@ -51,8 +51,9 @@ jobs:
             exit 1
           fi
 
-      # The shell-based golden-path probe (scripts/probe-rebar.sh) parses rebar's
-      # JSON output with jq in its assertions (mirrors the main test workflow).
+      # jq is a general JSON-inspection utility for ad-hoc steps in this lane.
+      # (The golden-path probe is now Python — scripts/probe_rebar.py — and no
+      # longer needs jq itself.)
       - name: Ensure jq is installed
         run: sudo apt-get update && sudo apt-get install -y jq && jq --version
 
