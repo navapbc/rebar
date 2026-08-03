@@ -23,6 +23,67 @@ from rebar_reconciler.adapters.jira_family import sanitize_label as _sanitize_la
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Callable, Iterator
+
+
+class RunawayPaginationError(RuntimeError):
+    """A ``nextPageToken`` cursor walk saw the same non-null token twice in a row.
+
+    The server has stopped advancing the cursor ([rebar:cabc-7a98-d173-4d7c]):
+    every further request would return the same page forever, so the walk stops
+    at the second sighting. Readers re-raise this PAST their fail-open handlers
+    deliberately — a stalled cursor is a truncated whole-project read (the
+    silent-loss class this adapter has shipped three times), not a transient
+    fault to degrade around.
+    """
+
+
+def _iter_cursor_pages(
+    post: Callable[[str, dict[str, Any]], Any],
+    path: str,
+    base_body: dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    """Yield each page of an opaque-cursor ``POST <path>`` search.
+
+    THE one cursor loop: three hand-rolled copies of this walk have shipped
+    three silent-truncation bugs (see test_acli_graph_pagination_heldout.py's
+    module docstring), so exactly one copy exists and the readers all route
+    through it. Contract (ticket 8b25, live-proven): the first request body is
+    ``base_body`` verbatim; each subsequent request adds ``nextPageToken``; the
+    walk ends on ``isLast: true`` or a null/absent token. A non-dict response
+    ends the walk quietly — callers treat pages already yielded as the partial
+    result.
+
+    Transport exceptions propagate unhandled: degradation policy (410-loud,
+    warn-and-degrade, partial map) belongs to each reader, not the shared walk.
+
+    Raises:
+        RunawayPaginationError: the same non-null token arrived twice
+            consecutively. Without this the spin would run until the transport
+            itself failed, and the readers' fail-open handlers would convert
+            THAT into a silent partial map.
+    """
+    next_page_token: str | None = None
+    while True:
+        body = dict(base_body)
+        if next_page_token is not None:
+            body["nextPageToken"] = next_page_token
+        resp = post(path, body)
+        if not isinstance(resp, dict):
+            return
+        yield resp
+        if resp.get("isLast"):
+            return
+        token = resp.get("nextPageToken")
+        if not token:
+            return
+        if token == next_page_token:
+            raise RunawayPaginationError(
+                f"cursor walk on {path} stalled: the server returned "
+                f"nextPageToken {token!r} twice consecutively; aborting the "
+                f"walk rather than spinning [rebar:cabc-7a98-d173-4d7c]"
+            )
+        next_page_token = token
 
 
 class AcliGraphMixin:
@@ -197,10 +258,14 @@ class AcliGraphMixin:
         ``{nextPageToken: <token>}``. The loop terminates when the response
         reports ``isLast: true`` or yields a null/absent ``nextPageToken``.
 
-        Paginates until the cursor is exhausted.  Returns an empty dict and
+        Paginates until the cursor is exhausted (via the module's single
+        shared ``_iter_cursor_pages`` walk).  Returns an empty dict and
         logs on any REST failure (fetcher degrades gracefully — ticket 8b25).
         An HTTP 410 (endpoint retirement) is logged at ERROR (loud — API
-        retirements must be noticed); transient faults stay at WARNING.
+        retirements must be noticed); transient faults stay at WARNING.  One
+        deliberate exception to fail-open: a stalled cursor (the same token
+        twice in a row) raises ``RunawayPaginationError`` instead of
+        degrading, because a partial whole-project map is silent data loss.
 
         Args:
             project: Jira project key (e.g. "DIG").
@@ -212,68 +277,56 @@ class AcliGraphMixin:
 
         effective_jql = jql or f"project = {project}"
         result: dict[str, str | None] = {}
-        page_size = 100
-        next_page_token: str | None = None
-
-        while True:
-            body: dict[str, Any] = {
-                "jql": effective_jql,
-                "maxResults": page_size,
-                "fields": ["parent"],
-            }
-            if next_page_token is not None:
-                body["nextPageToken"] = next_page_token
-            try:
-                resp = self._direct_rest_post_json("/rest/api/3/search/jql", body)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 410:
-                    _log.error(
-                        "get_parent_map: endpoint POST /rest/api/3/search/jql "
-                        "returned HTTP 410 GONE — the Jira search endpoint has "
-                        "been RETIRED; parent enrichment is unavailable this pass. "
-                        "This is an API retirement, not a transient fault: %r",
-                        exc,
-                    )
-                else:
-                    _log.warning(
-                        "get_parent_map: REST search failed (HTTP %s): %r; "
-                        "degrading gracefully — parent data absent this pass",
-                        exc.code,
-                        exc,
-                    )
-                break
-            except Exception as exc:  # noqa: BLE001 — fail-open: degrade gracefully, parent data absent
-                _log.warning(
-                    "get_parent_map: REST search failed: %r; "
-                    "degrading gracefully — parent data will be absent this pass",
+        base_body: dict[str, Any] = {
+            "jql": effective_jql,
+            "maxResults": 100,
+            "fields": ["parent"],
+        }
+        try:
+            for resp in _iter_cursor_pages(
+                self._direct_rest_post_json, "/rest/api/3/search/jql", base_body
+            ):
+                issues = resp.get("issues") or []
+                if not isinstance(issues, list):
+                    break
+                for issue in issues:
+                    if not isinstance(issue, dict):
+                        continue
+                    key = issue.get("key")
+                    if not key:
+                        continue
+                    fields = issue.get("fields") or {}
+                    parent_raw = fields.get("parent")
+                    parent_key_val: str | None = None
+                    if isinstance(parent_raw, dict):
+                        parent_key_val = parent_raw.get("key") or None
+                    result[key] = parent_key_val
+        except RunawayPaginationError:
+            # A stalled cursor means a truncated whole-project map the differ
+            # would treat as authoritative. Loud beats fail-open here.
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code == 410:
+                _log.error(
+                    "get_parent_map: endpoint POST /rest/api/3/search/jql "
+                    "returned HTTP 410 GONE — the Jira search endpoint has "
+                    "been RETIRED; parent enrichment is unavailable this pass. "
+                    "This is an API retirement, not a transient fault: %r",
                     exc,
                 )
-                break
-
-            if not isinstance(resp, dict):
-                break
-            issues = resp.get("issues") or []
-            if not isinstance(issues, list):
-                break
-            for issue in issues:
-                if not isinstance(issue, dict):
-                    continue
-                key = issue.get("key")
-                if not key:
-                    continue
-                fields = issue.get("fields") or {}
-                parent_raw = fields.get("parent")
-                parent_key_val: str | None = None
-                if isinstance(parent_raw, dict):
-                    parent_key_val = parent_raw.get("key") or None
-                result[key] = parent_key_val
-
-            # nextPageToken cursor contract: stop when isLast or token absent.
-            if resp.get("isLast"):
-                break
-            next_page_token = resp.get("nextPageToken")
-            if not next_page_token:
-                break
+            else:
+                _log.warning(
+                    "get_parent_map: REST search failed (HTTP %s): %r; "
+                    "degrading gracefully — parent data absent this pass",
+                    exc.code,
+                    exc,
+                )
+        except Exception as exc:  # noqa: BLE001 — fail-open: degrade gracefully, parent data absent
+            _log.warning(
+                "get_parent_map: REST search failed: %r; "
+                "degrading gracefully — parent data will be absent this pass",
+                exc,
+            )
 
         return result
 
@@ -313,69 +366,58 @@ class AcliGraphMixin:
 
         effective_jql = jql or f"project = {project}"
         result: dict[str, Any] = {}
-        page_size = 100
-        next_page_token: str | None = None
-
-        while True:
-            body: dict[str, Any] = {
-                "jql": effective_jql,
-                "maxResults": page_size,
-                "fields": ["comment"],
-            }
-            if next_page_token is not None:
-                body["nextPageToken"] = next_page_token
-            try:
-                resp = self._direct_rest_post_json("/rest/api/3/search/jql", body)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 410:
-                    _log.error(
-                        "get_comment_map: endpoint POST /rest/api/3/search/jql "
-                        "returned HTTP 410 GONE — the Jira search endpoint has "
-                        "been RETIRED; comment enrichment is unavailable this pass. "
-                        "Per-ticket get_comments fallback applies. API retirement, "
-                        "not a transient fault: %r",
-                        exc,
-                    )
-                else:
-                    _log.warning(
-                        "get_comment_map: REST search failed (HTTP %s): %r; "
-                        "degrading gracefully — per-ticket fallback applies",
-                        exc.code,
-                        exc,
-                    )
-                break
-            except Exception as exc:  # noqa: BLE001 — fail-open: degrade to per-ticket fallback
-                _log.warning(
-                    "get_comment_map: REST search failed: %r; "
-                    "degrading gracefully — per-ticket fallback applies",
+        base_body: dict[str, Any] = {
+            "jql": effective_jql,
+            "maxResults": 100,
+            "fields": ["comment"],
+        }
+        try:
+            for resp in _iter_cursor_pages(
+                self._direct_rest_post_json, "/rest/api/3/search/jql", base_body
+            ):
+                issues = resp.get("issues") or []
+                if not isinstance(issues, list):
+                    break
+                for issue in issues:
+                    if not isinstance(issue, dict):
+                        continue
+                    key = issue.get("key")
+                    if not key:
+                        continue
+                    fields = issue.get("fields") or {}
+                    comment_field = fields.get("comment")
+                    # Only record keys the search actually returned a comment field
+                    # for; omit the rest so the caller falls back to get_comments
+                    # (preserves the never-emit-blind invariant).
+                    if isinstance(comment_field, dict):
+                        result[key] = comment_field
+        except RunawayPaginationError:
+            # A stalled cursor means a truncated whole-project map. Loud beats
+            # fail-open here — see _iter_cursor_pages.
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code == 410:
+                _log.error(
+                    "get_comment_map: endpoint POST /rest/api/3/search/jql "
+                    "returned HTTP 410 GONE — the Jira search endpoint has "
+                    "been RETIRED; comment enrichment is unavailable this pass. "
+                    "Per-ticket get_comments fallback applies. API retirement, "
+                    "not a transient fault: %r",
                     exc,
                 )
-                break
-
-            if not isinstance(resp, dict):
-                break
-            issues = resp.get("issues") or []
-            if not isinstance(issues, list):
-                break
-            for issue in issues:
-                if not isinstance(issue, dict):
-                    continue
-                key = issue.get("key")
-                if not key:
-                    continue
-                fields = issue.get("fields") or {}
-                comment_field = fields.get("comment")
-                # Only record keys the search actually returned a comment field
-                # for; omit the rest so the caller falls back to get_comments
-                # (preserves the never-emit-blind invariant).
-                if isinstance(comment_field, dict):
-                    result[key] = comment_field
-
-            if resp.get("isLast"):
-                break
-            next_page_token = resp.get("nextPageToken")
-            if not next_page_token:
-                break
+            else:
+                _log.warning(
+                    "get_comment_map: REST search failed (HTTP %s): %r; "
+                    "degrading gracefully — per-ticket fallback applies",
+                    exc.code,
+                    exc,
+                )
+        except Exception as exc:  # noqa: BLE001 — fail-open: degrade to per-ticket fallback
+            _log.warning(
+                "get_comment_map: REST search failed: %r; "
+                "degrading gracefully — per-ticket fallback applies",
+                exc,
+            )
 
         return result
 
@@ -407,68 +449,57 @@ class AcliGraphMixin:
 
         effective_jql = jql or f"project = {project}"
         result: dict[str, Any] = {}
-        page_size = 100
-        next_page_token: str | None = None
-
-        while True:
-            body: dict[str, Any] = {
-                "jql": effective_jql,
-                "maxResults": page_size,
-                "fields": ["issuelinks"],
-            }
-            if next_page_token is not None:
-                body["nextPageToken"] = next_page_token
-            try:
-                resp = self._direct_rest_post_json("/rest/api/3/search/jql", body)
-            except urllib.error.HTTPError as exc:
-                if exc.code == 410:
-                    _log.error(
-                        "get_issuelinks_map: endpoint POST /rest/api/3/search/jql "
-                        "returned HTTP 410 GONE — the Jira search endpoint has been "
-                        "RETIRED; issuelink enrichment is unavailable this pass. "
-                        "API retirement, not a transient fault: %r",
-                        exc,
-                    )
-                else:
-                    _log.warning(
-                        "get_issuelinks_map: REST search failed (HTTP %s): %r; "
-                        "degrading gracefully (no issuelink enrichment this pass)",
-                        exc.code,
-                        exc,
-                    )
-                break
-            except Exception as exc:  # noqa: BLE001 — fail-open: degrade to no enrichment
-                _log.warning(
-                    "get_issuelinks_map: REST search failed: %r; "
-                    "degrading gracefully (no issuelink enrichment this pass)",
+        base_body: dict[str, Any] = {
+            "jql": effective_jql,
+            "maxResults": 100,
+            "fields": ["issuelinks"],
+        }
+        try:
+            for resp in _iter_cursor_pages(
+                self._direct_rest_post_json, "/rest/api/3/search/jql", base_body
+            ):
+                issues = resp.get("issues") or []
+                if not isinstance(issues, list):
+                    break
+                for issue in issues:
+                    if not isinstance(issue, dict):
+                        continue
+                    key = issue.get("key")
+                    if not key:
+                        continue
+                    fields = issue.get("fields") or {}
+                    links = fields.get("issuelinks")
+                    # Record any issue the search returned an issuelinks list for
+                    # (including the empty list — an authoritative "no links" that
+                    # lets the outbound differ's dedup treat the issue as known).
+                    if isinstance(links, list):
+                        result[key] = links
+        except RunawayPaginationError:
+            # A stalled cursor means a truncated whole-project map. Loud beats
+            # fail-open here — see _iter_cursor_pages.
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code == 410:
+                _log.error(
+                    "get_issuelinks_map: endpoint POST /rest/api/3/search/jql "
+                    "returned HTTP 410 GONE — the Jira search endpoint has been "
+                    "RETIRED; issuelink enrichment is unavailable this pass. "
+                    "API retirement, not a transient fault: %r",
                     exc,
                 )
-                break
-
-            if not isinstance(resp, dict):
-                break
-            issues = resp.get("issues") or []
-            if not isinstance(issues, list):
-                break
-            for issue in issues:
-                if not isinstance(issue, dict):
-                    continue
-                key = issue.get("key")
-                if not key:
-                    continue
-                fields = issue.get("fields") or {}
-                links = fields.get("issuelinks")
-                # Record any issue the search returned an issuelinks list for
-                # (including the empty list — an authoritative "no links" that
-                # lets the outbound differ's dedup treat the issue as known).
-                if isinstance(links, list):
-                    result[key] = links
-
-            if resp.get("isLast"):
-                break
-            next_page_token = resp.get("nextPageToken")
-            if not next_page_token:
-                break
+            else:
+                _log.warning(
+                    "get_issuelinks_map: REST search failed (HTTP %s): %r; "
+                    "degrading gracefully (no issuelink enrichment this pass)",
+                    exc.code,
+                    exc,
+                )
+        except Exception as exc:  # noqa: BLE001 — fail-open: degrade to no enrichment
+            _log.warning(
+                "get_issuelinks_map: REST search failed: %r; "
+                "degrading gracefully (no issuelink enrichment this pass)",
+                exc,
+            )
 
         return result
 

@@ -23,9 +23,12 @@ size arithmetic that broke DC does not exist here to get wrong. This module is t
 REGRESSION NET, not a bug reproduction: every oracle below has been mutation-checked to go
 red when the loop is broken after the first page or made to stop on a short page.
 
-ONE known hole is real and is NOT fixed here (production behaviour is out of scope for a
-test-parity ticket): a server that repeats the same cursor token spins the loop forever.
-See the strict-xfail at the bottom and [rebar:cabc-7a98-d173-4d7c].
+The runaway-cursor hole this module originally pinned as a strict-xfail —
+[rebar:cabc-7a98-d173-4d7c], a server repeating the same cursor token spun the loop until
+the transport failed and the fail-open handler swallowed THAT into a silent partial map —
+is now CLOSED [rebar:ab7f-f0cc-7384-43a7]: all three readers route through the module's
+single shared ``_iter_cursor_pages`` walk, which raises ``RunawayPaginationError`` on a
+same-token-twice stall, and the readers re-raise it PAST their fail-open handlers.
 
 DELIBERATE LITERALS. ``_EXPECTED_PAGE_SIZE`` below is a module-local literal spelling what
 the reader is expected to request, NOT an import of the reader's own ``page_size``. Deriving
@@ -41,6 +44,10 @@ from typing import Any
 import pytest
 
 from rebar_reconciler.adapters.jira.acli import AcliClient
+from rebar_reconciler.adapters.jira.acli_graph import (
+    RunawayPaginationError,
+    _iter_cursor_pages,
+)
 
 _JIRA_ADAPTER_DIR = (
     pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/adapters/jira"
@@ -356,27 +363,19 @@ class _RepeatTokenServer:
         }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN CLOUD DEFECT [rebar:cabc-7a98-d173-4d7c]: acli_graph's readers have NO "
-        "same-token-twice guard, unlike fetcher._iter_pages which raises "
-        "SilentTruncationError. A server repeating its cursor spins the loop until the "
-        "transport itself fails; the fail-open `except Exception` then swallows that and "
-        "returns a PARTIAL map. Fixing production behaviour is out of scope for this "
-        "test-parity ticket — when the guard lands, this xfail turns strict-red and must "
-        "be converted to a plain assertion."
-    ),
-)
-def test_a_repeated_cursor_token_stops_the_walk_on_its_own() -> None:
-    """The CONTRACT, asserted rather than the current behaviour pinned: a reader that sees
-    the same cursor twice has learned the walk is stalled and must stop itself (the
-    fetcher raises; stopping quietly would also satisfy this) — within two requests, and
-    WITHOUT the harness having to break the spin.
+@pytest.mark.parametrize("method", sorted(_READERS))
+def test_a_repeated_cursor_token_stops_the_walk_on_its_own(method: str) -> None:
+    """Formerly the strict-xfail for [rebar:cabc-7a98-d173-4d7c]; the guard landed with
+    [rebar:ab7f-f0cc-7384-43a7]. A reader that sees the same non-null cursor twice
+    consecutively has learned the walk is stalled and must stop itself within two
+    requests, WITHOUT the harness having to break the spin — and it must stop LOUDLY:
+    ``RunawayPaginationError`` escapes the fail-open handler rather than degrading to a
+    silent partial map, because a stalled cursor IS the silent-truncation defect class
+    this module exists to pin.
     """
     server = _RepeatTokenServer()
-    out = _client(server).get_parent_map("DIG")
-    assert isinstance(out, dict)
+    with pytest.raises(RunawayPaginationError):
+        getattr(_client(server), method)("DIG")
     assert not server.hard_stopped, (
         f"the reader never stopped on a repeated cursor: it issued {server.calls} requests "
         f"and only the harness's hard stop ended the spin"
@@ -384,6 +383,133 @@ def test_a_repeated_cursor_token_stops_the_walk_on_its_own() -> None:
     assert server.calls <= 2, (
         f"a stalled cursor should end the walk within two requests; got {server.calls}"
     )
+
+
+class _FaultOnSecondCallServer:
+    """Serves one good page (with a live cursor), then raises an ordinary transport
+    fault — the mid-walk failure the readers' fail-open contract degrades around.
+    """
+
+    def __init__(self, fields_for: Any) -> None:
+        self.fields_for = fields_for
+        self.calls = 0
+
+    def __call__(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "issues": [{"key": "DIG-0", "fields": self.fields_for(0)}],
+                "nextPageToken": "cursor:1",
+            }
+        raise RuntimeError("transport fault mid-walk")
+
+
+@pytest.mark.parametrize("method", sorted(_READERS))
+def test_an_ordinary_mid_walk_fault_still_degrades_open(method: str) -> None:
+    """The runaway raise must not have NARROWED fail-open: any other mid-walk transport
+    fault still degrades gracefully — no raise, and the pages recovered before the fault
+    are returned (the documented partial-map degradation, ticket 8b25).
+    """
+    _field, fields_for, expected = _READERS[method]
+    server = _FaultOnSecondCallServer(fields_for)
+    out = getattr(_client(server), method)("DIG")
+    assert server.calls == 2, f"expected the walk to hit the fault on call 2; {server.calls}"
+    assert out == {"DIG-0": expected(0)}, (
+        f"{method} must keep page-1 results when a later page faults; got {out!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The shared cursor walk itself — the ONE loop all three readers route through
+# ---------------------------------------------------------------------------
+
+
+def _iter_body(field: str) -> dict[str, Any]:
+    return {"jql": "project = DIG", "maxResults": _EXPECTED_PAGE_SIZE, "fields": [field]}
+
+
+def test_the_shared_walk_yields_every_page_and_echoes_the_cursor() -> None:
+    server = _CursorServer(_parent_fields)
+    pages = list(_iter_cursor_pages(server, _SEARCH_JQL_PATH, _iter_body("parent")))
+    assert pages == server.responses
+    assert len(pages) == _EXPECTED_PAGES
+    assert "nextPageToken" not in server.bodies[0]
+    for i in range(1, len(server.bodies)):
+        assert server.bodies[i]["nextPageToken"] == server.responses[i - 1]["nextPageToken"]
+
+
+@pytest.mark.parametrize("terminator", ["isLast", "absent-token", "null-token"])
+def test_the_shared_walk_stops_on_either_documented_terminator(terminator: str) -> None:
+    server = _CursorServer(_parent_fields, terminator=terminator)
+    pages = list(_iter_cursor_pages(server, _SEARCH_JQL_PATH, _iter_body("parent")))
+    assert len(pages) == _EXPECTED_PAGES
+    assert len(server.bodies) == _EXPECTED_PAGES
+
+
+def test_the_shared_walk_handles_a_single_page_project() -> None:
+    server = _CursorServer(_parent_fields, total=5)
+    pages = list(_iter_cursor_pages(server, _SEARCH_JQL_PATH, _iter_body("parent")))
+    assert len(pages) == 1
+    assert len(server.bodies) == 1
+
+
+def test_the_shared_walk_raises_on_a_repeated_cursor_token() -> None:
+    server = _RepeatTokenServer()
+    with pytest.raises(RunawayPaginationError):
+        list(_iter_cursor_pages(server, _SEARCH_JQL_PATH, _iter_body("parent")))
+    assert server.calls == 2, f"the stall is provable at request 2; walked {server.calls}"
+
+
+def test_the_shared_walk_lets_transport_faults_propagate() -> None:
+    """Degradation POLICY (410-loud, warn-and-degrade, partial map) belongs to each
+    reader's handler, not the shared walk — so the walk must not swallow anything.
+    """
+
+    def boom(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("transport fault")
+
+    with pytest.raises(RuntimeError, match="transport fault"):
+        list(_iter_cursor_pages(boom, _SEARCH_JQL_PATH, _iter_body("parent")))
+
+
+def test_the_shared_walk_ends_quietly_on_a_non_dict_response() -> None:
+    server_calls: list[int] = []
+
+    def malformed(path: str, body: dict[str, Any]) -> Any:
+        server_calls.append(1)
+        return ["not", "a", "dict"]
+
+    pages = list(_iter_cursor_pages(malformed, _SEARCH_JQL_PATH, _iter_body("parent")))
+    assert pages == []
+    assert len(server_calls) == 1
+
+
+def test_all_three_readers_route_through_the_shared_walk() -> None:
+    """STRUCTURAL: zero hand-rolled cursor loops remain in the readers. Each reader's
+    body calls ``_iter_cursor_pages`` and contains no ``while`` — a fourth copy of the
+    walk is where all three historical truncation bugs lived, so hand-rolling one back
+    into a reader is itself the regression.
+    """
+    src = dict(_scanned_sources())["acli_graph.py"]
+    tree = ast.parse(src)
+    readers = {"get_parent_map", "get_comment_map", "get_issuelinks_map"}
+    seen: set[str] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.name not in readers:
+            continue
+        seen.add(fn.name)
+        calls_shared_walk = any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_iter_cursor_pages"
+            for n in ast.walk(fn)
+        )
+        assert calls_shared_walk, f"{fn.name} no longer routes through _iter_cursor_pages"
+        hand_loops = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
+        assert not hand_loops, (
+            f"{fn.name} grew a hand-rolled while-loop back (line {hand_loops[0].lineno})"
+        )
+    assert seen == readers, f"structural scan missed reader(s): {sorted(readers - seen)}"
 
 
 # ---------------------------------------------------------------------------
