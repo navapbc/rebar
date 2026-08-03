@@ -1,17 +1,22 @@
 """Story 4b2f: a LIVE single_turn workflow step (needs a real LLM).
 
 Marked ``external`` → inert in the default suite (see tests/external/conftest.py);
-runs only with REBAR_RUN_EXTERNAL=1 + ANTHROPIC_API_KEY + the [agents] extra. Kept
-minimal: it proves a single_turn prompt drives ONE real structured model call whose
-output validates against the prompt's declared ``outputs`` contract.
+runs only with REBAR_RUN_EXTERNAL=1 + the [agents] extra + a credential for the CONFIGURED
+provider (``_live_llm``, story f124 — not a hardcoded ANTHROPIC_API_KEY, which would make a
+Bedrock/OpenAI matrix arm skip and report green). Kept minimal: it proves a single_turn prompt
+drives ONE real structured model call whose output validates against the prompt's declared
+``outputs`` contract.
+
+The step's model comes from the discovered config, so a matrix arm's ``REBAR_LLM_CONFIG_FILE``
+overlay repoints it at that arm's provider.
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 
+import _live_llm
 import pytest
 
 import rebar
@@ -22,6 +27,9 @@ pytest.importorskip("pydantic_ai")
 
 pytestmark = pytest.mark.external
 
+# Auto-marks this module's tests `llm_live` (tests/external/conftest.py).
+_live_llm_ready = _live_llm.live_llm_ready()
+
 _PROMPT_ID = "live-verdict"
 _PROMPT_TEXT = (
     "---\nexecution_mode: single_turn\noutputs: completion_verdict\n---\n"
@@ -29,7 +37,7 @@ _PROMPT_TEXT = (
 )
 
 
-@pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"), reason="needs ANTHROPIC_API_KEY")
+@_live_llm.skip_without_live_llm
 def test_single_turn_live_structured_output(
     rebar_repo: Path,
     project_prompt_writer: Callable[[Path, str, str], Path],

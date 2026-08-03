@@ -569,6 +569,7 @@ markers = [
     "external: external-integration tests that hit third-party services (live LLM providers, etc.); excluded from the default run; run via the external-integration workflow with credentials",
     "live: live Jira reconciler-validation tests (story d01e); hit a dedicated test project + require JIRA_URL/JIRA_USER/JIRA_API_TOKEN + acli; excluded from the default run, self-skip without live env; GUARANTEE bilateral cleanup",
     "jira_live: a live test that requires Jira credentials + the acli binary",
+    "llm_live: a live test that makes a REAL model call on the CONFIGURED provider; auto-applied to external modules carrying a `_live_llm_ready` sentinel, and the dimension the external suite's provider matrix selects on (story f124)",
     "interface: interface-parity tests (library / CLI / MCP over one store)",
     "allow_network: opt out of the network guard for a test",
     "benchmark: performance benchmark (informational; not a pass/fail gate)",

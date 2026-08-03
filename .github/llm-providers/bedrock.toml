@@ -1,0 +1,24 @@
+# AWS Bedrock arm of the external suite's provider matrix (story f124).
+#
+# The SAME Claude models as the anthropic arm, reached through Bedrock, so a difference between
+# the two arms is a PROVIDER difference and not a model difference.
+#
+# Only INFERENCE-PROFILE ids (the `us.` / `global.` prefix) are invokable — a bare on-demand
+# `anthropic.claude-*` id returns `ValidationException: … on-demand throughput isn't supported`.
+# The suffixes are NOT uniform: MEASURED in account 896586841071 / us-east-1 (story 1aa2),
+# `us.anthropic.claude-sonnet-4-6` and `us.anthropic.claude-haiku-4-5-20251001-v1:0` invoke while
+# `us.anthropic.claude-sonnet-4-6-v1:0` and `us.anthropic.claude-haiku-4-5-v1:0` do not exist.
+# Take any new id VERBATIM from `aws bedrock list-inference-profiles --region <region>`.
+#
+# Credential: the AMBIENT AWS chain, never a rebar-managed key. In CI that is GitHub OIDC role
+# assumption (infra/runbooks/bedrock-ci-oidc.md); locally it is AWS_PROFILE / env keys.
+#
+# REGION IS NOT EXPRESSIBLE HERE and is not optional: `[llm.model_classes]` carries model ids
+# only, boto3 resolves NO region from IMDS (MEASURED, ticket a574), and `build_bedrock_provider`
+# raises a typed LLMConfigError when none resolves. The workflow therefore sets BOTH
+# AWS_DEFAULT_REGION and REBAR_LLM_BEDROCK_REGION as job env.
+
+[llm.model_classes]
+frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }

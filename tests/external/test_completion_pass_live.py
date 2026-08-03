@@ -1,17 +1,22 @@
 """Story e7e0: LIVE completion-verifier PASS emits a positive per-criterion ``criteria[]``.
 
 Marked ``external`` → inert in the default suite (see tests/external/conftest.py); runs only
-with REBAR_RUN_EXTERNAL=1 + ANTHROPIC_API_KEY + the [agents] extra. Proves the cutover
-live-exercise DoD: the REAL agent path, on a fixture whose criterion is met, returns a PASS
-carrying a populated ``criteria[]`` that persists to the completion sidecar.
+with REBAR_RUN_EXTERNAL=1 + the [agents] extra + a credential for the CONFIGURED provider
+(``_live_llm``, story f124 — NOT a hardcoded ANTHROPIC_API_KEY, which would make a Bedrock or
+OpenAI arm skip and report green). Proves the cutover live-exercise DoD: the REAL agent path, on
+a fixture whose criterion is met, returns a PASS carrying a populated ``criteria[]`` that
+persists to the completion sidecar.
+
+The op reads its model from the discovered config (no ``config=`` override), so a matrix arm's
+``REBAR_LLM_CONFIG_FILE`` overlay repoints this test at that arm's provider.
 """
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
+import _live_llm
 import pytest
 
 import rebar
@@ -22,8 +27,12 @@ pytest.importorskip("pydantic_ai")
 
 pytestmark = pytest.mark.external
 
+# Auto-marks this module's tests `llm_live` (tests/external/conftest.py) — the dimension the
+# provider matrix selects on and the all-skip canary counts.
+_live_llm_ready = _live_llm.live_llm_ready()
 
-@pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"), reason="needs ANTHROPIC_API_KEY")
+
+@_live_llm.skip_without_live_llm
 def test_live_completion_pass_persists_criteria(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     # A real source file the criterion can be checked against, committed to HEAD.

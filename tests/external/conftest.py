@@ -23,18 +23,28 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
 
 
-def _jira_canary_should_fail(collected: int, executed: int, run_external: bool) -> bool:
-    """Decide whether the scheduled live-Jira canary should FAIL the session.
+def _all_skipped_canary_should_fail(collected: int, executed: int, run_external: bool) -> bool:
+    """Decide whether an all-skip canary should FAIL the session.
 
-    The canary exists so a scheduled external-integration run cannot go green while
-    every Jira live test silently skipped (missing creds/acli, a broken auth step) —
-    an all-skip run validates nothing. Only relevant when the external tier is opted
-    in via ``REBAR_RUN_EXTERNAL``; otherwise it is a no-op (returns False). Fails only
-    when at least one ``jira_live`` test was collected but NONE executed.
+    The canary exists so a scheduled external-integration run cannot go green while every
+    live test of some kind silently skipped (missing creds, a broken auth step) — an
+    all-skip run validates nothing. Only relevant when the external tier is opted in via
+    ``REBAR_RUN_EXTERNAL``; otherwise it is a no-op (returns False). Fails only when at
+    least one marked test was collected but NONE executed.
+
+    Marker-agnostic (story f124): the same predicate now guards BOTH the live-Jira lane and
+    the live-LLM provider-matrix lane. A provider arm whose credential is absent skips every
+    ``llm_live`` test, and without this the arm would report green having called no model —
+    the exact "a missing secret reads as green" failure the matrix must never have.
     """
     if not run_external:
         return False
     return collected >= 1 and executed == 0
+
+
+# Backwards-compatible alias: the Jira canary's original name, kept so existing callers/tests
+# that reference it by name keep resolving to the (now generalized) predicate.
+_jira_canary_should_fail = _all_skipped_canary_should_fail
 
 
 # nodeids that ran a non-skipped `call` phase this session — populated by
@@ -50,16 +60,25 @@ def _executed_set(config: pytest.Config) -> set[str]:
     return store
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Auto-mark every Jira-gated module's tests with ``jira_live``.
+# Module-level sentinel -> the marker it earns. Marking by sentinel presence keeps the canary
+# bookkeeping in one place instead of requiring each test to carry the marker by hand.
+#   _live_jira_ready -> jira_live  (live Jira credentials + acli)
+#   _live_llm_ready  -> llm_live   (a live LLM call on the CONFIGURED provider; story f124)
+# `llm_live` is what the external suite's provider matrix selects on: the matrix job runs
+# `-m "external and llm_live"` once per provider, and the services job runs the complement, so
+# the union is exactly the set that ran before the split.
+_SENTINEL_MARKERS = {
+    "_live_jira_ready": "jira_live",
+    "_live_llm_ready": "llm_live",
+}
 
-    Jira live test modules all define a module-level ``_live_jira_ready`` sentinel;
-    marking by that presence keeps the canary bookkeeping in one place instead of
-    requiring each test to carry the marker by hand.
-    """
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Auto-mark tests from modules carrying a live-tier readiness sentinel."""
     for item in items:
-        if getattr(item.module, "_live_jira_ready", None) is not None:
-            item.add_marker(pytest.mark.jira_live)
+        for sentinel, marker in _SENTINEL_MARKERS.items():
+            if getattr(item.module, sentinel, None) is not None:
+                item.add_marker(getattr(pytest.mark, marker))
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
@@ -81,28 +100,46 @@ def pytest_configure(config: pytest.Config) -> None:
     pytest_runtest_logreport._config = config  # type: ignore[attr-defined]
 
 
+# Per-marker canary wording: (marker, canary label, what an all-skip run means).
+_CANARIES = (
+    (
+        "jira_live",
+        "jira-live-canary",
+        "every live-Jira test skipped — the scheduled canary validated nothing.",
+    ),
+    (
+        "llm_live",
+        "llm-live-canary",
+        "every live-LLM test skipped — this provider arm called NO model, so its green "
+        "result would be indistinguishable from a real pass. Check that the arm's "
+        "credential is present for the provider its REBAR_LLM_CONFIG_FILE selects "
+        "(see tests/external/_live_llm.py).",
+    ),
+)
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Fail a scheduled external run in which every Jira live test skipped.
+    """Fail a scheduled external run in which every test of a live lane skipped.
 
     No-op unless the external tier is opted in (``REBAR_RUN_EXTERNAL``). Reports the
-    collected/executed/skipped counts for ``jira_live``-marked tests, and — when at
-    least one was collected but none executed — flips the session to a failure exit.
+    collected/executed/skipped counts per live lane, and — when at least one test in a lane
+    was collected but none executed — flips the session to a failure exit.
     """
     if not _env_truthy("REBAR_RUN_EXTERNAL"):
         return
     executed_nodeids = _executed_set(session.config)
-    jira_items = [it for it in session.items if it.get_closest_marker("jira_live") is not None]
-    collected = len(jira_items)
-    executed = sum(1 for it in jira_items if it.nodeid in executed_nodeids)
-    skipped = collected - executed
-    print(f"\n[jira-live-canary] collected={collected} executed={executed} skipped={skipped}")
-    if _jira_canary_should_fail(collected, executed, run_external=True):
-        print(
-            "[jira-live-canary] FAIL: at least one jira_live test was collected but "
-            "none executed (every live-Jira test skipped) — the scheduled canary "
-            "validated nothing."
-        )
-        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    for marker, label, meaning in _CANARIES:
+        items = [it for it in session.items if it.get_closest_marker(marker) is not None]
+        collected = len(items)
+        executed = sum(1 for it in items if it.nodeid in executed_nodeids)
+        skipped = collected - executed
+        print(f"\n[{label}] collected={collected} executed={executed} skipped={skipped}")
+        if _all_skipped_canary_should_fail(collected, executed, run_external=True):
+            print(
+                f"[{label}] FAIL: at least one {marker} test was collected but none "
+                f"executed ({meaning})"
+            )
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.fixture(autouse=True)

@@ -147,7 +147,15 @@ Bedrock is a first-class provider (`docs/llm-example-configs.md` §2), so a deve
 model classes at once, deep-merges over (rather than replaces) the discovered config, and is
 reverted by unsetting one variable.
 
-Write the file once — anywhere readable; `~/.config/rebar/bedrock.toml` keeps it out of the
+**The checkout already ships one you can point at.** CI's provider matrix uses the same mechanism,
+so its overlays are committed and are the exact files the weekly live suite runs on
+(`docs/ci-provider-matrix.md`):
+
+```sh
+export REBAR_LLM_CONFIG_FILE="$PWD/.github/llm-providers/bedrock.toml"   # or anthropic/openai
+```
+
+Or write your own — anywhere readable; `~/.config/rebar/bedrock.toml` keeps it out of the
 checkout, and the table is `[llm.model_classes]` (not `[tool.rebar.llm…]`, which is the
 `pyproject.toml` spelling):
 

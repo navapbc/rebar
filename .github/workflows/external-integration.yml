@@ -4,15 +4,29 @@ name: Live External Integration
 # third-party services and make REAL, billable LLM calls, so they are deliberately
 # NOT part of the automatic `test` workflow. Trigger from the Actions tab.
 #
-# Two jobs:
-#   * external        — the live rebar.llm runner validation (model only).
+# Jobs:
+#   * external-llm    — the live-LLM lane, run ONCE PER PROVIDER as a matrix
+#                       (`-m "external and llm_live"`). See the provider-matrix
+#                       notes on that job.
+#   * external        — the remaining live-service lane (live Jira Cloud, deps,
+#                       link-sync): `-m "external and not llm_live"`, run once.
 #   * langfuse-trace  — stands up an EPHEMERAL self-hosted Langfuse stack
 #                       (docker-compose.langfuse.yml, headless-init) and asserts a
 #                       review run emits a trace fetchable via the Langfuse API.
+#   * jira-dc-harness — the Jira Data Center harness smoke lane.
 #
-# Both require the `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) repository secret.
-# langfuse-trace needs NO Langfuse secret — the stack is ephemeral with
-# deterministic headless-init keys baked into the compose file.
+# THE LLM LANE IS A PROVIDER MATRIX, NOT AN AMBIENT DEFAULT (story f124). It previously
+# ran on whichever provider happened to hold a key, which in practice meant Anthropic
+# only — so a Bedrock-only regression (a `cachePoint` envelope change, an
+# inference-profile id that stops resolving, a throttling shape) was undetectable by CI
+# and could only ever be found by a human running the gates by hand. The `external-llm`
+# job below therefore carries one arm per provider we hold a credential for, selects the
+# provider through a `REBAR_LLM_CONFIG_FILE` overlay (.github/llm-providers/), and fails
+# any arm whose credential is absent rather than letting it skip to green.
+#
+# `external` + `langfuse-trace` require the `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
+# repository secret. langfuse-trace needs NO Langfuse secret — the stack is ephemeral
+# with deterministic headless-init keys baked into the compose file.
 
 on:
   workflow_dispatch: {}
@@ -27,6 +41,202 @@ permissions:
   contents: read
 
 jobs:
+  # ── the live-LLM lane: one arm per credentialed provider ───────────────────────────────
+  #
+  # PROVIDER SELECTION goes through `REBAR_LLM_CONFIG_FILE` — the layered config-file
+  # pointer — never the deprecated bare `REBAR_LLM_MODEL` (which cannot express a per-class
+  # model, so it could not repoint all three classes). Each arm's overlay
+  # (.github/llm-providers/<provider>.toml) sets ONLY `[llm.model_classes]` and DEEP-MERGES
+  # over the discovered config, so an arm overrides the provider and the models and nothing
+  # else. A side benefit that is really the point: CI now dogfoods the same override path a
+  # developer uses locally (docs/local-dev-env.md), so the pointer itself gets live coverage
+  # on every run instead of being exercised only by hand.
+  #
+  # AN ARM WITH NO CREDENTIAL FAILS; IT DOES NOT SKIP. "Skip loudly, and never read as green"
+  # has exactly one unambiguous rendering in GitHub Actions, and it is a red job: a skipped
+  # job renders grey/neutral, which is trivially misread as fine, and `secrets` is not even
+  # available in a job-level `if:` so a genuine per-arm skip is not expressible anyway. The
+  # preflight step below therefore emits `::error::` and exits non-zero, matching the
+  # long-standing idiom in the `external` job. The second line of defence is the
+  # `llm-live-canary` (tests/external/conftest.py): if the credential is present but wrong
+  # for the arm's provider, every `llm_live` test skips and the canary flips the session to a
+  # failure — so "the arm called no model" can never report success either.
+  #
+  # COST + CADENCE (measured; full workings in docs/ci-provider-matrix.md). Real usage logs
+  # from three consecutive runs of the pre-split job (artifacts of runs 30772461871 /
+  # 30784592232 / 30792766156: 29 LLM calls, ~0.49–0.55M input tokens, ~33–36k output) price
+  # at $1.95 / $2.04 / $2.15 on direct Anthropic. Bedrock's `us.` (regional) inference
+  # profiles list 10% above Anthropic list, so the Bedrock arm adds ~$2.14–$2.36. DECISION:
+  # every credentialed provider runs on EVERY trigger, including the weekly schedule. The
+  # incremental spend is ~$2/arm/trigger — about $9/month at the weekly cadence — while a
+  # reduced cadence would leave a Bedrock-only regression undetected for up to a month, and
+  # the whole reason this job exists is to shorten that window. Revisit if manual dispatch
+  # volume makes the spend material (a `workflow_dispatch` input narrowing the matrix is the
+  # obvious next step, deliberately not built yet).
+  external-llm:
+    name: external LLM (live ${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for OIDC AssumeRoleWithWebIdentity on the Bedrock arm. GitHub has no
+      # per-matrix-arm `permissions:` block, so it is granted job-wide; the token is only
+      # ever exchanged by the `if: matrix.provider == 'bedrock'` step below, and an ID token
+      # confers nothing without a role whose trust policy accepts it.
+      id-token: write
+    strategy:
+      # One provider's outage or regression must not cancel the others — the whole point is
+      # to see each provider's result independently.
+      fail-fast: false
+      matrix:
+        include:
+          - provider: anthropic
+            config_file: .github/llm-providers/anthropic.toml
+          - provider: bedrock
+            config_file: .github/llm-providers/bedrock.toml
+          # OpenAI is rebar's BEST-EFFORT provider tier, covered because the repository does
+          # hold an OPENAI_API_KEY secret — leaving it uncovered would be a blind spot we
+          # are already paying for.
+          - provider: openai
+            config_file: .github/llm-providers/openai.toml
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+
+      # Each arm receives ONLY its own provider's credential: every key expression is guarded
+      # on `matrix.provider`, so the Bedrock arm cannot see ANTHROPIC_API_KEY and therefore
+      # cannot fall back to direct Anthropic on any path that reads a key rather than the
+      # resolved model string. A non-matching guard evaluates to the empty string, which
+      # rebar and this preflight both treat as absent.
+      - name: Require this arm's credential (loud failure, never a silent skip)
+        env:
+          PROVIDER: ${{ matrix.provider }}
+          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          # Bedrock authenticates from the AMBIENT AWS chain, so there is no key to check.
+          # What must exist instead is the OIDC role to assume and the region to assume it
+          # in — both repository VARIABLES (a role ARN and a region are not secrets).
+          BEDROCK_ROLE_ARN: ${{ vars.AWS_BEDROCK_CI_ROLE_ARN }}
+          BEDROCK_REGION: ${{ vars.AWS_BEDROCK_CI_REGION }}
+        run: |
+          set -euo pipefail
+          case "$PROVIDER" in
+            anthropic)
+              if [ -z "$ANTHROPIC_API_KEY" ]; then
+                echo "::error title=anthropic arm has no credential::Set the ANTHROPIC_API_KEY repository secret. This arm is FAILED rather than skipped so a missing secret can never read as a green live run."
+                exit 1
+              fi
+              ;;
+            openai)
+              if [ -z "$OPENAI_API_KEY" ]; then
+                echo "::error title=openai arm has no credential::Set the OPENAI_API_KEY repository secret, or remove the openai arm from the matrix and record the decision in docs/ci-provider-matrix.md."
+                exit 1
+              fi
+              ;;
+            bedrock)
+              missing=""
+              [ -n "$BEDROCK_ROLE_ARN" ] || missing="AWS_BEDROCK_CI_ROLE_ARN"
+              [ -n "$BEDROCK_REGION" ] || missing="${missing:+$missing, }AWS_BEDROCK_CI_REGION"
+              if [ -n "$missing" ]; then
+                echo "::error title=bedrock arm is not configured::Missing repository variable(s): ${missing}. The role must be created first — its exact name, trust policy and permission policy are in infra/runbooks/bedrock-ci-oidc.md. A region is NOT optional and NOT discoverable: boto3 resolves none from IMDS (measured, ticket a574)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error title=unknown provider arm::'$PROVIDER' has no credential rule; add one rather than letting the arm run uncredentialed."
+              exit 1
+              ;;
+          esac
+          echo "credential preflight OK for provider '$PROVIDER'"
+
+      # The S7 review-bot's Bedrock access rides an EC2 INSTANCE ROLE reached over IMDS from
+      # inside its container. That path DOES NOT EXIST on a GitHub-hosted runner — there is no
+      # instance role and no IMDS route to that host — so this arm needs its own mechanism:
+      # OIDC federation to a dedicated, repo-scoped role that reuses S7's POLICY shape
+      # (bedrock:InvokeModel + InvokeModelWithResponseStream on anthropic.claude-* only). The
+      # rejected alternative is a long-lived AWS access key in a secret, i.e. a durable
+      # credential in CI to save a one-time role setup. Role definition + verification:
+      # infra/runbooks/bedrock-ci-oidc.md.
+      - name: Configure AWS credentials (OIDC → the scoped Bedrock CI role)
+        if: matrix.provider == 'bedrock'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_BEDROCK_CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_BEDROCK_CI_REGION }}
+
+      # `[dev]` already pulls pydantic-ai-slim's [bedrock] and [openai] groups, so one sync
+      # covers every arm — no per-provider install branch.
+      - name: Install rebar + the full agents stack
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Run the live-LLM suite on ${{ matrix.provider }}
+        env:
+          # See the preflight step: guarded per arm so no arm holds a foreign credential.
+          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          # THE provider switch: a layered overlay setting only [llm.model_classes].
+          REBAR_LLM_CONFIG_FILE: ${{ github.workspace }}/${{ matrix.config_file }}
+          # Lets tests inside the arm assert the arm ran the provider it claims
+          # (tests/external/test_provider_matrix_live.py).
+          REBAR_EXPECTED_LLM_PROVIDER: ${{ matrix.provider }}
+          # BOTH region variables, on purpose. Ticket a574 established by MEASUREMENT that
+          # IMDS supplies NO region (so a working credential chain does not imply a resolvable
+          # region — they fail and are fixed independently) AND that rebar's own
+          # REBAR_LLM_BEDROCK_REGION alone was insufficient: AWS_DEFAULT_REGION was also
+          # required. rebar's knob additionally puts the region into the verdict's
+          # provider_provenance, which a bare AWS_* var does not. With neither resolving,
+          # provider construction raises a typed LLMConfigError naming the knob — never a
+          # silent skip and never green.
+          AWS_DEFAULT_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
+          REBAR_LLM_BEDROCK_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
+          # The external tier is inert unless this opt-in is set (a safety guard against
+          # accidental billable calls); the preflight above already required a credential.
+          REBAR_RUN_EXTERNAL: "1"
+          # Durable per-arm token-usage record — this is the instrument the cadence decision
+          # above is measured with, so it must be per-provider. Step-level so
+          # ${{ runner.temp }} is in scope: a JOB-level env entry using runner.* is a
+          # parse-time startup failure (bug 8002; tests/unit/test_ci_actionlint_scope.py).
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage-${{ matrix.provider }}.jsonl
+        # `-m "external and llm_live"` selects exactly the live-LLM modules — those carrying a
+        # `_live_llm_ready` sentinel, auto-marked in tests/external/conftest.py. The `external`
+        # job below runs the complement, so the union is the same set that ran before the
+        # split; and a NEW live-LLM module is picked up automatically instead of needing a
+        # path added here (tests/unit/test_ci_provider_matrix.py fails if a module uses the
+        # shared live-LLM gate without the sentinel).
+        run: >-
+          pytest -m "external and llm_live" tests/external -q
+          --ignore=tests/external/live_jira_dc
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Summarize LLM token usage → job summary
+        if: ${{ always() }}
+        env:
+          REBAR_USAGE_LOG: ${{ runner.temp }}/usage-${{ matrix.provider }}.jsonl
+        run: |
+          echo "### ${{ matrix.provider }}" >> "$GITHUB_STEP_SUMMARY"
+          python -m rebar.llm.usage_log summarize "$REBAR_USAGE_LOG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload LLM token-usage log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          # Per-arm name: artifact names must be unique across a matrix.
+          name: external-usage-log-${{ matrix.provider }}
+          path: ${{ runner.temp }}/usage-${{ matrix.provider }}.jsonl
+          if-no-files-found: ignore
+
   external:
     name: external integration (live services)
     runs-on: ubuntu-latest
@@ -148,8 +358,15 @@ jobs:
         # tests included and no harness, the canary stays silent; the two tiers must stay
         # independent so each job's canary means what it says). The dedicated jira-dc-harness
         # job below covers tests/external/live_jira_dc/ with its own canary.
+        # `and not llm_live`: the live-LLM modules moved to the `external-llm` provider matrix
+        # above (story f124), which runs them once per provider. Running them here too would
+        # bill a fourth, provider-ambiguous copy — and, worse, this job's Jira all-skip canary
+        # counts collected-vs-executed GLOBALLY per session, so LLM tests executing here would
+        # MASK an all-skip of the Jira tests. The two lanes must stay independent for each
+        # job's canary to mean what it says, exactly as the --ignore below reasons about the
+        # Data Center tier.
         run: >-
-          pytest -m external tests/external -q
+          pytest -m "external and not llm_live" tests/external -q
           --ignore=tests/external/live_jira_dc
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 

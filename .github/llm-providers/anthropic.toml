@@ -1,0 +1,14 @@
+# Direct-Anthropic arm of the external suite's provider matrix (story f124).
+#
+# This restates the SHIPPED defaults rather than relying on them, so the anthropic arm is
+# selected by exactly the same mechanism as every other arm — a REBAR_LLM_CONFIG_FILE overlay.
+# An arm that instead ran with "no pointer set" would be testing a different code path from its
+# siblings, and the pointer itself (the thing this matrix dogfoods) would go unexercised on the
+# only arm that runs today.
+#
+# Credential: ANTHROPIC_API_KEY (rebar-managed key).
+
+[llm.model_classes]
+frontier = { model = "anthropic:claude-opus-4-8" }
+standard = { model = "anthropic:claude-sonnet-4-6" }
+trivial  = { model = "anthropic:claude-haiku-4-5" }
