@@ -8,6 +8,7 @@ as its optimistic-concurrency token.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +19,8 @@ from typing import Any, Literal, cast
 from rebar import config
 from rebar._engine_support import reads as ticket_reads
 from rebar.reducer import reduce_all_tickets
+
+logger = logging.getLogger(__name__)
 
 PlanMaterialRole = Literal["child", "prerequisite"]
 PlanRelationSnapshotReason = Literal[
@@ -184,6 +187,33 @@ def _resolve_reference(
     return next(iter(matches))
 
 
+def _holds_no_events(ticket_dir: Path) -> bool:
+    """Whether ``ticket_dir`` holds no live event file at all.
+
+    An event-less ticket directory is the debris of a write that died between
+    ``os.makedirs`` and the event's atomic rename (see ``_store.event_append``).
+    It carries no CREATE/SNAPSHOT — and therefore no relation material — by
+    construction, which is what makes it safe for the relation snapshot to skip
+    (bug 043f). The predicate mirrors the reducer's own event-file rule: a live
+    event is a non-dot ``*.json`` that is not a folded ``*.retired`` source.
+
+    Deliberately NARROW: a directory that DOES hold events but still fails to
+    reduce may carry relations we would silently drop, so it keeps failing closed.
+    """
+    from rebar.reducer._cache import is_active_event
+
+    try:
+        return not any(
+            entry.name.endswith(".json")
+            and not entry.name.startswith(".")
+            and is_active_event(entry.name)
+            and entry.is_file()
+            for entry in ticket_dir.iterdir()
+        )
+    except OSError:
+        return False
+
+
 def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
     try:
         entries = sorted(
@@ -209,6 +239,20 @@ def _load_states(tracker: Path) -> tuple[dict[str, dict], dict[str, set[str]]]:
     aliases: dict[str, set[str]] = {}
     for directory_id, state in zip(entries, reduced, strict=True):
         if not isinstance(state, dict) or state.get("status") in ("error", "fsck_needed"):
+            # Bug 043f: an EVENT-LESS directory is skippable debris, not a broken
+            # ticket. Failing the whole reduction on one made every plan review in
+            # the clone return an unsigned INDETERMINATE naming an UNRELATED ticket,
+            # and git cannot see the artifact (it cannot track empty directories) so
+            # no .gitignore remedy reaches it. Skip it, and NAME THE PATH so the
+            # operator can delete it.
+            ticket_dir = tracker / directory_id
+            if _holds_no_events(ticket_dir):
+                logger.warning(
+                    "skipping ticket directory with no CREATE/SNAPSHOT event: %s "
+                    "(debris of an interrupted write; safe to delete)",
+                    ticket_dir,
+                )
+                continue
             raise PlanRelationSnapshotError("reducer-error", reference=directory_id)
         canonical_id = state.get("ticket_id")
         if canonical_id != directory_id or not is_canonical_ticket_id(canonical_id):

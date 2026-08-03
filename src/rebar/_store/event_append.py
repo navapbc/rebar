@@ -151,6 +151,18 @@ def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> tuple
     relative_path)``. Raises :class:`StoreError` (1); no lock is held here."""
     event_type, timestamp, uuid_str = _validate_event(event)
     ticket_dir = os.path.join(tracker, ticket_id)
+    # Bug 043f — DECIDED: the directory is still created BEFORE its first event, and the
+    # relation snapshot tolerates the resulting event-less directory instead (see
+    # ``relation_snapshot._holds_no_events``). Reasoning, recorded so it is not re-litigated:
+    # the observed orphans came from PROCESS DEATH (crash/kill) between this makedirs and the
+    # under-lock rename below, which no exception handler in this function can cover — a
+    # best-effort rmdir on the staging-failure path would close only the narrow subset that
+    # already raises, while leaving the actual failure mode intact. Cleanup here is also
+    # unsafe under this store's concurrency model, where MANY sessions write one shared
+    # tracker: removing a directory another session has just created races its in-flight
+    # write. Tolerating at the reader additionally repairs clones ALREADY carrying an orphan,
+    # which a writer-side change can never do. Tolerate, never tidy (same rule as the stray
+    # ``.tmp-event-*`` files).
     os.makedirs(ticket_dir, exist_ok=True)
     final_path = os.path.join(ticket_dir, event_filename(timestamp, uuid_str, event_type))
     relative_path = os.path.relpath(final_path, tracker)

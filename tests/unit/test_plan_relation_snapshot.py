@@ -540,3 +540,90 @@ def test_archived_child_excluded_from_child_ids_and_pins(repo: str) -> None:
     child_pins = [pin.canonical_id for pin in snapshot.related_material if pin.role == "child"]
     assert drop not in child_pins
     assert child_pins == [keep]
+
+
+def _capture_warnings(logger_name: str) -> tuple[list[str], object, object]:
+    """Attach a handler DIRECTLY to ``logger_name``.
+
+    ``caplog`` attaches to the root logger, so it silently misses records from a
+    logger whose ``propagate`` has been turned off elsewhere in the process (the
+    known ``configure_logging()`` leak). Binding the handler to the exact logger
+    under test makes the assertion deterministic regardless of propagation.
+    """
+    import logging
+
+    messages: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    logger = logging.getLogger(logger_name)
+    handler = _Collect(level=logging.WARNING)
+    logger.addHandler(handler)
+    return messages, logger, handler
+
+
+def test_event_less_ticket_directory_does_not_fail_an_unrelated_snapshot(repo: str) -> None:
+    """Bug 043f: a ticket directory holding NO events — left behind when a write died
+    between ``os.makedirs`` and the event rename — made ``_load_states`` raise
+    ``reducer-error``, which surfaced as an unsigned INDETERMINATE verdict on plan
+    reviews of completely UNRELATED tickets (the store reduction is store-WIDE, so every
+    review in the clone failed until someone deleted the directory by hand).
+
+    An event-less directory carries no relation material by construction, so the correct
+    behaviour is to SKIP it with a warning naming the path, not to fail the whole
+    snapshot. Note the artifact is invisible to git — git cannot track an empty directory
+    — so no ``.gitignore`` remedy can reach it.
+    """
+    PlanRelationSnapshotError, collect_plan_relation_snapshot, _ = _api()
+    subject = rebar.create_ticket("epic", "Unrelated subject", repo_root=repo)
+    child = rebar.create_ticket("story", "Child", parent=subject, repo_root=repo)
+
+    orphan = "0de5-6db1-8058-4e80"
+    orphan_dir = Path(config.tracker_dir(repo)) / orphan
+    orphan_dir.mkdir()
+    assert not any(orphan_dir.iterdir()), "the artifact under test is an EMPTY directory"
+
+    messages, logger, handler = _capture_warnings("rebar.llm.plan_review.relation_snapshot")
+    try:
+        snapshot = collect_plan_relation_snapshot(subject, repo_root=repo, ignore_untracked=True)
+    except PlanRelationSnapshotError as exc:  # pragma: no cover — the RED path
+        pytest.fail(
+            "an event-less ticket directory failed the snapshot of an UNRELATED ticket: "
+            f"reason={exc.reason} reference={exc.reference}"
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    assert snapshot.child_ids == (child,), "the real relation material must be unaffected"
+    assert orphan not in snapshot.ticket_states_by_id, "the event-less directory must be skipped"
+    assert any(str(orphan_dir) in message for message in messages), (
+        "the skip must be reported as a warning NAMING THE PATH so the artifact is "
+        f"discoverable rather than silent; got: {messages}"
+    )
+
+
+def test_a_populated_but_unreducible_ticket_directory_still_fails_closed(repo: str) -> None:
+    """Mutation guard for the opposite direction: the 043f tolerance must be narrow.
+
+    A directory that DOES hold events but cannot be reduced (here: events with no CREATE)
+    may carry relation material the snapshot would silently drop, so it must keep failing
+    closed with ``reducer-error``. Only the genuinely event-less directory is skippable.
+    """
+    PlanRelationSnapshotError, collect_plan_relation_snapshot, _ = _api()
+    subject = rebar.create_ticket("epic", "Unrelated subject", repo_root=repo)
+
+    broken = "4ab3-411d-9736-4a41"
+    broken_dir = Path(config.tracker_dir(repo)) / broken
+    broken_dir.mkdir()
+    (broken_dir / "1700000000000000000-aaaaaaaa-COMMENT.json").write_text(
+        '{"event_type": "COMMENT", "uuid": "aaaaaaaa", "timestamp": 1700000000000000000,'
+        ' "data": {"body": "no CREATE precedes me"}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PlanRelationSnapshotError) as caught:
+        collect_plan_relation_snapshot(subject, repo_root=repo, ignore_untracked=True)
+    assert caught.value.reason == "reducer-error"
+    assert caught.value.reference == broken
