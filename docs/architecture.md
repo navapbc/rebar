@@ -272,6 +272,23 @@ invariants (I1–I9) and the sync/reconvergence algorithm are in
 `docs/concurrency.md`; the agent-facing tool set and workflow are in
 `AGENTS.md`.
 
+## Sanctioned git-write seams
+
+All git mutations of the tickets store flow through a small set of write seams:
+`_store/gitutil.run_git_write` (and the locked-store internals in
+`_store/event_append.py`, `_store/txn.py`, `_store/push.py`, `_store/sync.py`),
+the reconciler's `git_adapter.py` / `_ref_lock.py`, and the store-maintenance
+commands (`init`, `compact`, `delete`, `fsck*`). CI enforces this with the
+**raw-git-write gate** (`scripts/check_raw_git_writes.py`, ticket d37e): a raw
+`subprocess` git mutation or a mutation-verb call through a wrapper name outside
+a seam fails the build, as does a workflow step running `git add/commit/push`
+inside a `.tickets-tracker` context. Legitimate sites carry a reasoned
+`# raw-git-ok: <reason>` marker (empty reasons are rejected); sandbox/eval repos
+and generic command runners are marked, not exempted. This is a different
+marker from `# tickets-boundary-ok`: that convention sanctions
+boundary-crossing *reads/layout* knowledge of `.tickets-tracker`, while
+`# raw-git-ok` sanctions raw git *writes*.
+
 ## Module-size policy
 
 rebar is built to be edited by agents, which read a unit whole. The balance is

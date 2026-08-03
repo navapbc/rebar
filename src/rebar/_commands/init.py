@@ -77,6 +77,7 @@ repos: []
 """
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return run_git_write(cwd, *args, check=False)
 
@@ -100,6 +101,7 @@ def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _git_ok(cwd: str, *args: str) -> bool:
     return _git(cwd, *args).returncode == 0
 
@@ -377,6 +379,7 @@ def _warn_force_no_effect(reason: str) -> None:
     )
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = False) -> int:
     from rebar.config import tickets_branch, tickets_remote
 
@@ -478,6 +481,7 @@ def _ensure_branch_user_config(repo: str, tracker: str) -> None:
         _git(tracker, "config", "user.name", name)
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _gitignore_unit(tracker: str) -> EnsureOutcome:
     """Ensure the tickets-branch ``.gitignore`` carries every runtime-artifact entry
     (ensure-registry unit). Tree-checks the committed blob first, so it commits only
@@ -520,6 +524,7 @@ def _gitignore_unit(tracker: str) -> EnsureOutcome:
     return EnsureOutcome("gitignore", "changed", f"added {len(missing)} .gitignore line(s)")
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _store_compat_unit(tracker: str) -> EnsureOutcome:
     """Stamp the COMMITTED store-compatibility record ``.store-compat.json`` (story
     21dd). A v1.0 rebar reads this record before any mutating/publishing operation and
@@ -578,6 +583,7 @@ def _merge_ours_unit(tracker: str) -> EnsureOutcome:
     return EnsureOutcome("merge-ours", "changed", "set merge.ours.driver=true")
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _gitattributes_unit(tracker: str) -> EnsureOutcome:
     """Commit the tickets-branch ``.gitattributes`` (create-if-absent, idempotent),
     so a union merge keeps OUR copy of the per-pass mutable root files instead of
@@ -624,6 +630,7 @@ def _gitattributes_unit(tracker: str) -> EnsureOutcome:
     return EnsureOutcome("gitattributes", "changed", "stripped retired merge=ours line")
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def _commit_precommit(tracker: str) -> None:
     if _git(tracker, "show", "tickets:.pre-commit-config.yaml").returncode != 0:
         with open(os.path.join(tracker, ".pre-commit-config.yaml"), "w", encoding="utf-8") as f:

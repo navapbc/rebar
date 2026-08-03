@@ -43,6 +43,7 @@ _ACCUMULATION_WINDOW_SECS = 24 * 3600
 _DETECTED_BY = "reconciler-conflict"
 
 
+# raw-git-ok: generic command runner, argv supplied by caller
 def _default_runner(argv: list[str]) -> tuple[int, str, str]:
     import subprocess
 

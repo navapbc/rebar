@@ -16,6 +16,7 @@ from rebar.metrics.analyzers import jscpd_dup, lizard_complexity, scc_loc
 from rebar.metrics.registry import REGISTRY, MetricSpec, Unavailable
 
 
+# raw-git-ok: read-oriented git helper, variable subcommand
 def _git(repo_root: str, *args: str) -> str:
     """Run a git subcommand in ``repo_root`` and return its stdout."""
     return subprocess.run(

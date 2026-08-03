@@ -126,6 +126,7 @@ def _reap_process_group(p: subprocess.Popen[str]) -> None:
     )
 
 
+# raw-git-ok: generic command runner, argv supplied by caller
 def run_tool(
     cmd: Sequence[str],
     *,

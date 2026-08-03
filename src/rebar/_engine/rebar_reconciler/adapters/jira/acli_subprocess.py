@@ -329,6 +329,7 @@ def _reap_process_group(p: subprocess.Popen[str]) -> None:
     )
 
 
+# raw-git-ok: generic command runner, argv supplied by caller
 def _run_acli(
     cmd: list[str],
     *,

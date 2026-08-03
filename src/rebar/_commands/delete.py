@@ -170,6 +170,7 @@ def scan_and_write_unlinks(
 
 
 # ── delete orchestration ─────────────────────────────────────────────────────
+# raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str):
     """Run a git op in the tracker, raising :class:`CommandError` (exit 2) on
     failure — so a failed DELETE add/commit aborts loudly instead of reporting
@@ -247,6 +248,7 @@ def _rel(tracker: str, path: str) -> str:
     return path[len(prefix) :] if path.startswith(prefix) else path
 
 
+# raw-git-ok: store-maintenance command, seam-internal
 def delete_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar delete <id> --user-approved`` entry."""
     try:

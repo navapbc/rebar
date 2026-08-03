@@ -339,6 +339,7 @@ class GerritClient:
                 logger.debug("events-log: skipping unparseable line")
         return events
 
+    # raw-git-ok: disposable sandbox repo, not the tracker
     def clone_change_ref(self, change_number: int, revision_ref: str, dest: str) -> str:
         """Clone the project at the change's ref into ``dest`` (a working tree for the
         reviewer) and return ``dest``.
