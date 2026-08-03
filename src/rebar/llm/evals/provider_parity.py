@@ -155,8 +155,25 @@ def solver_arm(solver_id: str, repo_root: str | None = None) -> str | None:
     return None
 
 
+def _runnable(solver_id: str, case: dict[str, Any]) -> bool:
+    """Whether ``run_case`` can actually execute this case, beyond the arm resolving.
+
+    A CONTAINER criterion runs over a (parent, children, roster) decomposition, so
+    ``_run_criterion_case`` raises unless the case carries a non-empty ``children`` list; the
+    parent plan alone is not enough. Some container fixtures supply one and some do not, and a
+    case that can only raise is not corpus: it would burn an epoch on both arms and land in the
+    error counts rather than producing a verdict."""
+    from rebar.llm.plan_review.pass1 import CONTAINER_CRITERIA
+
+    if solver_id in CONTAINER_CRITERIA:
+        children = case.get("children")
+        return isinstance(children, list) and bool(children)
+    return True
+
+
 def eligible_cases(repo_root: str | None = None) -> list[CorpusItem]:
-    """Every gold-labelled eval case whose solver id resolves to a non-agentic arm."""
+    """Every gold-labelled eval case whose solver id resolves to a non-agentic arm AND whose
+    payload that arm can actually run."""
     import yaml
 
     items: list[CorpusItem] = []
@@ -168,7 +185,7 @@ def eligible_cases(repo_root: str | None = None) -> list[CorpusItem]:
             if label is None:
                 continue
             solver_id = str(case.get("criterion") or prompt_id)
-            if solver_arm(solver_id, repo_root) is None:
+            if solver_arm(solver_id, repo_root) is None or not _runnable(solver_id, case):
                 continue
             items.append(
                 CorpusItem(
