@@ -161,7 +161,8 @@ def _plan_entries_for(repo: Path, local_id: str, key: str) -> list[dict[str, Any
 
     MATCHES ON `target`, NOT on `local_id`. The envelope's `local_id` field is populated from
     `provenance["local_id"]` (`reconcile_helpers._build_plan_entries`) and for these entries it
-    carries the JIRA KEY, not the rebar local id — observed directly in run 30721408463, whose
+    carries the JIRA KEY, not the rebar local id — observed directly in J11's first harness
+    run (ticket 5200-e04e-246e-4aae), whose
     outbound entries read `{'target': 'RBJISZB-1', 'local_id': 'RBJISZB-1'}`. A filter keying on
     the derived local id alone therefore matches NOTHING, which is how the pagination cell
     reported a suspiciously round "0 of 201 recovered" and nearly became a false data-loss alarm.
@@ -426,7 +427,7 @@ def test_inbound_assign_round_trips(
         `assigneeType`, so DC default-assigns to it, and this suite asserts that fact in two
         other places. Assigning `ADMIN_USER` therefore changed nothing:
         `inbound_fields._assignee_matches` (`inbound_fields.py:102-128`) short-circuits an
-        unchanged assignee, so the differ had nothing to report. Harness run 30763838558
+        unchanged assignee, so the differ had nothing to report. The J11 harness
         confirmed it independently by finding `jira/'admin'` already mapped before any cell ran.
       * THE ORACLE CHECKED A FIELD THE BINDING PASS HAD ALREADY POPULATED, and checked it only
         for TRUTHINESS. So the cell was green whether or not inbound assignee sync worked at
@@ -1714,7 +1715,7 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
     resolve under `jira` AND must NOT exist under `jira-datacenter` — a positive-only check
     would pass a build that minted under both.
 
-    THE CELL ESTABLISHES ITS OWN PRECONDITION RATHER THAN HOPING FOR IT. Harness run 30763838558
+    THE CELL ESTABLISHES ITS OWN PRECONDITION RATHER THAN HOPING FOR IT. The J11 harness
     showed the "absent before" assertion failing: jira/'admin' was already mapped. That is not
     the scrub's doing — every identity on the real `tickets` branch carries `mappings: []`. It
     is `bound_dc_issue`'s binding pass importing the seeded issue's DEFAULT assignee (the
@@ -1967,7 +1968,8 @@ def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
     """After a mutation converges, a second pass must plan nothing for that pair.
 
     A SEPARATE CELL, and the separation is the lesson rather than a style choice. This assertion
-    was originally bundled into every round-trip cell above, and run 30721408463 then reported 19
+    was originally bundled into every round-trip cell above, and J11's first harness run
+    (ticket 5200-e04e-246e-4aae) then reported 19
     failures of which THIRTEEN were mutations that had round-tripped perfectly and tripped only on
     this check — the real signal buried under false reds. An assertion that can fail for a reason
     unrelated to the cell's subject belongs in its own cell. (This is the same "split it into two

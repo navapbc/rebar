@@ -10,7 +10,7 @@ This file has TWO test classes:
    exist because epic 3a03 surfaced three layered ACLI invocation bugs
    (ProjectKey null, priority dict shape, --label vs --labels flag) that
    would have been caught pre-cutover by a command-shape contract test.
-   Every confirmed-correct pattern from the 2026-05-24 ACLI audit is pinned
+   Every confirmed-correct pattern from epic 3a03's ACLI audit is pinned
    here; regression (flag rename, payload key drift, missing --yes) will
    fail loudly in CI.
 

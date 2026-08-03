@@ -60,13 +60,13 @@ def fixture_repo(tmp_path, monkeypatch):
 
     Removes REBAR_TRACKER_DIR from the environment so a developer-set
     override in the host shell cannot leak into the test and steer writes
-    away from the tmp tracker dir (PR #375 review thread 3306949620).
+    away from the tmp tracker dir (PR #375 review).
 
     Also removes REBAR_ENV_ID and REBAR_AUTHOR — both are read by
     ``applier._event_meta()`` and written into every event file. If
     developer-shell values leak into the test the assertions still pass
     locally but the event-file ``env_id``/``author`` diverge between local
-    and CI runs (PR #375 review thread 3307104056).
+    and CI runs (PR #375 review).
     """
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
@@ -207,7 +207,7 @@ def test_inbound_update_writes_edit_event(applier, mut_mod, fixture_repo):
 
 def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_mod, fixture_repo):
     """STATUS event's current_status must be the PREVIOUS state, not the new
-    one (PR #375 review thread 3306949587). The reducer compares
+    one (PR #375 review). The reducer compares
     data['current_status'] against state['status'] to detect forks — setting
     current_status to the NEW state guarantees a false-positive fork mismatch
     whenever the ticket isn't already in that state.
@@ -307,7 +307,7 @@ def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome, branch
 
 def test_inbound_delete_redirect_raises_when_destination_exists(applier, mut_mod, fixture_repo):
     """Redirect branch must NOT silently skip the rename when both src and
-    dst already exist on disk (PR #375 review thread 3307104042). Silent
+    dst already exist on disk (PR #375 review). Silent
     skip leaves both directories present — an inconsistent state that
     propagates to later passes. Expect FileExistsError.
     """
@@ -448,7 +448,7 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound(
 def test_apply_honours_suppress_pair_drops_subsequent_inbound_via_computed_form(
     applier, mut_mod, fixture_repo, monkeypatch
 ):
-    """Computed-form suppression contract (PR #375 review thread 3306949607):
+    """Computed-form suppression contract (PR #375 review):
     a suppress_pair on jira_key='DIG-7' must also drop later mutations whose
     target is the LOCAL-ID form of that key ('jira-dig-7'). Without the
     third match-arm, the later inbound update sneaks past.

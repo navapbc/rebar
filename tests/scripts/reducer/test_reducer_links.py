@@ -433,7 +433,7 @@ def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path)
         data={"ticket_type": "task", "title": "Same-second sort test"},
     )
 
-    # Write LINK event: link_uuid sorts HIGH → filename e.g. 1700000000-ffff1111-...-LINK.json
+    # Write LINK event: link_uuid sorts HIGH in the filename's uuid segment
     _write_event(
         ticket_dir,
         timestamp=ts,
@@ -442,7 +442,7 @@ def test_same_second_link_unlink_sort_order(reducer: ModuleType, tmp_path: Path)
         data={"target_id": "tkt-target", "relation": "blocks"},
     )
 
-    # Write UNLINK event: unlink_uuid sorts LOW → filename e.g. 1700000000-aaaa9999-...-UNLINK.json
+    # Write UNLINK event: unlink_uuid sorts LOW in the filename's uuid segment
     # Lexicographic sort would put UNLINK before LINK (aaaa < ffff), causing the bug.
     _write_event(
         ticket_dir,

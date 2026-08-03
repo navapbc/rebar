@@ -295,9 +295,9 @@ class _Heartbeat:
                 with self._oid_lock:
                     self._oid = new_oid
             except self._lease_lost_cls:
-                # Bug 4afc: probe what the ref actually holds NOW. Reporting only that
-                # the lease is gone leaves "stolen by whom" unanswerable — the ambiguity
-                # that makes the 2026-07-30 losses (runs 30576272914, 30579382013)
+                # Bug 4afc-33cc-9e4f-4fe2: probe what the ref actually holds NOW.
+                # Reporting only that the lease is gone leaves "stolen by whom"
+                # unanswerable — the ambiguity that made that bug's lease losses
                 # unclassifiable after the fact. A DIFFERENT holder is a real takeover;
                 # our own oid still on the ref means the CAS failed for another reason.
                 # Strictly diagnostic: it must never mask or delay the abort, and a

@@ -140,6 +140,23 @@ Two notes on the hook:
 - It is a local guardrail, bypassable with `git commit --no-verify`, not an enforcement
   boundary — CI does not check wrapping.
 
+**Comments and docstrings must not anchor on rot-prone history tokens.** The ticket
+system owns history; source comments carry *current state*. CI's comment-hygiene gate
+(`scripts/check_comment_hygiene.py`, wired into `_build-and-test.yml`) fails the build
+when a comment or docstring cites a bare commit SHA (`cb858e468d`), a CI run/job id
+(`run 30721408463`), or a dated incident narrative (`the 2026-07-30 losses`) — all of
+which go stale or unresolvable as history is rewritten, runs expire, and dates lose
+context. Write one of the three durable forms instead:
+
+- **Cite a resolvable ticket** — a grouped hex id (`5200-e04e-246e-4aae`) or word-triple
+  alias (`robe-creek-zealot`); ADR references (`ADR 0025`) also count. `rebar show <id>`
+  must resolve it.
+- **Drop the token, keep the prose** — describe the behavior or decision in words that
+  stay true without the reference (e.g. keep "PR #375 review", drop raw thread ids).
+- **Vendor-pinned external references** — mark the line with `context: external` when a
+  token genuinely lives outside rebar's ticket system (an upstream issue id, a pinned
+  vendor SHA) and cannot be replaced.
+
 ### 2b. Push for review
 Push to the magic `refs/for/main` ref — this creates (or updates) a Gerrit **change**,
 it does **not** touch `main`:

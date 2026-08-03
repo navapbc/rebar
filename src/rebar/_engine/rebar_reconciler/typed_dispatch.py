@@ -125,7 +125,7 @@ def _apply_typed(
     # Inspect the handler signature once to decide whether to pass repo_root,
     # rather than catching a broad TypeError (which would silently swallow
     # genuine TypeErrors raised from inside the leaf body — bug surfaced in
-    # PR #375 review thread 3306949603).
+    # PR #375 review).
     import inspect as _inspect
 
     try:

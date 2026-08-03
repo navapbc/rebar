@@ -188,7 +188,7 @@ def _children(tracker: str, parent_id: str) -> list[str]:
     """Non-deleted children via the EFFECTIVE current parent_id (full event history,
     not just the CREATE event), so a child REPARENTED onto ``parent_id`` via
     ``edit --parent`` is still caught — otherwise a soft delete would orphan it.
-    Mirrors the transition open-children guard fix (535bee1), which closed the same
+    Mirrors the transition open-children guard fix, which closed the same
     CREATE-only blind spot. Tombstoned/archived children are already-deleted /
     excluded and don't block (unchanged)."""
     from rebar.reducer import reduce_ticket

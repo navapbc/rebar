@@ -299,7 +299,8 @@ def assert_local_assignee_is(
     seeded issue arrives ALREADY ASSIGNED to the project lead — the scratch project is
     created with ``lead=admin`` and no ``assigneeType``, so DC default-assigns to it, and
     the fixture's own binding pass therefore imports that assignee before any cell runs
-    (harness run 30763838558 proved it by finding ``jira/'admin'`` already mapped). A
+    (J11's harness — ticket 5200-e04e-246e-4aae — proved it by finding ``jira/'admin'``
+    already mapped). A
     truthiness check on ``.assignee`` is thus satisfied by the BINDING PASS, not by the
     mutation under test: the cell passed whether or not inbound assignee sync worked at all.
     The repaired cell drives the assignee to EMPTY first and asserts that, so the value

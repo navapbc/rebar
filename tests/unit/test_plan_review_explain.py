@@ -305,7 +305,8 @@ def test_all_in_command_help_links_resolve_for_repoless_client() -> None:
     only an absolute URL, an intra-doc `#anchor`, or `mailto:` is safe. And any `rebar explain
     <topic>` the prose points at must name a real registered guide/criterion, so the
     reachable-pointer promise can't rot. Driven by the registries, so new help is covered
-    automatically. (This is the class of bug `62933ff62` fixed for plan-review deep-links.)"""
+    automatically. (This is the deep-link rot class bug c7e3-dd16-f0a8-43aa fixed for
+    plan-review coaching.)"""
     import re
 
     link = re.compile(r"\]\(([^)]+)\)")

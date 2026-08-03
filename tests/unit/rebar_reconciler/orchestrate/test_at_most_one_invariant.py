@@ -195,9 +195,9 @@ def test_c_dedup_window(tmp_path, invariants):
 
 def test_c_legacy_dedup_key_still_recognized(tmp_path, invariants):
     """An alert filed under the legacy 'at-most-one:<key>' format (pre prefix
-    change) is recognized by the backward-compat lookup added in commit
-    e04e0b289c so the violation is NOT re-filed under the new key during the
-    transition window. Regression for finding 4 of PR #332 cycle-3 review.
+    change) is recognized by the backward-compat lookup added for finding 4
+    of PR #332 cycle-3 review, so the violation is NOT re-filed under the new
+    key during the transition window.
     """
     legacy_dedup_key = "at-most-one:PROJ-LEGACY"
     snapshot = {
