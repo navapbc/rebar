@@ -205,3 +205,131 @@ def test_legacy_payload_without_provenance_still_builds_and_signs() -> None:
     assert json.loads(json.dumps(payload))["model"] == "anthropic:claude-opus-4-8"
     # absence is representable, never an error
     assert payload.get("provider_provenance") is None
+
+
+# ── bug 7fe2: a `gateway/*` provider must not sign as first_class ─────────────────────────
+#
+# `KNOWN_PROVIDER_NAMES` (config.py) admits five `gateway/*` qualifiers, and they carry NO
+# `base_url` — the gateway URL is resolved inside pydantic-ai from its own env/api-key. The
+# tier was derived SOLELY from `base_url`, so every byte could traverse Pydantic's AI Gateway
+# (an intermediary that can rewrite the request — the Vercel AI Gateway has been documented
+# silently downgrading Anthropic's 1-hour prompt cache) while the SIGNED verdict claimed
+# `first_class`. The two-tier field exists so an attestation consumer can reject an off-tier
+# verdict; a wrong tier makes it worthless.
+
+
+def _gateway_provider_names() -> list[str]:
+    """The `gateway/*` qualifiers rebar actually admits, read from the config allowlist rather
+    than hardcoded — a sixth gateway added there must be covered here automatically."""
+    from rebar.llm.config import KNOWN_PROVIDER_NAMES
+
+    return sorted(n for n in KNOWN_PROVIDER_NAMES if n.startswith("gateway/"))
+
+
+def test_the_gateway_provider_family_is_non_empty() -> None:
+    """Guard for the parametrized tests below: if the allowlist ever loses its `gateway/*`
+    entries, the tier tests must fail loudly rather than silently parametrize over nothing."""
+    assert len(_gateway_provider_names()) >= 5
+
+
+def test_the_enumerated_gateway_set_matches_the_config_registry_exactly() -> None:
+    """THE DRIFT PIN, and the reason the tier rule can be pure MEMBERSHIP.
+
+    `capabilities._GATEWAY_PROVIDER_NAMES` restates the `gateway/*` members of
+    `config.KNOWN_PROVIDER_NAMES` instead of filtering them out of it, because filtering would
+    itself need the prefix test that f184's attested criterion bans inside `capabilities.py`
+    (and that epic 061c's registry-membership decision bans generally). Restating is only safe
+    if the two cannot drift, so a sixth gateway added to the registry fails HERE until it is
+    listed — which is a loud build failure rather than a verdict silently signed `first_class`.
+
+    This test may use `startswith`; the ban is on `capabilities.py`, not on its tests."""
+    from rebar.llm.capabilities import _GATEWAY_PROVIDER_NAMES
+
+    assert set(_GATEWAY_PROVIDER_NAMES) == set(_gateway_provider_names())
+
+
+def test_an_unadmitted_gateway_lookalike_is_not_granted_gateway_semantics() -> None:
+    """The membership dividend. Under prefix matching any string beginning `gateway/` — a typo,
+    a hand-edited config, a future name rebar does not model — silently acquired gateway
+    semantics. Under membership it does not, and `KNOWN_PROVIDER_NAMES` is the single upstream
+    gate that stops such a qualifier being configurable at all."""
+    from rebar.llm.capabilities import _GATEWAY_PROVIDER_NAMES
+    from rebar.llm.config import KNOWN_PROVIDER_NAMES
+
+    typo = "gateway/nonsense"
+    assert typo not in KNOWN_PROVIDER_NAMES, "config is the gate that makes this unreachable"
+    assert typo not in _GATEWAY_PROVIDER_NAMES
+
+
+@pytest.mark.parametrize("provider", _gateway_provider_names())
+def test_gateway_provider_without_base_url_is_best_effort(provider: str) -> None:
+    """THE defect. A `gateway/anthropic:claude-opus-4-8` run carries no `base_url`, so the
+    base_url-only rule stamped it `first_class`. Every gateway qualifier must tier
+    `best_effort`, because rebar cannot vouch for what the intermediary sent upstream."""
+    rec = _provenance(
+        provider=provider, model=f"{provider}:claude-opus-4-8", base_url=None, caps=CAPS
+    )
+    assert rec["tier"] == "best_effort", (
+        f"{provider} traverses an opaque intermediary — it cannot sign as first_class"
+    )
+    assert rec["provider"] == provider
+
+
+def test_gateway_tier_is_not_decided_by_the_provider_names_shape() -> None:
+    """Contrast case: the rule is set MEMBERSHIP, not name shape. No amount of the token
+    'gateway' in a provider name downgrades a direct provider — including a bare `gateway`, a
+    name that merely contains it, and one that ends with it."""
+    for direct in ("mygateway", "openai-gateway", "gateway", "gateway-anthropic"):
+        rec = _provenance(provider=direct, model=f"{direct}:m", base_url=None, caps=CAPS)
+        assert rec["tier"] == "first_class", f"{direct} is not an enumerated gateway qualifier"
+
+
+@pytest.mark.parametrize(
+    "provider", ["anthropic", "bedrock", "openai", "google-cloud", "groq", "vertexai"]
+)
+def test_direct_providers_with_no_base_url_stay_first_class(provider: str) -> None:
+    """The no-collateral-damage half. Every non-gateway qualifier with no custom endpoint
+    keeps signing `first_class`; the fix must narrow the rule, not invert it."""
+    rec = _provenance(provider=provider, model=f"{provider}:m", base_url=None, caps=CAPS)
+    assert rec["tier"] == "first_class"
+
+
+@pytest.mark.parametrize("provider", _gateway_provider_names())
+def test_gateway_endpoint_host_stays_none_unless_a_base_url_was_actually_configured(
+    provider: str,
+) -> None:
+    """THE RECORDED DECISION for this bug: `endpoint_host` is NOT back-filled with a guessed
+    gateway hostname.
+
+    pydantic-ai resolves the gateway URL from `PYDANTIC_AI_GATEWAY_BASE_URL` / `PAIG_BASE_URL`
+    or infers it from the API KEY (`providers/gateway.py`), none of which this seam observes.
+    Synthesising `gateway.pydantic.dev` here would put an UNVERIFIED fact into a SIGNED record
+    — the precise failure mode the tier field exists to prevent. The intermediary is instead
+    named by the `provider` field (`gateway/anthropic`) and flagged by `tier`, both of which
+    are observed. When a `base_url` IS configured, the real host is recorded as before."""
+    rec = _provenance(provider=provider, model=f"{provider}:m", base_url=None, caps=CAPS)
+    assert rec["endpoint_host"] is None
+    assert rec["provider"].startswith("gateway/"), "the record still names the intermediary"
+
+    with_url = _provenance(
+        provider=provider,
+        model=f"{provider}:m",
+        base_url="https://gw.example.test:8443/proxy",
+        caps=CAPS,
+    )
+    assert with_url["endpoint_host"] == "gw.example.test"
+    assert with_url["tier"] == "best_effort"
+
+
+def test_gateway_credentials_in_a_configured_base_url_never_reach_the_record() -> None:
+    """The gateway arm inherits the security oracle: adding a provider-name branch must not
+    route around `urlparse(...).hostname`, which strips userinfo."""
+    rec = _provenance(
+        provider="gateway/anthropic",
+        model="gateway/anthropic:claude-opus-4-8",
+        base_url="https://alice:hunter2@gw.internal:8443/proxy",
+        caps=CAPS,
+    )
+    assert "hunter2" not in json.dumps(rec)
+    assert "alice" not in json.dumps(rec)
+    assert rec["endpoint_host"] == "gw.internal"

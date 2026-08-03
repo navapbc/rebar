@@ -368,6 +368,30 @@ def _model_id_of(model_or_model_string: Any) -> str | None:
     return None
 
 
+# The provider qualifiers that route a run through Pydantic's AI Gateway, ENUMERATED (bug 7fe2).
+#
+# Membership, never prefix matching. This module exists precisely because provider-name string
+# matching is wrong (see the module docstring), f184's attested criterion forbids prefix matching
+# here, and epic 061c's standing decision is provider qualification by REGISTRY MEMBERSHIP with
+# no exceptions — LiteLLM's Bedrock id-sniffing is the recurring bug class that rule exists to
+# avoid. Membership is also strictly better on the merits: the set is auditable at a glance, and
+# an unrecognized `gateway/...` string is not silently granted gateway semantics.
+#
+# These are exactly the ``gateway/*`` members of ``config.KNOWN_PROVIDER_NAMES`` — the registry
+# that decides whether a qualifier is admissible at all. They are restated rather than filtered
+# out of it because filtering would itself require the banned prefix test; a drift test pins the
+# two in lockstep, so a sixth gateway added to the registry fails the build here until listed.
+_GATEWAY_PROVIDER_NAMES = frozenset(
+    {
+        "gateway/anthropic",
+        "gateway/bedrock",
+        "gateway/google-cloud",
+        "gateway/groq",
+        "gateway/openai",
+    }
+)
+
+
 def provenance_for(
     *, provider: str, model: str, base_url: str | None, caps: ModelCapabilities
 ) -> dict:
@@ -376,10 +400,30 @@ def provenance_for(
     A verdict used to record only a model STRING, so a run behind an opaque gateway still
     claimed it came from ``anthropic:claude-opus-4-8``. This assembles the additive record
     that names the resolved provider/model, the endpoint actually called (``tier`` flips to
-    ``"best_effort"`` once a custom ``base_url`` is set), and the EFFECTIVE capability record
+    ``"best_effort"`` once a custom ``base_url`` is set OR the provider is a known gateway
+    qualifier — see below), and the EFFECTIVE capability record
     that drove the run — carried through from the ``caps`` argument, never recomputed (a
     second `capabilities_for` resolution here could diverge from the record that actually
     drove the run, which is exactly the prior regression this must not repeat).
+
+    GATEWAY QUALIFIERS (bug 7fe2). Deriving the tier from ``base_url`` ALONE was wrong: the
+    five ``gateway/*`` names in ``config.KNOWN_PROVIDER_NAMES`` are live (pydantic-ai's
+    ``infer_provider`` resolves them) and carry NO ``base_url``, because the gateway URL is
+    resolved inside pydantic-ai from its own env/API key. So a ``gateway/anthropic`` run — every
+    byte of which traverses an intermediary that can rewrite the request; the Vercel AI Gateway
+    has been documented silently downgrading Anthropic's 1-hour prompt cache — signed as
+    ``first_class``. Gateway membership is therefore a second, independent trigger for
+    ``best_effort``, decided by MEMBERSHIP in :data:`_GATEWAY_PROVIDER_NAMES` (never by prefix or
+    substring shape — see that constant), so a direct provider whose name merely contains the
+    token is not collaterally downgraded.
+
+    ``endpoint_host`` is deliberately NOT back-filled with a guessed gateway hostname. This seam
+    never observes the resolved gateway URL (pydantic-ai reads ``PYDANTIC_AI_GATEWAY_BASE_URL`` /
+    ``PAIG_BASE_URL``, or infers it from the API key), and synthesising ``gateway.pydantic.dev``
+    would place an UNVERIFIED fact into a SIGNED record — exactly what the tier field exists to
+    prevent. The intermediary is instead named by the OBSERVED ``provider`` field
+    (``gateway/anthropic``) and flagged by ``tier``. When a ``base_url`` IS configured its real
+    host is recorded, gateway or not.
 
     Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
     latter retains embedded credentials (``user:secret@host``), and no credential material may
@@ -387,11 +431,12 @@ def provenance_for(
     from urllib.parse import urlparse
 
     endpoint_host = urlparse(base_url).hostname if base_url else None
+    via_gateway = provider in _GATEWAY_PROVIDER_NAMES
     return {
         "provider": provider,
         "model": model,
         "endpoint_host": endpoint_host,
-        "tier": "best_effort" if base_url else "first_class",
+        "tier": "best_effort" if (base_url or via_gateway) else "first_class",
         "capabilities": {
             "native_structured_output": caps.native_structured_output,
             "prompt_cache_style": caps.prompt_cache_style,
