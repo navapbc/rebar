@@ -103,6 +103,55 @@ def _wait_until_search_reflects(
     )
 
 
+def _linked_keys(links: list[dict[str, Any]]) -> set[str | None]:
+    """The counterpart keys named by an ``issuelinks`` payload, in EITHER direction.
+
+    A Jira link is nested under ``outwardIssue`` or ``inwardIssue`` depending on which end
+    is being read, so a reader that inspects only one of the two silently sees no link half
+    the time. Extracted from `test_outbound_link_round_trips`, which had this inline, so the
+    add cell and the remove cell cannot drift on the shape they read.
+    """
+    return {
+        (lk.get("outwardIssue") or lk.get("inwardIssue") or {}).get("key")
+        for lk in links
+        if isinstance(lk, dict)
+    }
+
+
+def _wait_until_links_reflect(
+    transport: Any,
+    project: str,
+    key: str,
+    predicate: Callable[[set[str | None]], bool],
+    what: str,
+    timeout: float = 90.0,
+) -> None:
+    """Block until THE PRODUCTION LINK READ for ``key`` satisfies ``predicate``.
+
+    Waits on ``get_issuelinks_map`` rather than on ``get_issue_links``, and the difference
+    matters for the same reason `_wait_until_search_reflects` exists. ``get_issue_links`` is a
+    direct GET (`transport.py:477-486`) and is immediately consistent; the INBOUND PASS reads
+    links from a JQL paged search — ``fetcher.py:592-593`` calls ``get_issuelinks_map``, which
+    is ``_paged_search(f"project = {project}")`` (`transport.py:391-395`) — and Jira's Lucene
+    index is not. A cell that waits on the direct GET can therefore hand the differ a stale
+    document and then report a bridge defect that never happened.
+    """
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    last: set[str | None] = set()
+    while time.monotonic() < deadline:
+        attempts += 1
+        last = _linked_keys(transport.get_issuelinks_map(project).get(key) or [])
+        if predicate(last):
+            return
+        time.sleep(2.0)
+    raise AssertionError(
+        f"the SEARCH-backed link read never reflected {what} on {key} within {timeout:.0f}s "
+        f"({attempts} attempts). This is NOT a bridge defect — the write succeeded, the search "
+        f"cannot see it yet. Last counterpart keys seen: {sorted(str(k) for k in last)}"
+    )
+
+
 def _plan_entries_for(repo: Path, local_id: str, key: str) -> list[dict[str, Any]]:
     """Scoped dry-run plan entries naming this pair.
 
@@ -524,8 +573,19 @@ def test_outbound_remove_label_round_trips(
 
 
 # ---------------------------------------------------------------------------
-# Rows 10-11 — links, in both directions
+# Rows 10-11 — links, in both directions. ADD and REMOVE are SEPARATE cells.
 # ---------------------------------------------------------------------------
+#
+# WHY THE SPLIT, since both directions previously carried one cell apiece. The two link
+# cells below each claimed "Rows 10-11" in their docstring while asserting ONLY the add — a
+# docstring overclaiming its own coverage, which is the exact defect class sibling ticket 2944
+# existed to delete, and it is worse than a missing test: it makes the gap invisible to anyone
+# auditing the table. The removals now live in their own cells (`test_inbound_delete_link_...`
+# and `test_outbound_delete_link_...`), each asserting the link's ABSENCE after a removal that
+# a PROVEN add preceded, and these two are re-scoped to row 10 alone. Splitting rather than
+# appending is also the discipline this module already learned the expensive way (see
+# `test_a_repeat_pass_over_a_converged_pair_plans_nothing`): a removal can fail for reasons the
+# add cannot, so bundling them makes one red report two indistinguishable things.
 
 
 @_skip
@@ -537,7 +597,12 @@ def test_inbound_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Rows 10-11 inbound: a Jira issue link surfaces as a local dep, and its removal removes it.
+    """Row 10 inbound: a Jira issue link surfaces as a local dep.
+
+    SCOPED TO THE ADD, and the docstring says so. It previously read "Rows 10-11 ... and its
+    removal removes it" while the body asserted only the add; the removal is now
+    `test_inbound_delete_link_round_trips` below. No assertion was weakened — one was ADDED,
+    elsewhere, and this claim narrowed to what this body actually proves.
 
     THE FAR END MUST BE BOUND *AND* LOCALLY PRESENT BEFORE THE LINK PASS. The inbound link
     translator resolves the counterpart through the binding store and skips an unresolvable
@@ -593,6 +658,96 @@ def test_inbound_link_round_trips(
 
 @_skip
 @_skip_no_extra
+def test_inbound_delete_link_round_trips(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    bound_dc_issue: Any,
+) -> None:
+    """Row 11 inbound: a Jira issue link DELETED in DC must disappear from the local ticket.
+
+    THE ORACLE IS ABSENCE, ASSERTED AFTER A PROVEN ADD. The add half is SETUP, not the
+    assertion, and it is asserted as setup: a removal cell whose link never arrived passes
+    vacuously against a bridge that never wrote it. Same shape as
+    `test_outbound_remove_label_round_trips` (row 6), for the same reason.
+
+    "The pass did not raise" is deliberately NOT the oracle. The whole d067 defect was a
+    soft-failed error with exit 0, so the only thing worth reading here is whether the dep is
+    GONE from `rebar show`.
+
+    EXPECTED RED — AND THE PRODUCT, NOT THIS CELL, IS WHY. `inbound_differ._diff_links_inbound`
+    is ADD-ONLY by construction: its docstring opens "Reflect Jira issuelinks into rebar
+    relations. ADD-only." and closes "ADD-only (no REMOVE mutations)"
+    (`inbound_differ.py:380`, `:396`). Nothing walks the local deps looking for one whose Jira
+    counterpart has gone, so a link a human deletes in Jira stays on the rebar ticket forever
+    and no pass reports it. The OUTBOUND direction does have a removal path
+    (`outbound_links._diff_link_removals`, `outbound_links.py:120-175`), which is what makes
+    this an asymmetry rather than a deliberate whole-feature omission. Filed as
+    [rebar:2b16-9be0-a8f5-41d9] with the citations; this cell is the evidence, so it asserts the
+    AC's oracle (row 11 inbound: "that link is ABSENT") rather than pinning the current
+    behaviour. Do not "fix" it by asserting the dep survives — that would freeze the gap.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    local_id, key = bound_dc_issue
+    other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 unlink target"))
+    other_local = _jira_key_to_local_id(other)
+
+    # Priming pass — the counterpart must be BOUND and in the ACTIVE local set before the link
+    # pass, for the two reasons `test_inbound_link_round_trips` documents at length
+    # (`inbound_differ.py:402-404` and `:409-412`).
+    scope = f"{local_id},{key},{other_local},{other}"
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the link target raised:\n{cp.stderr}"
+    bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
+    assert bound_other == other, (
+        f"SETUP FAILED (not the removal): the link target {other_local} is not bound (got "
+        f"{bound_other!r}); an inbound link naming an unresolvable target is skipped, not "
+        f"attempted, so its later absence would prove nothing."
+    )
+
+    # SETUP — drive the link ALL THE WAY into the local ticket, and assert it got there.
+    dc_transport.set_relationship(key, other, "Blocks")
+    _wait_until_links_reflect(
+        dc_transport, jira_dc_project, key, lambda seen: other in seen, "the link to remove"
+    )
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"inbound link-add pass raised:\n{cp.stderr[-2000:]}"
+    targets = {d.get("target_id") for d in (_local(dc_store_copy_repo, local_id).get("deps") or [])}
+    assert other_local in targets, (
+        f"SETUP FAILED (not the removal): the inbound link never reached the local ticket, so "
+        f"its absence below would prove nothing. deps on {local_id} target {sorted(targets)}, "
+        f"expected to contain {other_local!r}. Row 10 "
+        f"(`test_inbound_link_round_trips`) covers this add on its own; if that cell is also "
+        f"red, fix it there."
+    )
+
+    # THE MUTATION UNDER TEST — delete the link in DC by its id, then prove it is gone from the
+    # instance before asking rebar about it.
+    link_ids = [lk.get("id") for lk in dc_transport.get_issue_links(key) if isinstance(lk, dict)]
+    assert link_ids, f"SETUP FAILED: no link id to delete on {key} after the add converged"
+    for link_id in link_ids:
+        dc_transport.delete_issue_link(str(link_id))
+    _wait_until_links_reflect(
+        dc_transport, jira_dc_project, key, lambda seen: other not in seen, "the link removal"
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"inbound unlink pass raised:\n{cp.stderr[-2000:]}"
+
+    after = {d.get("target_id") for d in (_local(dc_store_copy_repo, local_id).get("deps") or [])}
+    assert other_local not in after, (
+        f"the Jira link was DELETED (confirmed absent from the search-backed link read) but the "
+        f"local dep on {local_id} still targets {other_local!r}: deps target {sorted(after)}. "
+        f"The inbound link differ is ADD-only (`inbound_differ.py:380,396`) — see "
+        f"[rebar:2b16-9be0-a8f5-41d9]."
+    )
+
+
+@_skip
+@_skip_no_extra
 def test_outbound_link_round_trips(
     dc_store_copy_repo: Path,
     dc_transport: Any,
@@ -600,9 +755,14 @@ def test_outbound_link_round_trips(
     track_issue: Any,
     bound_dc_issue: Any,
 ) -> None:
-    """Rows 10-11 outbound: a local `blocks` link surfaces in `fields.issuelinks`, and unlink
-    removes it. Both halves in one cell because the removal is only meaningful after the add
-    has been PROVEN to land — asserted separately below so the two do not blur."""
+    """Row 10 outbound: a local `blocks` link surfaces in `fields.issuelinks`.
+
+    SCOPED TO THE ADD, and the docstring now says so. It previously claimed "Rows 10-11 ... and
+    unlink removes it. Both halves in one cell", and the body asserted ONLY the add (there was
+    no unlink here at all) — a docstring overclaiming its coverage, which hides a gap more
+    effectively than having no test. The removal is `test_outbound_delete_link_round_trips`
+    below, which does exactly what the old text described: proves the add landed, then asserts
+    absence. No assertion was weakened; one was added, elsewhere."""
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
@@ -628,15 +788,83 @@ def test_outbound_link_round_trips(
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"outbound link pass raised:\n{cp.stderr[-2000:]}"
 
-    links = dc_transport.get_issue_links(key)
-    seen = {
-        (lk.get("outwardIssue") or lk.get("inwardIssue") or {}).get("key")
-        for lk in links
-        if isinstance(lk, dict)
-    }
+    seen = _linked_keys(dc_transport.get_issue_links(key))
     assert other in seen, (
         f"the local 'blocks' link did not reach DC: fields.issuelinks on {key} names {seen}, "
         f"expected to contain {other!r}"
+    )
+
+
+@_skip
+@_skip_no_extra
+def test_outbound_delete_link_round_trips(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    bound_dc_issue: Any,
+) -> None:
+    """Row 11 outbound: a local `unlink` must remove the link from `fields.issuelinks`.
+
+    THE ORACLE IS ABSENCE ON THE INSTANCE, read with `get_issue_links` (a direct GET,
+    `transport.py:477-486`) so it cannot be satisfied by what rebar believes it sent. Not "the
+    pass exited 0" and not "the payload carried a remove instruction": the removal path
+    (`outbound_links._diff_link_removals` → `dispatch_one`'s `delete_issue_link`) is exactly the
+    kind of best-effort chain that logs and continues, so only the post-state is evidence.
+
+    ITS OWN CELL, separate from row 10's add. The add is asserted here too, but as SETUP — an
+    unlink asserted without first proving the link ARRIVED passes vacuously against a bridge
+    that never wrote it, which is the same trap `test_outbound_remove_label_round_trips`
+    documents for row 6.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    import rebar
+
+    local_id, key = bound_dc_issue
+    other = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outunlink target"))
+    other_local = _jira_key_to_local_id(other)
+
+    # The target must be BOUND: an outbound link can only name a key the binding store resolves,
+    # so an unbound target makes the differ skip the link and the cell would fail for a setup
+    # reason wearing the costume of a bridge defect (see `test_outbound_link_round_trips`).
+    scope = f"{local_id},{key},{other_local},{other}"
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"binding pass for the link target raised:\n{cp.stderr}"
+    bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
+    assert bound_other == other, (
+        f"SETUP FAILED (not the removal): the link target {other_local} is not bound (got "
+        f"{bound_other!r}); an outbound link naming an unresolvable target is skipped, not "
+        f"attempted."
+    )
+
+    # SETUP — push the link and PROVE it landed on the instance.
+    rebar.link(local_id, other_local, "blocks", repo_root=dc_store_copy_repo)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"outbound link-add pass raised:\n{cp.stderr[-2000:]}"
+    seen = _linked_keys(dc_transport.get_issue_links(key))
+    assert other in seen, (
+        f"SETUP FAILED (not the removal): the local 'blocks' link never reached DC, so its "
+        f"absence below would prove nothing. fields.issuelinks on {key} names {seen}. Row 10 "
+        f"(`test_outbound_link_round_trips`) covers this add on its own; if that cell is also "
+        f"red, fix it there."
+    )
+
+    # THE MUTATION UNDER TEST — unlink locally, then read the instance back.
+    # `unlink` takes NO relation argument (`rebar.unlink(id1, id2)`) — it removes the edge
+    # between the pair, which is what row 11 is about.
+    rebar.unlink(local_id, other_local, repo_root=dc_store_copy_repo)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"outbound unlink pass raised:\n{cp.stderr[-2000:]}"
+
+    after = _linked_keys(dc_transport.get_issue_links(key))
+    assert other not in after, (
+        f"the local link was REMOVED but the DC issue still carries it: fields.issuelinks on "
+        f"{key} names {sorted(str(k) for k in after)}, expected {other!r} to be absent. The "
+        f"outbound remove path is `outbound_links._diff_link_removals` "
+        f"(`outbound_links.py:120-175`) applied via `delete_issue_link` "
+        f"(`transport.py:556-577`); both log rather than raise, so exit 0 says nothing here."
     )
 
 
