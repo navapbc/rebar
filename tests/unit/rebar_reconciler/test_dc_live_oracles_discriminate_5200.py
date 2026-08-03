@@ -400,3 +400,202 @@ def test_the_raw_count_surfaces_a_failed_request_instead_of_counting_zero(suppor
     with pytest.raises(AssertionError) as excinfo:
         support.raw_indexed_issue_count(_broken, "RBJ")
     assert "HTTP 503" in str(excinfo.value)
+
+
+# ===========================================================================
+# GAP 4 — row 12 OUTBOUND: rebar writing a parent onto a DC issue
+# ===========================================================================
+#
+# The fourth gap in criterion 11, found after the first three were closed: row 12 had no
+# OUTBOUND test at all. It looked covered because `test_outbound_clear_parent_round_trips`
+# (row 13 outbound) asserts a parent IS present — but that parent came from issue CREATION
+# (`extra={"parent": {"key": parent}}`), never from a rebar write.
+#
+# Everything below is harness-free. The DC transport is driven with a fake pycontribs client,
+# which is how the rest of `tests/unit/rebar_reconciler/` exercises it, so the CONTRACT claims
+# in the live cell's docstring are executable rather than asserted in prose.
+
+
+class _FakeIssue:
+    """A pycontribs `Issue`-shaped object: a `.raw` payload plus a recording `.update`."""
+
+    def __init__(self, key: str, *, subtask: bool, parent: str | None = None) -> None:
+        fields: dict[str, Any] = {"issuetype": {"name": "Sub-task", "subtask": subtask}}
+        if parent:
+            fields["parent"] = {"key": parent}
+        self.raw = {"key": key, "fields": fields}
+        self.updates: list[dict[str, Any]] = []
+
+    def update(self, fields: dict[str, Any] | None = None, **_kwargs: Any) -> None:
+        self.updates.append(fields or {})
+
+
+class _FakeClient:
+    def __init__(self, issue: _FakeIssue) -> None:
+        self._issue = issue
+
+    def issue(self, _remote_id: str) -> _FakeIssue:
+        return self._issue
+
+
+def _dc_transport_for(issue: _FakeIssue) -> Any:
+    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    return JiraDataCenterTransport(client=_FakeClient(issue), project="RBJ")
+
+
+def test_dc_set_parent_WRITES_fields_parent_for_a_subtask() -> None:
+    """CONTRACT, HALF ONE: the sub-task case is genuinely SUPPORTED, so row 12 outbound is a
+    real round-trip and not a limitation cell.
+
+    Nothing in `tests/unit/` exercised DC `set_parent` before this — the write shape
+    (`{"parent": {"key": …}}`, `jira_datacenter/transport.py:711-712`) was unasserted at every
+    level. Asserted on the PAYLOAD, because "it did not raise" is what a silent no-op also
+    looks like.
+    """
+    issue = _FakeIssue("RBJ-3", subtask=True, parent="RBJ-1")
+
+    _dc_transport_for(issue).set_parent("RBJ-3", "RBJ-2")
+
+    assert issue.updates == [{"parent": {"key": "RBJ-2"}}], (
+        f"DC set_parent did not PUT the sub-task's parent as fields.parent; it sent "
+        f"{issue.updates!r}. The live row-12-outbound cell asserts that write landed, so a "
+        f"changed shape here makes that cell assert the wrong thing."
+    )
+
+
+def test_dc_set_parent_DECLINES_the_non_subtask_case_by_raising() -> None:
+    """CONTRACT, HALF TWO: epic and sub-task are DIFFERENT PATHS — they do not collapse into
+    one already-covered case, which is why row 12 outbound needed a cell rather than an
+    amended criterion.
+
+    The decline is `NotImplementedError` NAMING the limitation
+    (`jira_datacenter/transport.py:702-710`): epic membership on DC is an "Epic Link" custom
+    field written through the Agile API under the `greenhopper` path. Writing `fields.parent`
+    there would silently no-op, which is the failure class this story exists to eliminate.
+    """
+    issue = _FakeIssue("RBJ-9", subtask=False)
+
+    with pytest.raises(NotImplementedError) as excinfo:
+        _dc_transport_for(issue).set_parent("RBJ-9", "RBJ-1")
+
+    message = str(excinfo.value)
+    assert "sub-task" in message.lower() and "Epic Link".lower() in message.lower(), (
+        f"the decline must name the limitation an operator can act on; got {message!r}"
+    )
+    assert issue.updates == [], (
+        f"the declined path still issued a write: {issue.updates!r}. A `fields.parent` write on "
+        f"a non-subtask is exactly the silent no-op the decline exists to prevent."
+    )
+
+
+def test_the_two_dc_parent_gates_are_DISJOINT_so_a_pass_cannot_carry_this_row() -> None:
+    """WHY THE LIVE CELL ASSERTS THE PRIMITIVE RATHER THAN ROUTING THROUGH A PASS.
+
+    This is the structural finding, and it is asserted rather than argued because it is the
+    justification for the cell's shape. Two gates, each defensible alone:
+
+      * APPLY gate — DC accepts a `fields.parent` write only for a SUB-TASK (above).
+      * EMIT gate — `outbound_field_diff._resolve_local_parent:136-139` OMITS the parent field
+        entirely when the local parent's `ticket_type` is not `epic` (bug 8b25's hierarchy
+        guard).
+
+    A DC sub-task's parent is a STANDARD issue, which imports as local `ticket_type` "task".
+    So the only child DC will apply a parent write for is the only parent the differ refuses to
+    emit one for. Routing row 12 outbound through a pass would assert a mutation nothing emits
+    — the row-14-outbound situation verbatim.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "_outbound_field_diff_for_5200", _ENGINE / "outbound_field_diff.py"
+    )
+    assert spec and spec.loader
+    ofd = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ofd
+    spec.loader.exec_module(ofd)
+
+    class _Bindings:
+        def get_jira_key(self, local_id: str) -> str:
+            return {"parent-local": "RBJ-1"}.get(local_id, "")
+
+    child = {"ticket_id": "child-local", "parent_id": "parent-local"}
+
+    # A DC sub-task's parent is a Task — the differ omits it, so no mutation is emitted.
+    present, value = ofd._resolve_local_parent(child, _Bindings(), {"parent-local": "task"})
+    assert (present, value) == (False, None), (
+        f"_resolve_local_parent no longer suppresses a non-epic parent (got {(present, value)!r}); "
+        f"if the emit gate has changed, row 12 outbound may now be reachable THROUGH A PASS and "
+        f"the live cell should be re-shaped as a full round-trip"
+    )
+
+    # An epic parent IS emitted — which is the case DC's set_parent declines. Both halves are
+    # asserted so "the gates are disjoint" is a measurement and not a reading.
+    assert ofd._resolve_local_parent(child, _Bindings(), {"parent-local": "epic"}) == (
+        True,
+        "RBJ-1",
+    )
+
+
+def _parent_doc(key: str, parent: str | None) -> tuple[int, dict[str, Any]]:
+    """A raw-REST issue document as DC answers `GET /issue/{key}?fields=parent`."""
+    fields: dict[str, Any] = {"parent": {"key": parent}} if parent else {}
+    return 200, {"key": key, "fields": fields}
+
+
+def test_the_parent_oracle_passes_when_the_write_landed(support: Any) -> None:
+    support.assert_remote_parent_is(
+        "RBJ-3", *_parent_doc("RBJ-3", "RBJ-2"), "RBJ-2", previous_parent="RBJ-1"
+    )
+
+
+def test_the_parent_oracle_names_a_silent_no_op_as_one(support: Any) -> None:
+    """THE FAILURE THIS ROW EXISTS FOR. Every DC defect in this area presented the same way:
+    no traceback, pass reported OK, field unchanged. So the oracle must not merely fail — it
+    must say that the value it found is the value from BEFORE, or the next reader looks for a
+    write that went astray instead of one that never happened."""
+    with pytest.raises(AssertionError) as excinfo:
+        support.assert_remote_parent_is(
+            "RBJ-3", *_parent_doc("RBJ-3", "RBJ-1"), "RBJ-2", previous_parent="RBJ-1"
+        )
+    message = str(excinfo.value)
+    assert "STILL 'RBJ-1'" in message and "silent-no-op signature" in message, message
+    assert "dispatch_one.py:571-578" in message, (
+        f"the message must point at the swallow that makes the post-state the only observable; "
+        f"got {message!r}"
+    )
+
+
+def test_the_parent_oracle_goes_red_when_the_field_was_cleared_or_misdirected(
+    support: Any,
+) -> None:
+    """A write that CLEARED the parent, and one that landed on the wrong issue, are different
+    findings from a no-op and neither may pass."""
+    with pytest.raises(AssertionError) as excinfo:
+        support.assert_remote_parent_is(
+            "RBJ-3", *_parent_doc("RBJ-3", None), "RBJ-2", previous_parent="RBJ-1"
+        )
+    assert "cleared the field" in str(excinfo.value), str(excinfo.value)
+
+    with pytest.raises(AssertionError) as excinfo:
+        support.assert_remote_parent_is(
+            "RBJ-3", *_parent_doc("RBJ-3", "RBJ-7"), "RBJ-2", previous_parent="RBJ-1"
+        )
+    assert "wrong issue" in str(excinfo.value), str(excinfo.value)
+
+
+def test_the_parent_oracles_setup_use_rejects_the_wrong_starting_parent(support: Any) -> None:
+    """The cell asserts its STARTING parent through the same helper. Without that, "it is under
+    B afterwards" could have been true before the mutation — the vacuity this session exists to
+    remove — so the setup use has to be able to fail too."""
+    with pytest.raises(AssertionError) as excinfo:
+        support.assert_remote_parent_is(
+            "RBJ-3", *_parent_doc("RBJ-3", "RBJ-2"), "RBJ-1", stage="SETUP (not the reparent)"
+        )
+    assert "SETUP (not the reparent)" in str(excinfo.value), str(excinfo.value)
+
+
+def test_the_parent_oracle_surfaces_an_unreadable_issue_instead_of_a_missing_parent(
+    support: Any,
+) -> None:
+    with pytest.raises(AssertionError) as excinfo:
+        support.assert_remote_parent_is("RBJ-3", 404, {"errorMessages": ["gone"]}, "RBJ-2")
+    assert "not readable by raw REST" in str(excinfo.value) and "HTTP 404" in str(excinfo.value)
