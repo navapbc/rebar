@@ -43,9 +43,12 @@ from typing import Any
 
 import pytest
 from _dc_support import ADMIN_USER, BASE, live_jira_ready
+from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
 from _dc_support import assert_mint_registered as _assert_mint_registered
+from _dc_support import assert_outbound_provenance_markers as _assert_outbound_provenance_markers
 from _dc_support import envelope as _envelope
 from _dc_support import forget_identity_mapping as _forget_identity_mapping
+from _dc_support import raw_indexed_issue_count as _raw_indexed_issue_count
 from _dc_support import read_local_ticket as _local
 from _dc_support import run_reconcile as _run
 from _dc_support import seed_searchable_issue as _seed
@@ -308,29 +311,27 @@ def _oracle_in_comment(ticket: dict[str, Any], expected: str) -> None:
     )
 
 
-def _in_assign(tr: Any, project: str, key: str) -> str:
-    tr.update_issue(key, assignee=ADMIN_USER)
+def _wait_until_dc_assignee_is(
+    tr: Any, project: str, key: str, user: str | None, what: str
+) -> None:
+    """Block until the SEARCH DOCUMENT shows `key` assigned to `user` (None = unassigned).
+
+    Row 8's cell waits on BOTH states — unassigned for its setup, then assigned for the
+    mutation — and the two must not drift on the shape they read: DC carries the user under
+    `fields.assignee.name`, while an unassigned issue reads back as `None` or `{}` depending on
+    the endpoint. One helper, one place to be wrong.
+    """
+    if user is None:
+        _wait_until_search_reflects(
+            tr, project, key, lambda h: (h.get("fields") or {}).get("assignee") in (None, {}), what
+        )
+        return
     _wait_until_search_reflects(
         tr,
         project,
         key,
-        lambda h: (((h.get("fields") or {}).get("assignee") or {}).get("name")) == ADMIN_USER,
-        "the assignee",
-    )
-    return ADMIN_USER
-
-
-def _oracle_in_assign(ticket: dict[str, Any], expected: str) -> None:
-    """The local `.assignee` is a rebar IDENTITY id, not the raw DC username.
-
-    So the oracle is not `== "admin"`. It is that the field is populated AND that it is the
-    id the identity registry mints for this DC user under the SHARED `jira` family — which is
-    the epic's shared-identity decision, asserted positively in
-    `test_the_inbound_assignee_mints_a_jira_family_identity` below.
-    """
-    assert ticket.get("assignee"), (
-        f"inbound assignee did not reach the local ticket: .assignee is "
-        f"{ticket.get('assignee')!r} (expected the minted identity for {expected!r})"
+        lambda h: (((h.get("fields") or {}).get("assignee") or {}).get("name")) == user,
+        what,
     )
 
 
@@ -369,7 +370,8 @@ _INBOUND_CELLS: list[tuple[str, Any, Any]] = [
     ("05-add-label", _in_add_label, _oracle_in_add_label),
     ("06-remove-label", _in_remove_label, _oracle_in_remove_label),
     ("07-add-comment", _in_comment, _oracle_in_comment),
-    ("08-assign", _in_assign, _oracle_in_assign),
+    # Row 8 (assign) is NOT here — it needs two passes, so it is
+    # `test_inbound_assign_round_trips` below. See that cell's docstring.
     ("09-unassign", _in_unassign, _oracle_in_unassign),
 ]
 
@@ -388,11 +390,14 @@ def test_inbound_mutation_round_trips(
     jira_dc_project: str,
     bound_dc_issue: Any,
 ) -> None:
-    """Rows 2-9 inbound: mutate in DC, run a pass, assert the LOCAL ticket carries it.
+    """Rows 2-7 and 9 inbound: mutate in DC, run a pass, assert the LOCAL ticket carries it.
 
     `bound_dc_issue` supplies an issue that is already imported and BOUND, so this cell
     exercises the UPDATE path on an existing ticket rather than re-testing the create path
     (row 1, which the thin slice already covers end to end).
+
+    ROW 8 IS NOT IN THIS TABLE — it is `test_inbound_assign_round_trips` below, because it
+    needs two passes and this driver runs one.
     """
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
@@ -403,6 +408,71 @@ def test_inbound_mutation_round_trips(
     assert "Traceback" not in cp.stderr, f"inbound pass raised:\n{cp.stderr[-2000:]}"
 
     oracle(_local(dc_store_copy_repo, local_id), expected)
+
+
+@_skip
+@_skip_no_extra
+def test_inbound_assign_round_trips(
+    dc_store_copy_repo: Path, dc_transport: Any, jira_dc_project: str, bound_dc_issue: Any
+) -> None:
+    """Row 8 inbound: assigning a DC user puts THAT user on the local ticket.
+
+    THIS CELL USED TO BE A `_INBOUND_CELLS` ROW AND COULD NOT FAIL IN EITHER HALF. It is the
+    epic's signature failure mode, twice over in eight lines:
+
+      * THE MUTATION WAS A NO-OP. `bound_dc_issue`'s seeded issue arrives ALREADY ASSIGNED to
+        the project lead — `conftest._create_scratch_project` passes `lead=admin` with no
+        `assigneeType`, so DC default-assigns to it, and this suite asserts that fact in two
+        other places. Assigning `ADMIN_USER` therefore changed nothing:
+        `inbound_fields._assignee_matches` (`inbound_fields.py:102-128`) short-circuits an
+        unchanged assignee, so the differ had nothing to report. Harness run 30763838558
+        confirmed it independently by finding `jira/'admin'` already mapped before any cell ran.
+      * THE ORACLE CHECKED A FIELD THE BINDING PASS HAD ALREADY POPULATED, and checked it only
+        for TRUTHINESS. So the cell was green whether or not inbound assignee sync worked at
+        all. The AC's row-8 inbound oracle is "`.assignee` is the mapped identity"; a
+        truthiness check is not that.
+
+    THE REPAIR IS THE ONE THE MINT CELL ALREADY ESTABLISHED: make the expected value one that
+    is genuinely NOT there beforehand. That cell removes an identity MAPPING to establish
+    absence; this one drives the ASSIGNEE to empty and asserts the emptiness reached the local
+    ticket, so the value read at the end is one only the pass under test can have written.
+
+    STANDALONE, NOT A ROW, for the reason rows 6 and 9 outbound are standalone: the table
+    driver runs exactly ONE pass and this needs TWO (clear, converge, assign, converge). The
+    admin is the ONE user the harness guarantees exists and is assignable
+    (`_dc_support.py:28-31`), so "assign a DIFFERENT user than the pre-seeded one" is not
+    available on this instance — going through empty is.
+
+    THE ORACLE IS EXACT EQUALITY against the DC username, via
+    `_dc_support.assert_local_assignee_is`, which is where the reasoning for that expected value
+    lives (`.assignee` holds `_extract_name(fields["assignee"])`, and `_extract_name` prefers
+    `name` over `displayName`, which on DC is the username). It is shared rather than inline so
+    the harness-free mutation check can drive THE ORACLE ITSELF — the harness is amd64-only, so
+    a green live run is the one thing that cannot demonstrate this cell discriminates.
+    """
+    local_id, key = bound_dc_issue
+    dc_transport.project = jira_dc_project
+
+    # SETUP — take the assignee away, and drive that all the way into the local ticket. Both
+    # halves are asserted as SETUP: an unassign that does not propagate leaves the pre-seeded
+    # value in place, which is exactly the state that made this cell vacuous. Cell `09-unassign`
+    # covers this propagation on its own; if that cell is also red, fix it there.
+    dc_transport.update_issue(key, assignee=None)
+    _wait_until_dc_assignee_is(dc_transport, jira_dc_project, key, None, "the unassignment (setup)")
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"the unassign setup pass raised:\n{cp.stderr[-2000:]}"
+    _assert_local_assignee_is(
+        _local(dc_store_copy_repo, local_id), "", stage="SETUP (not the assignment)"
+    )
+
+    # THE MUTATION UNDER TEST — now a REAL transition, empty -> admin.
+    dc_transport.update_issue(key, assignee=ADMIN_USER)
+    _wait_until_dc_assignee_is(dc_transport, jira_dc_project, key, ADMIN_USER, "the assignee")
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
+    assert "Traceback" not in cp.stderr, f"inbound assign pass raised:\n{cp.stderr[-2000:]}"
+
+    _assert_local_assignee_is(_local(dc_store_copy_repo, local_id), ADMIN_USER)
 
 
 # ===========================================================================
@@ -539,6 +609,72 @@ def test_outbound_mutation_round_trips(
     assert "Traceback" not in cp.stderr, f"outbound pass raised:\n{cp.stderr[-2000:]}"
 
     oracle(dc_transport.get_issue_by_rest(key), expected)
+
+
+@_skip
+@_skip_no_extra
+def test_outbound_create_stamps_both_provenance_markers(
+    dc_store_copy_repo: Path, jira_dc_project: str, track_issue: Any, dc_request: Any
+) -> None:
+    """Row 1 OUTBOUND: a local ticket the pass CREATES in DC carries BOTH provenance markers.
+
+    THIS ROW HAD NO TEST AT ALL, in either this module or the thin slice, and it was not on the
+    story's own list of known gaps — `grep -rn "rebar-id:\\|properties/local_id" tests/external/`
+    returned nothing. Every other outbound cell rides `bound_dc_issue`, which exists precisely
+    so those cells exercise the UPDATE path; nothing exercised the CREATE path's write-back.
+
+    THE TWO MARKERS ARE ASSERTED TOGETHER because neither is redundant and the create writes
+    them as a pair (`dispatch_one.py:306-307`). The LABEL is what the dedup JQL re-finds the
+    issue by (`dispatch_one.py:214` searches `labels = "rebar-id:<local_id>"`); lose it and the
+    next pass creates a DUPLICATE. The ENTITY PROPERTY is what inbound consumers correlate on.
+    A cell asserting one would pass a build that lost the other.
+
+    THE COLON FORM IS THE ONE ASSERTED, and that is established from the writers, not chosen.
+    This codebase carries both `rebar-id:<local_id>` and `rebar-id-<local_id>` (see
+    `inbound_differ`'s exclusion list re bug `eadb`), and all three writers emit the COLON form:
+    `dispatch_one.py:306`, `apply_inbound_records.py:290`, `binding_store.py:706`. The hyphen
+    form is READ-ONLY legacy — `binding_walk.py:352` and `inbound_translate.py:77-78` accept it
+    and `binding_store.py:715` searches it as a fallback, but nothing writes it. So a
+    hyphen-only issue is a finding, and the oracle says so rather than accepting it.
+
+    THE PROPERTY IS READ BY RAW REST, not through `transport.get_entity_property`. Reading a
+    value back through the same abstraction that wrote it cannot distinguish "stored correctly"
+    from "stored and re-read consistently wrong" — which is bug 0b27 exactly: a Cloud
+    implementation wrapped the value as `{"value": …}`, storing the wrong shape and breaking
+    correlation WITHOUT raising. The labels are read from that same raw document for the same
+    reason, so nothing in this oracle passes through the writing path.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+
+    import rebar
+
+    title = _uniq("rebar J11 outbound create")
+    local_id = rebar.create_ticket("task", title, repo_root=dc_store_copy_repo)
+
+    # Scoped to the LOCAL ID alone — deliberately, and it is the one case where that is right:
+    # an outbound CREATE has no Jira key yet, which is why `bound_dc_issue` has to pass both.
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=local_id)
+    assert "Traceback" not in cp.stderr, f"outbound create pass raised:\n{cp.stderr[-2000:]}"
+
+    key = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
+    assert key, (
+        f"the outbound pass did not create-and-bind {local_id!r} (get_jira_key returned "
+        f"{key!r}), so there is no DC issue to read the provenance markers off. Row 1's markers "
+        f"are written INSIDE the create (`dispatch_one.py:306-307`), so a missing binding is "
+        f"upstream of this oracle, not a marker finding.\nstdout:\n{cp.stdout[-1500:]}"
+    )
+    track_issue(key)
+
+    status, issue = dc_request(f"/rest/api/2/issue/{key}?fields=labels")
+    assert status == 200 and isinstance(issue, dict), (
+        f"the created issue {key} is not readable by raw REST (HTTP {status}); the markers "
+        f"cannot be asserted at all."
+    )
+    prop_status, prop_body = dc_request(f"/rest/api/2/issue/{key}/properties/local_id")
+
+    _assert_outbound_provenance_markers(
+        local_id, (issue.get("fields") or {}).get("labels") or [], prop_status, prop_body
+    )
 
 
 @_skip
@@ -1654,17 +1790,28 @@ def test_the_inbound_snapshot_survives_multi_page_pagination(
 
     # Wait for the INDEX to hold them all — a count check, because waiting on the last key
     # alone would not prove the earlier ones are visible to a paged search.
+    #
+    # MEASURED BY RAW REST, NOT BY `_paged_search`. This used to read
+    # `len(dc_transport._paged_search(...))` — and `_paged_search` IS the pagination fix this
+    # cell exists to guard (ticket 9263). So a re-truncation failed the cell HERE, at its
+    # precondition, under a message reading "NOT a pagination defect": the one place a reader
+    # would be told to stop looking is the place the defect was. `raw_indexed_issue_count` pages
+    # with explicit `startAt`/`maxResults` and advances on what the server RETURNED, so a
+    # truncating `_paged_search` now reaches the real assertion below and is named there. The
+    # disclaimer in this message is only honest because the measurement is independent.
     deadline = time.monotonic() + 300.0
     indexed = 0
     while time.monotonic() < deadline:
-        indexed = len(dc_transport._paged_search(f'project = "{jira_dc_project}"'))
+        indexed = _raw_indexed_issue_count(dc_request, jira_dc_project)
         if indexed >= target:
             break
         time.sleep(5.0)
-    print(f"[j11-pagination] indexed {indexed} of {target} seeded issues")
+    print(f"[j11-pagination] indexed {indexed} of {target} seeded issues (raw REST count)")
     assert indexed >= target, (
         f"only {indexed} of {target} seeded issues became searchable within 300s — the index is "
-        f"lagging further than this suite allows. NOT a pagination defect."
+        f"lagging further than this suite allows. NOT a pagination defect: this count is taken "
+        f"over RAW REST paging, independent of `_paged_search`, so it is the index and not the "
+        f"fix under test that is short."
     )
 
     cp = _run(dc_store_copy_repo, "dry-run")
