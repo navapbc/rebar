@@ -10,10 +10,12 @@ from rebar.llm.parity import (
     ATTRIBUTION_ACCURACY_FLOOR,
     CONTAINER_MIN_GOLD,
     ItemRecord,
+    _recall_false_accept,
     attribution_accuracy,
     container_fidelity_report,
     parallel_run_and_diff,
     parity_report,
+    prerequisite_fidelity_report,
 )
 
 
@@ -77,6 +79,82 @@ def test_recall_drop_beyond_margin_fails():
     report = parity_report(v1, v2)
     assert not report.passed
     assert any("recall" in f or "flip" in f for f in report.gating_failures)
+
+
+def _safe_pair(n_safe, v1_blocked, v2_blocked, *, block_gold=10):
+    """Two arms over `n_safe` gold-SAFE items, each wrongly BLOCKING the given count, plus
+    `block_gold` should-block items both arms catch (so recall is defined and the coverage
+    guard is satisfied)."""
+    v1, v2 = [], []
+    for i in range(n_safe):
+        v1.append(_rec(decision="block" if i < v1_blocked else "advisory", label="advisory"))
+        v2.append(_rec(decision="block" if i < v2_blocked else "advisory", label="advisory"))
+    for _ in range(block_gold):
+        v1.append(_rec(decision="block", label="block"))
+        v2.append(_rec(decision="block", label="block"))
+    return v1, v2
+
+
+def test_false_accept_is_the_wrongly_blocked_rate():
+    # false-accept is an ERROR rate, lower-is-better: the fraction of gold-SAFE items the
+    # runner wrongly BLOCKED. Same sense `rebar.llm.evals.eval` reports it in
+    # (`false_accept = wrongly-fired / must-not-fire`, eval.py:399,491) and the sense
+    # docs/plan-review-gate.md's `false_accept: 0.0` release threshold requires.
+    v1, _ = _safe_pair(20, 5, 5, block_gold=0)
+    recall, false_accept = _recall_false_accept(v1)
+    assert false_accept == 0.25  # 5 of 20 safe items wrongly blocked
+    assert recall == 1.0  # no should-block items -> vacuously perfect
+
+
+def test_clean_run_scores_zero_false_accept():
+    # A run that blocks NO safe item must hit the 0.0 release threshold, not 1.0.
+    v1, v2 = _good_pair()
+    report = parity_report(v1, v2)
+    assert report.metrics["false_accept"] == {"v1": 0.0, "v2": 0.0}
+
+
+def test_candidate_that_false_fires_less_is_not_failed():
+    # The recorded Bedrock frontier-slot shape: v1 wrongly blocks 4 of 14 safe items, the
+    # candidate only 2. The STRICTLY MORE ACCURATE candidate must not trip this criterion.
+    v1, v2 = _safe_pair(14, 4, 2)
+    report = parity_report(v1, v2)
+    assert not any("false-accept" in f for f in report.gating_failures), report.gating_failures
+    assert report.metrics["false_accept"]["v2"] < report.metrics["false_accept"]["v1"]
+
+
+def test_candidate_that_false_fires_more_is_failed():
+    # +4 of 14 safe items wrongly blocked = 0.286, far beyond the 2pp margin.
+    v1, v2 = _safe_pair(14, 2, 6)
+    report = parity_report(v1, v2)
+    assert not report.passed
+    assert any("false-accept rose" in f for f in report.gating_failures)
+
+
+def test_prerequisite_false_accept_ceiling_reads_as_an_error_rate():
+    # `max_false_accept=0.10` (parity.py) is a CEILING on an error rate: a candidate that
+    # blocks no safe item clears it; one wrongly blocking a quarter of them does not.
+    def corpus(blocked):
+        recs = [
+            ItemRecord(
+                valid=True,
+                decision="block",
+                label="block",
+                gold_prerequisite_id=f"p{i:03d}",
+                pred_prerequisite_id=f"p{i:03d}",
+            )
+            for i in range(20)
+        ]
+        recs += [
+            _rec(decision="block" if i < blocked else "advisory", label="advisory")
+            for i in range(8)
+        ]
+        return recs
+
+    clean = corpus(0)
+    report = prerequisite_fidelity_report(clean, clean)
+    assert not any("false acceptance" in f for f in report.gating_failures), report.gating_failures
+    report = prerequisite_fidelity_report(clean, corpus(2))  # 2/8 = 0.25 > 0.10
+    assert any("false acceptance" in f for f in report.gating_failures)
 
 
 def test_error_rate_regression_fails():

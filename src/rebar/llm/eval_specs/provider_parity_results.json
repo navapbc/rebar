@@ -45,8 +45,7 @@
       "excluded_errored_pairs": 2,
       "gating_failures": [
         "verdict agreement 0.929 below 0.95",
-        "2 decision-level flip(s) on the gold set (must be 0)",
-        "false-accept rose 0.143 > margin 0.02"
+        "2 decision-level flip(s) on the gold set (must be 0)"
       ],
       "invalid": false,
       "invalid_reasons": [],
@@ -66,12 +65,12 @@
           "v2": 0.0
         },
         "false_accept": {
-          "v1": 0.7857142857142857,
-          "v2": 0.9285714285714286
+          "v1": 0.21428571428571427,
+          "v2": 0.07142857142857142
         },
         "latency_s": {
-          "v1": 2103.116499837255,
-          "v2": 2105.149094866356
+          "v1": 0.0,
+          "v2": 0.0
         },
         "n": 28,
         "n_gold": 28,
@@ -604,12 +603,12 @@
           "v2": 0.0
         },
         "false_accept": {
-          "v1": 0.7857142857142857,
-          "v2": 0.7857142857142857
+          "v1": 0.21428571428571427,
+          "v2": 0.21428571428571427
         },
         "latency_s": {
-          "v1": 2756.5112515385263,
-          "v2": 2484.617536471458
+          "v1": 0.0,
+          "v2": 0.0
         },
         "n": 28,
         "n_gold": 28,

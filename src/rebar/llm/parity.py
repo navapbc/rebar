@@ -68,8 +68,17 @@ def _rate(records: Sequence[_T], pred: Callable[[_T], bool]) -> float:
 
 
 def _recall_false_accept(records: Sequence[ItemRecord]) -> tuple[float, float]:
-    """Recall = caught / should-have-blocked; false-accept = wrongly-shipped / safe,
-    against the per-item gold ``label`` (only gold items count)."""
+    """Recall = caught / should-have-blocked; false-accept = wrongly-BLOCKED / safe,
+    against the per-item gold ``label`` (only gold items count).
+
+    Both are rates in [0, 1], but in OPPOSITE senses: recall is higher-is-better, and
+    false-accept is an ERROR rate — LOWER-is-better. False-accept counts the gold-safe
+    items (``label != "block"``) the runner nonetheless blocked, which is the same
+    quantity ``rebar.llm.evals.eval`` reports under this name (``false_accept =
+    wrongly-fired / must-not-fire``) and the one ``docs/plan-review-gate.md``'s
+    ``false_accept: 0.0`` release threshold is stated against. Every consumer compares it
+    with ``>`` (a rise beyond the non-inferiority margin, or a ceiling), so it MUST be the
+    error rate and not its complement, the true-negative rate."""
     gold = [r for r in records if r.label in _DECISIONS]
     should_block = [r for r in gold if r.label == "block"]
     safe = [r for r in gold if r.label != "block"]
@@ -78,7 +87,7 @@ def _recall_false_accept(records: Sequence[ItemRecord]) -> tuple[float, float]:
         if should_block
         else 1.0
     )
-    false_accept = sum(1 for r in safe if r.decision != "block") / len(safe) if safe else 0.0
+    false_accept = sum(1 for r in safe if r.decision == "block") / len(safe) if safe else 0.0
     return recall, false_accept
 
 
