@@ -158,7 +158,14 @@ def build_client_from_settings(settings: Any) -> Any:
         )
 
     jira_cls = _jira_client_class()
-    options: dict[str, Any] = {}
+    # Ticket 39c1: DC serves the Agile API under ``greenhopper``, while pycontribs'
+    # ``AGILE_BASE_REST_PATH`` defaults to ``agile`` (``jira/resources.py``). ``set_parent``
+    # writes a non-sub-task's parent as an EPIC LINK through ``add_issues_to_epic``, so without
+    # this option that call targets a path Data Center does not expose and the write fails —
+    # i.e. the epic-link route is only reachable when the client is built this way. Set here,
+    # at the single DC construction site, rather than per call: the option is read off
+    # ``self._options`` inside the library, so a caller cannot override it at the call site.
+    options: dict[str, Any] = {"agile_rest_path": "greenhopper"}
     if settings.ca_bundle:
         options["verify"] = settings.ca_bundle
     return jira_cls(server=settings.url, token_auth=settings.pat, options=options or None)
@@ -679,13 +686,20 @@ class JiraDataCenterTransport:
         so ``add_issues_to_epic`` with default options targets a path DC does not
         expose.
 
-        Rather than write ``fields.parent`` for a non-subtask and let DC silently
-        no-op the epic link — the failure mode this story exists to eliminate — the
-        epic case raises ``NotImplementedError`` NAMING the limitation. It is a
-        loud, attributed decline, not an absent attribute and not a silent success.
-        Lifting it is the story's recorded spike (epic-link field id +
-        ``add_issues_to_epic`` against a real DC instance under
-        ``agile_rest_path='greenhopper'``).
+        **Ticket 39c1 lifted the former decline.** This method used to raise
+        ``NotImplementedError`` for a non-sub-task, which made the outbound parent
+        UNREACHABLE on DC: the emit gate omits the parent unless the local parent is
+        an ``epic`` (bug 8b25), and that is precisely the shape this side refused, so
+        the two gates were DISJOINT and no pass could ever carry a parent. The epic
+        case is now WRITTEN, through ``add_issues_to_epic`` (greenhopper sentinel
+        epic ``"none"`` expresses a CLEAR), which is what the original decline named
+        as its own lift. ``build_client_from_settings`` sets
+        ``agile_rest_path="greenhopper"`` so that call reaches DC at all.
+
+        The decline survives only where the parent is genuinely unrepresentable — an
+        injected client with no ``add_issues_to_epic`` — because writing
+        ``fields.parent`` for a non-sub-task would be silently no-op'd by DC, which is
+        the failure mode this method exists to refuse.
         """
         issue = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
         raw = _unwrap(issue)
@@ -693,21 +707,31 @@ class JiraDataCenterTransport:
         issue_type = fields.get("issuetype") if isinstance(fields, dict) else None
         is_subtask = bool(issue_type.get("subtask")) if isinstance(issue_type, dict) else False
         if not is_subtask:
-            logger.warning(
-                "jira-datacenter transport: set_parent declined for remote id %r "
-                "(parent=%r): not a sub-task, so this is an Epic Link, not fields.parent",
-                remote_id,
-                parent_key,
+            # Ticket 39c1: a NON-sub-task's parent is the EPIC LINK, written through the Agile
+            # API — never ``fields.parent``, which DC silently no-ops. Routing here (rather than
+            # declining) is what makes the outbound emit gate and this apply side OVERLAP: the
+            # gate emits ONLY for an epic parent (bug 8b25), which is exactly this shape, so
+            # before this branch existed no reconcile pass could carry a parent to DC at all.
+            #
+            # ``add_issues_to_epic`` targets ``{agile_rest_path}/1.0/epics/{epic}/add``, and DC
+            # serves that under ``greenhopper`` while pycontribs defaults to ``agile`` — so the
+            # CLIENT must be built with ``agile_rest_path="greenhopper"`` for this to reach DC.
+            # The sentinel epic ``"none"`` is greenhopper's documented way to REMOVE an issue
+            # from its epic, which is how a CLEAR is expressed here.
+            adder = getattr(self._client, "add_issues_to_epic", None)
+            if adder is None:
+                raise NotImplementedError(
+                    f"set_parent cannot represent the parent of {remote_id!r} on Jira Data "
+                    "Center: the issue is not a sub-task, so its parent is an EPIC LINK written "
+                    "through the Agile API, but the injected client exposes no "
+                    "'add_issues_to_epic'. Declining rather than writing fields.parent, which "
+                    "DC would silently no-op."
+                )
+            _epic = parent_key if parent_key else "none"
+            _call_logged(
+                "set_parent", remote_id, lambda: adder(_epic, [raw.get("key") or remote_id])
             )
-            raise NotImplementedError(
-                f"set_parent is not supported for {remote_id!r} on Jira Data Center: only a "
-                "SUB-TASK's parent lives in fields.parent. For any other issue type the parent "
-                "is an EPIC LINK, held in an instance-specific 'Epic Link' custom field "
-                "(customfield_NNNNN) and written through the Agile API, which Data Center "
-                "serves under the 'greenhopper' REST path rather than the 'agile' path "
-                "pycontribs/jira defaults to. Writing fields.parent here would silently "
-                "no-op, so the operation is declined instead."
-            )
+            return
         body: dict[str, Any] = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
         _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
 
