@@ -199,17 +199,21 @@ def _commit_binding_store_snapshot(
     from rebar_reconciler import git_adapter
 
     tracker_dir = repo_root / git_adapter.TRACKER_DIR
-    # Bug 1e08: stage BOTH the live store and the retired-binding store. The
+    # Stage the live, retired, and GET-rotation binding state files. The
     # absence-lifecycle GC writes bindings-retired.json; a retirement-only pass
     # must also be committed (else a soft-deleted binding is silently lost on
     # the next ``git merge origin/tickets``).
-    _rel_files = [git_adapter.BINDINGS_FILE, git_adapter.BINDINGS_RETIRED_FILE]
+    _rel_files = [
+        git_adapter.BINDINGS_FILE,
+        git_adapter.BINDINGS_RETIRED_FILE,
+        git_adapter.GET_ROTATION_FILE,
+    ]
     _existing_rel = [rel for rel in _rel_files if (tracker_dir / rel).exists()]
     if not _existing_rel:
         return True  # Nothing to commit — not a failure
 
     try:
-        # Stage only our two state files (never git add -A: avoid staging
+        # Stage only our three state files (never git add -A: avoid staging
         # unrelated working-tree changes in the tickets worktree).
         git_adapter.add(tracker_dir, *_existing_rel)
         # Check if there is actually a diff to commit (idempotent).
@@ -225,6 +229,7 @@ def _commit_binding_store_snapshot(
         _tracked_basenames = {
             os.path.basename(git_adapter.BINDINGS_FILE),
             os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
+            os.path.basename(git_adapter.GET_ROTATION_FILE),
         }
         if not (_tracked_basenames & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.

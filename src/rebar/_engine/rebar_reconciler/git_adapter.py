@@ -40,6 +40,7 @@ __all__ = [
     "BRIDGE_STATE_DIR",
     "BINDINGS_FILE",
     "BINDINGS_RETIRED_FILE",
+    "GET_ROTATION_FILE",
     "run_git",
     "rev_parse",
     "cat_file_exists",
@@ -77,6 +78,8 @@ BINDINGS_FILE = f"{BRIDGE_STATE_DIR}/bindings.json"
 # The retired (soft-deleted) binding store, staged alongside ``BINDINGS_FILE`` so a
 # retirement-only pass is also committed (bug 1e08).
 BINDINGS_RETIRED_FILE = f"{BRIDGE_STATE_DIR}/bindings-retired.json"
+# The bounded direct-GET rotation sidecar, staged with bindings during rollout.
+GET_ROTATION_FILE = f"{BRIDGE_STATE_DIR}/get_rotation.json"
 
 RepoRoot = str | os.PathLike[str]
 

@@ -132,18 +132,21 @@ class TestPersistence:
         store.save()
 
         bridge_dir = tmp_path / ".bridge_state"
-        # After save, only bindings.json should exist (no leftover .tmp)
-        files = list(bridge_dir.iterdir())
-        assert len(files) == 1
-        assert files[0].name == "bindings.json"
+        # Both durable stores are complete, with no atomic-write temp left behind.
+        files = {path.name for path in bridge_dir.iterdir()}
+        assert files == {"bindings.json", "get_rotation.json"}
+        assert not any(name.endswith(".tmp") for name in files)
 
         # Verify content is valid JSON
-        with open(files[0]) as f:
+        with open(bridge_dir / "bindings.json") as f:
             data = json.load(f)
+        with open(bridge_dir / "get_rotation.json") as f:
+            rotation = json.load(f)
         # Version 2 adds the ADR 0026 per-binding baseline (epic 3006-e198); a
         # version-1 store without baselines still reads (back-compat).
         assert data["version"] == 2
         assert "t1" in data["bindings"]
+        assert rotation == {"version": 1, "last_get_pass": {}}
 
 
 class TestRecovery:

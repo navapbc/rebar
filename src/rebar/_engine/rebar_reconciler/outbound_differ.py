@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 # lazily inside its functions). All five symbols are re-exported so
 # outbound_differ.<name> keeps resolving for callers and the identity test suite
 # (test_identity_264f_resolve.py pins _bootstrap_account_id_via_user_search).
+from rebar_reconciler.get_rotation import last_get_pass as _last_get_pass
 from rebar_reconciler.outbound_assignee import (  # noqa: F401
     _USER_SEARCH_METHODS,
     _bootstrap_account_id_via_user_search,
@@ -152,17 +153,6 @@ def _is_retired(binding_store: Any, jira_key: str) -> bool:
         return bool(fn(jira_key))
     except Exception:  # noqa: BLE001 — fail-open: legacy-stub fallback returns False
         return False
-
-
-def _last_get_pass(binding_store: Any, jira_key: str) -> str:
-    """``binding_store.last_get_pass`` with fallback to the "" sentinel."""
-    fn = getattr(binding_store, "last_get_pass", None)
-    if fn is None:
-        return ""
-    try:
-        return fn(jira_key) or ""
-    except Exception:  # noqa: BLE001 — fail-open: legacy-stub fallback returns "" sentinel
-        return ""
 
 
 def _best_effort(binding_store: Any, member: str, *args: Any) -> None:
