@@ -26,6 +26,75 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# The CONSERVATIVE fallback minimum prompt-prefix the anthropic cache will write/read, used
+# for any model with no documented per-model figure (see `_MODEL_CACHE_MIN_PREFIX_TOKENS`
+# below for the documented ones). Below the applicable floor a prefix never caches, so a
+# zero/zero cache reading is the EXPECTED result rather than a symptom of anything.
+#
+# Lives HERE, alongside ``cache_settings_for``, because it is a fact about the prompt cache
+# that BOTH sides need and neither owns (bug 7a79): the Pass-1 warm-up decision
+# (``llm/plan_review/pass1.py`` — warming a sub-floor prefix would add a serialized call for
+# no read benefit, story ba7e) and the cache-effectiveness warning
+# (``llm/structured_run.py:warn_if_cache_ineffective`` — it can only claim caching FAILED for
+# a prompt that was cacheable to begin with). ONE definition; do not restate the literal.
+#
+# 4096 is the HIGHEST value in Anthropic's published table, which makes it the conservative
+# choice for an unlisted model: too high merely under-warns (a missed signal), whereas too
+# low re-creates the unactionable warning spam bug 7a79 removed. Bug e3cd renamed what this
+# constant means — it is the FALLBACK, no longer "the floor" — because applying it to every
+# model made it 4x too high on rebar's own DEFAULT_MODEL.
+CACHE_MIN_PREFIX_TOKENS = 4096
+
+
+# Anthropic's PUBLISHED per-model minimum cacheable prompt length. Transcribed from
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+# (§ "Minimum cacheable prompt length", read 2026-08-02) — the documentation is the source of
+# truth here. Independent empirical brackets recorded on bug e3cd VERIFY these values rather
+# than defining them:
+#
+#   sonnet-4-6    922 -> no cache, 1042 -> write 1035 / read 1035     => ~1024   ✓ doc 1024
+#   sonnet-4-5    253 -> no cache, 7930 -> cached                     => <=1024  ✓ doc 1024
+#   haiku-4-5    2748 -> no cache, 4749 -> write 4742 / read 4742     => (2748,4749] ✓ doc 4096
+#
+# NOT monotonic across generations — 512 on the newest models but 4096 on opus-4-6/4-5 and
+# haiku-4-5 — which is precisely why a single global constant could not express it.
+#
+# Keyed on the BARE model id (`_model_id_of` strips the provider prefix), so these cover both
+# `anthropic:claude-opus-4-8` and the bare string. Bedrock ids (`us.anthropic.…`,
+# `global.anthropic.…`) are DELIBERATELY absent: Anthropic's table states these minimums apply
+# on every platform EXCEPT Amazon Bedrock, which documents its own minimums separately. Rather
+# than guess a Bedrock number, a Bedrock model falls through to the conservative fallback —
+# the "if you cannot source it confidently, do not invent it" rule this bug was filed under.
+_MODEL_CACHE_MIN_PREFIX_TOKENS: dict[str, int] = {
+    "claude-opus-5": 512,
+    "claude-fable-5": 512,
+    "claude-mythos-5": 512,
+    # claude-opus-4-8 is rebar's DEFAULT_MODEL — the global 4096 was 4x too high here, which
+    # is the single most costly instance of the defect e3cd describes.
+    "claude-opus-4-8": 1024,
+    "claude-sonnet-5": 1024,
+    "claude-sonnet-4-6": 1024,
+    "claude-sonnet-4-5": 1024,
+    "claude-opus-4-1": 1024,
+    "claude-mythos-preview": 2048,
+    "claude-opus-4-7": 2048,
+    "claude-opus-4-6": 4096,
+    "claude-opus-4-5": 4096,
+    "claude-haiku-4-5": 4096,
+}
+
+
+def _cache_min_prefix_tokens(prompt_cache_style: str, model_id: str | None) -> int:
+    """This model's documented minimum cacheable prefix, else the conservative fallback.
+
+    Gated on ``prompt_cache_style == "anthropic"`` so the DIRECT-Anthropic table is never
+    applied to a Bedrock-hosted model of the same family (see the table's own note: Bedrock
+    publishes different minimums, and rebar has measured none of them)."""
+    if prompt_cache_style == "anthropic" and model_id is not None:
+        return _MODEL_CACHE_MIN_PREFIX_TOKENS.get(model_id, CACHE_MIN_PREFIX_TOKENS)
+    return CACHE_MIN_PREFIX_TOKENS
+
+
 @dataclass(frozen=True)
 class ModelCapabilities:
     """The capability facts rebar's LLM stack branches on — derived from a Pydantic AI
@@ -40,6 +109,13 @@ class ModelCapabilities:
     # than silently losing Pass-2 greedy determinism for every model as a blanket withdrawal
     # would.
     supports_temperature: bool = True
+    # The minimum MARKED-PREFIX size that can cache on this model (bug e3cd). Carried on the
+    # capability record alongside `prompt_cache_style` because it is the same kind of fact —
+    # per-model, read off the resolved model, never guessed from a provider-name string — and
+    # because its two consumers (the cache-effectiveness warning and any prefix-sizing
+    # decision) must not each re-derive it. Defaults to the conservative fallback so an
+    # unlisted model is never assigned an invented floor.
+    cache_min_prefix_tokens: int = CACHE_MIN_PREFIX_TOKENS
 
 
 def _is_claude(profile: Any) -> bool:
@@ -160,11 +236,15 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         id_overrides = _MODEL_ID_CAPABILITY_OVERRIDES.get(model_id)
         if id_overrides is not None:
             caps.update(id_overrides)
+    resolved_cache_style = str(caps["prompt_cache_style"])
     return ModelCapabilities(
         native_structured_output=bool(caps["native_structured_output"]),
-        prompt_cache_style=str(caps["prompt_cache_style"]),
+        prompt_cache_style=resolved_cache_style,
         supports_thinking=bool(caps["supports_thinking"]),
         supports_temperature=bool(caps["supports_temperature"]),
+        # Derived from the RESOLVED style + id, never from an override table: the floor is a
+        # published property of the model, not a rebar policy knob.
+        cache_min_prefix_tokens=_cache_min_prefix_tokens(resolved_cache_style, model_id),
     )
 
 
@@ -267,11 +347,13 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
             "supports_temperature": _CONSERVATIVE.supports_temperature,
         }
         merged.update(id_overrides)
+        merged_cache_style = str(merged["prompt_cache_style"])
         return ModelCapabilities(
             native_structured_output=bool(merged["native_structured_output"]),
-            prompt_cache_style=str(merged["prompt_cache_style"]),
+            prompt_cache_style=merged_cache_style,
             supports_thinking=bool(merged["supports_thinking"]),
             supports_temperature=bool(merged["supports_temperature"]),
+            cache_min_prefix_tokens=_cache_min_prefix_tokens(merged_cache_style, fallback_id),
         )
     return _CONSERVATIVE
 
@@ -317,17 +399,6 @@ def provenance_for(
             "supports_temperature": caps.supports_temperature,
         },
     }
-
-
-# The minimum prompt-prefix the anthropic cache will write/read (Opus 4.8 floor). Below this
-# a prefix never caches, so a zero/zero cache reading is the EXPECTED result rather than a
-# symptom of anything. Lives HERE, alongside ``cache_settings_for``, because it is a fact about
-# the prompt cache that BOTH sides need and neither owns (bug 7a79): the Pass-1 warm-up decision
-# (``llm/plan_review/pass1.py`` — warming a sub-floor prefix would add a serialized call for no
-# read benefit, story ba7e) and the cache-effectiveness warning
-# (``llm/structured_run.py:warn_if_cache_ineffective`` — it can only claim caching FAILED for a
-# prompt that was cacheable to begin with). ONE definition; do not restate the literal.
-CACHE_MIN_PREFIX_TOKENS = 4096
 
 
 def cache_settings_for(caps: ModelCapabilities) -> Any:

@@ -389,7 +389,14 @@ def _extract_usage(run_result) -> dict[str, int]:
     }
 
 
-def warn_if_cache_ineffective(usage: dict, *, caching_requested: bool, model: str) -> None:
+def warn_if_cache_ineffective(
+    usage: dict,
+    *,
+    caching_requested: bool,
+    model: str,
+    marked_prefix_tokens: int | None = None,
+    cache_min_prefix_tokens: int = CACHE_MIN_PREFIX_TOKENS,
+) -> None:
     """Telemetry-only WARNING (never a block) when prompt caching was REQUESTED but reports
     ZERO effect (story S3/2932).
 
@@ -413,23 +420,118 @@ def warn_if_cache_ineffective(usage: dict, *, caching_requested: bool, model: st
     on every small call — ~20 lines per ``rebar review-plan`` run, on the same runs whose
     AGGREGATE usage reported ``cache_write_tokens > 0`` — which both contradicted the run's own
     telemetry and trained operators to filter out the one signal that catches real cost bleed.
-    The floor makes the warning mean what it says; the above-floor detection is unchanged."""
-    if (
+    The floor makes the warning mean what it says; the above-floor detection is unchanged.
+
+    Bug e3cd corrected BOTH halves of that bound.
+
+    * ``cache_min_prefix_tokens`` is now the CALLER'S per-model floor (read off
+      ``ModelCapabilities``), not a model-blind 4096. It defaults to the conservative global
+      so an un-updated caller keeps today's exact behavior.
+    * ``marked_prefix_tokens`` is the size of the MARKED PREFIX -- the bytes ahead of the
+      ``cache_control`` breakpoint -- which is what actually governs whether the cache
+      engages. The old predicate tested total ``input_tokens``, so a call with a 150-token
+      marked prefix behind a 7000-token UNMARKED user message cleared the floor on totals
+      while being uncacheable in fact. When it is None (a caller that cannot measure it) the
+      pre-existing total-based predicate applies unchanged.
+
+    With the marked prefix known there are two distinct, mutually exclusive reports, because
+    they have different causes and therefore different remedies:
+
+    A. marked prefix AT/ABOVE the floor, zero/zero -> the prompt WAS cacheable and the cache
+       silently did not engage. The original story-S3 signal, retargeted.
+    B. marked prefix BELOW the floor while a floor's worth of payload rides OUTSIDE the
+       breakpoint -> the prompt can never cache as marked, and the changeable thing is where
+       the breakpoint sits. Reporting the total here (as the old predicate did) named the
+       wrong quantity and so implied the wrong remedy, since the prompt looks plenty big.
+
+    Case B is deliberately bounded by ``unmarked >= floor`` rather than firing on every small
+    marked prefix: the signal is "a cacheable-sized payload is riding outside the breakpoint",
+    not "the prefix is small". Without that bound this would re-create the 7a79 spam."""
+    if not (
         caching_requested
         and usage.get("cache_read_tokens", 0) == 0
         and usage.get("cache_write_tokens", 0) == 0
-        and usage.get("input_tokens", 0) >= CACHE_MIN_PREFIX_TOKENS
     ):
+        return
+
+    input_tokens = usage.get("input_tokens", 0)
+
+    if marked_prefix_tokens is None:
+        if input_tokens >= cache_min_prefix_tokens:
+            logger.warning(
+                "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
+                "cache_write=%s) despite input_tokens=%s - caching is model-dependent and can "
+                "fail silently (no error from the provider); the operator is paying full "
+                "input price on every call",
+                model,
+                usage.get("cache_read_tokens", 0),
+                usage.get("cache_write_tokens", 0),
+                input_tokens,
+            )
+        return
+
+    if marked_prefix_tokens >= cache_min_prefix_tokens:
         logger.warning(
             "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
-            "cache_write=%s) despite input_tokens=%s — caching is model-dependent and can "
-            "fail silently (no error from the provider); the operator is paying full input "
-            "price on every call",
+            "cache_write=%s) despite a marked prefix of %s tokens, at/above this model's "
+            "%s-token minimum - caching is model-dependent and can fail silently (no error "
+            "from the provider); the operator is paying full input price on every call",
             model,
             usage.get("cache_read_tokens", 0),
             usage.get("cache_write_tokens", 0),
-            usage.get("input_tokens", 0),
+            marked_prefix_tokens,
+            cache_min_prefix_tokens,
         )
+        return
+
+    if input_tokens - marked_prefix_tokens >= cache_min_prefix_tokens:
+        logger.warning(
+            "llm prompt caching requested for model=%s but CANNOT engage: only %s tokens sit "
+            "ahead of the cache breakpoint, below this model's %s-token minimum, while %s of "
+            "the %s billed input tokens ride AFTER it unmarked - the provider declines a "
+            "sub-minimum prefix silently (no error, cache_read=%s cache_write=%s). The "
+            "changeable thing is where the breakpoint sits, not the size of the prompt",
+            model,
+            marked_prefix_tokens,
+            cache_min_prefix_tokens,
+            input_tokens - marked_prefix_tokens,
+            input_tokens,
+            usage.get("cache_read_tokens", 0),
+            usage.get("cache_write_tokens", 0),
+        )
+
+
+def estimate_marked_prefix_tokens(cache_settings: Any, *, system_prompt: str) -> int | None:
+    """Estimated size of the bytes AHEAD of the cache breakpoint, or ``None`` if unknowable.
+
+    ``warn_if_cache_ineffective`` needs the MARKED PREFIX, not the total input (bug e3cd), and
+    the only component that can name it is the one that decided where the breakpoint goes.
+    Today ``capabilities.cache_settings_for`` sets exactly the instructions + tool-definitions
+    breakpoints, and pydantic-ai puts ``cache_control`` on the LAST SYSTEM BLOCK for the
+    former, so the marked prefix is the system prompt.
+
+    Two deliberate conservatisms, both erring toward NOT warning:
+
+    * Tool definitions render AHEAD of the system prompt and are inside the marked span, but
+      they are not sized here (their serialized JSON is not available at this seam). Omitting
+      them UNDER-counts, which can only suppress a warning, never manufacture one. It is a
+      no-op on rebar's single-turn calls, which send no tools.
+    * Returning ``None`` when no instructions breakpoint is set routes the caller back to the
+      pre-existing total-``input_tokens`` predicate rather than asserting a marked size that
+      was never established.
+
+    The chars/4 estimate matches ``plan_review.det_floor.est_tokens``, imported lazily to keep
+    this leaf module free of a package that imports back into ``llm``."""
+    if not cache_settings:
+        return None
+    if not (
+        cache_settings.get("anthropic_cache_instructions")
+        or cache_settings.get("bedrock_cache_instructions")
+    ):
+        return None
+    from rebar.llm.plan_review.det_floor import est_tokens
+
+    return est_tokens(system_prompt)
 
 
 def _warn_if_zeroed_usage(usage: dict) -> None:
