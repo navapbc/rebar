@@ -19,10 +19,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Exit code signalling that the caller should reschedule this pass.
 # Distinct from 1 (error) and 0 (success).  Chosen to be outside the
@@ -94,6 +98,51 @@ def _load_alert_store():
     sys.modules.setdefault("rebar_reconciler_alert_store", mod)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
+
+
+def record_parent_divergence(
+    kind: str,
+    key: str | None,
+    local_id: str | None,
+    parent: str | None,
+    exc: BaseException,
+    repo_root: Path | None = None,
+) -> None:
+    """Record that an outbound parent did NOT reach the tracker (ticket 39c1 AC4).
+
+    The dispatcher keeps warn-and-continue — a parent failure must not abort the
+    rest of the batch — but a log line is not a signal: the pass still exits 0 and
+    nothing durable says the hierarchy diverged. This writes the same
+    ``bridge_alerts`` record that ``apply_handlers.record_backstop_failure`` uses
+    for the identical shape of non-fatal-but-real failure, so the divergence shows
+    up wherever alerts already surface instead of only in a log nobody reads.
+
+    ``kind`` discriminates the operator's next move and the two are not
+    interchangeable: ``outbound-parent-unrepresentable`` means this deployment
+    cannot hold the relationship at all (no retry helps), while
+    ``outbound-parent-rejected`` means Jira refused THIS parent on hierarchy
+    grounds and a different one would be accepted.
+
+    Fail-open by construction. Observability must never cost delivery, so an
+    unwritable state directory degrades to a warning rather than failing a
+    mutation that would otherwise land.
+    """
+    try:
+        if repo_root is None:
+            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        _load_alert_store().append(
+            {
+                "kind": kind,
+                "key": key,
+                "local_id": local_id,
+                "parent": parent,
+                "timestamp_ns": time.time_ns(),
+                "reason": str(exc),
+            },
+            repo_root=repo_root,
+        )
+    except Exception as alert_exc:  # noqa: BLE001 — alerting is best-effort; never fail a pass
+        logger.warning("could not record %s alert for %s: %r", kind, key, alert_exc)
 
 
 def _load_mapping(mapping_path: Path) -> dict:

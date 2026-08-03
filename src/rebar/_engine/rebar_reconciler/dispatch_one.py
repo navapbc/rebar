@@ -54,7 +54,7 @@ from rebar_reconciler.dispatch_apply_phases import (
     _update_one_dispatch_comments,
     _update_one_filter_fields,
 )
-from rebar_reconciler.pass_io import _write_mapping_atomic
+from rebar_reconciler.pass_io import _write_mapping_atomic, record_parent_divergence
 
 if TYPE_CHECKING:
     from ._backend import SupportsComments, SupportsLinks, TicketTransport
@@ -492,7 +492,7 @@ def update_one(
     # OutboundMutation has no field for it). Pop it here — before the allowlist filter —
     # and forward it as a bool kwarg so acli submits the resolved accountId directly.
     _assignee_is_account_id = bool(fields.pop("_assignee_is_account_id", False))
-    _has_parent_op = _update_one_apply_parent(fields, issue_key, client)
+    _has_parent_op = _update_one_apply_parent(fields, issue_key, client, mutation.get("local_id"))
     _update_one_apply_reporter(fields, issue_key, client)
     fields = _update_one_filter_fields(fields, mutation)
     result = _update_one_scalar_update(
@@ -520,7 +520,9 @@ def update_one(
     return result
 
 
-def _update_one_apply_parent(fields, issue_key, client: TicketTransport) -> bool:
+def _update_one_apply_parent(
+    fields, issue_key, client: TicketTransport, local_id: str | None = None
+) -> bool:
     """Phase: route a parent reparent/clear through client.set_parent (popped from
     ``fields`` before the allowlist filter). Returns whether a parent op was present."""
     # Parent reparent (ticket 8b25): the production outbound dispatch routes
@@ -555,12 +557,18 @@ def _update_one_apply_parent(fields, issue_key, client: TicketTransport) -> bool
             # misleading "same project" message. Treat any 400 as a hierarchy
             # rejection: WARN + continue. Non-400 errors stay non-fatal too —
             # a parent failure must not abort the rest of the batch.
+            #
+            # Every arm ALSO records a bridge_alerts entry (ticket 39c1 AC4).
+            # Warn-and-continue alone is why "the parent never reached the
+            # tracker" stayed invisible through five instances of this class:
+            # the pass exits 0 and nothing durable reports the divergence.
             if exc.code == 400:
                 logger.warning(
                     "parent sync skipped: Jira hierarchy rejected %s->%s (HTTP 400)",
                     issue_key,
                     parent_key,
                 )
+                _alert_kind = "outbound-parent-rejected"
             else:
                 logger.warning(
                     "update_one: set_parent failed for %s parent=%r: %r",
@@ -568,6 +576,21 @@ def _update_one_apply_parent(fields, issue_key, client: TicketTransport) -> bool
                     parent_key,
                     exc,
                 )
+                _alert_kind = "outbound-parent-failed"
+            record_parent_divergence(_alert_kind, issue_key, local_id, parent_key, exc)
+        except NotImplementedError as exc:
+            # The transport says this deployment has no way to express the
+            # relationship at all — distinct from Jira refusing THIS parent,
+            # because no retry and no different parent shape will help.
+            logger.warning(
+                "update_one: parent unrepresentable for %s parent=%r: %r",
+                issue_key,
+                parent_key,
+                exc,
+            )
+            record_parent_divergence(
+                "outbound-parent-unrepresentable", issue_key, local_id, parent_key, exc
+            )
         except Exception as exc:  # noqa: BLE001 — best-effort set_parent; non-fatal, logged
             logger.warning(
                 "update_one: set_parent failed for %s parent=%r: %r",
@@ -575,6 +598,7 @@ def _update_one_apply_parent(fields, issue_key, client: TicketTransport) -> bool
                 parent_key,
                 exc,
             )
+            record_parent_divergence("outbound-parent-failed", issue_key, local_id, parent_key, exc)
     return _has_parent_op
 
 
