@@ -55,6 +55,7 @@ from rebar.llm.structured_run import (
     build_usage_limits,
     effective_max_iterations,  # noqa: F401  (re-exported: tests import it from `runner`)
     effective_max_tokens,  # noqa: F401  (re-exported: tests import it from `runner`)
+    estimate_marked_prefix_tokens,
     interpret_failure,
     warn_if_cache_ineffective,
 )
@@ -488,8 +489,19 @@ class PydanticAIRunner:
                     # full input tokens, no error) — this is the signal an operator otherwise never
                     # sees. `cache_settings is not None` is the existing local for "caching was
                     # requested this call" (set above from `cache_settings_for(caps)`).
+                    # Bug e3cd: measure the MARKED PREFIX against THIS model's documented
+                    # floor. The old call compared total `input_tokens` against a model-blind
+                    # 4096, which both missed real failures on low-floor models (opus-4-8,
+                    # rebar's DEFAULT_MODEL, is 1024) and named the wrong quantity when a big
+                    # payload rode unmarked after the breakpoint.
                     warn_if_cache_ineffective(
-                        usage, caching_requested=cache_settings is not None, model=ran_model
+                        usage,
+                        caching_requested=cache_settings is not None,
+                        model=ran_model,
+                        marked_prefix_tokens=estimate_marked_prefix_tokens(
+                            cache_settings, system_prompt=req.system_prompt
+                        ),
+                        cache_min_prefix_tokens=caps.cache_min_prefix_tokens,
                     )
             except Exception as exc:  # noqa: BLE001 — the except spine is `interpret_failure`
                 # (ADR 0056 decision 3, src/rebar/llm/structured_run.py): it dispatches on
