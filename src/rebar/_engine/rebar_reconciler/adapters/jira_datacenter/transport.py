@@ -288,13 +288,36 @@ class JiraDataCenterTransport:
         return self.get_issue(remote_id)
 
     def _assign(self, remote_id: str, assignee: Any) -> None:
-        """Assign ``remote_id`` to ``assignee`` (a DC username), raising
-        ``AssigneeNotFoundError`` when the library/server reports the user as
-        unresolvable rather than letting a bare HTTP error escape.
+        """Assign ``remote_id`` to ``assignee`` (a DC username), or UNASSIGN it when
+        ``assignee`` is empty, raising ``AssigneeNotFoundError`` when the library/server
+        reports a real user as unresolvable rather than letting a bare HTTP error escape.
 
         The HTTP error is caught as the already-translated ``BackendHTTPError``
         (:func:`_with_connection_retry` converts it), so this behaves exactly as
-        before while needing no vendor import of its own."""
+        before while needing no vendor import of its own.
+
+        Bug 751e — THE EMPTY ASSIGNEE IS AN UNASSIGN, AND IT NEEDS TRANSLATING HERE.
+        ``outbound_differ._assignee_resolver`` resolves an empty local assignee to the
+        EMPTY STRING (not ``None``), and ``assignee`` is in
+        ``dispatch_apply_phases._OUTBOUND_BATCH_ALLOWLIST``, so ``update_issue(key,
+        assignee="")`` is what arrives. ``pycontribs``' ``JIRA._get_user_id`` passes only
+        ``None``/``-1``/``"-1"`` through and SEARCHES for anything else, so an empty string
+        is not an unassign instruction on that library at all: it either raises
+        ``JIRAError("No matching user found for: ''")`` — soft-failed upstream, so the pass
+        reports success while the assignee never moved — or, worse, returns a hit and
+        assigns an ARBITRARY user. Verified at runtime against ``jira==3.10.5``: on a
+        self-hosted instance ``None`` PUTs ``{"name": null}`` (Unassigned) while
+        ``-1``/``"-1"`` PUT ``{"name": "-1"}``, which is Jira's *Automatic* (assign to the
+        project default) — a DIFFERENT operation, hence ``None`` and not ``-1``.
+
+        Cloud already routes an empty/``None`` assignee away from the vendor call inside
+        ITS OWN transport (``adapters/jira/acli.py:342-345,357-359``, bug 85a1); as with the
+        status→transition seam of bug d067, the translation lives PER TRANSPORT and Data
+        Center simply never got its half. Blank-but-not-empty strings are normalised too:
+        they carry the same arbitrary-match hazard through ``search_users(user=" ")``.
+        """
+        if assignee is None or (isinstance(assignee, str) and not assignee.strip()):
+            assignee = None
         try:
             _with_connection_retry(lambda: self._client.assign_issue(remote_id, assignee))
         except BackendHTTPError as exc:
