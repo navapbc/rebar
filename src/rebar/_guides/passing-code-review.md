@@ -110,9 +110,12 @@ Read the `LLM-Review` tag — it tells you whose problem it is:
 - **`BLOCK — finding`** (with inline comments): a real issue in *your* code. Fix it, amend,
   re-push, and mark each inline comment **Done** (submit requires no unresolved comments).
 - **`BLOCK — coverage-gap (…)`** (gate-disabled / llm-unavailable / scanner / review-error /
-  indeterminate / merge-review): an **infrastructure veto, not your diff** — a maintainer
-  re-triggers; re-pushing the same commit or pinging the maintainer is the move, not a code
-  change.
+  indeterminate / merge-review): an **infrastructure veto, not your diff** — once the
+  infrastructure issue clears, comment **`recheck-review`** on the change to re-trigger
+  the review yourself (self-service; the bot refuses the trigger only when the standing
+  `-1` is a real finding). No code change and no re-push needed. The two triggers mirror
+  each other: `recheck` re-runs CI (`Verified`), `recheck-review` re-runs the LLM review
+  (`LLM-Review`).
 - **`PASS`**: nothing to do.
 
 The gate is **required-with-human-override**: the lead maintainer owns the rubric and can waive
