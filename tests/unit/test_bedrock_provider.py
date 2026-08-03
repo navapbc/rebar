@@ -293,12 +293,18 @@ def test_bedrock_builder_sets_exactly_the_two_parity_cache_keys():
     """PARITY, not maximalism: the direct-Anthropic path sets instructions + tool_definitions
     and leaves ``*_cache_messages`` unset, so Bedrock does the same. Enabling a third key would
     make Bedrock cache MORE than Anthropic — a different behaviour with its own cost profile,
-    and story 0d76 measures the parity bar against exactly these two."""
+    and story 0d76 measures the parity bar against exactly these two.
+
+    Scoped to SINGLE_TURN, which is what this parity claim was always about: bug dd27 added a
+    message-tail breakpoint to the multi-turn arm on BOTH providers (Anthropic
+    ``anthropic_cache``, Bedrock ``bedrock_cache_messages``), so parity there is preserved by
+    each arm using its OWN key — see ``test_agentic_message_cache.py``. The single-turn arm has
+    no history to cache and is byte-unchanged, so the two-key bar still holds here exactly."""
     pytest.importorskip("boto3")
     from rebar.llm.capabilities import cache_settings_for, capabilities_for
 
     caps = capabilities_for(SimpleNamespace(profile=_bedrock_profile(), model_name=_TEMP_OK))
-    settings = cache_settings_for(caps)
+    settings = cache_settings_for(caps, execution_mode="single_turn")
     assert settings is not None
     assert settings["bedrock_cache_instructions"] is True
     assert settings["bedrock_cache_tool_definitions"] is True

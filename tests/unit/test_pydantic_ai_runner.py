@@ -316,15 +316,21 @@ def test_preflight_ok_with_extra_installed():
 def test_cache_settings_enabled_only_for_anthropic():
     # Anthropic-qualified resolved strings get BOTH cache flags; every other provider
     # gets None (the keys error on openai/gemini), so the call is unchanged there.
-    s = cache_settings_for(capabilities_for("anthropic:claude-opus-4-8"))
+    # single_turn throughout: bug dd27 left that arm byte-unchanged, so this test's original
+    # subject is preserved rather than retargeted.
+    s = cache_settings_for(
+        capabilities_for("anthropic:claude-opus-4-8"), execution_mode="single_turn"
+    )
     assert s is not None
     assert s["anthropic_cache_instructions"] is True
     assert s["anthropic_cache_tool_definitions"] is True
-    assert cache_settings_for(capabilities_for("openai:gpt-4o")) is None
-    assert cache_settings_for(capabilities_for("google-gla:gemini-2.5-flash")) is None
-    # "" resolves to no known provider prefix -> the conservative record -> no cache settings
-    # (mirrors the old model_override (test) sentinel behavior).
-    assert cache_settings_for(capabilities_for("")) is None
+    for uncached in ("openai:gpt-4o", "google-gla:gemini-2.5-flash", ""):
+        # "" resolves to no known provider prefix -> the conservative record -> no cache
+        # settings (mirrors the old model_override (test) sentinel behavior).
+        assert cache_settings_for(capabilities_for(uncached), execution_mode="single_turn") is None
+        # ...and the agentic arm must not manufacture settings for a non-caching provider
+        # either: it only ADDS a message-tail breakpoint where caching already applies.
+        assert cache_settings_for(capabilities_for(uncached), execution_mode="agentic") is None
 
 
 def test_extract_usage_reads_normalized_cache_tokens():

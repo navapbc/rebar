@@ -114,16 +114,19 @@ def test_openai_lazy_model_string_keeps_native_output():
 
 
 def test_cache_settings_selected_from_style_and_absent_when_none():
-    """The cache-settings seam: one function, dispatching on ``prompt_cache_style``."""
+    """The cache-settings seam: one function, dispatching on ``prompt_cache_style``.
+
+    ``execution_mode="single_turn"`` is this test's original subject preserved verbatim: it is
+    the arm bug dd27 left byte-unchanged, so these assertions still mean what they meant."""
     from rebar.llm.capabilities import cache_settings_for
 
-    settings = cache_settings_for(_caps("anthropic:claude-opus-4-8"))
+    settings = cache_settings_for(_caps("anthropic:claude-opus-4-8"), execution_mode="single_turn")
     assert settings is not None
     assert settings["anthropic_cache_instructions"] is True
     assert settings["anthropic_cache_tool_definitions"] is True
 
     # A non-caching provider sends no cache keys at all (they error on openai/gemini).
-    assert cache_settings_for(_caps("openai:gpt-4o")) is None
+    assert cache_settings_for(_caps("openai:gpt-4o"), execution_mode="single_turn") is None
 
 
 # ── §B held out from the implementer ────────────────────────────────────────────────────
@@ -162,7 +165,8 @@ def test_cache_settings_for_bedrock_style_sets_both_bedrock_breakpoints():
     caps = _caps(SimpleNamespace(profile=_bedrock_claude_profile_stub()))
     assert caps.prompt_cache_style == "bedrock"
 
-    settings = cache_settings_for(caps)
+    # single_turn: the arm bug dd27 left byte-unchanged, so this keeps pinning what it pinned.
+    settings = cache_settings_for(caps, execution_mode="single_turn")
     assert settings is not None, "Bedrock caching must be ON — this is the defect being fixed"
     assert settings["bedrock_cache_instructions"] is True
     assert settings["bedrock_cache_tool_definitions"] is True

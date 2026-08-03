@@ -446,26 +446,70 @@ def provenance_for(
     }
 
 
-def cache_settings_for(caps: ModelCapabilities) -> Any:
+# The execution modes that re-send an ACCUMULATED MESSAGE HISTORY and therefore need a
+# message-tail cache breakpoint (bug dd27). Membership, not equality, so a future multi-turn
+# mode is added here rather than by editing the branch below — and an UNRECOGNISED mode falls
+# through to the single-turn arm, which fails safe: a mode whose cost/breakpoint-budget profile
+# was never assessed does not silently opt into an extra breakpoint.
+_MESSAGE_TAIL_EXECUTION_MODES = frozenset({"agentic"})
+
+
+def cache_settings_for(caps: ModelCapabilities, *, execution_mode: str) -> Any:
     """The provider-specific prompt-cache ``ModelSettings`` mapping for ``caps``, or ``None``.
 
-    Dispatches SOLELY on ``caps.prompt_cache_style`` — never a provider-name string. Only the
-    instructions + tool-definitions cache breakpoints are set (today's behavior); neither
-    ``*_cache_messages`` nor ``anthropic_cache`` is touched."""
+    Dispatches SOLELY on ``caps.prompt_cache_style`` — never a provider-name string.
+
+    The instructions + tool-definitions breakpoints are set on every caching call. On a
+    MULTI-TURN mode (:data:`_MESSAGE_TAIL_EXECUTION_MODES`) a THIRD breakpoint covers the
+    accumulated message tail. Bug dd27: without it the growing tool-result history rode outside
+    every breakpoint and was re-sent uncached on each turn, making input cost O(N^2) in turns —
+    and invisible to ``structured_run.warn_if_cache_ineffective``, whose predicate requires
+    ``cache_read_tokens == 0`` while the SYSTEM block was hitting cache all along. Anthropic's
+    own prompt-caching guidance names this the multi-turn shape (system + a point the
+    conversation can be incrementally cached against), not an exotic optimisation.
+
+    ``execution_mode`` is keyword-only and REQUIRED on purpose. A default would let a new call
+    site silently pick an arm, which is the exact failure being fixed; the caller always knows
+    which mode it is on (``RunRequest.execution_mode``).
+
+    PROVIDER ASYMMETRY — the trap. The two arms must use their OWN keys:
+
+    * Anthropic — ``anthropic_cache=True``, the automatic-caching key, which sends a TOP-LEVEL
+      ``cache_control`` so the server places the breakpoint at the end of the prompt. It is
+      mutually exclusive with ``anthropic_cache_messages`` (pydantic-ai raises ``UserError`` if
+      both are set), so only one of the pair is ever emitted.
+    * Bedrock — ``bedrock_cache_messages=True``. There is NO ``bedrock_cache`` key, and Bedrock
+      REJECTS a top-level ``cache_control`` outright ("Extra inputs are not permitted").
+      LangChain shipped precisely this regression: their Anthropic prompt-caching middleware
+      broke on Bedrock in 1.4.1 by switching to top-level automatic caching (langchain#37042).
+
+    Breakpoint budget is safe on both. pydantic-ai's ``_limit_cache_points`` drops the Anthropic
+    budget to ``MAX_CACHE_POINTS = 3`` when automatic caching is on, and this sets exactly 3
+    (two explicit + the server-applied one); Bedrock's limit is 4 and this sets 3.
+
+    SINGLE-TURN CALLS ARE BYTE-IDENTICAL to the pre-dd27 behavior — there is no history to
+    cache, so no third breakpoint is added and the emitted mapping is unchanged."""
+    cache_message_tail = execution_mode in _MESSAGE_TAIL_EXECUTION_MODES
     if caps.prompt_cache_style == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModelSettings
 
-        return AnthropicModelSettings(
+        anthropic_settings = AnthropicModelSettings(
             anthropic_cache_instructions=True,
             anthropic_cache_tool_definitions=True,
         )
+        if cache_message_tail:
+            anthropic_settings["anthropic_cache"] = True
+        return anthropic_settings
     if caps.prompt_cache_style == "bedrock":
         # Imported INSIDE this branch only: `pydantic_ai.models.bedrock` imports `botocore` at
         # module top, so this line executes only when a Bedrock model is actually in use.
         from pydantic_ai.models.bedrock import BedrockModelSettings
 
-        return BedrockModelSettings(
+        bedrock_settings = BedrockModelSettings(
             bedrock_cache_instructions=True,
             bedrock_cache_tool_definitions=True,
         )
+        if cache_message_tail:
+            bedrock_settings["bedrock_cache_messages"] = True
+        return bedrock_settings
     return None

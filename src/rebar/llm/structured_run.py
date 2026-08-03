@@ -247,7 +247,8 @@ def build_model_settings(
     ``PydanticAIRunner.run()`` as a PURE function — no logging, no mutation of any module-level
     state. ``model_override`` is accepted only to document/preserve the invariant that
     ``cache_settings`` was ALREADY computed by the caller as
-    ``None if model_override else cache_settings_for(caps)`` (see ``run()``'s own assignment) —
+    ``None if model_override else cache_settings_for(caps, execution_mode=req.execution_mode)``
+    (see ``run()``'s own assignment) —
     it is never recomputed here, so the guard that keeps the offline ``TestModel`` path free of
     cache flags cannot be silently dropped by this move.
 
@@ -506,9 +507,12 @@ def estimate_marked_prefix_tokens(cache_settings: Any, *, system_prompt: str) ->
 
     ``warn_if_cache_ineffective`` needs the MARKED PREFIX, not the total input (bug e3cd), and
     the only component that can name it is the one that decided where the breakpoint goes.
-    Today ``capabilities.cache_settings_for`` sets exactly the instructions + tool-definitions
+    ``capabilities.cache_settings_for`` always sets the instructions + tool-definitions
     breakpoints, and pydantic-ai puts ``cache_control`` on the LAST SYSTEM BLOCK for the
-    former, so the marked prefix is the system prompt.
+    former, so the marked prefix is the system prompt. Bug dd27 added a THIRD, message-tail
+    breakpoint on the multi-turn arm; it sits BEHIND the system prompt, so it can only enlarge
+    the truly-cached span and never shrinks the prefix estimated here — the estimate stays
+    conservative in the same direction as the two below.
 
     Two deliberate conservatisms, both erring toward NOT warning:
 

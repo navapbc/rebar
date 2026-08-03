@@ -392,7 +392,11 @@ class PydanticAIRunner:
                 caps = _intersect_capabilities([capabilities_for(m) for m in model.models])
             else:
                 caps = capabilities_for(resolved if self._model_override is not None else model)
-            cache_settings = None if self._model_override else cache_settings_for(caps)
+            cache_settings = (
+                None
+                if self._model_override
+                else cache_settings_for(caps, execution_mode=req.execution_mode)
+            )
             # Provider provenance (story S5/343b): stamp WHAT actually ran — resolved
             # provider/model, the endpoint host (None for the first-class/no-custom-base_url
             # path), and the effective capability record — onto the verdict, additively,
