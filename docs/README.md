@@ -95,6 +95,10 @@ Configuring, deploying, syncing, and releasing rebar.
   (kept in sync by a CI drift gate).
 - **[jira-sync-setup.md](jira-sync-setup.md)** — automating the rebar ⇄ Jira
   reconciler in GitHub Actions so a project can stand up bidirectional sync.
+- **[bug-creation-contract.md](bug-creation-contract.md)** — the contract every
+  automated bug filer (CI canaries, the reconciler's conflict filer, future
+  watchdogs) must follow: dedup search, accumulation cap, abort-if-empty,
+  flake threshold, and `detected_by` provenance.
 - **[gerrit-aws-setup.md](gerrit-aws-setup.md)** — the optional/advanced deployment
   of a self-hosted Gerrit + rebar review-bot to LLM-gate every commit to a GitHub
   repo's `main`.
