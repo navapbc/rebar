@@ -974,6 +974,343 @@ def test_set_parent_declines_the_epic_case_loudly(
     )
 
 
+def _subtask_type_name(dc_request: Any, project: str) -> str:
+    """The name of THIS project's sub-task issue type, ASKED of the instance.
+
+    Not hardcoded as "Sub-task", for the reason `conftest._discover_project_templates` records
+    about template keys: the scratch project is created from whichever template the image
+    happens to offer, so its issue-type set is not knowable at authoring time. A hardcoded name
+    that the project does not have would make `create_issue` fail and every parent cell below
+    would report a PROJECT-CONFIGURATION problem as a bridge defect.
+    """
+    status, body = dc_request(f"/rest/api/2/project/{project}")
+    assert status == 200 and isinstance(body, dict), (
+        f"SETUP FAILED: could not read project {project} to discover its issue types "
+        f"(HTTP {status})"
+    )
+    names = [
+        str(it.get("name"))
+        for it in (body.get("issueTypes") or [])
+        if isinstance(it, dict) and it.get("subtask")
+    ]
+    assert names, (
+        f"SETUP FAILED (not a bridge defect): project {project} exposes NO sub-task issue type "
+        f"(types: {[i.get('name') for i in body.get('issueTypes') or [] if isinstance(i, dict)]}"
+        f"). Rows 12-13 are about `fields.parent`, which on Data Center only a SUB-TASK has "
+        f"(`transport.py:645-690`), so they cannot be exercised on a project without one."
+    )
+    return names[0]
+
+
+def _wait_until_parent_map_reflects(
+    transport: Any,
+    project: str,
+    key: str,
+    predicate: Callable[[str | None], bool],
+    what: str,
+    timeout: float = 90.0,
+) -> None:
+    """Block until ``get_parent_map`` reflects ``what`` for ``key``.
+
+    Waits on THE PRODUCTION READ. The inbound pass does not read `fields.parent` off the issue:
+    the fetcher makes one extra paged REST search via ``client.get_parent_map`` and merges the
+    result into each snapshot entry (`fetcher.py:485-511`), and that search is index-backed and
+    eventually consistent. So this is the `_wait_until_search_reflects` hazard again, one layer
+    over: waiting on a direct GET would let a stale parent map be reported as a bridge defect.
+    """
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    last: str | None = None
+    while time.monotonic() < deadline:
+        attempts += 1
+        last = transport.get_parent_map(project).get(key)
+        if predicate(last):
+            return
+        time.sleep(2.0)
+    raise AssertionError(
+        f"get_parent_map never reflected {what} for {key} within {timeout:.0f}s ({attempts} "
+        f"attempts). This is NOT a bridge defect — the write succeeded, the search-backed parent "
+        f"map cannot see it yet. Last parent seen: {last!r}"
+    )
+
+
+@_skip
+@_skip_no_extra
+def test_inbound_set_subtask_parent_round_trips(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
+) -> None:
+    """Row 12 inbound, the SUB-TASK case: a DC re-parent must reach `.parent_id` locally.
+
+    STANDALONE, not an `_INBOUND_CELLS` row, because the table driver hands every row the
+    `bound_dc_issue` fixture — a TASK. On Data Center only a sub-task has a `fields.parent` at
+    all (`transport.py:645-690`), so this row needs its own hierarchy: two candidate parents and
+    a sub-task, all bound before the pass.
+
+    RE-PARENTS RATHER THAN PARENTS, so the assertion is about a value THIS CELL wrote. A
+    sub-task cannot be created parentless, so it arrives already pointing at one parent and the
+    priming import may already have carried that; asserting THAT value would be re-reading a
+    field the cell did not set. Moving it to a second parent makes the oracle a genuine
+    round-trip, and the precondition below asserts the two differ so it cannot be vacuous.
+
+    BOTH PARENTS MUST BE BOUND. `inbound_differ._extract_parent_local_id` resolves the Jira
+    parent key through `binding_store.get_local_id` and returns None when the key is not yet
+    bound, and the caller then SKIPS the field rather than emitting it (`inbound_differ.py:90-110`,
+    `:257-270`). An unbound parent therefore produces no mutation at all — the same
+    unresolvable-counterpart trap the link cells document.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 parent A"))
+    second = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 parent B"))
+    child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 reparented subtask"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": first}},
+    )
+    child_local = _jira_key_to_local_id(child)
+    first_local = _jira_key_to_local_id(first)
+    second_local = _jira_key_to_local_id(second)
+
+    scope = ",".join((child_local, child, first_local, first, second_local, second))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    store = load_binding_store(dc_store_copy_repo)
+    for local_ref, key_ref in ((child_local, child), (second_local, second)):
+        bound = store.get_jira_key(local_ref)
+        assert bound == key_ref, (
+            f"SETUP FAILED (not the reparent): {local_ref} is not bound (got {bound!r}, expected "
+            f"{key_ref!r}). An unbound parent key resolves to None and the differ SKIPS the "
+            f"parent field entirely (`inbound_differ.py:257-270`), so no mutation would even be "
+            f"attempted."
+        )
+    before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert before != second_local, (
+        f"SETUP FAILED (not the reparent): the sub-task's local parent_id is ALREADY "
+        f"{second_local!r} before this cell reparents it, so the assertion below would pass "
+        f"without any mutation having happened."
+    )
+
+    dc_transport.set_parent(child, second)
+    _wait_until_parent_map_reflects(
+        dc_transport,
+        jira_dc_project,
+        child,
+        lambda seen: seen == second,
+        f"the reparent to {second}",
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"inbound reparent pass raised:\n{cp.stderr[-2000:]}"
+
+    after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert after == second_local, (
+        f"the DC reparent did not reach the local ticket: .parent_id on {child_local} is "
+        f"{after!r} (it was {before!r} before), expected {second_local!r} — the local id of "
+        f"{second}, which `get_parent_map` confirms is now the sub-task's parent."
+    )
+
+
+@_skip
+@_skip_no_extra
+def test_inbound_clear_parent_round_trips(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
+) -> None:
+    """Row 13 inbound: a parent REMOVED in DC must clear `.parent_id` locally.
+
+    THE ORACLE IS ABSENCE, and it is preceded by a precondition that the parent IS set locally
+    — otherwise "parent_id is empty" is true before the cell does anything.
+
+    THE DC-SIDE CLEAR IS ITS OWN ASSERTED SETUP STEP, deliberately. Data Center may refuse to
+    null a sub-task's parent (a sub-task exists only under one), and if it does, that refusal is
+    a PLATFORM constraint and not a rebar defect — so it is caught and reported as SETUP FAILED
+    rather than being allowed to look like "the bridge did not clear the local parent". The two
+    outcomes are genuinely different findings and this cell keeps them apart.
+
+    EXPECTED RED ON THE ORACLE, with the mechanism proven by code path and filed as
+    [rebar:88d9-fe42-e50f-4067]. TWO layers independently drop the signal:
+      1. THE SNAPSHOT NEVER CARRIES "no parent". The fetcher merges `get_parent_map` into the
+         snapshot and, when the mapped parent is None, deliberately leaves the field ABSENT —
+         "When parent_jira_key is None, leave the field absent (top-level issue)"
+         (`fetcher.py:508-511`). A de-parented issue then looks identical to one that never had
+         a parent.
+      2. THE DIFFER REFUSES TO EMIT A CLEAR: "We do NOT emit parent_id=None to avoid
+         accidentally clearing a locally-set parent when we just can't resolve it yet"
+         (`inbound_differ.py:266-270`).
+    The apply layer is already ready for it — `apply_inbound_records` maps `parent_id` through
+    `lambda v: v or ""` and its comment says an absent/empty parent "clears the parent"
+    (`apply_inbound_records.py:361-372`) — so only the differ never sends it. The cell asserts
+    the AC's oracle (row 13 inbound: "`.parent_id` is null"); do not invert it to pin the gap.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    parent = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 detach parent"))
+    child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 detached subtask"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": parent}},
+    )
+    child_local = _jira_key_to_local_id(child)
+    parent_local = _jira_key_to_local_id(parent)
+
+    scope = ",".join((child_local, child, parent_local, parent))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
+    assert bound == child, (
+        f"SETUP FAILED (not the clear): the sub-task {child_local} is not bound (got {bound!r})"
+    )
+    before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert before == parent_local, (
+        f"SETUP FAILED (not the clear): the sub-task's local parent_id is {before!r}, expected "
+        f"{parent_local!r}, so there is no parent for this cell to observe being cleared and the "
+        f"oracle below would pass vacuously. Row 12 "
+        f"(`test_inbound_set_subtask_parent_round_trips`) covers inbound parent import on its "
+        f"own; if that cell is also red, fix it there."
+    )
+
+    # SETUP — clear the parent ON THE INSTANCE, and prove it. A refusal here is Data Center's,
+    # not rebar's, and is reported as such.
+    try:
+        dc_transport.set_parent(child, None)
+    except Exception as exc:  # noqa: BLE001 — classify: a DC refusal is a SETUP outcome, not a bridge defect
+        raise AssertionError(
+            f"SETUP FAILED (not a rebar defect): Data Center REFUSED to clear the parent of "
+            f"sub-task {child} — {type(exc).__name__}: {exc}. A sub-task exists only under a "
+            f"parent, so nulling `fields.parent` may not be a legal DC edit at all. That is a "
+            f"platform constraint on row 13's inbound half and belongs in the AC, not in the "
+            f"bridge. Row 13's OUTBOUND half "
+            f"(`test_outbound_clear_parent_round_trips`) drives the same primitive and would "
+            f"fail here too."
+        ) from exc
+    remote_parent = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent")
+    assert not remote_parent, (
+        f"SETUP FAILED (not the bridge): set_parent(..., None) returned without error but "
+        f"{child} still carries fields.parent = {remote_parent!r}, so there is no remote clear "
+        f"for the pass to mirror. `set_parent` PUTs {{'parent': None}} "
+        f"(`transport.py:688-689`); Data Center accepted the request and ignored it."
+    )
+    _wait_until_parent_map_reflects(
+        dc_transport, jira_dc_project, child, lambda seen: not seen, "the parent removal"
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"inbound clear-parent pass raised:\n{cp.stderr[-2000:]}"
+
+    after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert not after, (
+        f"the DC parent was REMOVED (confirmed absent from both the direct GET and the "
+        f"search-backed parent map) but .parent_id on {child_local} is still {after!r}. The "
+        f"inbound differ suppresses parent_id=None by design (`inbound_differ.py:266-270`) and "
+        f"the fetcher never records the absence (`fetcher.py:508-511`) — see "
+        f"[rebar:88d9-fe42-e50f-4067]."
+    )
+
+
+@_skip
+@_skip_no_extra
+def test_outbound_clear_parent_round_trips(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
+) -> None:
+    """Row 13 outbound: detaching the local parent must leave `fields.parent` ABSENT in DC.
+
+    THROUGH A PASS, not against the transport, and that is the opposite choice from row 12's
+    epic case for a reason worth stating: row 12's epic case asserts an EXCEPTION, and
+    `dispatch_one._update_one_apply_parent` catches `Exception` and only warns
+    (`dispatch_one.py:571-578`), so an exception assertion is untestable through a pass. This
+    row asserts a POST-STATE on the instance, which the swallow cannot hide.
+
+    THE CLEAR IS EXPRESSED AS `--parent=null`. An empty value is rejected outright ("--parent
+    requires a non-empty value (use --parent=null to detach)"), and the differ needs the
+    "parent" key PRESENT-WITH-A-FALSY-VALUE to distinguish a CLEAR from "no parent op this
+    mutation" — `_update_one_apply_parent` keys out that presence explicitly and routes the
+    clear through the same `set_parent` call as a set (`dispatch_one.py:539-550`).
+
+    IF THIS FAILS, THE THREE CANDIDATE MECHANISMS ARE, IN ORDER: the differ never emitted the
+    parent clear; `set_parent` raised and was swallowed at `dispatch_one.py:571-578`; or Data
+    Center accepted `{"parent": None}` on a sub-task and ignored it. The precondition below
+    rules out a fourth (nothing to clear) by asserting the parent is present on BOTH sides
+    first.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    import rebar
+
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    parent = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 out-detach par"))
+    child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 out-detached subtask"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": parent}},
+    )
+    child_local = _jira_key_to_local_id(child)
+    parent_local = _jira_key_to_local_id(parent)
+
+    scope = ",".join((child_local, child, parent_local, parent))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
+    assert bound == child, (
+        f"SETUP FAILED (not the clear): the sub-task {child_local} is not bound (got {bound!r}), "
+        f"so an outbound update would take the CREATE path instead of touching {child}."
+    )
+    remote_parent = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent") or {}
+    assert remote_parent.get("key") == parent, (
+        f"SETUP FAILED (not the clear): {child} does not carry fields.parent = {parent!r} (got "
+        f"{remote_parent!r}), so its absence after the pass would prove nothing."
+    )
+    before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert before, (
+        f"SETUP FAILED (not the clear): the local ticket {child_local} has no parent_id to "
+        f"detach, so the differ has no CHANGE to emit — a pass would plan nothing and the "
+        f"remote parent would survive for a reason unrelated to this row."
+    )
+
+    # THE MUTATION UNDER TEST — detach locally, then read the instance back.
+    rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent="null")
+    cleared_local = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert not cleared_local, (
+        f"SETUP FAILED (not the clear): .parent_id on {child_local} is still {cleared_local!r} "
+        f"after `--parent=null`, so the outbound pass has no detach to carry."
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"outbound clear-parent pass raised:\n{cp.stderr[-2000:]}"
+
+    after = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent")
+    assert not after, (
+        f"the local parent was DETACHED but {child} still carries fields.parent = {after!r}. "
+        f"Candidates, in order: the differ never emitted the clear; `set_parent` raised and was "
+        f"swallowed (`dispatch_one.py:571-578` warns and continues); or Data Center accepted "
+        f"PUT {{'parent': None}} and ignored it (`transport.py:688-689`)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Row 14 — deletion never plans a teardown of the local side (ADR 0028 §1)
 # ---------------------------------------------------------------------------
