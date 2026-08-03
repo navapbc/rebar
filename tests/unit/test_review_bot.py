@@ -969,6 +969,195 @@ def test_reconcile_once_malformed_events_body_does_not_vote(monkeypatch, tmp_pat
     assert g.votes == []
 
 
+# ── 9ec0: the reconciler's cooperative shutdown (runs in the DEFAULT tier) ────
+#
+# These sit alongside the lifespan tests further down deliberately. Those exercise the whole
+# shutdown end to end but need the ``reviewbot`` extra, and CI's pytest lane installs only
+# ``[dev]`` — so every fastapi test SKIPS there. ``reconcile`` imports without fastapi, so
+# pinning the mechanism here is what gives this fix real coverage in CI rather than a skip.
+@pytest.fixture(autouse=True)
+def _reset_reconciler_stop_flag():
+    """``reconcile``'s stop flag is module state; leaking it would make later reconcile passes
+    decline all work (and under xdist that lands in a different test)."""
+    reconcile.clear_stop()
+    yield
+    reconcile.clear_stop()
+
+
+async def _await_probe(probe, *, cap=3.0, what="the probe"):
+    """Wait until ``probe`` (a list the code under test appends to) is non-empty.
+
+    Polls OFF-LOOP in a single ``to_thread`` hop rather than in a
+    ``while ...: await asyncio.sleep(...)`` loop, which is what ASYNC110 forbids. Its
+    suggested ``asyncio.Event`` is not usable here: the two probes this serves are appended
+    from WORKER THREADS — the review gate and the events-log fetch both run off-loop via
+    ``to_thread`` — and an ``asyncio.Event`` may not be set from another thread. Polling in
+    the thread keeps the event loop free, which is the property the rule protects, without
+    threading a cross-thread signalling contract through every fake.
+    """
+
+    def _poll():
+        deadline = time.monotonic() + cap
+        while not probe and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    await asyncio.to_thread(_poll)
+    assert probe, f"{what} never fired within {cap}s — the probe is not wired"
+
+
+def _slow_review_probe(monkeypatch, seconds=0.3):
+    """Patch ``review_and_vote`` with a slow stub; returns (started, completed) transcripts."""
+    started: list[str] = []
+    completed: list[str] = []
+
+    async def _slow(event, *, config=None, gerrit=None, dedup=None, force=False):
+        change_id = event["change"]["id"]
+        started.append(change_id)
+        await asyncio.sleep(seconds)
+        completed.append(change_id)
+        return {"status": "voted", "change_id": change_id}
+
+    monkeypatch.setattr(voter, "review_and_vote", _slow, raising=True)
+    return started, completed
+
+
+def test_reconcile_once_takes_no_new_candidate_once_a_stop_is_requested(monkeypatch, tmp_path):
+    """AC2 at the reconcile level: a stop requested mid-review lets THAT review finish but
+    stops the pass taking the next candidate — otherwise the drain re-extends per candidate."""
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    started, completed = _slow_review_probe(monkeypatch)
+    g = ReconcileGerrit(
+        events=[
+            _events_log_event("rebar~main~Ione", "rev-one", number=1),
+            _events_log_event("rebar~main~Itwo", "rev-two", number=2),
+        ]
+    )
+
+    async def _run():
+        task = asyncio.create_task(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+        # wait until the FIRST review is genuinely in flight
+        await _await_probe(started, what="the first review")
+        reconcile.request_stop()
+        return await asyncio.wait_for(task, timeout=10)
+
+    res = asyncio.run(_run())
+
+    assert len(started) == 1, f"a new candidate was started after the stop request: {started}"
+    assert len(completed) == 1, f"the in-flight review must still finish: {completed}"
+    assert res["reviewed"] == 1
+    # The skipped candidate stays vote-less (fail-closed) — never marked as handled.
+    assert not store.already_voted("rebar~main~Itwo", "rev-two")
+
+
+def test_a_candidate_skipped_by_the_stop_is_held_back_in_the_cursor(monkeypatch, tmp_path):
+    """The stop path must obey the low-water-mark contract (bug 9f63).
+
+    Declining a candidate at shutdown is only fail-closed if that candidate is still inside
+    the NEXT pass's window. The cursor advances to ``newest`` over the whole fetched window,
+    so a candidate merely ``break``-ed past — without being recorded in ``held_back`` — falls
+    outside every subsequent inclusive ``?t1=`` window and is unreachable forever. That would
+    make shutdown the one path that silently drops a gap patchset, which is the precise defect
+    9f63 closed; this pins that the 9ec0 stop cannot reintroduce it.
+
+    Shaped like the 9f63 oracle: the skipped candidate is NOT the newest event, so unrelated
+    chatter drags ``newest`` past it — the only shape in which the defect can be expressed.
+    """
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    started, _completed = _slow_review_probe(monkeypatch)
+    # Timestamps sit close together so the hold-back stays well inside
+    # ``reconcile_max_holdback_seconds`` and the clamp ceiling is not what is under test.
+    first = _events_log_event("rebar~main~Ione", "rev-one", number=1, created_on=2800)
+    skipped = _events_log_event("rebar~main~Itwo", "rev-two", number=2, created_on=2900)
+    chatter = {
+        "type": "comment-added",
+        "eventCreatedOn": 3000,
+        "change": {"id": "rebar~main~Ichat", "number": 3, "project": "rebar"},
+        "patchSet": {},  # not a candidate, but it DOES drag ``newest`` past the skipped one
+    }
+    g = ReconcileGerrit(events=[first, skipped, chatter])
+
+    async def _run():
+        task = asyncio.create_task(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+        # the FIRST review is genuinely in flight
+        await _await_probe(started, what="the first review")
+        reconcile.request_stop()
+        return await asyncio.wait_for(task, timeout=10)
+
+    asyncio.run(_run())
+    assert started == ["rebar~main~Ione"], f"the stop did not skip the second candidate: {started}"
+
+    # THE CONTRACT: the next pass can still see the candidate the shutdown declined.
+    reconcile.clear_stop()
+    second = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert "rebar~main~Itwo" in started, (
+        "the candidate declined at shutdown fell outside the next window — the cursor "
+        "advanced past an event no pass ever voted, so backfill can never recover it (9f63)"
+    )
+    assert second["scanned"] >= 1
+
+
+@pytest.mark.real_reconcile_loop
+def test_reconcile_loop_returns_after_finishing_the_review_in_flight(monkeypatch, tmp_path):
+    """AC1's mechanism: on a stop request the loop RETURNS once the in-flight review lands.
+
+    That return is what makes the loop's task awaitable as a drain by the app lifespan — the
+    alternative is cancelling it, which is precisely what abandoned the backfill review."""
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    started, completed = _slow_review_probe(monkeypatch)
+    g = ReconcileGerrit(events=[_events_log_event("rebar~main~Igap", "rev-gap", number=7)])
+
+    async def _run():
+        task = asyncio.create_task(
+            reconcile.reconcile_loop(interval=3600, config=cfg, gerrit=g, dedup=store)
+        )
+        await _await_probe(started, what="the first review")
+        reconcile.request_stop()
+        # No cancel: the loop must come back on its own, well inside a real drain budget.
+        await asyncio.wait_for(task, timeout=10)
+        return task
+
+    task = asyncio.run(_run())
+
+    assert completed == ["rebar~main~Igap"], (
+        "the loop must let the review in flight complete before returning; got "
+        f"{completed} (this is the review a shutdown cancels today)"
+    )
+    assert task.done() and not task.cancelled()
+
+
+@pytest.mark.real_reconcile_loop
+def test_reconcile_loop_stop_is_prompt_while_idle_between_passes(monkeypatch, tmp_path):
+    """An IDLE reconciler parked between passes must notice the stop promptly rather than
+    holding shutdown open for a whole reconcile interval (default 300s)."""
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    _patch_review(monkeypatch, [])
+    g = ReconcileGerrit(events=[])  # nothing to do → the loop parks in its inter-pass wait
+
+    async def _run():
+        task = asyncio.create_task(
+            reconcile.reconcile_loop(interval=3600, config=cfg, gerrit=g, dedup=store)
+        )
+        # first pass done → now parked
+        await _await_probe(g.list_since_calls, what="the first reconcile pass")
+        await asyncio.sleep(0.05)
+        start = time.monotonic()
+        reconcile.request_stop()
+        await asyncio.wait_for(task, timeout=10)
+        return time.monotonic() - start
+
+    elapsed = asyncio.run(_run())
+
+    assert elapsed < 2.0, (
+        f"an idle reconciler took {elapsed:.2f}s to honour the stop against a 3600s interval; "
+        "the inter-pass wait must be interruptible or shutdown waits out the whole interval"
+    )
+
+
 # ── force / rerun recovery ──────────────────────────────────────────────────────
 def test_voter_force_re_reviews_despite_existing_vote_and_dedup(monkeypatch, tmp_path):
     """force=True (a manual /rerun) re-reviews + re-casts even when the change ALREADY
@@ -1989,6 +2178,270 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
     assert elapsed < 2.0, (
         f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
         "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."
+    )
+
+
+# ── 9ec0: the shutdown drain must cover the RECONCILER's inline review ────────
+#
+# ``queue.join()`` drains the WEBHOOK queue only. The reconciler awaits ``review_and_vote``
+# INLINE (reconcile.reconcile_once), outside that queue, so with an empty queue ``join()``
+# returns immediately and the reconcile task is cancelled within ``SHUTDOWN_CANCEL_SECONDS``
+# — abandoning a backfill review that may be minutes in. The reconciler is the path that
+# RETRIES a review killed by anything else, so the gap sits on the self-heal path.
+#
+# These tests drive the REAL ``reconcile_loop`` (a test that drives the queue would prove
+# nothing here: the queue path is already protected).
+def _reconciler_probe(monkeypatch, tmp_path, *, gap_count=1, review_seconds=0.4):
+    """Wire the real reconcile_loop onto a fake events-log with ``gap_count`` vote-less changes.
+
+    Slows the review by stubbing the GATE (``produce_code_review_verdict``) rather than by
+    replacing ``review_and_vote``, so the REAL ``review_and_vote`` runs. That matters for the
+    lifespan tests: the drain gate reads ``voter.in_flight_reviews()``, whose count is held by
+    ``_counting_in_flight`` INSIDE ``review_and_vote`` — a stubbed-out review would never hold
+    it, and the test would then be asserting against a count it manufactured itself.
+
+    Returns (cfg, gerrit, started). Completion is read from ``gerrit.votes``: a cast vote is the
+    real end of the pipeline, a stronger signal than a stub's own transcript.
+    """
+    cfg = _cfg(tmp_path)
+    started: list[str] = []
+
+    import rebar.llm.workflow.gate_dispatch as gd
+
+    def _slow_gate(request):
+        started.append(getattr(request, "change_id", "?"))
+        time.sleep(review_seconds)  # the long LLM pass, off-loop via to_thread
+        return _verdict_from_findings([])  # clean → PASS → a vote is cast
+
+    gerrit = ReconcileGerrit(
+        events=[
+            _events_log_event(f"rebar~main~Igap{i}", f"rev-gap{i}", number=100 + i)
+            for i in range(gap_count)
+        ]
+    )
+    monkeypatch.setattr(gd, "produce_code_review_verdict", _slow_gate, raising=True)
+    monkeypatch.setattr(reconcile, "GerritClient", lambda *_a, **_k: gerrit, raising=True)
+    return cfg, gerrit, started
+
+
+async def _await_first_review(started, *, cap=3.0):
+    """Wait until the reconciler is genuinely INSIDE its review, so shutdown interrupts an
+    in-flight review rather than racing the pass's setup."""
+    await _await_probe(started, cap=cap, what="the reconciler's review")
+
+
+@pytest.mark.real_reconcile_loop
+def test_shutdown_drains_an_in_flight_reconciler_review(monkeypatch, tmp_path):
+    """AC1: a reconciler review in flight at shutdown must be DRAINED, not cancelled.
+
+    Pre-fix this fails: the webhook queue is empty, so ``queue.join()`` returns immediately
+    and the reconcile task is cancelled straight away, so the review never completes."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    cfg, gerrit, started = _reconciler_probe(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    # A bounded drain window that comfortably exceeds the fixture review, so a FAILURE here
+    # is "the review was cancelled", never "the budget was too small".
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "5")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            await _await_first_review(started)
+            # leaving the context = the shutdown uvicorn drives on SIGTERM
+
+    asyncio.run(asyncio.wait_for(_run(), timeout=20))
+
+    assert len(started) == 1, started
+    assert [v[0] for v in gerrit.votes] == ["rebar~main~Igap0"], (
+        "shutdown ABANDONED an in-flight reconciler review: it started but never cast its vote. "
+        "queue.join() drains the webhook queue only, so with an empty queue the reconcile "
+        "task is cancelled within SHUTDOWN_CANCEL_SECONDS while its inline review_and_vote "
+        "is mid-flight. The reconciler is the RETRY path, so this is the self-heal path "
+        f"being killed (9ec0 AC1). votes={gerrit.votes}"
+    )
+
+
+@pytest.mark.real_reconcile_loop
+def test_shutdown_does_not_let_the_reconciler_start_a_new_review(monkeypatch, tmp_path):
+    """AC2: the drain must not extend indefinitely — once shutdown has begun the reconciler
+    may finish the review in flight but must start NO new one.
+
+    Two vote-less changes are queued in the events-log. Shutdown lands during the first
+    review; the second must never start. This is the guard against 'fix' shapes that merely
+    let the reconcile loop run to completion, which would drain candidate after candidate
+    and could re-extend shutdown up to the full budget."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    cfg, gerrit, started = _reconciler_probe(monkeypatch, tmp_path, gap_count=2)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "5")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            await _await_first_review(started)
+
+    start = time.monotonic()
+    asyncio.run(asyncio.wait_for(_run(), timeout=20))
+    elapsed = time.monotonic() - start
+
+    assert len(gerrit.votes) == 1, (
+        f"the in-flight review must be drained exactly once: votes={gerrit.votes}"
+    )
+    assert len(started) == 1, (
+        f"shutdown let the reconciler START a new review after the drain began: {started}. "
+        "Draining must stop accepting new work, or each fresh candidate re-extends shutdown "
+        "(9ec0 AC2)."
+    )
+    # One review, not two, and nowhere near the 5s budget.
+    assert elapsed < 3.0, f"shutdown took {elapsed:.2f}s — the reconciler drain is not bounded"
+
+
+@pytest.mark.real_reconcile_loop
+def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tmp_path):
+    """The reconciler drain must run under the SAME ``shutdown_drain_seconds()`` deadline as
+    the queue drain, not a second independent one.
+
+    ``test_reviewbot_stop_grace_period_covers_an_in_flight_store_write`` sizes the container's
+    ``stop_grace_period`` as ``DEFAULT_SHUTDOWN_DRAIN_SECONDS + <store lock budget>``. Two
+    sequential windows of one drain budget each would make a real shutdown able to spend
+    ``2 x drain`` before the store write even starts, silently invalidating that sizing —
+    and overrunning the grace period means SIGKILL, which is strictly worse than a clean cancel.
+
+    To tell the two apart the QUEUE drain must consume most of the budget first: a webhook
+    review runs for 1.2s of a 2s budget, and the reconciler review then outlasts whatever is
+    left. Sharing one deadline finishes near 2s; a second independent window would spend 1.2s
+    plus a further 2s. (With an empty queue the two are indistinguishable, which is exactly the
+    vacuous shape this avoids.)"""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    cfg = _cfg(tmp_path)
+    started: list[str] = []
+    completed: list[str] = []
+
+    # The queue half is stubbed at review_and_vote (its drain is queue.join(), which does not
+    # consult the in-flight count), while the reconciler half runs the REAL review so the
+    # drain gate sees a genuine in_flight count.
+    real_review_and_vote = voter.review_and_vote
+
+    async def _review(event, *, config=None, gerrit=None, dedup=None, force=False):
+        change_id = event["change"]["id"]
+        if change_id.endswith("gap0"):  # the reconciler's candidate: real path, outlasts budget
+            return await real_review_and_vote(
+                event, config=config, gerrit=gerrit, dedup=dedup, force=force
+            )
+        started.append(change_id)
+        await asyncio.sleep(1.2)  # the webhook's review eats most of the budget
+        completed.append(change_id)
+        return {"status": "voted", "change_id": change_id}
+
+    import rebar.llm.workflow.gate_dispatch as gd
+
+    def _endless_gate(request):
+        started.append("gap0")
+        time.sleep(6)  # outlasts the whole budget (kept short: an orphaned thread is joined
+        return _verdict_from_findings([])  # by asyncio.run's teardown after the drain)
+
+    gerrit = ReconcileGerrit(events=[_events_log_event("rebar~main~Igap0", "rev-gap0", number=1)])
+    monkeypatch.setattr(gd, "produce_code_review_verdict", _endless_gate, raising=True)
+    monkeypatch.setattr(voter, "review_and_vote", _review, raising=True)
+    monkeypatch.setattr(reconcile, "GerritClient", lambda *_a, **_k: gerrit, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "2")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
+
+    drain_seconds: list[float] = []
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            await _await_first_review(started)  # the reconciler review is in flight
+            fake_app.state.queue.put_nowait(_event())  # and a webhook review will drain first
+            await asyncio.sleep(0.05)
+            start = time.monotonic()
+        drain_seconds.append(time.monotonic() - start)
+
+    # Timed around the context exit only: asyncio.run's teardown separately joins the orphaned
+    # gate thread, which would otherwise mask the very difference being measured.
+    asyncio.run(asyncio.wait_for(_run(), timeout=60))
+    elapsed = drain_seconds[0]
+
+    assert completed == ["rebar~main~Iabc"], (
+        f"the webhook review must drain and the reconciler's must outlast the budget: {completed}"
+    )
+    assert elapsed < 2.9, (
+        f"shutdown spent {elapsed:.2f}s against a 2s SHUTDOWN_DRAIN_SECONDS of which the queue "
+        "drain already used 1.2s. The queue drain and the reconciler drain must share ONE "
+        "deadline; two independent windows break the stop_grace_period sizing that "
+        "test_reviewbot_stop_grace_period_covers_an_in_flight_store_write pins, and an overrun "
+        "means SIGKILL mid-store-write."
+    )
+
+
+@pytest.mark.real_reconcile_loop
+def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypatch, tmp_path):
+    """The new drain must be scoped to an in-flight REVIEW, not to the reconcile task at large.
+
+    A reconciler parked in some other slow step — here a blocking events-log fetch — has no
+    review at risk, so shutdown must stay as prompt as it is today rather than waiting out the
+    drain budget. Without the ``voter.in_flight_reviews()`` gate this waits for the fetch to
+    return, which in production (a 1200s budget against a hung HTTP call) turns a ~10s shutdown
+    into minutes and eats the grace period that the store write needs."""
+    import types
+
+    pytest.importorskip("fastapi")
+    from rebar.review_bot import app as appmod
+
+    cfg = _cfg(tmp_path)
+    _patch_review(monkeypatch, [])
+
+    class SlowFetchGerrit(ReconcileGerrit):
+        def list_events(self, since=None):
+            self.list_since_calls.append(since)
+            time.sleep(3)  # blocking, off-loop via to_thread — no review is in flight
+            return []
+
+    gerrit = SlowFetchGerrit()
+    monkeypatch.setattr(reconcile, "GerritClient", lambda *_a, **_k: gerrit, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "5")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
+    elapsed: list[float] = []
+
+    async def _run():
+        async with appmod.lifespan(fake_app):
+            # the reconciler is inside the blocking fetch
+            await _await_probe(gerrit.list_since_calls, what="the events-log fetch")
+            start = time.monotonic()
+        elapsed.append(time.monotonic() - start)
+
+    # Timed around the context exit only: the executor's own join for the orphaned sleeping
+    # thread happens later, in asyncio.run's teardown, and is not part of the drain.
+    asyncio.run(asyncio.wait_for(_run(), timeout=30))
+
+    assert elapsed and elapsed[0] < 1.5, (
+        f"shutdown took {elapsed[0]:.2f}s with NO reconciler review in flight; the drain must "
+        "be gated on voter.in_flight_reviews() or a reconciler stuck anywhere else holds the "
+        "whole shutdown_drain_seconds() budget."
     )
 
 

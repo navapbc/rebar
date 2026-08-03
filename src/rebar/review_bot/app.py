@@ -35,6 +35,7 @@ import contextlib
 import hmac
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -113,7 +114,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     tasks: list[asyncio.Task] = []
     for _ in range(WORKER_COUNT):
         tasks.append(asyncio.create_task(_worker(app.state.queue, cfg)))
-    tasks.append(asyncio.create_task(_reconcile.reconcile_loop(config=cfg)))
+    # Re-arm the reconciler's cooperative-stop flag (module state, so a process that already
+    # ran a lifespan would otherwise start this one already shutting down).
+    _reconcile.clear_stop()
+    reconcile_task = asyncio.create_task(_reconcile.reconcile_loop(config=cfg))
+    tasks.append(reconcile_task)
     app.state.tasks = tasks
     # Snapshot-cache janitor (incident 2731 / bug e7f4): every review clones into the
     # content-addressed snapshot store on the ROOT disk, and without the janitor that
@@ -137,10 +142,47 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # acknowledged (202 "queued") webhooks (the in-memory queue is otherwise lost on every
         # restart). Bounded by ``config.shutdown_drain_seconds()``; anything still queued when
         # the window elapses is left for the backfill reconciler — fail-safe, never fail-lose.
+        #
+        # ONE deadline covers BOTH halves of the drain (ticket 9ec0). The queue drain and the
+        # reconciler drain must not each get a full ``shutdown_drain_seconds()``: the
+        # container's ``stop_grace_period`` is sized as that budget PLUS the store write-lock
+        # budget, so two sequential windows would let a shutdown legitimately overrun the grace
+        # period — and an overrun is SIGKILL mid-store-write (an orphaned mkdir lock dir the
+        # next container cannot reclaim), which is strictly worse than a clean cancel.
+        deadline = time.monotonic() + shutdown_drain_seconds()
+
+        def _remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        # Tell the reconciler to wind down BEFORE either wait, so it starts no new review while
+        # we drain (otherwise a fresh candidate could re-extend the wait, pass after pass).
+        _reconcile.request_stop()
         queue: asyncio.Queue | None = getattr(app.state, "queue", None)
         if queue is not None:
             with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
-                await asyncio.wait_for(queue.join(), timeout=shutdown_drain_seconds())
+                await asyncio.wait_for(queue.join(), timeout=_remaining())
+        # Now the OTHER half: the reconciler awaits ``review_and_vote`` INLINE, outside the
+        # queue, so ``queue.join()`` above says nothing about it. Having asked it to stop, wait
+        # for its task to finish the review it already had in flight — the backfill path is the
+        # one that RETRIES a review lost to anything else, so abandoning it here is what let a
+        # landing burst live-lock the gate. Run out of budget and it is abandoned by the cancel
+        # below — the same fail-safe the queue drain already has.
+        #
+        # Gated on a review ACTUALLY being in flight, reusing 34cd's ``in_flight_reviews()``
+        # rather than a second counter: a reconciler merely parked in some other slow step — a
+        # blocking events-log fetch, say — then keeps today's prompt cancel instead of holding
+        # shutdown for the whole budget. The gate cannot go stale in either direction: the stop
+        # is already requested so no new reconciler review can start, and ``queue.join()`` has
+        # already returned, so any remaining count is the reconciler's. (Had the join instead
+        # timed out, a worker review could still be counted — but then the budget is spent, so
+        # the wait below is a no-op.)
+        #
+        # ``asyncio.wait`` rather than ``wait_for``: wait_for's timeout path CANCELS the task and
+        # then awaits it with no bound of its own, which would reintroduce the unbounded-await
+        # hang c2ba closed if the task were slow to honor that cancel. ``wait`` just returns; the
+        # bounded cancel/gather below stays the single place that abandons work.
+        if _voter.in_flight_reviews() and not reconcile_task.done():
+            await asyncio.wait({reconcile_task}, timeout=_remaining())
         for task in tasks:
             task.cancel()
         # Bound the cancel + await (c2ba). A well-behaved task cancels promptly (its coroutine
