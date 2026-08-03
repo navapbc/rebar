@@ -61,6 +61,7 @@ from .det_gate_rules import _DET_OVERLAY_RULES as _DET_OVERLAY_RULES
 from .det_gate_rules import DetGateRule as DetGateRule
 from .det_gate_rules import leaf_gate_triggers as leaf_gate_triggers
 from .det_gate_rules import overlay_triggers as overlay_triggers
+from .det_gate_rules import project_trigger_fires as project_trigger_fires
 
 # The gate error is the SHARED criteria error (story 5065): plan-review re-exports it as
 # ``RegistryError`` so every existing ``except RegistryError`` / ``pytest.raises`` keeps

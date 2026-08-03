@@ -162,6 +162,52 @@ _DET_LEAF_GATE_RULES: dict[str, DetGateRule] = {
 }
 
 
+def project_trigger_fires(
+    trigger: object | Any,
+    plan: str,
+    file_impact: FileImpact | None = None,
+) -> bool | None:
+    """Evaluate a project criterion's deterministic ``trigger`` list (from
+    ``.rebar/criteria_routing.json``) against *plan* and *file_impact*.
+
+    Returns:
+    - ``None``  (fail-open) when *trigger* is absent/None, not a non-empty list, or ANY
+      entry is malformed (not a Mapping; or no usable arm after compiling regexes).
+    - ``True``  when EVERY entry's :class:`DetGateRule` fires (conjunction across entries).
+    - ``False`` when at least one entry fires nothing.
+
+    A regex that fails to compile makes its entry malformed → None (fail-open).
+    Never raises. Ticket a584, fail-open contract: None must not gate.
+    """
+    if not trigger or not isinstance(trigger, Sequence) or isinstance(trigger, str):
+        return None
+    rules: list[DetGateRule] = []
+    for entry in trigger:
+        if not isinstance(entry, Mapping):
+            return None
+        try:
+            raw_text_all = entry.get("text_all") or []
+            raw_globs = entry.get("file_impact_globs") or []
+            raw_reason_re = entry.get("file_impact_reason_re") or None
+            text_all = tuple(str(r) for r in raw_text_all) if raw_text_all else ()
+            globs = tuple(str(g) for g in raw_globs) if raw_globs else ()
+            reason_re = str(raw_reason_re) if raw_reason_re else None
+            # Validate: at least one usable arm
+            if not text_all and not globs and not reason_re:
+                return None
+            # Compile-check all regexes defensively
+            for rx in text_all:
+                re.compile(rx)
+            if reason_re:
+                re.compile(reason_re)
+        except (re.error, TypeError, ValueError):
+            return None
+        rules.append(DetGateRule("project-trigger", text_all, globs, reason_re))
+    if not rules:
+        return None
+    return all(r.fires(plan, file_impact) for r in rules)
+
+
 def overlay_triggers(plan: str, file_impact: FileImpact | None = None) -> dict[str, bool]:
     """Deterministic overlay triggers. Returns ``{overlay_id: fired}`` for every rule in
     ``_DET_OVERLAY_RULES``; the remaining overlays are LLM-routed and absent from this
