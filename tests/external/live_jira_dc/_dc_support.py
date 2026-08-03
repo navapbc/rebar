@@ -508,3 +508,64 @@ def assert_remote_parent_is(
         + ". A null/absent parent means the write cleared the field instead of setting it; any "
         "other key means it landed on the wrong issue."
     )
+
+
+_ALERT_STORE_SUBPATH = ("bridge_state", "bridge_alerts")
+
+
+def assert_bridge_alert_for_mutation(
+    cp: subprocess.CompletedProcess,
+    repo: Path,
+    local_id: str,
+    *,
+    key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read the `bridge_alerts` records naming `local_id` (or `key`) from a PROVEN-CLEAN pass.
+
+    Returns the matching records (possibly empty) for the CALLER to interpret — whether a
+    record is present or absent is a diagnostic finding specific to the cell asking, not
+    something this helper can judge on its own. See [rebar:18a5-2bd8-3e56-4bd8] for the cell
+    that needs this and [rebar:1a9f-50c0-e7a5-4fda] for the record it correlates: a mutation
+    swallowed by ``record_backstop_failure`` (`apply_handlers.py:355-387`) writes exactly one
+    of these, shaped ``{"kind": "mutation-error", "key": ..., "local_id": ..., "action": ...,
+    "pass_id": ..., "timestamp_ns": ..., "reason": ...}``.
+
+    ``cp`` IS REQUIRED, and the two assertions below run BEFORE this reads a single byte of
+    the alert store. ``alert_store.append`` (`alert_store.py:40-59`) creates
+    ``bridge_state/bridge_alerts/`` only on its FIRST write, so an absent directory is
+    indistinguishable on disk from "a clean pass wrote nothing" — the only way to tell those
+    apart is evidence that a pass actually RAN and completed. Skipping this precondition would
+    make this helper exactly the vacuous oracle this epic keeps producing: "no alert" would
+    mean "nobody looked" as often as it meant "nothing went wrong".
+
+    Matches on `local_id` (every writer of this shape carries it — `apply_handlers.py:377`)
+    and, if given, also on `key` (`apply_handlers.py:376`), since an UPDATE-path failure may
+    have a Jira key but never gained a local_id in the record, or vice versa for a CREATE.
+    """
+    assert cp.returncode == 0, (
+        f"the pass exited {cp.returncode}, not 0 — a failed pass's alert store proves nothing "
+        f"about whether a MUTATION was swallowed, only that the pass itself did not complete. "
+        f"stdout:\n{cp.stdout[-1500:]}\nstderr:\n{cp.stderr[-1500:]}"
+    )
+    assert "Traceback" not in cp.stderr, (
+        f"the pass raised (a traceback is on stderr), so it did not run to completion and its "
+        f"alert store is not evidence of anything either way:\n{cp.stderr[-2000:]}"
+    )
+
+    store_dir = repo.joinpath(*_ALERT_STORE_SUBPATH)
+    records: list[dict[str, Any]] = []
+    if store_dir.is_dir():
+        for jsonl_file in sorted(store_dir.glob("*.jsonl")):
+            for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                if rec.get("local_id") == local_id or (key is not None and rec.get("key") == key):
+                    records.append(rec)
+    return records
