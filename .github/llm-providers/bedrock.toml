@@ -18,6 +18,18 @@
 # raises a typed LLMConfigError when none resolves. The workflow therefore sets BOTH
 # AWS_DEFAULT_REGION and REBAR_LLM_BEDROCK_REGION as job env.
 
+# `[llm] model` is set as well as the classes, and it is LOAD-BEARING rather than redundant.
+# `cfg.model` is a SECOND resolution path the class table cannot reach: config.py:575 reads it
+# from `REBAR_LLM_MODEL`/`model` falling back to DEFAULT_MODEL, which is the bare literal
+# "claude-opus-4-8" and so infers provider `anthropic`. Any op that resolves `cfg.model` instead
+# of naming a class — and several do — would call direct Anthropic on EVERY arm, which is exactly
+# the "ambient default" this overlay exists to remove. MEASURED in run 30836378745: three such
+# tests called `model=anthropic:claude-opus-4-8` on the bedrock and openai arms and failed with
+# "Could not resolve authentication method", because those arms deliberately blank
+# ANTHROPIC_API_KEY.
+[llm]
+model = "bedrock:us.anthropic.claude-opus-4-8"
+
 [llm.model_classes]
 frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
 standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }

@@ -13,9 +13,14 @@ What each group protects, and the specific way the matrix could be silently brok
   happens to be set", which is the ambient default this story removes.
 * **selection goes through REBAR_LLM_CONFIG_FILE, never the deprecated bare REBAR_LLM_MODEL** —
   the latter cannot express a per-class model, so it cannot repoint all three classes.
-* **each overlay sets ONLY [llm.model_classes]** — an overlay that also set, say, `max_steps`
-  would make one arm differ from its siblings in more than the provider, and any difference
-  found would be unattributable.
+* **each overlay sets ONLY the two model-selection keys, `[llm] model` and
+  [llm.model_classes]** — an overlay that also set, say, `max_steps` would make one arm differ
+  from its siblings in more than the provider, and any difference found would be unattributable.
+  BOTH selection keys are required, and an earlier version of this file asserted `model_classes`
+  ALONE, which actively enforced a real leak: `cfg.model` is a second resolution path the class
+  table cannot reach, so any op reading it called direct Anthropic on every arm (run
+  30836378745). A test that pins the wrong surface is worse than no test, because it certifies
+  the gap.
 * **the overlay LAYERS rather than replaces** — the criterion `dict.update` cannot satisfy: an
   arm must override provider/model and leave the rest of the discovered config intact.
 * **no arm holds a foreign provider's credential** — a Bedrock arm that also saw
@@ -143,15 +148,27 @@ def test_the_deprecated_bare_model_variable_is_never_set() -> None:
             )
 
 
-def test_each_overlay_sets_only_the_model_classes_table() -> None:
+def test_each_overlay_sets_only_the_model_selection_keys() -> None:
+    """An overlay sets BOTH selection keys and nothing else.
+
+    `model_classes` alone is NOT sufficient, and asserting only it is what let a real leak ship:
+    `cfg.model` is a separate resolution path that falls back to the bare literal DEFAULT_MODEL and
+    therefore infers provider `anthropic`, so every op reading it called direct Anthropic on all
+    three arms while this file's class assertion passed (run 30836378745). Both keys are pinned
+    here; unrelated keys are still forbidden, which is the original and still-valid intent."""
     for arm in _arms():
         data = tomllib.loads((_ROOT / arm["config_file"]).read_text(encoding="utf-8"))
         assert set(data) == {"llm"}, (
             f"{arm['config_file']} sets top-level keys other than [llm]: {sorted(data)}"
         )
-        assert set(data["llm"]) == {"model_classes"}, (
-            f"{arm['config_file']} sets [llm] keys beyond model_classes: "
-            f"{sorted(data['llm'])} — an arm must differ from its siblings ONLY in provider"
+        assert set(data["llm"]) == {"model", "model_classes"}, (
+            f"{arm['config_file']} must set EXACTLY [llm] model + model_classes, got "
+            f"{sorted(data['llm'])} — an arm must differ from siblings ONLY in provider, and it "
+            f"must repoint BOTH the class table and the ambient cfg.model"
+        )
+        assert data["llm"]["model"].startswith(f"{arm['provider']}:"), (
+            f"{arm['config_file']} sets [llm] model = {data['llm']['model']!r}, which is not "
+            f"qualified with this arm's provider {arm['provider']!r}"
         )
         assert set(data["llm"]["model_classes"]) == set(_CLASSES), (
             f"{arm['config_file']} must set all three model classes, got "
