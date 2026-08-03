@@ -87,6 +87,57 @@ _T1_FORMAT = "%Y-%m-%d %H:%M:%S"
 #: and re-driving it would 409 forever (bug c943).
 _RETRYABLE_STATUSES = frozenset({"error", "deferred"})
 
+#: Cooperative-shutdown flag (ticket 9ec0). The app lifespan drains the webhook queue with
+#: ``queue.join()``, which does NOT cover this module: ``reconcile_once`` awaits
+#: ``review_and_vote`` INLINE, so with an empty queue the join returns at once and the
+#: reconcile task is cancelled within ``shutdown_cancel_seconds()`` — killing a backfill
+#: review that may be minutes in. Since the reconciler is the path that RETRIES a review lost
+#: to anything else, that is the self-heal path being killed.
+#:
+#: The fix is cooperative rather than a second drain primitive: ``request_stop()`` makes the
+#: loop stop taking NEW candidates and return as soon as the review in flight finishes, so
+#: the reconcile TASK ITSELF becomes the thing the lifespan can await — under the same
+#: single ``shutdown_drain_seconds()`` deadline as the queue drain.
+#:
+#: Deliberately a plain bool, not an ``asyncio.Event``: an Event binds to the loop it is first
+#: awaited on, and this is module state that outlives any one loop, so a second
+#: ``asyncio.run`` would hit "bound to a different event loop". A bool has no loop affinity.
+_stop_requested = False
+
+#: Granularity at which an IDLE reconciler (parked between passes) notices a stop request.
+#: Small enough that shutting down an idle bot is not perceptibly delayed, large enough to be
+#: free at steady state.
+_STOP_POLL_SECONDS = 0.25
+
+
+def request_stop() -> None:
+    """Ask the reconcile loop to wind down: finish the review in flight, start no new one,
+    and return. Idempotent; called by the app lifespan at the start of its shutdown drain."""
+    global _stop_requested
+    _stop_requested = True
+
+
+def clear_stop() -> None:
+    """Re-arm the loop (undo :func:`request_stop`). Called when a lifespan STARTS so a fresh
+    app in a process that already ran one — a reload, or a test — is not born shutting down."""
+    global _stop_requested
+    _stop_requested = False
+
+
+def stop_requested() -> bool:
+    """Whether a cooperative shutdown has been requested."""
+    return _stop_requested
+
+
+async def _sleep_unless_stopping(seconds: float) -> None:
+    """Sleep up to ``seconds``, returning EARLY once a stop has been requested, so an idle
+    reconciler does not hold shutdown open for a whole reconcile interval."""
+    remaining = max(0.0, seconds)
+    while remaining > 0 and not _stop_requested:
+        step = min(_STOP_POLL_SECONDS, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
+
 
 def _emit(event: str, **fields: Any) -> None:
     logger.info(json.dumps({"event": event, "timestamp": time.time(), **fields}, default=str))
@@ -250,7 +301,29 @@ async def reconcile_once(
     # un-voted for a RETRYABLE reason. Its minimum is the cursor's low-water mark (9f63): the
     # next pass's ``?t1=`` window must still contain these, or they are lost for good.
     held_back: dict[str, int] = {}
-    for change_id, ev in candidates.items():
+    pending = list(candidates.items())
+    for position, (change_id, ev) in enumerate(pending):
+        # Cooperative shutdown (ticket 9ec0): once shutdown has begun, take NO new candidate.
+        # This is what bounds the drain — the lifespan waits for the review in flight, and a
+        # pass that kept picking up fresh candidates could re-extend that wait up to the whole
+        # budget, candidate after candidate.
+        #
+        # Every candidate from here on is left un-voted, so each is HELD BACK (bug 9f63) rather
+        # than merely skipped. The cursor is a LOW-WATER MARK: without the hold-back it would
+        # still advance to ``newest``, pushing these candidates out of the next pass's inclusive
+        # ``?t1=`` window — unreachable forever. Shutdown must not become the one path that
+        # silently drops a gap patchset; held back, they stay vote-less (fail-closed) and the
+        # next container's startup pass picks them straight back up.
+        if _stop_requested:
+            for skipped_id, skipped_ev in pending[position:]:
+                held_back[skipped_id] = _event_time(skipped_ev)
+            _emit(
+                "reconcile_stopping",
+                skipped_from=change_id,
+                skipped=len(pending) - position,
+                reviewed=reviewed,
+            )
+            break
         patchset = ev.get("patchSet") or {}
         revision = str(patchset.get("revision"))
         try:
@@ -362,7 +435,14 @@ async def reconcile_loop(
 ) -> None:
     """Run ``reconcile_once`` on startup and then every ``interval`` seconds (default
     ``RECONCILE_INTERVAL_SECONDS``). Runs until cancelled (the app lifespan owns it);
-    a per-pass failure is logged and the loop continues."""
+    a per-pass failure is logged and the loop continues.
+
+    Also returns cleanly once :func:`request_stop` has been called (ticket 9ec0). That is what
+    makes this coroutine awaitable as a DRAIN by the app lifespan: the current pass finishes
+    the review it already has in flight, declines to start another, and the task completes —
+    so the lifespan can wait for the reconciler's inline review under the same
+    ``shutdown_drain_seconds()`` deadline it gives the webhook queue, instead of cancelling
+    that review outright within ``shutdown_cancel_seconds()``."""
     cfg = config or ReceiverConfig.from_env()
     every = interval if interval is not None else cfg.reconcile_interval_seconds
     gc = gerrit or GerritClient(cfg)
@@ -374,4 +454,11 @@ async def reconcile_loop(
             raise
         except Exception as exc:  # noqa: BLE001 — a pass must never kill the loop
             _emit("reconcile_loop_error", error=str(exc))
-        await asyncio.sleep(max(1, every))
+        # Checked AFTER the pass, so a stop requested mid-review still lets that review land.
+        if _stop_requested:
+            _emit("reconcile_loop_stopped")
+            return
+        await _sleep_unless_stopping(max(1, every))
+        if _stop_requested:
+            _emit("reconcile_loop_stopped")
+            return
