@@ -6,9 +6,11 @@ workflow-status maps and the pure helpers that turn a raw Jira ``fields`` dict
 into the local ticket field/value shape the differ then diffs against.
 
 It is a LEAF: every function here references only other symbols in this module
-(and the sibling ``adf`` module, loaded lazily by-path). ``inbound_differ``
-imports these names back and re-exports them, so ``inbound_differ.<symbol>``
-attribute access (and the config parity tests) keep resolving unchanged.
+(and the sibling ``adf`` module, loaded lazily by-path, plus the provider-agnostic
+managed-ref removal gate that ``diff_inbound_parent`` imports lazily — reused, never
+re-implemented). ``inbound_differ`` imports these names back and re-exports them, so
+``inbound_differ.<symbol>`` attribute access (and the config parity tests) keep
+resolving unchanged.
 
 This module is pure: no I/O, no time/random, no logging, no globals beyond the
 lazy ``adf`` module cache.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -245,3 +248,104 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
         out["status"] = local_status
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Inbound parent: the THREE-state read and the gated clear (ticket 88d9)
+# ---------------------------------------------------------------------------
+
+# The four situations the snapshot's ``parent`` field can be in. Before 88d9 the
+# differ collapsed all of them into "resolved to a local id, or not", which made a
+# de-parenting in Jira indistinguishable from a read that never happened — so the
+# differ could not clear a parent without risking a spurious clear, and therefore
+# never cleared one at all.
+PARENT_UNOBSERVED = "unobserved"  # no ``parent`` key: never queried / read failed / truncated
+PARENT_NO_PARENT = "no-parent"  # key PRESENT and falsy: queried, Jira has NO parent
+PARENT_RESOLVED = "resolved"  # a parent key that resolves to a bound local id
+PARENT_UNRESOLVABLE = "unresolvable"  # a parent key we cannot resolve yet (unbound / malformed)
+
+
+def classify_inbound_parent(
+    jira_fields: dict[str, Any],
+    get_local_id: Callable[[str], str | None],
+) -> tuple[str, str | None]:
+    """Classify a snapshot entry's ``parent`` field; return ``(state, local_parent_id)``.
+
+    ``local_parent_id`` is non-None only for :data:`PARENT_RESOLVED`.
+
+    The distinction that matters is PRESENCE, not truthiness: ``fetcher.merge_parent_map``
+    writes the key only for issues the parent map actually mentioned, so a missing key means
+    "we did not observe this issue" (a truncated page walk, a cross-project issue, or the
+    whole-map ``{}`` degradation ``get_parent_map`` returns on ANY REST failure) while a
+    present-and-falsy value means "Jira was asked and answered: no parent". Only the latter
+    may authorise a clear — this is the same predicate shape (``key in m and not m[key]``)
+    that story 5200's parent wait-helper had to be fixed to before landing.
+    """
+    if "parent" not in jira_fields:
+        return PARENT_UNOBSERVED, None
+    parent_raw = jira_fields.get("parent")
+    if not parent_raw:
+        return PARENT_NO_PARENT, None
+    if not isinstance(parent_raw, dict):
+        # Jira HAS a parent but not in the ``{"key": ...}`` REST shape we can read. Treat as
+        # unresolvable (skip), never as "no parent" — an unreadable value is not evidence of
+        # absence.
+        return PARENT_UNRESOLVABLE, None
+    parent_jira_key = parent_raw.get("key")
+    if not parent_jira_key:
+        return PARENT_UNRESOLVABLE, None
+    local_parent_id = get_local_id(parent_jira_key)
+    if local_parent_id is None:
+        return PARENT_UNRESOLVABLE, None  # not bound yet — retry next pass
+    return PARENT_RESOLVED, local_parent_id
+
+
+def diff_inbound_parent(
+    jira_fields: dict[str, Any],
+    local_ticket: dict[str, Any],
+    get_local_id: Callable[[str], str | None],
+) -> tuple[bool, str | None]:
+    """Decide the inbound ``parent_id`` change for one bound ticket (ticket 88d9).
+
+    Returns ``(emit, value)``. ``emit`` False means the differ writes nothing for this field.
+
+    An inbound CLEAR is a WRITE THAT DESTROYS LOCAL DATA, so it fires only on POSITIVE
+    evidence — never on absent snapshot data — and only through the shared managed-ref gate:
+
+      * :data:`PARENT_RESOLVED`     -> set/compare as before (a SET is local-authoritative
+                                       once observed, and unchanged emits nothing).
+      * :data:`PARENT_UNOBSERVED`   -> nothing. The read may have failed or been truncated.
+      * :data:`PARENT_UNRESOLVABLE` -> nothing, preserving the original guard's intent: "we do
+                                       NOT emit parent_id=None to avoid accidentally clearing a
+                                       locally-set parent when we just can't resolve it yet".
+      * :data:`PARENT_NO_PARENT`    -> the CLEAR, gated on ``should_propagate_removal`` so a
+                                       parent a human set directly in Jira (one rebar never
+                                       managed) is ADOPTED rather than clobbered. This is the
+                                       SAME provider-agnostic predicate the outbound direction
+                                       wraps as ``_parent_clear_is_managed``; reused, not
+                                       re-invented.
+
+    KNOWN BLIND SPOT, recorded not hidden: ``add_managed_ref`` is folded by the parent-set
+    EVENT, so a ref is "managed" the instant it is set LOCALLY — MANAGED does not prove Jira
+    ever had the parent. The differ's same-pass suppression closes that (an inbound field the
+    same pass's outbound is writing is dropped, and ``_OUTBOUND_TO_INBOUND_FIELD`` maps
+    ``parent`` -> ``parent_id`` so it genuinely fires here). The residual window, stated
+    plainly: a degraded pass in which outbound does not write the parent (skipped, disabled, or
+    failed) while inbound proceeds.
+    """
+    state, jira_parent_local_id = classify_inbound_parent(jira_fields, get_local_id)
+    local_parent_id = local_ticket.get("parent_id") or None
+
+    if state == PARENT_RESOLVED:
+        if jira_parent_local_id != local_parent_id:
+            return True, jira_parent_local_id
+        return False, None
+    if state != PARENT_NO_PARENT:
+        return False, None
+    if local_parent_id is None:
+        return False, None  # steady state: parentless on both sides, no churn
+    from rebar.reducer._managed_refs import should_propagate_removal
+
+    if not should_propagate_removal("parent", local_parent_id, local_ticket):
+        return False, None
+    return True, None
