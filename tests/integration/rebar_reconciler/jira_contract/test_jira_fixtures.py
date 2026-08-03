@@ -83,7 +83,15 @@ def test_fake_routes_fixtures_through_production_fetch(monkeypatch) -> None:
     # REB-430 (the epic) is top-level: authoritative EMPTY links list, no parent.
     epic = snapshot["REB-430"]
     assert epic.get("issuelinks") == [], "empty-links authoritative shape lost"
-    assert "parent" not in epic, "top-level issue should carry no parent key"
+    # Ticket 88d9 INVERTED this, preserving its intent. The intent was "a top-level issue
+    # must not be misreported as having a parent" — fully kept below, and strengthened: the
+    # key must be PRESENT and falsy, i.e. the parent map was QUERIED and Jira has no parent.
+    # The old `"parent" not in epic` form could not tell that from a failed or truncated
+    # read, which is the exact ambiguity 88d9 exists to remove (an inbound parent CLEAR is a
+    # write that destroys local data, so it may only fire on positive evidence). This mirrors
+    # the authoritative-EMPTY-links assertion two lines above.
+    assert "parent" in epic, "queried top-level issue must carry an explicit parent key"
+    assert epic.get("parent") is None, "top-level issue must be authoritatively parentless"
 
     # REB-407 exercises the non-null assignee shape end-to-end.
     assert isinstance(snapshot["REB-407"].get("assignee"), dict)
