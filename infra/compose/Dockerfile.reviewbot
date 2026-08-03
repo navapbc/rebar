@@ -72,15 +72,33 @@ ENV SEMGREP_SEND_METRICS=off \
 WORKDIR /app
 
 # Copy the whole repo (the build context is the repo root) and install the package
-# with the agents + reviewbot extras THROUGH the committed uv.lock (ticket ce5d):
+# with the agents + reviewbot + bedrock extras THROUGH the committed uv.lock (ticket ce5d):
 #   - reviewbot -> fastapi + uvicorn[standard] (the ASGI server)
 #   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it)
+#   - bedrock   -> pydantic-ai-slim[bedrock], the dependency of the AWS Bedrock provider
+#       that rebar.llm.bedrock_model.build_bedrock_provider imports lazily
+#       (`pydantic_ai.providers.bedrock`) once this container's model-class slots point at
+#       Bedrock (story eb6e).
+#
+#       DECLARED FOR EXPLICITNESS, NOT TO FIX A MISSING IMPORT. That import already
+#       succeeds in this image without this extra, and the reason is worth writing down:
+#       `pydantic_ai/providers/bedrock.py` ships in the BASE pydantic-ai-slim wheel, and
+#       pydantic-ai-slim's own `bedrock` extra contributes only boto3 — which this image
+#       already installs via the `reviewbot` extra above (`reviewbot = [..., "boto3"]`),
+#       at the same version. So the Bedrock provider's dependency is satisfied today only
+#       INCIDENTALLY, by an extra that does not exist for that purpose.
+#
+#       Naming `bedrock` makes the dependency INTENTIONAL and lock-enforced. Without it,
+#       dropping boto3 from the `reviewbot` extra — or pydantic-ai-slim later adding a
+#       bedrock-extra dependency beyond boto3 — would break the provider at gate time in
+#       production, where the cutover ships with NO cross-provider fallback by design.
+#       The declaration is what makes that class of accident impossible rather than latent.
 # `uv sync --locked` refuses a drifted lock, so the image always runs the same
 # verified-importable dependency set as CI and local dev. The project venv lives at
 # /app/.venv; prepending it to PATH replaces the old system-site `pip install .`.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY . /app
-RUN uv sync --locked --no-dev --extra agents --extra reviewbot
+RUN uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install the tickets-store ensure helper (bug desirous-judicial-hogget / d220) onto PATH
