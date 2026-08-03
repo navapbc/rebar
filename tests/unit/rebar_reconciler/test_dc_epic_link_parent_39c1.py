@@ -12,7 +12,7 @@ THE DEFECT, as two policies that are each defensible alone.
 A DC sub-task's parent is a STANDARD issue, which imports as local ``ticket_type`` ``"task"``. So
 the one child shape the apply side accepts can only have a parent shape the emit side refuses. The
 sets never intersect and NO reconcile pass can emit an outbound parent-set that DC would accept.
-Confirmed live before this module existed: harness run 30784592232,
+Confirmed live before this module existed (ticket 39c1-2a32-b564-4b4b):
 ``test_outbound_clear_parent_round_trips`` — the local parent was detached and DC still carried
 ``fields.parent``.
 
