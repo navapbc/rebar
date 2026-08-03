@@ -6,10 +6,17 @@ The external suite's live-LLM lane runs one arm per provider
 credentials on a **GitHub-hosted `ubuntu-latest` runner**, and this runbook is the definition of
 the IAM role it assumes.
 
-> **This role does not exist yet.** Nothing in this repository creates it. Until an operator
-> creates it and sets the two repository variables below, the Bedrock arm **fails its preflight
-> step with an `::error::`** — deliberately, so an unconfigured arm can never be mistaken for a
-> passing one.
+> **This role NOW EXISTS**, created by an operator on 2026-08-03 exactly as specified below:
+> `arn:aws:iam::896586841071:role/rebar-external-ci-bedrock`, with inline policy
+> `rebar-external-ci-bedrock-converse` and no managed policies attached. Both repository
+> variables are set (`AWS_BEDROCK_CI_ROLE_ARN`, `AWS_BEDROCK_CI_REGION=us-east-1`).
+> Nothing in this repository creates it — it is operator-owned, and this file remains its
+> definition of record. Verify the live state against the JSON below with the commands in
+> §"Verify"; if they ever diverge, the JSON here is the intent and the live role is the drift.
+>
+> Were the role or either variable absent, the Bedrock arm **fails its preflight step with an
+> `::error::`** rather than skipping — deliberately, so an unconfigured arm can never be mistaken
+> for a passing one.
 
 ---
 
@@ -55,7 +62,7 @@ one ever appears.
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "GitHubActionsBranchRefsOfThisRepoOnly",
+      "Sid": "GitHubActionsMainOfThisRepoOnly",
       "Effect": "Allow",
       "Principal": {
         "Federated": "arn:aws:iam::896586841071:oidc-provider/token.actions.githubusercontent.com"
@@ -64,10 +71,8 @@ one ever appears.
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:repository": "navapbc/rebar"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:navapbc/rebar:ref:refs/heads/*"
+          "token.actions.githubusercontent.com:repository": "navapbc/rebar",
+          "token.actions.githubusercontent.com:sub": "repo:navapbc/rebar:ref:refs/heads/main"
         }
       }
     }
@@ -82,24 +87,36 @@ one ever appears.
 - `repository = navapbc/rebar` — pins the repository by name. **A trust policy without a
   repository or `sub` scope is assumable by any GitHub Actions workflow in the world**; that is
   the classic and serious misconfiguration here, not a theoretical one.
-- `sub` like `repo:navapbc/rebar:ref:refs/heads/*` — pins the *context* to a **branch ref of this
-  repository**. This is what excludes a `pull_request` context, whose subject is
-  `repo:navapbc/rebar:pull_request` — i.e. it stops a **fork's pull request** from adding a
-  workflow that assumes this role. A bare `repo:navapbc/rebar:*` (the shape
+- `sub` EQUAL TO `repo:navapbc/rebar:ref:refs/heads/main` — pins the *context* to **main of this
+  repository, and nothing else**. Note it sits under `StringEquals`, not `StringLike`: with no
+  wildcard needed there is no glob to reason about, which is strictly stronger. This excludes a
+  `pull_request` context, whose subject is `repo:navapbc/rebar:pull_request`, and it also excludes
+  every non-main branch. A bare `repo:navapbc/rebar:*` (the shape
   `rebar-terraform-plan` uses) does **not** exclude that, so do not copy it verbatim here.
 
-**Residual risk, stated plainly.** `refs/heads/*` means *anyone who can push a branch to the
-GitHub mirror* can run a workflow that assumes this role. That is deliberate: the external suite
-is triggered by `workflow_dispatch`, and an operator validating a change needs to dispatch it from
-that change's branch. The blast radius is bounded by the permission policy below — Bedrock
-Claude invocation and nothing else, i.e. the worst case is token spend, not data access.
+**Why main-only, and why it costs nothing here.** An earlier draft of this runbook used
+`refs/heads/*` on the reasoning that an operator validating a change would dispatch the suite from
+that change's branch. That is NOT how this repository works, and the operator said so directly:
+the external integration suite is not run on branches, and pull requests on the GitHub mirror are
+closed with a redirect to Gerrit. So no non-main ref ever has a legitimate need for this role, and
+the wildcard bought nothing while widening the trust boundary. Pinning `sub` to main exactly
+removes that.
 
-Two tighter variants, if you want them:
+What this closes that `refs/heads/*` did not: anyone able to push a branch to the mirror could
+have run a workflow assuming this role. Now only a run whose ref IS `refs/heads/main` can.
+Combined with the permission policy below, the worst case was already bounded to Bedrock Claude
+token spend rather than data access — but "bounded" is not a reason to leave a door open.
+
+One tighter variant remains available:
 
 | Variant | `sub` condition | What it additionally closes | Cost |
 |---|---|---|---|
-| main-only | `repo:navapbc/rebar:ref:refs/heads/main` | a branch pushed to the mirror | cannot dispatch the suite from a branch to validate a change |
-| environment-scoped | `repo:navapbc/rebar:environment:bedrock-ci` | same, plus adds required-reviewer gating | needs a GitHub environment named `bedrock-ci` **and** `environment: bedrock-ci` added to the `external-llm` job; the arm fails until both exist |
+| environment-scoped | `repo:navapbc/rebar:environment:bedrock-ci` | adds required-reviewer gating on top of main-only | needs a GitHub environment named `bedrock-ci` **and** `environment: bedrock-ci` added to the `external-llm` job; the arm fails until both exist |
+
+Note the consequence for dispatching, so it is not a surprise: `workflow_dispatch` must be run
+against **main**. Dispatching from any other ref makes the Bedrock arm fail role assumption —
+loudly, at the `configure-aws-credentials` step, which is the intended behaviour rather than a
+silent skip.
 
 ### Permission policy
 
@@ -164,11 +181,16 @@ aws iam get-role --role-name rebar-external-ci-bedrock \
 ### Terraform: intentionally NOT committed here
 
 `infra/terraform/` is guarded by `.github/workflows/terraform-drift.yml`, which runs
-`terraform plan -detailed-exitcode` and **fails on a non-empty plan** — that is, on committed HCL
-that has not been applied. Committing an `iam_ci_bedrock.tf` for a role that does not exist yet
-would therefore turn the drift check **red** the moment it merged, for every change, until someone
-applied it. So the definition lives here as JSON, and the equivalent HCL is below for whoever
-adopts it into terraform **in the same change as the apply**:
+`terraform plan -detailed-exitcode` and **fails on a non-empty plan** — that is, on any committed
+HCL whose state does not already match reality. Committing an `iam_ci_bedrock.tf` would turn the
+drift check **red** the moment it merged, for every change, until someone reconciled it.
+
+That is still true now that the role exists, for a different reason: the role was created with the
+AWS CLI, so terraform has **no state entry** for it. Committed HCL would therefore plan a CREATE of
+a role that already exists — which fails on a name collision rather than converging. Adopting it
+into terraform requires `terraform import` (or an equivalent `plan`-clean apply) **in the same
+change as the HCL**. So the definition lives here as JSON, and the equivalent HCL is below for
+whoever does that adoption:
 
 ```hcl
 # infra/terraform/iam_f124.tf — add ONLY together with an apply (see the drift-gate note above).
@@ -192,11 +214,12 @@ data "aws_iam_policy_document" "gha_external_ci_bedrock_assume" {
       variable = "token.actions.githubusercontent.com:repository"
       values   = ["navapbc/rebar"]
     }
-    # Branch refs only — excludes the `pull_request` subject, i.e. a fork PR.
+    # main ONLY. Exact match, not StringLike: the suite is never run on a branch, and mirror
+    # PRs are closed with a redirect to Gerrit, so no other ref needs this role.
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:navapbc/rebar:ref:refs/heads/*"]
+      values   = ["repo:navapbc/rebar:ref:refs/heads/main"]
     }
   }
 }
