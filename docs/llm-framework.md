@@ -325,7 +325,12 @@ model/provider/timestamp (multi-model ops sum correctly row by row) and adds an
 "est. cost" column plus a per-model rollup table. Pricing never breaks the summary and
 never guesses: rows genai-prices cannot price (unknown model → its typed `LookupError`,
 rows from the pre-metadata format, or any pricing crash — logged at WARNING) are
-excluded and the summary notes "excludes N unpriced calls". Without the extra, token
+excluded and the summary notes "excludes N unpriced calls", **naming each model id that
+failed to resolve** so an unknown model (`my-local-model`) is distinguishable from a row
+dropped because its id was mis-formatted (bug 2ca9, where a stored `provider:model` id was
+passed through verbatim as genai-prices' `model_ref` and silently dropped every Anthropic
+and OpenAI row — the qualifier is now removed by registry membership before lookup).
+Without the extra, token
 totals still print and the cost line reads `unavailable (install rebar[pricing])`.
 
 ## External-integration suite (live validation)

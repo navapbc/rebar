@@ -409,6 +409,34 @@ def _pricing_module():
     return genai_prices
 
 
+def _pricing_model_ref(model: str) -> str:
+    """The id to hand genai-prices as ``model_ref`` for a STORED model string.
+
+    Rows record the model PROVIDER-QUALIFIED (``anthropic:claude-sonnet-4-6``) because epic
+    061c made model strings carry their provider and ``agent_call`` records ``ran_model``
+    verbatim. genai-prices resolves a BARE id and treats the qualifier as part of the name, so
+    it raised ``LookupError`` on every qualified id — which :func:`_price_row` then correctly
+    turned into "unpriced", making the drop SILENT. Worse, it was asymmetric: only the
+    ``bedrock:`` form happened to resolve, so a provider cost comparison showed figures for
+    Bedrock and blanks for Anthropic and OpenAI, reading as "Bedrock is the expensive arm" when
+    it was the only arm being measured (bug 2ca9). Dropping the qualifier here is the whole
+    fix; ``provider_id`` stays the provider signal it already is.
+
+    The qualifier is identified by REGISTRY MEMBERSHIP, via
+    :func:`~rebar.llm.config.split_provider_qualifier` (membership in
+    ``KNOWN_PROVIDER_NAMES``) — deliberately NOT by prefix sniffing and NOT by parsing the
+    colon here. That is correctness, not style: a real AWS id such as
+    ``anthropic.claude-haiku-4-5-20251001-v1:0`` prices today, and splitting on the first
+    colon would hand genai-prices ``"0"``. Membership leaves an unrecognized prefix intact,
+    which is the only answer that keeps such an id priceable — and it keeps this module from
+    growing a second, drifting parser of the qualifier grammar.
+    """
+    from rebar.llm.config import split_provider_qualifier
+
+    _, bare = split_provider_qualifier(model)
+    return bare
+
+
 def _price_row(pricing, row: dict) -> float | None:
     """Est. USD cost for one row, or None (= unpriced). Pricing must never break
     summarize: LookupError (genai-prices' unknown-model signal) and a missing model are
@@ -421,7 +449,7 @@ def _price_row(pricing, row: dict) -> float | None:
         timestamp = datetime.fromisoformat(str(raw_ts)) if raw_ts else None
         price = pricing.calc_price(
             pricing.Usage(**usage_kwargs(row)),
-            model_ref=str(model),
+            model_ref=_pricing_model_ref(str(model)),
             provider_id=row.get("provider") or None,
             genai_request_timestamp=timestamp,
         )
@@ -459,6 +487,12 @@ def summarize(path: str) -> str:
     totals = {field: 0 for field in _FIELDS}
     calls = 0
     unpriced = 0
+    # The model_refs genai-prices could not resolve. Naming them is what makes a genuinely
+    # unknown model DISTINGUISHABLE from a row dropped because its id was mis-formatted: an
+    # unknown one reads bare (`my-local-model`), a mis-formatted one still shows the
+    # malformation (`not-a-provider:m`). "excludes N unpriced calls" alone could not tell the
+    # two apart, which is how bug 2ca9 stayed invisible for a whole epic.
+    unpriced_refs: list[str] = []
     total_cost = 0.0
     for row in rows:
         calls += 1
@@ -473,6 +507,12 @@ def summarize(path: str) -> str:
             cost = _price_row(pricing, row)
             if cost is None:
                 unpriced += 1
+                stored_model = row.get("model")
+                # A pre-pricing row carries no model at all: unpriced, but no id to blame.
+                if stored_model:
+                    ref = _pricing_model_ref(str(stored_model))
+                    if ref not in unpriced_refs:
+                        unpriced_refs.append(ref)
             else:
                 op_cost[op] = op_cost.get(op, 0.0) + cost
                 op_priced[op] = op_priced.get(op, 0) + 1
@@ -513,7 +553,10 @@ def summarize(path: str) -> str:
     else:
         if unpriced:
             plural = "s" if unpriced != 1 else ""
-            lines += ["", f"est. cost excludes {unpriced} unpriced call{plural}."]
+            note = f"est. cost excludes {unpriced} unpriced call{plural}."
+            if unpriced_refs:
+                note += f" No pricing data for: {', '.join(sorted(unpriced_refs))}."
+            lines += ["", note]
         if per_model:
             lines += [
                 "",
