@@ -43,6 +43,7 @@ from typing import Any
 
 import pytest
 from _dc_support import ADMIN_USER, BASE, live_jira_ready
+from _dc_support import assert_bridge_alert_for_mutation as _assert_bridge_alert_for_mutation
 from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
 from _dc_support import assert_mint_registered as _assert_mint_registered
 from _dc_support import assert_outbound_provenance_markers as _assert_outbound_provenance_markers
@@ -659,12 +660,29 @@ def test_outbound_create_stamps_both_provenance_markers(
     assert "Traceback" not in cp.stderr, f"outbound create pass raised:\n{cp.stderr[-2000:]}"
 
     key = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
-    assert key, (
-        f"the outbound pass did not create-and-bind {local_id!r} (get_jira_key returned "
-        f"{key!r}), so there is no DC issue to read the provenance markers off. Row 1's markers "
-        f"are written INSIDE the create (`dispatch_one.py:306-307`), so a missing binding is "
-        f"upstream of this oracle, not a marker finding.\nstdout:\n{cp.stdout[-1500:]}"
-    )
+    if not key:
+        # [rebar:18a5-2bd8-3e56-4bd8] — the create-and-bind failed, and this is exactly the
+        # cell that ticket's own root-cause comment says can settle WHY: a real pass ran here
+        # (not a direct transport call, unlike 1a9f's sub-task cells), so a swallowed exception
+        # would have gone through `record_backstop_failure` and left a `bridge_alerts` record.
+        alerts = _assert_bridge_alert_for_mutation(cp, dc_store_copy_repo, local_id)
+        if alerts:
+            raise AssertionError(
+                f"the outbound pass did not create-and-bind {local_id!r} (get_jira_key returned "
+                f"None), and the alert store explains why: {len(alerts)} `mutation-error` "
+                f"record(s) were recorded for it. Most recent reason: "
+                f"{alerts[-1].get('reason')!r}. Full record(s): {alerts!r}\n"
+                f"stdout:\n{cp.stdout[-1500:]}"
+            )
+        raise AssertionError(
+            f"the outbound pass did not create-and-bind {local_id!r} (get_jira_key returned "
+            f"None) — but a PROVEN-CLEAN pass (exit 0, no traceback) recorded NO `bridge_alerts` "
+            f"entry for it either. This is a DIFFERENT and STRONGER finding than a swallowed "
+            f"exception: nothing here indicates the create was ever ATTEMPTED, which points back "
+            f"to [rebar:18a5-2bd8-3e56-4bd8]'s stage 1 (never planned) or stage 2 (planned but "
+            f"not dispatched) rather than stage 3 (dispatched, then swallowed).\n"
+            f"stdout:\n{cp.stdout[-1500:]}"
+        )
     track_issue(key)
 
     status, issue = dc_request(f"/rest/api/2/issue/{key}?fields=labels")
