@@ -543,14 +543,90 @@ def _inbound_update_apply_comments(payload, tracker_dir, local_id, written) -> N
             written.append(str(path))
 
 
+def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
+    """Mirror a peer link DELETION locally via ``rebar.unlink``. G5-gated (ticket 2b16).
+
+    **G5 RELATION MATCH.** ``rebar.unlink(id1, id2, *, repo_root=None)`` takes NO relation
+    argument, and that is deliberate: ``_commands/unlink.py``'s usage text says "pair-scoped, NO
+    relation arg; removes the most-recent link between the pair", and ``_get_link_info`` returns
+    the most recent NET-ACTIVE link for the target. So when a pair holds more than one active
+    relation and the peer dropped only one, a naive unlink removes THE WRONG ONE — a link the
+    peer still carries. We therefore ask ``_get_link_info`` (the very function ``unlink_core``
+    will consult) what it would remove, and decline unless that relation is the one whose peer
+    link vanished. Reusing that function rather than re-deriving the answer from ``deps`` order
+    is what keeps this prediction and the subsequent write from ever disagreeing.
+
+    Returns True only when an UNLINK was actually written, so the caller's count feeds the
+    silent-no-op canary (``apply_handlers.py``) truthfully. Every decline is LOGGED: this defect
+    class has been silent every time, so a skip that reports nothing is not acceptable.
+    """
+    import rebar
+    from rebar._commands._seam import tracker_dir
+    from rebar._commands.unlink import _get_link_info
+
+    try:
+        link_uuid, net_relation = _get_link_info(tracker_dir(repo_root) / local_id, target_local_id)
+    except Exception as exc:  # noqa: BLE001 — fail-open: decline the removal, never guess
+        logger.warning(
+            "_apply_inbound_update: cannot resolve the net-active link %s -> %s, "
+            "declining the inbound removal of relation %s: %r",
+            local_id,
+            target_local_id,
+            relation,
+            exc,
+        )
+        return False
+
+    if not link_uuid:
+        # Already gone (a re-applied record, or a local unlink beat us). Not an error.
+        logger.info(
+            "_apply_inbound_update: no active link %s -> %s; inbound removal of %s is a no-op",
+            local_id,
+            target_local_id,
+            relation,
+        )
+        return False
+
+    if net_relation != relation:
+        logger.warning(
+            "_apply_inbound_update: DECLINING the inbound removal of %s -> %s: the peer dropped "
+            "relation %r but the pair's net-active relation is %r, and rebar.unlink is "
+            "pair-scoped, so unlinking would remove a link the peer still has (G5)",
+            local_id,
+            target_local_id,
+            relation,
+            net_relation,
+        )
+        return False
+
+    try:
+        rebar.unlink(local_id, target_local_id, repo_root=repo_root)
+        return True
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
+        logger.warning(
+            "_apply_inbound_update: rebar.unlink failed for %s -> %s (%s): %r",
+            local_id,
+            target_local_id,
+            relation,
+            exc,
+        )
+        return False
+
+
 def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
-    """Phase: write each Jira-sourced relation into rebar via the rebar.link facade."""
+    """Phase: write each Jira-sourced relation change into rebar via the rebar facades."""
     # Cycle 3: inbound links — write each Jira-sourced relation into rebar via
     # the rebar.link library facade. rebar.link owns relation validation,
     # hierarchy promotion, cycle/redundant-link guards, and the LINK event
     # write — so we do NOT hand-write LINK events here. The redundant-link
     # guard inside add_dependency makes re-apply idempotent. Failures are
     # non-fatal and logged.
+    #
+    # Ticket 2b16: REMOVE records are now honoured too. This loop previously read
+    # ``if entry.get("action") != "add": continue``, so a removal emitted by
+    # ``inbound_differ._diff_link_removals_inbound`` was SILENTLY DISCARDED — the pass
+    # reported OK, the dep stayed put, and nothing raised. An unrecognised action is still
+    # skipped, but loudly, so the next new record type cannot fail the same way.
     inbound_links = payload.get("links") or []
     links_applied: int = 0
     if isinstance(inbound_links, list):
@@ -559,21 +635,33 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
         for entry in inbound_links:
             if not isinstance(entry, dict):
                 continue
-            if entry.get("action") != "add":
-                continue
+            action = entry.get("action")
             target_local_id = entry.get("target_id")
             relation = entry.get("relation")
             if not target_local_id or not relation:
                 continue
-            try:
-                rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
-                links_applied += 1
-            except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
+            if action == "add":
+                try:
+                    rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
+                    links_applied += 1
+                except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
+                    logger.warning(
+                        "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r",
+                        local_id,
+                        target_local_id,
+                        relation,
+                        exc,
+                    )
+            elif action == "remove":
+                if _inbound_unlink_one(local_id, target_local_id, relation, repo_root):
+                    links_applied += 1
+            else:
                 logger.warning(
-                    "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r",
+                    "_apply_inbound_update: ignoring inbound link record with unknown "
+                    "action %r for %s -> %s (%s)",
+                    action,
                     local_id,
                     target_local_id,
                     relation,
-                    exc,
                 )
     return links_applied

@@ -431,6 +431,68 @@ def _diff_links_inbound(
     return mutations
 
 
+def _diff_link_removals_inbound(
+    jira_fields: dict[str, Any],
+    local_ticket: dict[str, Any],
+    binding_store: Any,
+) -> list[dict[str, Any]]:
+    """Mirror a peer link DELETION locally — the REMOVE half of the link diff (ticket 2b16).
+
+    The inbound mirror of ``outbound_links._diff_link_removals``: walks the LOCAL deps and
+    emits ``{"action": "remove", "target_id": <local id>, "relation": <local relation>}`` per
+    dep whose peer counterpart is gone (inbound records carry a local ``target_id``, outbound a
+    peer ``to_key``). This WRITE DESTROYS LOCAL DATA and the enrichment it reads is fail-open,
+    so three guards stand between "not in the snapshot" and a delete:
+
+    * **G1 OBSERVED** — ``"issuelinks" in jira_fields``: key PRESENT, empty list allowed. The
+      fetcher sets it only for issues ``get_issuelinks_map`` returned a list for, and the base
+      search omits issuelinks entirely (bug 3f04), so presence means "enrichment reached this
+      issue" and ``[]`` is an authoritative "no links". Key-ABSENT is exactly the unsafe set
+      (failed enrichment, HTTP 410, a partial fail-open map, a truncated page, a cross-project
+      issue, no ``get_issuelinks_map``) and must fail safe. ``_diff_links_inbound`` opens
+      ``... .get("issuelinks") or []``, COLLAPSING observed-empty into unobserved — harmless
+      when ADD-only, never reusable here.
+    * **G2 TARGET BOUND** — an unbound target could never have carried a peer link.
+    * **G3 MANAGED** — ``should_propagate_removal``, the gate the outbound parent/link paths
+      already consume, so a peer-created dep rebar never owned is not clobbered; it excludes
+      ``duplicates``/``supersedes``/``discovered_from`` for free (``MANAGED_REF_KINDS`` omits
+      relations with no peer link type) — add no redundant filter. BLIND SPOT: a ref is managed
+      the moment it is created LOCALLY (``add_managed_ref`` is folded by the LINK-event
+      processor), which is not "we pushed it". G4 (the action-aware same-pass suppression in
+      ``compute_inbound_mutations``) closes that; G5 (the relation match in
+      ``apply_inbound_records``) guards the pair-scoped ``rebar.unlink``.
+
+    Both sides compare in LOCAL RELATION vocabulary via ``link_direction.observed_peer_deps``
+    (see there for why raw peer keys cannot be used). Deliberately does NOT reuse
+    ``_diff_links_inbound``'s dormant-counterpart guard — a removal whose counterpart is
+    archived or locally deleted must still be mirrored, not skipped forever.
+    """
+    if "issuelinks" not in jira_fields:
+        return []  # G1: unobserved — never infer a deletion from data we did not fetch
+    issuelinks = jira_fields["issuelinks"]
+    if not isinstance(issuelinks, list):
+        return []  # G1: a malformed value is not an observation either
+    get_jira_key = getattr(binding_store, "get_jira_key", None)
+    if get_jira_key is None:
+        return []  # cannot establish G2 — fail safe
+
+    from rebar.reducer._managed_refs import should_propagate_removal
+
+    ld = _load_link_direction()
+    observed = ld.observed_peer_deps(issuelinks, binding_store.get_local_id)
+
+    removals: list[dict[str, Any]] = []
+    for relation, target_id in sorted(ld.deps_as_set(local_ticket)):
+        if (relation, target_id) in observed:
+            continue  # still on the peer — steady state, no churn
+        if not get_jira_key(target_id):
+            continue  # G2
+        if not should_propagate_removal(relation, target_id, local_ticket):
+            continue  # G3
+        removals.append({"action": "remove", "target_id": target_id, "relation": relation})
+    return removals
+
+
 def _diff_labels_inbound(
     jira_fields: dict[str, Any], local_ticket: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -655,6 +717,9 @@ def compute_inbound_mutations(
         link_mutations = _diff_links_inbound(
             jira_fields, local_ticket, binding_store, local_tickets_by_id
         )
+        # Ticket 2b16: the symmetric REMOVE half — a local dep whose peer link was deleted.
+        # Guarded (G1 observed / G2 bound / G3 managed); see _diff_link_removals_inbound.
+        link_mutations.extend(_diff_link_removals_inbound(jira_fields, local_ticket, binding_store))
 
         # Bidirectional suppression (bug 3bf8): filter out inbound mutations
         # that would clobber a just-emitted outbound change for this target.
@@ -681,22 +746,36 @@ def compute_inbound_mutations(
                         continue
                     filtered_labels.append(lm)
                 label_mutations = filtered_labels
-            # Links: drop an inbound link-ADD when the SAME pass's outbound is
-            # link-ADDING to the same target key (echo of our own push). The
-            # inbound link mutation carries the LOCAL target_id; map it back to
-            # the target Jira key to compare against the outbound link_add_keys.
+            # Links: same-pass precedence, ACTION-AWARE (G4, ticket 2b16). The inbound record
+            # carries the LOCAL target_id; map it back to the peer key to compare against the
+            # outbound key sets. This filter used to test the key WITHOUT inspecting ``action``,
+            # so it would have suppressed an inbound REMOVE only by accident. The actions are
+            # listed apart because they are suppressed for DIFFERENT reasons (sets coincide).
             if link_mutations and (ob_entry["link_add_keys"] or ob_entry["link_remove_keys"]):
                 _get_jira_key = getattr(binding_store, "get_jira_key", None)
-                _suppress_keys = ob_entry["link_add_keys"] | ob_entry["link_remove_keys"]
+                _suppress_by_action: dict[str, set[str]] = {
+                    # An inbound ADD is either an echo of our own push (outbound ADD, bug
+                    # 3bf8) or contradicts a deliberate local unlink (outbound REMOVE —
+                    # remove-wins so local wins, bug wake-inn-parse). Drop it either way.
+                    "add": ob_entry["link_add_keys"] | ob_entry["link_remove_keys"],
+                    # G4 — THE GUARD THAT COVERS G3's BLIND SPOT, not a cosmetic one. A ref is
+                    # "managed" the instant it is created LOCALLY (add_managed_ref is folded by
+                    # the LINK-event processor), so G3 cannot tell a brand-new local dep from a
+                    # peer-deleted one, and the peer legitimately has no such link yet. In a
+                    # healthy pass outbound emits a link ADD for exactly that dep, so an
+                    # outbound ADD to this target means "being pushed", NOT "peer deleted it" —
+                    # never mirror a removal for it. An outbound REMOVE for the same pair also
+                    # suppresses: the two directions must not both act on one pair in a single
+                    # pass, and deferring re-evaluates next pass rather than double-removing.
+                    "remove": ob_entry["link_add_keys"] | ob_entry["link_remove_keys"],
+                }
                 filtered_links: list[dict[str, Any]] = []
                 for lk in link_mutations:
                     target_key = (
                         _get_jira_key(lk.get("target_id")) if _get_jira_key is not None else None
                     )
-                    # Drop an inbound link-ADD when the same pass's outbound is link-ADDING
-                    # (echo of our own push) OR link-REMOVING (a deliberate unlink — local
-                    # wins) to the same target key.
-                    if target_key and target_key in _suppress_keys:
+                    _keys = _suppress_by_action.get(str(lk.get("action")), set())
+                    if target_key and target_key in _keys:
                         suppression_count += 1
                         continue
                     filtered_links.append(lk)
