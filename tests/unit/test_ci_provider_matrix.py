@@ -19,7 +19,8 @@ What each group protects, and the specific way the matrix could be silently brok
   BOTH selection keys are required, and an earlier version of this file asserted `model_classes`
   ALONE, which actively enforced a real leak: `cfg.model` is a second resolution path the class
   table cannot reach, so any op reading it called direct Anthropic on every arm (run
-  30836378745). A test that pins the wrong surface is worse than no test, because it certifies
+  [rebar:f124-f14a-fd62-4973]). A test that pins the wrong surface is worse than no test,
+  because it certifies
   the gap.
 * **the overlay LAYERS rather than replaces** — the criterion `dict.update` cannot satisfy: an
   arm must override provider/model and leave the rest of the discovered config intact.
@@ -154,7 +155,8 @@ def test_each_overlay_sets_only_the_model_selection_keys() -> None:
     `model_classes` alone is NOT sufficient, and asserting only it is what let a real leak ship:
     `cfg.model` is a separate resolution path that falls back to the bare literal DEFAULT_MODEL and
     therefore infers provider `anthropic`, so every op reading it called direct Anthropic on all
-    three arms while this file's class assertion passed (run 30836378745). Both keys are pinned
+    three arms while this file's class assertion passed [rebar:f124-f14a-fd62-4973]. Both keys are
+    pinned
     here; unrelated keys are still forbidden, which is the original and still-valid intent."""
     for arm in _arms():
         data = tomllib.loads((_ROOT / arm["config_file"]).read_text(encoding="utf-8"))
