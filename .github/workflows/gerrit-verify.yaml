@@ -320,7 +320,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-          sparse-checkout: scripts/normalize_ci_conclusion.sh
+          sparse-checkout: scripts/normalize_ci_conclusion.py
           sparse-checkout-cone-mode: false
 
       # im-open/workflow-conclusion can set WORKFLOW_CONCLUSION to `skipped` (its fallback
@@ -337,7 +337,7 @@ jobs:
           FAILURE_OBSERVED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           set -euo pipefail
-          vote="$(scripts/normalize_ci_conclusion.sh)"
+          vote="$(python3 scripts/normalize_ci_conclusion.py)"
           echo "WORKFLOW_CONCLUSION='${CONCLUSION}' failure_observed='${FAILURE_OBSERVED}' -> vote-type='${vote}'"
           echo "vote-type=${vote}" >> "$GITHUB_OUTPUT"
 

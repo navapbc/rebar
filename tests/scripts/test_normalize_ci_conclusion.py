@@ -1,6 +1,6 @@
-"""Contract for scripts/normalize_ci_conclusion.sh (ticket bad2).
+"""Contract for scripts/normalize_ci_conclusion.py (tickets bad2, 9d07).
 
-Tier: scripts (drives the shell script via subprocess).
+Tier: scripts (drives the Python script via subprocess).
 
 The Verified vote job aggregates this run's jobs with im-open/workflow-conclusion,
 which sets WORKFLOW_CONCLUSION to one of {success, failure, cancelled, skipped} —
@@ -26,20 +26,21 @@ The KEY invariant: the emitted vote-type is ALWAYS in {success, failure, cancell
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.scripts
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "normalize_ci_conclusion.sh"
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "normalize_ci_conclusion.py"
 
 _VALID_VOTE_TYPES = {"success", "failure", "cancelled"}
 
 
 def _run(conclusion: str, failure_observed: str = "false") -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(_SCRIPT)],
+        [sys.executable, str(_SCRIPT)],
         env={
             "CONCLUSION": conclusion,
             "FAILURE_OBSERVED": failure_observed,
