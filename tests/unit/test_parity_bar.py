@@ -165,6 +165,71 @@ def test_error_rate_regression_fails():
     assert any("error rate" in f for f in report.gating_failures)
 
 
+def _errored_rec(label, *, valid=False):
+    """The production errored shape (`plan_review/fidelity_spot_eval.py`), and — with
+    `valid=True` — the SILENT variant, where nothing else in the report moves."""
+    return ItemRecord(valid=valid, decision="dropped", errored=True, label=label)
+
+
+def test_errored_pair_is_not_a_decision_flip():
+    # v1 produced a real `block`; v2 merely failed to run. `errored` is documented as "a
+    # runtime error / timeout (NOT a model verdict)", and criterion (d) already gates the
+    # error rate, so scoring this under (b) would double-count one event.
+    v1, v2 = _good_pair()
+    v2[0] = _errored_rec("block")
+    report = parity_report(v1, v2)
+    assert report.metrics["decision_flips"] == 0
+    assert report.metrics["errored_pairs"] == 1
+    assert not any("flip" in f for f in report.gating_failures)
+
+
+def test_silent_errored_pair_is_not_a_decision_flip():
+    # `errored=True, valid=True` leaves validity at 1.0, so before the guard this
+    # fabricated a decision flip with NO corroborating signal anywhere in the report.
+    v1, v2 = _good_pair()
+    v2[0] = _errored_rec("block", valid=True)
+    report = parity_report(v1, v2)
+    assert report.metrics["validity"]["v2"] == 1.0
+    assert report.metrics["decision_flips"] == 0
+    assert report.metrics["errored_pairs"] == 1
+
+
+def test_genuine_flip_between_two_live_sides_is_still_counted():
+    # The guard must not mask a REAL regression: both sides ran, and they disagree.
+    v1, v2 = _good_pair()
+    v2[0] = _rec(decision="advisory", label="block")
+    report = parity_report(v1, v2)
+    assert report.metrics["decision_flips"] == 1
+    assert report.metrics["errored_pairs"] == 0
+    assert any("flip" in f for f in report.gating_failures)
+
+
+def test_real_and_fabricated_flip_arms_are_distinguishable():
+    # Arms (A) 3 real / 0 errored, (B) 2 real + 1 errored and (C) 0 real / 3 errored against
+    # the same v1 all reported `decision_flips=3` with a BYTE-IDENTICAL gating string, so a
+    # reader could not discount fabricated flips even in principle.
+    def arm(real, errored):
+        _, v2 = _good_pair()
+        index = 0
+        for _ in range(real):
+            v2[index] = _rec(decision="advisory", label="block")
+            index += 1
+        for _ in range(errored):
+            v2[index] = _errored_rec("block")
+            index += 1
+        return v2
+
+    v1, _ = _good_pair()
+    reports = [parity_report(v1, arm(*shape)) for shape in ((3, 0), (2, 1), (0, 3))]
+    signatures = {
+        (tuple(r.gating_failures), r.metrics["decision_flips"], r.metrics["errored_pairs"])
+        for r in reports
+    }
+    assert len(signatures) == 3
+    counts = [(r.metrics["decision_flips"], r.metrics["errored_pairs"]) for r in reports]
+    assert counts == [(3, 0), (2, 1), (0, 3)]
+
+
 def test_goldless_run_fails_coverage_guard():
     # The review's blind spot: a 4% block->dropped regression on a GOLDLESS corpus
     # keeps agreement at 96% (> floor) and would otherwise "pass" — the coverage guard
