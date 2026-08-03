@@ -155,6 +155,61 @@ services:
       # boto3 has never heard of rebar's knob. AWS_DEFAULT_REGION is botocore's canonical
       # region var and covers every other caller in the image.
       AWS_DEFAULT_REGION: "us-east-1"
+      # THE BEDROCK CUTOVER (story eb6e): fill the three MODEL-CLASS slots with Bedrock
+      # inference-profile ids. This is the whole flip — purely ADDITIVE, and the kill switch is
+      # purely SUBTRACTIVE (delete these three lines, recreate the container). MEASURED in this
+      # container: with the slots absent, rebar resolves the classes to the built-in defaults
+      # anthropic:claude-opus-4-8 / -sonnet-4-6 / -haiku-4-5, so removing them restores the
+      # direct-Anthropic path by construction, with no other edit and no rebuild.
+      #
+      # WHY CLASSES AND NOT `REBAR_LLM_MODEL`: the gates name model CLASSES, not model ids
+      # (code-review.yaml's base is `frontier` and its verify/coach are `standard`;
+      # plan-review.yaml's Pass-1 ladder is `[frontier]`). Filling the slots therefore re-points
+      # every pass in one act while PRESERVING that split. `REBAR_LLM_MODEL` would destroy it:
+      # it is deprecated, and its compatibility shim fans ONE value out to ALL THREE classes —
+      # sonnet-everywhere silently downgrades the Pass-1 finder, opus-everywhere loses the Pass-2
+      # cost downgrade AND renders code-review.yaml's `temperature: 0` greedy pin inoperative,
+      # because Bedrock opus accepts only the default temperature. Both are wrong, in opposite
+      # directions. `REBAR_LLM_MODEL` is deliberately NOT set here and must not be added.
+      #
+      # ONLY INFERENCE-PROFILE ids are invokable: a bare on-demand `anthropic.claude-*` id
+      # returns `ValidationException: … on-demand throughput isn't supported`. The suffixes are
+      # NOT uniform (sonnet and haiku differ), so take any new id VERBATIM from
+      # `aws bedrock list-inference-profiles`. These three values are pinned byte-for-byte to
+      # `.github/llm-providers/bedrock.toml` by
+      # tests/unit/test_reviewbot_bedrock_cutover.py, so editing either side alone fails CI —
+      # that test is what keeps this block and the CI provider matrix single-sourced.
+      #
+      # If these ids change, infra/terraform/monitoring_eb6e.tf must change too: its
+      # client-error alarm is dimensioned by ModelId and would otherwise watch ids that no
+      # longer receive traffic and report healthy forever.
+      REBAR_LLM_FRONTIER_MODEL: "bedrock:us.anthropic.claude-opus-4-8"
+      REBAR_LLM_STANDARD_MODEL: "bedrock:us.anthropic.claude-sonnet-4-6"
+      REBAR_LLM_TRIVIAL_MODEL: "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      # Per-call token/provider sink (src/rebar/llm/usage_log.py). Recording is OPT-IN — with
+      # this var unset, `record()` is a no-op, which is why this container has produced no
+      # usage evidence until now. It is set HERE because it is the only oracle that proves the
+      # property this cutover actually cares about: that every call went to a Bedrock
+      # inference profile and ZERO went to direct Anthropic. The verdict's provider_provenance
+      # names the provider for the RUN; this names it PER CALL, so a single stray
+      # direct-Anthropic call cannot hide inside an otherwise-Bedrock review. ANTHROPIC_API_KEY
+      # stays in the container by design (the kill switch needs a working credential), so
+      # "unused" is a claim that has to be MEASURED rather than inferred from the key's
+      # absence — this is what measures it.
+      #
+      # ON THE PERSISTENT VOLUME on purpose. Auto-deploy recreates this container on every
+      # deploy, so a path inside the container image would lose the evidence at exactly the
+      # moment it is wanted; /var/gerrit/site/reviewbot is the bind-backed volume that already
+      # carries voted.db and reconcile_cursor across recreation.
+      #
+      # GROWTH, stated rather than waved at: the sink is append-only JSONL with NO rotation and
+      # no cap — it was built for ephemeral CI jobs, not a long-lived service. The RATE is what
+      # makes it acceptable here, not the design: a few hundred bytes per LLM call and tens of
+      # calls per review put it on the order of 100-200 MB/year at a busy review rate. MEASURED
+      # headroom: /var/gerrit is 50G with 44G free and the whole reviewbot volume is under 300K,
+      # and rebar-gerrit-data-disk-high already alarms on that filesystem. If the review rate
+      # ever grows by orders of magnitude, add rotation rather than removing the sink.
+      REBAR_USAGE_LOG: "/var/gerrit/site/reviewbot/usage.jsonl"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port
