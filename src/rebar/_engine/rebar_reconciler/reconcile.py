@@ -531,8 +531,32 @@ def _advance_baselines(binding_store: Any, curr_snapshot: Mapping[str, Any]) -> 
         if not jira_key or jira_key not in curr_snapshot:
             continue
         binding_store.set_baseline(local_id, curr_snapshot[jira_key])
+        _advance_peer_parent(binding_store, local_id, curr_snapshot[jira_key])
         advanced += 1
     return advanced
+
+
+def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, Any]) -> None:
+    """Record the peer parent OBSERVED for one binding — and ONLY if it was observed.
+
+    The evidence an inbound parent CLEAR requires (ticket 88d9). The observation test is
+    ``"parent" in entry``: key PRESENT means the parent map answered for this issue, and an
+    explicit ``None`` is then an authoritative "no parent". Key ABSENT is the whole unsafe set —
+    ``get_parent_map`` degraded to ``{}`` on a REST failure, a truncated page walk, a
+    cross-project issue — and MUST leave the prior observation untouched. Overwriting a good
+    history with a failed read is what would let the orphaning incident recur by a longer route,
+    so this is the load-bearing line, not a defensive nicety.
+
+    getattr-guarded so a store predating the field is a no-op rather than an AttributeError.
+    """
+    if "parent" not in entry:
+        return
+    setter = getattr(binding_store, "set_peer_parent", None)
+    if setter is None:
+        return
+    parent = entry.get("parent")
+    key = parent.get("key") if isinstance(parent, dict) else None
+    setter(local_id, key if isinstance(key, str) and key else None)
 
 
 def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
