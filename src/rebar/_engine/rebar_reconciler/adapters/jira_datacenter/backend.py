@@ -34,7 +34,10 @@ from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sani
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
 from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
 from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
-from rebar_reconciler.adapters.jira_family.rich_text import WIKI_DESCRIPTION_LIMIT, WikiTextCodec
+from rebar_reconciler.adapters.jira_family.rich_text import (
+    _WIKI_TRUNCATION_SUFFIX,
+    WikiTextCodec,
+)
 from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
     LOCAL_STATUS_TO_JIRA,
@@ -131,6 +134,35 @@ class _DCInbound:
         return inbound_fields.normalize_rich_text(body)
 
 
+def _truncate_dc_comment_body(body: str, max_chars: int) -> str:
+    """Truncate a DC COMMENT body to ``max_chars`` — the comment path's OWN rule.
+
+    Bug 049e. This exists so the comment path does not borrow ``WikiTextCodec.
+    fit_outbound``, the DESCRIPTION fitter: the two coincide today only because DC's
+    description fit is a plain character truncation, and a future format-aware change
+    to description fitting must not silently retarget comments.
+
+    ``max_chars <= 0`` means UNLIMITED (``jira.text.field.character.limit``'s own
+    ``0`` convention) — the body is returned untouched.
+
+    The truncation marker is the SHARED ``_WIKI_TRUNCATION_SUFFIX``, imported rather
+    than redeclared: a Jira reader must see ONE marker on DC regardless of which
+    field was shortened, and byte-identity with the description rule at the default
+    ceiling is pinned by the existing DC characterization/held-out tests. Sharing an
+    inert marker STRING is not the coupling this function breaks — sharing the fitter
+    FUNCTION is. Idempotent: re-fitting an already-fitted value is a no-op.
+    Non-``str`` values pass through, matching the codec's "never coerce" behaviour.
+    """
+    if not isinstance(body, str) or max_chars <= 0 or len(body) <= max_chars:
+        return body
+    keep = max_chars - len(_WIKI_TRUNCATION_SUFFIX)
+    if keep <= 0:
+        # A ceiling smaller than the marker itself: a bare hard cut is the only
+        # option that still respects the limit.
+        return body[:max_chars]
+    return body[:keep] + _WIKI_TRUNCATION_SUFFIX
+
+
 class _DCSanitizer:
     """Delegates to the SHARED Jira-family sanitizers, binding DC's
     ``WikiTextCodec``/plain-text limit as the injected rich-text contract
@@ -138,8 +170,12 @@ class _DCSanitizer:
     precisely so Cloud and DC each bind their own — see
     ``jira_family/sanitizers.py``)."""
 
-    def __init__(self) -> None:
+    def __init__(self, comment_max_chars: int | None = None) -> None:
         self._codec = WikiTextCodec()
+        #: ``None`` = resolve from config on first use (see :meth:`comment_max_chars`).
+        #: An explicit value is the injection seam tests and callers use to bind a
+        #: known ceiling without touching the process config.
+        self._comment_max_chars = comment_max_chars
 
     def sanitize_label(self, label: str) -> str:
         return _shared_sanitize_label(label)
@@ -150,34 +186,61 @@ class _DCSanitizer:
     def sanitize_description(self, description: str) -> str:
         return _shared_sanitize_description(description, fit=self._codec.fit_outbound)
 
+    def comment_max_chars(self) -> int:
+        """This instance's comment ceiling, resolved ONCE per sanitizer (bug 049e).
+
+        PROVENANCE OF THE CEILING (story 79d5, made configurable by bug 049e) —
+        32767 is a decision backed by a primary source, not an assumption carried
+        over from the description: Jira's own ``jpm.xml`` defines the advanced
+        setting ``jira.text.field.character.limit`` with ``default-value 32767`` and
+        a description covering "Description, Environment, Comments and Text custom
+        fields", and JRASERVER-28519 records that 7.0.0 made 32767 the default (6.x
+        shipped the same key defaulting to 0 = unlimited, already listing Comments in
+        scope). Comments and descriptions are governed by ONE property on DC, so the
+        two ceilings agreeing NUMERICALLY is faithful to DC rather than a shortcut.
+        Cloud needs its own ``adapters/jira/comment_limits`` module not because its
+        numbers differ but because its UNITS do — Cloud descriptions are limited in
+        ADF-SERIALIZED size, and DC has no ADF inflation to measure.
+
+        What 049e changed: that property is ADMIN-SETTABLE (``0..2147483647``, ``0`` =
+        unlimited), so 32767 is only the DEFAULT. It now comes from
+        ``[tool.rebar.reconciler].comment_max_chars`` (see
+        ``settings.resolve_comment_max_chars`` for the full citation and for why the
+        value is NOT discovered from the instance). Resolution is LAZY — a
+        ``_DCSanitizer`` is built in ``JiraDataCenterBackend.__init__``, which must
+        not require a resolvable config — and cached, so a hot comment loop resolves
+        config once. Tests inject the ceiling via the constructor instead.
+        """
+        if self._comment_max_chars is None:
+            from rebar_reconciler.adapters.jira_datacenter.settings import (
+                resolve_comment_max_chars,
+            )
+
+            self._comment_max_chars = resolve_comment_max_chars()
+        return self._comment_max_chars
+
     def sanitize_comment(self, body: str) -> str:
-        # PROVENANCE OF THE COMMENT CEILING (story 79d5) — 32767 here is a decision
-        # backed by a primary source, not an assumption carried over from the
-        # description. Jira's own ``jpm.xml`` defines the advanced setting
-        # ``jira.text.field.character.limit`` with ``default-value 32767`` and a
-        # description covering "Description, Environment, Comments and Text custom
-        # fields"; JRASERVER-28519 records that 7.0.0 made 32767 the default (6.x
-        # shipped the same key defaulting to 0 = unlimited, already listing Comments
-        # in scope). Comments and descriptions are governed by ONE property on DC, so
-        # binding both to ``WIKI_DESCRIPTION_LIMIT`` is faithful to DC rather than a
-        # shortcut. Cloud needs its own ``adapters/jira/comment_limits`` module not
-        # because its numbers differ but because its UNITS do — Cloud descriptions are
-        # limited in ADF-SERIALIZED size, and DC has no ADF inflation to measure.
-        # Two known limits of this binding, both tracked elsewhere:
-        #   * the property is admin-configurable (0-2147483647), and rebar hardcodes
-        #     the default — on a raised instance rebar truncates comments Jira would
-        #     have accepted in full. Tracked as rebar:049e-9fac-a821-4ea2.
-        #   * ``fit_outbound`` is the DESCRIPTION fitter. Correct today (it is a plain
-        #     character truncation), but any future format-aware change to it would
-        #     silently retarget comments — Cloud shows why that coupling is dangerous.
-        # Convergence over this ceiling is pinned by
-        # ``tests/unit/rebar_reconciler/mutate/test_dc_outbound_comment_length_convergence.py``.
+        # DELIBERATELY NOT ``self._codec.fit_outbound`` (bug 049e): that is the
+        # DESCRIPTION fitter. The two agreed today only because DC's description fit
+        # happens to be a plain character truncation — Cloud shows why the coupling
+        # is a trap, since its description fitter measures ADF-SERIALIZED size and
+        # would be catastrophically wrong for a comment. ``_truncate_dc_comment_body``
+        # is the comment path's own rule, so a future format-aware change to
+        # description fitting cannot silently retarget comments. Convergence over this
+        # ceiling is pinned by ``tests/unit/rebar_reconciler/mutate/
+        # test_dc_outbound_comment_length_convergence.py``.
+        max_chars = self.comment_max_chars()
         return _shared_sanitize_comment(
-            body, truncate=self._codec.fit_outbound, max_chars=WIKI_DESCRIPTION_LIMIT
+            body,
+            truncate=lambda text: _truncate_dc_comment_body(text, max_chars),
+            max_chars=max_chars,
         )
 
     def fit_comment(self, body: str) -> str:
-        return self._codec.fit_outbound(body)
+        # The differ-side comparison transform. MUST stay byte-identical to
+        # ``sanitize_comment``'s truncation (same ceiling, same rule) or the outbound
+        # comment loop never converges — hence the shared ``_truncate_dc_comment_body``.
+        return _truncate_dc_comment_body(body, self.comment_max_chars())
 
 
 def _search_users_by_username(client: Any, username: str) -> tuple[str | None, bool, bool]:

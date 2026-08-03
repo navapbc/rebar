@@ -50,6 +50,43 @@ class JiraDataCenterSettings(NamedTuple):
     pat: str
 
 
+def resolve_comment_max_chars() -> int:
+    """Resolve THIS instance's comment ceiling (characters) — bug 049e.
+
+    PROVENANCE OF THE DEFAULT. Data Center caps comment bodies with the advanced
+    setting ``jira.text.field.character.limit``, defined in Jira's own ``jpm.xml``
+    as::
+
+        description:   "The maximum number of characters to be entered for a single
+                        field. Affects Description, Environment, Comments and Text
+                        custom fields. 0 means unlimited."
+        default-value: 32767
+
+    JRASERVER-28519 (Resolved/Fixed, fix versions 6.4.1 / 7.0.0) records that
+    "starting with JIRA 7.0 and Cloud, ``jira.text.field.character.limit`` will be
+    set to 32767 by default". So 32767 is CORRECT for a stock instance and is kept
+    as the default of ``[tool.rebar.reconciler].comment_max_chars`` (env override
+    ``REBAR_RECONCILER_COMMENT_MAX_CHARS``) — but it is only a DEFAULT: the
+    property is admin-settable over ``0..2147483647``, with ``0`` meaning
+    UNLIMITED, and rebar must not impose the default on an instance that raised it.
+
+    NOT DISCOVERED FROM THE INSTANCE, deliberately. The value is exposed only via
+    ``/rest/api/2/application-properties`` (and its ``/advanced-settings``
+    sub-resource), whose documented requirement is the "Administer Jira" GLOBAL
+    permission; rebar authenticates as an ordinary user's PAT, so the probe would
+    403 for exactly the operators who need it. Discovery is therefore dropped and
+    configuration is the whole remedy — see the finding recorded on bug
+    ``049e-9fac-a821-4ea2``.
+
+    A non-positive value is returned as ``0`` = unlimited (jpm.xml's own
+    convention), which the DC comment truncator treats as "never truncate".
+    """
+    from rebar.config import load_config
+
+    configured = load_config().reconciler.comment_max_chars
+    return configured if configured > 0 else 0
+
+
 def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
     """Resolve DC connection settings through the typed config — FAIL LOUD.
 
