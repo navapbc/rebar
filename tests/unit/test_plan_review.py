@@ -1014,6 +1014,31 @@ def test_material_fingerprint_stable_for_same_content() -> None:
     )
 
 
+def test_material_fingerprint_invariant_under_checkbox_flip() -> None:
+    """Checkbox STATE is progress metadata, not plan material (bug 330c): the AC-box
+    close precheck (433c) requires flipping boxes before close, so a flip must not
+    stale the attestation — while any item-TEXT edit still must."""
+    a = orchestrator.material_fingerprint(_ctx(_GOOD_AC))
+    b = orchestrator.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [x]")))
+    c = orchestrator.material_fingerprint(_ctx(_GOOD_AC.replace("- [ ]", "- [X]")))
+    assert a == b == c
+
+
+def test_material_fingerprint_checkbox_flip_star_bullets_and_indent() -> None:
+    star = "## Acceptance Criteria\n  * [ ] alpha\n\t* [x] beta\n"
+    a = orchestrator.material_fingerprint(_ctx(star))
+    b = orchestrator.material_fingerprint(_ctx(star.replace("* [ ]", "* [x]")))
+    assert a == b
+
+
+def test_material_fingerprint_item_text_edit_still_changes() -> None:
+    a = orchestrator.material_fingerprint(_ctx(_GOOD_AC))
+    b = orchestrator.material_fingerprint(
+        _ctx(_GOOD_AC.replace("another check", "another different check"))
+    )
+    assert a != b
+
+
 def test_material_fingerprint_distinguishes_declared_none_without_legacy_churn() -> None:
     undeclared = _ctx(
         _GOOD_AC,
