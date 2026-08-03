@@ -23,7 +23,9 @@ of the three agentic reviewers": an id that resolves to no arm raises at run tim
 scored as an error rather than a verdict. The three agentic disposable-store reviewers are
 excluded because they resolve their config through ``LLMConfig.from_env`` rather than
 ``resolve_gate_config``, so ``gate_config`` does not reach them and both arms would read the same
-ambient model.
+ambient model. Solvers whose scorer carries no block/advisory polarity are excluded for a SECOND,
+unrelated reason (:data:`POLARITY_FREE_SOLVERS`): there is no decision in their output for the
+two-bucket mapping to read, so scoring them silently mislabels every case.
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ from rebar.llm.plan_review.fidelity_spot_eval import (
 
 __all__ = [
     "AGENTIC_SOLVERS",
+    "POLARITY_FREE_SOLVERS",
     "AUTH_VALIDATION",
     "CLASS_SLOTS",
     "DEFAULT_EPOCHS",
@@ -82,6 +85,20 @@ __all__ = [
 #: ``config or LLMConfig.from_env(...)`` directly, so ``gate_config`` does not reach them and the
 #: provider split would silently collapse on any corpus item routed to one.
 AGENTIC_SOLVERS = frozenset({"completion-verifier", "ticket-quality", "spec-alignment"})
+
+#: Solvers whose gating scorer is PRESENCE-based and carries no block/advisory polarity, so the
+#: two-bucket parity mapping has nothing to read. ``code-review-verify`` is scored on the presence
+#: of a ``verifications`` list — "scored independently of any FAIL/BLOCK polarity", and its dataset
+#: requires a non-empty list for the clean diff as much as the real-defect one
+#: (``code-review-verify.eval.yaml``). :func:`verdict_decision` keys on ``verdict``/``findings``,
+#: which that output has neither of, so every case fell through to ``advisory`` and the gold-BLOCK
+#: case was a guaranteed miss on both arms. Mapping presence to ``block`` does not fix it: it would
+#: score the clean case as a block and manufacture a false accept instead.
+#:
+#: Kept SEPARATE from :data:`AGENTIC_SOLVERS` because the reasons differ and collapsing them would
+#: lose one — that set excludes ops ``gate_config`` cannot reach; this one excludes a scorer with no
+#: polarity to read.
+POLARITY_FREE_SOLVERS = frozenset({"code-review-verify"})
 
 #: ``expect`` values that carry a gold label, and the coarse parity decision each maps to — the
 #: same two-bucket mapping :func:`verdict_decision` produces from a live result.
@@ -139,12 +156,20 @@ def _spec_paths() -> list[Path]:
 
 
 def solver_arm(solver_id: str, repo_root: str | None = None) -> str | None:
-    """The ``run_case`` arm ``solver_id`` dispatches to, or ``None`` when it resolves to no
-    non-agentic arm (an agentic reviewer, or an id ``run_case`` would raise on)."""
+    """The ``run_case`` arm ``solver_id`` dispatches to, or ``None`` when it is not scoreable
+    against the parity bar.
+
+    ``None`` covers THREE distinct cases, kept distinct on purpose:
+
+    * an :data:`AGENTIC_SOLVERS` reviewer — ``gate_config`` does not reach it, so both arms would
+      read the same ambient model;
+    * a :data:`POLARITY_FREE_SOLVERS` solver — its scorer is presence-based, so there is no
+      block/advisory decision to compare (bug ed82-08f3-a693-425f);
+    * an id ``run_case`` would raise on, which would be scored as an error rather than a verdict."""
     from rebar.llm.evals import eval_solver
     from rebar.llm.plan_review import passes
 
-    if solver_id in AGENTIC_SOLVERS:
+    if solver_id in AGENTIC_SOLVERS or solver_id in POLARITY_FREE_SOLVERS:
         return None
     if solver_id == passes.PASS_NOVELTY:
         return "novelty"
@@ -479,6 +504,14 @@ def recheck_recorded(results: dict[str, Any]) -> dict[str, parity.ParityReport]:
         rows = block.get("records")
         if not rows or "metrics" not in block:
             raise ValueError(f"measured slot {slot!r} carries no per-item records to re-score")
+        # Rows from a POLARITY-FREE spec stay in the file for provenance (the calls were
+        # really made) but are excluded from SCORING: that arm emits no block/advisory
+        # decision, so every such case scored `advisory` whatever its gold label, making a
+        # gold-BLOCK case a guaranteed miss on both arms (bug ed82-08f3-a693-425f).
+        # Dropping them corrects the metric; deleting the rows would discard live evidence.
+        rows = [r for r in rows if r.get("spec") not in POLARITY_FREE_SOLVERS]
+        if not rows:
+            raise ValueError(f"measured slot {slot!r} has no scoreable records after exclusion")
         v1 = [
             ItemRecord(
                 valid=bool(r["v1"]["valid"]),
