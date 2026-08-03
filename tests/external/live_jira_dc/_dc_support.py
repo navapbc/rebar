@@ -276,3 +276,180 @@ def assert_mint_registered(repo: Path, external_id: str) -> str:
         f"in `RemoteRef.instance`, not in the provider string."
     )
     return minted
+
+
+# ---------------------------------------------------------------------------
+# The three oracles repaired for ticket 5200 (J11 verification gaps 1-3)
+# ---------------------------------------------------------------------------
+#
+# All three live HERE rather than inline in the cell for the reason
+# ``assert_mint_registered`` does: the harness is linux/amd64-only and never boots on an
+# arm64 workstation, so the ONLY way to show these oracles can fail is to drive them
+# harness-free. ``tests/unit/rebar_reconciler/test_dc_live_oracles_discriminate_5200.py``
+# runs each of them VERBATIM, red and green. A paraphrase there could stay red while the
+# live cell had quietly gone vacuous, which is this epic's signature failure mode.
+
+
+def assert_local_assignee_is(
+    ticket: dict[str, Any], expected_user: str, *, stage: str = "the inbound assign"
+) -> None:
+    """Row 8 inbound oracle: the local ``.assignee`` is EXACTLY this DC user.
+
+    WHY EXACT AND NOT TRUTHY, which is what this oracle used to be. ``bound_dc_issue``'s
+    seeded issue arrives ALREADY ASSIGNED to the project lead — the scratch project is
+    created with ``lead=admin`` and no ``assigneeType``, so DC default-assigns to it, and
+    the fixture's own binding pass therefore imports that assignee before any cell runs
+    (harness run 30763838558 proved it by finding ``jira/'admin'`` already mapped). A
+    truthiness check on ``.assignee`` is thus satisfied by the BINDING PASS, not by the
+    mutation under test: the cell passed whether or not inbound assignee sync worked at all.
+    The repaired cell drives the assignee to EMPTY first and asserts that, so the value
+    checked here is one only the pass under test can have written.
+
+    ``expected_user`` IS THE DC USERNAME, not a rebar identity id, and that is not a
+    weakening. The local ticket stores the assignee as a bare human-readable string:
+    ``apply_inbound_records`` writes ``_extract_name(fields["assignee"])`` on both the create
+    (``apply_inbound_records.py:210``) and the update (``:370``) path, and
+    ``inbound_translate._extract_name`` (``:285-294``) returns ``name`` before
+    ``displayName`` — which on Data Center is the username. The identity the pass mints is a
+    REGISTRY entry, not a field on the ticket JSON (``_ensure_inbound_assignee_identity``
+    "NEVER changes the human-readable name extraction"), and it is asserted where it lives,
+    by ``assert_mint_registered`` in the dedicated mint cell.
+
+    Passing ``expected_user=""`` asserts the complementary state — unassigned — which is how
+    the repaired cell gates its own precondition instead of hoping for it.
+    """
+    got = ticket.get("assignee") or ""
+    if not expected_user:
+        assert not got, (
+            f"{stage}: the local ticket is STILL ASSIGNED to {got!r}, expected the assignee to "
+            f"be EMPTY. Until it is empty, an assignment afterwards is not a CHANGE and the "
+            f"oracle below could pass on the value the binding pass already imported."
+        )
+        return
+    assert got == expected_user, (
+        f"{stage}: the local .assignee is {ticket.get('assignee')!r}, expected EXACTLY "
+        f"{expected_user!r} — the DC username `_extract_name` puts on the ticket "
+        f"(`apply_inbound_records.py:210,370` -> `inbound_translate.py:285-294`, which prefers "
+        f"`name` over `displayName`). A non-empty but DIFFERENT value means the pass did not "
+        f"carry this assignment: the value on the ticket is the one the binding pass imported "
+        f"when the seeded issue arrived default-assigned to the project lead."
+    )
+
+
+#: The provenance label the outbound create actually writes — the COLON form. Established
+#: from the three writers, all of which emit ``f"rebar-id:{local_id}"``:
+#: ``dispatch_one.py:306`` (the outbound create), ``apply_inbound_records.py:290`` (the
+#: inbound-create write-back) and ``binding_store.py:706`` (pending-binding recovery). The
+#: HYPHEN form ``rebar-id-<local_id>`` is READ-ONLY legacy: ``binding_walk.py:352`` and
+#: ``inbound_translate.py:77-78`` accept it on read and ``binding_store.py:715`` searches it
+#: as a fallback, but NOTHING writes it. So the outbound oracle asserts the colon form; a
+#: hyphen-only issue is a finding, not an equivalent.
+REBAR_ID_LABEL_PREFIX = "rebar-id:"
+LEGACY_REBAR_ID_LABEL_PREFIX = "rebar-id-"
+
+
+def assert_outbound_provenance_markers(
+    local_id: str, labels: list[Any], property_status: int, property_body: Any
+) -> None:
+    """Row 1 outbound oracle: the created DC issue carries BOTH provenance markers.
+
+    The two markers are written together and neither is redundant: the label is what the
+    dedup JQL finds (``dispatch_one.py:214`` searches ``labels = "rebar-id:<local_id>"``) and
+    the entity property is what inbound consumers correlate on. A cell asserting only one
+    would pass a build that lost the other, and losing either re-creates the duplicate-issue
+    class the dedup exists to prevent.
+
+    ``property_status``/``property_body`` come from a RAW REST
+    ``GET /rest/api/2/issue/{key}/properties/local_id``, deliberately NOT from
+    ``transport.get_entity_property``: reading a value back through the same abstraction that
+    wrote it cannot distinguish "stored correctly" from "stored and re-read consistently
+    wrong". Bug 0b27 is exactly that failure — a Cloud implementation wrapped the value as
+    ``{"value": …}``, storing the wrong shape and breaking correlation WITHOUT raising — which
+    is why the shape is asserted here and not only the presence.
+    """
+    expected_label = f"{REBAR_ID_LABEL_PREFIX}{local_id}"
+    label_strings = [lbl for lbl in labels if isinstance(lbl, str)]
+    if expected_label not in label_strings:
+        legacy = f"{LEGACY_REBAR_ID_LABEL_PREFIX}{local_id}"
+        hint = (
+            f" The issue carries the LEGACY HYPHEN form {legacy!r} instead. That form is "
+            f"read-only compatibility (`binding_walk.py:352`, `inbound_translate.py:77-78`); "
+            f"no writer emits it, so an issue created by this pass carrying it means the "
+            f"create wrote through an unexpected path."
+            if legacy in label_strings
+            else ""
+        )
+        raise AssertionError(
+            f"the created DC issue does NOT carry the provenance label {expected_label!r} — "
+            f"labels are {label_strings!r}. The outbound create writes it at "
+            f"`dispatch_one.py:306`; without it the dedup JQL at `dispatch_one.py:214` cannot "
+            f"re-find the issue and the next pass creates a DUPLICATE.{hint}"
+        )
+    assert property_status == 200, (
+        f"the entity property `local_id` is NOT READABLE on the created DC issue: raw REST "
+        f"GET .../properties/local_id returned HTTP {property_status} (body "
+        f"{str(property_body)[:200]}). The outbound create writes it at "
+        f"`dispatch_one.py:307`; a 404 means the write never landed, and the label alone does "
+        f"not satisfy row 1 — inbound consumers correlate on the property."
+    )
+    assert isinstance(property_body, dict), (
+        f"the entity-property read returned {property_body!r}, not a JSON object; the endpoint "
+        f"returns {{'key': 'local_id', 'value': …}} and the oracle cannot read a value out of "
+        f"anything else."
+    )
+    value = property_body.get("value")
+    assert value == local_id, (
+        f"the entity property `local_id` on the created DC issue is {value!r}, expected the "
+        f"local id {local_id!r} VERBATIM. The value is PUT unwrapped "
+        f"(`jira_datacenter/transport.py:615-632` — 'the value is passed verbatim'), so a "
+        f"nested {{'value': …}} here is bug 0b27's wrong-shape signature: stored without "
+        f"raising, and correlation silently broken."
+    )
+
+
+def raw_indexed_issue_count(
+    dc_request: Any, project: str, *, page_size: int = 50, max_requests: int = 200
+) -> int:
+    """How many issues in ``project`` a JQL search can see, counted over RAW REST paging.
+
+    EXISTS SO THE PAGINATION CELL DOES NOT MEASURE ITS PRECONDITION WITH ITS OWN SUBJECT.
+    That cell waited for the index by calling ``dc_transport._paged_search(...)`` — but
+    ``_paged_search`` IS the pagination fix under test (ticket 9263). If it truncated again,
+    the cell failed at its PRECONDITION with a message reading "the index is lagging further
+    than this suite allows. NOT a pagination defect", pointing the next reader away from the
+    exact defect the cell exists to catch. This counts the same thing through a path the fix
+    does not touch, so a truncating ``_paged_search`` reaches the real assertion and is named
+    there.
+
+    Pages EXPLICITLY with ``startAt``/``maxResults`` and advances by the number of issues the
+    server ACTUALLY RETURNED — never by the number requested. DC silently clamps
+    ``maxResults`` to ``jira.search.views.default.max``, so a short page is NORMAL rather than
+    the end of the result set; advancing by the requested size skips whatever the clamp
+    withheld, and stopping on a short page truncates. Those two mistakes ARE defects 1105 /
+    9263 / deac, and this yardstick must not repeat the bug it is used to measure.
+    """
+    seen: set[str] = set()
+    start_at = 0
+    for _ in range(max_requests):
+        status, body = dc_request(
+            f"/rest/api/2/search?jql=project%3D{project}"
+            f"&startAt={start_at}&maxResults={page_size}&fields=key"
+        )
+        assert status == 200 and isinstance(body, dict), (
+            f"the raw paged count for {project} failed at startAt={start_at}: HTTP {status}, "
+            f"body {str(body)[:200]}"
+        )
+        issues = [i for i in (body.get("issues") or []) if isinstance(i, dict)]
+        if not issues:
+            return len(seen)
+        seen.update(str(i["key"]) for i in issues if i.get("key"))
+        start_at += len(issues)
+        total = body.get("total")
+        if isinstance(total, int) and start_at >= total:
+            return len(seen)
+    raise AssertionError(
+        f"the raw paged count for {project} did not terminate within {max_requests} requests "
+        f"(startAt={start_at}, {len(seen)} distinct keys). Either the project holds more issues "
+        f"than this measurement is budgeted for, or the search endpoint is returning pages "
+        f"without advancing — do NOT read the partial count as an index-lag verdict."
+    )
