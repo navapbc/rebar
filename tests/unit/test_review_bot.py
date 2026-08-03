@@ -1293,7 +1293,7 @@ def test_configure_logging_emits_rebar_info_to_stdout(capsys):
     _clear_reviewbot_log_handlers()
 
 
-def test_configure_logging_is_idempotent():
+def test_configure_logging_is_idempotent(capsys):
     """Configuring twice must not stack duplicate handlers (no double log lines)."""
     from rebar.review_bot.config import configure_logging
 
@@ -1304,7 +1304,33 @@ def test_configure_logging_is_idempotent():
         h for h in logging.getLogger("rebar").handlers if getattr(h, "_reviewbot_handler", False)
     ]
     assert len(installed) == 1
+    # The guarantee the removed ``propagate = False`` was claimed to provide (bug b718):
+    # a record reaches stdout EXACTLY once, counted on the stream rather than inferred
+    # from the handler list.
+    logging.getLogger("rebar.review_bot.voter").info('{"event": "voter_voted", "probe": "b718"}')
+    assert capsys.readouterr().out.count('"probe": "b718"') == 1
     _clear_reviewbot_log_handlers()
+
+
+def test_configure_logging_leaves_rebar_log_propagation_intact(caplog):
+    """``configure_logging()`` must not disable propagation on the shared ``rebar`` logger.
+
+    Bug b718: ``logging.getLogger("rebar").propagate = False`` is PROCESS-GLOBAL and was never
+    restored. pytest's ``caplog`` captures through a handler on the ROOT logger, so after one
+    call no ``rebar.*`` record could reach ``caplog`` again for the rest of the process — every
+    later log assertion silently saw zero records. Pre-fix this test fails on both assertions.
+    """
+    from rebar.review_bot.config import configure_logging
+
+    _clear_reviewbot_log_handlers()
+    try:
+        configure_logging()
+        assert logging.getLogger("rebar").propagate is True
+        with caplog.at_level(logging.INFO, logger="rebar.review_bot.voter"):
+            logging.getLogger("rebar.review_bot.voter").info("b718-caplog-probe")
+        assert any("b718-caplog-probe" in r.getMessage() for r in caplog.records)
+    finally:
+        _clear_reviewbot_log_handlers()
 
 
 def test_configure_logging_env_level_override(monkeypatch):
