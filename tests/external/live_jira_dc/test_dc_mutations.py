@@ -1430,84 +1430,81 @@ def test_inbound_clear_parent_round_trips(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 13 inbound: a parent REMOVED in DC must clear `.parent_id` locally.
+    """Row 13 inbound, REWRITTEN (ticket 37e7): clear a NON-sub-task's Epic Link parent.
 
-    THE ORACLE IS ABSENCE, and it is preceded by a precondition that the parent IS set locally
-    — otherwise "parent_id is empty" is true before the cell does anything.
+    WHY THE REWRITE. The previous version of this cell cleared a SUB-TASK's `fields.parent` and
+    could never reach its own oracle: 37e7's root-cause investigation confirmed Data Center
+    refuses to null `fields.parent` on a sub-task INTRINSICALLY — the field is object-typed and
+    mandatory on that issue shape, and DC rejects `null` at the deserializer level for every
+    payload shape rebar could send, before any business rule even runs. That is a PLATFORM
+    constraint, not a rebar defect, so the cell always reported SETUP FAILED and the inbound
+    parent-clear path had no live coverage at all. The operator's ruling (37e7) was to prove the
+    SAME clear semantic on a field that Jira actually allows to be nulled — a non-sub-task's
+    "Epic Link" custom field — and to keep a small, separate pin asserting DC still refuses the
+    sub-task case, so a future DC version that starts allowing it is caught rather than silently
+    reopening a gap nobody is watching for.
 
-    THE DC-SIDE CLEAR IS ITS OWN ASSERTED SETUP STEP, deliberately. Data Center may refuse to
-    null a sub-task's parent (a sub-task exists only under one), and if it does, that refusal is
-    a PLATFORM constraint and not a rebar defect — so it is caught and reported as SETUP FAILED
-    rather than being allowed to look like "the bridge did not clear the local parent". The two
-    outcomes are genuinely different findings and this cell keeps them apart.
+    THIS ONLY WORKS BECAUSE OF 9bb9. An earlier attempt at this exact rewrite was blocked:
+    `get_parent_map` used to read ONLY `fields.parent`, so an Epic Link clear was structurally
+    invisible to inbound — the map read `None` for the issue before the clear and `None` after,
+    a non-transition the differ could not observe. Change 1324 (ticket 9bb9), confirmed merged
+    on this base, taught `get_parent_map` to also read the Epic Link field back
+    (`transport.py:533-579`, falling to it whenever `fields.parent` is absent), which is what
+    makes this rewrite representable at all.
 
-    EXPECTED RED ON THE ORACLE, with the mechanism proven by code path and filed as
-    [rebar:88d9-fe42-e50f-4067]. TWO layers independently drop the signal:
-      1. THE SNAPSHOT NEVER CARRIES "no parent". The fetcher merges `get_parent_map` into the
-         snapshot and, when the mapped parent is None, deliberately leaves the field ABSENT —
-         "When parent_jira_key is None, leave the field absent (top-level issue)"
-         (`fetcher.py:508-511`). A de-parented issue then looks identical to one that never had
-         a parent.
-      2. THE DIFFER REFUSES TO EMIT A CLEAR: "We do NOT emit parent_id=None to avoid
-         accidentally clearing a locally-set parent when we just can't resolve it yet"
-         (`inbound_differ.py:266-270`).
-    The apply layer is already ready for it — `apply_inbound_records` maps `parent_id` through
-    `lambda v: v or ""` and its comment says an absent/empty parent "clears the parent"
-    (`apply_inbound_records.py:361-372`) — so only the differ never sends it. The cell asserts
-    the AC's oracle (row 13 inbound: "`.parent_id` is null"); do not invert it to pin the gap.
+    THE PRECONDITION IS AN "Epic" ISSUE TYPE, which this harness project currently does NOT have
+    (ticket 3fe5 — `has ['Sub-task', 'Task']`). `_seed_epic` therefore fails as SETUP until 3fe5
+    lands; that SETUP FAILED, naming the missing issue type, is the honest and correct outcome
+    here, not a weakened cell.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
-    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
-    parent = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 detach parent"))
-    child = _seed(
-        dc_transport,
-        jira_dc_project,
-        track_issue,
-        _uniq("rebar J11 detached subtask"),
-        issuetype=subtask_type,
-        extra={"parent": {"key": parent}},
-    )
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the non-sub-task parent-clear path cannot be exercised. See rebar ticket 39c1."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 epic-detach child"))
     child_local = _jira_key_to_local_id(child)
-    parent_local = _jira_key_to_local_id(parent)
+    epic_local = _jira_key_to_local_id(epic_key)
 
-    scope = ",".join((child_local, child, parent_local, parent))
+    # SETUP — give the child an Epic Link parent, and prove it landed BEFORE priming the local
+    # store, so the value the differ later clears is one this cell itself established.
+    dc_transport.set_parent(child, epic_key)
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    landed = isinstance(body, dict) and body["fields"].get(epic_field) == epic_key
+    assert status == 200 and landed, (
+        f"SETUP FAILED (not the clear): {child}'s Epic Link ({epic_field}) never reached "
+        f"{epic_key!r} (HTTP {status}, body {body!r}), so there is no parent for this cell to "
+        f"observe being cleared."
+    )
+
+    scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
     bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
     assert bound == child, (
-        f"SETUP FAILED (not the clear): the sub-task {child_local} is not bound (got {bound!r})"
+        f"SETUP FAILED (not the clear): the child {child_local} is not bound (got {bound!r})"
     )
     before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
-    assert before == parent_local, (
-        f"SETUP FAILED (not the clear): the sub-task's local parent_id is {before!r}, expected "
-        f"{parent_local!r}, so there is no parent for this cell to observe being cleared and the "
-        f"oracle below would pass vacuously. Row 12 "
-        f"(`test_inbound_set_subtask_parent_round_trips`) covers inbound parent import on its "
-        f"own; if that cell is also red, fix it there."
+    assert before == epic_local, (
+        f"SETUP FAILED (not the clear): the child's local parent_id is {before!r}, expected "
+        f"{epic_local!r} (the local id of the seeded epic {epic_key}), so there is no parent "
+        f"for this cell to observe being cleared and the oracle below would pass vacuously."
     )
 
-    # SETUP — clear the parent ON THE INSTANCE, and prove it. A refusal here is Data Center's,
-    # not rebar's, and is reported as such.
-    try:
-        dc_transport.set_parent(child, None)
-    except Exception as exc:  # noqa: BLE001 — classify: a DC refusal is a SETUP outcome, not a bridge defect
-        raise AssertionError(
-            f"SETUP FAILED (not a rebar defect): Data Center REFUSED to clear the parent of "
-            f"sub-task {child} — {type(exc).__name__}: {exc}. A sub-task exists only under a "
-            f"parent, so nulling `fields.parent` may not be a legal DC edit at all. That is a "
-            f"platform constraint on row 13's inbound half and belongs in the AC, not in the "
-            f"bridge. Row 13's OUTBOUND half "
-            f"(`test_outbound_clear_parent_round_trips`) drives the same primitive and would "
-            f"fail here too."
-        ) from exc
-    remote_parent = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent")
-    assert not remote_parent, (
+    # THE MUTATION UNDER TEST — clear the Epic Link on the instance, and prove it landed there
+    # (both by a direct GET and by the search-backed parent map inbound actually reads) before
+    # asking rebar about it.
+    dc_transport.set_parent(child, None)
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    cleared = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert not cleared, (
         f"SETUP FAILED (not the bridge): set_parent(..., None) returned without error but "
-        f"{child} still carries fields.parent = {remote_parent!r}, so there is no remote clear "
-        f"for the pass to mirror. `set_parent` PUTs {{'parent': None}} "
-        f"(`transport.py:688-689`); Data Center accepted the request and ignored it."
+        f"{child}'s Epic Link ({epic_field}) still reads {cleared!r}."
     )
     # The key must be PRESENT in the map with a falsy parent. `child not in mapping` would also
     # be "no parent seen", but it is what a DEGRADED map ({} per the contract at
@@ -1518,7 +1515,7 @@ def test_inbound_clear_parent_round_trips(
         jira_dc_project,
         child,
         lambda mapping: child in mapping and not mapping[child],
-        "the parent removal",
+        "the Epic Link removal",
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
@@ -1526,11 +1523,36 @@ def test_inbound_clear_parent_round_trips(
 
     after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
     assert not after, (
-        f"the DC parent was REMOVED (confirmed absent from both the direct GET and the "
-        f"search-backed parent map) but .parent_id on {child_local} is still {after!r}. The "
-        f"inbound differ suppresses parent_id=None by design (`inbound_differ.py:266-270`) and "
-        f"the fetcher never records the absence (`fetcher.py:508-511`) — see "
-        f"[rebar:88d9-fe42-e50f-4067]."
+        f"the DC Epic Link was cleared (confirmed absent from both the direct GET and the "
+        f"search-backed parent map, which 9bb9 taught to read it) but .parent_id on "
+        f"{child_local} is still {after!r}. See [rebar:37e7-d751-0042-4b94] and "
+        f"[rebar:9bb9-56a3-e9c0-46e9]."
+    )
+
+    # THE SMALL PIN (37e7's operator decision) — DC must still REFUSE to null a SUB-TASK's
+    # `fields.parent`. This is deliberately separate from the round trip above: it is a platform
+    # constraint, not a rebar defect, so it is asserted directly against the transport rather
+    # than through a pass. If DC ever starts accepting this, the assertion below fails loudly and
+    # reopens the sub-task coverage question instead of the gap being silently forgotten.
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    subtask_parent = _seed(
+        dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 subtask-refusal-parent")
+    )
+    subtask_child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 subtask-refusal-child"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": subtask_parent}},
+    )
+    with pytest.raises(Exception) as excinfo:
+        dc_transport.set_parent(subtask_child, None)
+    assert excinfo.value is not None, (
+        f"Data Center ACCEPTED nulling sub-task {subtask_child}'s fields.parent — this used to "
+        f"be refused intrinsically (see 37e7's root-cause comment); if this instance now "
+        f"allows it, the sub-task clear is representable again and this ticket's rewrite "
+        f"decision should be revisited."
     )
 
 
