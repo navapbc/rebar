@@ -73,7 +73,7 @@ def _resolve_conflicted_pop(base: str, stash: subprocess.CompletedProcess) -> No
     """Repair a ``git stash pop`` that applied-with-conflict (bug 6818).
 
     The stashed working-tree edits live on reconciler-REGENERABLE files
-    (``.bridge_state/prev_snapshot.json``, ``bindings.json`` — rebuilt on the
+    (``.bridge_state/prev_snapshot.json``, ``bindings.json``, ``get_rotation.json`` — rebuilt on the
     reconciler's next pass; a missing/empty prev_snapshot merely forces a full
     re-fetch). When the post-stash merge brings the upstream copy of such a file in
     cleanly but the stashed edit touches the same region, ``stash pop`` writes

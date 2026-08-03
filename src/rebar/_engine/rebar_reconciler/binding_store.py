@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
+from rebar_reconciler import get_rotation
 from rebar_reconciler.timeutil import utc_now_iso
 
 
@@ -175,6 +176,7 @@ class BindingStore:
 
     def __init__(self, tracker_dir: Path) -> None:
         self._path = tracker_dir / ".bridge_state" / "bindings.json"
+        self._get_rotation_path = self._path.with_name("get_rotation.json")
         # Bug 1e08: retired (soft-deleted) bindings live in a sibling file so
         # the live store stays clean and retirement is reversible.
         self._retired_path = tracker_dir / ".bridge_state" / "bindings-retired.json"
@@ -183,6 +185,8 @@ class BindingStore:
         # ``<repo_root>/.tickets-tracker``; the alert store keys off repo_root.
         self._repo_root = tracker_dir.parent
         self._data = self._load()
+        self._get_rotation = get_rotation.load(self._get_rotation_path)
+        get_rotation.merge_legacy(self._get_rotation, self._data["bindings"])
         self._retired: set[str] = self._load_retired()
 
     # -- persistence -------------------------------------------------------
@@ -316,6 +320,7 @@ class BindingStore:
             except OSError:
                 pass
             raise
+        get_rotation.save(self._get_rotation_path, self._get_rotation)
 
     # -- queries -----------------------------------------------------------
 
@@ -651,13 +656,13 @@ class BindingStore:
         if entry is None:
             return
         entry["last_get_pass"] = pass_id
+        get_rotation.set_last_get(self._get_rotation, jira_key, pass_id)
 
     def last_get_pass(self, jira_key: str) -> str:
         """Return the pass_id of the last GET; ``""`` if never GET'd (sorts first)."""
         entry = self._entry_for_jira_key(jira_key)
-        if entry is None:
-            return ""
-        return entry.get("last_get_pass", "") or ""
+        legacy = entry.get("last_get_pass") if entry is not None else ""
+        return get_rotation.latest(self._get_rotation, jira_key, legacy)
 
     def is_retired(self, jira_key: str) -> bool:
         """Return True if the key has been soft-deleted (retired)."""
