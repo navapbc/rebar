@@ -11,10 +11,20 @@ MUTATION_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "
 
 
 def _load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    m = importlib.util.module_from_spec(spec)
+    # CACHE-FIRST, matching the loader bug 9f0b installed in the sibling differ suites and bug
+    # 2bc7's audit of the rest. This previously overwrote `sys.modules[name]` unconditionally and
+    # returned the replacement: self-consistent within this file, but it CLOBBERS another file's
+    # registration of the same shared key ("differ" and "mutation" are both loaded by several
+    # modules). Nothing fails today only because pytest executes module-by-module, so each file's
+    # module-scoped fixture is built while its own registration is current — the same
+    # order-dependent coupling that made 2bc7 a macOS-only surprise.
     import sys
 
+    cached = sys.modules.get(name)
+    if cached is not None and getattr(cached, "__file__", None) == str(path):
+        return cached
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec)
     sys.modules[name] = m
     spec.loader.exec_module(m)
     return m
