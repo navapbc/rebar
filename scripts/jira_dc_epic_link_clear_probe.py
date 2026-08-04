@@ -35,6 +35,7 @@ import logging
 import os
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -52,6 +53,14 @@ logger = logging.getLogger("jira-dc-epic-link-probe")
 # provision the SAME shape of project the suite runs against, or its answer is about some other
 # environment.
 PROJECT_TEMPLATE = "com.pyxis.greenhopper.jira:gh-scrum-template"
+
+#: Poll interval while waiting for the Jira Software custom fields to register
+#: (bug 9790-cafa-dffa-462e). Coarse on purpose: the plugin takes minutes, so a
+#: tight loop only inflates the evidence log with identical inventories.
+_FIELD_POLL_INTERVAL_S = 10.0
+
+#: How long to wait for those fields before giving up.
+_FIELD_READY_BUDGET_S = 600.0
 
 _EVIDENCE: list[dict] = []
 
@@ -119,14 +128,62 @@ def _create_issue(project: str, issuetype: str, summary: str, extra: dict | None
     return str(body["key"])
 
 
+def _await_named_fields(names: tuple[str, ...]) -> dict[str, str | None]:
+    """Poll ``/rest/api/2/field`` until every name is registered, or the budget expires.
+
+    WHY THIS EXISTS, measured (bug 9790-cafa-dffa-462e). The workflow's readiness
+    gate polls ``/rest/api/2/serverInfo`` until 200, and that is NOT readiness for
+    the Jira Software (GreenHopper) custom fields this probe needs. On run
+    30944211742 ``serverInfo`` went green after 8m32s and, ONE SECOND later,
+    ``/rest/api/2/field`` returned 27 fields of which every one was a SYSTEM field:
+    no ``customfield_*`` at all, so no ``Epic Link`` and no ``Epic Name``.
+
+    The live harness never trips this only because it is SLOWER afterwards; it
+    installs deps and runs a ~41-minute suite before its fixture checks the same
+    fields, by which time the plugin is up. That margin is incidental, not a
+    guarantee, which is why this wait is explicit here rather than inherited from
+    how long unrelated work happens to take.
+
+    Waits for the CAPABILITY rather than a proxy for it. Values may be ``None`` on
+    expiry so the caller can report exactly which name never arrived.
+    """
+    deadline = time.monotonic() + _FIELD_READY_BUDGET_S
+    resolved: dict[str, str | None] = dict.fromkeys(names)
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        for name in names:
+            if resolved[name] is None:
+                resolved[name] = _field_id(name)
+        if all(resolved[name] for name in names):
+            logger.info("  field inventory ready after %d attempt(s): %s", attempts, resolved)
+            return resolved
+        time.sleep(_FIELD_POLL_INTERVAL_S)
+    logger.info(
+        "  field inventory NEVER ready within %.0fs (%d attempts): %s",
+        _FIELD_READY_BUDGET_S,
+        attempts,
+        resolved,
+    )
+    return resolved
+
+
 def main() -> int:
     verdicts: dict[str, str] = {}
 
     # ── setup ────────────────────────────────────────────────────────────────────────────────
-    epic_link = _field_id("Epic Link")
-    epic_name = _field_id("Epic Name")
+    # Wait for the Epic machinery to be REGISTERED, not merely for Jira to answer
+    # serverInfo (bug 9790-cafa-dffa-462e).
+    _fields = _await_named_fields(("Epic Link", "Epic Name"))
+    epic_link = _fields["Epic Link"]
+    epic_name = _fields["Epic Name"]
     if not epic_link or not epic_name:
-        raise SystemExit(f"PROBE SETUP FAILED: Epic Link={epic_link!r} Epic Name={epic_name!r}")
+        raise SystemExit(
+            f"PROBE SETUP FAILED: Epic Link={epic_link!r} Epic Name={epic_name!r} — "
+            "these are Jira Software (GreenHopper) custom fields and they never "
+            "registered within the wait budget. A system-only field inventory means "
+            "NOT-READY, not a degraded image (see the dump above; bug 9790)."
+        )
 
     key = "ELP"
     _req(f"/rest/api/2/project/{key}", method="DELETE")  # idempotent: ignore the outcome
