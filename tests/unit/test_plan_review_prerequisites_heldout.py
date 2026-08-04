@@ -282,6 +282,7 @@ def test_verifier_input_builder_reports_unsplittable_whole_pair(monkeypatch) -> 
 
     assert result == {
         "plan": "subject plan",
+        "shared_prefix": prerequisite_workflow_ops.prompts.shared_plan_prefix("subject plan"),
         "instructions": ["No focused findings; return an empty verifications array."],
         "input_too_large_ids": [prerequisite_id],
     }

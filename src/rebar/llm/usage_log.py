@@ -479,6 +479,12 @@ def summarize(path: str) -> str:
     rows = _read(path)
     if not rows:
         return "No LLM calls recorded."
+    # Aggregate cache telemetry (bug 1dbe): the write-every-call-never-read run shape is only
+    # visible ACROSS a run's rows, which this is the natural seam for — it already reads them
+    # all. Pure observability (a WARNING), never alters the returned summary.
+    from rebar.llm.structured_run import warn_if_cache_write_never_read
+
+    warn_if_cache_write_never_read(rows, model=str(rows[0].get("model", "?")))
     pricing = _pricing_module()
     per_op: dict[str, dict[str, int]] = {}
     op_cost: dict[str, float] = {}

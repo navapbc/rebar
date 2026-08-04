@@ -537,6 +537,65 @@ def warn_if_cache_ineffective(
         )
 
 
+def cache_write_never_read(records: list[dict], *, min_calls: int = 2) -> bool:
+    """True when a RUN's caching calls all WROTE the cache and NONE ever READ it (bug 1dbe).
+
+    The per-call :func:`warn_if_cache_ineffective` cannot see this shape: each individual
+    write>0/read==0 call is BENIGN in isolation (the first call of any warm-then-reuse
+    sequence writes and reads nothing). The pathology is only visible ACROSS a run's calls —
+    "every caching call paid the write PREMIUM and not one collected the read DISCOUNT" — which
+    is exactly the state bug 1dbe measured (three plan-review passes each writing thousands of
+    tokens, every read zero, on back-to-back runs). It stayed invisible because the only cache
+    telemetry fired on write==0 AND read==0.
+
+    Fires only with at least ``min_calls`` (default 2) CACHING calls — a call is "caching" here
+    iff it wrote OR read a cache (``cache_write_tokens`` or ``cache_read_tokens`` present and
+    nonzero). A single caching call is the legitimate first write and is never flagged; a run
+    with no caching calls at all is out of scope (the write==0/read==0 predicate owns that).
+    Returns True iff every caching call wrote (>0) and every caching call read exactly 0."""
+    caching = [
+        r
+        for r in records
+        if int(r.get("cache_write_tokens", 0) or 0) or int(r.get("cache_read_tokens", 0) or 0)
+    ]
+    if len(caching) < min_calls:
+        return False
+    return all(
+        int(r.get("cache_write_tokens", 0) or 0) > 0
+        and int(r.get("cache_read_tokens", 0) or 0) == 0
+        for r in caching
+    )
+
+
+def warn_if_cache_write_never_read(records: list[dict], *, model: str = "?") -> None:
+    """Telemetry-only WARNING (never a block) for the write-every-call-never-read run shape
+    (bug 1dbe) — the aggregate companion to the per-call :func:`warn_if_cache_ineffective`.
+
+    Called over a RUN's usage records (e.g. from :func:`rebar.llm.usage_log.summarize`). When
+    :func:`cache_write_never_read` holds, the operator is paying the cache-WRITE premium on
+    every call and collecting the read discount on none — pure loss — most often because the
+    marked prefix varies per call (no breakpoint sits at the byte-identical shared segment).
+    Observability only; a run that genuinely never re-uses a prefix is at worst a benign
+    warning."""
+    if not cache_write_never_read(records):
+        return
+    caching = [
+        r
+        for r in records
+        if int(r.get("cache_write_tokens", 0) or 0) or int(r.get("cache_read_tokens", 0) or 0)
+    ]
+    total_write = sum(int(r.get("cache_write_tokens", 0) or 0) for r in caching)
+    logger.warning(
+        "llm prompt caching WROTE on every one of %s caching call(s) (model=%s) and was READ "
+        "by NONE (%s cache_write tokens billed at premium, cache_read=0 across the run) - the "
+        "marked prefix likely varies per call, so no breakpoint sits at the byte-identical "
+        "shared segment; the write premium is pure loss until one does",
+        len(caching),
+        model,
+        total_write,
+    )
+
+
 def estimate_marked_prefix_tokens(cache_settings: Any, *, system_prompt: str) -> int | None:
     """Estimated size of the bytes AHEAD of the cache breakpoint, or ``None`` if unknowable.
 

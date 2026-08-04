@@ -83,6 +83,27 @@ def build_agent_kwargs(
         # can't interrupt a blocking call — those are bounded by the derived step caps).
         "tool_timeout": float(cfg.llm_tool_timeout_s),
     }
+    # Prompt-cache breakpoint relocation (bug 1dbe). When the caller named a byte-stable
+    # ``cache_prefix`` (the plan-review passes' ``shared_plan_prefix``), split the system into
+    # the static PREFIX block + a DYNAMIC instruction carrying the REMAINDER, so pydantic-ai's
+    # anthropic/bedrock ``*_cache_instructions`` place the breakpoint at the PREFIX boundary
+    # (they mark the last STATIC block; a dynamic instruction after it is excluded). The model
+    # still receives prefix+remainder byte-identically — only the cache boundary moves — so
+    # this is behaviour-preserving. Guarded to a non-empty PROPER prefix; any other value (or
+    # None) leaves the byte-identical single-string system prompt above untouched.
+    prefix = req.cache_prefix
+    if prefix and req.system_prompt.startswith(prefix) and len(prefix) < len(req.system_prompt):
+        remainder = req.system_prompt[len(prefix) :]
+
+        # A zero-argument FUNCTION (a closure over ``remainder``) makes pydantic-ai mark this a
+        # DYNAMIC instruction, which is what moves the cache breakpoint ahead of it onto the
+        # static prefix block. It must take NO parameters: a parameter (even one with a default)
+        # is read by pydantic-ai as a RunContext arg and breaks instruction assembly.
+        def _remainder_instructions() -> str:
+            return remainder
+
+        kwargs["system_prompt"] = prefix
+        kwargs["instructions"] = _remainder_instructions
     # Web search (bug ff64; provider-independent since bug 129e) — resolved by the caller for
     # every provider alike; an UNflagged request stays byte-identical (no ``capabilities`` key).
     if web_caps is not None:
