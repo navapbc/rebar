@@ -581,6 +581,7 @@ def _stub_bedrock_provider(monkeypatch):
     class _Stub:
         def __init__(self, *, region_name=None, **kw):
             seen["region_name"] = region_name
+            seen.update(kw)
 
     monkeypatch.setattr(bedrock_mod, "BedrockProvider", _Stub)
     return seen
@@ -622,12 +623,16 @@ def test_missing_region_raises_a_typed_error_naming_the_setting(monkeypatch) -> 
 
 def test_an_explicit_rebar_region_still_builds(monkeypatch) -> None:
     """Guard against an over-eager check: the knob being SET is the fixed configuration, so it
-    must not trip the new error. Without this, 'always raise' would satisfy the test above."""
+    must not trip the new error. Without this, 'always raise' would satisfy the test above.
+    The region now reaches the boto3 SESSION (the client is built here since bug 61d8), so
+    that is where the oracle looks."""
     from rebar.llm.bedrock_model import build_bedrock_provider
     from rebar.llm.config import LLMConfig
 
-    seen = _stub_bedrock_provider(monkeypatch)
-    _no_ambient_region(monkeypatch)
+    _stub_bedrock_provider(monkeypatch)
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    seen = _spy_boto_session(monkeypatch)
     cfg = LLMConfig(
         repo_path=".",
         model="bedrock:us.anthropic.claude-sonnet-4-6",
@@ -635,7 +640,7 @@ def test_an_explicit_rebar_region_still_builds(monkeypatch) -> None:
     )
 
     build_bedrock_provider(cfg)
-    assert seen["region_name"] == "us-east-1"
+    assert seen["session_kwargs"].get("region_name") == "us-east-1"
 
 
 def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
@@ -643,24 +648,15 @@ def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
     default region, so when boto3 CAN resolve one ambiently the provider is built and rebar passes
     None through — letting boto3 use what it resolved. An implementation that demanded the rebar
     knob unconditionally would break every developer using AWS_DEFAULT_REGION or a profile."""
-    import boto3
-
     from rebar.llm.bedrock_model import build_bedrock_provider
     from rebar.llm.config import LLMConfig
 
-    seen = _stub_bedrock_provider(monkeypatch)
-
-    class _RegionSession:
-        region_name = "eu-west-1"
-
-        def __init__(self, *a, **kw):
-            pass
-
-    monkeypatch.setattr(boto3.session, "Session", _RegionSession)
+    provider_seen = _stub_bedrock_provider(monkeypatch)
+    seen = _spy_boto_session(monkeypatch, ambient_region="eu-west-1")
     cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
 
     build_bedrock_provider(cfg)
-    assert "region_name" in seen  # built, not rejected
+    assert provider_seen.get("bedrock_client") is seen["sentinel"]  # built, not rejected
 
 
 def test_aws_region_alone_resolves_nothing_and_still_raises(monkeypatch, tmp_path) -> None:
@@ -695,3 +691,96 @@ def test_aws_region_alone_resolves_nothing_and_still_raises(monkeypatch, tmp_pat
     cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
     with pytest.raises(LLMConfigError):
         build_bedrock_provider(cfg)
+
+
+# ── 61d8: llm_retry_max_attempts / timeout_s must reach the botocore client Config ──────────
+# The inert-config defect: both knobs were documented but had NO read site on the Bedrock
+# path — `build_bedrock_provider` ended at `BedrockProvider(region_name=region)` and the
+# client ran on botocore's stock defaults. These oracles are BEHAVIOURAL: a spy boto3
+# session records what client was constructed and with which botocore Config, so a revert
+# to the bare `BedrockProvider(region_name=region)` (which never builds a client through
+# the session) turns them RED. They are NOT satisfiable by the Anthropic path.
+
+
+def _spy_boto_session(monkeypatch, *, ambient_region=None):
+    """Monkeypatch ``boto3.session.Session`` with a spy that records client construction.
+
+    Records the ``region_name`` passed to the Session, the service name and the
+    ``config``/kwargs passed to ``.client``, and returns a sentinel client object so the
+    test can assert the provider received exactly that client."""
+    import boto3
+
+    seen: dict = {}
+    sentinel = object()
+
+    class _SpySession:
+        def __init__(self, *a, **kw):
+            seen["session_kwargs"] = kw
+            self.region_name = kw.get("region_name") or ambient_region
+
+        def client(self, service_name, **kw):
+            seen["service_name"] = service_name
+            seen["client_kwargs"] = kw
+            return sentinel
+
+    monkeypatch.setattr(boto3.session, "Session", _SpySession)
+    seen["sentinel"] = sentinel
+    return seen
+
+
+def test_configured_retry_and_timeout_reach_the_botocore_client_config(monkeypatch) -> None:
+    """61d8 AC1+AC3. The two documented knobs — `llm_retry_max_attempts`
+    (REBAR_LLM_RETRY_MAX_ATTEMPTS) and the timeout (`timeout_s`, REBAR_LLM_TIMEOUT) — must
+    arrive in the botocore `Config` the Bedrock runtime client is constructed with:
+    retries as total attempts in "adaptive" mode, the timeout as both read and connect
+    timeout (the Anthropic path applies one `httpx.Timeout(timeout_s)` to every phase).
+
+    Values are deliberately non-default so a client built on stock defaults cannot pass."""
+    from botocore.config import Config as BotoConfig
+
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    provider_seen = _stub_bedrock_provider(monkeypatch)
+    session_seen = _spy_boto_session(monkeypatch)
+    cfg = LLMConfig(
+        repo_path=".",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        bedrock_region_name="us-east-1",
+        llm_retry_max_attempts=7,
+        timeout_s=123,
+    )
+
+    build_bedrock_provider(cfg)
+
+    assert session_seen.get("service_name") == "bedrock-runtime", (
+        "no bedrock-runtime client was constructed through the boto3 session — the builder "
+        "has reverted to the inert BedrockProvider(region_name=...) form (bug 61d8)"
+    )
+    boto_config = session_seen["client_kwargs"].get("config")
+    assert isinstance(boto_config, BotoConfig)
+    assert boto_config.retries == {"max_attempts": 7, "mode": "adaptive"}
+    assert boto_config.read_timeout == 123.0
+    assert boto_config.connect_timeout == 123.0
+    # the provider must be built ON that client, not on a second unconfigured one
+    assert provider_seen.get("bedrock_client") is session_seen["sentinel"]
+
+
+def test_retry_attempts_below_one_clamp_to_a_single_attempt(monkeypatch) -> None:
+    """Parity with the Anthropic envelope's `max(1, ...)`: `llm_retry_max_attempts <= 1`
+    means fail-fast (one attempt, zero retries), never a botocore ValidationError on 0."""
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    _stub_bedrock_provider(monkeypatch)
+    session_seen = _spy_boto_session(monkeypatch)
+    cfg = LLMConfig(
+        repo_path=".",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        bedrock_region_name="us-east-1",
+        llm_retry_max_attempts=0,
+    )
+
+    build_bedrock_provider(cfg)
+
+    assert session_seen["client_kwargs"]["config"].retries["max_attempts"] == 1
