@@ -1248,11 +1248,13 @@ def _seed_epic(dc_request: Any, dc_transport: Any, project: str, track_issue: An
 def _subtask_type_name(dc_request: Any, project: str) -> str:
     """The name of THIS project's sub-task issue type, ASKED of the instance.
 
-    Not hardcoded as "Sub-task", for the reason `conftest._discover_project_templates` records
-    about template keys: the scratch project is created from whichever template the image
-    happens to offer, so its issue-type set is not knowable at authoring time. A hardcoded name
-    that the project does not have would make `create_issue` fail and every parent cell below
-    would report a PROJECT-CONFIGURATION problem as a bridge defect.
+    Read from the project rather than hardcoded. Since bug 3fe5 the project is created from a
+    PINNED template and `conftest._assert_project_capabilities` guarantees a `Sub-task` type is
+    present before any cell runs, so this is no longer the only thing standing between us and a
+    confusing failure — but it stays a read because the contract pins the type's PRESENCE, not
+    the exact display name a future image might localise or rename. A hardcoded name the project
+    does not have would make `create_issue` fail, and every parent cell below would report a
+    PROJECT-CONFIGURATION problem as a bridge defect.
     """
     status, body = dc_request(f"/rest/api/2/project/{project}")
     assert status == 200 and isinstance(body, dict), (
