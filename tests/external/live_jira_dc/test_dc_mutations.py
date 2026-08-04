@@ -1188,6 +1188,99 @@ def test_outbound_epic_parent_round_trips_via_the_epic_link(
     )
 
 
+@_skip
+@_skip_no_extra
+def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
+) -> None:
+    """Ticket 39c1 AC1: the emit gate and the apply gate must OVERLAP on a real pass.
+
+    THE CELL ABOVE IS NOT THIS CELL, and the difference is the whole acceptance criterion.
+    ``test_outbound_epic_parent_round_trips_via_the_epic_link`` calls ``dc_transport.set_parent``
+    directly, so it proves the APPLY side in isolation: that Data Center accepts an Epic Link
+    write. AC1 asks something strictly stronger — that a reconcile PASS emits that write at all.
+    Those are different claims, and 39c1 exists precisely because the two gates were DISJOINT:
+    the emit side (bug 8b25's hierarchy guard) omits the parent unless the local parent's
+    ``ticket_type`` is ``epic``, while the apply side used to accept only sub-task children. No
+    pass could ever emit a parent DC would take.
+
+    Substituting the transport-level cell for this one is the error this epic keeps making —
+    changes 1276, 1288 and 1302 each shipped merged and mutation-proven against a green that was
+    ADJACENT to the claim rather than the claim.
+
+    THE PARENT'S LOCAL TICKET_TYPE IS ASSERTED, not assumed. If the seeded epic did not import as
+    local ``epic``, the emit gate would omit the parent and this cell would go red for a reason
+    that has nothing to do with the apply side — an unattributable failure of exactly the kind
+    the SETUP-vs-defect split in this module exists to prevent.
+
+    READ BACK OVER RAW REST, never through the transport that performed the write, so a writer
+    that returns cleanly without persisting cannot pass itself.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    import rebar
+
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the epic-parent path cannot be exercised. See rebar ticket 39c1-2a32-b564-4b4b."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 pass epic-child"))
+    child_local = _jira_key_to_local_id(child)
+    epic_local = _jira_key_to_local_id(epic_key)
+
+    scope = ",".join((child_local, child, epic_local, epic_key))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
+    assert bound == child, (
+        f"SETUP FAILED (not the emit): the child {child_local} is not bound (got {bound!r}), so "
+        f"an outbound update would take the CREATE path instead of touching {child}."
+    )
+    parent_type = (_local(dc_store_copy_repo, epic_local).get("ticket_type") or "").lower()
+    assert parent_type == "epic", (
+        f"SETUP FAILED (not the emit): the seeded epic {epic_key} imported as local ticket_type "
+        f"{parent_type!r}, not 'epic'. Bug 8b25's hierarchy guard omits the parent field unless "
+        f"the local parent is an epic, so the pass below would plan nothing and this cell would "
+        f"be red for an import reason rather than an emit-or-apply reason."
+    )
+    before = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")[1] or {}
+    before_link = (before.get("fields") or {}).get(epic_field) if isinstance(before, dict) else None
+    assert not before_link, (
+        f"SETUP FAILED (not the emit): {child} already carries an Epic Link ({before_link!r}) "
+        f"before the pass, so its presence afterwards would prove nothing."
+    )
+
+    # THE MUTATION UNDER TEST — attach the parent LOCALLY and let a real pass carry it.
+    rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
+    staged = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert staged == epic_local, (
+        f"SETUP FAILED (not the emit): .parent_id on {child_local} is {staged!r}, expected "
+        f"{epic_local!r}, so the outbound pass has no attach to carry."
+    )
+
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"outbound epic-parent pass raised:\n{cp.stderr[-2000:]}"
+
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    got = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert got == epic_key, (
+        f"A RECONCILE PASS DID NOT EMIT THE EPIC PARENT: {child}'s Epic Link ({epic_field}) is "
+        f"{got!r}, expected {epic_key!r} (HTTP {status}). The transport-level cell above proves "
+        f"Data Center ACCEPTS this write, so an unchanged field here means the pass never made "
+        f"it — the emit gate and the apply gate are still disjoint, which is 39c1's whole "
+        f"subject. `dispatch_one` swallows set_parent's failure, so the field is the only place "
+        f"this is observable."
+    )
+
+
 def _named_field_id(dc_request: Any, name: str) -> str | None:
     """The id of the field called `name` on THIS instance, or None.
 
