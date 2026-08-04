@@ -24,6 +24,12 @@ from rebar._commands.verify_commit import extract_ticket_refs
 from rebar._engine_support import field_reads
 from rebar._engine_support.resolver import resolve_ticket_id
 
+# Watchdog on the read-only culprit-analysis git walks (bug 9305): log walks over a
+# long-lived branch are legitimately slow and hold no store lock, so this is generous
+# (research 5b rec 3) — it only converts a wedged filesystem into the existing
+# best-effort ``None`` (the broad except below absorbs ``TimeoutExpired``).
+_GIT_TIMEOUT = 300
+
 
 # raw-git-ok: read-oriented git helper, variable subcommand
 def _git(repo_root: str, *args: str) -> str | None:
@@ -33,6 +39,7 @@ def _git(repo_root: str, *args: str) -> str | None:
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
+            timeout=_GIT_TIMEOUT,
         )
     except Exception:  # noqa: BLE001 — best-effort: any git/OS error → no culprit
         return None
