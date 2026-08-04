@@ -127,10 +127,83 @@ library-arg-only, off the public env surface).
 
 ## Model providers (not Anthropic-only)
 
-The pydantic-ai runner is **provider-agnostic**: pydantic-ai resolves the provider
-from the model string in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
-`openai:gpt-4o`, `google:gemini-2.5-pro`). The provider can also be inferred from a
-bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`.
+Models are named in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
+`bedrock:us.anthropic.claude-sonnet-4-6`, `openai:gpt-4o`). The provider can also be
+inferred from a bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`.
+
+**rebar owns provider resolution; pydantic-ai is the fallback.** `ProviderSession.provider_factory`
+(`src/rebar/llm/providers.py`) is passed to pydantic-ai's `infer_model(provider_factory=...)` hook
+and answers in three ordered steps:
+
+1. rebar has its own builder for the name (`anthropic`, `bedrock`, plus `openai` **only when
+   `REBAR_LLM_BASE_URL` is set**) → rebar builds the provider;
+2. otherwise pydantic-ai recognizes the name → delegate to its `infer_provider`;
+3. neither → a typed `LLMConfigError`. An unrecognized provider is a **configuration error**, not
+   an outage, so it never surfaces as `LLMUnavailableError`.
+
+A string counts as provider-qualified only when its prefix is a member of
+`llm/config.KNOWN_PROVIDER_NAMES` — never by prefix *shape*. This is what keeps a canonical
+Bedrock id such as `anthropic.claude-haiku-4-5-20251001-v1:0` (whose colon belongs to the version
+suffix) from being mistaken for a `provider:model` split. An explicitly configured provider that
+is not a member is rejected outright, naming the valid set.
+
+### Provider support tiers
+
+Every provider resolves into one of two tiers, and the tier is **stamped into the gate verdict's
+`provider_provenance` record** (see `docs/event-schema.md` §"Provider provenance"):
+
+| Tier | Which providers | What it means |
+|---|---|---|
+| `first_class` | `anthropic`, `bedrock` | native rebar builder, capabilities derived from the real `ModelProfile`, covered by the unit suite and the provider-parity harness |
+| `best_effort` | anything reached via `REBAR_LLM_BASE_URL` (LMStudio / Ollama / vLLM / a LiteLLM proxy), and the five `gateway/*` provider names | an intermediary may have rewritten the request; **rebar cannot vouch for what reached the model** |
+
+Two independent triggers select `best_effort`: a non-empty `base_url`, **or** a `gateway/*`
+provider name (those carry no `base_url`, because the gateway URL is resolved inside pydantic-ai).
+Everything else — including an unregistered provider name — records `first_class`.
+
+**rebar signs verdicts on every tier.** Refusing to sign an off-tier verdict would break local
+development for anyone without a first-class provider key, so a contributor running Ollama can
+still exercise every gate; the verdict simply says honestly that rebar cannot vouch for the route.
+Three limits an attestation consumer must know: the tier is derived from **configuration-time**
+facts and so does not prove where traffic went; it lives in the sidecar payload and is **not part
+of the signed bytes**; and `first_class` does **not** currently imply retry/timeout parity —
+`REBAR_LLM_RETRY_MAX_ATTEMPTS` and `REBAR_LLM_TIMEOUT` reach the Anthropic path only. The
+decision record, including the rejected alternatives, is
+[`docs/adr/0059-llm-provider-seam-and-support-tiers.md`](adr/0059-llm-provider-seam-and-support-tiers.md).
+
+### AWS Bedrock
+
+Bedrock is reached **natively**, on the **ambient AWS credential chain** — instance role,
+`AWS_PROFILE`, or boto3's default chain. rebar manages no Bedrock credential and has no field for
+one, so there is no `REBAR_LLM_*` key to set.
+
+```bash
+pip install 'nava-rebar[agents,bedrock]'     # adds pydantic-ai-slim[bedrock] (boto3)
+export REBAR_LLM_BEDROCK_REGION=us-east-1    # see the region note below
+export REBAR_LLM_FRONTIER_MODEL=bedrock:us.anthropic.claude-opus-4-8
+export REBAR_LLM_STANDARD_MODEL=bedrock:us.anthropic.claude-sonnet-4-6
+export REBAR_LLM_TRIVIAL_MODEL=bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0
+```
+
+Three things bite in practice:
+
+- **Only INFERENCE-PROFILE ids are invokable.** A bare on-demand id such as
+  `anthropic.claude-sonnet-4-6` returns
+  `ValidationException: Invocation of model ID … with on-demand throughput isn't supported.` Use
+  the `us.` / `global.` prefixed form, and take every id **verbatim** from
+  `aws bedrock list-inference-profiles --region <region>` — the version suffixes are not uniform
+  across models, and `list-foundation-models` does not list profiles at all.
+- **A region must resolve, and `AWS_REGION` alone does not resolve one.** Measured on
+  boto3/botocore 1.43.62, `AWS_REGION` with `AWS_DEFAULT_REGION` unset leaves
+  `boto3.session.Session().region_name` as `None`. Set `REBAR_LLM_BEDROCK_REGION` (rebar's own
+  knob, so the value is visible to rebar's config layer) or `AWS_DEFAULT_REGION`. Instance-metadata
+  reachability supplies **credentials, never a region** — credential and region discovery are
+  independent, so a working instance role does not remove this step.
+- **The `[bedrock]` extra declares a uv resolution conflict with `[eval]`**, so those two extras
+  are not co-installable.
+
+`ANTHROPIC_API_KEY` is **not** required on the Bedrock path, nor for a local OpenAI-compatible
+server.
 
 Models are chosen **per model class** (`trivial` / `standard` / `frontier`), so a cheap
 model can serve the decisive checks while a frontier model does the open-ended work:
@@ -149,19 +222,26 @@ REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review <id>
 REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review <id>
 # local OpenAI-compatible server (LMStudio / Ollama / vLLM):
 REBAR_LLM_TRIVIAL_MODEL=local-model REBAR_LLM_TRIVIAL_PROVIDER=openai \
-  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1 REBAR_LLM_API_KEY=not-needed rebar review <id>
+  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1 rebar review <id>
+# (no dummy REBAR_LLM_API_KEY needed — the builder supplies one; such a run records tier=best_effort)
 ```
 
 > **`REBAR_LLM_MODEL` is DEPRECATED** (scheduled for removal in v1.0.0). It still works and
 > now applies its value to **all three** classes, warning once per call; any class slot or
 > `REBAR_LLM_<CLASS>_MODEL` you set wins over it. Migrate to the slots above.
 
-The `[agents]` extra ships **`pydantic-ai-slim[anthropic]`** (Claude, the default)
-out of the box; other providers need their pydantic-ai slim group
+The `[agents]` extra ships **`pydantic-ai-slim[anthropic,retries]`** (Claude, the default)
+out of the box. Bedrock has rebar's own **`[bedrock]`** extra (see above, and note its declared
+resolver conflict with `[eval]`); other providers need their pydantic-ai slim group
 (`pip install 'pydantic-ai-slim[openai]'` for ChatGPT + OpenAI-compatible local
 servers, `pydantic-ai-slim[google]` for Gemini) — a missing one raises a clear
-error naming the package. We deliberately **never send `temperature`**
-(claude-opus-4.x reject it; other providers use their default). Structured output
+error naming the package.
+
+`temperature` is **unset by default**, so the provider's own default applies; set
+`REBAR_LLM_TEMPERATURE` to send one. Whether a model accepts it is a resolved **capability**
+(`supports_temperature`), recorded in the signed provenance record, because some models reject the
+parameter outright — on Bedrock fatally, since only pydantic-ai's Anthropic path drops unsupported
+sampling settings for you. Structured output
 uses pydantic-ai's reliability stack (`NativeOutput`/`PromptedOutput` +
 `json-repair` + bounded retry), which is provider-*portable*.
 
@@ -246,14 +326,24 @@ for the future code-review op's "deterministic reviewer-selection rules."
 |-----|---------|---------|
 | `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id (or a `provider:model` string) |
 | `REBAR_LLM_MODEL_PROVIDER` | inferred | pydantic-ai provider (`anthropic`/`openai`/`google`/…); inferred from the model string if unset |
-| `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM) |
-| `REBAR_LLM_API_KEY` | — | explicit model key (e.g. a dummy key for a local server) |
-| `REBAR_LLM_MAX_TOKENS` | `8000` | per-response token ceiling |
-| `REBAR_LLM_MAX_STEPS` | `50` | agent-loop step cap (~2 per tool call) |
-| `REBAR_LLM_TIMEOUT` | `600` | per-call wall-clock seconds (wired to the model's request timeout — see note below) |
+| `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_MODEL` | — | the model-class slots (see above); these are the interface, not `REBAR_LLM_MODEL` |
+| `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_PROVIDER` | inferred | per-class provider override; rejected if not in `KNOWN_PROVIDER_NAMES` |
+| `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_ENDPOINT` | — | per-class OpenAI-compatible endpoint |
+| `REBAR_LLM_BEDROCK_REGION` | — | AWS region for the Bedrock path; **`AWS_REGION` alone does not resolve one** (see §"AWS Bedrock") |
+| `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM). **Load-bearing twice over:** it is what registers the `openai` provider builder at all, and it flips the signed verdict tier to `best_effort` |
+| `REBAR_LLM_API_KEY` | — | explicit model key (e.g. for a local server). Only valid **with** `REBAR_LLM_BASE_URL` — alone it is a hard `LLMConfigError`. A dummy value is no longer needed; the builder supplies `"not-needed"` itself |
+| `REBAR_LLM_CONFIG_FILE` | — | path to a provider-overlay TOML; **outranks the project's `rebar.toml`**, so it is the one-line switch between provider arms |
+| `REBAR_LLM_TEMPERATURE` | unset | sampling temperature; unset sends none |
+| `REBAR_LLM_MAX_TOKENS` | `16000` | per-response token ceiling |
+| `REBAR_LLM_MAX_STEPS` | `250` | agent-loop step cap (~2 per tool call) |
+| `REBAR_LLM_TIMEOUT` | `600` | per-call wall-clock seconds (wired to the model's request timeout — see note below). **Anthropic path only** |
+| `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `4` | transport retry attempts. **Anthropic path only** — Bedrock inherits botocore's stock defaults |
+| `REBAR_LLM_RETRY_MAX_WAIT_S` | `60` | cap on the honored `Retry-After` backoff. **Anthropic path only** |
+| `REBAR_LLM_TOOL_TIMEOUT_S` | — | per-tool-call wall-clock bound |
+| `REBAR_LLM_ALLOW_LOCAL_PROXY` | off | permit an inherited loopback `ANTHROPIC_BASE_URL` instead of bypassing it |
 | `REBAR_LLM_REPO_PATH` | repo root | repo the read-only file tools see |
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |
-| `ANTHROPIC_API_KEY` | — | model credentials (required to run the agent runtime) |
+| `ANTHROPIC_API_KEY` | — | model credentials for the **direct-Anthropic** path only; not required for Bedrock or a local server |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | OTLP trace sink only (auto-enabled when both keys present + the `[tracing]` extra); never used for prompt text |
 | `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
 
@@ -263,8 +353,12 @@ for the future code-review op's "deterministic reviewer-selection rules."
 > call rather than being an inert knob. The default (`600` s) equals the Anthropic SDK's
 > own default, so leaving it unset never lowers the effective timeout below the SDK floor;
 > an explicit operator value is honored verbatim (raise it for very large graph reviews,
-> lower it to fail faster). This does not add retry/backoff — it is a single per-call
-> wall-clock bound.
+> lower it to fail faster). It is a single per-call wall-clock bound and does not itself
+> add retry/backoff — but **retry is on by default on the direct-Anthropic path**, as a
+> tenacity transport wrapping the httpx client (`REBAR_LLM_RETRY_MAX_ATTEMPTS`, default 4;
+> `REBAR_LLM_RETRY_MAX_WAIT_S`, default 60), with the Anthropic SDK's own retries disabled so
+> the two do not compound. **Neither the timeout nor the retry envelope reaches Bedrock**, which
+> runs on botocore's stock defaults.
 
 Tracing is the optional `[tracing]` **OpenTelemetry exporter** to Langfuse's OTLP
 endpoint (Langfuse is an OTLP sink, not an SDK dependency) — wired in
@@ -278,8 +372,8 @@ optional extra; a missing extra/credential raises a clear, actionable error.
 ## Using it
 
 ```bash
-pip install 'nava-rebar[agents]'        # pydantic-ai-slim[anthropic] + json-repair + pydantic
-export ANTHROPIC_API_KEY=...            # model credentials
+pip install 'nava-rebar[agents]'        # pydantic-ai-slim[anthropic,retries] + json-repair + pydantic
+export ANTHROPIC_API_KEY=...            # direct-Anthropic credentials (Bedrock uses the AWS chain)
 rebar review --check                    # show backend/credential availability
 rebar review <ticket-id> ticket-quality # JSON review_result on stdout
 rebar review <epic-id> --graph -o text  # review an epic + its children, human output
