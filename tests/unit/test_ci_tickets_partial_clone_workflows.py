@@ -86,7 +86,6 @@ def test_identity_fetch_is_blobless_and_full_history() -> None:
     ("path", "job", "limit_name", "limit"),
     [
         (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", 102400),
-        (_GERRIT, "verify-identity", "REBAR_TICKETS_PACK_LIMIT_KIB", 131072),
     ],
 )
 def test_pack_guard_contract(path: Path, job: str, limit_name: str, limit: int) -> None:
@@ -102,6 +101,26 @@ def test_pack_guard_contract(path: Path, job: str, limit_name: str, limit: int) 
     assert re.search(r"^size_pack=.*git count-objects -v", script, re.MULTILINE)
     assert limit_name in script
     assert re.search(r"\bexit 1\b", script)
+
+
+def test_gerrit_verify_has_no_tickets_pack_gate() -> None:
+    """The gerrit-verify tickets-pack gate was removed deliberately (a092).
+
+    The `tickets` branch is an append-only event log mounted with FULL history
+    (ADR 0051), so its pack only ever grows; a fixed `REBAR_TICKETS_PACK_LIMIT_KIB`
+    ceiling is guaranteed to be crossed and, once crossed, casts Verified -1 on every
+    Gerrit change repo-wide. This pins the deliberate absence so the fail-closed gate
+    is not silently reintroduced without revisiting a092.
+    """
+    job_def = _workflow(_GERRIT)["jobs"]["verify-identity"]
+    assert "REBAR_TICKETS_PACK_LIMIT_KIB" not in (job_def.get("env") or {})
+    standalone_guards = [
+        step
+        for step in job_def["steps"]
+        if "git count-objects -v" in str(step.get("run", ""))
+        and "rebar verify-identity" not in str(step.get("run", ""))
+    ]
+    assert not standalone_guards, "the gerrit-verify tickets-pack gate must stay removed (a092)"
 
 
 @pytest.mark.parametrize(
@@ -131,7 +150,6 @@ def test_identity_no_promisor_contract(path: Path, job: str, verify_fragment: st
 
 _GUARD_CASES = [
     (_VERIFY, "verify-identity", "REBAR_CHECKOUT_PACK_LIMIT_KIB", "102400"),
-    (_GERRIT, "verify-identity", "REBAR_TICKETS_PACK_LIMIT_KIB", "131072"),
 ]
 
 
