@@ -13,14 +13,44 @@ NEVER ``shell=True`` — argv is a list, so a git argument can never be reinterp
 by a shell. This helper does not redact: it returns the ``CompletedProcess``
 verbatim, and any token/secret redaction stays where it already lives — in the
 caller that formats ``stderr`` into a message.
+
+**Blocking policy under local git lock contention (bug 9305, operator-ratified
+2026-08-04): bounded jittered retry plus per-store advisory serialization.** rebar is
+driven by many concurrent local agent processes, so git-lock conflicts (``index.lock`` /
+ref locks) on the shared tickets store are the normal case, not an anomaly. The policy,
+chosen against the OSS research recorded on ticket 9305 (git lockfile.c's jittered
+backoff; JGit's own-fair-lock-before-the-file-lock; Mercurial's bounded wait; Bazel's
+"print the holder, never parse it") and applied consistently at this seam:
+
+* rebar's OWN index-mutating git ops on a store are serialized behind a per-store
+  advisory ``flock`` (:func:`_store_git_op_lock`) — non-blocking when uncontended (zero
+  added latency), kernel-released on holder death (no staleness logic to get wrong);
+* a git lock-conflict signature is ridden out with a bounded, JITTERED backoff
+  (:func:`_with_index_lock_retry`; total budget ~tens of seconds — see
+  :func:`_lock_retry_budget_s`), resolving transient contention silently (debug log only);
+* only a genuinely STUCK lock — the budget exhausted — surfaces, and then as ONE
+  actionable error naming the contended lock file with holder guidance
+  (:func:`_augment_lock_exhaustion`), never as raw git stderr alone.
+
+Chosen over block-forever (cargo/Bazel) because rebar's callers are unattended agents
+with their own deadlines, and over fail-fast because the observed conflicts resolve on
+retry. Not config-tunable: no store/git config surface exists, and inert one-off config
+keys are a known defect class here; tests tune the module-level constants.
 """
 
 from __future__ import annotations
 
+import fcntl
+import logging
 import os
+import random
+import re
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 
 # raw-git-ok: locked store seam internal
@@ -87,14 +117,155 @@ def run_git(
 # EVERY index-mutating git op (event_append's add/commit AND txn.py's claim/transition
 # add/commit) self-heals through the one implementation.
 _INDEX_LOCK_STALE_S = 300  # a lock older than this is a crash remnant, safe to reclaim
-_INDEX_LOCK_ATTEMPTS = 5
-_INDEX_LOCK_BACKOFF_S = 0.2  # gap = base * attempt → ~2s summed over the 4 inter-attempt gaps
+# Bounded jittered backoff (bug 9305): gap(n) = min(base * 2^(n-1), cap) x jitter — the sum
+# of the nominal inter-attempt gaps is ~21s (see _lock_retry_budget_s), the operator-ratified
+# "tens of seconds" default, up from the pre-9305 ~2s that a peer's ordinary commit could
+# outlast. Exponential-with-cap is git lockfile.c's own shape (quadratic-with-cap there).
+_INDEX_LOCK_ATTEMPTS = 10
+_INDEX_LOCK_BACKOFF_S = 0.2
+_INDEX_LOCK_BACKOFF_CAP_S = 5.0
+
+
+def _jitter(delay: float) -> float:
+    """*delay* scaled by uniform [0.75, 1.25] — git lockfile.c's exact jitter shape
+    ("back off for between 0.75*backoff_ms and 1.25*backoff_ms"), so competing processes
+    de-synchronize instead of thundering in lockstep (9305 research rec #4)."""
+    return delay * random.uniform(0.75, 1.25)
+
+
+def _lock_backoff_s(attempt: int) -> float:
+    """The nominal (pre-jitter) backoff before retry *attempt* (1-based gap index)."""
+    return min(_INDEX_LOCK_BACKOFF_S * (2 ** (attempt - 1)), _INDEX_LOCK_BACKOFF_CAP_S)
+
+
+def _lock_retry_budget_s() -> float:
+    """The nominal total wait the lock retry can spend backing off (the bounded budget a
+    stuck lock exhausts before its one actionable error surfaces)."""
+    return sum(_lock_backoff_s(n) for n in range(1, _INDEX_LOCK_ATTEMPTS))
 
 
 def _is_index_lock_error(text: str) -> bool:
     """True if *text* is git's index.lock-contention signature (case-insensitive)."""
     low = text.lower()
     return "index.lock" in low and ("file exists" in low or "another git process" in low)
+
+
+def _is_git_lock_error(text: str) -> bool:
+    """True if *text* is ANY git lock-conflict signature: the index.lock contention above,
+    a ref lock (``cannot lock ref``), or another ``<name>.lock`` create conflict
+    (``HEAD.lock`` / ``packed-refs.lock`` / ``config.lock``). Only index.lock gets the
+    stale-reclaim treatment; the others are purely ridden out (git's maintenance holds ref
+    locks for microseconds — retry has a real chance; 9305 research §1a)."""
+    if _is_index_lock_error(text):
+        return True
+    low = text.lower()
+    return "cannot lock ref" in low or (".lock'" in low and "file exists" in low)
+
+
+# git names the contended lock file in its own message ("Unable to create '<path>': File
+# exists." / "cannot lock ref '<ref>'"); parse it so the exhaustion error can name it.
+_LOCK_PATH_RE = re.compile(r"[Uu]nable to create '([^']+\.lock)'")
+_LOCK_REF_RE = re.compile(r"cannot lock ref '([^']+)'")
+
+
+def _augment_lock_exhaustion(result: subprocess.CompletedProcess) -> subprocess.CompletedProcess:
+    """Fold rebar's actionable guidance into the FINAL still-locked failure: name the
+    contended lock file (parsed from git's own message when present) and state the remedy.
+    The existing call-site contracts (raise from ``stderr`` / print ``stderr``) then surface
+    one actionable error with no per-site changes."""
+    text = result.stderr or result.stdout or ""
+    m = _LOCK_PATH_RE.search(text)
+    if m:
+        lock_name = m.group(1)
+    else:
+        ref = _LOCK_REF_RE.search(text)
+        lock_name = f"ref '{ref.group(1)}'" if ref else "a git lock file"
+    result.stderr = (result.stderr or "") + (
+        f"\nrebar: git lock still contended after {_INDEX_LOCK_ATTEMPTS} attempts over "
+        f"~{_lock_retry_budget_s():.0f}s (lock: {lock_name}). Another git process holds it; "
+        "if no git process is running on this store, the lock file is stale — remove it "
+        "and retry."
+    )
+    return result
+
+
+# Per-store advisory git-op lock (bug 9305). rebar's store write lock already serializes
+# the LOCKED write paths, but git ops also run outside it (sync/push fetch-merge legs,
+# fsck repair, init) and non-rebar git can hold the same locks — so the seam additionally
+# serializes rebar's OWN index-mutating git invocations behind one kernel flock per store.
+# flock is dropped by the kernel when its holder dies: no staleness/reclamation logic to
+# get wrong (the cargo/Bazel property, 9305 research §3). ADVISORY: on budget exhaustion
+# we log and proceed WITHOUT it — correctness stays with the git-level retry below (JGit
+# takes its in-process fair lock before the file lock for the same reason, §1c(b)).
+_STORE_GIT_LOCK_NAME = "rebar-git-op.lock"
+_STORE_GIT_LOCK_WAIT_S = 30.0
+_STORE_GIT_LOCK_POLL_S = 0.05
+
+
+def _store_git_lock_path(tracker: str) -> str | None:
+    """The per-store advisory lock file path (inside the tracker's git dir, like git's own
+    locks — never tracked), or ``None`` when *tracker* is not a git repo."""
+    from rebar._commands.fsck import _resolve_tracker_git_dir
+
+    git_dir = _resolve_tracker_git_dir(tracker)
+    if not git_dir:
+        return None
+    return os.path.join(git_dir, _STORE_GIT_LOCK_NAME)
+
+
+@contextmanager
+def _store_git_op_lock(tracker: str) -> Iterator[None]:
+    """Hold the per-store advisory git-op lock for one git invocation (plus its retries).
+
+    Fast path is a single non-blocking ``flock`` — zero added latency, NO sleep, when
+    uncontended. When a peer holds it, poll with short jittered sleeps up to
+    ``_STORE_GIT_LOCK_WAIT_S`` (debug log), then — advisory, not load-bearing — proceed
+    without it at warning level: the bounded git-level lock retry still governs
+    correctness, so a wedged peer degrades to pre-9305 behavior rather than a new failure
+    mode. Best-effort on any OS fault (an unwritable git dir must not fail the git op)."""
+    lock_path = _store_git_lock_path(tracker)
+    if lock_path is None:
+        yield
+        return
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    except OSError:
+        yield
+        return
+    acquired = False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError:
+            logger.debug("store git-op lock %s contended; waiting (bounded)", lock_path)
+            deadline = time.monotonic() + _STORE_GIT_LOCK_WAIT_S
+            while time.monotonic() < deadline:
+                time.sleep(_jitter(_STORE_GIT_LOCK_POLL_S))
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except OSError:
+                    continue
+            if not acquired:
+                logger.warning(
+                    "store git-op lock %s still held after %.0fs; proceeding without "
+                    "serialization (the bounded git lock retry still governs)",
+                    lock_path,
+                    _STORE_GIT_LOCK_WAIT_S,
+                )
+        yield
+    finally:
+        try:
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 # Test seam: a no-arg callable (default ``None`` = disabled) invoked inside
@@ -175,20 +346,39 @@ def _with_index_lock_retry(
     ``force_reclaim=True`` (passed by the store-write git helpers, which hold the exclusive
     write lock) reclaims a stranded index.lock regardless of age — under the write lock the
     lock is provably an orphan, so a YOUNG one is cleared on the first retry instead of
-    wedging every write for the 300s stale threshold (the Mode B cascade)."""
-    result = run_once()
-    if _retry_probe is not None:
-        _retry_probe(1, result)
-    for attempt in range(1, _INDEX_LOCK_ATTEMPTS):
-        if result.returncode == 0:
-            return result
-        if not _is_index_lock_error(result.stderr or result.stdout or ""):
-            return result
-        _reclaim_if_stale_index_lock(tracker, force=force_reclaim)
-        time.sleep(_INDEX_LOCK_BACKOFF_S * attempt)
+    wedging every write for the 300s stale threshold (the Mode B cascade).
+
+    Bug 9305: the whole run (initial attempt + retries) holds the per-store advisory git-op
+    lock, serializing rebar's own writers; the backoff is jittered exponential-with-cap to a
+    ~tens-of-seconds budget (up from ~2s) and also retries git's REF-lock conflict signature
+    (:func:`_is_git_lock_error`; only index.lock gets stale reclamation). A lock signature
+    that survives the whole budget gets rebar's actionable guidance folded into its
+    ``stderr`` (:func:`_augment_lock_exhaustion`); a transient one self-heals with at most a
+    debug log."""
+    with _store_git_op_lock(tracker):
         result = run_once()
         if _retry_probe is not None:
-            _retry_probe(attempt + 1, result)
+            _retry_probe(1, result)
+        for attempt in range(1, _INDEX_LOCK_ATTEMPTS):
+            if result.returncode == 0:
+                return result
+            failure_text = result.stderr or result.stdout or ""
+            if not _is_git_lock_error(failure_text):
+                return result
+            logger.debug(
+                "git lock contention on %s (attempt %d/%d): retrying after jittered backoff",
+                tracker,
+                attempt,
+                _INDEX_LOCK_ATTEMPTS,
+            )
+            if _is_index_lock_error(failure_text):
+                _reclaim_if_stale_index_lock(tracker, force=force_reclaim)
+            time.sleep(_jitter(_lock_backoff_s(attempt)))
+            result = run_once()
+            if _retry_probe is not None:
+                _retry_probe(attempt + 1, result)
+    if result.returncode != 0 and _is_git_lock_error(result.stderr or result.stdout or ""):
+        return _augment_lock_exhaustion(result)
     return result
 
 
@@ -237,6 +427,16 @@ def _with_transient_head_retry(
     return result
 
 
+# Watchdog bound for the index-mutating store git ops routed through run_git_write
+# (txn/compact/delete add/commit/rm). WATCHDOG-grade, not a latency budget (9305 research
+# §2: "bounding a local git call is defensible watchdog-grade, not latency-grade"):
+# deliberately NOT copied from the 30s/300s network values — these are small local
+# add/commits on the tickets tree (sub-second normally), so 120s distinguishes "wedged
+# fs/lock" from "slow" with ~100x margin while still freeing the store write lock a hung
+# mount would otherwise hold forever. event_append keeps its own 30s (_GIT_TIMEOUT there).
+_LOCAL_GIT_TIMEOUT = 120
+
+
 # raw-git-ok: locked store seam internal
 def run_git_write(
     tracker: str | os.PathLike[str],
@@ -244,21 +444,39 @@ def run_git_write(
     check: bool = False,
 ) -> subprocess.CompletedProcess:
     """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
-    git's ``.git/index.lock`` contention AND the transient ``could not parse HEAD`` read
-    fault. Runs the op and, ONLY on the index.lock signature, reclaims a provably-stale lock,
-    backs off, and retries (see :func:`_with_index_lock_retry`); ONLY on the transient
-    HEAD-parse read signature, backs off and retries the identical (idempotent) op (see
-    :func:`_with_transient_head_retry`). The two compose — index.lock is the OUTER retry, the
-    HEAD-parse transient the INNER — so each self-heals without interfering. A success or any
-    OTHER failure returns at once, so a genuine error is unchanged. ``check=True`` raises
-    :class:`subprocess.CalledProcessError` on the final non-zero exit (default ``False``
-    so callers that inspect ``returncode`` / raise their own error get the result verbatim).
+    git's ``.git/index.lock`` / ref-lock contention AND the transient ``could not parse
+    HEAD`` read fault, serialized behind the per-store advisory git-op lock (bug 9305).
+    Runs the op and, ONLY on a git lock-conflict signature, reclaims a provably-stale
+    index.lock, backs off (jittered, bounded), and retries (see
+    :func:`_with_index_lock_retry`); ONLY on the transient HEAD-parse read signature, backs
+    off and retries the identical (idempotent) op (see :func:`_with_transient_head_retry`).
+    The two compose — the lock conflict is the OUTER retry, the HEAD-parse transient the
+    INNER — so each self-heals without interfering. A success or any OTHER failure returns
+    at once, so a genuine error is unchanged; a lock conflict that outlives the bounded
+    budget returns ONE actionable error naming the lock file. Each attempt is bounded by
+    the :data:`_LOCAL_GIT_TIMEOUT` watchdog, folded into a synthetic rc-124 result (the
+    ``event_append._run_git`` shape) so a hung filesystem fails the op cleanly instead of
+    hanging the caller. ``check=True`` raises :class:`subprocess.CalledProcessError` on the
+    final non-zero exit (default ``False`` so callers that inspect ``returncode`` / raise
+    their own error get the result verbatim).
 
-    Safe to route ANY tracker git op through: index.lock and the HEAD-parse transient only
+    Safe to route ANY tracker git op through: the lock and HEAD-parse signatures only
     appear on index-mutating commands, so a read op simply never trips either retry."""
+
+    def _bounded_once() -> subprocess.CompletedProcess:
+        try:
+            return run_git(tracker, *args, check=False, timeout=_LOCAL_GIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(tracker), *args],
+                124,
+                "",
+                f"git timed out after {_LOCAL_GIT_TIMEOUT}s",
+            )
+
     result = _with_index_lock_retry(
         str(tracker),
-        lambda: _with_transient_head_retry(lambda: run_git(tracker, *args, check=False)),
+        lambda: _with_transient_head_retry(_bounded_once),
     )
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(

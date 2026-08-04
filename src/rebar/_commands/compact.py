@@ -375,7 +375,8 @@ def _compact_locked(
         if not no_commit:
             add = _git(tracker, "add", "-A", f"{ticket_id}/")
             if add.returncode != 0:
-                sys.stderr.write("Error: git operation failed while holding lock\n")
+                # Include git's stderr: the seam's lock-exhaustion guidance rides in it (9305).
+                sys.stderr.write(f"Error: git operation failed while holding lock: {add.stderr}\n")
                 return 1
             staged = _git(tracker, "diff", "--cached", "--quiet")
             if staged.returncode != 0:
@@ -383,7 +384,9 @@ def _compact_locked(
                     tracker, "commit", "-q", "--no-verify", "-m", f"ticket: COMPACT {ticket_id}"
                 )
                 if commit.returncode != 0:
-                    sys.stderr.write("Error: git operation failed while holding lock\n")
+                    sys.stderr.write(
+                        f"Error: git operation failed while holding lock: {commit.stderr}\n"
+                    )
                     return 1
 
         sys.stdout.write(f"EVENT_COUNT={event_count}\n")

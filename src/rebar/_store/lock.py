@@ -60,6 +60,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from rebar._store.compat import check_store_compat
+from rebar._store.gitutil import _jitter
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,8 @@ def _acquire_fcntl(lock_path: str, deadline: float) -> int:
             if time.monotonic() >= deadline:
                 os.close(fd)
                 return -1
-            time.sleep(0.05)
+            # Jittered so many competing acquirers de-synchronize (9305 research rec #4).
+            time.sleep(_jitter(0.05))
 
 
 _STAMP_V2_PREFIX = "rebar-lock v2"
@@ -477,14 +479,15 @@ def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
                 _reclaim_mkdir_lock(lock_dir)
             if time.monotonic() >= deadline:
                 return False
-            time.sleep(0.1)
+            # Jittered so many competing acquirers de-synchronize (9305 research rec #4).
+            time.sleep(_jitter(0.1))
         except OSError as exc:  # pragma: no cover - unexpected fs error
             if exc.errno == errno.EEXIST:
                 if _mkdir_lock_is_stale(lock_dir, fcntl_held=True):
                     _reclaim_mkdir_lock(lock_dir)
                 if time.monotonic() >= deadline:
                     return False
-                time.sleep(0.1)
+                time.sleep(_jitter(0.1))
             else:
                 raise
 
