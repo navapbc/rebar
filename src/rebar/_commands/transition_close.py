@@ -401,12 +401,17 @@ def _completion_precheck(
     # yields a closed-without-signature ticket (the documented "not attested" signal).
     if result.get("source") == "local":
         return None
-    # A closed-but-uncertified (force-closed) descendant WITHHOLDS certification: the parent's own
-    # criteria PASSED (it may close), but certification propagates — an unattested descendant leaves
-    # the subtree unattested, so we close WITHOUT signing (the same unsigned-close path as
-    # --force-close). The closed-without-signature ticket is the durable "not fully certified"
-    # signal; re-close the uncertified descendant through the gate to certify, then re-close here.
+    # A closed-but-uncertified (force-closed) descendant WITHHOLDS certification (it
+    # propagates): close WITHOUT signing, and SAY SO (bug 96d1 — this path was silent,
+    # unlike the drift/SigningError arms of the same seam, which both warn).
     if result.get("certifiable") is False:
+        import sys
+
+        sys.stderr.write(
+            f"Warning: closing {ticket_id} WITHOUT a completion signature — certification "
+            "withheld: an uncertified (e.g. force-closed) descendant leaves the subtree "
+            "unattested. Re-close that descendant through the gate, then reopen and re-close.\n"
+        )
         return None
     return result
 
@@ -418,11 +423,10 @@ def _is_full_sha(s: object) -> bool:
 
 
 def _material_drifted(verified_sha: object, fresh_sha: object) -> bool:
-    """Whether the code MATERIALLY drifted between verify and sign (story blackbear): true only
-    when BOTH are real full SHAs that differ. A non-SHA / absent ``verified-at-sha`` (an
-    unattested/local verdict, or a test's synthetic marker) is not comparable → NOT drift, so the
-    normal sign-on-PASS path is preserved. Keeps the recheck sound in attested mode, where the
-    manifest's verified-at-sha is HEAD-at-verify and equals a fresh HEAD read unless HEAD moved."""
+    """Whether the code MATERIALLY drifted between verify and sign (story blackbear): true
+    only when BOTH are real full SHAs that differ. A non-SHA / absent ``verified-at-sha``
+    (an unattested/local verdict, or a test's synthetic marker) is not comparable → NOT
+    drift, so the normal sign-on-PASS path is preserved."""
     return _is_full_sha(verified_sha) and _is_full_sha(fresh_sha) and verified_sha != fresh_sha
 
 

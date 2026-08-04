@@ -37,7 +37,7 @@ from .manifest import (
     validate_review_phase_metadata,
 )
 from .pin_health import DerivedPlanMaterialPinHealth, DerivedPlanReviewHealth, PlanValidityProfile
-from .relation_snapshot import PlanMaterialPin, live_material_children
+from .relation_snapshot import PlanMaterialPin
 
 logger = logging.getLogger(__name__)
 
@@ -670,7 +670,9 @@ def compute_validity(
             current = current_material_fingerprint(
                 ticket_state.get("ticket_id", ""), repo_root=repo_root
             )
-            if current is None or current != signed_material:
+            if (current is None or current != signed_material) and not _legacy_material_ok(
+                signed_material, ticket_state.get("ticket_id", ""), repo_root
+            ):
                 return {
                     "valid": False,
                     "reason": "the ticket was materially edited since the completion verdict",
@@ -728,7 +730,9 @@ def compute_validity(
                     "could not recompute the plan's material fingerprint",
                     "unverifiable-material",
                 )
-            if signed != current:
+            if signed != current and not _legacy_material_ok(
+                signed, ticket_state.get("ticket_id", ""), repo_root
+            ):
                 return _result(
                     False,
                     (
@@ -754,40 +758,30 @@ def compute_validity(
 
 # ── completion-awareness: is a container's child "delivered" right now? ───────────
 def current_material_fingerprint(ticket_id: str, *, repo_root=None) -> str | None:
-    """Recompute the ticket's material fingerprint from a LIGHT read (the ticket +
-    its child ids only — no full child fetch, no LLM), matching
-    :func:`orchestrator.material_fingerprint`. Returns None for a deleted target
-    or on any read error. A deleted reducer state is a tombstone, not readable
-    plan material; read failures still fail closed through the head_sha +
-    certified checks."""
-    from rebar import _reads
+    """Recompute the ticket's material fingerprint from a LIGHT read (no LLM). Thin
+    delegator (body moved next to :func:`live_material_children`); kept here because the
+    close gate and the test suite reference/patch ``attest.current_material_fingerprint``."""
+    from .relation_snapshot import current_material_fingerprint_impl
 
-    from .det_floor import PlanContext
-    from .orchestrator import material_fingerprint
+    return current_material_fingerprint_impl(ticket_id, repo_root=repo_root)
 
+
+def _legacy_material_ok(signed: str, ticket_id: str, repo_root) -> bool:
+    """Grandfather for pre-normalization attestations (bug 96d1): manifests signed before
+    checkbox-state normalization hashed the RAW description (every completion manifest
+    embeds ``[x]`` — the close gate requires checked boxes), so the normalized recompute
+    can never match them. A signed hash that byte-exactly matches the LEGACY recomputation
+    of the CURRENT material proves nothing changed — not even box state — so it is not a
+    material edit. Strictly narrower than the normalized check: a real edit matches neither."""
     try:
-        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
-        if state.get("status") == "deleted":
-            return None
-        canonical = state.get("ticket_id", ticket_id)
-        try:
-            kids = live_material_children(canonical, repo_root=repo_root)
-        except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
-            kids = []
-        ctx = PlanContext(
-            ticket_id=canonical,
-            ticket_type=state.get("ticket_type", ""),
-            title=state.get("title", ""),
-            description=state.get("description", ""),
-            state=state,
-            children=[{"ticket_id": k.get("ticket_id")} for k in kids],
+        from .relation_snapshot import current_material_fingerprint_impl
+
+        legacy = current_material_fingerprint_impl(
+            ticket_id, repo_root=repo_root, normalize_checkboxes=False
         )
-        return material_fingerprint(ctx)
-    except Exception:  # noqa: BLE001 — fingerprint computation best-effort; broad-but-logged below, caller treats material as unknown
-        # Cannot compute the current fingerprint → caller treats material as unknown
-        # (the gate fails closed / re-review). Log so the cause is observable.
-        logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)
-        return None
+    except Exception:  # noqa: BLE001 — best-effort fallback; an uncomputable legacy hash is simply no match
+        return False
+    return legacy is not None and legacy == signed
 
 
 # Backward-compatible claim-gate/delivery re-exports (after their helper dependencies).

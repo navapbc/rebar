@@ -130,6 +130,23 @@ def test_gate_pass_uncertifiable_closes_without_signature(rebar_repo: Path, monk
     assert v.get("verdict") != "certified", v  # NOT certified — no completion signature written
 
 
+def test_gate_pass_uncertifiable_warns_on_stderr(
+    rebar_repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A PASS close whose certification is WITHHELD (certifiable=False) must say so on stderr
+    (bug 96d1): the silent unsigned close left no operator-visible signal of WHY the signed
+    attestation was skipped, mirroring the drift and SigningError warnings on the same path."""
+    _commit(rebar_repo)
+    _enable(rebar_repo)
+    monkeypatch.setattr(rebar.llm, "verify_completion", PASS_uncertifiable)
+    tid = _make(rebar_repo)
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert _status(tid, rebar_repo) == "closed"
+    err = capsys.readouterr().err
+    assert "WITHOUT a completion signature" in err, err
+    assert "certif" in err, err  # names certification withholding as the cause
+
+
 def test_gate_pass_signs_strictly_after_close(rebar_repo: Path, monkeypatch) -> None:
     """ORDERING (behavioral): the verdict is signed AFTER a confirmed close — the SIGNATURE
     commit must land later than the STATUS→closed commit in the tracker history, so a
