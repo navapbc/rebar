@@ -521,3 +521,109 @@ def test_regression_c8ed_shape_is_candidate(rebar_repo: Path) -> None:
     rebar.link(bug, epic, "supersedes", repo_root=str(rebar_repo))
 
     assert bug in _candidate_ids(epic, rebar_repo)
+
+
+# ------------------------------------------------------------ provider error fails closed (1019)
+#
+# Operator-ratified fail-closed ruling (bug 1019): a SYSTEMIC provider error
+# (LLMUnavailableError, subclass LLMConfigError included) raised by a screen call must
+# PROPAGATE — never degrade to C — so the close gate's existing fail-closed handler blocks
+# the close. On epic e369 a Bedrock ValidationException failed all 32 per-candidate calls
+# and the degrade silently blinded the caused_by bug floor while the verifier PASSed.
+# Non-provider failures (malformed output, RuntimeError) keep the degrade-open contract
+# pinned by the tests above.
+
+
+def test_screen_warm_call_provider_error_propagates(rebar_repo: Path) -> None:
+    from rebar.llm.errors import LLMUnavailableError
+
+    vmap: dict = {}
+    bugs = [_mk_bug(i, vmap) for i in range(2)]
+
+    def provider_down(bug: dict, sp: str) -> dict:
+        raise LLMUnavailableError(
+            "the LLM provider call failed: status_code: 400 (ValidationException)"
+        )
+
+    with pytest.raises(LLMUnavailableError, match="ValidationException"):
+        ebs.screen_candidates(
+            {"title": "e", "description": ""}, bugs, None, None, screen_fn=provider_down
+        )
+
+
+def test_screen_fanout_provider_error_propagates(rebar_repo: Path) -> None:
+    """The FAN-OUT re-raises too (unlike the pass1 container precedent): the completion
+    screen has no upstream chunk-pool tripwire, so its own fan-out is the ONLY place a
+    per-call provider rejection can surface."""
+    from rebar.llm.errors import LLMUnavailableError
+
+    vmap: dict = {}
+    bugs = [_mk_bug(i, vmap) for i in range(3)]
+
+    def warm_ok_fanout_down(bug: dict, sp: str) -> dict:
+        if bug["ticket_id"] == bugs[0]["ticket_id"]:
+            return vmap[bug["ticket_id"]]  # the warm call succeeds
+        raise LLMUnavailableError("the LLM provider call failed: ValidationException")
+
+    with pytest.raises(LLMUnavailableError, match="ValidationException"):
+        ebs.screen_candidates(
+            {"title": "e", "description": ""}, bugs, None, None, screen_fn=warm_ok_fanout_down
+        )
+
+
+def test_run_screen_provider_error_propagates(rebar_repo: Path) -> None:
+    from rebar.llm.errors import LLMUnavailableError
+
+    epic, _child = _epic_with_child(rebar_repo)
+    rebar.create_ticket("bug", "fresh bug", repo_root=str(rebar_repo))
+
+    def provider_down(bug: dict, sp: str) -> dict:
+        raise LLMUnavailableError("the LLM provider call failed: ValidationException")
+
+    with pytest.raises(LLMUnavailableError, match="ValidationException"):
+        ebs.run_screen(
+            epic,
+            {"title": "e", "description": "", "ticket_id": epic},
+            str(rebar_repo),
+            screen_fn=provider_down,
+        )
+
+
+def test_precheck_propagates_screen_provider_error(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end at the precheck step: a provider error inside the epic-close bug screen
+    escapes completion_precheck (the workflow interpreter then fails the step and the close
+    gate fail-closes) instead of being laundered into run_verify=True with an empty block."""
+    from rebar.llm.errors import LLMUnavailableError
+    from rebar.llm.workflow import gate_ops
+
+    epic, child = _epic_with_child(rebar_repo)
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+    rebar.create_ticket("bug", "fresh candidate bug", repo_root=str(rebar_repo))
+
+    def provider_down(*a, **k):
+        raise LLMUnavailableError("the LLM provider call failed: ValidationException")
+
+    monkeypatch.setattr(ebs, "_screen_one", provider_down)
+
+    with pytest.raises(LLMUnavailableError, match="ValidationException"):
+        gate_ops.completion_precheck(_precheck_ctx(epic, rebar_repo))
+
+
+def test_screen_non_provider_failure_still_degrades_after_1019(rebar_repo: Path) -> None:
+    """The fail-closed carve-out is ONLY the LLMUnavailableError class: a non-provider
+    failure alongside a provider-healthy fan-out still degrades that one candidate to C."""
+    vmap: dict = {}
+    bugs = [_mk_bug(i, vmap) for i in range(2)]
+
+    def flaky(bug: dict, sp: str) -> dict:
+        if bug["ticket_id"] == bugs[1]["ticket_id"]:
+            raise ValueError("malformed screen output")
+        return vmap[bug["ticket_id"]]
+
+    tally = ebs.screen_candidates(
+        {"title": "e", "description": ""}, bugs, None, None, screen_fn=flaky
+    )
+
+    assert [row["verdict"] for row in tally] == ["A", "C"]

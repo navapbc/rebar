@@ -20,8 +20,16 @@ at-close escapes, 30a2 and 5b09). The gate is three-staged, cheapest-first:
    tool. A false NEGATIVE here is no worse than today (the bug was invisible before); a false
    POSITIVE costs the verifier one adjudication.
 
-The screen NEVER blocks a close by itself: any failure — model down, malformed output, store
-read error — degrades OPEN (logged, candidate treated as ``C`` / screen skipped). The tally
+The screen degrades OPEN on non-systemic failures — malformed output, store read error —
+(logged, candidate treated as ``C`` / screen skipped), with ONE deliberate exception (bug
+1019, operator-ratified fail-closed): a SYSTEMIC provider error (:class:`LLMUnavailableError`,
+subclass ``LLMConfigError`` included) PROPAGATES so the close gate's existing fail-closed
+handler blocks the close. Degrading it per-candidate silently blinded the caused_by bug floor
+when a Bedrock ValidationException failed all 32 screen calls of one close while the verifier
+PASSed. Unlike the ``plan_review/pass1.py`` container fan-out (which degrades a fanned-out
+worker's systemic error because an upstream chunk pool already re-raises), this screen has no
+upstream tripwire — its own calls are the ONLY place the outage can surface — so the warm
+call and the fan-out both re-raise. The tally
 (per-bug verdict + citation + unevaluated-overflow count) is recorded on the completion
 sidecar for audit and live false-negative calibration.
 
@@ -41,6 +49,7 @@ from dataclasses import replace
 from typing import Any
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -55,8 +64,10 @@ _PROMPT_ID = "epic-bug-screen"
 _OUTPUT_SCHEMA = "epic_bug_screen_verdict"
 _BLOCK_HEADER = "UNRESOLVED BUG CANDIDATES (epic-close screen)"
 _FAN_OUT_WORKERS = 8
-# The non-surfacing degrade verdict: any per-candidate failure coerces to C (unrelated), so a
-# broken screen can only UNDER-report — it never fabricates an A-candidate or blocks a close.
+# The non-surfacing degrade verdict: a NON-SYSTEMIC per-candidate failure coerces to C
+# (unrelated), so a broken screen can only UNDER-report — it never fabricates an A-candidate.
+# A systemic provider error (LLMUnavailableError) is the bug-1019 carve-out: it re-raises so
+# the close FAILS CLOSED instead of the floor being silently blinded.
 _DEGRADE = {"verdict": "C", "citation": ""}
 
 ScreenFn = Callable[[dict, str], dict]
@@ -146,9 +157,12 @@ def screen_candidates(
     into the provider cache, then the rest fan out concurrently and read the warmed prefix —
     mirroring the plan-review container orchestration (``plan_review/pass1.py``,
     warm-then-fan-out; the helper is not lifted from there because pass1's version is
-    entangled with bin-packing and budget records). A per-candidate failure degrades THAT
-    candidate to ``C`` — including the warm call: an unwarmed fan-out only forfeits cache
-    hits, and the trivial tier is cheap uncached (bug 7a79 note).
+    entangled with bin-packing and budget records). A NON-SYSTEMIC per-candidate failure
+    degrades THAT candidate to ``C`` — including the warm call: an unwarmed fan-out only
+    forfeits cache hits, and the trivial tier is cheap uncached (bug 7a79 note). A systemic
+    provider error (:class:`LLMUnavailableError`) instead PROPAGATES from warm call and
+    fan-out alike (bug 1019 fail-closed ruling; see the module docstring for why this
+    deliberately diverges from pass1's fan-out degrade).
 
     ``screen_fn`` is the LLM-free test seam: ``(bug, system_prompt) -> raw verdict dict``.
     """
@@ -171,7 +185,14 @@ def screen_candidates(
     def _row(bug: dict) -> dict:
         try:
             verdict = _normalized(screen_fn(bug, system_prompt))
-        except Exception:  # noqa: BLE001 — degrade open per candidate; the close never fails here
+        except LLMUnavailableError:
+            # Bug 1019 (operator-ratified FAIL CLOSED): a systemic provider error — the
+            # provider rejected/unreachable, or the extra/key absent (LLMConfigError is a
+            # subclass by design) — must NOT be laundered into C. Re-raise (warm call and
+            # fan-out alike; pool.map surfaces the first worker exception) so the close
+            # gate's fail-closed handler blocks the close and names the provider failure.
+            raise
+        except Exception:  # noqa: BLE001 — non-systemic failure degrades open per candidate
             logger.warning(
                 "epic bug screen call failed for %s; degrading to C (unrelated)",
                 bug.get("ticket_id"),
@@ -237,9 +258,12 @@ def run_screen(
     """The full stage-2/3 pipeline for one epic close: candidate filter -> screen -> compact
     forwarding block + sidecar tally. Returns ``{"block": str, "tally": list, "overflow": int}``.
 
-    NEVER raises and never blocks the close: any failure degrades open with a logged reason
-    and an empty block (the DET caused_by floor is the hard tier; this stage only feeds the
-    verifier evidence it would otherwise not see)."""
+    NEVER raises on a NON-SYSTEMIC failure and never blocks the close for one: such a
+    failure degrades open with a logged reason and an empty block (the DET caused_by floor
+    is the hard tier; this stage only feeds the verifier evidence it would otherwise not
+    see). The ONE exception (bug 1019, operator-ratified): a systemic provider error
+    (:class:`LLMUnavailableError`) re-raises so the close gate FAILS CLOSED — a blind
+    screen must not report success."""
     from rebar.llm import completion, completion_sidecar
 
     try:
@@ -265,7 +289,9 @@ def run_screen(
             "tally": tally,
             "overflow": overflow,
         }
-    except Exception:  # noqa: BLE001 — the screen is advisory; a failure must never block a close
+    except LLMUnavailableError:
+        raise  # bug 1019: a systemic provider error fails the close CLOSED, never degrades
+    except Exception:  # noqa: BLE001 — advisory tier: a non-systemic failure must never block a close
         logger.warning("epic bug screen failed for %s; degrading open (skipped)", epic_id)
         logger.debug("epic bug screen failure detail", exc_info=True)
         return {"block": "", "tally": [], "overflow": 0}

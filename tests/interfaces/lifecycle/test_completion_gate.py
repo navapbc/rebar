@@ -207,6 +207,31 @@ def test_gate_missing_llm_fails_closed(rebar_repo: Path, monkeypatch) -> None:
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
 
 
+def test_gate_provider_error_fails_closed(rebar_repo: Path, monkeypatch) -> None:
+    """Bug 1019 (operator-ratified fail-closed): a verifier run that dies with a PROVIDER
+    error — an LLMUnavailableError, e.g. a Bedrock ValidationException surfaced from the
+    epic-close bug screen — REFUSES the close exactly like the missing-extra path: nonzero
+    exit, the error names the provider failure, ticket stays in_progress, no signature."""
+    _enable(rebar_repo)
+
+    def _provider_down(ticket_id, **kw):
+        from rebar.llm.errors import LLMUnavailableError
+
+        raise LLMUnavailableError(
+            "the LLM provider call failed: status_code: 400 (ValidationException)"
+        )
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", _provider_down)
+    tid = _make(rebar_repo)
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert ei.value.returncode != 0
+    # the message names the provider failure (load-bearing token, not the exact sentence)
+    assert "ValidationException" in ei.value.stderr
+    assert _status(tid, rebar_repo) == "in_progress"
+    assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "unsigned"
+
+
 def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
