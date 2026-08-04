@@ -220,8 +220,6 @@ jobs:
     name: verify-identity (whole-store authorship gate)
     needs: clear-vote
     runs-on: ubuntu-latest
-    env:
-      REBAR_TICKETS_PACK_LIMIT_KIB: 131072
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
         uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
@@ -267,19 +265,17 @@ jobs:
             exit 1
           fi
           git worktree add -B tickets .tickets-tracker refs/remotes/gh-tickets
-      - name: Fail closed if the filtered tickets pack exceeds its limit
-        shell: bash
-        run: |
-          set -euo pipefail
-          size_pack="$(git count-objects -v | awk '$1 == "size-pack:" { print $2; found=1 } END { if (!found) exit 1 }')"
-          if ! [[ "$size_pack" =~ ^[0-9]+$ ]]; then
-            echo "::error::git count-objects did not report a numeric size-pack" >&2
-            exit 1
-          fi
-          if (( size_pack > REBAR_TICKETS_PACK_LIMIT_KIB )); then
-            echo "::error::tickets pack is ${size_pack} KiB; limit is ${REBAR_TICKETS_PACK_LIMIT_KIB} KiB" >&2
-            exit 1
-          fi
+      # NOTE: there is deliberately NO pack-size gate here. A hard cap on the tickets
+      # pack (formerly `REBAR_TICKETS_PACK_LIMIT_KIB`, "Fail closed if the filtered tickets
+      # pack exceeds its limit") was removed on purpose: the `tickets` branch is an
+      # APPEND-ONLY event log whose full history is mounted here on purpose (commit-ancestry
+      # era scoping, ADR 0051), so its pack only ever grows — a fixed KiB ceiling is
+      # guaranteed to be crossed eventually and, once crossed, casts Verified -1 on EVERY
+      # Gerrit change repo-wide until someone bumps the number. Since the feature landed it
+      # has repeatedly blocked the normal review workflow for reasons unrelated to the change
+      # under review, so the gate cost far more than it protected. Tracked by a092
+      # (bardic-continuous-asianlion). If tickets-pack growth ever needs bounding, do it with
+      # a real mechanism (server-side gc / history compaction), not a fail-closed CI ceiling.
       - name: verify-identity (config-driven posture; reads rebar.toml from this change)
         shell: bash
         run: |

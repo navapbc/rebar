@@ -20,7 +20,6 @@ pytestmark = pytest.mark.integration
 _ROOT = Path(__file__).resolve().parents[2]
 _HISTORICAL_BYTES = 141 * 1024 * 1024
 _STANDALONE_LIMIT = 102400
-_GERRIT_LIMIT = 131072
 
 
 def _run(
@@ -313,32 +312,26 @@ def test_standalone_guard_accepts_blobless(tmp_path: Path, ticket_server: Ticket
     )
 
 
-def test_gerrit_guard_rejects_full(tmp_path: Path, ticket_server: TicketServer) -> None:
-    client = tmp_path / "gerrit-full"
-    _fetch(client, ticket_server)
-    _git(client, "worktree", "add", "-B", "tickets", ".tickets-tracker", "origin/tickets")
-    assert _size_pack_kib(client) > _GERRIT_LIMIT
-    workflow = _ROOT / ".github/workflows/gerrit-verify.yaml"
-    assert (
-        _run_guard(
-            client, workflow, "verify-identity", "REBAR_TICKETS_PACK_LIMIT_KIB", _GERRIT_LIMIT
-        )
-        != 0
-    )
+def test_gerrit_verify_has_no_standalone_pack_guard(
+    tmp_path: Path, ticket_server: TicketServer
+) -> None:
+    """The gerrit-verify tickets-pack guard was removed deliberately (a092).
 
-
-def test_gerrit_guard_accepts_materialized(tmp_path: Path, ticket_server: TicketServer) -> None:
-    client = tmp_path / "gerrit-blobless"
-    _fetch(client, ticket_server, "--filter=blob:none")
-    _git(client, "worktree", "add", "-B", "tickets", ".tickets-tracker", "origin/tickets")
-    assert _size_pack_kib(client) < _GERRIT_LIMIT
+    The `tickets` branch is append-only full-history (ADR 0051), so its pack only
+    grows and any fixed KiB ceiling is guaranteed to trip and block every Gerrit
+    change repo-wide. Pin the deliberate absence so the fail-closed guard is not
+    silently reintroduced.
+    """
     workflow = _ROOT / ".github/workflows/gerrit-verify.yaml"
-    assert (
-        _run_guard(
-            client, workflow, "verify-identity", "REBAR_TICKETS_PACK_LIMIT_KIB", _GERRIT_LIMIT
-        )
-        == 0
-    )
+    job_def = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]["verify-identity"]
+    assert "REBAR_TICKETS_PACK_LIMIT_KIB" not in (job_def.get("env") or {})
+    standalone = [
+        step
+        for step in job_def["steps"]
+        if "git count-objects -v" in str(step.get("run", ""))
+        and "rebar verify-identity" not in str(step.get("run", ""))
+    ]
+    assert not standalone, "the gerrit-verify tickets-pack guard must stay removed (a092)"
 
 
 @pytest.mark.parametrize("lane", ["standalone", "gerrit"])
