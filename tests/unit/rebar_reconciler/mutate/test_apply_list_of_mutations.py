@@ -37,8 +37,14 @@ _OWNED_KEYS = (
 
 
 def _load(name: str, path: Path):
-    if name in sys.modules:
-        return sys.modules[name]
+    # Cache on name AND `__file__` (bug 2bc7's audit). Caching on the name alone is the "just cache
+    # on name" fix `test_load_module_identity.py`'s docstring warns about: when another file has
+    # registered a DIFFERENT file's module under the same shared key, this returned that module and
+    # the caller silently tested the wrong source. Validating `__file__` keeps the sharing benefit
+    # while refusing a mismatched hit.
+    cached = sys.modules.get(name)
+    if cached is not None and getattr(cached, "__file__", None) == str(path):
+        return cached
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
