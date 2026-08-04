@@ -148,6 +148,26 @@ reviewed ticket run `rebar review-plan <id>`; remediate any BLOCK and apply the 
 findings that genuinely improve the plan before claiming. Reading the gate first is standard
 process: it is far cheaper to author to the criteria than to remediate a BLOCK after the fact.
 
+**A blocked ticket has already completed the review cycle successfully — do NOT review it,
+and do NOT force it.** The gate's fast-fail on a not-yet-claimable ticket (status
+`closed`/`idea`/`blocked`, or `open` but blocked by an unclosed dependency) is the **intended
+and correct** outcome, not an obstacle to work around. For the current cycle, treat that
+blocked state as *done*: the ticket has passed through review as far as it can until its
+dependencies close, and it needs no further action from you now. It re-enters the review queue
+on its own when `rebar ready` surfaces it (all blockers closed) — review it *then*, not before.
+
+Never pass `--force` to `rebar review-plan` to bypass the claimability check so you can review a
+blocked ticket. `--force` exists as an escape hatch for a **human operator's** explicit
+judgment call; it is not an agent move, and a vague or implied instruction ("review these", "why
+aren't we reviewing yet?") is **not** authorization to force — it is at most a reason to ask.
+Forcing produces a signed attestation against dependencies that are not final, which the gate is
+specifically designed to prevent: a review pins its dependencies' material, so an attestation
+minted while a dependency is still open silently goes stale the moment that dependency changes.
+If you believe a blocked ticket genuinely must be reviewed now, that is a decision only the user
+can make — surface it as a one-question clarification (name the block, the risk of forcing, and
+ask explicitly) rather than inferring permission and forcing on your own. Do not treat a series
+of individually-plausible force decisions as collectively acceptable; each one erodes the gate.
+
 Before recording any ticket whose acceptance criteria will include or reference testing,
 verification, or behavioral oracles, also read **`test-design.md` in this skill's
 directory** (the shared test-design standard) — when in doubt, read it (the cost is one
