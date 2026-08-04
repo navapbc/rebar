@@ -42,6 +42,7 @@ from rebar.llm.model_classes import (
     build_fallback_model,
     entered_fallback_model,
     fallback_targets_for,
+    primary_endpoint_for,
 )
 from rebar.llm.providers import ProviderSession
 from rebar.llm.structured_run import (
@@ -347,6 +348,20 @@ class PydanticAIRunner:
                 tools = [*tools, *req.extra_tools]
             toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _pai_model(cfg)
+        # A model class may configure its endpoint on the SLOT (`REBAR_LLM_<CLASS>_ENDPOINT` /
+        # the `endpoint` field) rather than as a top-level `base_url`. Ops collapse the class
+        # onto `cfg.model` via `resolve_model_string`, which drops that endpoint, so recover it
+        # here from the resolved string (the same identity `fallback_targets_for` keys on) and
+        # apply it as `base_url` when the operator set none — this registers rebar's
+        # OpenAI-compatible builder for the PRIMARY model, stamps the endpoint host into the
+        # signed provenance, and flips the tier to best_effort, uniformly with the top-level
+        # `REBAR_LLM_BASE_URL` path. Without it the primary silently fell through to
+        # pydantic-ai's stock OpenAIProvider and failed with "Missing credentials" (bug 6e70).
+        # Never overrides an explicit `base_url`; a class with no slot endpoint is a no-op.
+        if not cfg.base_url and self._model_override is None:
+            slot_endpoint = primary_endpoint_for(resolved)
+            if slot_endpoint:
+                cfg = replace(cfg, base_url=slot_endpoint)
         # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
         # one-provider-factory) — the ONE place answering "how is a Provider built for
         # provider X", incl. "it isn't": a rebar-registered provider (today, only anthropic)

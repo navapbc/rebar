@@ -322,3 +322,50 @@ def test_native_output_still_selected_for_a_hosted_openai_model():
     caps = capabilities_for("openai:gpt-4o")
     assert caps.native_structured_output is True
     assert isinstance(structured.output_mode(_Verdict, caps), NativeOutput)
+
+
+# ── bug 6e70: a per-class endpoint must reach the local builder for the PRIMARY model ──────
+
+
+def _configure_class_endpoint(
+    monkeypatch,
+    *,
+    cls="trivial",
+    model="local-model",
+    provider="openai",
+    endpoint="http://localhost:1234/v1",
+):
+    """Point a model-class slot at a local ``endpoint`` through the REAL config path
+    (``load_class_slots`` -> ``_read_llm_file_table``) — the same seam the
+    ``REBAR_LLM_<CLASS>_ENDPOINT`` env var and the ``[tool.rebar.llm.model_classes]`` TOML land
+    on — so the endpoint has to survive parsing to reach the runner."""
+    from rebar.llm import config as llm_config
+
+    table = {"model_classes": {cls: {"model": model, "provider": provider, "endpoint": endpoint}}}
+    monkeypatch.setattr(llm_config, "_read_llm_file_table", lambda repo_root=None: table)
+
+
+def test_per_class_endpoint_routes_the_primary_through_the_local_builder(
+    stub_openai_server, monkeypatch
+):
+    """Regression for bug 6e70 — a model class configured with a local ``endpoint``
+    (``REBAR_LLM_<CLASS>_ENDPOINT`` / the slot ``endpoint`` field) and NO top-level ``base_url``
+    must reach the local server through rebar's OpenAI-compatible builder, not fall through to
+    pydantic-ai's stock ``OpenAIProvider`` (which raises 'Missing credentials').
+
+    The slot ``endpoint`` was parsed, given dedicated env vars, and documented, but the only
+    consumer of any ``.endpoint`` was the FALLBACK chain — the PRIMARY model silently dropped it.
+    Ops collapse the class onto ``cfg.model`` via ``resolve_model_string``; the endpoint stays in
+    the slot config, never on ``cfg``, so the runner must recover it from the resolved model."""
+    _configure_class_endpoint(monkeypatch)
+
+    from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
+
+    cfg = _cfg(model=resolve_model_string(TRIVIAL_CLASS))
+    assert cfg.base_url is None, "the endpoint lives in the slot, not on cfg — that is the bug"
+
+    out = PydanticAIRunner(cfg).run(_req(cfg))
+
+    assert out["verdict"] == "PASS"
+    assert stub_openai_server, "no request reached the configured per-class endpoint"
+    assert "localhost:1234" in str(stub_openai_server[0].url)
