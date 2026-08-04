@@ -417,7 +417,15 @@ def test_the_raw_count_surfaces_a_failed_request_instead_of_counting_zero(suppor
 
 
 class _FakeIssue:
-    """A pycontribs `Issue`-shaped object: a `.raw` payload plus a recording `.update`."""
+    """A pycontribs `Issue`-shaped object: a `.raw` payload plus a recording `.update`.
+
+    **`.update` APPLIES a `fields.parent` write back into `.raw`, and that is load-bearing**
+    (bug 1a9f-50c0-e7a5-4fda). Data Center answers a sub-task parent write with 204 and silently
+    ignores it, so `set_parent` now verifies by reading the field back and raises when the parent
+    did not move. A double that records the write without reflecting it is indistinguishable from
+    that platform bug, so it would make the sub-task cell below fail for a reason unrelated to
+    what it asserts — the write SHAPE, not persistence.
+    """
 
     def __init__(self, key: str, *, subtask: bool, parent: str | None = None) -> None:
         fields: dict[str, Any] = {"issuetype": {"name": "Sub-task", "subtask": subtask}}
@@ -428,6 +436,14 @@ class _FakeIssue:
 
     def update(self, fields: dict[str, Any] | None = None, **_kwargs: Any) -> None:
         self.updates.append(fields or {})
+        if fields and "parent" in fields:
+            parent = fields["parent"]
+            raw_fields = self.raw["fields"]
+            assert isinstance(raw_fields, dict)
+            if isinstance(parent, dict):
+                raw_fields["parent"] = dict(parent)
+            else:
+                raw_fields.pop("parent", None)
 
 
 class _FakeClient:
