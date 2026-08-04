@@ -352,63 +352,134 @@ def track_issue() -> Iterator[Callable[[str], None]]:
         _poll_until_404(f"/rest/api/2/issue/{key}", what=f"issue {key}")
 
 
-def _discover_project_templates() -> list[str]:
-    """Ask the instance which project templates it actually has.
+# ---------------------------------------------------------------------------
+# The DECLARED provisioning contract (bug 3fe5)
+# ---------------------------------------------------------------------------
+#
+# We build and own this image, so the environment it offers is ours to DECLARE as
+# data and assert once — not to rediscover on every run and hope for the best.
+# The values below are the ground truth measured by a capability-map run against
+# the real image (Jira DC 8.17.1): all three of its software templates yield an
+# `Epic` issue type, and the instance exposes named fields `Epic Link` and
+# `Epic Name`. Pinning the Scrum template makes every run provision the SAME
+# project; `_assert_project_capabilities` below is what turns a future image that
+# stops honouring this contract into a loud provisioning failure instead of a
+# quietly weaker project.
 
-    Hardcoding a template key does not survive contact with a real instance: the
-    first attempt used ``com.pyxis.greenhopper.jira:gh-simplified-kanban-classic``
-    — a plausible, widely-cited Software key — and this image rejected it with
-    ``400 The project template specified does not exist``. Which templates exist
-    depends on the bundled applications and version, so the instance is the only
-    authority. Discovery also means a future image bump does not silently break
-    the fixture on a key that quietly disappeared.
+#: The project template every scratch project is created from — the Scrum software
+#: development template. Pinned rather than discovered: see
+#: :func:`_create_scratch_project`.
+_PROJECT_TEMPLATE = "com.pyxis.greenhopper.jira:gh-scrum-template"
 
-    Returns an empty list if the endpoint is unavailable, in which case the caller
-    falls back to creating without a template.
-    """
-    status, body = _request("/rest/project-templates/latest/templates")
-    if status != 200 or not isinstance(body, dict):
-        return []
-    keys: list[str] = []
-    for group in body.values():
-        if not isinstance(group, list):
-            continue
-        for template in group:
-            if isinstance(template, dict) and template.get("projectTemplateModuleCompleteKey"):
-                keys.append(str(template["projectTemplateModuleCompleteKey"]))
-    return keys
+#: Issue type NAMES this suite needs the scratch project to offer. `Epic` is the
+#: one that actually broke (3fe5): a degraded template offered only
+#: ``['Sub-task', 'Task']`` and the epic-parent cells died 35 minutes into the run.
+_REQUIRED_ISSUE_TYPES = ("Task", "Sub-task", "Epic")
+
+#: Instance field NAMES this suite needs. Both are Epic machinery: Data Center
+#: requires `Epic Name` to create an Epic at all, and `Epic Link` is how a child
+#: is attached to one. They are instance-wide custom fields, so they are asserted
+#: against ``/rest/api/2/field`` rather than against the project.
+_REQUIRED_FIELDS = ("Epic Link", "Epic Name")
 
 
 def _create_scratch_project(key: str) -> tuple[int, Any]:
-    """Create the scratch project, trying discovered templates then no template.
+    """Create the scratch project from the ONE pinned template. Returns ``(status, body)``.
 
-    Returns the first ``201`` outcome, or the LAST failure with every attempt
-    named — so a future breakage reports what was tried rather than just "400".
+    This deliberately makes a single create attempt and has no fallback chain.
+    The earlier version tried every template discovered from the instance, then a
+    bare ``software`` project, then a project with no template at all, and returned
+    the first ``201`` **without asserting anything about what it got**. That is the
+    defect bug 3fe5 records: on the wire a silent degrade to a template offering no
+    ``Epic`` issue type is indistinguishable from a good provision, so nothing
+    noticed at provisioning time and the run failed 35 minutes later, inside one
+    cell, as ``SETUP FAILED: project offers no 'Epic' issue type``.
+
+    Discovery was never the right shape for an image WE build: the environment is
+    ours to declare. So the template is a constant (``_PROJECT_TEMPLATE``), the
+    single create either produces exactly the declared project or fails, and
+    :func:`_assert_project_capabilities` verifies the result before any test sees
+    it. **Do not reintroduce the fallback** — a chain can only convert a loud,
+    immediate, accurate failure into a quiet one 35 minutes downstream.
+
+    On failure the returned body NAMES the refused template, so an image bump that
+    retires the key reports what was tried rather than a bare ``400``.
     """
-    base = {
+    payload: dict[str, Any] = {
         "key": key,
         "name": f"rebar J5 harness scratch {key}",
         "lead": _ADMIN_USER,
         "description": "Scratch project from tests/external/live_jira_dc — safe to delete.",
+        "projectTypeKey": "software",
+        "projectTemplateKey": _PROJECT_TEMPLATE,
     }
-    # Discovered templates first (most specific), then a bare software project,
-    # then a bare project with no type at all — each is a real create attempt, so
-    # whichever the instance supports wins without us having to know in advance.
-    candidates: list[dict[str, Any]] = [
-        {**base, "projectTypeKey": "software", "projectTemplateKey": template}
-        for template in _discover_project_templates()
-    ]
-    candidates.append({**base, "projectTypeKey": "software"})
-    candidates.append(dict(base))
+    status, body = _request("/rest/api/2/project", method="POST", payload=payload)
+    if status == 201:
+        return status, body
+    return status, (
+        f"{body} (pinned template {_PROJECT_TEMPLATE!r} was refused; there is no fallback "
+        f"by design — if this image no longer offers that template, re-run the capability "
+        f"map and update `_PROJECT_TEMPLATE` rather than adding a retry)"
+    )
 
-    attempts: list[str] = []
-    status, body = 0, None
-    for payload in candidates:
-        status, body = _request("/rest/api/2/project", method="POST", payload=payload)
-        if status == 201:
-            return status, body
-        attempts.append(f"{payload.get('projectTemplateKey', '<no template>')} -> {status}")
-    return status, f"{body} (tried: {'; '.join(attempts)})"
+
+def _assert_project_capabilities(key: str) -> None:
+    """Verify the freshly-created project actually honours the declared contract.
+
+    The drift detector for bug 3fe5. Creating from a pinned template is necessary
+    but not sufficient: a template can be present and still yield a different issue
+    type set after an image bump, and Epic machinery additionally depends on
+    instance-wide custom fields the template says nothing about. So the contract is
+    checked against the provisioned reality, once, at provisioning time — where the
+    failure is attributable — instead of being discovered by whichever test cell
+    happens to need ``Epic`` half an hour later.
+
+    Raises ``AssertionError`` naming what was required, what was found, and what to
+    change. Note that an UNVERIFIABLE contract raises too: if the project or field
+    read fails, this must not pass vacuously, because "we could not check" is
+    exactly the state that let the original degrade through.
+    """
+    status, body = _request(f"/rest/api/2/project/{key}")
+    if status != 200 or not isinstance(body, dict):
+        raise AssertionError(
+            f"PROVISIONING FAILED: could not read back scratch project {key} to verify its "
+            f"capabilities (HTTP {status}, body {body!r}). The declared contract "
+            f"(issue types {list(_REQUIRED_ISSUE_TYPES)}, fields {list(_REQUIRED_FIELDS)}) is "
+            f"therefore UNVERIFIED, and an unverified contract is refused rather than assumed."
+        )
+
+    offered = sorted(
+        str(issue_type.get("name"))
+        for issue_type in (body.get("issueTypes") or [])
+        if isinstance(issue_type, dict)
+    )
+    missing_types = [name for name in _REQUIRED_ISSUE_TYPES if name not in offered]
+    if missing_types:
+        raise AssertionError(
+            f"PROVISIONING FAILED: scratch project {key}, created from the pinned template "
+            f"{_PROJECT_TEMPLATE!r}, offers no {missing_types} issue type(s). It offers "
+            f"{offered}. This is the 3fe5 degrade: the image no longer yields the declared "
+            f"environment. Re-run the capability map against the current image and update "
+            f"`_PROJECT_TEMPLATE` / `_REQUIRED_ISSUE_TYPES` — do not add a fallback template."
+        )
+
+    status, fields = _request("/rest/api/2/field")
+    if status != 200 or not isinstance(fields, list):
+        raise AssertionError(
+            f"PROVISIONING FAILED: could not list instance fields to verify "
+            f"{list(_REQUIRED_FIELDS)} (HTTP {status}, body {fields!r}). The declared contract "
+            f"is UNVERIFIED, and an unverified contract is refused rather than assumed."
+        )
+    present = {str(field.get("name")) for field in fields if isinstance(field, dict)}
+    missing_fields = [name for name in _REQUIRED_FIELDS if name not in present]
+    if missing_fields:
+        raise AssertionError(
+            f"PROVISIONING FAILED: this instance exposes no {missing_fields} field(s), which "
+            f"Data Center requires to create an Epic ('Epic Name') and to attach a child to "
+            f"one ('Epic Link'). Without them the epic-parent cells cannot run. Re-run the "
+            f"capability map against the current image and update `_REQUIRED_FIELDS` if the "
+            f"instance genuinely renamed them."
+        )
 
 
 @pytest.fixture
@@ -418,10 +489,17 @@ def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
     Any issue created under this project should ALSO be registered with
     ``track_issue`` by the test, so it is deleted (and confirmed gone) before
     the project itself is deleted.
+
+    The capability assertion runs BEFORE the yield, and that ordering is the whole
+    fix for bug 3fe5: a project that does not honour the declared contract must
+    abort provisioning here — where the diagnosis is one HTTP status away — rather
+    than be handed to tests that will fail confusingly, and much later, for a
+    reason that is not about the code under test.
     """
     key = _random_project_key()
     status, created = _create_scratch_project(key)
     assert status == 201, f"scratch project creation failed: {status} {created}"
+    _assert_project_capabilities(key)
 
     yield key
 
