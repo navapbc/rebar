@@ -161,6 +161,48 @@ def _parent_clear_is_managed(
     return should_propagate_removal("parent", parent_local_id, ticket)
 
 
+def _peer_removed_the_parent(
+    local_parent: str | None,
+    remote_parent: Any,
+    ticket: dict[str, Any],
+    binding_store: Any,
+    local_id: str,
+) -> bool:
+    """Whether the peer DE-PARENTED this child since our last observation, so the outbound
+    local-wins SET must stand down and let ``diff_inbound_parent`` clear the local parent.
+
+    Ticket 339a-57ac-e5f3-4718: a parent cleared on the Jira side was never cleared locally.
+    ``parent`` is not in ``_INBOUND_MIRRORED_FIELDS``, so nothing deferred to inbound for it —
+    outbound resolved the still-bound local epic parent, saw ``remote_parent_id is None``, and
+    emitted a local-wins re-push; the inbound differ then dropped its own freshly computed
+    clear as a same-pass contradiction of that write. The clear's precondition ("Jira has no
+    parent, local does") is IDENTICAL to the re-push's, so the clear could never fire.
+
+    The discriminator is the LAST-OBSERVED PEER PARENT (ticket 88d9's evidence channel, reused
+    here rather than inventing a second one). A bare "remote is falsy" check cannot tell the
+    two symmetric cases apart:
+
+    * ``get_peer_parent(local_id) == local_parent`` — we last saw the peer carrying exactly the
+      parent we still hold locally, and it is gone now. Only the PEER moved: a remote removal,
+      which inbound owns. Suppress the outbound push (return ``True``).
+    * ``get_peer_parent(local_id) != local_parent`` — the local side re-set (or first set) the
+      parent since that observation, so this is genuine LOCAL intent and local-wins must push
+      it. Returning ``True`` here would silently discard a real local re-parent, a worse
+      failure than the one being fixed.
+
+    ``get_peer_parent`` is getattr-guarded exactly as the inbound differ guards it: legacy
+    binding stores and older test doubles predate the method, and their absence must fall
+    through to today's unconditional local-wins push rather than change behaviour blindly.
+    """
+    if not local_parent or remote_parent:
+        return False
+    get_peer_parent = getattr(binding_store, "get_peer_parent", None)
+    if get_peer_parent is None:
+        return False
+    observed = get_peer_parent(local_id or ticket.get("ticket_id") or "")
+    return bool(observed) and observed == local_parent
+
+
 def compute_update_fields(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
@@ -348,6 +390,11 @@ def diff_canonical_fields(
                 and not _parent_clear_is_managed(remote_parent, ticket, binding_store)
             ):
                 pass  # never managed this remote parent → adopt inbound, don't clear
+            elif _peer_removed_the_parent(
+                local_parent, remote_parent, ticket, binding_store, local_id
+            ):
+                # peer de-parented, local unchanged → inbound owns the clear
+                pass  # (ticket 339a-57ac-e5f3-4718)
             else:
                 changed["parent"] = local_parent
 
