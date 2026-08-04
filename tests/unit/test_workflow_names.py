@@ -27,6 +27,7 @@ _WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 # filename -> exact expected `name:` display value. This IS the locked table.
 _EXPECTED_NAMES: dict[str, str] = {
     "gerrit-verify.yaml": "Gerrit Verified Gate",
+    "jira-dc-epic-link-probe.yml": "Jira DC Epic-Link Clear Probe",
     "release.yml": "Release",
     "_optionality.yml": "Optional-Dependency Isolation (reusable)",
     "optionality.yml": "Optional-Dependency Isolation (mirror)",
