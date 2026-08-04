@@ -1,13 +1,17 @@
 """Tier B ``unlink`` port (docs/bash-migration.md §4) — the net-effective UNLINK.
 
-``unlink`` is pair-scoped (no relation arg): it removes the most-recently-created
-net-active LINK between the ordered pair by writing an UNLINK event carrying that
-LINK's uuid. This mirrors ticket-link.sh's unlink path — the net-effective replay
-(``_get_link_info``: replay LINK/UNLINK chronologically, with a SNAPSHOT
-compiled_state fallback for compacted links) and the reciprocal UNLINK for
-relates_to. The UNLINK write routes through the shared seam (same locked write
-path), and the active-link check reuses rebar.graph's ``_is_active_link`` so the
-two stay in lockstep.
+``unlink`` removes a net-active LINK between the ordered pair by writing an UNLINK
+event carrying that LINK's uuid. With no relation it is pair-scoped — it removes
+the most-recently-created net-active LINK between the pair, mirroring
+ticket-link.sh's unlink path. With an explicit relation (bug e39f) removal is
+RELATION-SCOPED: exactly the named relation's net-active link is removed, leaving
+any other relation the pair holds untouched — symmetric with the write side,
+where ``graph/_links.add_dependency`` keys idempotency on ``(target_id,
+relation)``. Both forms share the net-effective replay (``_get_link_info``:
+replay LINK/UNLINK chronologically, with a SNAPSHOT compiled_state fallback for
+compacted links) and the reciprocal UNLINK for relates_to. The UNLINK write
+routes through the shared seam (same locked write path), and the active-link
+check reuses rebar.graph's ``_is_active_link`` so the two stay in lockstep.
 """
 
 from __future__ import annotations
@@ -22,8 +26,9 @@ from rebar.reducer._sort import prefix_ts as _prefix_ts
 
 _USAGE = (
     "Usage: ticket link <source_id> <target_id> <relation>   (relation REQUIRED)\n"
-    "       ticket unlink <source> <target>   (pair-scoped, NO relation arg;\n"
-    "                                          removes the most-recent link between the pair)\n"
+    "       ticket unlink <source> <target> [relation]   (no relation: pair-scoped,\n"
+    "                                          removes the most-recent link between the pair;\n"
+    "                                          with relation: removes that relation's link)\n"
     "\n"
     "  relation: blocks | depends_on | relates_to | duplicates | supersedes | "
     "discovered_from | caused_by\n"
@@ -34,13 +39,19 @@ _USAGE = (
 _EVENT_ORDER = {"LINK": 0, "UNLINK": 1}
 
 
-def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
+def _get_link_info(
+    ticket_dir: Path, target_id: str, relation: str | None = None
+) -> tuple[str, str]:
     """Net-active ``(link_uuid, relation)`` from source→target, or ``("", "")``.
 
     Replays LINK/UNLINK events chronologically (UNLINK.data.link_uuid cancels the
     LINK with that uuid), returning the most recent net-active link for target;
     falls back to a SNAPSHOT compiled_state.deps[] entry (compacted links), minus
     any cancelled uuids. Mirrors ticket-link.sh's ``_get_link_info``.
+
+    ``relation`` narrows the search to exactly that relation (bug e39f): links are
+    written keyed on ``(target_id, relation)``, so a pair can hold several
+    relations; ``relation=None`` keeps the pair-scoped most-recent behavior.
     """
     if not ticket_dir.is_dir():
         return "", ""
@@ -72,7 +83,7 @@ def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
 
     found = ("", "")
     for uuid, (tid, rel) in active.items():
-        if tid == target_id:
+        if tid == target_id and (relation is None or rel == relation):
             found = (uuid, rel)  # last match wins (insertion order = chronological)
     if found[0]:
         return found
@@ -85,12 +96,25 @@ def _get_link_info(ticket_dir: Path, target_id: str) -> tuple[str, str]:
             continue
         for dep in data.get("data", {}).get("compiled_state", {}).get("deps", []):
             duuid = dep.get("link_uuid", "")
-            if dep.get("target_id", "") == target_id and duuid and duuid not in cancelled:
-                return duuid, dep.get("relation", "")
+            drel = dep.get("relation", "")
+            if (
+                dep.get("target_id", "") == target_id
+                and duuid
+                and duuid not in cancelled
+                and (relation is None or drel == relation)
+            ):
+                return duuid, drel
     return "", ""
 
 
-def _write_unlink(source_id: str, target_id: str, tracker: Path, *, repo_root) -> None:
+def _write_unlink(
+    source_id: str,
+    target_id: str,
+    tracker: Path,
+    *,
+    repo_root,
+    relation: str | None = None,
+) -> None:
     """Validate and append one UNLINK event (mirrors ``_write_unlink_event``)."""
     from rebar.graph._links import _is_active_link
 
@@ -100,9 +124,12 @@ def _write_unlink(source_id: str, target_id: str, tracker: Path, *, repo_root) -
         if not (tracker / tid).is_dir():
             raise CommandError(f"Error: ticket '{tid}' does not exist")
 
-    link_uuid, link_relation = _get_link_info(tracker / source_id, target_id)
+    link_uuid, link_relation = _get_link_info(tracker / source_id, target_id, relation)
     if not link_uuid:
-        raise CommandError(f"Error: no LINK event found in '{source_id}' targeting '{target_id}'")
+        scope = f" with relation '{relation}'" if relation else ""
+        raise CommandError(
+            f"Error: no LINK event found in '{source_id}' targeting '{target_id}'{scope}"
+        )
     if not _is_active_link(source_id, target_id, link_relation, str(tracker)):
         raise CommandError(f"Error: no active link found between '{source_id}' and '{target_id}'")
 
@@ -115,13 +142,24 @@ def _write_unlink(source_id: str, target_id: str, tracker: Path, *, repo_root) -
     )
 
 
-def unlink_core(id1_raw: str, id2_raw: str, *, repo_root=None) -> None:
+def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo_root=None) -> None:
     """Remove the net-active link id1→id2 (+ reciprocal for relates_to).
 
-    Mirrors ticket-link.sh's unlink case: resolve both ids, unlink id1→id2, and for
-    a relates_to link also unlink the reciprocal id2→id1 (warning if it is an
-    orphaned one-sided link). Raises :class:`CommandError`.
+    With ``relation=None``, mirrors ticket-link.sh's unlink case: resolve both ids,
+    unlink the most-recent id1→id2 link, and for a relates_to link also unlink the
+    reciprocal id2→id1 (warning if it is an orphaned one-sided link). With an
+    explicit ``relation`` (bug e39f), removes exactly that relation's net-active
+    link — a pair holding several relations keeps the others. Raises
+    :class:`CommandError`.
     """
+    if relation is not None:
+        from rebar.graph._links import CANONICAL_RELATIONS
+
+        if relation not in CANONICAL_RELATIONS:
+            canonical_list = " | ".join(sorted(CANONICAL_RELATIONS))
+            raise CommandError(
+                f"Error: invalid relation '{relation}': must be one of {canonical_list}"
+            )
     tracker = tracker_dir(repo_root)
     id1 = resolve_ticket_id(id1_raw, str(tracker))
     if id1 is None:
@@ -130,13 +168,13 @@ def unlink_core(id1_raw: str, id2_raw: str, *, repo_root=None) -> None:
     if id2 is None:
         raise CommandError(f"Error: ticket '{id2_raw}' does not exist")
 
-    _, link_relation = _get_link_info(tracker / id1, id2)
-    _write_unlink(id1, id2, tracker, repo_root=repo_root)
+    _, link_relation = _get_link_info(tracker / id1, id2, relation)
+    _write_unlink(id1, id2, tracker, repo_root=repo_root, relation=relation)
 
     if link_relation == "relates_to":
-        recip_uuid, _ = _get_link_info(tracker / id2, id1)
+        recip_uuid, _ = _get_link_info(tracker / id2, id1, relation)
         if recip_uuid:
-            _write_unlink(id2, id1, tracker, repo_root=repo_root)
+            _write_unlink(id2, id1, tracker, repo_root=repo_root, relation=relation)
         else:
             print(
                 f"Warning: no reciprocal LINK found in '{id2}' targeting '{id1}' — "
@@ -150,8 +188,9 @@ def unlink_cli(argv: list[str], *, repo_root=None) -> int:
     if len(argv) < 2:
         print(_USAGE, file=sys.stderr)
         return 1
+    relation = argv[2] if len(argv) > 2 else None
     try:
-        unlink_core(argv[0], argv[1], repo_root=repo_root)
+        unlink_core(argv[0], argv[1], relation, repo_root=repo_root)
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
