@@ -324,6 +324,19 @@ def test_same_pass_outbound_parent_write_suppresses_the_clear() -> None:
     pass, outbound emits the parent push for exactly that ticket, and
     ``inbound_differ``'s scalar filter drops any inbound field the same pass's outbound is
     writing. So a brand-new local parent being pushed is never cleared inbound.
+
+    NARROWED IN SCOPE BY ``339a-57ac-e5f3-4718``, though not one line of it changed. The
+    outbound entry here is HAND-BUILT, so this cell asserts what ``inbound_differ``'s filter
+    does GIVEN such a write — it never asks whether the outbound differ actually produces one.
+    That gap is exactly how 339a hid: outbound was ALSO emitting this push when the peer had
+    removed the parent, in which case the suppression discarded a legitimate clear and the local
+    parent survived forever. Since 339a, outbound emits a parent write in this shape only when
+    the LOCAL side genuinely re-set the parent, so the scenario mocked below is now specifically
+    the local-re-set case — which is the one where suppression is correct.
+
+    The complementary property — that outbound stays silent when the peer removed the parent —
+    cannot be asserted here precisely because this cell fabricates its input. It is covered by
+    ``test_parent_clear_bidirectional_37e7.py``, which composes the two REAL differs.
     """
     bindings, locals_by_id = _one_managed_parent()
     snap = _snapshot(["DC-1"], {"DC-1": None})
