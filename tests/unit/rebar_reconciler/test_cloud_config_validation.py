@@ -1,44 +1,48 @@
-"""Cloud config-validation coverage — story 2127, item 2.
+"""Cloud config-validation coverage — story 2127, item 2 (item 2a now ENFORCED by bdb8).
 
-Two Cloud config-validation behaviours the DC transport HAS and Cloud LACKS. Both tests
-are ABSENCE-DOCUMENTING: they pin the CURRENT (permissive) Cloud behaviour and cite the
-follow-up bug that tracks closing the gap, so the divergence is a recorded decision rather
-than an undetected hole. Each has an inverse mutation-check (add the missing guard → the
-absence-doc assertion flips), recorded RED/GREEN in the change description.
-
-  behaviour                 | DC (has it)                              | Cloud (lacks it)
+  behaviour                 | DC (has it)                              | Cloud
   --------------------------+------------------------------------------+-----------------------
-  non-https base URL        | ReconcilerConfig.__post_init__ calls     | JiraConfig has NO
-  rejected                  | _validate_reconciler_tls → ConfigError   | __post_init__; url is
-                            | (_config_schema.py)                      | stored unvalidated
+  non-https url rejected     | ReconcilerConfig.__post_init__ calls     | JiraConfig.__post_init__
+  (item 2a — IMPLEMENTED)    | _validate_reconciler_tls → ConfigError   | now rejects too, via the
+                            | (_config_schema.py)                      | shared _validate_https_url
+                            |                                          | (bug bdb8)
   missing credential        | (DC PAT is required by its transport)    | _build_jira_backend
-  fails loudly              |                                          | builds an AcliClient
-                            |                                          | with EMPTY creds, no
+  fails loudly (item 2b —   |                                          | builds an AcliClient
+  still ABSENCE-DOCUMENTED)  |                                          | with EMPTY creds, no
                             |                                          | loud failure
 
+Item 2a was originally absence-documenting; bug bdb8-0646-9e13-4bfb closed the gap, so the
+tests below now PIN the ENFORCEMENT (JiraConfig rejects a non-https url, with a
+``jira.allow_insecure`` override) — the mutation-check is the inverse: removing
+``JiraConfig.__post_init__`` flips these RED.
+
+Item 2b remains ABSENCE-DOCUMENTING (the current permissive behaviour), tracked by the
+follow-up bug cited below; its inverse mutation-check (add a credential guard → the
+absence-doc assertion flips) is recorded in ad85's change.
+
 Follow-up bugs (filed + linked ``discovered_from`` 2127):
-  * Cloud non-https URL not rejected  → bug bdb8-0646-9e13-4bfb
-  * Cloud missing-credential silent   → bug ad85-e5e3-be8d-4be5
+  * Cloud non-https URL not rejected  → bug bdb8-0646-9e13-4bfb  (CLOSED by this change)
+  * Cloud missing-credential silent   → bug ad85-e5e3-be8d-4be5  (still open)
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
 
-from rebar._config_schema import JiraConfig, ReconcilerConfig
+from rebar._config_schema import InsecureUrlError, JiraConfig, ReconcilerConfig
 from rebar.config import ConfigError
 
 # ---------------------------------------------------------------------------
-# Item 2a — non-https base URL. DC rejects; Cloud does NOT (absence-documenting).
+# Item 2a — non-https url. DC rejects; Cloud now rejects too (bug bdb8).
 # ---------------------------------------------------------------------------
 
 
 def test_dc_reconciler_rejects_non_https_base_url() -> None:
-    """CONTRAST anchor: the DC ReconcilerConfig DOES reject a cleartext base_url. This is
-    the behaviour Cloud is measured against — if this ever stops raising, the Cloud
-    absence-doc below is comparing against nothing."""
+    """CONTRAST anchor: the DC ReconcilerConfig rejects a cleartext base_url. Cloud's
+    JiraConfig below is now measured to match it."""
     with pytest.raises(ConfigError, match="not 'https'"):
         ReconcilerConfig(base_url="http://jira.internal")
 
@@ -49,22 +53,46 @@ def test_dc_reconciler_allows_non_https_when_allow_insecure() -> None:
     assert cfg.base_url == "http://jira.internal"
 
 
-def test_cloud_jira_config_does_not_reject_non_https_url_absence_documented() -> None:
-    """ABSENCE-DOC: Cloud's ``JiraConfig`` has no ``__post_init__`` and performs NO
-    URL-scheme validation, so a cleartext ``http://`` Jira URL is accepted silently —
-    unlike the DC ``ReconcilerConfig``. Pinned as the current behaviour; the gap is
-    tracked by the follow-up bug cited in the module docstring.
+def test_cloud_jira_config_rejects_non_https_url() -> None:
+    """ENFORCEMENT (bug bdb8): Cloud's ``JiraConfig`` now rejects a cleartext ``http://``
+    url with a ``ConfigError`` (an ``InsecureUrlError``), mirroring the DC
+    ``ReconcilerConfig``. The message must NAME the cleartext risk and the override key so
+    an operator knows how to proceed.
 
-    MUTATION-CHECK (inverse): give ``JiraConfig`` a ``__post_init__`` that rejects a
-    non-https ``url`` → this test flips to expecting ``ConfigError`` and the assertion
-    below goes RED, proving it actually measures the absence.
+    MUTATION-CHECK (inverse): remove ``JiraConfig.__post_init__`` → construction stops
+    raising and this test goes RED, proving it measures the enforcement.
     """
-    cfg = JiraConfig(url="http://insecure.example.com", user="u", project="DIG")
-    # No exception, no normalisation — the cleartext scheme is retained verbatim.
+    with pytest.raises(InsecureUrlError) as caught:
+        JiraConfig(url="http://insecure.example.com", user="u", project="DIG")
+    message = str(caught.value)
+    assert "not 'https'" in message
+    assert "cleartext" in message
+    assert "jira.allow_insecure" in message
+    # A subclass of ConfigError, so existing ``except ConfigError`` handlers still catch it.
+    assert isinstance(caught.value, ConfigError)
+
+
+def test_cloud_jira_config_allows_non_https_when_allow_insecure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The override path (parity with the DC one): ``jira.allow_insecure=true`` downgrades
+    the rejection to a warning that names the risk it is overriding."""
+    with caplog.at_level(logging.WARNING):
+        cfg = JiraConfig(url="http://insecure.example.com", allow_insecure=True)
     assert cfg.url == "http://insecure.example.com"
-    # JiraConfig is a plain dataclass — it defines no validating __post_init__ hook of its
-    # own (the mechanism by which the DC ReconcilerConfig rejects a non-https URL).
-    assert "__post_init__" not in vars(JiraConfig)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("NOT encrypted" in w for w in warnings), (
+        f"the override must warn, naming the risk; got: {warnings!r}"
+    )
+
+
+def test_cloud_jira_config_accepts_https_and_empty_url() -> None:
+    """Negative controls: an https url and the unset default are accepted (so the
+    validator cannot be satisfied by rejecting everything)."""
+    assert JiraConfig(url="https://secure.example.com", user="u", project="DIG").url == (
+        "https://secure.example.com"
+    )
+    assert JiraConfig().url == ""  # unset default: nothing to validate yet
 
 
 # ---------------------------------------------------------------------------

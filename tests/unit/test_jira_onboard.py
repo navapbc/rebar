@@ -160,6 +160,31 @@ def test_clear_removes_only_the_jira_keys(tmp_path, monkeypatch) -> None:
     assert data["tracker"]["branch"] == "tickets"  # other section kept
 
 
+def test_write_rejects_non_https_url_fail_closed(tmp_path, monkeypatch) -> None:
+    """bug bdb8: the writer validates the url scheme BEFORE persisting, so the wizard can
+    never silently write a cleartext url. Fail-closed: a non-https url raises
+    InsecureUrlError and NOTHING is written.
+
+    MUTATION-CHECK (inverse): remove the scheme check in write_jira_config → the write
+    succeeds and this test goes RED (the file appears with the http url).
+    """
+    p = _proj(tmp_path, monkeypatch)
+    with pytest.raises(cfg.InsecureUrlError, match="not 'https'"):
+        cfg.write_jira_config("http://insecure", "u", "P")
+    assert not (p / "rebar.toml").exists()  # nothing written
+
+
+def test_wizard_surfaces_non_https_error_exit_one_no_write(tmp_path, monkeypatch, capsys) -> None:
+    """End-to-end: a non-https --url makes the wizard fail loudly (exit 1, Error printed)
+    with no partial file, rather than persisting the cleartext url."""
+    p = _proj(tmp_path, monkeypatch)
+    code = main(["jira-onboard", "--url", "http://insecure", "--user", "u", "--project", "P"])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "not 'https'" in err
+    assert not (p / "rebar.toml").exists()  # no partial write
+
+
 # ── the wizard: detect / persist / validate paths ──────────────────────────────
 def _answers(monkeypatch, values):
     it = iter(values)
