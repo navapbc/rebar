@@ -3,7 +3,8 @@
 An opt-in, OPERATOR-RUN harness — never a CI job — that measures whether routing gate traffic
 through Bedrock is non-inferior to the direct Anthropic path, against the bar
 :func:`rebar.llm.parity.parity_report` already defines (structured-output validity, verdict
-agreement with ZERO decision-level flips on the gold set, recall and false-accept within 2pp,
+agreement with ZERO gold-regressing decision-level flips on the gold set (a flip TOWARD the
+gold label is gold-improving and never gates — bug 5968), recall and false-accept within 2pp,
 runtime error rate, and a gold-coverage floor). It is modelled on the landed spot-eval precedent
 :mod:`rebar.llm.plan_review.fidelity_spot_eval`: same parity bar, same epoch-majority
 aggregation, same committed-results-plus-offline-recheck shape, and the same

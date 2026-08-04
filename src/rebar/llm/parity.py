@@ -7,10 +7,17 @@ model + decoding params, N>=3 repeats), computed by :func:`parity_report` from p
 per-item records:
 
   (a) structured-output VALIDITY: v2 >= v1 (target >= 99% valid parses, no regression);
-  (b) per-criterion verdict AGREEMENT >= 95% AND ZERO decision-level flips
-      (block/advisory/dropped) on the gold set, counting only pairs where BOTH sides
-      produced a verdict — a gold pair with an errored side is excluded and reported as
-      ``errored_pairs``, since criterion (d) already owns runtime errors;
+  (b) per-criterion verdict AGREEMENT >= 95% AND ZERO gold-REGRESSING decision-level
+      flips (block/advisory/dropped) on the gold set, counting only pairs where BOTH
+      sides produced a verdict — a gold pair with an errored side is excluded and
+      reported as ``errored_pairs``, since criterion (d) already owns runtime errors.
+      Criterion (b) is GOLD-AWARE and ASYMMETRIC (bug 5968): on a gold-labelled
+      disagreement the gold label is consulted, and a candidate is NEVER failed for
+      agreeing with gold against the baseline — such a flip is gold-IMPROVING,
+      reported as ``gold_improving_flips`` and exempt from both the zero-flip gate
+      and the agreement floor. A flip AWAY from gold (including one where NEITHER
+      arm matches gold) gates as before, and non-gold disagreements — where no
+      ground truth exists — still count symmetrically against the agreement floor;
   (c) RECALL and FALSE-ACCEPT each within +/-2pp of v1 (non-inferiority margin);
   (d) runtime ERROR/timeout rate v2 <= v1;
   (e) cost/latency recorded (informational, NON-gating).
@@ -29,8 +36,10 @@ from typing import Any, TypeVar
 
 _T = TypeVar("_T")
 
-# A decision is the load-bearing, coarse outcome a verdict resolves to; a FLIP between
-# these on the gold set is never acceptable (it changes what ships).
+# A decision is the load-bearing, coarse outcome a verdict resolves to; a gold-REGRESSING
+# FLIP between these on the gold set is never acceptable (it changes what ships). A
+# gold-IMPROVING flip — the candidate agrees with gold against the baseline — is not a
+# regression and never gates (bug 5968).
 _DECISIONS = ("block", "advisory", "dropped")
 
 # Non-inferiority margins (percentage points / fractions).
@@ -112,7 +121,23 @@ def parity_report(
     val1, val2 = _rate(v1, lambda r: r.valid), _rate(v2, lambda r: r.valid)
     err1, err2 = _rate(v1, lambda r: r.errored), _rate(v2, lambda r: r.errored)
     pairs = list(zip(v1, v2, strict=True))  # lengths already validated above
-    agreement = _rate(pairs, lambda p: p[0].decision == p[1].decision)
+
+    # GOLD-AWARE forgiveness (bug 5968): a disagreement over a gold-labelled item where
+    # the CANDIDATE (b) genuinely matches the gold label is the candidate being MORE
+    # accurate than the baseline, not a parity defect — it must never fail the candidate,
+    # under either the agreement floor or the zero-flip gate. The candidate's side must
+    # be a real model verdict (`not b.errored`); an errored side's synthetic decision
+    # earns nothing. Non-gold disagreements have no ground truth to consult and keep
+    # their symmetric treatment.
+    def _improving(a: ItemRecord, b: ItemRecord) -> bool:
+        return (
+            a.label in _DECISIONS
+            and a.decision != b.decision
+            and not b.errored
+            and b.decision == a.label
+        )
+
+    agreement = _rate(pairs, lambda p: p[0].decision == p[1].decision or _improving(*p))
     gold_pairs = [(a, b) for a, b in pairs if a.label in _DECISIONS]
     n_gold = len(gold_pairs)
     # An ERRORED side never produced a model verdict (see ``ItemRecord.errored``), so its
@@ -123,8 +148,10 @@ def parity_report(
     # NOT decision-vocabulary membership: ``gold_pairs`` is selected on the gold ``label``
     # alone, so no value of ``decision`` can exempt an errored pair.
     errored_pairs = sum(1 for a, b in gold_pairs if a.errored or b.errored)
+    live_gold = [(a, b) for a, b in gold_pairs if not (a.errored or b.errored)]
+    gold_improving_flips = sum(1 for a, b in live_gold if _improving(a, b))
     decision_flips = sum(
-        1 for a, b in gold_pairs if not (a.errored or b.errored) and a.decision != b.decision
+        1 for a, b in live_gold if a.decision != b.decision and not _improving(a, b)
     )
     rec1, fa1 = _recall_false_accept(v1)
     rec2, fa2 = _recall_false_accept(v2)
@@ -135,13 +162,14 @@ def parity_report(
         failures.append(f"validity regressed: v2 {val2:.3f} < v1 {val1:.3f}")
     if val2 + 1e-9 < VALIDITY_FLOOR:
         failures.append(f"validity {val2:.3f} below floor {VALIDITY_FLOOR}")
-    # (b) agreement + zero decision flips on gold.
+    # (b) agreement + zero gold-REGRESSING decision flips (gold-improving ones never gate).
     if agreement + 1e-9 < AGREEMENT_FLOOR:
         failures.append(f"verdict agreement {agreement:.3f} below {AGREEMENT_FLOOR}")
     if decision_flips:
         excluded = f"; {errored_pairs} errored pair(s) excluded" if errored_pairs else ""
         failures.append(
-            f"{decision_flips} decision-level flip(s) on the gold set (must be 0){excluded}"
+            f"{decision_flips} gold-regressing decision-level flip(s) on the gold set "
+            f"(must be 0){excluded}"
         )
     # (c) recall + false-accept non-inferiority.
     if (rec1 - rec2) > NONINFERIORITY_MARGIN + 1e-9:
@@ -164,6 +192,9 @@ def parity_report(
             "validity": {"v1": val1, "v2": val2},
             "verdict_agreement": agreement,
             "decision_flips": decision_flips,
+            # Disagreements where the candidate matched the gold label — the candidate
+            # being MORE accurate than the baseline. Reported for visibility, never gating.
+            "gold_improving_flips": gold_improving_flips,
             # Gold pairs excluded from the flip count because a side errored — reported so a
             # reader can tell a fabricated flip from a genuine one.
             "errored_pairs": errored_pairs,
