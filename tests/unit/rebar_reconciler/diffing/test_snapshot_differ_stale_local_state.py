@@ -94,7 +94,6 @@ _NEW = "rebar converged title"
 
 _STUBBED_PHASES = (
     "_run_differs_report_schema_drift",
-    "_run_differs_inbound_probe_dispatch",
     "_run_differs_inbound",
     "_run_differs_binding_walk",
 )
@@ -125,7 +124,7 @@ def _drive_diff_phase(run_differs_mod, differ_mod, monkeypatch, prev, curr, *, s
         curr_snapshot=curr,
         mutations=[],
     )
-    run_differs_mod.run_differs(ctx, lambda *a, **k: None)
+    run_differs_mod.run_differs(ctx)
     return ctx.mutations
 
 

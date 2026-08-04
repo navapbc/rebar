@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """Inbound leaf appliers: materialise Jira issues into the local ticket store.
 
-The eight (inbound, *) leaf handlers dispatched from the typed registry, plus
+The (inbound, *) leaf handlers dispatched from the typed registry, plus
 inbound_repair_property (the local_id property write _apply_inbound_repair_property
 delegates to). Each leaf reads its Jira-side payload, translates it via
 inbound_translate, and writes local ticket events; rebar-id/property write-backs
 to Jira run through batch_dispatch._call_with_retry.
 
 Imports downward only (apply_base, batch_dispatch, inbound_translate — none import
-back); never imports applier. The hard-delete re-create obtains the local->remote
-field mapper from the configured backend via the neutral ``select_backend`` seam
-(ticket 4af8) rather than importing the vendor mapper, so this core module names no
-vendor mapper.
+back); never imports applier.
+
+Bug 3b5f removed the ``delete`` and ``probe`` inbound leaves: their producer chain had
+no live emitter, and ``_apply_inbound_delete``'s ``create_after_hard_delete`` follow-on
+WAS the resurrection of a deliberately-deleted Jira issue that the operator ruling
+forbids. A confirmed hard-delete now tombstones the pairing in ``outbound_differ``
+instead — see ADR 0028's Consequences.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ._backend import TicketTransport
@@ -49,7 +51,6 @@ from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
     _jira_key_to_local_id,
     _resolve_tracker_dir,
-    _write_event_file,
 )
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
@@ -169,146 +170,6 @@ def _apply_inbound_update(
         mutation.direction,
         mutation.action,
         {"local_id": local_id, "events": written, "links_applied": links_applied},
-    )
-
-
-def _apply_inbound_delete(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
-) -> ApplyResult:
-    """Handle one of four probe-outcome branches when a Jira issue has
-    disappeared from the working set.
-
-    Branches (selected via ``mutation.payload['probe_outcome']``):
-      * ``hard_delete``  — preserve the local content + emit a follow-on
-        ``(outbound, create_after_hard_delete)`` mutation so reconcile_once
-        re-creates the Jira side on the next applier pass.
-      * ``redirect``     — rename the local jira-dig-NNN ticket directory to
-        the new key supplied under ``new_jira_key``.
-      * ``out_of_window``— write a COMMENT event noting the Jira issue is
-        closed and aged out of the working set (no local mutation otherwise).
-      * ``trash``        — write a COMMENT event noting recoverable trash state.
-    """
-    mut_mod = _load_mutation_module()
-    _direction_guard(mutation, mut_mod.MutationDirection.inbound)
-
-    payload = dict(mutation.payload or {})
-    # Canonical key is ``reason`` — route_inbound_probe (reconcile.py) emits
-    # ``payload={"reason": "hard_delete", ...}``. ``probe_outcome`` is kept as a
-    # back-compat fallback for any legacy/test payloads still using the old key
-    # (c244: without this the hard_delete branch was unreachable and always fell
-    # through to the ``out_of_window`` default).
-    branch = payload.get("reason") or payload.get("probe_outcome", "out_of_window")
-    target = mutation.target
-    local_id = target if target.startswith("jira-") else _jira_key_to_local_id(target)
-    tracker_dir = _resolve_tracker_dir(repo_root)
-    result_payload: dict[str, Any] = {"branch": branch, "local_id": local_id}
-
-    if branch == "hard_delete":
-        _write_event_file(
-            tracker_dir,
-            local_id,
-            "COMMENT",
-            {
-                "comment": (
-                    f"reconciler: Jira issue {target} hard-deleted; local "
-                    "content preserved. Outbound re-create follow-on emitted."
-                )
-            },
-        )
-        follow_on = {
-            "direction": "outbound",
-            "action": "create_after_hard_delete",
-            "target": target,
-            "local_id": local_id,
-        }
-        result_payload["follow_on"] = follow_on
-        # The applier consumes this ``create_after_hard_delete`` follow-on and injects
-        # a standard outbound CREATE into the same pass's batch (c244; the former
-        # epic-3e36 gap). See applier.apply() — ``pending_hard_delete_creates``.
-    elif branch == "redirect":
-        new_key = payload.get("new_jira_key", "")
-        new_local_id = _jira_key_to_local_id(new_key) if new_key else local_id + "-redirected"
-        src = tracker_dir / local_id
-        dst = tracker_dir / new_local_id
-        # Collision protection (PR #375 review): when both
-        # src and dst already exist on disk (prior failed pass, or the
-        # destination key was imported by another path) we cannot silently
-        # skip the rename — that leaves the tracker holding two ticket dirs
-        # for the same logical ticket. Raise so the operator can reconcile.
-        if src.exists() and dst.exists():
-            raise FileExistsError(
-                f"inbound delete redirect: refusing to rename {src} -> {dst} "
-                f"because destination already exists (target={target}, "
-                f"new_jira_key={new_key!r})"
-            )
-        if src.exists() and not dst.exists():
-            src.rename(dst)
-        # Write a comment noting the redirect on the destination directory.
-        _write_event_file(
-            tracker_dir,
-            new_local_id,
-            "COMMENT",
-            {"comment": f"reconciler: redirected from {target} -> {new_key}"},
-        )
-        result_payload["new_local_id"] = new_local_id
-    elif branch == "out_of_window":
-        _write_event_file(
-            tracker_dir,
-            local_id,
-            "COMMENT",
-            {
-                "comment": (
-                    f"reconciler: Jira issue {target} is closed and has aged "
-                    "out of the working window."
-                )
-            },
-        )
-    elif branch == "trash":
-        _write_event_file(
-            tracker_dir,
-            local_id,
-            "COMMENT",
-            {"comment": (f"reconciler: Jira issue {target} entered recoverable trash state.")},
-        )
-    else:
-        # Unknown branch: record observable evidence; do not raise so the pass
-        # converges. The structural test enforces real-body coverage.
-        _write_event_file(
-            tracker_dir,
-            local_id,
-            "COMMENT",
-            {"comment": f"reconciler: unknown probe_outcome={branch!r}"},
-        )
-
-    return ApplyResult(mutation.direction, mutation.action, result_payload)
-
-
-def _apply_inbound_probe(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
-) -> ApplyResult:
-    """Inbound probe leaf: probe execution lives in reconcile_helpers.route_inbound_probe
-    (re-exported as reconcile.route_inbound_probe).
-
-    The leaf itself is a marker — the probe classification and follow-on
-    generation happen upstream of applier dispatch. We still write an audit
-    comment so the dispatch path is observable in the local tracker when a
-    probe leaf is invoked directly.
-    """
-    mut_mod = _load_mutation_module()
-    _direction_guard(mutation, mut_mod.MutationDirection.inbound)
-    target = mutation.target
-    local_id = target if target.startswith("jira-") else _jira_key_to_local_id(target)
-    tracker_dir = _resolve_tracker_dir(repo_root)
-    ticket_dir = tracker_dir / local_id
-    if ticket_dir.exists():
-        _write_event_file(
-            tracker_dir,
-            local_id,
-            "COMMENT",
-            {"comment": f"reconciler: inbound probe acknowledged for {target}"},
-        )
-    return ApplyResult(
-        mutation.direction, mutation.action, {"local_id": local_id, "probed": target}
     )
 
 
@@ -473,66 +334,3 @@ def inbound_repair_property(mutation, client: TicketTransport) -> dict:
                 ),
             },
         }
-
-
-def _build_hard_delete_recreate(follow_on: dict, repo_root, binding_store) -> dict | None:
-    """Reconstruct a standard outbound CREATE batch-dict for a hard-deleted Jira issue
-    whose LOCAL content is still present (c244 — the ``create_after_hard_delete``
-    follow-on emitted by :func:`_apply_inbound_delete`).
-
-    The follow-on carries only ``local_id``; ``create_one`` needs ``fields``. Fetch the
-    still-present local ticket by reading ``<tracker>/<local_id>/.cache.json`` ``state``
-    (mirroring ``reconcile_check.load_local_tickets``) and map it via the SAME backend
-    outbound mapper the outbound differ uses — obtained here from the configured backend
-    (``select_backend(load_config()).outbound``) rather than importing the vendor mapper
-    (ticket 4af8). Returns ``None`` (log + skip)
-    when the local ticket is absent/unreadable/malformed or has no mappable summary — a
-    hard-deleted ticket with no local content is not re-creatable.
-    """
-    local_id = follow_on.get("local_id", "")
-    if not local_id:
-        return None
-    root = (
-        Path(repo_root)
-        if repo_root is not None
-        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-    )
-    cache_path = root / ".tickets-tracker" / local_id / ".cache.json"
-    try:
-        state = json.loads(cache_path.read_text()).get("state")
-    except (ValueError, OSError):
-        state = None  # absent / malformed cache → not re-creatable
-    if not isinstance(state, dict):
-        logger.info("hard_delete_recreate_skip: no local content for local_id=%r", local_id)
-        return None
-    ticket = dict(state)
-    ticket.setdefault("ticket_id", local_id)
-    # Ticket 4af8: obtain the outbound field mapper from the configured backend through
-    # the neutral registry seam (lazy import to keep this module importable standalone
-    # and free of any vendor-mapper import).
-    from rebar.config import load_config
-    from rebar_reconciler._backend_registry import select_backend
-
-    outbound_mapper = select_backend(load_config()).outbound
-    fields = outbound_mapper.map_local_to_remote(
-        ticket,
-        binding_store=binding_store,
-        local_ticket_types={local_id: ticket.get("ticket_type", "task")},
-        emit_detach_clear=False,
-    )
-    if not fields or not fields.get("summary"):
-        logger.info("hard_delete_recreate_skip: no mappable summary for local_id=%r", local_id)
-        return None
-    # Standard outbound CREATE batch-dict (same shape _mutation_to_batch_dict emits) so
-    # it flows through _apply_batch -> create_one (JQL dedup + bind_confirm + budget).
-    return {
-        "action": "create",
-        "direction": "outbound",
-        "key": "",  # the Jira issue was hard-deleted — a fresh create, no target key
-        "fields": fields,
-        "local_id": local_id,
-        "follow_on": None,
-        "comments": [],
-        "labels": [],
-        "links": [],
-    }

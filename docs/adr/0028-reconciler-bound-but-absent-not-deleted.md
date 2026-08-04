@@ -59,13 +59,38 @@ Three lessons encode this:
 - The circuit breaker (refuse a pass mutating/retiring > N% of bindings) is the
   defense-in-depth backstop if this discrimination is ever violated by a fetch/JQL
   regression.
-- **Confirmed hard-delete of a still-locally-present ticket now re-creates it (c244).**
-  A proven 404 (`ARCHIVED_OR_MOVED`) preserves the local content, and — because the local
-  ticket is authoritative and still present — the reconciler re-creates the Jira issue in
-  the **same pass**: `_apply_inbound_delete` emits a `create_after_hard_delete` follow-on,
-  and `applier.apply()` reconstructs the CREATE fields from the local ticket
-  (`_map_local_to_jira_fields`) and injects a standard outbound CREATE into the pass's
-  batch, so it flows through `create_one` (JQL dedup makes a retry idempotent; REST-budget
-  exhaustion defers to the next pass). This closes the former `epic-3e36` gap where the
-  follow-on was built but never consumed. A subsequent `bind_confirm` to the fresh key
-  drops the stale reverse-index entry for the old (deleted) key in the same save.
+- **Confirmed hard-delete of a still-locally-present ticket is TOMBSTONED, never
+  re-created (supersedes c244; bug `3b5f`).** This Consequence previously asserted that a
+  proven 404 re-creates the Jira issue in the **same pass**, via
+  `_apply_inbound_delete`'s `create_after_hard_delete` follow-on. That was inaccurate on
+  two counts and is corrected here:
+  - It never ran. The follow-on's producer chain began at
+    `differ._compute_mutations_emit_absent_partner_probes`, which only emits for a
+    `local_state` entry carrying a bound `jira_key`; its sole production caller passes a
+    FETCHED Jira snapshot, whose entries never carry one. So the `(inbound, probe)` →
+    `(inbound, delete)` → `create_after_hard_delete` chain had no live producer — the
+    `epic-3e36` gap it claimed to close had silently re-opened for a different reason.
+  - Re-creation is no longer wanted. Operator ruling (`3b5f`): once an issue is deleted in
+    Jira it must not be resurrected — the deletion is an intent, and re-creating the issue
+    overrides it. Prior art agrees (Unito refuses to re-create deleted work items;
+    Kubernetes reconcilers treat a missing object with `IgnoreNotFound`).
+
+  The current behaviour: a confirmed 404 counted to grace **retires** the binding
+  (`RETIRE_AFTER_GRACE`), which unbinds the local ticket. The unbound-create arm in
+  `outbound_differ` then consults the retired-side tombstone
+  (`BindingStore.retired_key_for_local`) and **suppresses** the create it would otherwise
+  emit, writing a `outbound-create-suppressed` bridge alert that names the local id, the
+  retired key, and `BindingStore.unretire(<jira_key>)` as the documented route back. A
+  NEVER-bound local ticket has no tombstone and still creates normally. The whole
+  resurrection implementation (`_apply_inbound_delete`, its `("inbound", "delete")`
+  registration, the `_apply_inbound_probe` marker leaf, and the
+  `create_after_hard_delete` consumption in `applier.py`) was removed rather than left
+  orphaned.
+- **Absence-vs-deletion discrimination lives on the OUTBOUND side**, consistent with L16's
+  "retirement stays outbound-owned": `outbound_differ._safe_get_issue` (the bounded direct
+  GET, 404 → `_DELETED`) and `binding_walk`'s binding-driven loop, which maps the GET onto
+  the four-way `ObservedJira` state and advances grace only on `CONFIRMED_404`. The
+  inbound absence-probe port (`SupportsAbsenceProbe.probe_remote`, `inbound_probe.py`)
+  survives as a **dormant** capability with no consumer: removing it would drop the DC
+  adapter's only import of the shared `classify_probe_response`, leaving that classifier
+  Cloud-only and weakening epic `e369`'s AC5.

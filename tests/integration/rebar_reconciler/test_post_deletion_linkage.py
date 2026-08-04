@@ -27,8 +27,13 @@ EXPECTED_LEAF_PAIRS = frozenset(
         ("inbound", "clean_label"),
         ("inbound", "conflict"),
         ("inbound", "create"),
-        ("inbound", "delete"),
-        ("inbound", "probe"),
+        # ("inbound", "delete") and ("inbound", "probe") were REMOVED by bug 3b5f: the
+        # (inbound, probe) producer could never fire from the real call site, and the
+        # (inbound, delete) leaf's create_after_hard_delete follow-on IS the resurrection
+        # the operator ruled against ("once deleted in Jira, it shouldn't be resurrected").
+        # Dropped from this pinned set deliberately — the guard still pins the exact
+        # remaining pairs, so a leaf dropped by ACCIDENT still fails here.
+        # ("outbound", "probe") STAYS: the outbound bounded-GET absence probe is live.
         ("inbound", "repair_property"),
         ("inbound", "update"),
         ("outbound", "conflict"),

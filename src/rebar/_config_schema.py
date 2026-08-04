@@ -525,6 +525,9 @@ class TrackerConfig:
     # an absolute path relocates the store — EV-3b) and the orphan branch the event log
     # lives on. Both default to today's values, so every existing repo is unaffected.
     dir: str = ".tickets-tracker"
+    # Consumers call config.tickets_branch() instead of reading this field: _commands/fsck.py,
+    # _commands/init.py, _engine/rebar_reconciler/_concurrency.py, opcert_service/workspace.py.
+    # read-via: config.py tickets_branch()
     branch: str = "tickets"
 
 

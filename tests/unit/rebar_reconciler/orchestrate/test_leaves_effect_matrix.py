@@ -337,83 +337,8 @@ def _drive_inbound_update(handler, applier, mut_mod, repo_root):
     assert edits[-1]["data"]["fields"]["title"] == "Changed title"
 
 
-@_matrix("inbound", "delete")
-def _drive_inbound_delete(handler, applier, mut_mod, repo_root):
-    # Seed the ticket dir.
-    seed = _mk(
-        mut_mod,
-        "inbound",
-        "create",
-        target="DIG-44",
-        payload={"fields": {"summary": "seed", "issuetype": "Task"}},
-    )
-    applier._LEAVES[(seed.direction, seed.action)](seed, repo_root=repo_root)
-
-    # Success (hard_delete branch): COMMENT event + exact outbound re-create follow-on.
-    mut = _mk(
-        mut_mod,
-        "inbound",
-        "delete",
-        target="jira-dig-44",
-        payload={"reason": "hard_delete"},
-    )
-    result = handler(mut, repo_root=repo_root)
-    assert result.payload["branch"] == "hard_delete"
-    assert result.payload["follow_on"] == {
-        "direction": "outbound",
-        "action": "create_after_hard_delete",
-        "target": "jira-dig-44",
-        "local_id": "jira-dig-44",
-    }
-    tracker = repo_root / ".tickets-tracker"
-    assert any("COMMENT" in p.name for p in _event_files(tracker, "jira-dig-44"))
-
-    # Error path: redirect onto an existing destination must raise (no silent skip
-    # that would leave two dirs for one logical ticket).
-    seed2 = _mk(
-        mut_mod,
-        "inbound",
-        "create",
-        target="DIG-45",
-        payload={"fields": {"summary": "src", "issuetype": "Task"}},
-    )
-    applier._LEAVES[(seed2.direction, seed2.action)](seed2, repo_root=repo_root)
-    (tracker / "jira-dig-999").mkdir()
-    redirect = _mk(
-        mut_mod,
-        "inbound",
-        "delete",
-        target="jira-dig-45",
-        payload={"reason": "redirect", "new_jira_key": "DIG-999"},
-    )
-    with pytest.raises(FileExistsError):
-        handler(redirect, repo_root=repo_root)
-
-
-@_matrix("inbound", "probe")
-def _drive_inbound_probe(handler, applier, mut_mod, repo_root):
-    # Seed a ticket dir so the acknowledgement COMMENT is written.
-    seed = _mk(
-        mut_mod,
-        "inbound",
-        "create",
-        target="DIG-46",
-        payload={"fields": {"summary": "seed", "issuetype": "Task"}},
-    )
-    applier._LEAVES[(seed.direction, seed.action)](seed, repo_root=repo_root)
-
-    mut = _mk(mut_mod, "inbound", "probe", target="jira-dig-46")
-    result = handler(mut, repo_root=repo_root)
-    assert result.payload == {"local_id": "jira-dig-46", "probed": "jira-dig-46"}
-    tracker = repo_root / ".tickets-tracker"
-    comments = [
-        json.loads(p.read_text())
-        for p in _event_files(tracker, "jira-dig-46")
-        if "COMMENT" in p.name
-    ]
-    assert any(
-        "inbound probe acknowledged for jira-dig-46" in c["data"]["comment"] for c in comments
-    )
+# Bug 3b5f: the ("inbound", "delete") and ("inbound", "probe") leaves are GONE — the
+# resurrection implementation is removed, not orphaned. Their drivers went with them.
 
 
 @_matrix("inbound", "clean_label")
