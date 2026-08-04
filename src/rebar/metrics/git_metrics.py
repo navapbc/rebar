@@ -15,6 +15,12 @@ from rebar.metrics.analyzer import AnalyzerResult
 from rebar.metrics.analyzers import jscpd_dup, lizard_complexity, scc_loc
 from rebar.metrics.registry import REGISTRY, MetricSpec, Unavailable
 
+# Watchdog on the read-only metrics git walks (bug 9305): log/numstat over a long-lived
+# branch is legitimately slow and holds no store lock, so this is generous (research 5b
+# rec 3). A ``TimeoutExpired`` propagates like any other failure to the per-metric fault
+# isolation in ``_commands/metrics.py``, which renders the one metric unavailable.
+_GIT_TIMEOUT = 300
+
 
 # raw-git-ok: read-oriented git helper, variable subcommand
 def _git(repo_root: str, *args: str) -> str:
@@ -25,6 +31,7 @@ def _git(repo_root: str, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=_GIT_TIMEOUT,
     ).stdout
 
 
