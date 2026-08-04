@@ -134,16 +134,35 @@ jobs:
       # event_append, txn, git_adapter/_ref_lock). Any raw `git add/commit/push`
       # against the tracker outside a seam needs a reasoned `# raw-git-ok:` marker
       # — see docs/architecture.md §"Sanctioned git-write seams".
+      #
+      # Definition-vs-tree skew guard (ticket ee2a): Gerrit's verify job takes
+      # the workflow DEFINITION from the target branch but checks out the
+      # CHANGE'S tree, so a gate step added on main runs against open changes
+      # whose base predates its script. New gate steps that run a repo script
+      # must copy this if-present guard: skip (with a log line) when the script
+      # is absent from the checked-out tree; the gate re-enforces on rebase and
+      # on every post-merge change.
       - name: raw-git-write gate
-        run: python scripts/check_raw_git_writes.py
+        run: |
+          if [ -f scripts/check_raw_git_writes.py ]; then
+            python scripts/check_raw_git_writes.py
+          else
+            echo "scripts/check_raw_git_writes.py not in checked-out tree (change predates the gate) — skipping"
+          fi
 
       # Wall-clock-assert gate (ticket 1e95): upper-bound wall-clock asserts in
       # tests are the proven CI flake class under runner contention (19d7, 5e94,
       # edfe, 85c3). Prefer counting/structural proxies; a deliberate stuck-run
       # guard carries `# timing: hang-guard — <reason>`, and perf-lane tests use
       # the skipif-CI guard (the bare benchmark marker still runs on CI).
+      # If-present guard per ticket ee2a (see raw-git-write gate above).
       - name: wall-clock-assert gate
-        run: python scripts/check_wall_clock_asserts.py
+        run: |
+          if [ -f scripts/check_wall_clock_asserts.py ]; then
+            python scripts/check_wall_clock_asserts.py
+          else
+            echo "scripts/check_wall_clock_asserts.py not in checked-out tree (change predates the gate) — skipping"
+          fi
 
   pip-audit:
     # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
