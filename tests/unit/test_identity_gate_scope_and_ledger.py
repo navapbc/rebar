@@ -102,6 +102,48 @@ def _write_and_commit_event(repo: Path, ticket_id: str, event: dict, suffix: str
     )
 
 
+def _git(repo: str, *args: str, env: dict[str, str] | None = None) -> str:
+    return subprocess.run(
+        ["git", "-C", repo, *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout.strip()
+
+
+def _rewrite_tracker_history(repo: Path) -> tuple[str, str, dict[str, str]]:
+    """Recreate the reachable tickets DAG with identical trees and new commit ids."""
+    tracker = str(tracker_dir(str(repo)))
+    old_tip = _git(tracker, "rev-parse", "HEAD")
+    old_tree = _git(tracker, "rev-parse", f"{old_tip}^{{tree}}")
+    old_commits = _git(tracker, "rev-list", "--reverse", "--topo-order", old_tip).splitlines()
+    rewritten: dict[str, str] = {}
+
+    for index, old_commit in enumerate(old_commits):
+        fields = _git(tracker, "show", "-s", "--format=%T %P", old_commit).split()
+        tree, *parents = fields
+        command = ["commit-tree", tree, "-m", f"rewrite {old_commit}"]
+        for parent in parents:
+            command.extend(("-p", rewritten[parent]))
+        timestamp = 1_600_000_000 + index
+        rewrite_env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "History Rewriter",
+            "GIT_AUTHOR_EMAIL": "rewrite@example.com",
+            "GIT_AUTHOR_DATE": f"@{timestamp} +0000",
+            "GIT_COMMITTER_NAME": "History Rewriter",
+            "GIT_COMMITTER_EMAIL": "rewrite@example.com",
+            "GIT_COMMITTER_DATE": f"@{timestamp} +0000",
+        }
+        rewritten[old_commit] = _git(tracker, *command, env=rewrite_env)
+
+    new_tip = rewritten[old_tip]
+    _git(tracker, "update-ref", "HEAD", new_tip, old_tip)
+    assert _git(tracker, "rev-parse", f"{new_tip}^{{tree}}") == old_tree
+    return old_tip, new_tip, rewritten
+
+
 # ── Bug A: reducer-ignored sidecars are out of the gate's scope ───────────────
 def test_completion_verdict_sidecar_out_of_scope_but_known_unsigned_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -217,6 +259,97 @@ def test_ledger_null_commit_sha_reresolves_to_verified(
     assert "key_not_valid_at_era" not in combined, combined
     assert not report, f"a re-resolved, era-valid signed event must be verified, got {report}"
     assert res.returncode == 0, combined
+
+
+@_ssh
+def test_ledger_non_null_commit_sha_reresolves_after_history_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A compacted ledger's old-epoch SHA is a cache, not its era authority."""
+    from rebar.attest import authorship
+
+    repo = _init(tmp_path, monkeypatch, "ledger_rewrite")
+    priv, pub = _keypair(tmp_path, "rewrite_author")
+    ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))
+    rebar.use_identity(ident, repo_root=str(repo))
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", priv)
+
+    tid = rebar.create_ticket("task", "signed work", repo_root=str(repo))
+    for i in range(3):
+        rebar.comment(tid, f"c{i}", repo_root=str(repo))
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "0")
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    rebar.compact(tid, repo_root=str(repo))
+
+    tracker = str(tracker_dir(str(repo)))
+    snapf = next((Path(tracker) / tid).glob("*-SNAPSHOT.json"))
+    snapshot_bytes = snapf.read_bytes()
+    ledger = json.loads(snapshot_bytes)["data"]["compiled_state"]["authorship_ledger"]
+    anchors = {entry["position"]["position"]: entry["position"]["commit_sha"] for entry in ledger}
+    assert anchors, "precondition: compaction recorded signed ledger entries"
+    assert all(anchors.values()), "precondition: every recorded ledger SHA is non-null"
+    before = _gate(repo, "--all", "--format", "json")
+    assert before.returncode == 0, before.stdout + before.stderr
+    assert json.loads(before.stdout) == []
+
+    old_tip, new_tip, rewritten = _rewrite_tracker_history(repo)
+    assert old_tip != new_tip
+    assert all(old != rewritten[old] for old in rewritten)
+    assert snapf.read_bytes() == snapshot_bytes, "rewrite must preserve ledger/event bytes"
+
+    current_positions = authorship.build_position_commit_map(repo_root=str(repo))
+    for position, recorded_sha in anchors.items():
+        assert current_positions[position] != recorded_sha
+        assert current_positions[position] == rewritten[recorded_sha]
+
+    after = _gate(repo, "--all", "--format", "json")
+    combined = after.stdout + after.stderr
+    assert json.loads(after.stdout) == [], combined
+    assert after.returncode == 0, combined
+
+
+@_ssh
+def test_ledger_non_null_commit_sha_is_fallback_when_position_is_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A map/resolver miss keeps the recorded SHA as the fail-closed era anchor."""
+    from rebar.attest import authorship
+
+    repo = _init(tmp_path, monkeypatch, "ledger_fallback")
+    tracker = str(tracker_dir(str(repo)))
+    before_key = _git(tracker, "rev-parse", "HEAD")
+    priv, pub = _keypair(tmp_path, "fallback_author")
+    ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))
+    rebar.use_identity(ident, repo_root=str(repo))
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", priv)
+
+    tid = rebar.create_ticket("task", "signed work", repo_root=str(repo))
+    for i in range(3):
+        rebar.comment(tid, f"c{i}", repo_root=str(repo))
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "0")
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    rebar.compact(tid, repo_root=str(repo))
+
+    snapf = next((Path(tracker) / tid).glob("*-SNAPSHOT.json"))
+    snap = json.loads(snapf.read_text(encoding="utf-8"))
+    ledger = snap["data"]["compiled_state"]["authorship_ledger"]
+    assert ledger, "precondition: compaction recorded a signed ledger"
+    for entry in ledger:
+        bogus_position = f"9999999999999999999-{entry['event_uuid']}-NEVER-COMMITTED"
+        entry["position"]["position"] = bogus_position
+        entry["position"]["commit_sha"] = before_key
+        assert (
+            authorship.resolve_position_commit(bogus_position, tracker, repo_root=str(repo)) is None
+        )
+    snapf.write_text(json.dumps(snap), encoding="utf-8")
+    _git(tracker, "add", "-A")
+    _git(tracker, "commit", "-q", "--no-verify", "-m", "unresolvable current positions")
+
+    res = _gate(repo, "--all", "--format", "json")
+    report = json.loads(res.stdout)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert report, "recorded pre-key SHAs must remain fail-closed era anchors"
+    assert {entry["verdict"] for entry in report} == {"key_not_valid_at_era"}
 
 
 # ── Bug B: compaction falls back to the global position resolver ──────────────
