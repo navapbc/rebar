@@ -29,7 +29,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `reconcile` | Run the Jira reconciler. Defaults to a non-mutating dry-run. _(live/mutating modes are blocked by `REBAR_MCP_READONLY` first, then require `REBAR_MCP_ALLOW_JIRA_SYNC`; dry-run/check are always available)_ |
 | `render_workflow` | Render a workflow (a .rebar/workflows/<name> name or a file path) to a |
 | `search` | Full-text search over titles/descriptions/comments/tags (replay-derived). |
-| `show_ticket` | Show compiled ticket state (accepts full id, short id, or alias). |
+| `show_ticket` | Show compiled ticket state (accepts full id, short id, or alias). Includes the computed `inbound_deps` (inbound edges — `{from_id, relation, status}`, "from_id \<relation\> this ticket") alongside the stored outgoing `deps`. |
 | `summary` | One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]. |
 | `ticket_deps` | Show the dependency graph for a ticket. |
 | `validate` | Repo-wide quality health check (JSON report: score, critical/major/ |
