@@ -46,6 +46,30 @@ class BackendEnvError(RuntimeError):
     """
 
 
+class BackendPaginationStallError(RuntimeError):
+    """A paged whole-project read's server stopped advancing (ticket 18a4).
+
+    Raised when a pager can prove the server is no longer honouring its paging
+    parameter — an offset pager whose ``startAt`` is ignored (the same page comes
+    back at a new offset), or a cursor walk handed the same non-null token twice.
+    Every further request would return the same page forever.
+
+    **Readers must re-raise this PAST their fail-open handlers.** A stalled pager
+    is a TRUNCATED whole-project read, not a transient fault: degrading around it
+    writes a snapshot the differ then treats as authoritative (missing parents
+    read as parentless, missing issuelinks as "no links", so removals become
+    undetectable). That silent-loss class has shipped repeatedly here — bug deac
+    (``fetcher._iter_pages``), bug 9263 (the DC transport pager), bug cabc
+    (Cloud's ``acli_graph`` cursor walk) — which is why the loud abort is the
+    contract rather than a per-reader choice.
+
+    Lives in core beside the other ``Backend*`` errors so BOTH the adapters that
+    raise it and the core ``fetcher`` handlers that must re-raise it can name one
+    type: core must never import ``adapters/``, so an adapter-local error would
+    be unnameable at exactly the boundary that absorbs it.
+    """
+
+
 class BackendAssigneeNotFoundError(Exception):
     """Vendor-neutral base for "a requested assignee resolves to no assignable
     remote user" (ticket 97f2/bbf1).
