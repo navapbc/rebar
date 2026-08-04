@@ -188,12 +188,15 @@ def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
     return alias_matches
 
 
-def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
+def resolve_ticket_id(ticket_id: str, tracker_dir: str, *, quiet: bool = False) -> str | None:
     """Return the canonical ticket directory name for ``ticket_id``, or None.
 
     Ambiguous matches and tracker-listing failures are surfaced via stderr to
     match the bash side's diagnostics; the function still returns None so callers
-    can pick their own error vs graceful path.
+    can pick their own error vs graceful path. ``quiet=True`` suppresses those
+    stderr diagnostics (the return value is unchanged) — for scanners resolving
+    candidates the user never supplied, e.g. the close precheck's walk over
+    historical commit references, where an unrelated ambiguity is noise.
     """
     # Fast path: if the input already names an existing ticket directory, use it
     # directly. `_existing_ticket_dir_name` guards the input as a safe path
@@ -227,10 +230,11 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            print(
-                f"Error: Ambiguous 8-hex ID '{ticket_id}' matches: {' '.join(sorted(matches))}",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    f"Error: Ambiguous 8-hex ID '{ticket_id}' matches: {' '.join(sorted(matches))}",
+                    file=sys.stderr,
+                )
         return None
 
     # Jira issue key (e.g. REB-310) → bound local ticket via the binding store.
@@ -246,11 +250,12 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
         if len(alias_matches) == 1:
             return alias_matches[0]
         if len(alias_matches) > 1:
-            print(
-                f"Error: Ambiguous alias '{ticket_id}' matches multiple tickets: "
-                f"{' '.join(sorted(alias_matches))}",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    f"Error: Ambiguous alias '{ticket_id}' matches multiple tickets: "
+                    f"{' '.join(sorted(alias_matches))}",
+                    file=sys.stderr,
+                )
             return None
 
     if len(ticket_id) >= 4:
@@ -267,11 +272,12 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str) -> str | None:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            print(
-                f"Error: Ambiguous prefix '{ticket_id}' matches multiple tickets: "
-                f"{' '.join(sorted(matches))}",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    f"Error: Ambiguous prefix '{ticket_id}' matches multiple tickets: "
+                    f"{' '.join(sorted(matches))}",
+                    file=sys.stderr,
+                )
 
     return None
 
