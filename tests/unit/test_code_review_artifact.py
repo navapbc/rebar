@@ -152,11 +152,16 @@ def _local_ticket(ticket_id: str, ticket_type: str) -> dict:
     }
 
 
-def test_code_review_excluded_from_jira_sync() -> None:
+def test_code_review_excluded_from_jira_sync(monkeypatch) -> None:
     """Behavioral: RUN the reconciler's outbound diff over a store holding a code_review
     ticket + a sibling task. The code_review must yield ZERO outbound mutations (it never
     enters the Jira sync set) while the task still produces a CREATE — a surgical exclusion
     observed in the emitted mutation list, not a source-string grep."""
+    # bug ad85: compute_outbound_mutations builds the (default Cloud) backend, which now
+    # fails loudly on absent credentials; this offline differ test needs valid creds pinned.
+    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     outbound_differ = _load_outbound_differ()
 
     art = _local_ticket("local-cr-1", "code_review")

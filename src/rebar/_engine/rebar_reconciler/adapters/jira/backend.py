@@ -279,10 +279,52 @@ class JiraBackend:
 def _build_jira_backend(config: Any) -> JiraBackend:
     """Construct a JiraBackend whose transport is an AcliClient from the resolved
     Jira settings — mirroring the pre-story direct construction."""
-    from rebar_reconciler._backend import assert_transport_conforms
+    from rebar_reconciler._backend import BackendEnvError, assert_transport_conforms
     from rebar_reconciler.adapters.jira import acli, acli_subprocess
 
     s = acli_subprocess.resolve_jira_settings(project_default="DIG")
+    # Fail LOUDLY at construction on absent/invalid Cloud credentials, at parity with the
+    # DC JIRA_PAT guard (bug ad85). Cloud authenticates with HTTP Basic auth: the Atlassian
+    # account EMAIL (JIRA_USER) + an API token (JIRA_API_TOKEN) against JIRA_URL. Without
+    # them the AcliClient would build with empty creds and every request would go out
+    # effectively ANONYMOUS, failing only later at the first API call (a misleading
+    # "project does not exist"/401). Presence + a minimal email-format check only — NO live
+    # network probe (which would misattribute an outage as misconfiguration).
+    missing = [
+        name
+        for name, value in (
+            ("JIRA_URL", s.url),
+            ("JIRA_USER", s.user),
+            ("JIRA_API_TOKEN", s.api_token),
+        )
+        if not (value or "").strip()
+    ]
+    if missing:
+        raise BackendEnvError(
+            f"missing Jira Cloud configuration: {', '.join(missing)}. The Jira Cloud "
+            "backend authenticates with HTTP Basic auth using your Atlassian account email "
+            "(JIRA_USER) and an API token (JIRA_API_TOKEN) against JIRA_URL. Set them "
+            "before reconciling:\n"
+            "    export JIRA_URL=https://<your-site>.atlassian.net\n"
+            "    export JIRA_USER=<your-atlassian-account-email>\n"
+            "    export JIRA_API_TOKEN=<your-api-token>\n"
+            "Without them the reconciler would fall back to ANONYMOUS access, which "
+            'typically surfaces as a misleading "project does not exist"/401 error (Jira '
+            "hides projects you cannot browse) or, on a permissive instance, as a silently "
+            "empty pass."
+        )
+    # Minimal email-format check: Cloud uses the account EMAIL as the Basic-auth username, so
+    # a bare handle/accountId silently 401s. Require an "@" with a non-empty local and domain
+    # part — deliberately NOT a strict RFC-5322 regex, which rejects valid addresses
+    # (+tag subaddressing, subdomains): the guard only catches "not an email at all".
+    local, sep, domain = s.user.strip().partition("@")
+    if not sep or not local or not domain:
+        raise BackendEnvError(
+            "invalid JIRA_USER: Jira Cloud authenticates with your Atlassian account EMAIL "
+            f"as the Basic-auth username, but JIRA_USER={s.user.strip()!r} is not an email "
+            "address. Set JIRA_USER to the email of the account that owns the API token "
+            "(e.g. export JIRA_USER=you@example.com)."
+        )
     transport = acli.AcliClient(
         jira_url=s.url, user=s.user, api_token=s.api_token, jira_project=s.project
     )

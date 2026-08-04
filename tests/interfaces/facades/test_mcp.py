@@ -198,6 +198,12 @@ def test_readonly_dry_run_reconcile_performs_zero_store_writes(
     # bug 626d: the inbound fetch is scoped to jira.project and fails closed on an
     # empty key; configure one so the dry-run reaches the (empty) acli fetch.
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
+    # bug ad85: building the (default Cloud) backend now fails loudly on absent
+    # credentials — even a dry-run reads select_backend(...).project — so pin
+    # hermetic, valid creds; this test asserts zero store writes, not auth.
+    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     srv = build_server()
 
     before = _store_write_tree(rebar_repo)

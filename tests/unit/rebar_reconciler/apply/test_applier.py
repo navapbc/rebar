@@ -310,14 +310,17 @@ def test_apply_constructs_client_with_env_derived_args(tmp_path, applier, monkey
 
 
 def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, applier, monkeypatch):
-    """When credential env vars are absent, building the backend transport must still
-    construct AcliClient with empty-string defaults (so test/CI shims that don't set
-    the env still work), EXCEPT jira_project which falls back to the canonical project
-    default "DIG" — empty projectKey is rejected by ACLI (bug 4fa9-0846-519e-4c30), so
-    a sensible default is required.
+    """When credential env vars are absent, building the backend transport must now
+    FAIL LOUDLY with ``BackendEnvError`` rather than constructing an anonymous
+    AcliClient with empty-string creds (bug ad85 — parity with the DC ``JIRA_PAT``
+    guard). Historically this seam built ``AcliClient(jira_url="", user="",
+    api_token="", jira_project="DIG")`` and every request went out effectively
+    anonymous, failing only later at the first API call with a misleading
+    "project does not exist"/401. The guard raises at construction (in
+    ``_build_jira_backend``) instead, naming every missing variable.
 
-    S4: asserted at the relocated backend-factory construction seam (patch
-    ``acli.AcliClient``, let the real ``_load_acli`` backend path run)."""
+    S4: asserted at the relocated backend-factory construction seam (let the real
+    ``_load_acli`` backend path run)."""
     pass_id = "2026-05-23-env-unset"
     _init_git_repo(tmp_path)
 
@@ -326,21 +329,15 @@ def test_apply_constructs_client_with_empty_strings_when_env_unset(tmp_path, app
     monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
     monkeypatch.delenv("JIRA_PROJECT", raising=False)
 
-    from rebar_reconciler.adapters.jira import acli
+    from rebar_reconciler._backend import BackendEnvError
 
-    mock_client, _ = _make_mock_acli_module()
-    constructor = MagicMock(return_value=mock_client)
-    monkeypatch.setattr(acli, "AcliClient", constructor)
+    with pytest.raises(BackendEnvError) as excinfo:
+        applier.apply([], pass_id, repo_root=tmp_path)
 
-    applier.apply([], pass_id, repo_root=tmp_path)
-
-    constructor.assert_called_once()
-    assert constructor.call_args.kwargs == {
-        "jira_url": "",
-        "user": "",
-        "api_token": "",
-        "jira_project": "DIG",
-    }
+    message = str(excinfo.value)
+    assert "JIRA_URL" in message
+    assert "JIRA_USER" in message
+    assert "JIRA_API_TOKEN" in message
 
 
 # ---------------------------------------------------------------------------

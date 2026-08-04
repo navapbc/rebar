@@ -34,6 +34,15 @@ def _default_jira_project(monkeypatch):
     real project key here. ``REB`` matches the hermetic Jira fixtures under
     ``tests/fixtures/jira/`` (epic f89d, story A); the mock/fake clients ignore the
     project argument, so key-matching mock data of any project prefix still merges.
+
+    Bug ad85 additionally made Cloud credentials load-bearing: ``_build_jira_backend``
+    now fails loudly (``BackendEnvError``) when ``JIRA_URL`` / ``JIRA_USER`` /
+    ``JIRA_API_TOKEN`` are absent or ``JIRA_USER`` is not an email, at parity with the
+    DC ``JIRA_PAT`` guard. These reconcile paths build the (default Cloud) backend, so
+    pin hermetic, valid creds here alongside the project (overridable per-test).
     """
     monkeypatch.setenv("JIRA_PROJECT", "REB")
+    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     yield
