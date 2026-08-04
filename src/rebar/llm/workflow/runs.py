@@ -315,6 +315,15 @@ def build_agent_request(
     else:
         mode = ctx.step.get("mode", "findings")
         output_schema = ctx.step.get("output_schema")
+    # Prompt-cache breakpoint relocation (bug 1dbe): a plan-review verify step supplies a
+    # byte-stable ``shared_prefix`` input (``prompts.shared_plan_prefix(plan)``) that its
+    # template LEADS with, so the resolved system prompt starts with it. Naming it as the
+    # ``cache_prefix`` moves the provider breakpoint to that boundary — identical to the
+    # Pass-1 finder's — so the finder's cache WRITE is READ here within one run. Pass the
+    # candidate through; ``RunRequest.effective_cache_prefix`` applies the shared proper-prefix
+    # guard at use time, so a step whose system prompt does not lead with it is byte-unchanged.
+    shared_prefix = ctx.inputs.get("shared_prefix")
+    cache_prefix = shared_prefix if isinstance(shared_prefix, str) and shared_prefix else None
     return RunRequest(
         system_prompt=system_prompt,
         instructions=instructions,
@@ -325,6 +334,7 @@ def build_agent_request(
         mode=mode,
         output_schema=output_schema,
         execution_mode=em,
+        cache_prefix=cache_prefix,
     )
 
 
