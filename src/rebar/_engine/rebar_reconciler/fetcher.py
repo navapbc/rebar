@@ -22,6 +22,12 @@ import urllib.error
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+# Ticket 18a4: named ABSOLUTELY (the established pattern here — cf.
+# ``outbound_differ``'s ``from rebar_reconciler._loader import lazy_load``) because
+# this module is also loaded standalone via ``importlib.util.spec_from_file_location``,
+# where a RELATIVE runtime import has no package to resolve against.
+from rebar_reconciler._backend import BackendPaginationStallError
+
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
@@ -502,6 +508,11 @@ def _build_snapshot(
     Raises:
         SilentTruncationError: Per-query ACLI ceiling hit, or same-token-
             twice cursor stall on either query.
+        BackendPaginationStallError: an enrichment read's pager proved the server
+            stopped honouring its paging parameter (ticket 18a4). Deliberately
+            re-raised PAST all three fail-open enrichment handlers: a stalled pager
+            is a truncated whole-project read, and degrading around it writes a
+            snapshot the differ then treats as authoritative.
         Any exception raised by ``AcliClient.search_issues()`` propagates out.
     """
     if repo_root is None:
@@ -607,6 +618,11 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project map the differ would treat
+        # as authoritative (every missing parent reads as parentless). Loud beats
+        # fail-open here.
+        raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
         _fetcher_log.warning(
             "fetch_snapshot: parent enrichment failed (%r); "
@@ -649,6 +665,10 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project comment map. Loud beats
+        # fail-open here — see _paged_search / _iter_cursor_pages.
+        raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
         _fetcher_log.warning(
             "fetch_snapshot: comment enrichment failed (%r); "
@@ -685,6 +705,11 @@ def _build_snapshot(
                 exc.code,
                 exc,
             )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project link map, which the differs
+        # would read as an authoritative "no Jira links" (removals undetectable).
+        # Loud beats fail-open here.
+        raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip issuelink enrichment, write degraded snapshot
         _fetcher_log.warning(
             "fetch_snapshot: issuelink enrichment failed (%r); "

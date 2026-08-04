@@ -219,3 +219,247 @@ def test_all_three_whole_project_readers_exist_and_page(method: str) -> None:
     client = _PageCappingClient(total=250, server_cap=20)
     result = getattr(_transport(client), method)("DC")
     assert len(result) == 250, f"{method} recovered {len(result)} of 250"
+
+
+# ===========================================================================
+# OFFSET-STALL (ticket 18a4-9df8-6373-4d9f) — the runaway-pagination sibling
+# ===========================================================================
+#
+# THE DEFECT, second axis. Everything above hardens the PAGE-SIZE axis: a server that
+# caps pages below the requested size must not be read as exhausted. This section covers
+# the OFFSET axis, which that fix left open: `_paged_search`'s only loop exit is
+# `if not batch: break`, and nothing verifies the server HONOURED `startAt`. A DC instance
+# that ignores/repeats `startAt` re-serves the same non-empty page forever, so the exit is
+# unreachable — measured on the unguarded pager: 26 calls (harness cap), requesting offsets
+# [0, 3, 6, 9, 12, ...] while receiving page 1 every time, `out` growing without bound.
+#
+# Same defect class as bug cabc (Cloud's `acli_graph` cursor spin, fixed by ab7f in
+# 30c522cde9 with `RunawayPaginationError`) and `fetcher._iter_pages` (offset-stall guard at
+# fetcher.py:336-344, bug deac). Those two are the cited authority for the contract asserted
+# here: a paged whole-project read whose server stops advancing is a TRUNCATED read, and it
+# must abort LOUDLY rather than return a silent partial.
+#
+# WHY THE GUARD IS STRICTER THAN `fetcher._iter_pages`'s. fetcher returns cleanly (no raise)
+# when the repeated page is SHORT, reasoning that a client which returns fewer items than
+# asked and then repeats itself "has nothing further to give". That reasoning does NOT
+# transfer to DC. This pager exists (bug 9263) precisely because a hardened DC caps EVERY
+# page below the requested size via `jira.search.views.default.max` — so on DC a short page
+# is the NORMAL case WITH more to give, and adopting fetcher's short-page branch would
+# silently return 20 of 250: the exact 92%-loss defect this pager was built to refuse. Hence
+# both page shapes below are parameterized and BOTH must raise.
+#
+# The guard cannot false-positive: a `startAt`-honouring server serves DIFFERENT issues at
+# each offset, which is what `_PageCappingClient` above proves (250/250, raising nothing).
+
+import importlib.util  # noqa: E402
+import json as _json  # noqa: E402
+import sys  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+from rebar_reconciler._backend import BackendPaginationStallError  # noqa: E402
+
+_FETCHER_PATH = (
+    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/fetcher.py"
+)
+
+
+class _OffsetBlindClient:
+    """A DC server that IGNORES ``startAt``: every request gets the SAME page.
+
+    The documented real-world shape this models is a proxy/plugin that drops the query
+    parameter, or a search endpoint whose index resets — both observed as "pagination never
+    advances". ``page_len`` selects whether the repeated page is SHORT (< the requested
+    ``maxResults``, the hardened-DC shape) or FULL.
+    """
+
+    def __init__(self, page_len: int = 3) -> None:
+        self.calls: list[int] = []
+        self.page = [
+            {
+                "key": f"DC-{i}",
+                "fields": {
+                    "issuelinks": [{"id": f"L{i}", "type": {"name": "Blocks"}}],
+                    "parent": {"key": "DC-EPIC"},
+                },
+            }
+            for i in range(page_len)
+        ]
+
+    def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):  # noqa: N803
+        self.calls.append(startAt)
+        # A guarded pager stops at 2 calls. The cap keeps an UNGUARDED pager from hanging
+        # the suite, and is deliberately far above 2 so "stopped at 2" is a real assertion
+        # and not an artefact of the cap.
+        if len(self.calls) > 25:
+            raise AssertionError(
+                f"the pager made {len(self.calls)} calls against a startAt-ignoring server "
+                f"— it never self-terminated (offsets requested: {self.calls[:10]}...). "
+                f"This is the runaway spin ticket 18a4 exists to stop."
+            )
+        return list(self.page)
+
+    def comments(self, key):
+        return [{"id": f"c-{key}", "body": "hi"}]
+
+    def fields(self):
+        return []
+
+
+@pytest.mark.parametrize(
+    ("page_len", "shape"),
+    [(3, "SHORT page (the hardened-DC shape)"), (100, "FULL page")],
+)
+def test_paged_search_aborts_loudly_when_the_server_ignores_start_at(
+    page_len: int, shape: str
+) -> None:
+    """THE BUG. `startAt` is not honoured, so paging can never advance — abort, do not spin.
+
+    Asserts BOTH halves of the contract: the loud error, and self-termination WITHIN 2 calls
+    (the second call is what proves the repeat; a third would already be a spin).
+    """
+    client = _OffsetBlindClient(page_len=page_len)
+    transport = _transport(client)
+
+    with pytest.raises(BackendPaginationStallError) as caught:
+        transport._paged_search("project = DC", page_size=100)
+
+    assert len(client.calls) == 2, (
+        f"{shape}: the pager made {len(client.calls)} calls before aborting; the stall is "
+        f"detectable on the SECOND response (the first repeat), so 2 is the contract. "
+        f"Offsets requested: {client.calls}"
+    )
+    # The message must name the actionable fact — which offset stalled — or an operator
+    # cannot tell this apart from a transient fault.
+    assert "startAt" in str(caught.value), (
+        f"the error must name startAt as the un-honoured parameter; got: {caught.value!r}"
+    )
+
+
+def test_the_stall_error_escapes_get_parent_maps_fail_open_handler() -> None:
+    """AC2, transport half. `get_parent_map` wraps the drain in a bare
+    `except Exception: warn; return {}` degradation contract (_hierarchy.py:91), which
+    would convert this abort into a SILENT empty parent map — the differ then treats every
+    issue as parentless. Measured on the unguarded path: `{}` after 26 calls, raising
+    nothing. The stall must be re-raised AHEAD of that clause, as the Cloud sibling does
+    (acli_graph.py:304-306)."""
+    transport = _transport(_OffsetBlindClient())
+    transport._epic_link_field_id = None  # type: ignore[attr-defined]
+
+    with pytest.raises(BackendPaginationStallError):
+        transport.get_parent_map("DC")
+
+
+def test_the_stall_error_is_importable_through_the_transport_facade() -> None:
+    """AC4. `transport.py` is the documented re-export facade every DC importer reaches
+    through (its own `__all__` docstring says so); a reader that cannot NAME the error
+    cannot re-raise it past its fail-open handler."""
+    from rebar_reconciler.adapters.jira_datacenter import transport as _dc_transport
+
+    assert getattr(_dc_transport, "BackendPaginationStallError", None) is (
+        BackendPaginationStallError
+    ), "BackendPaginationStallError is not re-exported through the transport facade"
+    assert "BackendPaginationStallError" in _dc_transport.__all__, (
+        "the re-export is not recorded in __all__, so it reads as an accident"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The fetcher boundary — where a transport-level abort is silently absorbed
+# ---------------------------------------------------------------------------
+#
+# `_paged_search` feeds THREE whole-project readers, and ALL THREE are consumed by
+# `fetcher.fetch_snapshot` behind broad `except Exception` fail-open handlers
+# (fetcher.py:610 parent, :652 comment, :688 issuelink). Piercing only the transport's own
+# fail-open would leave the stall absorbed one layer up: the pass writes a silently degraded
+# snapshot and reports success — which is the whole silent-loss class, just relocated. So
+# the escape is asserted THROUGH the real `fetch_snapshot`.
+
+
+def _load_fetcher():
+    spec = importlib.util.spec_from_file_location("fetcher_18a4", _FETCHER_PATH)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fetcher_18a4"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _StalledEnrichmentClient:
+    """Base scan succeeds; the named enrichment reader raises the stall error.
+
+    The fault is injected at the enrichment call itself — inside the try block whose
+    `except` clause is under test — so the handler actually executes. Injecting above it
+    would leave the clause unrun.
+    """
+
+    def __init__(self, stalling: str) -> None:
+        self._stalling = stalling
+        self._served: set[str] = set()
+
+    def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50):
+        # One non-empty page per JQL, then empty — a well-behaved base scan, so the only
+        # thing that can raise is the enrichment under test.
+        if jql in self._served:
+            return []
+        self._served.add(jql)
+        return [{"key": "DC-1", "fields": {"summary": "one"}}]
+
+    def _maybe_stall(self, name: str):
+        if name == self._stalling:
+            raise BackendPaginationStallError(
+                "search endpoint is not honouring startAt (test injection)"
+            )
+        return {}
+
+    def get_parent_map(self, project_key: str):
+        return self._maybe_stall("get_parent_map")
+
+    def get_comment_map(self, project_key: str):
+        return self._maybe_stall("get_comment_map")
+
+    def get_issuelinks_map(self, project_key: str):
+        return self._maybe_stall("get_issuelinks_map")
+
+
+@pytest.mark.parametrize("stalling", ["get_parent_map", "get_comment_map", "get_issuelinks_map"])
+def test_the_stall_error_escapes_every_fetch_snapshot_enrichment_fail_open(
+    tmp_path, stalling: str
+) -> None:
+    """AC2, fetcher half — one case per broad handler. A stalled whole-project read means
+    the enrichment is TRUNCATED, not absent: degrading around it writes a snapshot the
+    differ treats as authoritative (missing parents read as parentless, missing issuelinks
+    as "no links", so the inbound differ cannot detect removals). Loud beats fail-open."""
+    fetcher = _load_fetcher()
+    client = _StalledEnrichmentClient(stalling)
+
+    with patch.object(fetcher, "_load_acli", return_value=client):
+        with pytest.raises(BackendPaginationStallError):
+            fetcher.fetch_snapshot(f"18a4-stall-{stalling}", repo_root=tmp_path)
+
+
+@pytest.mark.parametrize("stalling", ["get_parent_map", "get_comment_map", "get_issuelinks_map"])
+def test_ordinary_enrichment_failures_still_fail_open_and_write_the_snapshot(
+    tmp_path, stalling: str
+) -> None:
+    """NEGATIVE CONTROL, and the reason this fix is narrow. Each of those three handlers
+    exists to keep a pass alive through a TRANSIENT enrichment fault, and that contract must
+    survive untouched — a re-raise clause that swallowed the distinction (or a bare `raise`
+    added to the wrong clause) would abort every pass on any hiccup. Only the STALL is loud.
+
+    The transport-side twin of this control is
+    `test_get_parent_map_degradation_contract_is_preserved` above."""
+
+    class _OrdinaryFailure(_StalledEnrichmentClient):
+        def _maybe_stall(self, name: str):
+            if name == self._stalling:
+                raise RuntimeError("transient enrichment hiccup")
+            return {}
+
+    fetcher = _load_fetcher()
+    with patch.object(fetcher, "_load_acli", return_value=_OrdinaryFailure(stalling)):
+        out = fetcher.fetch_snapshot(f"18a4-open-{stalling}", repo_root=tmp_path)
+
+    assert out.exists(), "an ordinary enrichment failure must still write a degraded snapshot"
+    assert "DC-1" in _json.loads(out.read_text()), (
+        "the degraded snapshot must still carry the base scan's issues"
+    )

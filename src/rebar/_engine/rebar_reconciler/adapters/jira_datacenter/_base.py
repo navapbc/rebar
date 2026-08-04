@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.adapters.jira_datacenter.retry import _with_connection_retry
 
 logger = logging.getLogger(__name__)
@@ -137,9 +138,33 @@ class _TransportBase:
         ``get_parent_map`` alone, leaving the two siblings here plus a third in
         ``fetcher._iter_pages``. A structural test now fails the build if any caller takes
         the ``search_issues`` default again (bug 9263).
+
+        **Termination (ticket 18a4).** Two conditions stop the walk, and only two:
+
+        * an EMPTY page — the ordinary exhaustion exit; or
+        * an OFFSET STALL — a page repeating the previous page's first issue key,
+          which proves the server is not honouring ``startAt``. That raises
+          :class:`~rebar_reconciler._backend.BackendPaginationStallError` naming
+          ``startAt`` and the stalled offset. Without it the empty-page exit is
+          unreachable against a ``startAt``-blind instance and this loop runs
+          forever, ``out`` growing without bound.
+
+          The stall aborts on ANY repeated page, SHORT **or** FULL — deliberately
+          UNLIKE ``fetcher._iter_pages``, which returns cleanly on a repeated SHORT
+          page. That reasoning ("fewer than asked for, so nothing further to give")
+          does not transfer to DC: this pager exists *because* a hardened DC caps
+          EVERY page below the requested size, so on DC a short page is the normal
+          case WITH more to give. Treating it as exhaustion would silently return
+          20 of 250 — the exact bug-9263 loss this pager was built to refuse. It
+          cannot false-positive either: a ``startAt``-honouring server serves
+          DIFFERENT issues at each offset.
+
+        Raises:
+            BackendPaginationStallError: the server stopped honouring ``startAt``.
         """
         out: list[dict[str, Any]] = []
         start_at = 0
+        prev_first_key: Any = None
         while True:
             results = _call_logged(
                 "_paged_search",
@@ -152,6 +177,20 @@ class _TransportBase:
             batch = [_unwrap(issue) for issue in results]
             if not batch:
                 break
+            # A missing/unusable key yields ``None``, which never compares equal to a
+            # previous ``None`` here — two consecutive keyless pages must not be read as
+            # a stall, and a non-dict item (the readers already tolerate junk) must not
+            # raise an AttributeError from the guard itself.
+            head = batch[0]
+            first_key = head.get("key") if isinstance(head, dict) else None
+            if first_key is not None and first_key == prev_first_key:
+                raise BackendPaginationStallError(
+                    f"jira-datacenter _paged_search: the search endpoint returned the "
+                    f"same first issue ({first_key!r}) again at startAt={start_at} — it "
+                    f"is not honouring `startAt`, so paging can never advance and this "
+                    f"whole-project read is truncated (jql={jql!r})"
+                )
+            prev_first_key = first_key
             out.extend(batch)
             start_at += len(batch)
         return out

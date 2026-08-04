@@ -53,7 +53,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rebar_reconciler._backend import BackendEnvError, BackendHTTPError
+from rebar_reconciler._backend import (
+    BackendEnvError,
+    BackendHTTPError,
+    BackendPaginationStallError,
+)
 from rebar_reconciler.adapters.jira_datacenter._base import _call_logged, _unwrap
 
 # The capability mixins (ticket 465d): one module per Protocol in ``_backend.py``
@@ -108,6 +112,9 @@ from rebar_reconciler.adapters.jira_family import classify_probe_response
 # sibling Cloud adapter uses in ``adapters/jira/acli.py``.
 __all__ = [
     "AssigneeNotFoundError",
+    # Re-exported (not defined here): the DC pager raises it, and DC readers must be able
+    # to NAME it to re-raise past their fail-open handlers (ticket 18a4).
+    "BackendPaginationStallError",
     "IllegalTransitionError",
     "JiraDataCenterTransport",
     "TlsVerificationError",
