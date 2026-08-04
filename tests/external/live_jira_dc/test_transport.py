@@ -561,3 +561,191 @@ def test_a_rekeyed_issue_resolves_by_id_and_records_what_the_stale_key_returns(
             method="PUT",
             payload={"key": jira_dc_project},
         )
+
+
+def _request_as(
+    path: str,
+    *,
+    token: str | None = None,
+    basic_auth: tuple[str, str] | None = None,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, Any]:
+    """REST v2 call as an ARBITRARY principal, returning ``(status, body_or_None)``.
+
+    ``_admin_request`` hardcodes the admin basic credentials, which is exactly the principal
+    the 275e probe must NOT use: the question is what an ORDINARY user's PAT can read. Same
+    raw-urllib shape as its siblings, for the same reason — a permission probe asserts on the
+    STATUS CODE, so it must not route through a client library that raises or retries.
+    """
+    import base64
+    import json as _json
+
+    url = f"{_BASE.rstrip('/')}{path}"
+    body = _json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("Accept", "application/json")
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if token is not None:
+        req.add_header("Authorization", f"Bearer {token}")
+    else:
+        user, password = basic_auth if basic_auth is not None else (_ADMIN_USER, "admin")
+        req.add_header(
+            "Authorization", "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+        )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8") or ""
+            return resp.status, (_json.loads(raw) if raw.strip() else None)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            return exc.code, _json.loads(raw) if raw.strip() else None
+        except ValueError:
+            return exc.code, raw
+
+
+@_skip
+@_skip_no_extra
+def test_whether_a_non_admin_pat_can_read_application_properties(jira_dc_project: str) -> None:
+    """MEASURE 049e's documentary claim instead of inheriting it (ticket 275e).
+
+    Bug 049e made the DC comment ceiling configurable and DROPPED auto-discovery from
+    ``/rest/api/2/application-properties``, reasoning that the ``/advanced-settings``
+    sub-resource — where ``jira.text.field.character.limit`` actually lives — requires the
+    global "Administer Jira" permission while rebar authenticates as an ordinary user's PAT.
+    That conclusion was never measured: no 403 was ever captured, because the harness image is
+    linux/amd64-only and never finished booting on the workstation where 049e was worked.
+
+    **THE PRINCIPAL IS THE WHOLE POINT, AND THE HARNESS DOES NOT SUPPLY ONE.** The session
+    ``jira_dc_pat`` fixture mints its token while authenticated as ADMIN, so it is an admin
+    PAT; probing with it would return whatever admin can see and prove nothing about rebar's
+    actual privilege level. So this cell creates an ordinary user and mints a PAT as THAT user.
+
+    Three positive controls, because a bare non-200 could mean any of several things and the
+    ticket's criterion explicitly refuses a bare non-200 assertion:
+
+    1. the new user's PAT really authenticates (``/myself`` -> 200 with their name), so a 401/403
+       on the probe is about the ENDPOINT, not a broken account;
+    2. the new user really lacks admin (``/mypermissions`` reports ADMINISTER false), so a 403
+       is attributable to non-adminness rather than to an accident of setup;
+    3. the same two paths are probed AS ADMIN in the same run, which is what distinguishes
+       "404 — absent on 8.17.1" from "403 — present but privileged".
+
+    The outcome is RECORDED, not pinned to one expected answer: the assertion admits every
+    documented possibility so this cell reports a fact rather than encoding today's guess as a
+    contract. ``jira_dc_project`` is requested only to order this cell after the scratch project
+    exists, keeping user creation inside the same live-instance lifecycle.
+    """
+    import random
+    import string as _string
+
+    suffix = "".join(random.choices(_string.ascii_lowercase + _string.digits, k=8))
+    username = f"rebar-275e-{suffix}"
+    password = f"Pw-{suffix}-Aa1"
+
+    create_status, create_body = _request_as(
+        "/rest/api/2/user",
+        method="POST",
+        payload={
+            "name": username,
+            "password": password,
+            "emailAddress": f"{username}@example.invalid",
+            "displayName": f"rebar 275e probe {suffix}",
+            "applicationKeys": ["jira-software"],
+        },
+    )
+    assert create_status in (200, 201), (
+        f"could not create an ordinary user to probe with: {create_status} {create_body!r}. "
+        f"Without a NON-ADMIN principal this cell cannot answer 275e at all — an admin PAT "
+        f"would measure the wrong privilege level and look like an answer."
+    )
+
+    try:
+        pat_status, pat_body = _request_as(
+            "/rest/pat/latest/tokens",
+            method="POST",
+            payload={"name": f"rebar-275e-{suffix}", "expirationDuration": 1},
+            basic_auth=(username, password),
+        )
+        assert pat_status in (200, 201) and isinstance(pat_body, dict), (
+            f"minting a PAT as the ordinary user failed: {pat_status} {pat_body!r}"
+        )
+        user_pat = str(pat_body["rawToken"])
+
+        # CONTROL 1 — the credential works, so a later 401/403 is about the endpoint.
+        me_status, me_body = _request_as("/rest/api/2/myself", token=user_pat)
+        assert me_status == 200 and isinstance(me_body, dict), (
+            f"the ordinary user's PAT does not authenticate at all ({me_status} {me_body!r}); "
+            f"every reading below would be uninterpretable"
+        )
+        assert me_body.get("name") == username, (
+            f"the PAT authenticates as {me_body.get('name')!r}, not the ordinary user "
+            f"{username!r} — the probe would be measuring the wrong principal"
+        )
+
+        # CONTROL 2 — the user genuinely lacks Administer Jira.
+        perm_status, perm_body = _request_as(
+            "/rest/api/2/mypermissions?permissions=ADMINISTER", token=user_pat
+        )
+        administer: Any = None
+        if perm_status == 200 and isinstance(perm_body, dict):
+            administer = (perm_body.get("permissions") or {}).get("ADMINISTER", {})
+            administer = administer.get("havePermission")
+        assert administer is False, (
+            f"expected the probe user to LACK Administer Jira; /mypermissions returned "
+            f"status={perm_status} havePermission={administer!r}. If this user is an admin the "
+            f"readings below say nothing about rebar's privilege level."
+        )
+
+        paths = {
+            "application-properties": "/rest/api/2/application-properties",
+            "advanced-settings": "/rest/api/2/application-properties/advanced-settings",
+        }
+        version = os.environ.get("JIRA_DC_VERSION", "8.17.1")
+        for label, path in paths.items():
+            user_status, user_payload = _request_as(path, token=user_pat)
+            # CONTROL 3 — the same path as admin, so absence and privilege are separable.
+            admin_status, admin_payload = _admin_request(path)
+
+            def _shape(payload: Any) -> str:
+                if isinstance(payload, list):
+                    return f"list[{len(payload)}]"
+                if isinstance(payload, dict):
+                    return f"dict(keys={sorted(payload)[:6]})"
+                return type(payload).__name__
+
+            print(
+                f"[275e-probe] DC {version} GET {path} — "
+                f"non_admin_pat: status={user_status} body={_shape(user_payload)} | "
+                f"admin_basic: status={admin_status} body={_shape(admin_payload)} | "
+                f"label={label} principal={username}"
+            )
+            assert user_status in (200, 401, 403, 404), (
+                f"unexpected status {user_status} for {path} as a non-admin PAT; record it "
+                f"and widen this list rather than letting an unmodelled code pass silently"
+            )
+            assert admin_status in (200, 401, 403, 404), (
+                f"unexpected status {admin_status} for {path} as admin; record and widen"
+            )
+            # The one INFERENCE this cell is willing to make, and only when both readings
+            # are in hand: a path admin can read but the ordinary user cannot is a
+            # PERMISSION boundary, not an absent endpoint.
+            if admin_status == 200 and user_status in (401, 403):
+                print(
+                    f"[275e-probe] {label}: PRESENT but PRIVILEGED — admin 200, non-admin "
+                    f"{user_status}. 049e's documentary claim is CONFIRMED for this path."
+                )
+            elif admin_status == 404 and user_status == 404:
+                print(
+                    f"[275e-probe] {label}: ABSENT on DC {version} for both principals — "
+                    f"049e's claim is CORRECTED: the drop stands, but not for the stated reason."
+                )
+            elif user_status == 200:
+                print(
+                    f"[275e-probe] {label}: READABLE by a non-admin PAT — 049e's claim is "
+                    f"CORRECTED; optional auto-discovery is viable on top of the config key."
+                )
+    finally:
+        _request_as(f"/rest/api/2/user?username={username}", method="DELETE")
