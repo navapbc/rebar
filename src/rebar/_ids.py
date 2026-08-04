@@ -98,6 +98,42 @@ def _existing_ticket_dir_name(tracker_dir: str, name: str) -> str | None:
     return None
 
 
+def _load_binding_reverse(tracker_dir: str) -> dict:
+    """Load the binding store's reverse index ``{jira_key → local_id}``, or ``{}``.
+
+    The single reader of ``<tracker_dir>/.bridge_state/bindings.json`` →
+    ``reverse``. Best-effort: a missing/corrupt store or a non-dict ``reverse``
+    yields ``{}`` (Jira mapping simply unavailable — never raises). Shared by
+    :func:`_resolve_via_binding_store` (id resolution) and
+    :func:`binding_jira_key_map` (search enrichment) so both read the mapping the
+    same way.
+    """
+    bindings_path = os.path.join(tracker_dir, ".bridge_state", "bindings.json")
+    try:
+        with open(bindings_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    reverse = data.get("reverse")
+    return reverse if isinstance(reverse, dict) else {}
+
+
+def binding_jira_key_map(tracker_dir: str) -> dict[str, str]:
+    """Map ``local_id → jira_key`` for every binding, inverting the reverse index.
+
+    The read-side counterpart of :func:`_resolve_via_binding_store`: it exposes
+    the SAME authoritative binding store (``reverse: {jira_key → local_id}``) as a
+    ``ticket_id → jira_key`` lookup, so a caller can annotate reduced states with
+    their bound Jira key in one pass. Best-effort and never raises. If two Jira
+    keys somehow map to one local id, the first wins (``setdefault``).
+    """
+    out: dict[str, str] = {}
+    for jira_key, local_id in _load_binding_reverse(tracker_dir).items():
+        if isinstance(jira_key, str) and jira_key and isinstance(local_id, str) and local_id:
+            out.setdefault(local_id, jira_key)
+    return out
+
+
 def _resolve_via_binding_store(target: str, tracker_dir: str) -> str | None:
     """Resolve a Jira issue key to its bound local ticket-dir name, or None.
 
@@ -109,14 +145,8 @@ def _resolve_via_binding_store(target: str, tracker_dir: str) -> str | None:
     unavailable — this never raises). The lookup tries the key verbatim then
     upper-cased, since Jira project keys are canonically upper-case.
     """
-    bindings_path = os.path.join(tracker_dir, ".bridge_state", "bindings.json")
-    try:
-        with open(bindings_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    reverse = data.get("reverse")
-    if not isinstance(reverse, dict):
+    reverse = _load_binding_reverse(tracker_dir)
+    if not reverse:
         return None
     local_id = reverse.get(target) or reverse.get(target.upper())
     if not isinstance(local_id, str) or not local_id:
