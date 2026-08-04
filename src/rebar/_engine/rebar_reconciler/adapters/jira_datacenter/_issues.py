@@ -20,6 +20,96 @@ from rebar_reconciler.adapters.jira_datacenter.transitions import (
     route_status_to_transition,
     transition_to_status,
 )
+from rebar_reconciler.adapters.jira_family import sanitize_summary as _sanitize_summary
+from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+
+#: Bridge-schema keys the create payload carries for Cloud's ``AcliClient`` and that
+#: Jira has no field for — forwarded as field ids they 400 the WHOLE create. Their
+#: content is not lost: it is translated into ``summary``/``issuetype`` below.
+_BRIDGE_ONLY_CREATE_FIELDS: frozenset[str] = frozenset({"title", "ticket_type"})
+
+#: Fields Jira refuses to SET at create time regardless of spelling. ``status`` is
+#: not a rejected name — a status is reached by a workflow transition, never by a
+#: create-time field write — so it is dropped here exactly as Cloud drops it, and
+#: the outbound status lands later through ``route_status_to_transition``.
+_UNSETTABLE_AT_CREATE_FIELDS: frozenset[str] = frozenset({"status"})
+
+#: DC's REST v2 descriptions are plain text/wiki markup with the instance's
+#: ``jira.text.field.character.limit`` cap; the codec is the one place that fit
+#: is spelled, shared with the backend's description sanitizer.
+_DESCRIPTION_CODEC = WikiTextCodec()
+
+
+def _create_summary(ticket_data: dict[str, Any]) -> str:
+    """Resolve the Jira ``summary`` from the create payload's two spellings.
+
+    ``title`` is the bridge-side name (added by ``dispatch_one`` for Cloud) and
+    ``summary`` is the differ's Jira-side name; both arrive in the same payload, so
+    prefer the bridge value and fall back to the Jira one. An empty result RAISES
+    rather than creating an untitled issue, because the create's whole purpose is to
+    bind a local ticket to a recognisable remote one (Cloud raises here too).
+    """
+    stripped = ""
+    for key in ("title", "summary"):
+        # A whitespace-only value counts as absent, so a blank ``title`` falls
+        # through to the differ's ``summary`` instead of aborting the create.
+        candidate = ticket_data.get(key)
+        if candidate is not None and str(candidate).strip():
+            stripped = str(candidate).strip()
+            break
+    if not stripped:
+        raise ValueError(
+            "cannot create a Jira Data Center issue: neither 'title' nor 'summary' "
+            f"carries a non-empty headline (payload keys: {sorted(ticket_data)})"
+        )
+    # Data Center hard-rejects an over-length summary with a 400 (measured against
+    # 8.17.1); truncate rather than fail the pass on one oversize ticket.
+    return _sanitize_summary(stripped)
+
+
+def _create_issuetype(ticket_data: dict[str, Any]) -> dict[str, str]:
+    """Resolve Jira's ``{"name": …}`` issue-type object from the create payload.
+
+    Three shapes reach this function, and at least two of them in the SAME payload:
+    ``ticket_type`` (a bridge-side string such as ``"task"``, capitalized the way
+    Cloud's ``AcliClient.create_issue`` capitalizes it), and ``issuetype``, which the
+    differ emits either as Jira's nested ``{"name": "Story"}`` or as a bare string.
+    A payload that yields nothing usable defaults to ``Task``, matching Cloud.
+    """
+    bridge_type = ticket_data.get("ticket_type")
+    if isinstance(bridge_type, str) and bridge_type.strip():
+        return {"name": bridge_type.strip().capitalize()}
+    jira_type = ticket_data.get("issuetype")
+    if isinstance(jira_type, dict):
+        # Already Jira-canonical (``{"name": "Sub-task"}``) — do NOT recapitalize it.
+        name = str(jira_type.get("name") or "").strip()
+        if name:
+            return {"name": name}
+    elif isinstance(jira_type, str) and jira_type.strip():
+        return {"name": jira_type.strip()}
+    return {"name": "Task"}
+
+
+def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
+    """Translate a dual-schema create payload into Jira's own field schema.
+
+    Everything the payload carries that Jira DOES accept — ``priority``,
+    ``assignee``, ``parent``, ``labels``, custom fields — passes through untouched;
+    only the bridge-only names and the create-unsettable ones are dropped, and only
+    ``summary``/``issuetype``/``description`` are rewritten. Narrowing this to an
+    allowlist instead would silently drop real content the differ emitted.
+    """
+    fields = {
+        name: value
+        for name, value in ticket_data.items()
+        if name not in _BRIDGE_ONLY_CREATE_FIELDS and name not in _UNSETTABLE_AT_CREATE_FIELDS
+    }
+    fields["summary"] = _create_summary(ticket_data)
+    fields["issuetype"] = _create_issuetype(ticket_data)
+    description = fields.get("description")
+    if isinstance(description, str):
+        fields["description"] = _DESCRIPTION_CODEC.fit_outbound(description)
+    return fields
 
 
 class _IssuesMixin(_TransportBase):
@@ -32,7 +122,29 @@ class _IssuesMixin(_TransportBase):
         def _assign(self, remote_id: str, assignee: Any) -> None: ...
 
     def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
-        fields = dict(ticket_data)
+        """Create an issue, TRANSLATING the payload into Jira's field schema first.
+
+        The create payload carries TWO schemas at once: ``dispatch_one`` starts from
+        the differ's Jira-shaped fields (``summary``, ``issuetype``, ``status``, …)
+        and then ADDS the bridge-shaped names Cloud's client needs (``title``,
+        ``ticket_type``), passing everything else through. Cloud's
+        ``AcliClient.create_issue`` EXTRACTS the fields it wants and ignores the
+        rest, so the duplication is harmless there. This method used to splat the
+        whole dict into ``client.create_issue(**fields)``, which sent rebar's own
+        field names to Jira as field ids and got the entire request rejected —
+        ``HTTP 400 … Field 'ticket_type'/'title'/'status' cannot be set. It is not on
+        the appropriate screen, or unknown.`` No issue meant no binding, so the
+        failure surfaced three steps downstream as ``get_jira_key`` returning
+        ``None`` (bug 18a5-2bd8-3e56-4bd8).
+
+        The translation lives PER TRANSPORT — the same seam :meth:`update_issue`
+        documents for ``status``→transition, and Data Center simply never got its
+        half. :func:`_translate_create_fields` therefore drops the bridge-only names
+        and ``status`` (not settable at create at all — a status is reached by a
+        workflow transition), rewrites ``summary``/``issuetype``/``description`` into
+        Jira's shapes, and leaves every other genuinely Jira-valid field alone.
+        """
+        fields = _translate_create_fields(ticket_data)
         fields.setdefault("project", {"key": self.project})
         issue = _with_connection_retry(lambda: self._client.create_issue(**fields))
         return _unwrap(issue)
