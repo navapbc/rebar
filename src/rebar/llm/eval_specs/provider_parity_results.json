@@ -43,10 +43,7 @@
         ]
       },
       "excluded_errored_pairs": 2,
-      "gating_failures": [
-        "verdict agreement 0.923 below 0.95",
-        "2 decision-level flip(s) on the gold set (must be 0)"
-      ],
+      "gating_failures": [],
       "invalid": false,
       "invalid_reasons": [],
       "latency_s": {
@@ -59,8 +56,9 @@
           "v1": 1.0,
           "v2": 1.0
         },
-        "verdict_agreement": 0.9230769230769231,
-        "decision_flips": 2,
+        "verdict_agreement": 1.0,
+        "decision_flips": 0,
+        "gold_improving_flips": 2,
         "errored_pairs": 0,
         "n_gold": 26,
         "recall": {
@@ -86,7 +84,7 @@
         "n": 26
       },
       "n_items": 30,
-      "passed": false,
+      "passed": true,
       "recorded_at": "2026-08-02T23:39:53.656405+00:00",
       "records": [
         {
@@ -584,9 +582,7 @@
         ]
       },
       "excluded_errored_pairs": 2,
-      "gating_failures": [
-        "1 decision-level flip(s) on the gold set (must be 0)"
-      ],
+      "gating_failures": [],
       "invalid": false,
       "invalid_reasons": [],
       "latency_s": {
@@ -599,8 +595,9 @@
           "v1": 1.0,
           "v2": 1.0
         },
-        "verdict_agreement": 0.9615384615384616,
-        "decision_flips": 1,
+        "verdict_agreement": 1.0,
+        "decision_flips": 0,
+        "gold_improving_flips": 1,
         "errored_pairs": 0,
         "n_gold": 26,
         "recall": {
@@ -626,7 +623,7 @@
         "n": 26
       },
       "n_items": 30,
-      "passed": false,
+      "passed": true,
       "recorded_at": "2026-08-02T23:57:01.083760+00:00",
       "records": [
         {

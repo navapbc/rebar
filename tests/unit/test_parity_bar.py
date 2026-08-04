@@ -70,6 +70,85 @@ def test_decision_flip_on_gold_fails():
     assert any("flip" in f for f in report.gating_failures)
 
 
+def test_flip_toward_gold_is_not_a_gating_flip():
+    # Bug 5968: v1 misses a should-block item the CANDIDATE catches. Gold sides with the
+    # candidate, so the disagreement is a gold-IMPROVING flip — reported, never gating.
+    v1, v2 = _good_pair()
+    v1[0] = _rec(decision="advisory", label="block")  # baseline wrong; v2[0] stays "block"
+    report = parity_report(v1, v2)
+    assert report.passed, report.gating_failures
+    assert report.metrics["decision_flips"] == 0
+    assert report.metrics["gold_improving_flips"] == 1
+    assert not any("flip" in f for f in report.gating_failures)
+
+
+def test_flip_direction_is_scored_asymmetrically():
+    # Ticket 5968 AC: a candidate that flips a gold item TOWARD the gold label is scored
+    # differently from one that flips it AWAY. Same disagreement, opposite direction.
+    v1, v2 = _good_pair()
+    toward_v1 = list(v1)
+    toward_v1[0] = _rec(decision="advisory", label="block")  # candidate matches gold
+    toward = parity_report(toward_v1, v2)
+    away_v2 = list(v2)
+    away_v2[0] = _rec(decision="advisory", label="block")  # candidate diverges from gold
+    away = parity_report(v1, away_v2)
+    assert toward.passed and not away.passed
+    assert toward.metrics["decision_flips"] == 0 and toward.metrics["gold_improving_flips"] == 1
+    assert away.metrics["decision_flips"] == 1 and away.metrics["gold_improving_flips"] == 0
+
+
+def test_both_arms_wrong_disagreement_is_still_a_gating_flip():
+    # Gold sides with NEITHER arm: the candidate is not agreeing with gold, so the
+    # asymmetric rule grants no forgiveness — the flip gates as before.
+    v1, v2 = _good_pair()
+    v1[0] = _rec(decision="advisory", label="block")
+    v2[0] = _rec(decision="dropped", label="block")
+    report = parity_report(v1, v2)
+    assert not report.passed
+    assert report.metrics["decision_flips"] == 1
+    assert report.metrics["gold_improving_flips"] == 0
+    assert any("flip" in f for f in report.gating_failures)
+
+
+def test_gold_improving_disagreements_do_not_trip_the_agreement_floor():
+    # The recorded frontier-slot shape: an all-gold corpus of 26 where the candidate
+    # corrects TWO baseline mistakes. Symmetric agreement would be 24/26 = 0.923 < 0.95
+    # — failing the candidate for being MORE accurate. Gold-aware agreement forgives a
+    # disagreement where the candidate matches gold.
+    v1, v2 = _good_pair(n=26, block_gold=13, safe_gold=13)
+    v1[13] = _rec(decision="block", label="advisory")  # baseline wrongly blocks a safe item
+    v1[14] = _rec(decision="block", label="advisory")
+    report = parity_report(v1, v2)
+    assert report.passed, report.gating_failures
+    assert not any("agreement" in f for f in report.gating_failures)
+    assert report.metrics["gold_improving_flips"] == 2
+
+
+def test_non_gold_disagreement_earns_no_gold_forgiveness():
+    # Missing gold label -> current behaviour preserved: an unlabeled disagreement still
+    # counts against the agreement floor (there is no ground truth to side with either
+    # arm) and is never a decision flip.
+    v1, v2 = _good_pair(n=120, block_gold=10, safe_gold=10)
+    for i in range(20, 30):  # 10/120 unlabeled disagreements -> agreement < 95%
+        v2[i] = _rec(decision="dropped")
+    report = parity_report(v1, v2)
+    assert not report.passed
+    assert any("agreement" in f for f in report.gating_failures)
+    assert report.metrics["decision_flips"] == 0
+    assert report.metrics["gold_improving_flips"] == 0
+
+
+def test_errored_candidate_matching_gold_earns_no_forgiveness():
+    # An errored side never produced a model verdict, so its synthetic decision matching
+    # gold must not earn the gold-improving forgiveness (criterion (d) owns the event).
+    v1, v2 = _good_pair(n=26, block_gold=13, safe_gold=13)
+    v1[0] = _rec(decision="advisory", label="block")
+    v2[0] = ItemRecord(valid=True, decision="block", errored=True, label="block")
+    report = parity_report(v1, v2)
+    assert report.metrics["gold_improving_flips"] == 0
+    assert report.metrics["errored_pairs"] == 1
+
+
 def test_recall_drop_beyond_margin_fails():
     # 30 gold (20 block + 10 safe) so the coverage guard passes; v2 misses 3 block
     # items -> recall drops 0.15 >> 0.02 margin (and they are gold flips).
