@@ -109,6 +109,21 @@ def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
     description = fields.get("description")
     if isinstance(description, str):
         fields["description"] = _DESCRIPTION_CODEC.fit_outbound(description)
+    # Jira's REST API wants OBJECTS for these two, and a live run is what said so — with the
+    # bridge-only names fixed the create got further and failed differently:
+    #   "priority":"Could not find valid 'id' or 'name' in priority object."
+    #   "assignee":"data was not an object"
+    # A bare string arrives because the SHARED outbound mapper has already resolved rebar's
+    # integer priority to a Jira NAME, and because Data Center identifies users by ``name``
+    # (never Cloud's accountId — see ``validate_assignee_exists``). ACLI accepts the bare forms,
+    # which is why the Cloud path never needed this: the same per-transport seam again.
+    # Wrapping only a STRING keeps this idempotent in shape — a caller that already passed the
+    # object form must not end up with ``{"name": {"name": ...}}``, a third distinct 400 — and an
+    # ABSENT field is never invented, which would assign the issue to nobody in particular.
+    for name in ("priority", "assignee"):
+        value = fields.get(name)
+        if isinstance(value, str) and value:
+            fields[name] = {"name": value}
     return fields
 
 
