@@ -20,6 +20,13 @@ def _haystack(state: dict) -> str:
         str(state.get("title") or ""),
         str(state.get("description") or ""),
         " ".join(str(t) for t in (state.get("tags") or [])),
+        # Identifiers a user is likely to paste into search: the canonical
+        # ticket_id, the human alias, and the bound Jira key (folded in by the
+        # caller — search_states stays pure). Lowercased with everything else by
+        # the trailing ``.lower()``; matching stays the single substring path.
+        str(state.get("ticket_id") or ""),
+        str(state.get("alias") or ""),
+        str(state.get("jira_key") or ""),
     ]
     for c in state.get("comments") or []:
         if isinstance(c, dict):

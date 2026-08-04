@@ -49,6 +49,40 @@ def test_search_matches_title_description_comments_tags(rebar_repo: Path) -> Non
     assert miss not in ids
 
 
+def test_search_matches_ticket_id_and_alias(rebar_repo: Path) -> None:
+    # The two identifiers `show` accepts directly must also be discoverable by
+    # `search` (the exact footgun: a user pastes an id/alias and gets nothing).
+    tid = rebar.create_ticket("task", "some work", return_alias=True)
+    ticket_id, alias = tid["id"], tid["alias"]
+    rebar.create_ticket("task", "noise")
+
+    assert ticket_id in _ids(rebar.search(ticket_id))
+    assert ticket_id in _ids(rebar.search(alias))
+    # CLI parity for the id path.
+    assert ticket_id in _ids(_cli_search(rebar_repo, ticket_id))
+
+
+def test_search_matches_bound_jira_key(rebar_repo: Path) -> None:
+    # A ticket bound to a Jira key is discoverable by `rebar search <JIRA-KEY>`,
+    # mirroring `rebar show <JIRA-KEY>` resolving it. The binding lives in the
+    # reconciler's binding store reverse index, not in the reduced state — the
+    # enrichment seam under test.
+    tid = rebar.create_ticket("task", "jira-bound work")
+    rebar.create_ticket("task", "noise")
+
+    tracker = Path(rebar.config.tracker_dir(rebar_repo))
+    bridge = tracker / ".bridge_state"
+    bridge.mkdir(parents=True, exist_ok=True)
+    (bridge / "bindings.json").write_text(
+        json.dumps({"reverse": {"REB-1654": tid}}), encoding="utf-8"
+    )
+
+    # Both `show` and `search` resolve the same input, case-insensitively.
+    assert tid in _ids(rebar.search("REB-1654"))
+    assert tid in _ids(rebar.search("reb-1654"))
+    assert tid in _ids(_cli_search(rebar_repo, "REB-1654"))
+
+
 def test_search_filters_and_and_terms(rebar_repo: Path) -> None:
     a = rebar.create_ticket("bug", "alpha beta gamma")
     b = rebar.create_ticket("task", "alpha only")
