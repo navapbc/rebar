@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.adapters.jira_datacenter._base import (
     _MISSING,
     _call_logged,
@@ -65,7 +66,11 @@ class _HierarchyMixin(_TransportBase):
 
         Degradation contract (mirrors Cloud, and what ``fetcher`` expects): a
         failure logs a WARNING and returns ``{}``, so the inbound pass falls back
-        to its parentless path rather than aborting.
+        to its parentless path rather than aborting. **One exception (ticket 18a4):**
+        a :class:`~rebar_reconciler._backend.BackendPaginationStallError` from the
+        pager is RE-RAISED past that handler — a stalled pager is a TRUNCATED map,
+        and a ``{}`` there reads as "nothing has a parent", which the differ would
+        act on as authoritative.
         """
         query = jql or f"project = {project_key}"
         out: dict[str, str | None] = {}
@@ -88,6 +93,10 @@ class _HierarchyMixin(_TransportBase):
                     epic_value = fields.get(epic_field)
                     parent_key = epic_value if isinstance(epic_value, str) and epic_value else None
                 out[key] = parent_key
+        except BackendPaginationStallError:
+            # A stalled pager means a truncated whole-project map the differ
+            # would treat as authoritative. Loud beats fail-open here.
+            raise
         except Exception as exc:  # noqa: BLE001 — degradation contract: a parent-map failure must not abort the inbound pass
             logger.warning(
                 "jira-datacenter transport: get_parent_map degraded to {} for project %r: %r",
