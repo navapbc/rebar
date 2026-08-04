@@ -38,15 +38,36 @@ from rebar_reconciler.inbound_probe import ProbeBranch, ProbeConfigError, ProbeR
 
 RESOLVED_STATUS_NAMES = frozenset({"Resolved", "Done", "Cancelled"})
 # DECISION (story 2127-348c-c41d-472e, item 3 — repo artifact, not a tracker-only note):
-# This set is HARDCODED here, whereas the DC side already sources its equivalent from
-# config (ReconcilerConfig.resolved_statuses, src/rebar/_config_schema.py). A Cloud tenant
-# whose workflow uses non-standard resolved-status names (e.g. "Closed", "Complete",
-# "Won't Do") would therefore have those issues MISCLASSIFIED as PRESENT_FILTERED instead
-# of PRESENT_RESOLVED. A runtime/config hook IS warranted for Cloud↔DC parity: Cloud should
-# read a jira.resolved_statuses config key (defaulting to this frozenset) the same way DC
-# reads reconciler.resolved_statuses. Tracked by story e34a-1d0c-0daa-4f2c
-# (discovered_from 2127). Until that lands, this default matches Cloud/DIG's own configured
-# resolved-status names, so a stock DIG tenant is unaffected.
+# This frozenset is the DEFAULT fallback, not a hardcoded classification set. Story
+# e34a-1d0c-0daa-4f2c (discovered_from 2127) added the Cloud↔DC parity hook: the classifier
+# below sources its resolved-status set from the `jira.resolved_statuses` config key (see
+# `_resolve_resolved_statuses`), defaulting to this frozenset — the same way DC reads
+# `reconciler.resolved_statuses`. A Cloud tenant whose workflow uses non-standard
+# resolved-status names (e.g. "Closed", "Complete", "Won't Do") now configures them and has
+# those issues classified PRESENT_RESOLVED (not PRESENT_FILTERED) without a code change. An
+# unset/empty/malformed config falls back to this frozenset, so a stock DIG tenant is
+# unaffected.
+
+
+def _resolve_resolved_statuses() -> frozenset[str]:
+    """The configured resolved-status set for Cloud classification.
+
+    Sources ``jira.resolved_statuses`` through the single typed-config entry point,
+    falling back to :data:`RESOLVED_STATUS_NAMES` when the key is unset, explicitly
+    EMPTY (``_as_str_list`` coerces ``[]``/``[""]`` to ``[]`` without raising), or the
+    config is malformed (:class:`ConfigError`). Mirrors DC's
+    ``settings.resolve_jira_datacenter_settings`` guard so an empty list degrades to
+    the default rather than binding an empty set (which would classify every resolved
+    issue PRESENT_FILTERED). A classification is not the place to surface a config typo,
+    so a malformed config degrades rather than breaking the probe pass.
+    """
+    from rebar.config import ConfigError, load_config
+
+    try:
+        configured = load_config().jira.resolved_statuses
+    except ConfigError:
+        return RESOLVED_STATUS_NAMES
+    return frozenset(configured) if configured else RESOLVED_STATUS_NAMES
 
 
 def _make_request(jira_url: str, issue_key: str, user: str, token: str) -> urllib.request.Request:
@@ -80,10 +101,11 @@ def _resolve_env() -> tuple[str, str, str]:
 
 def classify_probe_response(issue_key: str, status_code: int, payload: dict) -> ProbeResult:
     """Cloud-bound classifier — delegates to the shared ``jira_family`` classifier,
-    binding this module's ``RESOLVED_STATUS_NAMES`` as the resolved-status set. Used
-    by both the real probe and tests."""
+    binding the configured ``jira.resolved_statuses`` set (defaulting to this module's
+    ``RESOLVED_STATUS_NAMES`` — see ``_resolve_resolved_statuses``). Used by both the
+    real probe and tests."""
     return _classify_probe_response(
-        issue_key, status_code, payload, resolved_statuses=RESOLVED_STATUS_NAMES
+        issue_key, status_code, payload, resolved_statuses=_resolve_resolved_statuses()
     )
 
 
