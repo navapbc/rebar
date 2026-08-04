@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _dc_support import ADMIN_USER, BASE, live_jira_ready
+from _dc_support import ADMIN_USER, BASE, collect_base_urls, live_jira_ready
 from _dc_support import assert_bridge_alert_for_mutation as _assert_bridge_alert_for_mutation
 from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
 from _dc_support import assert_mint_registered as _assert_mint_registered
@@ -515,8 +515,18 @@ def _out_status(repo: Path, local_id: str) -> str:
     import rebar
 
     current = _local(repo, local_id).get("status") or "open"
-    if current != "in_progress":
-        rebar.transition(local_id, current, "in_progress", repo_root=repo)
+    # ESTABLISH the pre-state instead of mutating conditionally (bug 59b2, Finding C). The
+    # conditional version skipped the transition when the ticket was ALREADY in_progress, and the
+    # oracle then asserted a status this helper had not created — the same "the oracle may be
+    # checking pre-existing state" shape as the 08-assign vacuity. An imported DC issue lands
+    # `open`, so this is a precondition that holds today; making it LOUD rather than silently
+    # tolerated is the fix, because the tolerated branch is the one that proves nothing.
+    assert current != "in_progress", (
+        f"{local_id} is already 'in_progress' before this helper transitions it, so the status "
+        f"this row asserts would be pre-existing state rather than a mutation this cell made. "
+        f"Fix the fixture/ordering that pre-advanced the ticket rather than skipping the write."
+    )
+    rebar.transition(local_id, current, "in_progress", repo_root=repo)
     return "In Progress"
 
 
@@ -1393,6 +1403,19 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
     )
 
     rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
+
+    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
+    # This is the SECOND cell drawing a verdict from an empty filtered plan; the ticket named only
+    # the summary one, and the shared defect was found by the repo-only guard that pins the control
+    # ordering. With the local parent edit pending and DC not yet updated, an entry must exist — so
+    # an empty result here indicts `--filter-local-ids`, not convergence.
+    pending = _plan_entries_for(dc_store_copy_repo, child_local, child)
+    assert pending, (
+        f"the filtered dry-run surfaced NO entry for {child_local}/{child} even though a local "
+        f"parent attach is pending and DC does not yet carry it. The filter is not matching this "
+        f"pair, so the emptiness asserted at the end of this cell would mean nothing."
+    )
+
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"converging epic-parent pass raised:\n{cp.stderr[-2000:]}"
 
@@ -2022,6 +2045,26 @@ def test_a_deleted_dc_issue_never_plans_a_local_teardown(
     """
     local_id, key = bound_dc_issue
 
+    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
+    # The verdict below is `not teardown` over a FILTERED plan, so a filter matching nothing
+    # passes it vacuously. Establish reach BEFORE the delete, while the pair still exists: a
+    # pending local edit must produce at least one entry. The edit is then reverted so the
+    # subject state is the converged pair this cell means to test, not a dirty one.
+    import rebar as _rebar
+
+    _probe_title = _uniq("rebar J11 row14 filter probe")
+    _original_title = _local(dc_store_copy_repo, local_id).get("title")
+    _rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=_probe_title)
+    _reach = _plan_entries_for(dc_store_copy_repo, local_id, key)
+    _rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=_original_title)
+    assert _reach, (
+        f"the filtered dry-run surfaced NO entry for {local_id}/{key} with a local edit pending, "
+        f"so `--filter-local-ids` is not matching this pair and the teardown-absence asserted "
+        f"below would be vacuous. The surviving-ticket assertion at the end of this cell is NOT a "
+        f"sufficient backstop: if the filter matches nothing the pass does nothing, so the ticket "
+        f"survives for the wrong reason and both assertions pass together."
+    )
+
     dc_transport.delete_issue(key)
 
     cp = _run(dc_store_copy_repo, "dry-run", only=f"{local_id},{key}")
@@ -2370,23 +2413,30 @@ def test_no_config_in_the_working_repo_points_anywhere_but_the_harness(
     aim at production, and asserting the SET (rather than "the harness URL appears") is what
     catches a second value sitting alongside the right one.
     """
-    import re
+    import shutil
 
-    candidates = [
-        dc_store_copy_repo / "rebar.toml",
-        dc_store_copy_repo / "pyproject.toml",
-    ]
-    rebar_dir = dc_store_copy_repo / ".rebar"
-    if rebar_dir.is_dir():
-        candidates.extend(sorted(p for p in rebar_dir.rglob("*") if p.is_file()))
-    pattern = re.compile(r"""^\s*base_url\s*=\s*["']([^"']+)["']""", re.MULTILINE)
-    found: dict[str, list[str]] = {}
-    for path in candidates:
-        if not path.is_file():
-            continue
-        for value in pattern.findall(path.read_text()):
-            found.setdefault(value, []).append(str(path.relative_to(dc_store_copy_repo)))
+    # POSITIVE CONTROL, on a DECOY tree (bug 59b2, Finding A). The only file in the real copy
+    # carrying a base_url is the rebar.toml the fixture itself wrote from BASE, so the assertion
+    # below compares the fixture against itself and could not detect the stray production URL it
+    # exists to catch. Running the SAME collector over a tree that deliberately contains a foreign
+    # value is what proves the collector can see one — without it, an empty or broken candidate
+    # list looks identical to a clean repo. The collector lives in `_dc_support` so a repo-only
+    # test can mutation-check it too (tests/unit/test_live_dc_isolation_controls_59b2.py).
+    decoy_root = dc_store_copy_repo / ".j11-decoy"
+    (decoy_root / ".rebar").mkdir(parents=True, exist_ok=True)
+    (decoy_root / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{BASE}"\n')
+    (decoy_root / ".rebar" / "nested.toml").write_text(
+        '[reconciler]\nbase_url = "https://real-jira.example.com"\n'
+    )
+    decoy_found = collect_base_urls(decoy_root)
+    assert set(decoy_found) == {BASE, "https://real-jira.example.com"}, (
+        f"the base_url collector failed its own positive control: over a decoy tree containing a "
+        f"foreign URL in .rebar/nested.toml it found {decoy_found!r}. Until this passes, the "
+        f"assertion below cannot be read as evidence of anything."
+    )
+    shutil.rmtree(decoy_root)
 
+    found = collect_base_urls(dc_store_copy_repo)
     assert set(found) == {BASE}, (
         f"the working repo names base_url(s) {found!r}; the ONLY permitted value is the harness "
         f"URL {BASE!r}. Anything else means a pass from this copy could reach a real instance."
@@ -2425,6 +2475,20 @@ def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
     new_title = _uniq("rebar J11 idempotence")
 
     rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=new_title)
+
+    # POSITIVE CONTROL — the filter CAN surface an entry for THIS pair (bug 59b2, Finding B).
+    # The verdict below is drawn from an EMPTY filtered plan, and story 5200 already burned a
+    # cycle on `--filter-local-ids` being a post-filter that matched nothing ("1640 mutations
+    # computed, 0 match filter"). Under that failure mode "a repeat plans nothing" passes while
+    # proving nothing. Taken here, with the local edit pending and DC not yet updated, an entry
+    # for this pair MUST exist — so an empty result now indicts the filter, not convergence.
+    pending = _plan_entries_for(dc_store_copy_repo, local_id, key)
+    assert pending, (
+        f"the filtered dry-run surfaced NO entry for {local_id}/{key} even though a local title "
+        f"edit is pending and DC still holds the old summary. The filter is not matching this "
+        f"pair, so the emptiness asserted at the end of this cell would mean nothing."
+    )
+
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
     assert "Traceback" not in cp.stderr, f"the converging pass raised:\n{cp.stderr[-2000:]}"
 
