@@ -39,6 +39,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -82,12 +83,36 @@ from rebar.llm.contracts import register_contract  # noqa: E402
 from rebar.llm.errors import LLMError  # noqa: E402
 from rebar.llm.runner import RunRequest, get_runner  # noqa: E402
 
-# Recorded in README.md / docker-compose.yml; restated here only for the artifact's own
-# provenance record — the actual digest pin lives in the ONE place that decides which image
-# is built: tests/external/live_jira_dc/Dockerfile's `FROM` line. This job builds that exact
-# Dockerfile (see the workflow), so it is pinned by construction, not by a second literal that
-# could drift from the first.
-_HARNESS_IMAGE_DIGEST = "sha256:04326628dc4ac36b2bfc1d0f2ebe5ba3807c1ec9cf9b18307d3c2ad7222537e9"
+_HARNESS_DOCKERFILE = _REPO_ROOT / "tests" / "external" / "live_jira_dc" / "Dockerfile"
+_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def harness_image_digest(dockerfile: Path | None = None) -> str | None:
+    """Read the harness image digest from the ONE place that decides which image is
+    built: the vendored Dockerfile's ``FROM`` line — never a second, hand-copied literal
+    that could drift from the first. ``dockerfile`` defaults to the real vendored harness
+    Dockerfile, resolved relative to the repo root; pass an override to make this
+    derivation testable against a fixture.
+
+    Deliberately does not raise: this runs mid-way through a long, billable live CI run,
+    and this value is metadata about the run, not something the run depends on — an
+    aborted run over a missing/malformed pin would throw away the evidence the run exists
+    to collect. A missing Dockerfile or a ``FROM`` line without an ``@sha256:`` digest
+    both report as "no digest" (``None``) rather than falling back to a remembered value,
+    which would silently mislabel the artifact just as badly as the bug this replaces.
+    """
+    path = dockerfile if dockerfile is not None else _HARNESS_DOCKERFILE
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("FROM"):
+            found = _DIGEST_RE.search(line)
+            if found:
+                return found.group(0)
+    return None
+
 
 _DEFAULT_BASE_URL = "http://localhost:2990/jira"
 _PAT_NAME_PREFIX = "rebar-259b-map-"
@@ -493,7 +518,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output-dir", default=os.environ.get("JIRA_DC_MAP_OUTPUT_DIR", "jira-dc-capability-map")
     )
+    parser.add_argument(
+        "--dockerfile",
+        type=Path,
+        default=None,
+        help=(
+            "Override the Dockerfile the harness image digest is read from "
+            "(default: the vendored tests/external/live_jira_dc/Dockerfile)."
+        ),
+    )
+    parser.add_argument(
+        "--print-digest",
+        action="store_true",
+        help=(
+            "Print the derived harness image digest and exit immediately — no Jira "
+            "contact, no PAT, no LLM, no files written. Lets a human confirm which "
+            "image a run will map without a ~35-minute live run."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.print_digest:
+        digest = harness_image_digest(args.dockerfile)
+        print(digest if digest is not None else "unpinned")
+        return 0
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -554,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
         (out_dir / "run_metadata.json").write_text(
             json.dumps(
                 {
-                    "harness_image_digest": _HARNESS_IMAGE_DIGEST,
+                    "harness_image_digest": harness_image_digest(args.dockerfile),
                     "base_url": args.base_url,
                     "model": cfg.model,
                     "rest_call_count": len(_EVIDENCE),
