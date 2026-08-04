@@ -46,12 +46,24 @@ from rebar.review_bot import voter as _voter
 from rebar.review_bot.config import (
     ReceiverConfig,
     configure_logging,
+    install_access_log_redaction,
     review_timeout_seconds,
     shutdown_cancel_seconds,
     shutdown_drain_seconds,
 )
 
 logger = logging.getLogger("rebar.review_bot")
+
+#: HTTP header carrying the webhook/rerun secret (ticket 66af). The token is read from THIS
+#: header in preference to the legacy ``?token=`` query param because uvicorn's access log
+#: records the request LINE (method + path + query) but NOT headers — so a header-authenticated
+#: request never writes the secret to stderr → journald. Do NOT reintroduce the query-string
+#: form as a convenience: it is exactly what leaked the bot's Gerrit credential into the most-
+#: grepped log on the box. ``config.install_access_log_redaction()`` is the backstop for any
+#: caller still using the query form. Gerrit's ``webhooks`` plugin can send this via its
+#: ``header`` config (see infra/gerrit/webhooks.config); the operator ``/rerun`` recipe uses it
+#: directly.
+TOKEN_HEADER = "X-Rebar-Token"
 
 #: Default listen port when run via the ``__main__`` convenience runner. The
 #: deployment single-sources this from the ``.env`` (``REVIEW_BOT_PORT``) and passes
@@ -76,6 +88,20 @@ def _config() -> ReceiverConfig:
     """Process-wide receiver config (env/SSM-sourced). Resolved fresh per app build so
     a reload picks up rotated secrets."""
     return ReceiverConfig.from_env()
+
+
+def _request_token(request: Request) -> str:
+    """Extract the auth secret, preferring the ``X-Rebar-Token`` header over the legacy
+    ``?token=`` query param.
+
+    The header is preferred because it keeps the secret OUT of the access-logged request line
+    (ticket 66af). The query param is still accepted so a legacy caller (a Gerrit webhook whose
+    ``webhooks.config`` has not yet been re-pushed to send the header) keeps authenticating; its
+    value is protected in the log by ``config.install_access_log_redaction()``."""
+    header_token = request.headers.get(TOKEN_HEADER, "").strip()
+    if header_token:
+        return header_token
+    return request.query_params.get("token", "")
 
 
 @contextlib.asynccontextmanager
@@ -201,6 +227,13 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
 # at import, before the app is built, so startup logs are captured too.
 configure_logging()
 
+# Install the access-log token-redaction backstop (ticket 66af option c). Even though the
+# secret now travels in the ``X-Rebar-Token`` header (out of the access-logged request line),
+# any request line that still carries ``?token=`` — a legacy caller or a future regression — is
+# scrubbed before it reaches stderr → journald. Idempotent; called at import for the same reason
+# as configure_logging.
+install_access_log_redaction()
+
 app = FastAPI(
     title="rebar review-bot",
     summary="Gerrit webhook receiver — reviews a patchset and casts the LLM-Review vote.",
@@ -234,13 +267,16 @@ async def health() -> dict[str, str | int]:
 async def webhook(request: Request) -> JSONResponse:
     """Authenticate, ACK fast (202), and enqueue the event for background review.
 
-    Auth (ADR-0014): the ``?token=`` query value must equal the configured
-    ``WEBHOOK_TOKEN`` (constant-time compare); a missing/empty/wrong token is 401. The
+    Auth (ADR-0014, ticket 66af): the secret must equal the configured ``WEBHOOK_TOKEN``
+    (constant-time compare), supplied in the ``X-Rebar-Token`` header (preferred — kept out of
+    the access-logged request line) or the legacy ``?token=`` query param (accepted for
+    backward-compat, its value scrubbed from the log by the redaction filter). A
+    missing/empty/wrong token is 401. The
     review itself is NOT awaited here — it is enqueued and a background worker casts the
     vote — because the review takes far longer than Gerrit's webhook socket timeout.
     """
     cfg: ReceiverConfig = request.app.state.config
-    token = request.query_params.get("token", "")
+    token = _request_token(request)
     if not cfg.webhook_token or not hmac.compare_digest(token, cfg.webhook_token):
         logger.warning("review-bot webhook: rejected (missing/invalid token)")
         return JSONResponse(status_code=401, content={"status": "unauthorized"})
@@ -265,7 +301,9 @@ async def webhook(request: Request) -> JSONResponse:
 async def rerun(request: Request) -> JSONResponse:
     """Manually FORCE a fresh review of a change (operability — recover a stuck vote).
 
-    Auth: same ``?token=`` secret as ``/webhook`` (constant-time). Body/query supplies
+    Auth: same secret as ``/webhook`` (constant-time), supplied in the ``X-Rebar-Token``
+    header (preferred — keeps it out of the access log) or the legacy ``?token=`` query param.
+    Body/query supplies
     ``change`` (a Gerrit change id/number). The receiver looks up the change's CURRENT
     revision, enqueues it with the force marker, and ACKs 202; the worker re-reviews it
     bypassing the dedup + existing-vote short-circuits — so a stuck fail-closed ``-1``
@@ -273,7 +311,7 @@ async def rerun(request: Request) -> JSONResponse:
     a rerun can only request a FRESH review, never force a PASS.
     """
     cfg: ReceiverConfig = request.app.state.config
-    token = request.query_params.get("token", "")
+    token = _request_token(request)
     if not cfg.webhook_token or not hmac.compare_digest(token, cfg.webhook_token):
         return JSONResponse(status_code=401, content={"status": "unauthorized"})
 

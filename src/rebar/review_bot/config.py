@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,6 +156,64 @@ def configure_logging() -> None:
         setattr(handler, _REVIEWBOT_LOG_HANDLER_MARKER, True)
         lg.addHandler(handler)
     lg.setLevel(level)
+
+
+#: Marker attribute stamped on the ``uvicorn.access`` logger once the redaction filter is
+#: installed, so :func:`install_access_log_redaction` is idempotent under a reload/re-import.
+_ACCESS_REDACTION_MARKER = "_reviewbot_access_redaction"
+
+#: Scrub the VALUE of any ``token=<secret>`` in a logged URL/request line. Case-insensitive on
+#: the key; the value runs to the next ``&`` / whitespace / quote so the route and remaining
+#: query params (e.g. ``change=1323``) are preserved for the observability greps. This is the
+#: belt-and-suspenders backstop (ticket 66af option c): the token now travels in a header
+#: (``X-Rebar-Token``) which uvicorn's access log never records, but any request line that still
+#: carries a query token — a legacy caller, a future endpoint, a regression — is scrubbed here
+#: before it can reach stderr → journald.
+_TOKEN_QUERY_RE = re.compile(r"(?i)(token=)[^&\s\"']*")
+
+
+def _redact_token(value: object) -> object:
+    """Redact ``token=`` values inside a string; pass non-strings through untouched."""
+    if isinstance(value, str):
+        return _TOKEN_QUERY_RE.sub(r"\1<redacted>", value)
+    return value
+
+
+class TokenRedactingFilter(logging.Filter):
+    """A :class:`logging.Filter` that scrubs ``token=<secret>`` out of a log record before it
+    is formatted, then always passes the record through (``return True`` — this redacts, it
+    does not drop).
+
+    uvicorn's access logger emits the request line as ``%``-args
+    (``client, method, full_path, http_version, status``) against a ``'%s - "%s %s ..."'``
+    template, so the query string lives in one of ``record.args``; we scrub each string arg
+    (and, defensively, ``record.msg`` for any pre-formatted line) rather than the final
+    message, so redaction happens regardless of how the handler formats the record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple):
+            record.args = tuple(_redact_token(a) for a in args)
+        elif isinstance(args, dict):
+            record.args = {k: _redact_token(v) for k, v in args.items()}
+        if isinstance(record.msg, str):
+            record.msg = _TOKEN_QUERY_RE.sub(r"\1<redacted>", record.msg)
+        return True
+
+
+def install_access_log_redaction() -> None:
+    """Attach :class:`TokenRedactingFilter` to the ``uvicorn.access`` logger (idempotent).
+
+    Called at import from ``rebar.review_bot.app`` alongside :func:`configure_logging`. The
+    primary defence for the token leak is moving the secret into the ``X-Rebar-Token`` header
+    (app.py), which keeps it out of the access-logged request line entirely; this filter is the
+    backstop for any request line that still carries ``?token=`` (ticket 66af)."""
+    access = logging.getLogger("uvicorn.access")
+    if getattr(access, _ACCESS_REDACTION_MARKER, False):
+        return
+    if not any(isinstance(f, TokenRedactingFilter) for f in access.filters):
+        access.addFilter(TokenRedactingFilter())
+    setattr(access, _ACCESS_REDACTION_MARKER, True)
 
 
 def _int_env(name: str, default: int) -> int:
