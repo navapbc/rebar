@@ -218,13 +218,28 @@ trivial  = { model = "local-model", provider = "openai", endpoint = "http://loca
 The same slots are settable from the environment, one variable per class and field:
 
 ```bash
-REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review <id>
-REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review <id>
-# local OpenAI-compatible server (LMStudio / Ollama / vLLM):
+# `frontier` drives the code-review Pass-1 finder (`gates/code-review.yaml`):
+REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review-code
+# `standard` drives plan-review, the completion verifier, the code-review verify passes
+# and the overlap judge:
+REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review-plan <id>
+# `trivial` drives ticket enrichment and the epic bug screen. Pointing it at a local
+# OpenAI-compatible server (LMStudio / Ollama / vLLM):
 REBAR_LLM_TRIVIAL_MODEL=local-model REBAR_LLM_TRIVIAL_PROVIDER=openai \
-  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1 rebar review <id>
+  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1
 # (no dummy REBAR_LLM_API_KEY needed — the builder supplies one; such a run records tier=best_effort)
 ```
+
+A class slot only takes effect for an operation that **declares** that class — the gate
+workflows do so with a step-level `model: frontier` / `model: standard`. An operation that
+declares none, such as `rebar review`, resolves the **top-level** model instead
+(`[tool.rebar.llm].model`, else the deprecated `REBAR_LLM_MODEL`, else `DEFAULT_MODEL`), so a
+per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o`
+set and this repo's own `[tool.rebar.llm].model` pinned to Bedrock,
+`rebar review` still ran — and stamped its provenance — as
+`bedrock:us.anthropic.claude-opus-4-8`, while `resolve_model(cfg, step="frontier")` returned
+`openai:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
+class the operation declares) to move a classless operation.
 
 > **`REBAR_LLM_MODEL` is DEPRECATED** (scheduled for removal in v1.0.0). It still works and
 > now applies its value to **all three** classes, warning once per call; any class slot or
