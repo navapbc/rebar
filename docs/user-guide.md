@@ -174,7 +174,8 @@ Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
 `discovered_from`. Blocking links (`blocks` / `depends_on`) connect tickets that
 share a parent; across sub-trees they escalate automatically to the children of
 the two tickets' nearest common ancestor. Remove a link with `rebar unlink <a> <b>`
-(no relation argument; removes the most-recent link for that pair).
+(removes the most-recent link for that pair) or `rebar unlink <a> <b> <relation>`
+(removes exactly that relation's link when the pair holds several).
 
 **Tag** and **untag** for lightweight labels; `rebar edit` changes fields:
 

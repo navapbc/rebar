@@ -288,3 +288,52 @@ def add_dependency(
     # is already persisted, satisfying the write-or-fail-loudly invariant.
     _emit_redirect()
     return redirect_record
+
+
+def remove_dependency(
+    source_id: str,
+    target_id: str,
+    tracker_dir: str,
+    relation: str,
+) -> None:
+    """Remove the net-active ``(target_id, relation)`` link — ``add_dependency``'s mirror.
+
+    The RELATION-SCOPED removal seam (bug e39f): links are written keyed on
+    ``(target_id, relation)`` (see ``add_dependency``'s idempotency), so a pair can
+    hold several relations at once; this removes exactly the named relation's most
+    recent net-active LINK by writing an UNLINK event through the same shared
+    locked write seam, leaving any other relation the pair holds untouched. For
+    ``relates_to`` the reciprocal link in ``target_id``'s directory is removed too
+    (mirroring the reciprocal write).
+
+    Raises ValueError if ``relation`` is not in ``CANONICAL_RELATIONS``.
+    Raises :class:`rebar._commands._seam.CommandError` when either ticket is
+    missing or no net-active ``(target_id, relation)`` link exists.
+
+    The net-effective LINK/UNLINK replay lives in ``rebar._commands.unlink``
+    (lazily imported, mirroring ``_write_link_event``'s lazy seam import) so this
+    seam and the CLI's ``unlink`` can never disagree about which link is removed.
+    """
+    if relation not in CANONICAL_RELATIONS:
+        canonical_list = ", ".join(sorted(CANONICAL_RELATIONS))
+        raise ValueError(f"invalid relation '{relation}': must be one of {canonical_list}")
+
+    from pathlib import Path
+
+    from rebar._commands.unlink import _get_link_info, _write_unlink
+
+    tracker = Path(tracker_dir)
+    _write_unlink(source_id, target_id, tracker, repo_root=None, relation=relation)
+
+    if relation == "relates_to":
+        recip_uuid, _ = _get_link_info(tracker / target_id, source_id, relation)
+        if recip_uuid:
+            _write_unlink(target_id, source_id, tracker, repo_root=None, relation=relation)
+        else:
+            logger.warning(
+                "no reciprocal LINK found in '%s' targeting '%s' — orphaned link, "
+                "removed from '%s' only",
+                target_id,
+                source_id,
+                source_id,
+            )
