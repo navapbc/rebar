@@ -146,33 +146,31 @@ def _safe_get_issue(client: TicketTransport, jira_key: str) -> Any:
 
 def _is_retired(binding_store: Any, jira_key: str) -> bool:
     """``binding_store.is_retired`` with graceful fallback for legacy stubs."""
-    fn = getattr(binding_store, "is_retired", None)
-    if fn is None:
-        return False
-    try:
-        return bool(fn(jira_key))
-    except Exception:  # noqa: BLE001 — fail-open: legacy-stub fallback returns False
-        return False
+    return bool(_best_effort(binding_store, "is_retired", jira_key))
 
 
-def _best_effort(binding_store: Any, member: str, *args: Any) -> None:
-    """Call a VOID binding-store bookkeeping method; no-op when the store lacks it.
+def _best_effort(binding_store: Any, member: str, *args: Any) -> Any:
+    """Call a binding-store member; ``None`` when the store lacks it or it raises.
 
-    One helper for the three bookkeeping calls this module makes
-    (``set_last_get`` / ``note_absent_or_rekey`` / ``clear_absent``), which carried
-    three byte-identical getattr-guarded, exception-swallowing bodies. Bookkeeping
+    One helper for the bookkeeping calls this module makes (``set_last_get`` /
+    ``note_absent_or_rekey`` / ``clear_absent`` / ``note_create_suppressed``) and for
+    the read-only store queries (``is_retired`` / ``retired_key_for_local``), which
+    carried byte-identical getattr-guarded, exception-swallowing bodies. Bookkeeping
     must never fail a pass, and a duck-typed store may implement only some members.
 
     Collapsed under bug 7c26 rather than for tidiness: this module sits at the LOCKED
     module-size cap, so wiring the move-aware absence path had to buy its lines back
-    from real duplication instead of from comments.
+    from real duplication instead of from comments. Bug 3b5f bought the tombstone
+    guard's lines the same way, by returning the member's value instead of discarding
+    it (the void call sites are unaffected — they ignore the return).
     """
     fn = getattr(binding_store, member, None)
-    if fn is not None:
-        try:
-            fn(*args)
-        except Exception:  # noqa: BLE001 — fail-open: bookkeeping never fails a pass
-            pass
+    if fn is None:
+        return None
+    try:
+        return fn(*args)
+    except Exception:  # noqa: BLE001 — fail-open: a legacy/duck-typed store never fails a pass
+        return None
 
 
 _CONFIG_KEY = "rebar_reconciler.config"
@@ -603,7 +601,18 @@ def _compute_outbound_create_mutation(
 
     ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket 4af8);
     its ``map_local_to_remote`` replaces the former direct vendor-mapper import.
+
+    TOMBSTONE GUARD (bug 3b5f): a local ticket with NO live binding but WITH a retired
+    one was paired with a Jira issue a bounded direct GET confirmed 404 — deleted.
+    Retirement unbinds the local ticket, so without this check the ordinary
+    unbound->create arm resurrected the deliberately-deleted issue ~3 passes later.
+    A NEVER-bound ticket has no tombstone and still creates; that distinction is the
+    whole point. Fail-open via ``_best_effort``, and reversible by ``unretire``.
     """
+    tombstone = _best_effort(binding_store, "retired_key_for_local", local_id)
+    if isinstance(tombstone, str) and tombstone:
+        _best_effort(binding_store, "note_create_suppressed", local_id, tombstone)
+        return
     # Unbound -> outbound create
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).

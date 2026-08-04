@@ -337,10 +337,6 @@ def compute_mutations(
                 key, local_state, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
             )
 
-    _compute_mutations_emit_absent_partner_probes(
-        local_state, jira_state, state, quarantine_set=quarantine_set, ledger=ledger
-    )
-
     return state.mutations
 
 
@@ -611,49 +607,6 @@ def _compute_mutations_emit_both(
                     fallback_fields=local_fields,
                     reason="field_drift",
                 ),
-            ),
-            quarantine_set=quarantine_set,
-            mutations_out=mutations,
-            ledger=ledger,
-        )
-
-
-def _compute_mutations_emit_absent_partner_probes(
-    local_state, jira_state, state, *, quarantine_set, ledger
-) -> None:
-    """Final phase: symmetric inbound-probe pass for bound-but-absent Jira partners."""
-    Mutation = state.Mutation
-    MutationDirection = state.MutationDirection
-    MutationAction = state.MutationAction
-    mutations = state.mutations
-
-    # Symmetric inbound-probe pass: a local ticket may carry a bound
-    # ``jira_key`` pointing at a Jira issue that is ABSENT from the current
-    # jira_state working set. This is the inbound counterpart to the
-    # ambiguous_local_binding (outbound, probe) emission above — the local
-    # side believes a partner exists, but the Jira working set does not
-    # surface it. Emit (inbound, probe) so the applier can investigate
-    # (deleted? out of scope of working-set query? renamed?).
-    for local_key in sorted(local_state):
-        local_entry = local_state[local_key]
-        if not isinstance(local_entry, dict):
-            continue
-        bound_jira_key = local_entry.get("jira_key")
-        if not bound_jira_key:
-            continue
-        bound_jira_key_str = str(bound_jira_key)
-        if bound_jira_key_str in jira_state:
-            continue
-        _emit(
-            Mutation(
-                direction=MutationDirection.inbound,
-                action=MutationAction.probe,
-                target=bound_jira_key_str,
-                payload={"reason": "absent_partner"},
-                provenance={
-                    "source": "differ",
-                    "local_target": local_key,
-                },
             ),
             quarantine_set=quarantine_set,
             mutations_out=mutations,

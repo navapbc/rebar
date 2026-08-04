@@ -258,88 +258,14 @@ def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_m
 
 
 # ---------------------------------------------------------------------------
-# 3. inbound delete — four probe-outcome branches
+# 3. inbound delete — REMOVED (bug 3b5f)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "outcome",
-    ["hard_delete", "redirect", "out_of_window", "trash"],
-)
-# c244: the leaf now reads the canonical `reason` key (route_inbound_probe emits it);
-# `probe_outcome` is exercised too so the back-compat fallback stays live (not dead code).
-@pytest.mark.parametrize("branch_key", ["reason", "probe_outcome"])
-def test_inbound_delete_branches(applier, mut_mod, fixture_repo, outcome, branch_key):
-    # Seed the ticket dir.
-    create_mut = _make_mutation(
-        mut_mod,
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.create,
-        target="DIG-123",
-        payload={"fields": {"summary": "seed", "issuetype": "Task"}},
-    )
-    applier._apply_typed(create_mut, repo_root=fixture_repo)
-
-    payload = {branch_key: outcome}
-    if outcome == "redirect":
-        payload["new_jira_key"] = "DIG-999"
-    delete_mut = _make_mutation(
-        mut_mod,
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.delete,
-        target="jira-dig-123",
-        payload=payload,
-    )
-    result = applier._apply_typed(delete_mut, repo_root=fixture_repo)
-    assert result.payload["branch"] == outcome
-
-    tracker = fixture_repo / ".tickets-tracker"
-    if outcome == "hard_delete":
-        assert result.payload["follow_on"]["action"] == "create_after_hard_delete"
-    elif outcome == "redirect":
-        assert (tracker / "jira-dig-999").is_dir()
-        assert not (tracker / "jira-dig-123").exists()
-    else:
-        # Comment-only branches: ticket dir still exists with a new COMMENT.
-        events = _event_files(tracker, "jira-dig-123")
-        assert any("COMMENT" in p.name for p in events)
-
-
-def test_inbound_delete_redirect_raises_when_destination_exists(applier, mut_mod, fixture_repo):
-    """Redirect branch must NOT silently skip the rename when both src and
-    dst already exist on disk (PR #375 review). Silent
-    skip leaves both directories present — an inconsistent state that
-    propagates to later passes. Expect FileExistsError.
-    """
-    # Seed the source ticket dir (the one being redirected away).
-    create_src = _make_mutation(
-        mut_mod,
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.create,
-        target="DIG-123",
-        payload={"fields": {"summary": "src", "issuetype": "Task"}},
-    )
-    applier._apply_typed(create_src, repo_root=fixture_repo)
-
-    # Pre-create the destination directory (simulates a prior failed pass
-    # or collision with an already-imported ticket of the new key).
-    tracker = fixture_repo / ".tickets-tracker"
-    (tracker / "jira-dig-999").mkdir()
-
-    delete_mut = _make_mutation(
-        mut_mod,
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.delete,
-        target="jira-dig-123",
-        payload={"reason": "redirect", "new_jira_key": "DIG-999"},
-    )
-    with pytest.raises(FileExistsError):
-        applier._apply_typed(delete_mut, repo_root=fixture_repo)
-
-    # Both directories must still exist — the leaf must not have partially
-    # mutated state before raising.
-    assert (tracker / "jira-dig-123").is_dir()
-    assert (tracker / "jira-dig-999").is_dir()
+# ``_apply_inbound_delete`` and its ``("inbound", "delete")`` registration are gone.
+# Its sole producer (``route_inbound_probe``) was itself unreachable, and its
+# ``create_after_hard_delete`` follow-on IS the resurrection the operator ruling
+# forbids: once an issue is deleted in Jira it must not be re-created. The
+# tombstone that enforces that lives in ``outbound_differ`` — see
+# tests/unit/rebar_reconciler/test_no_resurrection_after_confirmed_delete_3b5f.py.
 
 
 # ---------------------------------------------------------------------------

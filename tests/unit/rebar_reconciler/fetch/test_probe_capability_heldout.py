@@ -58,38 +58,6 @@ def test_missing_env_raises_probe_config_error(monkeypatch) -> None:
         jira_probe._resolve_env()
 
 
-# ── capability-LACKING backend degrades to UNREACHABLE (the key edge) ────────
-def _make_probe_mutation(mut_mod, target: str = "PROJ-1"):
-    return mut_mod.Mutation(
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.probe,
-        target=target,
-        payload={"reason": "absent_partner"},
-        provenance={"source": "differ", "local_target": "LOCAL-1"},
-    )
-
-
-def test_dispatch_degrades_to_unreachable_without_capability() -> None:
-    mut_mod = _load("reconcile_mutation", "mutation.py")
-    run_differs = _load("run_differs_probe_heldout", "run_differs.py")
-
-    class NonProbingBackend:
-        """A backend WITHOUT SupportsAbsenceProbe (no probe_remote)."""
-
-    captured: list = []
-
-    def route(mut, result):
-        captured.append(result)
-        return None
-
-    muts = [_make_probe_mutation(mut_mod, "PROJ-9")]
-    run_differs._run_differs_inbound_probe_dispatch(muts, route, NonProbingBackend())
-
-    assert captured, "route_inbound_probe should still be called (conservative branch)"
-    assert captured[0].branch == inbound_probe.ProbeBranch.UNREACHABLE
-    assert captured[0].issue_key == "PROJ-9"
-
-
 # ── the neutral vocabulary stayed at root, with no vendor import ─────────────
 def test_root_inbound_probe_is_neutral_vocabulary() -> None:
     """Root ``inbound_probe.py`` still exports the neutral vocab and imports nothing from

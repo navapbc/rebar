@@ -50,20 +50,18 @@ def _load(name: str, relpath: str):
 # ---------------------------------------------------------------------------
 # Leaf-helper re-exports. reconcile_helpers.py holds the pure pass-support
 # utilities that carry no back-edge to the reconcile_once spine (status
-# preflight, binding-store commit-back, the inbound-probe router, the ticket-CLI
-# reader, the filter-scope builders, the no-write plan renderer, and the cap-0
-# sync-logger stand-in). Load it once by path and bind its names at module level
-# so (a) the staying phase helpers call them as bare names — preserving the
-# monkeypatch seam tests rely on — and (b) attribute access (``reconcile.<name>``,
-# used by tests that load this module by path) keeps resolving all ten names.
+# preflight, binding-store commit-back, the ticket-CLI reader, the filter-scope
+# builders, the no-write plan renderer, and the cap-0 sync-logger stand-in). Load
+# it once by path and bind its names at module level so (a) the staying phase
+# helpers call them as bare names — preserving the monkeypatch seam tests rely on —
+# and (b) attribute access (``reconcile.<name>``, used by tests that load this
+# module by path) keeps resolving all eight names.
 # ---------------------------------------------------------------------------
 _helpers = _load("reconcile_helpers", "reconcile_helpers.py")
 
 StatusMappingError = _helpers.StatusMappingError
 preflight_status_mapping = _helpers.preflight_status_mapping
 _commit_binding_store_snapshot = _helpers._commit_binding_store_snapshot
-_audit_log_probe = _helpers._audit_log_probe
-route_inbound_probe = _helpers.route_inbound_probe
 _read_local_tickets = _helpers._read_local_tickets
 _build_filter_target_set = _helpers._build_filter_target_set
 _mutation_matches_filter = _helpers._mutation_matches_filter
@@ -174,12 +172,9 @@ def reconcile_once(
     )
     _load_snapshots(ctx)
     # Diff phase lives in the sibling run_differs.py (loaded lazily by file path,
-    # matching the sibling-loader convention). route_inbound_probe is passed in
-    # (rather than imported) so run_differs.py holds no back-edge to reconcile.py —
-    # route_inbound_probe now lives in the sibling reconcile_helpers.py and is re-exported
-    # here (a separately-tested public surface).
+    # matching the sibling-loader convention). It holds no back-edge to reconcile.py.
     run_differs_mod = _load("reconcile_run_differs", "run_differs.py")
-    run_differs_mod.run_differs(ctx, route_inbound_probe)
+    run_differs_mod.run_differs(ctx)
     _apply_mutations(ctx)
     return _persist_and_log(ctx)
 

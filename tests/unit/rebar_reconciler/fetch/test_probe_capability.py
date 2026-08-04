@@ -56,42 +56,13 @@ def test_jira_backend_supports_absence_probe() -> None:
     assert isinstance(JiraBackend(transport=object()), SupportsAbsenceProbe)
 
 
-# ── dispatch routes through backend.probe_remote when capable ────────────────
-def _make_probe_mutation(mut_mod, target: str = "PROJ-1"):
-    return mut_mod.Mutation(
-        direction=mut_mod.MutationDirection.inbound,
-        action=mut_mod.MutationAction.probe,
-        target=target,
-        payload={"reason": "absent_partner"},
-        provenance={"source": "differ", "local_target": "LOCAL-1"},
-    )
-
-
-def test_dispatch_uses_backend_probe_when_capable() -> None:
-    mut_mod = _load("reconcile_mutation", "mutation.py")
-    run_differs = _load("run_differs_probe_happy", "run_differs.py")
-
-    class ProbingBackend:
-        """A backend that HAS SupportsAbsenceProbe."""
-
-        def __init__(self) -> None:
-            self.seen: list[str] = []
-
-        def probe_remote(self, remote_id: str):
-            self.seen.append(remote_id)
-            return inbound_probe.ProbeResult(
-                inbound_probe.ProbeBranch.PRESENT_RESOLVED, remote_id, {"status": "Done"}
-            )
-
-    captured: list = []
-
-    def route(mut, result):
-        captured.append(result)
-        return None
-
-    backend = ProbingBackend()
-    muts = [_make_probe_mutation(mut_mod, "PROJ-1")]
-    run_differs._run_differs_inbound_probe_dispatch(muts, route, backend)
-
-    assert backend.seen == ["PROJ-1"]  # the backend's probe was used
-    assert captured and captured[0].branch == inbound_probe.ProbeBranch.PRESENT_RESOLVED
+# ── the dispatch consumer is GONE (bug 3b5f); the capability stays dormant ────
+# ``_run_differs_inbound_probe_dispatch`` was removed with its only producer
+# (``differ._compute_mutations_emit_absent_partner_probes``, which could never fire
+# from the real call site). ``probe_remote`` / ``SupportsAbsenceProbe`` /
+# ``inbound_probe.py`` are deliberately KEPT as a dormant port: removing DC's
+# ``probe_remote`` would drop DC's only import of the shared
+# ``classify_probe_response``, leaving it Cloud-only and weakening epic e369's AC5
+# (one classifier implementation imported by BOTH backends). The cells above still
+# pin the classifier and the capability advertisement; only the dead dispatch cell
+# is gone.
