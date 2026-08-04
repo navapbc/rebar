@@ -116,8 +116,20 @@ def _default_jira_project(monkeypatch):
     hermeticity. The env override (env > config) pins DIG deterministically; a test
     that needs another project sets ``JIRA_PROJECT`` itself (it runs after this
     fixture and wins).
+
+    Bug ad85 additionally made Cloud credentials load-bearing: ``_build_jira_backend``
+    now fails loudly (``BackendEnvError``) when ``JIRA_URL`` / ``JIRA_USER`` /
+    ``JIRA_API_TOKEN`` are absent or ``JIRA_USER`` is not an email, at parity with the
+    DC ``JIRA_PAT`` guard — rather than building an anonymous client that 401s later.
+    Nearly every reconcile path builds the (default Cloud) backend — the applier and
+    the outbound differ read ``select_backend(...).project`` — so pin hermetic, valid
+    creds here just as ``JIRA_PROJECT`` is pinned. A test exercising the absent/invalid
+    -credential path deletes/overrides these itself (it runs after this fixture).
     """
     monkeypatch.setenv("JIRA_PROJECT", "DIG")
+    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     yield
 
 

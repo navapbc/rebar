@@ -211,7 +211,7 @@ def test_gate_defaults_missing_managed_refs_to_no_removal() -> None:
 
 # ── compaction-boundary end-to-end: compact → post-compaction UNLINK → differ removes ──
 def test_unlink_after_compaction_still_propagates_removal(
-    tmp_path: Path, reducer: ModuleType, outbound_differ: ModuleType
+    tmp_path: Path, reducer: ModuleType, outbound_differ: ModuleType, monkeypatch
 ) -> None:
     """The durability hole closed (story safe-luge-nog AC3): a removal performed AFTER a
     compaction boundary still propagates. Chain it end-to-end — reduce a CREATE+LINK, COMPACT
@@ -219,6 +219,11 @@ def test_unlink_after_compaction_still_propagates_removal(
     again (deps empty, managed_refs survives), and feed the reduced ticket to the outbound
     differ: it must emit the link REMOVE. A raw-event ever-seen projection would fail closed
     here (the compacted log no longer proves we managed the link) and re-resurrect it."""
+    # bug ad85: compute_outbound_mutations builds the (default Cloud) backend, which now
+    # fails loudly on absent credentials; this offline differ test needs valid creds pinned.
+    monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
     # 1) reduce a real CREATE + LINK to get the pre-compaction compiled_state.
     d1 = tmp_path / "local-1"
     d1.mkdir()
