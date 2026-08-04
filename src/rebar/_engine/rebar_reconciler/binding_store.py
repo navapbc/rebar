@@ -299,7 +299,10 @@ class BindingStore:
             pass
 
     def save(self) -> None:
-        """Atomic write via tempfile + os.replace."""
+        """Persist rotation first, then atomically replace bindings with safe fallback state."""
+        if get_rotation.save(self._get_rotation_path, self._get_rotation):
+            for entry in self._data["bindings"].values():
+                entry.pop("last_get_pass", None)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(
             dir=str(self._path.parent),
@@ -318,7 +321,6 @@ class BindingStore:
             except OSError:
                 pass
             raise
-        get_rotation.save(self._get_rotation_path, self._get_rotation)
 
     # -- queries -----------------------------------------------------------
 
@@ -693,8 +695,8 @@ class BindingStore:
         entry = self._entry_for_jira_key(jira_key)
         if entry is None:
             return
-        entry["last_get_pass"] = pass_id
         get_rotation.set_last_get(self._get_rotation, jira_key, pass_id)
+        entry["last_get_pass"] = self._get_rotation[jira_key]
 
     def last_get_pass(self, jira_key: str) -> str:
         """Return the pass_id of the last GET; ``""`` if never GET'd (sorts first)."""

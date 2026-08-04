@@ -112,7 +112,16 @@ def test_interleaved_old_new_state_selects_same_next_key_as_all_new(
     mixed_rotation = json.loads(
         (mixed_root / ".tickets-tracker" / ".bridge_state" / "get_rotation.json").read_text()
     )
+    mixed_bindings = json.loads(
+        (mixed_root / ".tickets-tracker" / ".bridge_state" / "bindings.json").read_text()
+    )
+    assert mixed_rotation["last_get_pass"]["DIG-B"] == "2026-07-01T00-00-03"
     assert mixed_rotation["last_get_pass"]["DIG-C"] == "2026-07-01T00-00-04"
+    assert all("last_get_pass" not in entry for entry in mixed_bindings["bindings"].values())
+
+    reloaded = binding_store.BindingStore(mixed_root / ".tickets-tracker")
+    assert reloaded.last_get_pass("DIG-B") == "2026-07-01T00-00-03"
+    assert reloaded.last_get_pass("DIG-C") == "2026-07-01T00-00-04"
 
 
 def test_corrupt_sidecar_fails_open_to_legacy_rotation(tmp_path: Path) -> None:
@@ -150,6 +159,10 @@ def test_legacy_only_store_materializes_equivalent_sidecar_on_save(tmp_path: Pat
     assert rotation_path.is_file(), "the first persisted new-binary save materializes the sidecar"
     rotation = json.loads(rotation_path.read_text())
     assert rotation["last_get_pass"] == {f"DIG-{key}": value for key, value in inline.items()}
+    bindings = json.loads(
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json").read_text()
+    )
+    assert all("last_get_pass" not in entry for entry in bindings["bindings"].values())
     reloaded = binding_store.BindingStore(tmp_path / ".tickets-tracker")
     assert {key: reloaded.last_get_pass(key) for key in before} == before
 
@@ -184,6 +197,106 @@ def test_sidecar_tempfile_failure_does_not_abort_legacy_save(
     bindings_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json"
     bindings = json.loads(bindings_path.read_text())
     assert bindings["bindings"]["loc-A"]["last_get_pass"] == "2026-07-01T00-00-02"
+    assert not (tmp_path / ".tickets-tracker" / ".bridge_state" / "get_rotation.json").exists()
+
+    reloaded = binding_store.BindingStore(tmp_path / ".tickets-tracker")
+    assert reloaded.last_get_pass("DIG-A") == "2026-07-01T00-00-02"
+
+    monkeypatch.undo()
+    reloaded.save()
+    converged_bindings = json.loads(bindings_path.read_text())
+    converged_rotation = json.loads(
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "get_rotation.json").read_text()
+    )
+    assert "last_get_pass" not in converged_bindings["bindings"]["loc-A"]
+    assert converged_rotation["last_get_pass"]["DIG-A"] == "2026-07-01T00-00-02"
+
+
+def test_sidecar_replace_failure_retains_inline_floor_until_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed sidecar replace keeps the newer inline floor until convergence."""
+    _write_store(
+        tmp_path,
+        inline={"A": "2026-07-01T00-00-01", "B": "", "C": ""},
+        sidecar={"DIG-A": "2026-07-01T00-00-00"},
+    )
+    binding_store = _load("_heldout_rotation_sidecar_replace_failure", "binding_store.py")
+    from rebar_reconciler import get_rotation
+
+    tracker = tmp_path / ".tickets-tracker"
+    bridge = tracker / ".bridge_state"
+    bindings_path = bridge / "bindings.json"
+    rotation_path = bridge / "get_rotation.json"
+    store = binding_store.BindingStore(tracker)
+    store.set_last_get("DIG-A", "2026-07-01T00-00-02")
+
+    real_replace = get_rotation.os.replace
+
+    def fail_sidecar_replace(source, destination):
+        if Path(destination) == rotation_path:
+            raise OSError("rotation sidecar replace is temporarily unavailable")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(get_rotation.os, "replace", fail_sidecar_replace)
+    store.save()
+
+    failed_bindings = json.loads(bindings_path.read_text())
+    unchanged_rotation = json.loads(rotation_path.read_text())
+    assert failed_bindings["bindings"]["loc-A"]["last_get_pass"] == ("2026-07-01T00-00-02")
+    assert unchanged_rotation["last_get_pass"]["DIG-A"] == "2026-07-01T00-00-00"
+
+    reloaded = binding_store.BindingStore(tracker)
+    assert reloaded.last_get_pass("DIG-A") == "2026-07-01T00-00-02"
+
+    monkeypatch.undo()
+    reloaded.save()
+    converged_bindings = json.loads(bindings_path.read_text())
+    converged_rotation = json.loads(rotation_path.read_text())
+    assert "last_get_pass" not in converged_bindings["bindings"]["loc-A"]
+    assert converged_rotation["last_get_pass"]["DIG-A"] == "2026-07-01T00-00-02"
+
+
+def test_failure_after_sidecar_replace_preserves_newest_rotation_maximum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash at the second file boundary must leave the newest max durable."""
+    _write_store(
+        tmp_path,
+        inline={"A": "2026-07-01T00-00-01", "B": "", "C": ""},
+        sidecar={"DIG-A": "2026-07-01T00-00-00"},
+    )
+    binding_store = _load("_heldout_rotation_second_replace_failure", "binding_store.py")
+    tracker = tmp_path / ".tickets-tracker"
+    bridge = tracker / ".bridge_state"
+    bindings_path = bridge / "bindings.json"
+    rotation_path = bridge / "get_rotation.json"
+    before_bindings = bindings_path.read_bytes()
+
+    store = binding_store.BindingStore(tracker)
+    store.set_last_get("DIG-A", "2026-07-01T00-00-02")
+
+    real_replace = binding_store.os.replace
+
+    def fail_bindings_replace(source, destination):
+        if Path(destination) == bindings_path:
+            raise OSError("simulated failure after sidecar replace")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(binding_store.os, "replace", fail_bindings_replace)
+    with pytest.raises(OSError, match="after sidecar replace"):
+        store.save()
+
+    assert bindings_path.read_bytes() == before_bindings
+    rotation = json.loads(rotation_path.read_text())
+    assert rotation["last_get_pass"]["DIG-A"] == "2026-07-01T00-00-02"
+
+    monkeypatch.undo()
+    reloaded = binding_store.BindingStore(tracker)
+    assert reloaded.last_get_pass("DIG-A") == "2026-07-01T00-00-02"
+    reloaded.save()
+    converged = json.loads(bindings_path.read_text())
+    assert "last_get_pass" not in converged["bindings"]["loc-A"]
 
 
 def test_rotation_paths_and_regenerable_documentation_are_pinned() -> None:

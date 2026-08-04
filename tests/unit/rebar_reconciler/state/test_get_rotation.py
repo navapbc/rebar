@@ -59,8 +59,8 @@ def _write_bindings(bridge: Path) -> None:
     )
 
 
-def test_binding_store_reads_max_and_dual_writes_rotation_stamp(tmp_path: Path) -> None:
-    """New readers take max(sidecar, legacy); new writes advance both formats."""
+def test_binding_store_reads_max_and_migrates_to_sidecar_only(tmp_path: Path) -> None:
+    """A successful new-writer save persists the max and scrubs legacy stamps."""
     tracker = tmp_path / ".tickets-tracker"
     bridge = tracker / ".bridge_state"
     _write_bindings(bridge)
@@ -76,7 +76,18 @@ def test_binding_store_reads_max_and_dual_writes_rotation_stamp(tmp_path: Path) 
 
     bindings = json.loads((bridge / "bindings.json").read_text())
     rotation = json.loads((bridge / "get_rotation.json").read_text())
-    assert bindings["bindings"]["loc-a"]["last_get_pass"] == "2026-07-01T00-00-04"
     assert rotation["last_get_pass"]["DIG-A"] == "2026-07-01T00-00-04"
-    assert bindings["bindings"]["loc-b"]["last_get_pass"] == "2026-07-01T00-00-02"
     assert rotation["last_get_pass"]["DIG-B"] == "2026-07-01T00-00-03"
+    assert all("last_get_pass" not in entry for entry in bindings["bindings"].values())
+    assert bindings["bindings"]["loc-a"] == {
+        "jira_key": "DIG-A",
+        "state": "confirmed",
+    }
+    assert bindings["bindings"]["loc-b"] == {
+        "jira_key": "DIG-B",
+        "state": "confirmed",
+    }
+
+    reloaded = module.BindingStore(tracker)
+    assert reloaded.last_get_pass("DIG-A") == "2026-07-01T00-00-04"
+    assert reloaded.last_get_pass("DIG-B") == "2026-07-01T00-00-03"
