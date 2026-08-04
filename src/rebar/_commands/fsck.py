@@ -47,6 +47,11 @@ from rebar._store.gitutil import _reclaim_if_stale_index_lock, run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
+# Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
+# are sub-second rev-parse/log/symbolic-ref reads, so 120s only distinguishes a wedged
+# filesystem/lock from slowness (deliberately not copied from the 30s/300s network values).
+_FSCK_GIT_TIMEOUT = 120
+
 _STRUCTURED_KINDS = {
     "corrupt",
     "corrupt_create",
@@ -354,11 +359,15 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
         configured = config.tickets_branch(root)
     except config.ConfigError:
         return None
-    cp = subprocess.run(
-        ["git", "-C", tracker, "symbolic-ref", "--quiet", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        cp = subprocess.run(
+            ["git", "-C", tracker, "symbolic-ref", "--quiet", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_FSCK_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return None  # watchdog (9305): a hung fs yields the best-effort no-report path
     mounted = cp.stdout.strip()
     if cp.returncode != 0 or not mounted or mounted == configured:
         return None  # detached/unreadable, or a match — nothing to report
@@ -385,7 +394,16 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
 
     # raw-git-ok: store-maintenance command, seam-internal
     def _git(*args: str) -> subprocess.CompletedProcess:
-        return run_git(tracker, *args, check=False)
+        try:
+            return run_git(tracker, *args, check=False, timeout=_FSCK_GIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            # Watchdog, not a latency budget (9305): a hung fs must not hang fsck.
+            return subprocess.CompletedProcess(
+                ["git", "-C", tracker, *args],
+                124,
+                "",
+                f"git timed out after {_FSCK_GIT_TIMEOUT}s",
+            )
 
     # Branch + remote resolved from the MAIN repo config (the tracker's parent).
     try:
