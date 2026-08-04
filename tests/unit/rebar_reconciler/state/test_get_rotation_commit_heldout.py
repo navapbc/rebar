@@ -10,12 +10,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
+BINDING_STORE_PATH = (
+    REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "binding_store.py"
+)
 
 
 def _load_reconcile():
     name = "_test_get_rotation_commit_reconcile"
     sys.modules.pop(name, None)
     spec = importlib.util.spec_from_file_location(name, RECONCILE_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_binding_store():
+    name = "_test_get_rotation_commit_binding_store"
+    sys.modules.pop(name, None)
+    spec = importlib.util.spec_from_file_location(name, BINDING_STORE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -66,4 +80,58 @@ def test_sidecar_only_change_is_staged_and_committed(tmp_path: Path) -> None:
     )
     committed = json.loads(_git(tracker, "show", "HEAD:.bridge_state/get_rotation.json"))
     assert committed["last_get_pass"] == {"DIG-1": "p2"}
+    assert _git(tracker, "status", "--porcelain") == ""
+
+
+def test_cutover_commit_contains_sidecar_only_rotation_state(tmp_path: Path) -> None:
+    """The real reconciler commit boundary persists the cutover as one commit."""
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", "-b", "tickets", str(tracker)],
+        check=True,
+        capture_output=True,
+    )
+    _git(tracker, "config", "user.email", "test@example.com")
+    _git(tracker, "config", "user.name", "Test")
+
+    bridge = tracker / ".bridge_state"
+    bridge.mkdir()
+    (bridge / "bindings.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "bindings": {
+                    "loc-1": {
+                        "jira_key": "DIG-1",
+                        "state": "confirmed",
+                        "last_get_pass": "p2",
+                    }
+                },
+                "reverse": {"DIG-1": "loc-1"},
+            }
+        )
+    )
+    (bridge / "get_rotation.json").write_text(
+        json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p1"}})
+    )
+    _git(tracker, "add", ".bridge_state/bindings.json", ".bridge_state/get_rotation.json")
+    _git(tracker, "commit", "--no-verify", "-m", "initial mixed rotation state")
+
+    binding_store = _load_binding_store()
+    store = binding_store.BindingStore(tracker)
+    store.set_last_get("DIG-1", "p3")
+    store.save()
+
+    reconcile = _load_reconcile()
+    assert reconcile._commit_binding_store_snapshot(store, tmp_path, "cutover") is True
+
+    committed_bindings = json.loads(_git(tracker, "show", "HEAD:.bridge_state/bindings.json"))
+    committed_rotation = json.loads(_git(tracker, "show", "HEAD:.bridge_state/get_rotation.json"))
+    assert "last_get_pass" not in committed_bindings["bindings"]["loc-1"]
+    assert committed_rotation["last_get_pass"] == {"DIG-1": "p3"}
+    assert _git(tracker, "diff", "--name-only", "HEAD^", "HEAD").splitlines() == [
+        ".bridge_state/bindings.json",
+        ".bridge_state/get_rotation.json",
+    ]
     assert _git(tracker, "status", "--porcelain") == ""

@@ -76,7 +76,7 @@ def last_get_pass(binding_store: Any, jira_key: str) -> str:
 
 def set_last_get(stamps: dict[str, str], jira_key: str, pass_id: str) -> None:
     """Record a newly observed GET stamp in sidecar state."""
-    stamps[jira_key] = pass_id
+    stamps[jira_key] = max(stamps.get(jira_key, ""), pass_id)
 
 
 def save(path: Path, stamps: dict[str, str]) -> bool:
