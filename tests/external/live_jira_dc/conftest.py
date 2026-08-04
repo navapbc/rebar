@@ -615,7 +615,20 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     """
     import textwrap
 
-    from _dc_support import is_ticket_entry, source_repo_root
+    from _dc_support import (
+        CLOUD_CREDENTIAL_VARS,
+        INHERITED_ENV_FILE,
+        is_ticket_entry,
+        source_repo_root,
+    )
+
+    # SNAPSHOT THE INHERITED ENVIRONMENT FIRST, before this fixture changes any of it (bug 59b2,
+    # Finding A). Once the `monkeypatch` calls below have run, `os.environ` describes the FIXTURE,
+    # so a cell asserting on it can only ever confirm that the fixture ran. Recording what the JOB
+    # supplied is what gives the isolation cell something it did not author to assert about.
+    inherited_env = {
+        name: os.environ.get(name) for name in (*CLOUD_CREDENTIAL_VARS, "REBAR_SYNC_PUSH")
+    }
 
     source = source_repo_root()
     work = tmp_path / "dc-store-copy"
@@ -654,6 +667,7 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     (work / ".j11-expected-entries.json").write_text(
         json.dumps(sorted(e for e in listing if is_ticket_entry(e)))
     )
+    (work / INHERITED_ENV_FILE).write_text(json.dumps(inherited_env, sort_keys=True))
 
     # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
     # cannot survive merely because its exact name is not enumerated.
@@ -699,7 +713,7 @@ def dc_store_copy_repo(tmp_path: Path, jira_dc_project: str, jira_dc_pat: str, m
     # REBAR_ROOT is what a `rebar` SUBPROCESS resolves the store from. `rebar.edit_ticket(...,
     # repo_root=...)` shells out to the CLI and the child does not inherit that argument.
     monkeypatch.setenv("REBAR_ROOT", str(work))
-    for cloud_var in ("JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"):
+    for cloud_var in CLOUD_CREDENTIAL_VARS:
         monkeypatch.delenv(cloud_var, raising=False)
     return work
 

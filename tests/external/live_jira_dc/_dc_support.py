@@ -42,6 +42,72 @@ def is_ticket_entry(name: str) -> bool:
     return not name.startswith(".")
 
 
+#: Environment variables that could aim a pass at a REAL Jira instead of the harness.
+#: SINGLE-SOURCED deliberately (bug 59b2, Finding A): the isolation cell used to hardcode its own
+#: copy of this list, which was the IDENTICAL three names the ``dc_store_copy_repo`` fixture
+#: ``delenv``s — so the assertion could not fail, while its message claimed to be checking the JOB
+#: environment. One definition, consumed by the fixture that clears them AND by the cell that
+#: reports what the job actually provided, means the two can no longer drift apart.
+#:
+#: BROADER than the original three, also per Finding A: ``JIRA_TOKEN`` and ``JIRA_URL`` are equally
+#: plausible ways to reach a real instance and were unchecked.
+CLOUD_CREDENTIAL_VARS = (
+    "JIRA_API_TOKEN",
+    "JIRA_EMAIL",
+    "ATLASSIAN_API_TOKEN",
+    "JIRA_TOKEN",
+    "JIRA_URL",
+)
+
+#: Where ``dc_store_copy_repo`` records the environment it INHERITED, before it changed anything.
+#: The isolation cell reads this rather than ``os.environ``: after the fixture runs, ``os.environ``
+#: reflects the fixture's own edits, so asserting on it proves only that the fixture ran.
+INHERITED_ENV_FILE = ".j11-inherited-env.json"
+
+
+def read_inherited_env(work: Path) -> dict[str, str | None]:
+    """The job environment as it was BEFORE ``dc_store_copy_repo`` touched it.
+
+    Written by the fixture at setup (see ``INHERITED_ENV_FILE``). A missing file is a hard error
+    rather than an empty dict: silently returning ``{}`` would make every assertion over it pass
+    vacuously, which is precisely the defect class this exists to close.
+    """
+    path = work / INHERITED_ENV_FILE
+    assert path.is_file(), (
+        f"{INHERITED_ENV_FILE} is absent from {work} — the fixture did not record the inherited "
+        f"environment, so any assertion about the JOB environment would pass vacuously"
+    )
+    return dict(json.loads(path.read_text()))
+
+
+def collect_base_urls(root: Path) -> dict[str, list[str]]:
+    """Every ``base_url = "..."`` assignment under ``root``, mapped to the files declaring it.
+
+    Extracted from the isolation cell so it can be exercised over a tree that DELIBERATELY
+    contains a foreign URL (bug 59b2, Finding A). In the live copy the only file carrying a
+    ``base_url`` is the ``rebar.toml`` the fixture itself wrote, so the cell's assertion compared
+    the fixture against itself and could not detect the stray production URL it exists to catch.
+    A function with its own unit test can be shown to SEE one.
+
+    Searches ``rebar.toml``, ``pyproject.toml`` and everything under ``.rebar/`` — the config
+    surfaces a reconcile pass reads.
+    """
+    import re
+
+    pattern = re.compile(r"""^\s*base_url\s*=\s*["']([^"']+)["']""", re.MULTILINE)
+    candidates = [root / "rebar.toml", root / "pyproject.toml"]
+    rebar_dir = root / ".rebar"
+    if rebar_dir.is_dir():
+        candidates.extend(sorted(p for p in rebar_dir.rglob("*") if p.is_file()))
+    collected: dict[str, list[str]] = {}
+    for path in candidates:
+        if not path.is_file():
+            continue
+        for value in pattern.findall(path.read_text()):
+            collected.setdefault(value, []).append(str(path.relative_to(root)))
+    return collected
+
+
 def derive_rename_target(project_key: str) -> str:
     """A project key to rename ``project_key`` TO, guaranteed never to equal it (bug d582).
 
