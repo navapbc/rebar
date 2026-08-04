@@ -170,8 +170,8 @@ _154 variables._
 
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
-- `src/rebar/_cli/_jira_onboard.py:59` — `os.environ.get(<non-literal>)`
-- `src/rebar/_cli/_jira_onboard.py:185` — `os.environ.get(<non-literal>)`
+- `src/rebar/_cli/_jira_onboard.py:63` — `os.environ.get(<non-literal>)`
+- `src/rebar/_cli/_jira_onboard.py:189` — `os.environ.get(<non-literal>)`
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py:49` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_handlers.py:62` — `os.environ.get(<non-literal>)`
@@ -185,10 +185,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:760` — `os.environ.get(<non-literal>)`
 - `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:263` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:276` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:280` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:287` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:264` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:277` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:281` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:288` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:324` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:358` — `os.environ.get(<non-literal>)`

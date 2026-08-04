@@ -79,6 +79,10 @@ def _validate_reconciler_tls(base_url: str, allow_insecure: bool) -> None:
     """Reject a non-``https`` ``reconciler.base_url`` unless ``allow_insecure`` is
     set (story J6, epic e369 — the Data Center transport's connection settings).
 
+    Thin wrapper over :func:`_validate_https_url` with the DC field labels; kept as a
+    named entry point (referenced by the DC config tests) so the DC behaviour and
+    messages are byte-unchanged.
+
     Applies uniformly to ANY non-``https`` scheme, including ``http://localhost``
     — there is no loopback special case, because the J5 live-harness tests are
     REQUIRED to set ``allow_insecure = true`` explicitly precisely so their
@@ -90,24 +94,56 @@ def _validate_reconciler_tls(base_url: str, allow_insecure: bool) -> None:
     CERTIFICATE verification (that is ``reconciler.ca_bundle`` / the transport's
     ``options["verify"]``, entirely independent of this flag).
     """
-    if not base_url:
+    _validate_https_url(
+        base_url,
+        allow_insecure,
+        url_label="reconciler.base_url",
+        override_label="reconciler.allow_insecure",
+    )
+
+
+class InsecureUrlError(ConfigError):
+    """A configured URL uses a cleartext (non-``https``) scheme without an explicit
+    ``allow_insecure`` override.
+
+    A SUBCLASS of :class:`ConfigError` so existing ``except ConfigError`` handlers still
+    catch it, but distinct so a caller can tell a deliberate security-policy rejection
+    apart from a malformed-config parse error — e.g. Cloud's ``resolve_jira_settings``
+    lets this PROPAGATE (fail-loud, parity with the DC resolver) while still degrading to
+    env on a genuinely malformed config (bug bdb8).
+    """
+
+
+def _validate_https_url(
+    url: str, allow_insecure: bool, *, url_label: str, override_label: str
+) -> None:
+    """Reject a non-``https`` ``url`` unless ``allow_insecure`` is set — the shared TLS
+    scheme guard behind both ``reconciler.base_url`` (DC) and ``jira.url`` (Cloud).
+
+    ``url_label`` / ``override_label`` name the offending config key and its override in
+    the error/warning so the message is actionable for whichever section called in. An
+    empty ``url`` (the unset default) is not validated. ``allow_insecure`` governs the
+    URL SCHEME only — it never relaxes TLS certificate verification.
+    """
+    if not url:
         return
-    scheme = urllib.parse.urlsplit(base_url).scheme.lower()
+    scheme = urllib.parse.urlsplit(url).scheme.lower()
     if scheme == "https":
         return
     if not allow_insecure:
-        raise ConfigError(
-            f"reconciler.base_url: {base_url!r} uses scheme {scheme!r}, not 'https' — "
-            "a cleartext connection risks exposing credentials (e.g. a Jira PAT) in "
-            "transit. Set reconciler.allow_insecure = true to override (only for a "
-            "trusted network, e.g. a loopback Data Center test harness)."
+        raise InsecureUrlError(
+            f"{url_label}: {url!r} uses scheme {scheme!r}, not 'https' — "
+            "a cleartext connection risks exposing credentials (e.g. a Jira PAT or "
+            f"API token) in transit. Set {override_label} = true to override (only for a "
+            "trusted network, e.g. a loopback test harness)."
         )
     logger.warning(
-        "reconciler.base_url %r uses a non-https scheme; reconciler.allow_insecure=true "
-        "overrides the TLS requirement — this connection is NOT encrypted and is "
-        "vulnerable to interception. This does not relax certificate verification "
-        "(see reconciler.ca_bundle).",
-        base_url,
+        "%s %r uses a non-https scheme; %s=true overrides the TLS requirement — this "
+        "connection is NOT encrypted and is vulnerable to interception. This does not "
+        "relax certificate verification (see the section's ca_bundle).",
+        url_label,
+        url,
+        override_label,
     )
 
 
@@ -451,6 +487,21 @@ class JiraConfig:
     # names, so a stock tenant is unaffected. Consumed by adapters/jira/probe.py; env
     # override REBAR_JIRA_RESOLVED_STATUSES is auto-derived from this field.
     resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
+    # Overrides ONLY the url scheme check below (parity with reconciler.allow_insecure);
+    # never relaxes certificate verification. Env override auto-derives to
+    # REBAR_JIRA_ALLOW_INSECURE. Intended for a loopback/trusted test instance (bug bdb8).
+    allow_insecure: bool = False
+
+    def __post_init__(self) -> None:
+        # Parity with the DC ReconcilerConfig: a cleartext jira.url risks exposing the
+        # API token / basic-auth credentials in transit, so reject it unless the operator
+        # opts in via jira.allow_insecure (bug bdb8).
+        _validate_https_url(
+            self.url,
+            self.allow_insecure,
+            url_label="jira.url",
+            override_label="jira.allow_insecure",
+        )
 
 
 @dataclass
@@ -645,6 +696,7 @@ _SECTIONS: dict[str, dict] = {
         "user": lambda v, k: _as_str(v, k),
         "project": lambda v, k: _as_str(v, k),
         "resolved_statuses": lambda v, k: _as_str_list(v, k),
+        "allow_insecure": lambda v, k: _as_bool(v, k),
     },
     "scratch": {"base_dir": lambda v, k: _as_str(v, k)},
     "tracker": {

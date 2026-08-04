@@ -44,7 +44,11 @@ def _detect() -> _Detected:
     ``load_config().jira.*``; the secret ``JIRA_API_TOKEN`` is env-only). The engine
     ``rebar_reconciler`` package is import-path-scoped to subprocesses, so we read
     the same typed config directly rather than importing it. A malformed config
-    degrades to env-only (matching the resolver's fail-soft behavior)."""
+    degrades to env-only (matching the resolver's fail-soft behavior). This includes a
+    non-https ``jira.url`` rejection (``InsecureUrlError``, a ``ConfigError`` subclass):
+    detection is best-effort so the wizard stays usable to FIX a bad url — the loud
+    enforcement lives on the WRITE path (``write_jira_config`` refuses to persist a
+    cleartext url) and in the reconciler resolver (bug bdb8)."""
     from rebar.config import ConfigError, load_config
 
     url = user = project = ""
