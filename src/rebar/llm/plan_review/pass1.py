@@ -747,14 +747,22 @@ def _normalize_checkbox_state(description: str) -> str:
     return _CHECKBOX_STATE_RE.sub(r"\g<1> \g<2>", description)
 
 
-def material_fingerprint(ctx: PlanContext) -> str:
+def material_fingerprint(ctx: PlanContext, *, normalize_checkboxes: bool = True) -> str:
     """A hash of the ticket's MATERIAL plan content (description / AC / file_impact /
     decomposition) — bound into the attestation so a material edit invalidates the
     signature. Tags/comments/links/assignee are NOT material (excluded), and neither
-    is AC checkbox STATE (normalized away — see :func:`_normalize_checkbox_state`)."""
+    is AC checkbox STATE (normalized away — see :func:`_normalize_checkbox_state`).
+
+    ``normalize_checkboxes=False`` reproduces the PRE-normalization (pre-330c) algorithm
+    that hashed the raw description. Validity-on-read uses it as a grandfather fallback
+    (bug 96d1): a signed hash that byte-exactly matches the legacy recomputation proves
+    the material is unchanged — not even box state moved — so a pre-330c attestation over
+    an unedited ticket is not spuriously invalidated as stale-material."""
     basis = {
         "ticket_id": ctx.ticket_id,
-        "description": _normalize_checkbox_state(ctx.description),
+        "description": _normalize_checkbox_state(ctx.description)
+        if normalize_checkboxes
+        else ctx.description,
         "file_impact": ctx.state.get("file_impact") or [],
         "children": sorted(c.get("ticket_id", "") for c in ctx.children),
     }

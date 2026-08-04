@@ -284,6 +284,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             "verified_at_sha": v.get("verified_at_sha"),
             "trace_id": v.get("trace_id"),
             "material_fingerprint": material,
+            # Whether the close may be CERTIFIED (signed). False iff certification was
+            # withheld (an uncertified descendant) — previously dropped on PASS, which made
+            # an unsigned certifiable=False close unexplainable from stored data (bug 96d1).
+            "certifiable": v.get("certifiable"),
         }
     return {
         "schema": SCHEMA,

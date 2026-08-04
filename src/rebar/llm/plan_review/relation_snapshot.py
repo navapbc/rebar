@@ -303,6 +303,47 @@ def live_material_children(canonical_id: str, *, repo_root=None) -> list[dict]:
     ]
 
 
+def current_material_fingerprint_impl(
+    ticket_id: str, *, repo_root=None, normalize_checkboxes: bool = True
+) -> str | None:
+    """Recompute the ticket's material fingerprint from a LIGHT read (the ticket + its
+    child ids only — no full child fetch, no LLM), matching
+    :func:`pass1.material_fingerprint`. Returns None for a deleted target or on any read
+    error. ``normalize_checkboxes=False`` recomputes under the PRE-normalization
+    (pre-330c) algorithm — the validity-on-read grandfather basis (bug 96d1).
+
+    (Body moved here from ``attest.current_material_fingerprint`` — which now delegates —
+    because its one non-trivial dependency, :func:`live_material_children`, lives here.)"""
+    from rebar import _reads
+
+    from .det_floor import PlanContext
+    from .pass1 import material_fingerprint
+
+    try:
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+        if state.get("status") == "deleted":
+            return None
+        canonical = state.get("ticket_id", ticket_id)
+        try:
+            kids = live_material_children(canonical, repo_root=repo_root)
+        except Exception:  # noqa: BLE001 — children enumeration is best-effort for the fingerprint
+            kids = []
+        ctx = PlanContext(
+            ticket_id=canonical,
+            ticket_type=state.get("ticket_type", ""),
+            title=state.get("title", ""),
+            description=state.get("description", ""),
+            state=state,
+            children=[{"ticket_id": k.get("ticket_id")} for k in kids],
+        )
+        return material_fingerprint(ctx, normalize_checkboxes=normalize_checkboxes)
+    except Exception:  # noqa: BLE001 — fingerprint computation best-effort; broad-but-logged below, caller treats material as unknown
+        # Cannot compute the current fingerprint → caller treats material as unknown
+        # (the gate fails closed / re-review). Log so the cause is observable.
+        logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)
+        return None
+
+
 def _context_for(
     ticket_id: str,
     states: dict[str, dict],
