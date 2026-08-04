@@ -55,7 +55,8 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     ``caused_by`` floor short-circuits exactly like an unclosed child (an open/in_progress bug
     the epic's own work broke is delegated work unfinished), and the candidate screen appends
     its compact A-verdict block INSIDE the fenced context below — the screen degrades open on
-    any failure and never blocks by itself."""
+    non-systemic failures, but a provider error (``LLMUnavailableError``) propagates so the
+    close FAILS CLOSED (bug 1019)."""
     from rebar import _reads
     from rebar.llm.completion import (
         child_closure_findings,
@@ -145,7 +146,9 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     if is_epic:
         # Epic-close bug screen (4b54), stages 2-3: filter + haiku screen; A-verdicts land as
         # a compact evidence block INSIDE the fence (untrusted, like all ticket content). The
-        # screen degrades open on ANY failure — an empty block costs the verifier nothing.
+        # screen degrades open on NON-SYSTEMIC failures — an empty block costs the verifier
+        # nothing — but a provider error (LLMUnavailableError) propagates: the interpreter
+        # fails this step and the close gate fail-closes (bug 1019, operator-ratified).
         from rebar.llm import epic_bug_screen
 
         screen = epic_bug_screen.run_screen(
