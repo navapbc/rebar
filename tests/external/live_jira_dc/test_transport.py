@@ -749,3 +749,73 @@ def test_whether_a_non_admin_pat_can_read_application_properties(jira_dc_project
                 )
     finally:
         _request_as(f"/rest/api/2/user?username={username}", method="DELETE")
+
+
+@_skip
+@_skip_no_extra
+def test_the_instance_label_ceiling_measured_at_254_and_255(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any
+) -> None:
+    """POST a 254-char and a 255-char label to the REAL instance and record what it does.
+
+    Bug 2e47-ae62-c0cf-48a0. rebar's shared ``JIRA_LABEL_MAX_CHARS`` is 255, taken from Jira's
+    documented "not more than 255 characters". A capability-map pass measured DC 8.17.1 REJECTING
+    a 255-character label (req-0071/0072/0073) — so ``sanitize_label`` lets a 255-char label
+    through and the instance then refuses it.
+
+    WHY THIS CELL EXISTS RATHER THAN A TIGHTER CONSTANT. Every existing label test compares the
+    sanitizer against ``JIRA_LABEL_MAX_CHARS``, so the constant is checked against itself and no
+    unit test can detect that the real ceiling is one character lower. This asserts against the
+    INSTANCE, which is the only oracle that can. And it is the reason the constant was NOT simply
+    tightened: ``sanitize_label`` raises rather than truncates, so a shared 254 would make the
+    live-validated Cloud path reject a label Cloud accepts.
+
+    The 254 leg is the control. Without it, a 255 rejection could equally mean "labels are broken
+    on this instance" or "the field is not on the create screen"; with 254 accepted in the same
+    run against the same project, a 255 rejection is specifically an off-by-one at the ceiling.
+    """
+    dc_transport.project = jira_dc_project
+    version = os.environ.get("JIRA_DC_VERSION", "8.17.1")
+    observed: dict[int, tuple[bool, str]] = {}
+
+    for length in (254, 255):
+        label = "x" * length
+        assert len(label) == length
+        try:
+            created = dc_transport.create_issue(
+                {
+                    "summary": f"rebar 2e47 live — label ceiling {length}",
+                    "issuetype": "Task",
+                    "labels": [label],
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — the REFUSAL is the measurement
+            observed[length] = (False, f"{type(exc).__name__}: {exc}")
+            continue
+        key = created["key"]
+        track_issue(key)
+        # Read the label BACK: an accepted-and-silently-dropped label is a third outcome, and
+        # treating it as acceptance is how a silent failure gets recorded as a pass (bug 6afc's
+        # shape — a rejection that does not surface as an error).
+        fetched = dc_transport.get_issue(key)
+        landed = list((fetched.get("fields") or {}).get("labels") or [])
+        if label in landed:
+            observed[length] = (True, f"accepted and read back on {key}")
+        else:
+            observed[length] = (False, f"accepted by create but ABSENT on read-back of {key}")
+
+    for length, (ok, detail) in sorted(observed.items()):
+        print(f"[2e47-label-ceiling] DC {version} label len={length}: ok={ok} — {detail}")
+
+    assert observed[254][0], (
+        f"a 254-character label was NOT stored: {observed[254][1]}. This is the control leg — "
+        f"without it the 255 reading below cannot be attributed to the ceiling, so fix or "
+        f"re-scope this cell before reading anything into the 255 result."
+    )
+    assert not observed[255][0], (
+        f"a 255-character label WAS stored ({observed[255][1]}), contradicting the capability "
+        f"map's req-0071/0072/0073 measurement that DC {version} rejects 255. If this instance "
+        f"now accepts 255, rebar's shared ceiling of 255 is correct for DC after all and bug "
+        f"2e47's label finding should be CLOSED as no-longer-reproducing — update the capability "
+        f"map with this run's id rather than loosening this assertion."
+    )
