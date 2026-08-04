@@ -37,6 +37,16 @@ from rebar_reconciler.adapters.jira_family import (
 from rebar_reconciler.inbound_probe import ProbeBranch, ProbeConfigError, ProbeResult
 
 RESOLVED_STATUS_NAMES = frozenset({"Resolved", "Done", "Cancelled"})
+# DECISION (story 2127-348c-c41d-472e, item 3 — repo artifact, not a tracker-only note):
+# This set is HARDCODED here, whereas the DC side already sources its equivalent from
+# config (ReconcilerConfig.resolved_statuses, src/rebar/_config_schema.py). A Cloud tenant
+# whose workflow uses non-standard resolved-status names (e.g. "Closed", "Complete",
+# "Won't Do") would therefore have those issues MISCLASSIFIED as PRESENT_FILTERED instead
+# of PRESENT_RESOLVED. A runtime/config hook IS warranted for Cloud↔DC parity: Cloud should
+# read a jira.resolved_statuses config key (defaulting to this frozenset) the same way DC
+# reads reconciler.resolved_statuses. Tracked by story e34a-1d0c-0daa-4f2c
+# (discovered_from 2127). Until that lands, this default matches Cloud/DIG's own configured
+# resolved-status names, so a stock DIG tenant is unaffected.
 
 
 def _make_request(jira_url: str, issue_key: str, user: str, token: str) -> urllib.request.Request:
