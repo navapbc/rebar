@@ -202,6 +202,81 @@ def test_an_oversize_summary_is_truncated_to_what_data_center_accepts() -> None:
     assert len(summary) <= 254, f"summary is {len(summary)} chars; DC rejects anything over 254"
 
 
+def test_priority_is_wrapped_in_the_object_jira_rest_requires() -> None:
+    """SECOND LAYER, found by a live run rather than by reasoning.
+
+    With the bridge-schema names fixed, the create got FURTHER and failed differently:
+
+        "errors":{"priority":"Could not find valid 'id' or 'name' in priority object."}
+
+    The shared outbound mapper already turns rebar's integer priority into a Jira NAME
+    (``LOCAL_PRIORITY_TO_JIRA`` -> ``"Medium"``), so a bare string arrives here. Jira's REST API
+    wants an OBJECT. ACLI accepts the bare name, which is why Cloud never needed this — the same
+    per-transport seam as the rest of this bug.
+    """
+    client = _FakeClient()
+
+    _transport(client).create_issue(_dispatch_payload(priority="Medium"))
+
+    assert client.create_calls[0].get("priority") == {"name": "Medium"}, (
+        f"priority reached Jira unwrapped: {client.create_calls[0].get('priority')!r}. Data "
+        f"Center answers that with 400 \"Could not find valid 'id' or 'name' in priority "
+        f'object" and the whole create fails.'
+    )
+
+
+def test_assignee_is_wrapped_in_the_object_jira_rest_requires() -> None:
+    """The other half of the same 400: ``"assignee":"data was not an object"``.
+
+    Data Center identifies users by ``name`` (never Cloud's accountId — that is why
+    ``validate_assignee_exists`` returns the username on this transport), so the resolved handle
+    must be wrapped rather than sent bare.
+    """
+    client = _FakeClient()
+
+    _transport(client).create_issue(_dispatch_payload(assignee="jdoe"))
+
+    assert client.create_calls[0].get("assignee") == {"name": "jdoe"}, (
+        f"assignee reached Jira unwrapped: {client.create_calls[0].get('assignee')!r}. Data "
+        f'Center answers that with 400 "data was not an object".'
+    )
+
+
+def test_an_already_shaped_priority_or_assignee_is_left_alone() -> None:
+    """Wrapping must be idempotent in shape: a caller that already passed the object form must
+    not end up with ``{"name": {"name": ...}}``, which would 400 for a third distinct reason."""
+    client = _FakeClient()
+
+    _transport(client).create_issue(
+        _dispatch_payload(priority={"id": "3"}, assignee={"name": "jdoe"})
+    )
+
+    sent = client.create_calls[0]
+    assert sent.get("priority") == {"id": "3"}, f"priority was re-wrapped: {sent.get('priority')!r}"
+    assert sent.get("assignee") == {"name": "jdoe"}, (
+        f"assignee was re-wrapped: {sent.get('assignee')!r}"
+    )
+
+
+def test_absent_priority_and_assignee_are_not_invented() -> None:
+    """A create that names neither must not acquire them.
+
+    Injecting an empty or default object would either 400 or, worse, silently assign the issue
+    to nobody-in-particular — the create equivalent of the mis-assignment bug 544e records on the
+    Cloud side.
+    """
+    client = _FakeClient()
+    payload = _dispatch_payload()
+    payload.pop("priority", None)
+    payload.pop("assignee", None)
+
+    _transport(client).create_issue(payload)
+
+    sent = client.create_calls[0]
+    assert "priority" not in sent, f"priority was invented: {sent.get('priority')!r}"
+    assert "assignee" not in sent, f"assignee was invented: {sent.get('assignee')!r}"
+
+
 def test_the_description_survives_the_translation() -> None:
     """A field that is already Jira-shaped must pass through — the fix must not become an
     allowlist so narrow that it drops real content."""
