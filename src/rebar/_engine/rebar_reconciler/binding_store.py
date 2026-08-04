@@ -3,29 +3,21 @@
 Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
 `.tickets-tracker/.bridge_state/bindings.json` on the tickets branch.  # tickets-boundary-ok
 
-Write-ahead protocol
---------------------
-1. bind_pending(local_id)          — mark outbound create in-flight; save()
-2. Jira client.create_issue(...)   — obtain DIG-NNNN
-3. record_pending_key(local_id, jira_key) — record the key on the STILL-pending
-   entry; save() — BEFORE the rebar-id label is attached (story 9622)
-4. Jira client.add_label / set_entity_property — plant rebar-id marker
-5. bind_confirm(local_id, jira_key) — finalise binding; save()
+Write-ahead protocol: bind_pending(local_id) + save(); client.create_issue()
+→ DIG-NNNN; record_pending_key(local_id, jira_key) + save() — persisted on the
+STILL-pending entry BEFORE the rebar-id label is attached (story 9622); plant
+the rebar-id label/property; bind_confirm(local_id, jira_key) + save(). The
+keyed-pending write is what makes recovery deterministic: if the process is
+hard-killed between create and label, the pending entry already carries the
+``jira_key``, so recovery re-attaches the label and confirms WITHOUT any Jira
+search (no duplicate). ``jira_key`` on a ``pending`` entry is an additive
+SUB-state of the ADR-0027 ``pending`` state, not a new enumerated state.
 
-The step-3 keyed-pending write is what makes recovery deterministic: if the
-process is hard-killed between create (step 2) and label (step 4), the pending
-entry already carries the ``jira_key``, so recovery re-attaches the label and
-confirms WITHOUT any Jira search (no duplicate). ``jira_key`` on a ``pending``
-entry is an additive SUB-state of the ADR-0027 ``pending`` state, not a new
-enumerated state.
-
-Recovery (next pass startup): recover_pending_bindings(client, failure_sink=…):
-- keyed-pending (has ``jira_key``) → retro-attach the rebar-id label/property
-  (idempotent) and confirm, NO search.
-- keyless-pending → search Jira for the rebar-id label; confirm if found, else
-  unbind (the create never reached Jira).
-- any per-entry error → append ``{local_id, reason}`` to ``failure_sink`` and
-  continue (loud, non-fatal).
+Recovery (next pass startup, recover_pending_bindings(client, failure_sink=…)):
+keyed-pending (has ``jira_key``) → retro-attach the rebar-id label/property
+(idempotent) and confirm, NO search; keyless-pending → search Jira for the
+rebar-id label, confirm if found, else unbind (the create never reached Jira);
+any per-entry error → append ``{local_id, reason}`` to ``failure_sink``, continue.
 """
 
 from __future__ import annotations
@@ -39,8 +31,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
-from rebar_reconciler import get_rotation
-from rebar_reconciler.inbound_fields import normalize_baseline_value
+from rebar_reconciler import get_rotation, peer_state
 from rebar_reconciler.timeutil import utc_now_iso
 
 
@@ -99,17 +90,6 @@ _EMPTY_STORE: dict[str, Any] = {
     "bindings": {},
     "reverse": {},
 }
-
-# ADR 0026 stores five last-synced Jira-side inbound-mirrored fields per binding.
-# An absent baseline (including v1) is valid and degrades to local-wins.
-_BASELINE_FIELDS: tuple[str, ...] = (
-    "summary",
-    "description",
-    "priority",
-    "status",
-    "assignee",
-)
-
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
@@ -438,97 +418,22 @@ class BindingStore:
         if entry is not None and entry.get("jira_key"):
             self._data["reverse"].pop(entry["jira_key"], None)
 
-    # -- per-binding baseline (ADR 0026 — three-way-merge direction arbitration) --
+    # Last-synced PEER STATE thin delegates — semantics + unit tests: peer_state.py (4522).
 
     def get_baseline(self, local_id: str) -> dict[str, Any] | None:
-        """Return the last-synced Jira-side field values for a binding, or None.
-
-        None (an absent baseline) is VALID and means "no last-synced ancestor
-        yet" — the consumer degrades to local-wins (ADR 0026 §2). A version-1
-        store, or an entry that predates baselines, simply has no ``baseline``
-        key and returns None here.
-        """
-        entry = self._data["bindings"].get(local_id)
-        if entry is None:
-            return None
-        baseline = entry.get("baseline")
-        if not isinstance(baseline, dict):
-            return None
-        return dict(baseline)
+        return peer_state.get_baseline(self._data["bindings"], local_id)
 
     def set_baseline(self, local_id: str, fields: dict[str, Any]) -> None:
-        """Record the last-synced Jira-side values for a binding's 5 mirrored fields.
-
-        Filters ``fields`` to ``_BASELINE_FIELDS`` (so a whole prev_snapshot entry
-        can be passed directly). A no-op if the local id is not bound (you cannot
-        baseline an unbound pair). In-memory until
-        ``save()`` — persisted by the existing binding-store commit path, no new
-        commit surface (ADR 0026 §Consequences).
-        """
-        entry = self._data["bindings"].get(local_id)
-        if entry is None:
-            return
-        baseline = {
-            k: normalize_baseline_value(k, fields[k]) for k in _BASELINE_FIELDS if k in fields
-        }
-        if entry.get("baseline") == baseline:
-            return
-        entry["baseline"] = baseline
-
-    # -- last-OBSERVED peer parent (ticket 88d9) ---------------------------
+        peer_state.set_baseline(self._data["bindings"], local_id, fields)
 
     def get_peer_parent(self, local_id: str) -> str | None:
-        """The peer parent key rebar last OBSERVED for this binding, or None.
-
-        The evidence channel for an inbound parent CLEAR — it answers "did the peer ever have
-        a parent", which ``managed_refs`` cannot (``add_managed_ref`` fires on the LOCAL
-        parent-set event, so managed never meant pushed; reading the peer's silence as a
-        deletion orphaned 63 tickets, ticket 88d9). None is VALID and MUST fail safe to no
-        clear: a v1 store, a pre-field binding, an unconfirmed binding and an out-of-window
-        key all present as None.
-        """
-        entry = self._data["bindings"].get(local_id)
-        if entry is None:
-            return None
-        value = entry.get("peer_parent")
-        return value if isinstance(value, str) and value else None
+        return peer_state.get_peer_parent(self._data["bindings"], local_id)
 
     def set_peer_parent(self, local_id: str, parent_key: str | None) -> None:
-        """Record the peer parent key OBSERVED this pass (None = observed to have none).
-
-        No-op for an unbound id; in-memory until ``save()``, persisted by the existing
-        binding-store commit path (no new commit surface, mirroring ``set_baseline``).
-
-        **Callers MUST NOT call this for a pass that did not OBSERVE the parent field.** A
-        fail-open read (``get_parent_map`` degrades to ``{}``; a truncated page walk omits
-        issues) would overwrite a good observation with "no parent", and the next pass would
-        read that as a deletion — the orphaning incident by a longer route. Only the caller can
-        see whether the snapshot entry carried the key, so only the caller can decide.
-        """
-        entry = self._data["bindings"].get(local_id)
-        if entry is None:
-            return
-        normalized = parent_key if isinstance(parent_key, str) and parent_key else ""
-        if entry.get("peer_parent", None) == normalized:
-            return
-        entry["peer_parent"] = normalized
+        peer_state.set_peer_parent(self._data["bindings"], local_id, parent_key)
 
     def seed_baselines_from_snapshot(self, prev_snapshot: dict[str, Any]) -> int:
-        """One-shot: seed a baseline for every bound key present in a Jira snapshot.
-
-        ``prev_snapshot`` is ``{jira_key: {summary, description, priority, status,
-        assignee, ...}}``. Derisk X4 proved all 613 bound+present keys carry all 5
-        mirrored fields, so already-bound pairs need no cold-start local-wins window.
-        Does NOT delete prev_snapshot or change its consumers (that is the rollout
-        task's swap). Returns the number of baselines seeded.
-        """
-        seeded = 0
-        for local_id, entry in self._data["bindings"].items():
-            jira_key = entry.get("jira_key")
-            if jira_key and jira_key in prev_snapshot:
-                self.set_baseline(local_id, prev_snapshot[jira_key])
-                seeded += 1
-        return seeded
+        return peer_state.seed_baselines_from_snapshot(self._data["bindings"], prev_snapshot)
 
     # -- immutable numeric id (bug 7c26) -----------------------------------
 
