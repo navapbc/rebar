@@ -549,7 +549,8 @@ def _probe() -> None:  # noqa: PLR0915 — deliberately one linear probe script
     # fields the other omits, BY DESIGN:
     #   - `show` adds the bulky bodies (`comments`, `description`) that lean
     #     `list` drops (opt back in with `list --full`), plus per-ticket
-    #     `digest_freshness` and `plan_review_health`.
+    #     `digest_freshness`, `inbound_deps` (computed inbound edges, bug 05cb),
+    #     and `plan_review_health`.
     #   - `list` surfaces `managed_refs`, which `show` omits.
     # Assert the exact symmetric difference in BOTH directions so drift is caught.
     assert_eq(
@@ -558,9 +559,10 @@ def _probe() -> None:  # noqa: PLR0915 — deliberately one linear probe script
         "list adds exactly managed_refs over show",
     )
     assert_eq(
-        ["comments", "description", "digest_freshness", "plan_review_health"],
+        ["comments", "description", "digest_freshness", "inbound_deps", "plan_review_health"],
         sorted(set(show_keys) - set(list_keys)),
-        "show adds exactly comments+description+digest_freshness+plan_review_health over lean list",
+        "show adds exactly comments+description+digest_freshness+inbound_deps"
+        "+plan_review_health over lean list",
     )
     run_rb("show", task)
     assert_not_contains('"parent_status_uuid"', "internal key not leaked in show")

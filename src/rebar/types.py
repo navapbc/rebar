@@ -115,6 +115,7 @@ class TicketState(TypedDict):
     env_id: NotRequired[str | None]
     comments: NotRequired[list[Comment]]
     deps: NotRequired[list[Dep]]
+    inbound_deps: NotRequired[list[dict[str, Any]]]
     file_impact: NotRequired[list[FileImpactEntry]]
     file_impact_scope: NotRequired[FileImpactScope]
     no_file_impact_reason: NotRequired[str]
