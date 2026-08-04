@@ -1281,6 +1281,91 @@ def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
     )
 
 
+@_skip
+@_skip_no_extra
+def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
+) -> None:
+    """Ticket 9bb9 AC6: a converged EPIC-PARENT pair must not be re-planned.
+
+    A SEPARATE CELL from the epic-parent emit above, for the reason this module already learned
+    the hard way: an idempotence assertion bundled into a round-trip cell turns every churn bug
+    into a false red on a mutation that actually worked, and J11's first run buried the real
+    signal under thirteen of them.
+
+    NOT COVERED BY ``test_a_repeat_pass_over_a_converged_pair_plans_nothing``, which converges a
+    TITLE edit on a plain task. The epic parent is a different field on a different code path —
+    written outbound as the Epic Link custom field and read back inbound by ``get_parent_map``'s
+    Epic Link branch (ticket 9bb9). Idempotence is a property of the WRITE/READ PAIR agreeing
+    about a field's value, so proving it for a summary says nothing about a parent: if the reader
+    and the writer disagree about the epic parent's shape, every pass re-plans the same attach
+    forever and the store churns.
+
+    WAITS ON ``get_parent_map`` BEFORE RE-PLANNING. The differ's remote snapshot is index-backed
+    and eventually consistent, so a re-plan issued immediately after the write sees the old
+    document and re-plans what it just applied. Waiting on the PRODUCTION read — the same one the
+    inbound pass uses — is what makes a subsequent non-empty plan attributable to churn rather
+    than to lag.
+    """
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    import rebar
+
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the epic-parent path cannot be exercised. See rebar ticket 9bb9-56a3-e9c0-46e9."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 epic-idem child"))
+    child_local = _jira_key_to_local_id(child)
+    epic_local = _jira_key_to_local_id(epic_key)
+
+    scope = ",".join((child_local, child, epic_local, epic_key))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert load_binding_store(dc_store_copy_repo).get_jira_key(child_local) == child, (
+        f"SETUP FAILED (not idempotence): the child {child_local} is not bound."
+    )
+
+    rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"converging epic-parent pass raised:\n{cp.stderr[-2000:]}"
+
+    # The attach must have LANDED before "a repeat plans nothing" means anything: over an
+    # unconverged pair a second pass SHOULD plan work, and this cell would pass for the wrong
+    # reason. Confirmed by RAW REST, independent of the pass that wrote it.
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    landed = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else None
+    assert landed == epic_key, (
+        f"SETUP FAILED (not idempotence): the epic parent never reached {child} (Epic Link is "
+        f"{landed!r}, HTTP {status}), so a repeat pass planning work would be CORRECT rather "
+        f"than churn. That emit failure is [rebar:39c1-2a32-b564-4b4b], not this cell."
+    )
+    _wait_until_parent_map_reflects(
+        dc_transport,
+        jira_dc_project,
+        child,
+        lambda m: m.get(child) == epic_key,
+        "the converged epic parent (before re-planning)",
+    )
+
+    mine = _plan_entries_for(dc_store_copy_repo, child_local, child)
+    assert mine == [], (
+        f"NOT IDEMPOTENT: with the epic parent confirmed on the instance AND visible to "
+        f"get_parent_map, a repeat pass still plans {len(mine)} mutation(s) for "
+        f"{child_local}/{child}: {mine[:4]}. Index lag is excluded by the wait above, so this is "
+        f"real churn — the outbound writer and the inbound reader disagree about the epic "
+        f"parent, and every pass will re-emit the same attach."
+    )
+
+
 def _named_field_id(dc_request: Any, name: str) -> str | None:
     """The id of the field called `name` on THIS instance, or None.
 
