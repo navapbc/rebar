@@ -119,6 +119,35 @@ class RunRequest:
     # withdrew a BLOCKING criterion's grounding tool at the Bedrock cutover. Every UNflagged
     # request is still byte-identical (no ``capabilities`` kwarg). DEFAULTED False.
     web: bool = False
+    # Prompt-cache breakpoint control (bug 1dbe). When set, this is the byte-stable LEADING
+    # segment of ``system_prompt`` at whose END the provider cache breakpoint should sit —
+    # rather than at the end of the whole (per-pass-varying) system prompt. The runner seam
+    # (``agent_call.build_agent_kwargs``) realises it by sending ``cache_prefix`` as the static
+    # system block and the REMAINDER as a DYNAMIC instruction, which is where pydantic-ai's
+    # anthropic/bedrock ``*_cache_instructions`` place the breakpoint (the last STATIC block).
+    # The model still receives ``cache_prefix + remainder`` byte-identically — only the cache
+    # boundary moves — so it is behaviour-preserving. Used by the plan-review passes that share
+    # ``prompts.shared_plan_prefix(plan)`` so the finder's WRITE is READ by the Pass-2 verifier
+    # (and a same-ticket re-review inside the TTL). Ignored unless it is a non-empty proper
+    # prefix of ``system_prompt``. DEFAULTED None so every other caller is byte-unchanged.
+    cache_prefix: str | None = None
+
+    def effective_cache_prefix(self) -> str | None:
+        """``cache_prefix`` iff it is a non-empty PROPER prefix of ``system_prompt``, else None.
+
+        The SINGLE validity predicate the runner seam (``agent_call.build_agent_kwargs``), the
+        marked-prefix estimate, and the workflow request builder all share (bug 1dbe) — so the
+        "when does the breakpoint actually move" rule lives in one place and cannot drift. A
+        None result means the breakpoint stays at the end of the whole system prompt (an unset,
+        empty, non-matching, or full-length ``cache_prefix`` is a safe no-op)."""
+        prefix = self.cache_prefix
+        if (
+            prefix
+            and self.system_prompt.startswith(prefix)
+            and len(prefix) < len(self.system_prompt)
+        ):
+            return prefix
+        return None
 
 
 @runtime_checkable
@@ -513,7 +542,12 @@ class PydanticAIRunner:
                         caching_requested=cache_settings is not None,
                         model=ran_model,
                         marked_prefix_tokens=estimate_marked_prefix_tokens(
-                            cache_settings, system_prompt=req.system_prompt
+                            cache_settings,
+                            # Bug 1dbe: when the caller relocated the breakpoint to a
+                            # ``cache_prefix``, the MARKED span is that prefix — not the whole
+                            # system prompt. ``effective_cache_prefix`` owns the validity check
+                            # (proper, non-empty prefix), falling back to the full system prompt.
+                            system_prompt=req.effective_cache_prefix() or req.system_prompt,
                         ),
                         cache_min_prefix_tokens=caps.cache_min_prefix_tokens,
                     )

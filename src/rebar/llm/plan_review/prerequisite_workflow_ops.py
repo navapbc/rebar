@@ -96,7 +96,14 @@ def plan_review_prerequisite_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     cfg = resolve_gate_config(ctx.repo_root)
     prompt = prompts.get_prompt(passes.PASS_PREREQUISITE_VERIFIER, repo_root=cfg.repo_path)
     subject_plan = str(ctx.inputs.get("subject_plan") or "")
-    system, _ = prompts.resolve_prompt(prompt, {"plan": subject_plan}, repo_root=cfg.repo_path)
+    # Bug 1dbe: the prerequisite verifier now LEADS with the byte-identical
+    # ``shared_plan_prefix`` (same segment the finder/verifier start with), so its cache
+    # breakpoint lands at the same boundary and reads the finder's write. Resolve the sizing
+    # system prompt with that variable (the template no longer references ``{{plan}}``).
+    shared_prefix = prompts.shared_plan_prefix(subject_plan)
+    system, _ = prompts.resolve_prompt(
+        prompt, {"shared_prefix": shared_prefix}, repo_root=cfg.repo_path
+    )
     bins, oversized = sizing.pack_prerequisite_verifier_bins(
         records,
         subject_plan=subject_plan,
@@ -120,6 +127,7 @@ def plan_review_prerequisite_verify_inputs(ctx: StepContext) -> dict[str, Any]:
         instructions = ["No focused findings; return an empty verifications array."]
     return {
         "plan": subject_plan,
+        "shared_prefix": shared_prefix,
         "instructions": instructions,
         "input_too_large_ids": input_too_large_ids,
     }
