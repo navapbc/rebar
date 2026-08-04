@@ -100,29 +100,25 @@ def _local(ticket_id: str, deps: list[tuple[str, str]], managed: list[tuple[str,
     }
 
 
-def _enrich_like_fetcher(
+def _enrich_via_fetcher(
     snapshot: dict[str, dict[str, Any]], issuelinks_map: dict[str, Any]
 ) -> dict[str, dict[str, Any]]:
-    """Merge an issuelinks map into a snapshot the way `fetcher.fetch_snapshot` does.
+    """Merge an issuelinks map into a snapshot via the PRODUCTION merge.
 
-    A VERBATIM mirror of the production merge (`fetcher.py:592-596`)::
-
-        issuelinks_map = client.get_issuelinks_map(project_key)
-        for snap_key, links in issuelinks_map.items():
-            if snap_key in snapshot and isinstance(links, list):
-                snapshot[snap_key]["issuelinks"] = links
-
-    The point is the CONDITIONAL: an issue the map does not mention never gets the key at all.
-    That is the real truncation/fail-open shape — a partial map from a broken page walk, an
-    HTTP 410, a cross-project issue, or a client with no ``get_issuelinks_map`` — so G1's
-    unobserved case is produced HERE by omitting the issue from the map, not by hand-deleting a
-    key off a finished entry. An issue the map DOES mention with ``[]`` gets an authoritative
-    empty list, which is the observed-and-genuinely-link-less case that MUST be able to remove.
+    Drives ``fetcher.merge_issuelinks_map`` — the named seam extracted by ticket 6c0a —
+    rather than the byte-faithful hand copy (``_enrich_via_fetcher``) this replaces. The
+    point is the CONDITIONAL inside that seam: an issue the map does not mention never gets
+    the key at all. That is the real truncation/fail-open shape — a partial map from a broken
+    page walk, an HTTP 410, a cross-project issue, or a client with no
+    ``get_issuelinks_map`` — so G1's unobserved case is produced HERE by omitting the issue
+    from the map, not by hand-deleting a key off a finished entry. An issue the map DOES
+    mention with ``[]`` gets an authoritative empty list, which is the
+    observed-and-genuinely-link-less case that MUST be able to remove. Because this calls
+    the production merge, any drift in that rule turns these tests RED instead of leaving a
+    stale copy green.
     """
-    for snap_key, links in issuelinks_map.items():
-        if snap_key in snapshot and isinstance(links, list):
-            snapshot[snap_key]["issuelinks"] = links
-    return snapshot
+    fetcher = importlib.import_module("rebar_reconciler.fetcher")
+    return fetcher.merge_issuelinks_map(snapshot, issuelinks_map)
 
 
 def _inbound(
@@ -171,7 +167,7 @@ def test_peer_deleted_link_emits_a_removal() -> None:
     absent symbol.
     """
     bindings, locals_by_id = _one_managed_dep()
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     records = _inbound(snapshot, bindings, locals_by_id)
 
@@ -192,7 +188,7 @@ def test_g1_observed_but_empty_issuelinks_still_removes() -> None:
     truthiness check and the feature is dead for every genuinely link-less issue.
     """
     bindings, locals_by_id = _one_managed_dep()
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     assert "issuelinks" in snapshot["DC-1"], "SETUP FAILED: the fetcher merge did not set the key"
     assert snapshot["DC-1"]["issuelinks"] == [], "SETUP FAILED: expected an authoritative []"
@@ -212,13 +208,13 @@ def test_g1_unobserved_issuelinks_emits_no_removal() -> None:
     """G1: the issue is ABSENT from the issuelinks map, so its links were never observed.
 
     Produced through the production merge rule with a TRUNCATED map (see
-    `_enrich_like_fetcher`) — the shape a fail-open partial page walk really leaves behind.
+    `_enrich_via_fetcher`) — the shape a fail-open partial page walk really leaves behind.
     Trusting this absence would convert the three already-fixed silent READ truncations in this
     path into a WRITE that deletes every managed dep in the project.
     """
     bindings, locals_by_id = _one_managed_dep()
     # The map came back WITHOUT DC-1 (truncated page / failed enrichment).
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-9": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-9": []})
 
     assert "issuelinks" not in snapshot["DC-1"], (
         "SETUP FAILED: the truncated map must leave the key absent, or this cell proves nothing"
@@ -242,6 +238,70 @@ def test_g1_non_list_issuelinks_emits_no_removal() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The merge seam itself — the key-presence contract G1 depends on (ticket 6c0a)
+# ---------------------------------------------------------------------------
+#
+# These cells drive ``fetcher.merge_issuelinks_map`` DIRECTLY. They pin the
+# characterization taken from the inline merge BEFORE the 6c0a extraction, so a
+# behaviour change in the extraction (or any later edit to the seam) turns them
+# RED here rather than silently disarming G1 above.
+
+
+def test_merge_seam_observed_vs_unobserved_key_presence() -> None:
+    """The property G1 depends on: key PRESENT means observed, key ABSENT means not.
+
+    An issue the map mentions with zero links gets ``"issuelinks": []`` (authoritative,
+    removal may fire); an issue the map never mentioned gets NO key at all (unobserved,
+    removal must not fire). Collapsing these two states is the exact drift that would let
+    the removal path delete local deps from a truncated read.
+    """
+    snapshot = _enrich_via_fetcher({"DC-1": {}, "DC-2": {}}, {"DC-1": []})
+
+    assert snapshot["DC-1"] == {"issuelinks": []}, (
+        "an issue OBSERVED with zero links must carry the issuelinks key with an empty "
+        f"list — got {snapshot['DC-1']!r}"
+    )
+    assert "issuelinks" not in snapshot["DC-2"], (
+        "MUTATION TRIPWIRE: an issue the map never mentioned gained an issuelinks key — "
+        "key-presence no longer means 'observed', which disarms G1 and lets a truncated "
+        f"read delete local deps. entry={snapshot['DC-2']!r}"
+    )
+
+
+def test_merge_seam_characterization_pinned_before_extraction() -> None:
+    """Characterization of the inline merge, captured BEFORE the 6c0a extraction.
+
+    Each row was produced by exec-ing the then-inline production lines
+    (`fetcher.py:629-633` at commit 75cdfec) against the input; the extracted seam must
+    reproduce them byte-for-byte — the extraction's zero-behaviour-change contract.
+    """
+    cases: list[tuple[str, dict[str, dict[str, Any]], dict[str, Any], dict[str, Any]]] = [
+        (
+            "observed links",
+            {"DC-1": {}},
+            {"DC-1": [{"id": "1"}]},
+            {"DC-1": {"issuelinks": [{"id": "1"}]}},
+        ),
+        ("map key not in snapshot is ignored", {"DC-1": {}}, {"DC-2": [{"id": "1"}]}, {"DC-1": {}}),
+        ("non-list value is not an observation", {"DC-1": {}}, {"DC-1": "garbage"}, {"DC-1": {}}),
+        ("None value is not an observation", {"DC-1": {}}, {"DC-1": None}, {"DC-1": {}}),
+        (
+            "a fresher list overwrites an existing key",
+            {"DC-1": {"issuelinks": [1]}},
+            {"DC-1": [2]},
+            {"DC-1": {"issuelinks": [2]}},
+        ),
+    ]
+    for name, snapshot, issuelinks_map, expected in cases:
+        result = _enrich_via_fetcher(snapshot, issuelinks_map)
+        assert result == expected, (
+            f"characterization case {name!r} diverged from the pre-extraction inline merge: "
+            f"got {result!r}, pinned {expected!r}"
+        )
+        assert result is snapshot, "the seam must mutate and return the SAME snapshot dict"
+
+
+# ---------------------------------------------------------------------------
 # G2 — an unbound target proves nothing
 # ---------------------------------------------------------------------------
 
@@ -253,7 +313,7 @@ def test_g2_unbound_target_emits_no_removal() -> None:
     """
     bindings = _FakeBindingStore({"DC-1": "local-a"})  # local-b deliberately unbound
     local_a = _local("local-a", [("blocks", "local-b")], [("blocks", "local-b")])
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     records = _inbound(snapshot, bindings, {"local-a": local_a})
     assert _removals(records) == [], (
@@ -278,7 +338,7 @@ def test_g3_unmanaged_dep_emits_no_removal() -> None:
     bindings = _FakeBindingStore({"DC-1": "local-a", "DC-2": "local-b"})
     local_a = _local("local-a", [("blocks", "local-b")], [])  # dep present, NOT managed
     local_b = _local("local-b", [], [])
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     records = _inbound(snapshot, bindings, {"local-a": local_a, "local-b": local_b})
     assert _removals(records) == [], (
@@ -300,7 +360,7 @@ def test_g3_relations_with_no_peer_link_type_are_never_removed(relation: str) ->
     # Claim it as managed anyway — the kind vocabulary, not the projection, must exclude it.
     local_a = _local("local-a", [(relation, "local-b")], [(relation, "local-b")])
     local_b = _local("local-b", [], [])
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     records = _inbound(snapshot, bindings, {"local-a": local_a, "local-b": local_b})
     assert _removals(records) == [], (
@@ -328,7 +388,7 @@ def test_g4_outbound_add_this_pass_suppresses_the_removal() -> None:
     `target_id`.
     """
     bindings, locals_by_id = _one_managed_dep()
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
     outbound = [_FakeOutbound("DC-1", [{"action": "add", "to_key": "DC-2", "relation": "blocks"}])]
 
     records = _inbound(snapshot, bindings, locals_by_id, outbound)
@@ -351,7 +411,7 @@ def test_g4_unrelated_outbound_add_does_not_suppress_the_removal() -> None:
         "local-b": _local("local-b", [], []),
         "local-c": _local("local-c", [], []),
     }
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
     outbound = [_FakeOutbound("DC-1", [{"action": "add", "to_key": "DC-3", "relation": "blocks"}])]
 
     assert len(_removals(_inbound(snapshot, bindings, locals_by_id, outbound))) == 1, (
@@ -389,7 +449,7 @@ def test_g4_inbound_add_suppression_is_unchanged() -> None:
 def test_steady_state_does_not_churn() -> None:
     """A managed dep STILL present on the peer emits no removal, on repeated passes."""
     bindings, locals_by_id = _one_managed_dep()
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": [_blocks_outward("DC-2")]})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": [_blocks_outward("DC-2")]})
 
     for pass_no in (1, 2, 3):
         records = _inbound(snapshot, bindings, locals_by_id)
@@ -412,7 +472,7 @@ def test_inward_blocks_is_not_a_spurious_removal() -> None:
     # local-b depends_on local-a; the peer still carries the link, seen from local-b's side.
     local_b = _local("local-b", [("depends_on", "local-a")], [("depends_on", "local-a")])
     locals_by_id = {"local-a": _local("local-a", [], []), "local-b": local_b}
-    snapshot = _enrich_like_fetcher({"DC-2": {}}, {"DC-2": [_blocks_inward("DC-1")]})
+    snapshot = _enrich_via_fetcher({"DC-2": {}}, {"DC-2": [_blocks_inward("DC-1")]})
 
     records = _inbound(snapshot, bindings, locals_by_id)
     assert _removals(records) == [], (
@@ -487,7 +547,7 @@ def test_end_to_end_a_peer_deleted_link_leaves_the_dep_gone(
         b: rebar.show_ticket(b, repo_root=repo),
     }
     # The peer was observed and the link is GONE.
-    snapshot = _enrich_like_fetcher({"DC-1": {}}, {"DC-1": []})
+    snapshot = _enrich_via_fetcher({"DC-1": {}}, {"DC-1": []})
 
     records = _inbound(snapshot, bindings, locals_by_id)
     assert _removals(records), (
