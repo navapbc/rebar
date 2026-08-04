@@ -481,6 +481,46 @@ def _assert_project_capabilities(key: str) -> None:
             f"instance genuinely renamed them."
         )
 
+    # ISSUE-TYPE NAME UNIQUENESS, within the provisioned project (bug 2e47-ae62-c0cf-48a0).
+    #
+    # The capability map found TWO instance-wide issue types both named `Task` (ids 10003 and
+    # 10004), which makes any name-based type resolution ambiguous — and `LOCAL_TYPE_TO_JIRA` maps
+    # by NAME. The question the map could not answer is whether that ambiguity can actually reach
+    # rebar: a create posts `issuetype: {"name": ...}` scoped to a PROJECT, so what matters is
+    # whether the project's own issue-type scheme exposes the name more than once.
+    #
+    # Asserted here rather than in a cell because this is a property of the provisioned
+    # environment, and because a future image that starts exposing both `Task`s to the project
+    # should fail LOUDLY at provisioning — where the diagnosis is one HTTP response away — instead
+    # of non-deterministically binding creates to the wrong type much later.
+    #
+    # The instance-wide duplicates are REPORTED, not asserted: they exist and are documented, and
+    # failing on them would refuse a project that is perfectly usable.
+    offered_names = [
+        str(issue_type.get("name"))
+        for issue_type in (body.get("issueTypes") or [])
+        if isinstance(issue_type, dict)
+    ]
+    ambiguous = sorted({name for name in offered_names if offered_names.count(name) > 1})
+    instance_wide = [
+        (str(f.get("id")), str(f.get("name")))
+        for f in fields
+        if isinstance(f, dict) and str(f.get("name")) in set(_REQUIRED_ISSUE_TYPES)
+    ]
+    if instance_wide:
+        print(
+            f"[2e47-issue-type-evidence] project {key} offers {sorted(set(offered_names))}; "
+            f"instance-wide entries matching the required names: {instance_wide}"
+        )
+    if ambiguous:
+        raise AssertionError(
+            f"PROVISIONING FAILED: scratch project {key} offers the issue-type name(s) "
+            f"{ambiguous} MORE THAN ONCE ({offered_names}). rebar's `LOCAL_TYPE_TO_JIRA` resolves "
+            f"issue types by NAME, so a create could bind to either one non-deterministically. "
+            f"This is bug 2e47's duplicate-`Task` ambiguity actually reaching the project scheme; "
+            f"resolve types by ID before running against this image."
+        )
+
 
 @pytest.fixture
 def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
