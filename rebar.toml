@@ -113,3 +113,48 @@ require_authenticated = false
 # ledger fixes above this makes the pre-merge whole-store gate report 0 enforced-not-verified.
 # Env override: REBAR_IDENTITY_ENFORCE_SINCE.
 enforce_since = "0cf8c03530d379991933740d9e4d1fa46ce4484a"
+
+# ── LLM provider: this project DEFAULTS TO AWS BEDROCK ────────────────────────────
+#
+# DECIDED (ticket d2ce-36f5-fd08-4e40, epic 061c): the project default is Bedrock, not a
+# per-developer opt-in. rebar's founding premise for the provider seam is that the path rebar
+# is developed against should be the path rebar's users run; a default-OFF opt-in leaves that
+# gap open precisely on the local gates a developer and every coding agent hit constantly.
+# The alternative considered and rejected was keeping Anthropic as the default and making the
+# opt-in loud (a make target / doctor warning) — cheaper on onboarding, but it advertises the
+# dogfooding gap instead of closing it.
+#
+# THE COST, accepted knowingly: local LLM gates (`review-plan`, `review-code`,
+# `verify-completion`) now need working AWS credentials from the ambient chain AND a resolvable
+# region. A contributor without Bedrock access takes the documented one-line OPT-OUT
+# (`REBAR_LLM_CONFIG_FILE="$PWD/.github/llm-providers/anthropic.toml"`); see
+# docs/local-dev-env.md.
+#
+# WHAT THIS DOES NOT AFFECT. Precedence is CLI > env > REBAR_LLM_CONFIG_FILE > this discovered
+# project file > built-in default, so every CI arm that names a provider overlay through
+# REBAR_LLM_CONFIG_FILE (the external provider matrix, prompt-eval) OUTRANKS this table and is
+# unchanged. The offline unit lanes make no LLM calls at all.
+#
+# THE IDS ARE SINGLE-SOURCED from `.github/llm-providers/bedrock.toml` and pinned two-sided by
+# `tests/unit/test_project_default_provider.py`, so editing either file alone fails. Only
+# INFERENCE-PROFILE ids (the `us.`/`global.` prefix) are invokable, and their suffixes are NOT
+# uniform — haiku carries `-20251001-v1:0` where sonnet carries none. Take any new id VERBATIM
+# from that overlay (itself taken from `aws bedrock list-inference-profiles --region <region>`).
+#
+# `[llm] model` IS SET AS WELL AS THE CLASSES, AND IT IS LOAD-BEARING, NOT REDUNDANT. `cfg.model`
+# is a SECOND resolution path the class table cannot reach: `rebar.llm.config` resolves it from
+# `REBAR_LLM_MODEL` / the `model` file key falling back to `DEFAULT_MODEL`, which is the bare
+# literal "claude-opus-4-8" and so infers provider `anthropic`. Any op that resolves `cfg.model`
+# instead of naming a class — and several do — would therefore call direct Anthropic on every
+# local run. That is exactly the ambient-default provider leak MEASURED on a live matrix run and
+# closed for the CI overlays by [rebar:f124-f14a-fd62-4973]; setting only the class table would
+# leave it open here. It is a COMPANION to the class table, never a substitute for it: a scalar
+# alone collapses the per-pass frontier/standard split, the trap that deprecated
+# `REBAR_LLM_MODEL` ([rebar:eb58-e71d-ec90-4b00]) — which is why that variable is set nowhere.
+[llm]
+model = "bedrock:us.anthropic.claude-opus-4-8"
+
+[llm.model_classes]
+frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
