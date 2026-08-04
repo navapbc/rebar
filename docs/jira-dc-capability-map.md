@@ -98,6 +98,38 @@ is not supported by this evidence.
 > **`Parent Link` (`customfield_10007`, Advanced Roadmaps) is a DIFFERENT field from `Epic
 > Link`** [req-0038]. Any name-based lookup must match exactly and must not confuse the two.
 
+#### RE-MEASURED 2026-08-04, live run `30951453979` (ticket 9f26)
+
+Every claim above about `fields.parent` was re-asserted against the live instance rather than
+read off this page, because this same epic RETRACTED the label-ceiling entry when a live cell
+contradicted it. **A recorded measurement is a hypothesis until it is re-measured.**
+
+The re-measurement needed no new probe — the failing cells' own text IS the measurement. Run
+`30951453979` reports rebar asking for `RBJREXN-2`, Jira accepting, and a fresh REST read still
+returning `RBJREXN-1` (and independently `RBJVZQW-3` -> `-2`, read back as `-1`). **req-0056 and
+req-0058 hold: accept-and-ignore, confirmed, not inherited.**
+
+**The supported parent mechanism, confirmed green in the same run.** The Epic Link on a
+NON-sub-task child works in both directions and for both operations, so it — not `fields.parent`
+— is the DC parent path, and it is what the parent cells are homed to:
+
+| cell, all PASSED in `30951453979` | what it proves |
+|---|---|
+| `test_outbound_epic_parent_round_trips_via_the_epic_link` | transport-level Epic Link SET **and** CLEAR, raw-REST read-back |
+| `test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS` | a real reconcile pass emits and lands it (req-0040/0041) |
+| `test_inbound_clear_parent_round_trips` | an Epic Link CLEAR is observed inbound via `get_parent_map`'s Epic Link fallback |
+
+This settles a question ticket 4b9e was holding work behind — whether `{epic_link: null}` clears
+on DC. **It does**, and the evidence was already in the harness; the dedicated probe
+(`scripts/jira_dc_epic_link_clear_probe.py`) was answering a question two green cells had
+answered. Recorded so the next reader checks the harness before building a probe.
+
+**Still UNKNOWN and deliberately not closed:** whether a sub-task's `fields.parent` is clearable
+by some route rebar does not take (the 400 at req-0057 is a screen-configuration shape, not a
+type error). Nothing here upgrades that to "intrinsically impossible"; it is pinned as a live
+expectation by the sub-task-clear assertion inside `test_inbound_clear_parent_round_trips`, so a
+DC that starts allowing it fails loudly.
+
 ### rebar's hardcoded vocabularies, diffed
 
 Present and correct: all issue types (`Bug`, `Story`, `Task`, `Epic`), all five priorities
