@@ -55,18 +55,33 @@ https://rebar.solutions.navateam.com/review/rerun      (nginx /review/* → rece
 
 i.e. the public `/review/rerun` path maps to the receiver's internal `POST /rerun`.
 
-**HOW.** Auth is the same `?token=` secret as the inbound webhook
-(`/rebar/prod/gerrit-bot-token`, constant-time compared). Pass the change as an id
-or number. A successful enqueue ACKs **202**:
+**HOW.** Auth is the same secret as the inbound webhook
+(`/rebar/prod/gerrit-bot-token`, constant-time compared). **Pass it in the
+`X-Rebar-Token` HTTP header, NOT in the URL** — uvicorn's access log records the
+request line (path + query string) but not headers, so a URL-embedded `?token=` writes
+the bot's Gerrit credential to journald in clear text on every request (ticket 66af).
+Pass the change as an id or number. A successful enqueue ACKs **202**:
 
 ```bash
 TOKEN=$(aws ssm get-parameter --name /rebar/prod/gerrit-bot-token \
   --with-decryption --query Parameter.Value --output text)
 
 curl -sS -X POST \
-  "https://rebar.solutions.navateam.com/review/rerun?token=$TOKEN&change=<CHANGE_ID_OR_NUMBER>"
+  -H "X-Rebar-Token: $TOKEN" \
+  "https://rebar.solutions.navateam.com/review/rerun?change=<CHANGE_ID_OR_NUMBER>"
 # → 202 Accepted  (the review runs asynchronously on the background worker)
 ```
+
+> **NEVER put the token in the URL** (`?token=...`). The receiver still accepts a
+> query-string token for backward-compat and scrubs its value from the access log with a
+> redaction filter (`config.install_access_log_redaction`), but that is a backstop — the
+> header is the only form that keeps the secret out of the request line entirely.
+>
+> **ROTATION (compromised token).** Any token that was ever passed in a URL against the
+> old recipe has already been written to journald in clear text and must be treated as
+> **compromised and rotated** (`/rebar/prod/gerrit-bot-token`), independently of this code
+> fix. The code fix must **land before** rotation — otherwise the newly rotated token is
+> logged the moment it is first used through a legacy query-string caller.
 
 Replace `<CHANGE_ID_OR_NUMBER>` with the Gerrit change number (e.g. `1234`) or the
 full Change-Id. After the worker runs, confirm the `LLM-Review` vote flipped on the

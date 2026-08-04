@@ -198,5 +198,5 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:161` — `os.environ.get(<non-literal>)`
-- `src/rebar/review_bot/config.py:171` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:220` — `os.environ.get(<non-literal>)`
+- `src/rebar/review_bot/config.py:230` — `os.environ.get(<non-literal>)`
