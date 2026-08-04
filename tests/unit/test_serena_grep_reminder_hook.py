@@ -22,6 +22,7 @@ Two properties matter more than the trigger, and both are safety properties:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -190,7 +191,7 @@ def test_settings_wires_the_hook_for_bash_without_losing_the_tool_search_setting
 
 
 def test_hook_script_is_tracked_and_executable_from_the_repo_root():
-    """`.claude/` is ignored by default and settings reference the script by relative path."""
+    """`.claude/` is ignored by default, so the script itself must live in tracked space."""
     proc = subprocess.run(
         ["git", "ls-files", "--error-unmatch", "scripts/hooks/serena_grep_reminder.py"],
         cwd=_REPO_ROOT,
@@ -200,3 +201,58 @@ def test_hook_script_is_tracked_and_executable_from_the_repo_root():
     )
     assert proc.returncode == 0, f"hook script is not tracked: {proc.stderr.strip()}"
     assert _HOOK.is_file()
+
+
+def _all_hook_commands(settings: dict) -> list[str]:
+    return [
+        h["command"]
+        for entries in settings.get("hooks", {}).values()
+        for entry in entries
+        for h in entry.get("hooks", [])
+        if h.get("type") == "command"
+    ]
+
+
+def test_no_hook_command_uses_a_relative_path():
+    """Every hook command must be anchored to ``$CLAUDE_PROJECT_DIR`` (or absolute).
+
+    Claude Code executes hook commands via ``/bin/sh`` with whatever cwd the shell last
+    had, so a relative command resolves against the tool call's cwd, not the project
+    root — it silently fails (exit 127, guidance absent) from any cwd without the file
+    (bug c6f6-9724-87fc-43db, observed from ``.tickets-tracker``).
+    """
+    settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
+    commands = _all_hook_commands(settings)
+    assert commands, "no hook commands found in .claude/settings.json"
+    for command in commands:
+        first_word = command.split()[0].strip("\"'")
+        assert first_word.startswith(("$CLAUDE_PROJECT_DIR", "/")), (
+            f"hook command {command!r} starts with a RELATIVE path: it resolves against "
+            "the shell's cwd at hook time and silently fails from any directory without "
+            'it — anchor it as "$CLAUDE_PROJECT_DIR/…"'
+        )
+
+
+def test_hook_command_resolves_from_a_foreign_cwd(tmp_path):
+    """The configured command, run exactly as the harness runs it (``/bin/sh -c`` with
+    ``$CLAUDE_PROJECT_DIR`` set) from a directory with no ``scripts/``, still emits the
+    reminder."""
+    settings = json.loads(_SETTINGS.read_text(encoding="utf-8"))
+    command = next(c for c in _all_hook_commands(settings) if "serena_grep_reminder.py" in c)
+    # Precondition: the foreign cwd really lacks the relative path.
+    assert not (tmp_path / "scripts").exists()
+    proc = subprocess.run(
+        ["/bin/sh", "-c", command],
+        input=json.dumps(_envelope("grep -rn foo src/")),
+        cwd=tmp_path,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(_REPO_ROOT)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert proc.returncode == 0, (
+        f"hook command failed from a foreign cwd (exit {proc.returncode}): {proc.stderr.strip()}"
+    )
+    context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "find_referencing_symbols" in context
