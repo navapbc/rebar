@@ -42,7 +42,16 @@ written against assumptions it falsifies.
 |---|---|
 | version | 8.17.1 Server/Data Center, buildNumber 817001, build date 2021-06-15 [req-0000] |
 | licensed | Jira Software (active), Jira Core; **not** Jira Service Management [req-0009] |
-| image digest | not exposed over REST; closest identifier is `scmInfo=36e93c711dfb14e6e1509a2fef6b04c4d73cc7ca` |
+| measured against image | `sha256:04326628dc4ac36b2bfc1d0f2ebe5ba3807c1ec9cf9b18307d3c2ad7222537e9` |
+| self-reported identity | the digest is **not** exposed over REST; the closest in-instance identifier is `scmInfo=36e93c711dfb14e6e1509a2fef6b04c4d73cc7ca` |
+
+That digest is the pin on `tests/external/live_jira_dc/Dockerfile`'s `FROM` line, and recording
+it here is what makes this page's staleness **checkable** rather than merely asserted:
+`tests/unit/test_jira_dc_capability_map_workflow.py` fails the moment the Dockerfile is
+re-pinned without this section being regenerated. Before that gate existed, a re-pin could land
+with every answer below silently describing an image nothing runs — and since the instance does
+not report its own digest, no live check could have caught it either. Treat a failure of that
+cell as "re-dispatch the mapping job", never as "update the digest here".
 
 ### Epic machinery — field ids and templates
 
@@ -110,7 +119,32 @@ Known mismatches — filed as [rebar:2e47-ae62-c0cf-48a0], **do not re-file**:
   req-0071/0072/0073's reading was wrong. The cell now pins the MEASUREMENT (255 accepted, 256
   rejected) so a future image that genuinely moves the ceiling fails loudly — which is precisely what
   the un-reproducible recorded claim failed to do.
-- **two distinct issue-type ids (10003 and 10004) are both named `Task`**, so name-based type resolution is ambiguous [req-0022].
+- ~~**two distinct issue-type ids (10003 and 10004) are both named `Task`**, so name-based type
+  resolution is ambiguous.~~ **RETRACTED — this claim DID NOT REPRODUCE.** Harness run
+  **30951453979** (`main` @ `d394a70529`) read `GET /rest/api/2/issuetype` live (HTTP 200) and its
+  `[2e47-issue-type-evidence]` line recorded the instance-wide entries as
+  **`[('10002', 'Task'), ('10003', 'Sub-task'), ('10000', 'Epic')]`** — exactly **one** id named
+  `Task`, and **10003 is `Sub-task`, not `Task`**. That emitter
+  (`tests/external/live_jira_dc/conftest.py`) builds the list by filtering the full `/issuetype`
+  response on the names `Task` / `Sub-task` / `Epic` with **no de-duplication**, so a second
+  `Task` entry would have been printed had one existed.
+  **This was NOT base-image drift:** the `FROM` digest at `d394a70529` is byte-identical to the
+  one this page records, so that run measured the same pinned image these answers describe.
+  What remains **undetermined** is *why* the two disagree. Issue-type ids are assigned as
+  instance state is built, and the mapping run created a project from **each** candidate template
+  while the harness provisions a **single** Scrum project — so the map's reading may reflect
+  instance state its own broader provisioning produced, rather than a misreading of its evidence.
+  Either way, the **conclusion** drawn from it does not hold for the environment the harness
+  actually runs: on that provisioning the name `Task` resolves to exactly one id, so name-based
+  type resolution is not ambiguous there. `_assert_project_capabilities` already fails
+  provisioning loudly if a project ever *does* offer a duplicate name, which is the condition
+  that would actually reach rebar.
+  Note what made this checkable at all: a same-digest contradiction is invisible to a digest
+  comparison, so the gate added by [rebar:259b-b7da-a346-4785] is what now **distinguishes** the
+  two explanations — with the pin asserted, "different image" is ruled out mechanically instead of
+  being argued. Closing the remaining half (a wrong answer at an *unchanged* digest) needs the
+  deterministic, non-LLM re-measurement pass filed as [rebar:a9bd-6641-e603-42bc]; this is the
+  **third** entry on this page contradicted by live measurement.
 - **three rebar relations are unrepresentable** on stock Jira: `supersedes`, `discovered_from`, `caused_by`. Conversely the instance ships a stock `Duplicate` type that rebar does not map [req-0004].
 
 ### Length limits, measured at limit-1 / limit / limit+1 with read-back
@@ -150,8 +184,10 @@ request/response the agent made, in call order), and `run_metadata.json` (the im
 digest, base URL, model, and call count).
 
 **The artifact is authored, not live.** A human reviews it and is responsible for landing
-whatever should become committed data (e.g. an updated `docs/jira-dc-value-map.md` or a
-harness setup assertion that reads it) — the workflow itself never commits anything, and
+whatever should become committed data — the answers section above, and the harness's own
+declared provisioning contract (`_PROJECT_TEMPLATE` / `_REQUIRED_FIELDS` in
+`tests/external/live_jira_dc/conftest.py`, enforced before any test runs by
+`_assert_project_capabilities`, per bug 3fe5). The workflow itself never commits anything, and
 the agent is explicitly instructed to *report* mismatches as findings, never to fix the
 harness, the repository, or rebar's own configuration. Any finding that implicates one of
 rebar's own hardcoded vocabularies or limits should be filed as a ticket citing the
@@ -163,6 +199,13 @@ Re-run whenever the harness's pinned base image changes — i.e. whenever
 `tests/external/live_jira_dc/Dockerfile`'s `FROM …@sha256:…` digest is bumped. The
 mapping job builds that same Dockerfile, so it always maps the image the harness will
 actually run against; a stale map after a re-pin describes an image nothing runs anymore.
+You do not have to remember this: the digest recorded above is asserted against the
+Dockerfile's pin by a unit test, so a re-pin lands red until the map is regenerated.
+
+To see which image a run *would* map without paying for one, `python
+scripts/jira_dc_capability_map.py --print-digest` reads the pin and exits — no container, no
+API key, no LLM. The digest in the artifact's `run_metadata.json` comes from that same
+derivation rather than a constant, so it cannot drift from the image actually built.
 It is also reasonable to re-run after any change to rebar's own Jira-family vocabularies
 (`src/rebar/_engine/rebar_reconciler/adapters/jira_family/value_maps.py` and neighbors) to
 re-confirm the diff still reads clean.
