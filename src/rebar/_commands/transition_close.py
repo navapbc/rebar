@@ -161,6 +161,10 @@ def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]
     sha = result.get("verified_at_sha")
     if sha:
         manifest.append(_signing.verified_at_sha_step(sha))
+    if result.get("disposition"):
+        from rebar._commands import close_disposition
+
+        return close_disposition.decorate_manifest(manifest, result)
     return manifest
 
 
