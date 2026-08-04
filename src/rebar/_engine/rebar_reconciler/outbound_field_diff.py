@@ -116,6 +116,9 @@ def _resolve_local_parent(
     ticket: dict[str, Any],
     binding_store: Any,
     local_ticket_types: dict[str, str] | None,
+    *,
+    jira_key: str = "",
+    dropped_field_sink: list[tuple[str, str]] | None = None,
 ) -> tuple[bool, str | None]:
     """Resolve the local parent to a remote key for the UPDATE diff (present?, value).
 
@@ -128,6 +131,17 @@ def _resolve_local_parent(
     * a locally-DETACHED ticket (no parent_id) → ``(True, None)`` — the clear
       candidate the diff loop gates on the managed-ref check;
     * no binding store → ``(False, None)``.
+
+    The two ``(False, None)`` returns are byte-identical but mean OPPOSITE things, and
+    conflating them is what made a suppressed hierarchy edit invisible: an UNBOUND parent
+    self-resolves on a later pass, while a BOUND non-epic parent will NEVER converge — the
+    user's parent edit is dropped for good, yet the pass exits 0 reporting convergence
+    (ticket 9f26; the same class of silence ``pass_io.record_parent_divergence`` was built
+    for). So when ``dropped_field_sink`` is supplied, the bound-non-epic case records
+    ``(jira_key, "parent")`` on it — the EXISTING channel
+    ``run_differs._emit_outbound_field_alerts`` turns into a deduped
+    ``outbound-field-dropped`` bridge alert. The suppression itself is unchanged: the
+    parent is still omitted from ``changed``, and the unbound case is still silent.
     """
     if binding_store is None:
         return (False, None)
@@ -136,7 +150,16 @@ def _resolve_local_parent(
         if local_ticket_types is not None and local_parent_id in local_ticket_types:
             parent_type = (local_ticket_types.get(local_parent_id) or "").lower()
             if parent_type != "epic":
-                return (False, None)  # Jira permits only Epic parents — suppress (8b25)
+                # Jira permits only Epic parents — suppress (8b25), but record the drop
+                # when the parent IS bound (a real, permanent divergence).
+                if dropped_field_sink is not None and jira_key:
+                    try:
+                        bound = bool(binding_store.get_jira_key(local_parent_id))
+                    except Exception:  # noqa: BLE001 — observability never costs delivery
+                        bound = False
+                    if bound:
+                        dropped_field_sink.append((jira_key, "parent"))
+                return (False, None)
         remote_parent_key = binding_store.get_jira_key(local_parent_id)
         if remote_parent_key:
             return (True, remote_parent_key)
@@ -380,7 +403,13 @@ def diff_canonical_fields(
                 changed["_assignee_is_account_id"] = True
 
     # --- parent (driven by LOCAL parent state; local-wins SET, managed-gated CLEAR) ---
-    present, local_parent = _resolve_local_parent(ticket, binding_store, local_ticket_types)
+    present, local_parent = _resolve_local_parent(
+        ticket,
+        binding_store,
+        local_ticket_types,
+        jira_key=jira_key,
+        dropped_field_sink=dropped_field_sink,
+    )
     if present:
         remote_parent = canonical_remote.get("remote_parent_id")
         if local_parent != remote_parent:
