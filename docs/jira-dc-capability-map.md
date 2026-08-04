@@ -24,6 +24,116 @@ checklist instead of an open-ended "go explore":
   comparison (the only way to catch silent accept-and-truncate);
 - the `37e7`/`1a9f` link-direction/parent-clearing falsifiers, executed as raw REST calls.
 
+## The answers, for the image we currently pin
+
+**Everything below was measured on Jira DC 8.17.1 by run `30863672922`.** It is transcribed
+from that run's `capability_map.json`, not from anyone's recollection, and every claim carries
+the `req-NNNN` evidence ids that locate the raw request/response in the same run's
+`evidence.json`. Because the harness image is **pinned by digest**, these answers are stable —
+they change only when the pin does, which is exactly when the "When to re-run it" section below
+says to regenerate them.
+
+Read this section before designing anything against DC. Three of this epic's changes were
+written against assumptions it falsifies.
+
+### Instance identity
+
+| | |
+|---|---|
+| version | 8.17.1 Server/Data Center, buildNumber 817001, build date 2021-06-15 [req-0000] |
+| licensed | Jira Software (active), Jira Core; **not** Jira Service Management [req-0009] |
+| image digest | not exposed over REST; closest identifier is `scmInfo=36e93c711dfb14e6e1509a2fef6b04c4d73cc7ca` |
+
+### Epic machinery — field ids and templates
+
+| | |
+|---|---|
+| `Epic Link` | `customfield_10001` |
+| `Epic Name` | `customfield_10003` |
+| `Epic Link` on the default **edit** screen | **No** |
+| `Epic Name` on the Epic **create** screen | Yes (and required) |
+
+All **three** software templates yield an `Epic` issue type, so the type is a provisioning
+choice, never a platform limit: `gh-scrum-template` (Scrum), `gh-kanban-template` (Kanban), and
+`basic-software-development-template` (Basic). The harness pins the Scrum one
+(`tests/external/live_jira_dc/conftest.py`, `_PROJECT_TEMPLATE`).
+
+> **Screen presence does NOT gate REST writes on this version.** `Epic Link` is absent from the
+> standard edit screen [req-0034] and `PUT /rest/api/2/issue/{key}` with
+> `{"fields":{"customfield_10001":"SCRUM-1"}}` still returned **204 and round-tripped** on
+> read-back [req-0040][req-0041]. This is the single most load-bearing finding here: it is why
+> the harness does **not** provision screen fields. Predicting a `400 "not on the appropriate
+> screen"` here is the natural inference and it is **wrong**.
+
+### Parent and hierarchy — the dangerous paths
+
+> **A sub-task reparent reports success and does nothing.** Raw REST
+> `PUT /rest/api/2/issue/SCRUM-6 {"fields":{"parent":{"key":"SCRUM-1"}}}` returns **HTTP 204**
+> [req-0056], and read-back shows the sub-task **still parented to its original parent**
+> [req-0058]. Accept-and-ignore, not rejection. **Any code path that reparents a sub-task must
+> verify by read-back — the status code is a lie.**
+
+Clearing a sub-task's parent fails, and the two spellings fail *differently* — which matters,
+because it means they do not share a validation path:
+
+| payload | result |
+|---|---|
+| `{"fields":{"parent":null}}` | 400 `data was not an object` [req-0055] |
+| `{"update":{"parent":[{"set":null}]}}` | 400 `Field 'parent' cannot be set. It is not on the appropriate screen, or unknown.` [req-0057] |
+| sub-task `editmeta` | exposes **no** `parent` field at all, so no declared operations [req-0054] |
+
+Neither clears it. Whether it is clearable *by some other route* is **UNKNOWN** — the
+second error is a screen-configuration shape, not a type error, so "intrinsically impossible"
+is not supported by this evidence.
+
+> **`Parent Link` (`customfield_10007`, Advanced Roadmaps) is a DIFFERENT field from `Epic
+> Link`** [req-0038]. Any name-based lookup must match exactly and must not confuse the two.
+
+### rebar's hardcoded vocabularies, diffed
+
+Present and correct: all issue types (`Bug`, `Story`, `Task`, `Epic`), all five priorities
+(`Highest`…`Lowest`), and the `Blocks` / `Relates` link types. Link **direction** was verified
+end-to-end: `blocks` (swap=false) and `depends_on` (swap=true) resolve to true inverses of the
+one `Blocks` type — no direction defect [req-0042][req-0043][req-0051][req-0052].
+
+Every workflow is `Software Simplified Workflow for Project SCRUM` with exactly
+**To Do / In Progress / Done**, all reachable via global transitions.
+
+Known mismatches — filed as [rebar:2e47-ae62-c0cf-48a0], **do not re-file**:
+
+- **status `IDEA` does not exist** in any workflow bound to any issue type. `LOCAL_STATUS_TO_JIRA['idea'] = 'IDEA'` has no target here [req-0033][req-0036].
+- **label limit is effectively 254, not 255.** rebar treats 255 as an inclusive max; this instance **rejects** a 255-char label with a 400 whose text confusingly names "255 characters". Only 254 is accepted [req-0071][req-0072][req-0073].
+- **two distinct issue-type ids (10003 and 10004) are both named `Task`**, so name-based type resolution is ambiguous [req-0022].
+- **three rebar relations are unrepresentable** on stock Jira: `supersedes`, `discovered_from`, `caused_by`. Conversely the instance ships a stock `Duplicate` type that rebar does not map [req-0004].
+
+### Length limits, measured at limit-1 / limit / limit+1 with read-back
+
+| field | rebar constant | measured | verdict |
+|---|---|---|---|
+| summary | 254 | 254 accepted, 255 rejected (hard 400) | **matches** |
+| label | 255 | 254 accepted, 255 rejected | **mismatch** (see above) |
+| description / comment | 32767 | governed by `jira.text.field.character.limit=32767`, enforced (non-zero) [req-0006] | **coverage gap** |
+
+No silent truncation was observed anywhere — over-limit writes are hard 4xx. The description
+boundary is a **recorded gap**: the literal 32K+ payload was not exercised in that session, so
+32767 is confirmed as the configured limit but not as an observed boundary.
+
+### Administrative hooks that DO work
+
+Both were exercised and confirmed by read-back, so they are available if template pinning ever
+stops being sufficient:
+
+- `POST /rest/api/2/issuetype` creates a new issue type (201) under the admin PAT [req-0076].
+- `POST /rest/api/2/screens/{id}/tabs/{id}/fields` adds a field to a screen, and the field then
+  appears on that tab [req-0078][req-0080]. **Possible, but not needed** — see the screen-gating
+  note above.
+
+### Harness limits worth knowing
+
+Jira DC caps a user at **10 Personal Access Tokens**, with no Cloud analogue. The
+`jira_dc_pat` fixture is session-scoped for this reason, and the harness sweeps leaked tokens
+on startup.
+
 ## What it produces
 
 An artifact (`jira-dc-capability-map`) with three files: `capability_map.json` (the
