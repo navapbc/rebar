@@ -534,34 +534,122 @@ def test_end_to_end_reapply_is_idempotent(
 # ---------------------------------------------------------------------------
 
 
-def test_g5_relation_mismatch_skips_the_unlink_and_logs(
+def test_g5_relation_mismatch_removes_nothing_and_logs(
     two_linked_tickets: tuple[Path, str, str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """G5: `rebar.unlink(id1, id2)` takes NO relation argument, and that is deliberate.
+    """G5 (e39f form): removal is RELATION-SCOPED, so a mismatch is a logged no-op.
 
-    `_commands/unlink.py`'s usage text says "pair-scoped, NO relation arg; removes the
-    most-recent link between the pair", and `_get_link_info` returns the most recent net-active
-    link. So if the pair's net-active relation is NOT the one whose peer link vanished, a naive
-    unlink removes THE WRONG LINK — one the peer still has. The apply step must decline.
-
-    Here the pair's net-active link is `blocks`, but the record claims `relates_to` vanished.
-    Nothing may be removed, and the skip must be logged rather than passing silently.
+    Links are written keyed on (target_id, relation), so a pair can hold two relations and
+    the inbound removal must act on exactly the relation whose peer link vanished (ticket
+    e39f-5055-f5af-424a). The safety invariant from ticket 2b16 is unchanged and asserted
+    positively here: a record naming a relation with NO matching net-active local link — here
+    the pair holds `blocks` but the record claims `relates_to` vanished — must remove NOTHING
+    (never a link the peer still carries), must not be counted as applied, and the skip must
+    be logged rather than passing silently.
     """
     repo, a, b = two_linked_tickets
     apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
 
-    with caplog.at_level("WARNING"):
+    # Pin the level ON THE ORIGINATING LOGGER: it lives outside the `rebar` hierarchy
+    # that tests/conftest.py's propagation guard restores, so a leaked
+    # setLevel(WARNING) from an earlier full-suite test would otherwise drop this
+    # INFO record at the source and make the assertion below unreachable (bug 9ac2).
+    with caplog.at_level("INFO", logger=apply_records.logger.name):
         applied = apply_records._inbound_update_apply_links(
             {"links": [{"action": "remove", "target_id": b, "relation": "relates_to"}]}, a, repo
         )
 
     assert b in _targets(repo, a), (
-        "THE WRONG LINK WAS REMOVED. The pair's net-active relation is `blocks`, but a "
-        "`relates_to` removal record deleted it anyway — that link is still on the peer"
+        "THE WRONG LINK WAS REMOVED. The pair holds only `blocks`, but a `relates_to` "
+        "removal record deleted it anyway — that link is still on the peer"
     )
-    assert applied == 0, f"a declined removal must not be counted as applied (got {applied})"
-    assert any("relation" in r.getMessage() for r in caplog.records), (
-        "the relation-mismatch skip was silent; every defect in this family has been a silent "
-        f"success. captured={[r.getMessage() for r in caplog.records]!r}"
+    assert applied == 0, f"a no-op removal must not be counted as applied (got {applied})"
+    assert any("relates_to" in r.getMessage() for r in caplog.records), (
+        "the no-matching-relation skip was silent; every defect in this family has been a "
+        f"silent success. captured={[r.getMessage() for r in caplog.records]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# e39f — a pair holding TWO relations converges when the peer drops ONE of them
+# ---------------------------------------------------------------------------
+
+
+def _relations_of(repo: Path, source: str, target: str) -> set[str]:
+    import rebar
+
+    deps = rebar.show_ticket(source, repo_root=repo).get("deps") or []
+    return {d.get("relation") for d in deps if d.get("target_id") == target}
+
+
+@pytest.fixture
+def double_related_tickets(
+    two_linked_tickets: tuple[Path, str, str],
+) -> tuple[Path, str, str]:
+    """`a` relates_to `b` ON TOP of the existing blocks link — two net-active relations.
+
+    relates_to is linked SECOND so it is the pair's most-recent net-active link; the
+    convergence cell below removes `blocks` (the OLDER one), which is exactly the case the
+    pre-e39f pair-scoped G5 guard could only decline forever.
+    """
+    import rebar
+
+    repo, a, b = two_linked_tickets
+    rebar.link(a, b, "relates_to", repo_root=repo)
+    return repo, a, b
+
+
+def test_e39f_inbound_removal_converges_for_a_double_related_pair(
+    double_related_tickets: tuple[Path, str, str],
+) -> None:
+    """THE e39f ACCEPTANCE ORACLE: the exactly-named relation is removed, the other survives.
+
+    The pair holds blocks + relates_to and the most-recent net-active link is relates_to. The
+    peer dropped `blocks`. The pre-e39f pair-scoped guard could only DECLINE this forever
+    (the removal re-emitted and re-declined every pass — silent non-convergence). The ratified
+    contract: the apply removes exactly the mirrored (target, relation) link, leaves the
+    other relation net-active, and counts the apply so the silent-no-op canary sees it.
+    """
+    repo, a, b = double_related_tickets
+    assert _relations_of(repo, a, b) == {"blocks", "relates_to"}, (
+        "SETUP FAILED: the pair does not hold two net-active relations"
+    )
+
+    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    applied = apply_records._inbound_update_apply_links(
+        {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}, a, repo
+    )
+
+    remaining = _relations_of(repo, a, b)
+    assert "blocks" not in remaining, (
+        "NON-CONVERGENCE. The peer dropped `blocks` but the local blocks link is still "
+        f"there — the removal was declined instead of applied; remaining={sorted(remaining)}"
+    )
+    assert "relates_to" in remaining, (
+        "THE WRONG LINK WAS REMOVED. The peer still carries relates_to but the local "
+        "relates_to link is gone — relation-scoped removal must touch only the named relation"
+    )
+    assert applied == 1, (
+        f"the applier reported {applied} for one converged removal — it must be counted"
+    )
+
+
+def test_e39f_double_related_reapply_is_idempotent(
+    double_related_tickets: tuple[Path, str, str],
+) -> None:
+    """Re-applying the same relation-scoped removal is a counted-zero no-op."""
+    repo, a, b = double_related_tickets
+    apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
+    payload = {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}
+
+    apply_records._inbound_update_apply_links(payload, a, repo)
+    applied_again = apply_records._inbound_update_apply_links(payload, a, repo)
+
+    remaining = _relations_of(repo, a, b)
+    assert "blocks" not in remaining and "relates_to" in remaining, (
+        f"a repeated apply changed the outcome; remaining={sorted(remaining)}"
+    )
+    assert applied_again == 0, (
+        f"a no-op re-apply must not be counted as applied (got {applied_again})"
     )

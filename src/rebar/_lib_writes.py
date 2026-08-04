@@ -630,10 +630,10 @@ def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:
     return _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
 
 
-def unlink(id1: str, id2: str, *, repo_root=None) -> None:
+def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None:
     from rebar._commands import unlink as _unlink_cmd
 
-    _python_leaf(_unlink_cmd.unlink_core, id1, id2, repo_root=repo_root, what="unlink")
+    _python_leaf(_unlink_cmd.unlink_core, id1, id2, relation, repo_root=repo_root, what="unlink")
 
 
 def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
