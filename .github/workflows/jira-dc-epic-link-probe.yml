@@ -1,0 +1,85 @@
+name: Jira DC Epic-Link Clear Probe
+
+# A TARGETED, DETERMINISTIC probe against the pinned Jira DC harness (bug 1019, epic e369).
+#
+# THIS IS NOT THE CAPABILITY MAP AND DOES NOT RE-RUN IT. `jira-dc-capability-map.yml` is an
+# agentic Opus pass over a broad checklist whose answers are already committed in
+# docs/jira-dc-capability-map.md; re-running it to settle two narrow questions would be slow,
+# billable, and would risk churning answers that are already reviewed and landed. This job runs
+# `scripts/jira_dc_epic_link_clear_probe.py` — plain deterministic urllib, no LLM, no agent, four
+# predetermined REST calls — so it answers ONLY the two open questions and touches nothing else.
+#
+# It exists in CI rather than on a workstation because the harness image is linux/amd64-only and
+# does not boot locally (tests/external/live_jira_dc/README.md). It boots the SAME vendored,
+# digest-pinned Dockerfile the capability map and the live suite build, so its answer is about
+# the environment the suite actually runs against.
+#
+# The two questions:
+#   Q1  does clearing the Epic Link custom field take effect? (writing it is measured; clearing
+#       is not, and `set_parent`'s non-sub-task branch has no read-back, so a silent no-op there
+#       is invisible today)
+#   Q2  is `parent` present in the field inventory at all — i.e. could it ever be screened?
+#
+# `workflow_dispatch` ONLY — never push, PR, or schedule. It boots a real container and must
+# stay an explicit, on-demand authoring tool.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe-epic-link-clear:
+    name: probe the Epic Link clear (live, ephemeral)
+    runs-on: ubuntu-latest
+    # Native amd64 is a hard requirement for this harness to boot at all — see
+    # tests/external/live_jira_dc/README.md's measured arm64 findings.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # NO LLM key and NO `uv sync` are needed: the probe imports only the standard library, so
+      # the job stays cheap and cannot accidentally take a billable agentic path.
+
+      - name: Build and start the Jira DC harness
+        working-directory: tests/external/live_jira_dc
+        run: docker compose up -d --build
+
+      - name: Wait for Jira DC to become ready
+        run: |
+          ok=
+          for i in $(seq 1 240); do
+            if curl -fsS http://localhost:2990/jira/rest/api/2/serverInfo >/dev/null 2>&1; then
+              echo "Jira DC ready after ${i} tries"; ok=1; break
+            fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Jira DC harness never became ready (see tests/external/live_jira_dc/README.md)"
+            (cd tests/external/live_jira_dc && docker compose logs --tail=200)
+            exit 1
+          fi
+
+      - name: Run the Epic-Link clear probe
+        env:
+          JIRA_DC_BASE_URL: http://localhost:2990/jira
+          JIRA_DC_PROBE_OUTPUT_DIR: ${{ runner.temp }}/jira-dc-epic-link-probe
+        run: python scripts/jira_dc_epic_link_clear_probe.py
+
+      - name: Jira DC container logs on failure
+        if: failure()
+        run: cd tests/external/live_jira_dc && docker compose logs --tail=200
+
+      - name: Tear down the Jira DC harness
+        if: always()
+        run: cd tests/external/live_jira_dc && docker compose down -v
+
+      - name: Upload probe verdicts + raw evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jira-dc-epic-link-probe
+          path: ${{ runner.temp }}/jira-dc-epic-link-probe
+          if-no-files-found: error
