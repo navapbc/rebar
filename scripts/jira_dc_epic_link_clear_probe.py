@@ -64,6 +64,7 @@ def _req(path: str, *, method: str = "GET", payload: dict | None = None) -> tupl
     token = base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")
     request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "application/json")
     try:
         with urllib.request.urlopen(request, timeout=60) as resp:  # noqa: S310
             raw = resp.read().decode() or ""
@@ -87,10 +88,26 @@ def _req(path: str, *, method: str = "GET", payload: dict | None = None) -> tupl
 def _field_id(name: str) -> str | None:
     status, body = _req("/rest/api/2/field")
     if status != 200 or not isinstance(body, list):
+        # Say WHY rather than collapsing an unreachable/unauthorised instance and a genuinely
+        # absent field into the same `None`. The first probe run reported only
+        # "Epic Link=None Epic Name=None", which does not distinguish the two.
+        logger.info(
+            "  field inventory unusable: GET /rest/api/2/field -> HTTP %s, body type %s",
+            status,
+            type(body).__name__,
+        )
         return None
-    return next(
+    found = next(
         (str(f.get("id")) for f in body if isinstance(f, dict) and f.get("name") == name), None
     )
+    if found is None:
+        logger.info(
+            "  field %r absent from an inventory of %d field(s); names present: %s",
+            name,
+            len(body),
+            sorted({str(f.get("name")) for f in body if isinstance(f, dict)})[:40],
+        )
+    return found
 
 
 def _create_issue(project: str, issuetype: str, summary: str, extra: dict | None = None) -> str:
@@ -189,9 +206,7 @@ def main() -> int:
     # ── teardown + evidence ──────────────────────────────────────────────────────────────────
     _req(f"/rest/api/2/project/{key}", method="DELETE")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUT_DIR / "verdicts.json").write_text(json.dumps(verdicts, indent=2))
-    (OUT_DIR / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2))
+    _write_evidence(verdicts)
 
     logger.info("=== JIRA DC EPIC-LINK CLEAR PROBE ===")
     for k, v in verdicts.items():
@@ -200,5 +215,31 @@ def main() -> int:
     return 0
 
 
+def _write_evidence(verdicts: dict[str, str]) -> None:
+    """Persist verdicts + every recorded round trip. Safe to call on ANY exit path."""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / "verdicts.json").write_text(json.dumps(verdicts, indent=2))
+    (OUT_DIR / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    # EVIDENCE MUST SURVIVE A SETUP FAILURE. Every `PROBE SETUP FAILED` path raises SystemExit,
+    # and evidence used to be written only after the last question — so the first real run died at
+    # field discovery, uploaded nothing ("No files were found with the provided path"), and left
+    # the one artifact needed to diagnose it unwritten. A probe whose failures are undiagnosable
+    # costs a whole boot cycle per attempt, which on an amd64-only image is the expensive resource.
+    try:
+        _rc = main()
+    except SystemExit as exc:
+        _write_evidence({"aborted": str(exc)})
+        logger.info(
+            "ABORTED — wrote %d recorded round trip(s) to %s/evidence.json before exiting",
+            len(_EVIDENCE),
+            OUT_DIR,
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001 — an unexpected error is itself evidence worth keeping
+        _write_evidence({"crashed": repr(exc)})
+        logger.info("CRASHED — wrote %d round trip(s) before re-raising", len(_EVIDENCE))
+        raise
+    sys.exit(_rc)
