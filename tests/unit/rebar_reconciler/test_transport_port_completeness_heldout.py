@@ -406,7 +406,7 @@ def test_the_cloud_factory_also_asserts_conformance(monkeypatch) -> None:
         acli_subprocess,
         "resolve_jira_settings",
         lambda project_default=None: type(
-            "_S", (), {"url": "u", "user": "x", "api_token": "t", "project": "P"}
+            "_S", (), {"url": "u", "user": "x@example.com", "api_token": "t", "project": "P"}
         )(),
     )
     monkeypatch.setattr(acli, "AcliClient", _Incomplete)

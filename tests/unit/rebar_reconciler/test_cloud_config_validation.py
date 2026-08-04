@@ -1,24 +1,25 @@
 """Cloud config-validation coverage — story 2127, item 2.
 
-Two Cloud config-validation behaviours the DC transport HAS and Cloud LACKS. Both tests
-are ABSENCE-DOCUMENTING: they pin the CURRENT (permissive) Cloud behaviour and cite the
-follow-up bug that tracks closing the gap, so the divergence is a recorded decision rather
-than an undetected hole. Each has an inverse mutation-check (add the missing guard → the
-absence-doc assertion flips), recorded RED/GREEN in the change description.
+Two Cloud config-validation behaviours the DC transport HAS. Item 2a (non-https URL) is
+still ABSENCE-DOCUMENTING here; item 2b (missing credential) is now ENFORCED (bug ad85):
+``_build_jira_backend`` fails loudly at construction, at parity with DC. The absence-doc
+tests pin the CURRENT behaviour and cite the follow-up bug; each has an inverse
+mutation-check recorded RED/GREEN in the change description.
 
-  behaviour                 | DC (has it)                              | Cloud (lacks it)
+  behaviour                 | DC (has it)                              | Cloud
   --------------------------+------------------------------------------+-----------------------
   non-https base URL        | ReconcilerConfig.__post_init__ calls     | JiraConfig has NO
   rejected                  | _validate_reconciler_tls → ConfigError   | __post_init__; url is
                             | (_config_schema.py)                      | stored unvalidated
-  missing credential        | (DC PAT is required by its transport)    | _build_jira_backend
-  fails loudly              |                                          | builds an AcliClient
-                            |                                          | with EMPTY creds, no
-                            |                                          | loud failure
+                            |                                          | (absence-doc; bdb8)
+  missing/invalid credential| (DC PAT is required by its transport)    | _build_jira_backend
+  fails loudly              |                                          | raises BackendEnvError
+                            |                                          | at construction —
+                            |                                          | ENFORCED (bug ad85)
 
 Follow-up bugs (filed + linked ``discovered_from`` 2127):
-  * Cloud non-https URL not rejected  → bug bdb8-0646-9e13-4bfb
-  * Cloud missing-credential silent   → bug ad85-e5e3-be8d-4be5
+  * Cloud non-https URL not rejected  → bug bdb8-0646-9e13-4bfb (absence-doc below)
+  * Cloud missing-credential silent   → bug ad85-e5e3-be8d-4be5 (RESOLVED — enforced below)
 """
 
 from __future__ import annotations
@@ -68,42 +69,99 @@ def test_cloud_jira_config_does_not_reject_non_https_url_absence_documented() ->
 
 
 # ---------------------------------------------------------------------------
-# Item 2b — missing credential. Cloud's backend factory proceeds SILENTLY
-# (absence-documenting), building an AcliClient with empty creds.
+# Item 2b — missing credential. ENFORCED (bug ad85): Cloud's backend factory now
+# fails LOUDLY at construction (parity with DC's JIRA_PAT guard,
+# test_dc_pat_required_heldout.py) instead of silently building a doomed AcliClient
+# with empty creds. Research-approved shape: presence + minimal email-format check,
+# no live network probe.
 # ---------------------------------------------------------------------------
 
 
-def test_cloud_build_backend_with_missing_credentials_does_not_fail_loudly() -> None:
-    """ABSENCE-DOC: ``_build_jira_backend`` resolves settings via
-    ``resolve_jira_settings`` (which returns ``""`` for a missing url/user/token) and
-    constructs the ``AcliClient`` transport WITHOUT asserting the credentials are present
-    — so a wholly-unconfigured Cloud environment builds a live-looking backend that will
-    only fail later, at the first real API call, instead of failing loudly at
-    construction. Pinned as current behaviour; tracked by the follow-up bug in the module
-    docstring.
+def _stub_settings(**over: Any):
+    from rebar_reconciler.adapters.jira import acli_subprocess
 
-    MUTATION-CHECK (inverse): add a ``if not (s.url and s.user and s.api_token): raise``
-    guard to ``_build_jira_backend`` → this test's ``does not raise`` expectation flips to
-    RED, proving it measures the absence of the guard.
-    """
-    from rebar_reconciler.adapters.jira import acli_subprocess, backend
+    base = {
+        "url": "https://acme.atlassian.net",
+        "user": "you@example.com",
+        "project": "DIG",
+        "api_token": "tok",
+    }
+    base.update(over)
+    return acli_subprocess.JiraSettings(**base)
 
-    empty = acli_subprocess.JiraSettings(url="", user="", project="", api_token="")
 
-    import rebar_reconciler.adapters.jira.acli_subprocess as acli_subprocess_mod
+def _build_with_settings(monkeypatch, settings, *, forbid_client: bool = False):
+    """Drive ``_build_jira_backend`` with a stubbed ``resolve_jira_settings``. When
+    ``forbid_client`` is set, ``AcliClient`` is replaced with a sentinel that fails if
+    constructed — proving the credential guard runs BEFORE transport construction."""
+    from rebar_reconciler.adapters.jira import acli, acli_subprocess, backend
 
-    orig = acli_subprocess_mod.resolve_jira_settings
-    try:
-        acli_subprocess_mod.resolve_jira_settings = lambda **_k: empty  # type: ignore[assignment]
-        # Must NOT raise despite wholly-absent credentials — the documented gap.
-        built = backend._build_jira_backend(config=_DummyConfig())
-    finally:
-        acli_subprocess_mod.resolve_jira_settings = orig  # type: ignore[assignment]
+    monkeypatch.setattr(acli_subprocess, "resolve_jira_settings", lambda **_k: settings)
+    if forbid_client:
 
-    # A backend was constructed; its transport carries the empty credentials verbatim.
-    assert built.transport.jira_url == ""
-    assert built.transport.user == ""
-    assert built.transport.api_token == ""
+        def _never(**_k):
+            raise AssertionError("AcliClient was constructed — the guard did not run first")
+
+        monkeypatch.setattr(acli, "AcliClient", _never)
+    return backend._build_jira_backend(config=_DummyConfig())
+
+
+@pytest.mark.parametrize("field", ["url", "user", "api_token"])
+@pytest.mark.parametrize("bad", ["", "   ", "\t\n"], ids=["empty", "whitespace", "blank"])
+def test_cloud_build_backend_missing_credential_fails_loudly(monkeypatch, field, bad) -> None:
+    """ENFORCEMENT (bug ad85): a missing OR whitespace-only ``JIRA_URL`` / ``JIRA_USER`` /
+    ``JIRA_API_TOKEN`` makes ``_build_jira_backend`` raise ``BackendEnvError`` at
+    construction — naming the missing var and the anonymous-access consequence — instead of
+    building an ``AcliClient`` with empty creds that only fails at the first API call. The
+    guard runs BEFORE the transport is constructed (``forbid_client``)."""
+    from rebar_reconciler._backend import BackendEnvError
+
+    env_names = {"url": "JIRA_URL", "user": "JIRA_USER", "api_token": "JIRA_API_TOKEN"}
+    settings = _stub_settings(**{field: bad})
+    with pytest.raises(BackendEnvError) as excinfo:
+        _build_with_settings(monkeypatch, settings, forbid_client=True)
+    message = str(excinfo.value)
+    assert env_names[field] in message, f"error must name the missing var: {message!r}"
+    assert "anonymous" in message.lower(), f"error must name the anonymous fallback: {message!r}"
+
+
+def test_cloud_build_backend_names_every_missing_credential(monkeypatch) -> None:
+    """All three absent → ONE message names ALL of them (no fix-one-rerun loop), mirroring
+    DC's single-message guard."""
+    from rebar_reconciler._backend import BackendEnvError
+
+    settings = _stub_settings(url="", user="", api_token="")
+    with pytest.raises(BackendEnvError) as excinfo:
+        _build_with_settings(monkeypatch, settings, forbid_client=True)
+    message = str(excinfo.value)
+    for name in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
+        assert name in message, f"{name} not named in {message!r}"
+
+
+@pytest.mark.parametrize("user", ["admin", "not-an-email", "@no-local.example", "no-domain@"])
+def test_cloud_build_backend_non_email_user_fails_loudly(monkeypatch, user) -> None:
+    """Cloud authenticates with the Atlassian account EMAIL as the Basic-auth username
+    (jira.js's hard-won lesson); a bare handle/accountId silently 401s. A present-but-not-
+    an-email ``JIRA_USER`` raises ``BackendEnvError`` naming ``JIRA_USER``."""
+    from rebar_reconciler._backend import BackendEnvError
+
+    settings = _stub_settings(user=user)
+    with pytest.raises(BackendEnvError) as excinfo:
+        _build_with_settings(monkeypatch, settings, forbid_client=True)
+    assert "JIRA_USER" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "user",
+    ["you@example.com", "a.b+tag@sub.example.com", "First.Last@team.atlassian.net"],
+)
+def test_cloud_build_backend_accepts_valid_email(monkeypatch, user) -> None:
+    """A valid account email — including ``+tag`` subaddressing and subdomains — is
+    ACCEPTED. Guards against an over-strict email check that rejects valid addresses (the
+    documented email-validation trap)."""
+    built = _build_with_settings(monkeypatch, _stub_settings(user=user))
+    assert built.transport.user == user
+    assert built.transport.api_token == "tok"
 
 
 class _DummyConfig:
