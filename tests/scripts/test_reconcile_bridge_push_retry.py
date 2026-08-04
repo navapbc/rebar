@@ -185,6 +185,7 @@ def test_push_loop_converges_under_contention(bridge: dict) -> None:
     # The bound is deliberately loose (an order of magnitude over the ~3s real cost, and
     # well under the >=30s any exponential variant needs) so it cannot flake on a slow
     # runner while still failing outright if the backoff returns.
+    # timing: hang-guard — backoff-return guard; 10x over the ~3s cost
     assert elapsed < 20.0, (
         f"the loop took {elapsed:.1f}s for {COMPETITOR_PUSHES} contended attempts. After a "
         "clean merge HEAD is already fast-forwardable, so a growing sleep can only forfeit "

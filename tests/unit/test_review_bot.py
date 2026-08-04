@@ -1707,6 +1707,7 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
     except (asyncio.TimeoutError, TimeoutError):
         pass  # the safety net fired — elapsed asserted below turns a hang into a fast failure
     elapsed = time.monotonic() - start
+    # timing: hang-guard — shutdown-hang guard; unbounded lifespan cancel is the c2ba failure mode
     assert elapsed < 2.0, (
         f"review-bot shutdown took {elapsed:.2f}s — the lifespan cancel/await is not bounded; "
         "a background task slow to honor cancellation hangs shutdown (c2ba AC2)."

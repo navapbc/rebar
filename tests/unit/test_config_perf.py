@@ -11,7 +11,6 @@ wall-clock-flaky), plus one generous warm-resolution budget as a smoke guard.
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -183,19 +182,46 @@ def test_deep_tree_walk_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert all(str(p) in str(q) for q in parsed)
 
 
-def test_warm_resolution_is_cheap(tmp_path: Path) -> None:
-    """Smoke budget: 1000 warm resolutions complete well under a generous ceiling
-    (cache hits are dictionary lookups, not filesystem walks)."""
+def test_warm_resolution_is_cheap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Warm resolutions never re-enter the miss path: 1000 warm load_config calls
+    make ZERO _ordered_layers walks (cache hits are dictionary lookups, not
+    filesystem walks). Counting proxy, not a wall-clock budget — the previous
+    `assert elapsed < 5.0` was the CI flake class under runner contention
+    (bug 19d7: a 0.5s ceiling flaked at ~0.50-0.51s under load)."""
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[sync]\npush = 'async'\n", encoding="utf-8")
     cfg.load_config(root=p)  # warm the cache
-    start = time.perf_counter()
+    walks: list[object] = []
+    real_walk = cfg._ordered_layers
+
+    def counting_walk(*args: object, **kwargs: object) -> object:
+        walks.append(args)
+        return real_walk(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cfg, "_ordered_layers", counting_walk)
     for _ in range(1000):
         cfg.load_config(root=p)
-    elapsed = time.perf_counter() - start
-    # Generous smoke ceiling: warm resolves are dict lookups (~10ms for 1000; ~0.5s
-    # even on a loaded CI runner). A GROSS regression — a broken cache doing a per-resolve
-    # filesystem walk up a 40-deep tree — would take many seconds, so 5s catches the real
-    # failure while tolerating CI wall-clock variance (bug 19d7: a 0.5s ceiling flaked at
-    # ~0.50–0.51s under load across py3.11/3.12/3.13).
-    assert elapsed < 5.0
+    assert walks == []  # every resolve was a _RESULT_CACHE hit
+
+
+def test_warm_resolution_proxy_detects_cache_regression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression simulation proving the proxy's teeth: with the result cache
+    cleared per call (a broken cache doing per-resolve filesystem walks), the
+    same spy goes loud — so the GREEN assert above genuinely discriminates."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[sync]\npush = 'async'\n", encoding="utf-8")
+    cfg.load_config(root=p)
+    walks: list[object] = []
+    real_walk = cfg._ordered_layers
+
+    def counting_walk(*args: object, **kwargs: object) -> object:
+        walks.append(args)
+        return real_walk(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cfg, "_ordered_layers", counting_walk)
+    for _ in range(10):
+        cfg.reset_config_cache()  # simulate the cache never holding
+        cfg.load_config(root=p)
+    assert len(walks) == 10  # the miss path fires every call once the cache is broken

@@ -45,6 +45,7 @@ def test_write_reclaims_dead_owner_lock_promptly(rebar_repo: Path):
     elapsed = time.monotonic() - t0
 
     # Before the fix this blocked the full write budget (~60s) then failed.
+    # timing: hang-guard — stall detector; 15s dwarfs the sub-second reclaim
     assert elapsed < 15.0, f"write blocked on the orphaned lock: {elapsed:.1f}s"
     bodies = [c["body"] for c in rebar.show_ticket(tid, repo_root=str(rebar_repo))["comments"]]
     assert "written past the stale lock" in bodies

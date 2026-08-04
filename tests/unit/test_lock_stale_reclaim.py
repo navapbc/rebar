@@ -124,6 +124,7 @@ def test_acquire_fcntl_unexpected_errno_raises_immediately(tmp_path, monkeypatch
     with pytest.raises(OSError) as exc:
         _lock._acquire_fcntl(lock_path, deadline)
     assert exc.value.errno == _errno.ENOLCK
+    # timing: hang-guard — deadline-wait guard; 1s vs the 30s deadline the bug waited out
     assert _time.monotonic() - t0 < 1.0, "must surface immediately, not wait out the deadline"
 
 

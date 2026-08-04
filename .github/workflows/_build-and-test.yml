@@ -137,6 +137,14 @@ jobs:
       - name: raw-git-write gate
         run: python scripts/check_raw_git_writes.py
 
+      # Wall-clock-assert gate (ticket 1e95): upper-bound wall-clock asserts in
+      # tests are the proven CI flake class under runner contention (19d7, 5e94,
+      # edfe, 85c3). Prefer counting/structural proxies; a deliberate stuck-run
+      # guard carries `# timing: hang-guard — <reason>`, and perf-lane tests use
+      # the skipif-CI guard (the bare benchmark marker still runs on CI).
+      - name: wall-clock-assert gate
+        run: python scripts/check_wall_clock_asserts.py
+
   pip-audit:
     # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
     # installed dependency closure against the PyPI advisory / OSV database and

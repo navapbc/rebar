@@ -146,6 +146,7 @@ def test_boot_budget_skips_promptly_when_the_lock_is_held(
         held.release()
 
     assert outcomes == [], "a contended sweep must skip, not partially run"
+    # timing: hang-guard — lock-wait guard; a contended sweep must skip instantly
     assert elapsed < 30, f"boot sweep waited {elapsed:.1f}s — nowhere near a few seconds"
     assert any("skipping sweep" in r.getMessage() for r in caplog.records), "skip not logged"
 

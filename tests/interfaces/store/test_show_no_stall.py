@@ -45,6 +45,7 @@ def test_ensure_fresh_does_not_stall_on_held_write_lock(repo_with_origin_tickets
         reads.ensure_fresh(str(tracker))  # the read-path freshness step
         elapsed = time.monotonic() - t0
         # Before the fix this blocked ~15s on the held lock; a read must not stall.
+        # timing: hang-guard — stall detector; 8s dwarfs the ms-scale read, pre-fix hang was ~15s
         assert elapsed < 8.0, f"ensure_fresh stalled on the held lock: {elapsed:.1f}s"
     finally:
         release.set()
