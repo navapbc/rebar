@@ -173,6 +173,7 @@ def test_stalled_server_trips_read_timeout_under_run_sync(_dummy_anthropic_key):
     # aborted BEFORE the server's 5s stall (generous headroom for slow/loaded CI runners —
     # connection + SDK overhead, not the read window, dominates wall-time).
     assert any(isinstance(e, httpx.ReadTimeout) for e in _exc_chain(exc_info.value))
+    # timing: hang-guard — abort-before-stall proof; the 5s server stall is the failure mode
     assert elapsed < 4.5  # aborted at ~read timeout, well before the 5s stall
 
 
@@ -213,6 +214,7 @@ def test_slow_but_alive_server_completes_under_read_timeout(_dummy_anthropic_key
     # timeout is PER-READ (the server answers each read within 0.15s), it does not bound total
     # wall-time, which is dominated by connection + SDK + agent-loop overhead (~2s on loaded CI).
     assert "ALIVE" in str(result.output)
+    # timing: hang-guard — stuck-run guard; 20s dwarfs the ~1s happy path
     assert elapsed < 20  # generous hang-guard only (a stuck run would blow this)
 
 
@@ -246,6 +248,7 @@ def test_tool_timeout_cancels_an_async_tool():
         elapsed = time.monotonic() - t0
     finally:
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+    # timing: hang-guard — cancellation proof; the 5s sleep is the failure mode
     assert elapsed < 2.0  # cancelled well before the 5s sleep
     assert "done" in str(result.output)  # the run recovered, not aborted
 

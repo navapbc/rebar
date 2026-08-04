@@ -490,6 +490,7 @@ def test_run_repair_does_not_hold_a_lock_that_blocks_its_own_writes(
     assert findings[0]["repair_status"] == "repaired", findings[0]
     assert "flock" not in str(findings[0].get("repair_reason") or ""), findings[0]
     # The pre-fix code spent a full 60s lock timeout here before failing.
+    # timing: hang-guard — self-contention guard; 30s dwarfs the ~1s repair
     assert elapsed < 30, f"run_repair took {elapsed:.1f}s — it is contending with itself"
     assert not graph._is_active_link("epic-e", "story-s", "depends_on", str(tracker))
 

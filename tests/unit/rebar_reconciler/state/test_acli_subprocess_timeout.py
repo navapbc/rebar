@@ -126,6 +126,7 @@ def test_grandchild_process_group_reaped(tmp_path):
         )
     elapsed = time.monotonic() - start
     # call_timeout(1) + GRACE(1) + DRAIN(1) with headroom.
+    # timing: hang-guard — reap-hang guard; 10s dwarfs the 0.2s grace window
     assert elapsed < 10, f"reap took too long: {elapsed:.1f}s"
 
     # The grandchild wrote its PID; its process group must be gone. Poll, because
