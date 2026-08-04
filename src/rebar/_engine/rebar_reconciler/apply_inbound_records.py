@@ -544,20 +544,25 @@ def _inbound_update_apply_comments(payload, tracker_dir, local_id, written) -> N
 
 
 def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
-    """Mirror a peer link DELETION locally via ``rebar.unlink``. G5-gated (ticket 2b16).
+    """Mirror a peer link DELETION locally via a RELATION-SCOPED ``rebar.unlink``.
 
-    **G5 RELATION MATCH.** ``rebar.unlink(id1, id2, *, repo_root=None)`` takes NO relation
-    argument, and that is deliberate: ``_commands/unlink.py``'s usage text says "pair-scoped, NO
-    relation arg; removes the most-recent link between the pair", and ``_get_link_info`` returns
-    the most recent NET-ACTIVE link for the target. So when a pair holds more than one active
-    relation and the peer dropped only one, a naive unlink removes THE WRONG ONE — a link the
-    peer still carries. We therefore ask ``_get_link_info`` (the very function ``unlink_core``
-    will consult) what it would remove, and decline unless that relation is the one whose peer
-    link vanished. Reusing that function rather than re-deriving the answer from ``deps`` order
-    is what keeps this prediction and the subsequent write from ever disagreeing.
+    **G5, relation-scoped (tickets 2b16 → e39f).** Links are written keyed on
+    ``(target_id, relation)`` (``graph/_links.add_dependency``), so a pair can hold more than
+    one active relation. The original G5 guard could only DECLINE when the pair's most-recent
+    net-active relation was not the one whose peer link vanished — ``rebar.unlink`` was
+    pair-scoped, so unlinking would have removed a link the peer still carries. That decline
+    was permanent: the removal re-emitted and re-declined every pass, so a double-related
+    pair never converged (bug e39f). ``rebar.unlink`` now accepts the relation, so we remove
+    exactly the mirrored ``(target, relation)`` link and the pair converges. The G5 safety
+    invariant is unchanged and now structural: a removal can never touch a relation the
+    record did not name, and when the named relation has NO net-active local link the
+    removal is a logged no-op. We still ask ``_get_link_info`` (the very function
+    ``unlink_core`` will consult, with the same relation narrowing) before writing, so the
+    no-op case is detected without an exception and the prediction and the subsequent write
+    can never disagree.
 
     Returns True only when an UNLINK was actually written, so the caller's count feeds the
-    silent-no-op canary (``apply_handlers.py``) truthfully. Every decline is LOGGED: this defect
+    silent-no-op canary (``apply_handlers.py``) truthfully. Every skip is LOGGED: this defect
     class has been silent every time, so a skip that reports nothing is not acceptable.
     """
     import rebar
@@ -565,7 +570,7 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
     from rebar._commands.unlink import _get_link_info
 
     try:
-        link_uuid, net_relation = _get_link_info(tracker_dir(repo_root) / local_id, target_local_id)
+        link_uuid, _ = _get_link_info(tracker_dir(repo_root) / local_id, target_local_id, relation)
     except Exception as exc:  # noqa: BLE001 — fail-open: decline the removal, never guess
         logger.warning(
             "_apply_inbound_update: cannot resolve the net-active link %s -> %s, "
@@ -578,29 +583,21 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
         return False
 
     if not link_uuid:
-        # Already gone (a re-applied record, or a local unlink beat us). Not an error.
+        # Already gone, or the pair holds only OTHER relations (a re-applied record, or a
+        # local unlink beat us). Removing nothing is exactly right — never remove a link
+        # the peer still carries (G5) — but never silently.
         logger.info(
-            "_apply_inbound_update: no active link %s -> %s; inbound removal of %s is a no-op",
+            "_apply_inbound_update: no active %s link %s -> %s; the inbound removal of "
+            "relation %s is a no-op (any other relation the pair holds is untouched)",
+            relation,
             local_id,
             target_local_id,
             relation,
-        )
-        return False
-
-    if net_relation != relation:
-        logger.warning(
-            "_apply_inbound_update: DECLINING the inbound removal of %s -> %s: the peer dropped "
-            "relation %r but the pair's net-active relation is %r, and rebar.unlink is "
-            "pair-scoped, so unlinking would remove a link the peer still has (G5)",
-            local_id,
-            target_local_id,
-            relation,
-            net_relation,
         )
         return False
 
     try:
-        rebar.unlink(local_id, target_local_id, repo_root=repo_root)
+        rebar.unlink(local_id, target_local_id, relation, repo_root=repo_root)
         return True
     except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
         logger.warning(

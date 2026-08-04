@@ -437,7 +437,7 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<
 ### `unlink`
 
 ```
-Usage: rebar unlink <source> <target>   (no relation arg; removes the most-recent link between the pair — call repeatedly for multiple)
+Usage: rebar unlink <source> <target> [relation]   (no relation: removes the most-recent link between the pair — call repeatedly for multiple; with relation: removes exactly that relation's link, leaving the pair's other relations)
 ```
 
 ### `untag`

@@ -18,7 +18,12 @@ from rebar.graph._graph import (
     check_would_create_cycle,
 )
 from rebar.graph._hierarchy import compute_archive_eligible, resolve_hierarchy_link
-from rebar.graph._links import CyclicDependencyError, _is_active_link, add_dependency
+from rebar.graph._links import (
+    CyclicDependencyError,
+    _is_active_link,
+    add_dependency,
+    remove_dependency,
+)
 from rebar.graph._loader import reduce_ticket
 
 # Backward-compat aliases (tests access these directly).
@@ -33,6 +38,7 @@ __all__ = [
     "compute_archive_eligible",
     "CyclicDependencyError",
     "add_dependency",
+    "remove_dependency",
     "reduce_ticket",
     "_is_active_link",
     "_find_direct_blockers",
