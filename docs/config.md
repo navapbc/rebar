@@ -239,6 +239,13 @@ id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard â€
 url     = ""   # env JIRA_URL
 user    = ""   # env JIRA_USER
 project = ""   # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
+# Workflow status names the Cloud absence-probe treats as "resolved / out of the working
+# set" (parity with [reconciler].resolved_statuses on DC). Defaults to Cloud/DIG's own
+# names, so a stock tenant needs no config; set it when your workflow names its resolved
+# states differently (e.g. "Closed"/"Complete") so those issues classify PRESENT_RESOLVED
+# rather than PRESENT_FILTERED. An empty list falls back to the default. env (auto-derived)
+# REBAR_JIRA_RESOLVED_STATUSES.
+resolved_statuses = ["Resolved", "Done", "Cancelled"]
 ```
 
 The SECRET `JIRA_API_TOKEN` stays env-only â€” never a config key (see Secrets).

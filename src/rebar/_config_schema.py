@@ -443,6 +443,14 @@ class JiraConfig:
     url: str = ""
     user: str = ""
     project: str = ""
+    # Workflow status names the Cloud absence-probe treats as "resolved / out of the
+    # working set" (story e34a). Mirrors DC's reconciler.resolved_statuses so a Cloud
+    # tenant whose workflow names its resolved states non-standardly (e.g. "Closed",
+    # "Complete") classifies a still-present resolved issue as PRESENT_RESOLVED — not
+    # PRESENT_FILTERED — without a code change. Defaults to Cloud/DIG's own configured
+    # names, so a stock tenant is unaffected. Consumed by adapters/jira/probe.py; env
+    # override REBAR_JIRA_RESOLVED_STATUSES is auto-derived from this field.
+    resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
 
 
 @dataclass
@@ -636,6 +644,7 @@ _SECTIONS: dict[str, dict] = {
         "url": lambda v, k: _as_str(v, k),
         "user": lambda v, k: _as_str(v, k),
         "project": lambda v, k: _as_str(v, k),
+        "resolved_statuses": lambda v, k: _as_str_list(v, k),
     },
     "scratch": {"base_dir": lambda v, k: _as_str(v, k)},
     "tracker": {
