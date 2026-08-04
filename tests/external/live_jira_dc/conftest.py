@@ -502,16 +502,29 @@ def _assert_project_capabilities(key: str) -> None:
         if isinstance(issue_type, dict)
     ]
     ambiguous = sorted({name for name in offered_names if offered_names.count(name) > 1})
-    instance_wide = [
-        (str(f.get("id")), str(f.get("name")))
-        for f in fields
-        if isinstance(f, dict) and str(f.get("name")) in set(_REQUIRED_ISSUE_TYPES)
-    ]
-    if instance_wide:
-        print(
-            f"[2e47-issue-type-evidence] project {key} offers {sorted(set(offered_names))}; "
-            f"instance-wide entries matching the required names: {instance_wide}"
-        )
+    # The instance-wide issue-type inventory, for the record. This reads
+    # ``/rest/api/2/issuetype`` — NOT the field inventory. The first version of this filtered
+    # ``fields`` (which is ``/rest/api/2/field``) against issue-type NAMES, so it could never
+    # match and the evidence line silently never printed: a broken record that looked like a
+    # clean one, which is the same class of defect as bug 59b2's vacuous assertions.
+    it_status, all_types = _request("/rest/api/2/issuetype")
+    instance_wide = (
+        [
+            (str(t.get("id")), str(t.get("name")))
+            for t in all_types
+            if isinstance(t, dict) and str(t.get("name")) in set(_REQUIRED_ISSUE_TYPES)
+        ]
+        if it_status == 200 and isinstance(all_types, list)
+        else []
+    )
+    # Printed UNCONDITIONALLY, including the empty case: "no instance-wide duplicates found" is
+    # itself the evidence 2e47's criterion asks for, and a conditional print cannot distinguish
+    # "nothing to report" from "the query failed".
+    print(
+        f"[2e47-issue-type-evidence] project {key} offers {sorted(set(offered_names))}; "
+        f"instance-wide entries matching {list(_REQUIRED_ISSUE_TYPES)} "
+        f"(GET /rest/api/2/issuetype -> HTTP {it_status}): {instance_wide}"
+    )
     if ambiguous:
         raise AssertionError(
             f"PROVISIONING FAILED: scratch project {key} offers the issue-type name(s) "
