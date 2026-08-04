@@ -42,6 +42,28 @@ def is_ticket_entry(name: str) -> bool:
     return not name.startswith(".")
 
 
+def derive_rename_target(project_key: str) -> str:
+    """A project key to rename ``project_key`` TO, guaranteed never to equal it (bug d582).
+
+    The rekey cell needs a target key that differs from the source; it previously appended a
+    fixed ``"Z"`` to the truncated key, which returns the SOURCE KEY UNCHANGED whenever the key
+    already ends in ``Z``. Harness keys are ``RBJ`` + 4 random uppercase letters
+    (``conftest._random_project_key``), so that collided on roughly 1 run in 26 — observed on a
+    harness run that drew ``RBJDRDZ`` and failed the cell's own setup assertion (bug
+    d582-fd5a-7ece-4c32, which records the run id and the raw failure).
+
+    The fix is structural rather than defensive: pick a final character that DIFFERS from the
+    current one, so no draw can collide. ``Y`` is the alternate precisely because the only key
+    a ``Z`` swap cannot serve is one already ending in ``Z``.
+
+    The result satisfies Jira's project-key rules for any harness-generated key: it is the same
+    length as the input (>= 4), stays uppercase A-Z, and keeps the input's leading letter.
+    """
+    replacement = "Y" if project_key.endswith("Z") else "Z"
+    stem = project_key[:-1] if len(project_key) >= 4 else project_key
+    return f"{stem}{replacement}"
+
+
 def live_jira_ready() -> bool:
     import urllib.error
     import urllib.request
