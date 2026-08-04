@@ -502,6 +502,43 @@ def test_voter_casts_max_on_pass(monkeypatch, tmp_path):
     assert store.already_voted("rebar~main~Iabc", "rev1") is True
 
 
+def test_artifact_store_failure_after_vote_keeps_vote_and_returns_normally(monkeypatch, tmp_path):
+    """A post-vote store outage is observable but cannot undo or fail the Gerrit vote."""
+    import rebar
+    from rebar.review_bot import artifact_emit
+
+    _patch_review(monkeypatch, [])
+    g = FakeGerrit()
+    store = DedupStore(str(tmp_path / "v.db"))
+    order: list[str] = []
+
+    original_post_vote = g.post_vote
+
+    def _record_vote(*args, **kwargs):
+        result = original_post_vote(*args, **kwargs)
+        order.append("vote")
+        return result
+
+    def _fail_store_write(*args, **kwargs):
+        assert g.votes
+        order.append("artifact_failure")
+        raise RuntimeError("injected tickets-store write failure")
+
+    monkeypatch.setattr(g, "post_vote", _record_vote)
+    monkeypatch.setattr(rebar, "list_tickets", lambda *args, **kwargs: [])
+    monkeypatch.setattr(rebar, "create_ticket", _fail_store_write)
+    monkeypatch.setattr(artifact_emit, "_publish_artifact_emit_error_metric", lambda: None)
+
+    result = asyncio.run(
+        voter.review_and_vote(_event(), config=_cfg(tmp_path), gerrit=g, dedup=store)
+    )
+
+    assert order == ["vote", "artifact_failure"]
+    assert result["status"] == "voted"
+    assert len(g.votes) == 1
+    assert store.already_voted("rebar~main~Iabc", "rev1") is True
+
+
 def test_voter_casts_block_on_blocking_finding(monkeypatch, tmp_path):
     _patch_review(monkeypatch, [{"severity": "critical", "dimension": "sec", "detail": "rce"}])
     g = FakeGerrit()
