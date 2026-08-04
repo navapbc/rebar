@@ -166,6 +166,17 @@ class BindingStore:
         self._get_rotation = get_rotation.load(self._get_rotation_path)
         get_rotation.merge_legacy(self._get_rotation, self._data["bindings"])
         self._retired: set[str] = self._load_retired()
+        # Bug 3b5f: the reverse of the retired file — {local_id: jira_key} — so the
+        # outbound differ can ask "was THIS local ticket's pairing confirmed-deleted?"
+        # without re-reading the file once per unbound ticket per pass. Kept in
+        # lock-step with ``_retired`` by ``_retire`` / ``unretire``. A legacy
+        # list-form retired file carries no local_ids, so this degrades to empty —
+        # fail-open, matching ``_load_retired``.
+        self._retired_locals: dict[str, str] = {
+            str(entry["local_id"]): key
+            for key, entry in self._retired_entries().items()
+            if isinstance(entry, dict) and entry.get("local_id")
+        }
 
     # -- persistence -------------------------------------------------------
 
@@ -572,6 +583,7 @@ class BindingStore:
         }
         self._save_retired(retired_entries)
         self._retired.add(jira_key)
+        self._retired_locals[local_id] = jira_key
         # Remove the live binding (reversible: the entry survives in the
         # retired file and the live binding can be re-created on recovery).
         self._data["bindings"].pop(local_id, None)
@@ -612,6 +624,77 @@ class BindingStore:
     def is_retired(self, jira_key: str) -> bool:
         """Return True if the key has been soft-deleted (retired)."""
         return jira_key in self._retired
+
+    # -- tombstones: the local-side view of retirement (bug 3b5f) -----------
+
+    def retired_key_for_local(self, local_id: str) -> str | None:
+        """The retired ``jira_key`` this local ticket was last bound to, or ``None``.
+
+        The reverse of ``is_retired``, which is keyed by ``jira_key`` and therefore
+        cannot answer the question the unbound-create arm needs to ask: retirement
+        UNBINDS the local ticket (``_retire`` pops it from both ``bindings`` and
+        ``reverse``), so by the time the differ sees it there is no live key to look
+        up — only this tombstone distinguishes "was paired with a confirmed-deleted
+        issue" from "never bound at all".
+        """
+        key = self._retired_locals.get(local_id)
+        return key if key is not None and key in self._retired else None
+
+    def is_retired_local(self, local_id: str) -> bool:
+        """True when this local ticket's former Jira pairing was retired (3b5f)."""
+        return self.retired_key_for_local(local_id) is not None
+
+    def unretire(self, jira_key: str) -> bool:
+        """Lift a tombstone: drop ``jira_key`` from the retired set AND file (3b5f).
+
+        The documented route back from a tombstone. After this call the local ticket
+        is ordinary unbound work again, so the next pass's outbound differ creates a
+        fresh Jira issue for it — without this, suppressing the create would be a
+        permanent, undocumented dead end escapable only by hand-editing
+        ``.bridge_state/bindings-retired.json``.
+
+        Returns True when a tombstone was actually lifted; False (a no-op) when the
+        key was not retired, so the call is idempotent.
+        """
+        retired_entries = self._retired_entries()
+        entry = retired_entries.pop(jira_key, None)
+        if entry is None and jira_key not in self._retired:
+            return False
+        self._save_retired(retired_entries)
+        self._retired.discard(jira_key)
+        for local_id, key in list(self._retired_locals.items()):
+            if key == jira_key:
+                del self._retired_locals[local_id]
+        self._alert(
+            key=f"binding-unretired:{jira_key}",
+            record={
+                "kind": "binding-unretired",
+                "jira_key": jira_key,
+                "local_id": (entry or {}).get("local_id", ""),
+            },
+        )
+        return True
+
+    def note_create_suppressed(self, local_id: str, jira_key: str) -> None:
+        """Record that a tombstone suppressed an outbound CREATE (3b5f).
+
+        A suppression is work NOT done, so it must be loud: a silently-skipped
+        create looks identical to a healthy steady state. The alert names the route
+        back so the operator does not have to hand-edit retired state.
+        """
+        self._alert(
+            key=f"outbound-create-suppressed:{local_id}",
+            record={
+                "kind": "outbound-create-suppressed",
+                "local_id": local_id,
+                "jira_key": jira_key,
+                "reason": (
+                    f"Jira issue {jira_key} was confirmed deleted (404 to grace) and the "
+                    f"binding retired; a deleted issue is never re-created."
+                ),
+                "remedy": f"BindingStore.unretire({jira_key!r}) to re-enable creation",
+            },
+        )
 
     # -- recovery ----------------------------------------------------------
 

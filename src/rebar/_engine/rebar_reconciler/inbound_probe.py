@@ -16,6 +16,18 @@ This module holds ONLY the vendor-neutral vocabulary (``ProbeBranch``, ``ProbeRe
 ``ProbeConfigError``); the Jira mechanics live in ``adapters/jira/probe.py``. It stays
 at the package root (loaded by filename elsewhere) and MUST NOT import anything from
 ``adapters.jira``.
+
+DORMANT (bug 3b5f). This vocabulary and the ``SupportsAbsenceProbe`` capability that
+returns it currently have NO consumer: the only producer of ``(inbound, probe)``
+mutations could never fire from the real call site and was removed, along with the
+dispatch arm and the router. They are kept deliberately rather than deleted, because
+removing the DC adapter's ``probe_remote`` would remove DC's only import of the shared
+``classify_probe_response``, leaving that classifier Cloud-only and weakening epic
+``e369``'s AC5 (one implementation in ``jira_family`` imported by BOTH backends).
+Trading an epic-level AC to delete a dormant Protocol is a separate decision; see the
+follow-up ticket ``f020-0960-2c42-4d61`` and ADR 0028's corrected Consequences. Deletion detection
+itself is NOT dormant — it lives outbound, in ``outbound_differ._safe_get_issue`` +
+``binding_walk``.
 """
 
 from __future__ import annotations

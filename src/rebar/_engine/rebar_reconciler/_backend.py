@@ -508,8 +508,12 @@ class SupportsIncremental(Protocol):
 class SupportsAbsenceProbe(Protocol):
     """A backend that can probe a remote item that vanished from the working set.
 
-    Core dispatches an (inbound, probe) Mutation only when ``isinstance(backend,
-    SupportsAbsenceProbe)``; a backend that does not implement this is never asked.
+    DORMANT (bug 3b5f): no caller remains. Core used to dispatch an (inbound, probe)
+    Mutation through this capability, but that mutation's only producer could never fire
+    from the real call site, so the producer, the dispatch arm and the router were
+    removed. The capability is retained because removing DC's ``probe_remote`` would
+    leave the shared ``classify_probe_response`` imported by Cloud alone, weakening epic
+    ``e369``'s AC5. See ``inbound_probe.py`` and ADR 0028.
     """
 
     def probe_remote(self, remote_id: str) -> Any:

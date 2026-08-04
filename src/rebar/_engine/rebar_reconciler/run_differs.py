@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """run_differs.py — the diff phase of a reconcile pass, extracted from reconcile.py.
 
-``run_differs(ctx, route_inbound_probe)`` is the single ``reconcile_once`` phase
-that was previously the in-file ``_run_differs`` helper. It runs the structural
-invariants, the legacy snapshot diff, the inbound-probe dispatch, the outbound
-differ (with OutboundMutation -> typed Mutation conversion), and the binding-aware
-inbound differ (with InboundMutation -> typed Mutation conversion), accumulating the
-typed-Mutation list onto the shared ``_PassContext`` (``ctx.mutations``).
+``run_differs(ctx)`` is the single ``reconcile_once`` phase that was previously the
+in-file ``_run_differs`` helper. It runs the structural invariants, the legacy
+snapshot diff, the outbound differ (with OutboundMutation -> typed Mutation
+conversion), and the binding-aware inbound differ (with InboundMutation -> typed
+Mutation conversion), accumulating the typed-Mutation list onto the shared
+``_PassContext`` (``ctx.mutations``).
+
+Bug 3b5f removed the inbound-probe dispatch phase: its only producer
+(``differ._compute_mutations_emit_absent_partner_probes``) could never fire from this
+call site, which passes a FETCHED Jira snapshot as ``local_state``. Deletion-vs-aged-out
+discrimination lives on the outbound side instead (``outbound_differ._safe_get_issue``
+and ``binding_walk``), which ADR 0028 L16 makes the owner of retirement.
 
 Loader convention: like every sibling in this package, run_differs loads its own
-siblings (``mutation.py`` / ``inbound_probe.py``) by file path via the local
-``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves both
-under the real package and when a single module is loaded standalone in tests. It
-holds NO back-edge to reconcile.py: the probe router (``route_inbound_probe``,
-which now lives in ``reconcile_helpers.py`` and is re-exported by reconcile.py as a
-separately-tested public surface) is passed
-in as a parameter, and ``ctx`` is typed loosely to avoid importing ``_PassContext``.
+siblings (``mutation.py``) by file path via the local ``_load`` helper
+(``importlib.util.spec_from_file_location``), so it resolves both under the real
+package and when a single module is loaded standalone in tests. It holds NO back-edge
+to reconcile.py: ``ctx`` is typed loosely to avoid importing ``_PassContext``.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import importlib.util
 import json
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -201,8 +204,8 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
         return None
 
 
-def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) -> None:
-    """Diff phase: invariants + the legacy snapshot diff + inbound-probe dispatch +
+def run_differs(ctx: Any) -> None:
+    """Diff phase: invariants + the legacy snapshot diff +
     the outbound differ (with OM->Mutation conversion) + the binding-aware inbound
     differ (with IM->Mutation conversion). Accumulates the typed-Mutation list.
 
@@ -219,8 +222,7 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     suppression in the same change.
 
     ``ctx`` is the shared ``reconcile._PassContext`` (typed loosely as ``Any`` so
-    this module holds no import edge back to reconcile.py). ``route_inbound_probe``
-    is reconcile.py's probe router, injected as a parameter for the same reason.
+    this module holds no import edge back to reconcile.py).
 
     A thin orchestrator over the named ``_run_differs_*`` phase helpers, each of
     which captures one cohesive stage of the former inline body VERBATIM.
@@ -244,12 +246,10 @@ def run_differs(ctx: Any, route_inbound_probe: Callable[..., list[Any] | None]) 
     mutations = drop_snapshot_differ_local_state_emissions(mutations)
 
     _run_differs_report_schema_drift(mutations, skip_invariant_filing, ctx.invariants_mod)
-    # Ticket 4af8/aff0: obtain the configured backend ONCE and thread its role Protocols
+    # Ticket 4af8: obtain the configured backend ONCE and thread its role Protocols
     # into both differ phases (transport for the live-comment fetch; .outbound/.inbound as
-    # the injected field mappers) plus the inbound-probe dispatch (.probe_remote, when the
-    # backend advertises SupportsAbsenceProbe) so the core differs name no vendor mapper.
+    # the injected field mappers) so the core differs name no vendor mapper.
     backend = _load_reconcile_backend()
-    _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe, backend)
     outbound_raw, absent_alive_fields, outbound_diff_client = _run_differs_outbound(
         ctx, mutations, backend
     )
@@ -361,57 +361,6 @@ def _run_differs_report_schema_drift(mutations, skip_invariant_filing, invariant
                 follow_on.get("observed"),
                 follow_on.get("expected"),
             )
-
-
-def _run_differs_inbound_probe_dispatch(mutations, route_inbound_probe, backend) -> None:
-    """Inbound-probe dispatch phase: route (inbound, probe) mutations, append follow-ons.
-
-    ``backend`` is the configured :class:`Backend` (ticket aff0). When it advertises
-    ``SupportsAbsenceProbe`` the probe is dispatched through ``backend.probe_remote``;
-    otherwise the mutation is classified UNREACHABLE with a ``backend_lacks_absence_probe``
-    reason (no vendor mechanics live in this neutral module).
-    """
-    # Inbound-probe dispatch: any (inbound, probe) Mutation emitted by the
-    # differ is routed through the backend's absence-probe capability, then
-    # converted into a branch-specific follow-on (or a log-only outcome) via
-    # route_inbound_probe. Follow-on mutations are appended in-place so the
-    # applier dispatches them in the same pass.
-    from rebar_reconciler._backend import SupportsAbsenceProbe
-
-    mut_mod = _load("reconcile_mutation", "mutation.py")
-    probe_mod = _load("inbound_probe", "inbound_probe.py")
-    probe_follow_ons: list = []
-    for _m in mutations:
-        # Only Mutation objects with the (inbound, probe) combo trigger a probe.
-        direction = getattr(_m, "direction", None)
-        action = getattr(_m, "action", None)
-        if direction is None or action is None:
-            continue
-        if direction != mut_mod.MutationDirection.inbound:
-            continue
-        if action != mut_mod.MutationAction.probe:
-            continue
-        if isinstance(backend, SupportsAbsenceProbe):
-            try:
-                probe_result = backend.probe_remote(_m.target)
-            except probe_mod.ProbeConfigError as exc:
-                # Missing env → treat as unreachable; do not abort the pass.
-                print(  # noqa: T201
-                    f"inbound_probe: skipped key={_m.target} reason=config_error err={exc}",
-                    file=sys.stderr,
-                )
-                continue
-        else:
-            probe_result = probe_mod.ProbeResult(
-                probe_mod.ProbeBranch.UNREACHABLE,
-                _m.target,
-                {"reason": "backend_lacks_absence_probe"},
-            )
-        follow_ons = route_inbound_probe(_m, probe_result)
-        if follow_ons:
-            probe_follow_ons.extend(follow_ons)
-    if probe_follow_ons:
-        mutations.extend(probe_follow_ons)
 
 
 def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any]:

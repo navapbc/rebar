@@ -2030,7 +2030,9 @@ def test_a_deleted_dc_issue_never_plans_a_local_teardown(
     for a bound pair whose local ticket is active. The pair's real owner is the outbound
     differ's bounded direct GET, which on a confirmed 404 records the absence toward grace and
     deliberately emits no mutation (`outbound_differ.py:692-702`); `binding_walk.py:167-170`
-    skips active-local pairs precisely to leave them to it.
+    skips active-local pairs precisely to leave them to it. (Bug 3b5f has since DELETED that
+    dead producer along with the whole `(inbound, probe)` dispatch chain, which is why the
+    corrected oracle below is the only one that could ever have held.)
 
     THE AUTHORITATIVE OBSERVABLE IS THE ONE THIS DOCSTRING ALWAYS DESCRIBED — "rebar does not
     tear down a local ticket because a remote read failed once". ADR 0028 §1: snapshot-absence
