@@ -120,10 +120,22 @@ def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
     # Wrapping only a STRING keeps this idempotent in shape — a caller that already passed the
     # object form must not end up with ``{"name": {"name": ...}}``, a third distinct 400 — and an
     # ABSENT field is never invented, which would assign the issue to nobody in particular.
-    for name in ("priority", "assignee"):
-        value = fields.get(name)
+    # ``parent`` wraps DIFFERENTLY: Jira identifies a parent by ``key``, not by ``name``. Reusing
+    # one wrapper for all three would still 400, so the shape is per-field.
+    for name, wrapper in (("priority", "name"), ("assignee", "name"), ("parent", "key")):
+        if name not in fields:
+            continue
+        value = fields[name]
         if isinstance(value, str) and value:
-            fields[name] = {"name": value}
+            fields[name] = {wrapper: value}
+        elif not value:
+            # PRESENT BUT EMPTY is not the same as absent, and it is what the differ actually
+            # emits for a ticket with no assignee: the key arrives carrying ``None``. Passing
+            # that through sends a null where Jira expects an object and the whole create is
+            # rejected — ``"assignee":"data was not an object"``. Dropping is the only correct
+            # handling: there is no object that means "unassigned"/"no priority" at create time,
+            # and inventing one would assign the issue to somebody.
+            del fields[name]
     return fields
 
 

@@ -277,6 +277,53 @@ def test_absent_priority_and_assignee_are_not_invented() -> None:
     assert "assignee" not in sent, f"assignee was invented: {sent.get('assignee')!r}"
 
 
+def test_a_null_valued_optional_is_dropped_rather_than_sent_as_null() -> None:
+    """THIRD LAYER, again found by a live run rather than predicted.
+
+    With priority wrapped, the next 400 was ``"assignee":"data was not an object"`` — and the
+    value was not a string at all, it was ``None``. The differ emits the key with a null when the
+    ticket has no assignee, and the previous wrap only fired for a non-empty string, so the null
+    passed straight through. Jira reads a null where it expects an object and rejects the whole
+    create.
+
+    Dropping is right rather than wrapping: there is no object that means "unassigned" at create
+    time, and inventing one would assign the issue to somebody.
+    """
+    client = _FakeClient()
+
+    _transport(client).create_issue(_dispatch_payload(assignee=None, priority=None))
+
+    sent = client.create_calls[0]
+    assert "assignee" not in sent, f"a null assignee was sent to Jira: {sent!r}"
+    assert "priority" not in sent, f"a null priority was sent to Jira: {sent!r}"
+
+
+def test_the_parent_is_wrapped_as_a_key_object() -> None:
+    """``parent`` is the other half of the third layer, and it wraps DIFFERENTLY.
+
+    Jira identifies a parent by ``key``, not by ``name`` — ``{"key": "RBJ-1"}``. A translation
+    that reused the ``{"name": ...}`` shape used for priority and assignee would still 400, so
+    this cell pins the distinction rather than assuming the wrapper is uniform.
+    """
+    client = _FakeClient()
+
+    _transport(client).create_issue(_dispatch_payload(parent="RBJ-7"))
+
+    assert client.create_calls[0].get("parent") == {"key": "RBJ-7"}, (
+        f"parent reached Jira as {client.create_calls[0].get('parent')!r}; Data Center answers a "
+        f'bare value with 400 "data was not an object".'
+    )
+
+
+def test_an_already_shaped_parent_is_left_alone() -> None:
+    """The differ may already emit the object form; it must not be nested a second time."""
+    client = _FakeClient()
+
+    _transport(client).create_issue(_dispatch_payload(parent={"key": "RBJ-7"}))
+
+    assert client.create_calls[0].get("parent") == {"key": "RBJ-7"}
+
+
 def test_the_description_survives_the_translation() -> None:
     """A field that is already Jira-shaped must pass through — the fix must not become an
     allowlist so narrow that it drops real content."""
