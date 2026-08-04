@@ -152,7 +152,7 @@ steps:
       output_schema: plan_review_verification
       with:
         findings: ${{ steps.finders.outputs.prerequisite_findings }}
-        plan: ${{ steps.prerequisite_verify_inputs.outputs.plan }}
+        shared_prefix: ${{ steps.prerequisite_verify_inputs.outputs.shared_prefix }}
         instructions: ${{ steps.prerequisite_verify_inputs.outputs.instructions }}
         # Model-max output budget — the uniform plan-review rule (bug 30a2, see the
         # agentic verify step for the full rationale).
