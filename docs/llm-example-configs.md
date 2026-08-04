@@ -47,7 +47,7 @@ uniform, so a plausible-looking id can simply not exist. MEASURED against accoun
 `us.anthropic.claude-haiku-4-5-v1:0` raise `ValidationException: The provided model identifier is
 invalid`. For a developer machine, prefer pointing `REBAR_LLM_CONFIG_FILE` at a file holding this
 table over editing `pyproject.toml` — see
-[local-dev-env.md](local-dev-env.md#running-your-local-gates-on-aws-bedrock-instead-of-direct-anthropic).
+[local-dev-env.md](local-dev-env.md#running-your-local-gates-on-aws-bedrock-the-project-default-and-how-to-opt-out).
 
 ## 3. Mixed provider
 
