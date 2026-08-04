@@ -1190,6 +1190,64 @@ def test_outbound_epic_parent_round_trips_via_the_epic_link(
 
 @_skip
 @_skip_no_extra
+def test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored(
+    dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
+) -> None:
+    """Ticket 1a9f AC4: the read-back refusal, with the REFUSAL as this cell's subject.
+
+    Data Center answers a sub-task ``fields.parent`` write with **HTTP 204 and ignores it** — the
+    parent does not move. Every core caller swallows ``set_parent``'s failure, so before the fix
+    the only trace was an unchanged field noticed by some later assertion, and the pass reported
+    a mutation that never happened.
+
+    WHY THIS CELL EXISTS SEPARATELY. The two round-trip cells for sub-task parents do surface the
+    new refusal — in their failure text — but their SUBJECT is that a reparent round-trips, and
+    they are red because Data Center genuinely cannot do that. Reading the fix's success out of
+    another cell's error message is exactly the adjacent-green substitution this epic has been
+    burned by. This cell asserts the refusal itself, and is GREEN when the fix works.
+
+    THE SECOND ASSERTION IS THE LOAD-BEARING ONE. Raising is easy; raising because the write was
+    VERIFIED is the property. So the parent is read back over raw REST and must still be the
+    original — proving the transport refused after observing reality, not by declining the
+    sub-task branch outright. Without it, a blanket ``raise NotImplementedError`` would pass.
+
+    ``NotImplementedError`` specifically, because ``dispatch_one`` maps that to
+    ``outbound-parent-unrepresentable`` while every other type is the RETRYABLE
+    ``outbound-parent-failed``, and retrying a write DC ignores by design never terminates.
+    """
+    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
+    first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 refuse par-1"))
+    second = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 refuse par-2"))
+    child = _seed(
+        dc_transport,
+        jira_dc_project,
+        track_issue,
+        _uniq("rebar J11 refuse subtask"),
+        issuetype=subtask_type,
+        extra={"parent": {"key": first}},
+    )
+
+    with pytest.raises(NotImplementedError) as excinfo:
+        dc_transport.set_parent(child, second)
+
+    message = str(excinfo.value)
+    assert second in message and first in message, (
+        f"the refusal does not name BOTH the requested parent ({second}) and the one still "
+        f"attached ({first}), so an operator cannot tell an ignored write from a rejected one: "
+        f"{message}"
+    )
+
+    observed = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent") or {}
+    assert observed.get("key") == first, (
+        f"the transport refused, but {child}'s parent is {observed.get('key')!r} rather than the "
+        f"original {first!r}. The refusal must be the RESULT of a read-back that found the write "
+        f"ignored — if the parent actually moved, this decline is wrong and is suppressing a "
+        f"mutation that worked."
+    )
+
+
+@_skip
+@_skip_no_extra
 def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
     dc_store_copy_repo: Path,
     dc_transport: Any,
