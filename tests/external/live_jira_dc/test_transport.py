@@ -759,9 +759,16 @@ def test_the_instance_label_ceiling_measured_at_254_and_255(
     """POST a 254-char and a 255-char label to the REAL instance and record what it does.
 
     Bug 2e47-ae62-c0cf-48a0. rebar's shared ``JIRA_LABEL_MAX_CHARS`` is 255, taken from Jira's
-    documented "not more than 255 characters". A capability-map pass measured DC 8.17.1 REJECTING
-    a 255-character label (req-0071/0072/0073) — so ``sanitize_label`` lets a 255-char label
-    through and the instance then refuses it.
+    documented "not more than 255 characters". A capability-map pass recorded DC 8.17.1 REJECTING
+    a 255-character label (req-0071/0072/0073), which would have made the effective ceiling 254
+    and put DC at odds with the shared constant.
+
+    **THAT CLAIM DID NOT REPRODUCE.** This cell measured 255 ACCEPTED and read back (run
+    30944241768), so there is no divergence and the shared 255 is correct for DC. The map was
+    wrong, and it took a live assertion to find out — which is the argument for measuring against
+    the instance rather than trusting a recorded measurement. 256 is now probed too, so the
+    inclusive ceiling is bounded from ABOVE as well as below rather than inferred from two points
+    that both pass.
 
     WHY THIS CELL EXISTS RATHER THAN A TIGHTER CONSTANT. Every existing label test compares the
     sanitizer against ``JIRA_LABEL_MAX_CHARS``, so the constant is checked against itself and no
@@ -778,7 +785,7 @@ def test_the_instance_label_ceiling_measured_at_254_and_255(
     version = os.environ.get("JIRA_DC_VERSION", "8.17.1")
     observed: dict[int, tuple[bool, str]] = {}
 
-    for length in (254, 255):
+    for length in (254, 255, 256):
         label = "x" * length
         assert len(label) == length
         try:
@@ -809,13 +816,29 @@ def test_the_instance_label_ceiling_measured_at_254_and_255(
 
     assert observed[254][0], (
         f"a 254-character label was NOT stored: {observed[254][1]}. This is the control leg — "
-        f"without it the 255 reading below cannot be attributed to the ceiling, so fix or "
-        f"re-scope this cell before reading anything into the 255 result."
+        f"without it the readings above cannot be attributed to the ceiling, so fix or "
+        f"re-scope this cell before reading anything into them."
     )
-    assert not observed[255][0], (
-        f"a 255-character label WAS stored ({observed[255][1]}), contradicting the capability "
-        f"map's req-0071/0072/0073 measurement that DC {version} rejects 255. If this instance "
-        f"now accepts 255, rebar's shared ceiling of 255 is correct for DC after all and bug "
-        f"2e47's label finding should be CLOSED as no-longer-reproducing — update the capability "
-        f"map with this run's id rather than loosening this assertion."
+    # MEASURED, and it REFUTED the capability map (run 30944241768, bug 2e47-ae62-c0cf-48a0).
+    # req-0071/0072/0073 recorded that DC 8.17.1 REJECTS a 255-character label, making the
+    # effective ceiling 254 and putting DC at odds with rebar's shared JIRA_LABEL_MAX_CHARS of
+    # 255. This cell measured the opposite: 255 was accepted AND read back. So there is no
+    # Cloud/DC divergence here, rebar's shared 255 is correct for DC, and the map's claim does
+    # not reproduce on this image.
+    #
+    # The assertion is now pinned to the MEASUREMENT rather than to the map, and the direction is
+    # deliberate: a future image that starts rejecting 255 is a real change that should fail here
+    # loudly, which is exactly what the map's un-reproducible claim failed to do.
+    assert observed[255][0], (
+        f"a 255-character label was NOT stored ({observed[255][1]}). Run 30944241768 measured DC "
+        f"{version} ACCEPTING 255, refuting the capability map's req-0071/0072/0073. If this "
+        f"instance now rejects it, the divergence with rebar's shared 255-char ceiling is REAL "
+        f"after all — re-open bug 2c93-ce1c-127e-4d58 (the per-deployment ceiling) and record this "
+        f"run rather than loosening this assertion."
+    )
+    assert not observed[256][0], (
+        f"a 256-character label WAS stored ({observed[256][1]}), so this instance's inclusive "
+        f"ceiling is ABOVE Jira's documented 255 'not more than 255 characters'. That is a third "
+        f"outcome neither the map nor rebar's constant anticipates: record it and re-derive "
+        f"JIRA_LABEL_MAX_CHARS from the measurement instead of from the docs."
     )

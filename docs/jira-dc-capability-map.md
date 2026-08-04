@@ -102,7 +102,14 @@ Every workflow is `Software Simplified Workflow for Project SCRUM` with exactly
 Known mismatches — filed as [rebar:2e47-ae62-c0cf-48a0], **do not re-file**:
 
 - **status `IDEA` does not exist** in any workflow bound to any issue type. `LOCAL_STATUS_TO_JIRA['idea'] = 'IDEA'` has no target here [req-0033][req-0036].
-- **label limit is effectively 254, not 255.** rebar treats 255 as an inclusive max; this instance **rejects** a 255-char label with a 400 whose text confusingly names "255 characters". Only 254 is accepted [req-0071][req-0072][req-0073].
+- ~~**label limit is effectively 254, not 255.**~~ **RETRACTED — this claim DID NOT REPRODUCE.** A
+  dedicated live cell (`test_transport.py::test_the_instance_label_ceiling_measured_at_254_and_255`)
+  posted 254- and 255-character labels to this image and READ THEM BACK: **both were accepted**
+  (harness run 30944241768, `[2e47-label-ceiling]` lines). So rebar's shared
+  `JIRA_LABEL_MAX_CHARS = 255` is CORRECT for Data Center, there is no Cloud/DC divergence here, and
+  req-0071/0072/0073's reading was wrong. The cell now pins the MEASUREMENT (255 accepted, 256
+  rejected) so a future image that genuinely moves the ceiling fails loudly — which is precisely what
+  the un-reproducible recorded claim failed to do.
 - **two distinct issue-type ids (10003 and 10004) are both named `Task`**, so name-based type resolution is ambiguous [req-0022].
 - **three rebar relations are unrepresentable** on stock Jira: `supersedes`, `discovered_from`, `caused_by`. Conversely the instance ships a stock `Duplicate` type that rebar does not map [req-0004].
 
@@ -111,7 +118,7 @@ Known mismatches — filed as [rebar:2e47-ae62-c0cf-48a0], **do not re-file**:
 | field | rebar constant | measured | verdict |
 |---|---|---|---|
 | summary | 254 | 254 accepted, 255 rejected (hard 400) | **matches** |
-| label | 255 | 254 accepted, 255 rejected | **mismatch** (see above) |
+| label | 255 | 254 accepted, 255 **accepted**, 256 probed (run 30944241768) | **matches** — the earlier "mismatch" is RETRACTED above |
 | description / comment | 32767 | governed by `jira.text.field.character.limit=32767`, enforced (non-zero) [req-0006] | **coverage gap** |
 
 No silent truncation was observed anywhere — over-limit writes are hard 4xx. The description
