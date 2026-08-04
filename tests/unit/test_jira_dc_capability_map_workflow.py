@@ -92,3 +92,60 @@ def test_script_is_invoked() -> None:
         "workflow must invoke scripts/jira_dc_capability_map.py — the mapping tool "
         "cannot silently rot out of this job"
     )
+
+
+# ---------------------------------------------------------------------------
+# Parity: the targeted Epic-Link probe (bug 1019) is a SECOND live-container
+# authoring tool, so it inherits the same two safety rules.
+# ---------------------------------------------------------------------------
+
+_PROBE_WORKFLOW = _ROOT / ".github" / "workflows" / "jira-dc-epic-link-probe.yml"
+
+
+def _load_probe() -> dict:
+    assert _PROBE_WORKFLOW.exists(), f"expected workflow missing: {_PROBE_WORKFLOW}"
+    return yaml.safe_load(_PROBE_WORKFLOW.read_text())
+
+
+def test_probe_is_dispatch_only_no_push_pr_or_schedule() -> None:
+    """Same rule, same reason: it boots a real Jira container.
+
+    Added as its own cell rather than parametrizing the existing one so a future third tool
+    cannot be added silently — a new live-container workflow with no guard is the failure this
+    pair exists to prevent.
+    """
+    triggers = _load_probe().get("on", _load_probe().get(True))
+    assert isinstance(triggers, dict), f"'on:' block is not a mapping: {triggers!r}"
+    assert set(triggers) == {"workflow_dispatch"}, (
+        f"jira-dc-epic-link-probe.yml must be workflow_dispatch-ONLY (found {sorted(triggers)}) "
+        f"— it boots the pinned Jira DC container and must never fire on push, pull_request, or "
+        f"a schedule (bug 1019-e1e9-5117-4795)"
+    )
+
+
+def test_probe_grants_no_write_permissions() -> None:
+    perms = _load_probe().get("permissions") or {}
+    assert perms.get("contents") == "read", (
+        f"jira-dc-epic-link-probe.yml should request only read access (found {perms!r}) — it "
+        f"answers two questions and uploads evidence; it commits nothing"
+    )
+
+
+def test_probe_does_not_invoke_the_capability_map() -> None:
+    """The probe must NOT re-run the agentic capability map (operator constraint).
+
+    The map's answers are already reviewed and committed in docs/jira-dc-capability-map.md;
+    re-running it to settle two narrow questions would be slow, billable, and would risk
+    churning landed data. Asserted on the workflow text so the constraint survives an edit.
+    """
+    text = _PROBE_WORKFLOW.read_text()
+    assert "jira_dc_capability_map.py" not in text, (
+        "the probe workflow invokes the capability-map script — it must run ONLY the targeted "
+        "deterministic probe (scripts/jira_dc_epic_link_clear_probe.py)"
+    )
+    assert "jira_dc_epic_link_clear_probe.py" in text, (
+        "the probe workflow does not run the probe script it exists for"
+    )
+    assert "ANTHROPIC_API_KEY" not in text, (
+        "the probe requires no LLM key — its presence suggests an agentic path crept in"
+    )
