@@ -42,7 +42,16 @@ written against assumptions it falsifies.
 |---|---|
 | version | 8.17.1 Server/Data Center, buildNumber 817001, build date 2021-06-15 [req-0000] |
 | licensed | Jira Software (active), Jira Core; **not** Jira Service Management [req-0009] |
-| image digest | not exposed over REST; closest identifier is `scmInfo=36e93c711dfb14e6e1509a2fef6b04c4d73cc7ca` |
+| measured against image | `sha256:04326628dc4ac36b2bfc1d0f2ebe5ba3807c1ec9cf9b18307d3c2ad7222537e9` |
+| self-reported identity | the digest is **not** exposed over REST; the closest in-instance identifier is `scmInfo=36e93c711dfb14e6e1509a2fef6b04c4d73cc7ca` |
+
+That digest is the pin on `tests/external/live_jira_dc/Dockerfile`'s `FROM` line, and recording
+it here is what makes this page's staleness **checkable** rather than merely asserted:
+`tests/unit/test_jira_dc_capability_map_workflow.py` fails the moment the Dockerfile is
+re-pinned without this section being regenerated. Before that gate existed, a re-pin could land
+with every answer below silently describing an image nothing runs — and since the instance does
+not report its own digest, no live check could have caught it either. Treat a failure of that
+cell as "re-dispatch the mapping job", never as "update the digest here".
 
 ### Epic machinery — field ids and templates
 
@@ -150,8 +159,10 @@ request/response the agent made, in call order), and `run_metadata.json` (the im
 digest, base URL, model, and call count).
 
 **The artifact is authored, not live.** A human reviews it and is responsible for landing
-whatever should become committed data (e.g. an updated `docs/jira-dc-value-map.md` or a
-harness setup assertion that reads it) — the workflow itself never commits anything, and
+whatever should become committed data — the answers section above, and the harness's own
+declared provisioning contract (`_PROJECT_TEMPLATE` / `_REQUIRED_FIELDS` in
+`tests/external/live_jira_dc/conftest.py`, enforced before any test runs by
+`_assert_project_capabilities`, per bug 3fe5). The workflow itself never commits anything, and
 the agent is explicitly instructed to *report* mismatches as findings, never to fix the
 harness, the repository, or rebar's own configuration. Any finding that implicates one of
 rebar's own hardcoded vocabularies or limits should be filed as a ticket citing the
@@ -163,6 +174,13 @@ Re-run whenever the harness's pinned base image changes — i.e. whenever
 `tests/external/live_jira_dc/Dockerfile`'s `FROM …@sha256:…` digest is bumped. The
 mapping job builds that same Dockerfile, so it always maps the image the harness will
 actually run against; a stale map after a re-pin describes an image nothing runs anymore.
+You do not have to remember this: the digest recorded above is asserted against the
+Dockerfile's pin by a unit test, so a re-pin lands red until the map is regenerated.
+
+To see which image a run *would* map without paying for one, `python
+scripts/jira_dc_capability_map.py --print-digest` reads the pin and exits — no container, no
+API key, no LLM. The digest in the artifact's `run_metadata.json` comes from that same
+derivation rather than a constant, so it cannot drift from the image actually built.
 It is also reasonable to re-run after any change to rebar's own Jira-family vocabularies
 (`src/rebar/_engine/rebar_reconciler/adapters/jira_family/value_maps.py` and neighbors) to
 re-confirm the diff still reads clean.
