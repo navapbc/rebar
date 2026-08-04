@@ -37,11 +37,19 @@ def _json_or(out: str, default):
 
 
 # ── Read path (in-process via rebar._reads; alias-aware, returns parsed JSON) ──
-def show_ticket(ticket_id: str, *, repo_root=None) -> TicketState:
-    """Compiled ticket state as a dict (alias/short-id aware)."""
+def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False) -> TicketState:
+    """Compiled ticket state as a dict (alias/short-id aware).
+
+    ``include_inbound=True`` adds the computed ``inbound_deps`` key — inbound
+    edges (``{"from_id", "relation", "status"}``, "from_id <relation> this
+    ticket") derived at read time from other tickets' stored LINK events, so
+    blocked-ness is readable from a single show (bug 05cb)."""
     from rebar import _reads
 
-    return cast("TicketState", _reads.show_ticket(ticket_id, repo_root=repo_root))
+    return cast(
+        "TicketState",
+        _reads.show_ticket(ticket_id, repo_root=repo_root, include_inbound=include_inbound),
+    )
 
 
 def export_tickets(

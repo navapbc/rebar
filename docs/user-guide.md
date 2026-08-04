@@ -56,7 +56,9 @@ rebar ready
 rebar ready --epic=<epic-id>
 ```
 
-**Show** prints one or more tickets in full (description, comments, links, status):
+**Show** prints one or more tickets in full (description, comments, links, status). The
+default view includes the computed `inbound_deps` — tickets linking *to* the shown one
+(`{from_id, relation, status}`) — so "is this ticket blocked?" is answerable from one `show`:
 
 ```sh
 rebar show <ticket-id>

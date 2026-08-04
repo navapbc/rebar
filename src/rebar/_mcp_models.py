@@ -113,6 +113,10 @@ try:
         description: str | None = None
         comments: list[dict] = []
         deps: list[dict] = []
+        # Computed inbound edges (bug 05cb): {"from_id","relation","status"},
+        # each meaning "from_id <relation> this ticket". Additive — `deps`
+        # remains the stored outgoing-only list.
+        inbound_deps: list[dict] = []
         file_impact: list[dict] = []
         file_impact_scope: Literal["undeclared", "paths", "none"] = "undeclared"
         no_file_impact_reason: str = ""

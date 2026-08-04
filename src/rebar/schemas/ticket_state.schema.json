@@ -43,6 +43,20 @@
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/dep" }
     },
+    "inbound_deps": {
+      "description": "Computed inbound edges (read-time derivation, never persisted): every other ticket whose stored LINK targets this one, each entry meaning 'from_id <relation> this ticket', with the source ticket's current status. Present on the per-ticket show surfaces (CLI show default view, library show_ticket(include_inbound=True), MCP show_ticket); omitted from list/search projections.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from_id", "relation", "status"],
+        "properties": {
+          "from_id": { "type": "string" },
+          "relation": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
     "file_impact": {
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/file_impact_entry" }

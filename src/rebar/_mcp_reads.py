@@ -46,10 +46,13 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def show_ticket(ticket_id: str) -> TicketStateOut:
-        """Show compiled ticket state (accepts full id, short id, or alias)."""
+        """Show compiled ticket state (accepts full id, short id, or alias).
+        Includes the computed ``inbound_deps`` (inbound edges: other tickets
+        linking TO this one, with the source's status) alongside the stored
+        outgoing ``deps``."""
         from rebar.audit.read import plan_review_health
 
-        ticket = dict(rebar.show_ticket(ticket_id))
+        ticket = dict(rebar.show_ticket(ticket_id, include_inbound=True))
         ticket["plan_review_health"] = plan_review_health(ticket)
         return TicketStateOut.model_validate(ticket)
 

@@ -46,6 +46,7 @@ from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
     apply_ticket_filters,
+    find_inbound_relationships,
     reduce_all_tickets,
     reduce_ticket,
     search_states,
@@ -274,7 +275,36 @@ class ReadError(Exception):
         self.message = message
 
 
-def show_state(ticket_id: str, tracker: str, *, include_scratch: bool = False) -> dict:
+def inbound_deps_state(ticket_id: str, tracker: str) -> list[dict]:
+    """Computed INBOUND edges for the per-ticket show view (bug 05cb).
+
+    A LINK event is stored one-sided on the SOURCE ticket's record, so a
+    ticket's own ``deps`` list carries only its OUTGOING edges — "is this
+    ticket blocked?" is definitionally not answerable from the subject's
+    record alone. This derives the missing half at read time (no stored
+    mirror, so nothing can drift) via the same inbound derivation the close
+    gate uses (``find_inbound_relationships``), enriched with each source's
+    current status so blocked-ness is readable from a single ``show``.
+
+    Returns a sorted list of ``{"from_id", "relation", "status"}``, each
+    meaning "``from_id`` <relation> this ticket" (e.g. ``relation: blocks``
+    reads "from_id blocks this ticket").
+    """
+    entries: list[dict] = []
+    for link in find_inbound_relationships(ticket_id, tracker)["inbound_links"]:
+        src = reduce_ticket(os.path.join(tracker, link["from_id"]))
+        status = src.get("status", "") if isinstance(src, dict) else ""
+        entries.append({"from_id": link["from_id"], "relation": link["relation"], "status": status})
+    return entries
+
+
+def show_state(
+    ticket_id: str,
+    tracker: str,
+    *,
+    include_scratch: bool = False,
+    include_inbound: bool = False,
+) -> dict:
     resolved = resolve_ticket_id(ticket_id, tracker)
     if resolved is None:
         raise ReadError(f"Ticket '{ticket_id}' not found")
@@ -286,14 +316,18 @@ def show_state(ticket_id: str, tracker: str, *, include_scratch: bool = False) -
         raise ReadError(f'ticket "{resolved}" has no CREATE or SNAPSHOT event')
     if state.get("status") in ("error", "fsck_needed"):
         raise ReadError(f'ticket "{resolved}" has status "{state["status"]}"')
-    # NOTE: show emits the SAME compiled-state shape as list/search (the
-    # production dispatcher's `show` arm never augmented with inbound_links /
-    # children — only the now-deleted standalone ticket-show.sh shim did, and it
-    # was never wired into the dispatcher). Collapsing the dual read path keeps
-    # the production show==list==search contract (test_reducer_single_source).
+    # NOTE: show emits the SAME compiled-state shape as list/search by default
+    # (production show==list==search contract, test_reducer_single_source);
+    # ``include_inbound`` layers the computed ``inbound_deps`` key on top for
+    # the per-ticket surfaces (CLI show default view, MCP show_ticket).
     state = public_state(state)
     if not state.get("ticket_type"):
         raise ReadError(f'ticket "{resolved}" has no CREATE or SNAPSHOT event')
+    if include_inbound:
+        # Additive computed key — the stored (outgoing) `deps` list and every
+        # other existing key are untouched. Opt-in so the hot internal callers
+        # (gates, field reads) never pay the corpus scan.
+        state["inbound_deps"] = inbound_deps_state(resolved, tracker)
     if include_scratch:
         state["scratch"] = _load_scratch(resolved, tracker)
     return state

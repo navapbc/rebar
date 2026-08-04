@@ -50,14 +50,18 @@ def _rebar_error(message: str):
     return RebarError(message, returncode=1, stderr=message)
 
 
-def show_ticket(ticket_id: str, *, repo_root=None) -> dict:
+def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False) -> dict:
     """Compiled ticket state (alias/short-id aware). A missing/unresolvable id, a
     ticket that fails to reduce, or one with no CREATE/SNAPSHOT raises
-    ``RebarError`` (the subprocess path's exit-1 contract)."""
+    ``RebarError`` (the subprocess path's exit-1 contract).
+
+    ``include_inbound=True`` additionally derives the computed ``inbound_deps``
+    key (inbound edges + source status — see ``reads.inbound_deps_state``);
+    off by default so internal hot paths keep the stored-record-only cost."""
     tracker = _tracker(repo_root)
     _fresh(tracker)
     try:
-        return ticket_reads.show_state(ticket_id, tracker)
+        return ticket_reads.show_state(ticket_id, tracker, include_inbound=include_inbound)
     except ticket_reads.ReadError as exc:
         raise _rebar_error(f"rebar show failed (exit 1): {exc.message}") from None
 
