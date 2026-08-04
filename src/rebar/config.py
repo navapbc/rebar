@@ -27,6 +27,7 @@ from rebar._config_schema import (
 from rebar._config_schema import CodeHealthConfig as CodeHealthConfig
 from rebar._config_schema import CompactConfig as CompactConfig
 from rebar._config_schema import EnsureConfig as EnsureConfig
+from rebar._config_schema import InsecureUrlError as InsecureUrlError
 from rebar._config_schema import JiraConfig as JiraConfig
 from rebar._config_schema import McpConfig as McpConfig
 from rebar._config_schema import ReconcilerConfig as ReconcilerConfig
@@ -535,7 +536,10 @@ def write_jira_config(
     dropped) rather than set — the ``--reset`` path.
 
     Raises :class:`ConfigError` if an existing target is unreadable/malformed TOML
-    (fail-closed: nothing is written) or the write itself fails."""
+    (fail-closed: nothing is written) or the write itself fails. Raises
+    :class:`InsecureUrlError` (a ``ConfigError`` subclass) if ``url`` is a non-https
+    scheme, before writing anything — the wizard never persists a cleartext url (bug
+    bdb8)."""
     base = repo_root(root)
     proj = _discover_project_config(root)
     if proj is not None and proj[1] == "toml":
@@ -557,6 +561,14 @@ def write_jira_config(
         for k in ("url", "user", "project"):
             jira.pop(k, None)
     else:
+        # Fail-closed on a cleartext url BEFORE writing, so the onboarding wizard can never
+        # silently persist a credential-exposing http:// url (bug bdb8). https-only: an
+        # http loopback needs a hand-written [jira] allow_insecure = true.
+        from rebar._config_schema import _validate_https_url
+
+        _validate_https_url(
+            url, allow_insecure=False, url_label="jira.url", override_label="jira.allow_insecure"
+        )
         jira["url"] = url
         jira["user"] = user
         jira["project"] = project

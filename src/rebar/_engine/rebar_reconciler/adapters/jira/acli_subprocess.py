@@ -85,13 +85,20 @@ def resolve_jira_settings(*, project_default: str = "") -> JiraSettings:
     layer). The SECRET ``JIRA_API_TOKEN`` is read from the environment ONLY — it is
     never a config-file key. ``project_default`` substitutes for an empty project
     (e.g. ``"DIG"``, which ACLI requires on CREATE — bug 4fa9). A malformed config
-    degrades to the prior env-only behavior rather than breaking a reconcile pass.
+    degrades to the prior env-only behavior rather than breaking a reconcile pass; a
+    non-https ``jira.url`` (without ``jira.allow_insecure``), by contrast, is a deliberate
+    security-policy rejection that FAILS LOUD (``InsecureUrlError`` propagates — bug bdb8).
     """
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, InsecureUrlError, load_config
 
     try:
         jira = load_config().jira
         url, user, project = jira.url, jira.user, jira.project
+    except InsecureUrlError:
+        # A deliberate security-policy rejection (a cleartext jira.url) must FAIL LOUD —
+        # parity with the DC resolver's fail-loud posture — not silently degrade to env
+        # like a malformed config does (bug bdb8).
+        raise
     except ConfigError:
         url = os.environ.get("JIRA_URL", "")
         user = os.environ.get("JIRA_USER", "")

@@ -236,10 +236,18 @@ id_guard_bypass_unsafe = false # TEMPORARY bypass of the rebar-id write guard �
                                # `rebar_id_guard_mode` config key is no longer honored (removed pre-1.0).
 
 [tool.rebar.jira]   # Atlassian-standard, UNPREFIXED env names
-url     = ""   # env JIRA_URL
-user    = ""   # env JIRA_USER
-project = ""   # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
+url            = ""      # env JIRA_URL  (must be https unless allow_insecure=true)
+user           = ""      # env JIRA_USER
+project        = ""      # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
+allow_insecure = false   # env REBAR_JIRA_ALLOW_INSECURE — allow a cleartext http:// url
 ```
+
+A non-https `jira.url` is REJECTED at config load (an `InsecureUrlError`, naming the
+cleartext-credential risk) unless `allow_insecure = true`, which downgrades it to a
+warning — the parity of `reconciler.allow_insecure` for the Cloud transport. It governs
+the URL **scheme only** and never relaxes certificate verification. Intended for a
+loopback/trusted test instance; the `rebar jira-onboard` wizard is https-only and will
+not persist a cleartext url.
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
