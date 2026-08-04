@@ -41,9 +41,9 @@ from typing import Any
 
 # Imported by bare name: pytest inserts this directory on sys.path (there is no `__init__.py`
 # anywhere under `tests/`), which is also why `_dc_support` is not a dotted path.
+from _dc_support import CLOUD_CREDENTIAL_VARS, live_jira_ready, read_inherited_env
 from _dc_support import envelope as _envelope
 from _dc_support import is_ticket_entry as _is_ticket_entry
-from _dc_support import live_jira_ready
 from _dc_support import run_reconcile as _run_reconcile
 from _dc_support import seed_searchable_issue as _seed_searchable_issue
 from _dc_support import skip_no_extra as _skip_no_extra
@@ -84,12 +84,30 @@ def test_the_working_repo_is_isolated_from_this_project(dc_store_copy_repo: Path
             f"{what} has git remote(s) {remotes!r} — a store write here could push into this "
             "project's real tickets branch"
         )
-    assert os.environ.get("REBAR_SYNC_PUSH") == "off"
-    for cloud_var in ("JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"):
-        assert not os.environ.get(cloud_var), (
-            f"{cloud_var} is set in the job environment; a mis-routed pass could reach the "
-            "project's real Jira Cloud instance"
-        )
+    # FIXTURE REGRESSION GUARD, and labelled as one (bug 59b2, Finding A). `dc_store_copy_repo`
+    # itself sets REBAR_SYNC_PUSH=off, so this CANNOT detect a job environment that failed to set
+    # it — it can only detect the fixture ceasing to. That is worth keeping, because losing the
+    # fixture's setenv would re-enable pushes from the copy; it is NOT the environment check the
+    # original wording implied.
+    assert os.environ.get("REBAR_SYNC_PUSH") == "off", (
+        "the dc_store_copy_repo fixture no longer sets REBAR_SYNC_PUSH=off — a store write from "
+        "this copy could push"
+    )
+
+    # THE ACTUAL ENVIRONMENT CHECK: what the JOB supplied, recorded by the fixture BEFORE it
+    # deleted anything. Asserting on os.environ here would be circular — the fixture delenv's
+    # exactly these names, so the post-fixture environment is guaranteed clean whatever the job
+    # did. The recorded snapshot is a value this cell did not author, so it can fail.
+    inherited = read_inherited_env(dc_store_copy_repo)
+    leaked = {
+        name: value for name, value in inherited.items() if name in CLOUD_CREDENTIAL_VARS and value
+    }
+    assert not leaked, (
+        f"the JOB environment supplied real-Jira credentials/URLs {sorted(leaked)} — the fixture "
+        f"strips them from this copy's environment, so this run is safe, but their presence means "
+        f"a sibling job or a future cell that does NOT use dc_store_copy_repo could reach a real "
+        f"instance. Names checked: {list(CLOUD_CREDENTIAL_VARS)}"
+    )
 
 
 @_skip
