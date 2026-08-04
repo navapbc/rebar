@@ -468,7 +468,10 @@ open→in_progress`) verifies, in order:
    gate uses) — a code commit since the review invalidates it;
 4. the bound material fingerprint matches the **current** ticket — a material edit
    (description/AC/file-impact/decomposition) invalidates it. (Tags/comments/links/
-   assignee are *not* material and do not invalidate.)
+   assignee are *not* material and do not invalidate. Neither is AC **checkbox
+   state**: `- [ ]` vs `- [x]` — either bullet (`-`/`*`), either case — is
+   normalized to `[ ]` before the fingerprint is hashed (change 330c), so flipping
+   boxes never stales an attestation; only edits to an item's TEXT do.)
 5. it **post-dates the latest reopen** — reactivating a ticket (`closed → open`,
    recorded as `state["last_reopened_at"]`) invalidates an attestation signed before it.
 
@@ -905,7 +908,10 @@ ticket's `## Acceptance Criteria` section contains any unchecked `- [ ]` item, t
 fails immediately (exit 1) **without making any LLM call**. Items whose text begins with the
 `[operator-attested]` tag (ADR-0043) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
 from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
-a gate-level bypass is warranted, pass `--force-close="<reason>"`.
+a gate-level bypass is warranted, pass `--force-close="<reason>"`. Checking boxes to satisfy
+this precheck is attestation-safe: checkbox state is normalized out of the material
+fingerprint (330c; the single normalization seam covers both the plan-review claim gate and
+the completion-verifier staleness check), so the flips do not invalidate a signed plan review.
 
 ### The epic-close bug screen (three stages, epic closes only)
 
