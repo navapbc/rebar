@@ -422,8 +422,9 @@ def merge_parent_map(
 
     Extracted from the inline merge in ``fetch_snapshot`` so the guard tests can drive the
     PRODUCTION merge directly instead of hand-mirroring it (ticket 2b16's
-    ``_enrich_like_fetcher`` is exactly the byte-faithful copy this avoids: it guards the
-    boundary between a truncated read and deleted local data, and it silently drifts).
+    ``_enrich_like_fetcher`` was exactly the byte-faithful copy this avoids — deleted by
+    ticket 6c0a in favour of :func:`merge_issuelinks_map`: it guarded the
+    boundary between a truncated read and deleted local data, and it silently drifted).
 
     Mutates and returns ``snapshot``.
     """
@@ -431,6 +432,44 @@ def merge_parent_map(
         if snap_key not in snapshot:
             continue
         snapshot[snap_key]["parent"] = {"key": parent_jira_key} if parent_jira_key else None
+    return snapshot
+
+
+def merge_issuelinks_map(
+    snapshot: dict[str, dict],
+    issuelinks_map: dict[str, Any],
+) -> dict[str, dict]:
+    """Merge a ``{jira_key → issuelinks list}`` map into the snapshot entries.
+
+    THE KEY-PRESENCE CONTRACT this function exists to pin (ticket 6c0a; the
+    issuelinks sibling of :func:`merge_parent_map`). An inbound link REMOVAL is a
+    write that DESTROYS local data, so 2b16's guard G1 may only let it fire on
+    POSITIVE evidence that the peer was queried and answered — never on the mere
+    absence of data. That distinction is made HERE, by key presence:
+
+      * the map does NOT mention the key → no ``issuelinks`` key is written at
+        all. This is the UNOBSERVED case: a truncated page walk, a failed or
+        skipped enrichment (HTTP 410, fail-open partial map), a cross-project
+        issue, or a client with no ``get_issuelinks_map``. Downstream must never
+        read a removal out of it.
+      * the map maps the key to a list (possibly ``[]``) → the entry gets
+        ``"issuelinks": <list>``. An empty list is an AUTHORITATIVE "queried,
+        and Jira genuinely has no links" — the only shape that authorises a
+        removal.
+      * a non-list value is not an observation: the key stays absent.
+
+    Extracted from the inline merge in ``_build_snapshot`` so the guard tests can
+    drive the PRODUCTION merge directly instead of hand-mirroring it (ticket
+    2b16's ``_enrich_like_fetcher`` was exactly the byte-faithful copy this
+    deletes: if the merge drifted so key-presence stopped meaning "observed",
+    the copy would keep G1's tests green while the removal path started deleting
+    local deps from truncated reads).
+
+    Mutates and returns ``snapshot``.
+    """
+    for snap_key, links in issuelinks_map.items():
+        if snap_key in snapshot and isinstance(links, list):
+            snapshot[snap_key]["issuelinks"] = links
     return snapshot
 
 
@@ -627,10 +666,10 @@ def _build_snapshot(
     # "no Jira links" — additive ADD-only sync stays safe) and the pass completes.
     try:
         if project_key and hasattr(client, "get_issuelinks_map"):
-            issuelinks_map = client.get_issuelinks_map(project_key)
-            for snap_key, links in issuelinks_map.items():
-                if snap_key in snapshot and isinstance(links, list):
-                    snapshot[snap_key]["issuelinks"] = links
+            # The merge lives in ``merge_issuelinks_map`` (ticket 6c0a) so the
+            # key-present/key-absent observed contract it establishes is directly
+            # testable (2b16's G1 guard drives it instead of hand-mirroring it).
+            merge_issuelinks_map(snapshot, client.get_issuelinks_map(project_key))
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             _fetcher_log.error(
