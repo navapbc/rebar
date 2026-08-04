@@ -47,7 +47,6 @@ from _dc_support import assert_bridge_alert_for_mutation as _assert_bridge_alert
 from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
 from _dc_support import assert_mint_registered as _assert_mint_registered
 from _dc_support import assert_outbound_provenance_markers as _assert_outbound_provenance_markers
-from _dc_support import assert_remote_parent_is as _assert_remote_parent_is
 from _dc_support import envelope as _envelope
 from _dc_support import forget_identity_mapping as _forget_identity_mapping
 from _dc_support import probe_subtask_parent_editmeta_ops as _probe_subtask_parent_editmeta_ops
@@ -1237,6 +1236,25 @@ def test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored(
         extra={"parent": {"key": first}},
     )
 
+    # RAW PLATFORM PROBES — moved here by [rebar:9f26-66c2-14af-4223] from the two sub-task
+    # round-trip cells that were re-homed away from `fields.parent`. They belong on THIS cell:
+    # its subject IS the accept-and-ignore, so it is the right place to keep re-measuring the
+    # platform behaviour every run rather than trusting the capability map. `set_parent` cannot
+    # answer this itself — pycontribs' `issue.update(...)` does not surface the raw HTTP
+    # response — so these bypass it entirely. None of them assert; their results are folded
+    # into the oracle's failure text so a CI reader sees what DC actually said without a rerun.
+    editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
+    probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
+    update_verb_status, update_verb_body = _probe_subtask_parent_put(
+        dc_request, child, second, verb="update"
+    )
+    probe_diagnostics = (
+        f"raw PUT (fields form) for the reparent -> HTTP {probe_status}, body "
+        f"{str(probe_body)[:300]}; raw PUT (update-verb form) -> HTTP {update_verb_status}, "
+        f"body {str(update_verb_body)[:300]}; /editmeta for 'parent' (HTTP {editmeta_status}) "
+        f"exposes operations {editmeta_ops!r}"
+    )
+
     with pytest.raises(NotImplementedError) as excinfo:
         dc_transport.set_parent(child, second)
 
@@ -1244,7 +1262,7 @@ def test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored(
     assert second in message and first in message, (
         f"the refusal does not name BOTH the requested parent ({second}) and the one still "
         f"attached ({first}), so an operator cannot tell an ignored write from a rejected one: "
-        f"{message}"
+        f"{message}. Raw platform probes: {probe_diagnostics}"
     )
 
     observed = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent") or {}
@@ -1579,106 +1597,126 @@ def _wait_until_parent_map_reflects(
 
 @_skip
 @_skip_no_extra
-def test_inbound_set_subtask_parent_round_trips(
+def test_inbound_set_parent_round_trips(
     dc_store_copy_repo: Path,
     dc_transport: Any,
     jira_dc_project: str,
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 12 inbound, the SUB-TASK case: a DC re-parent must reach `.parent_id` locally.
+    """Row 12 inbound: a parent set on the INSTANCE must reach `.parent_id` locally.
 
-    STANDALONE, not an `_INBOUND_CELLS` row, because the table driver hands every row the
-    `bound_dc_issue` fixture — a TASK. On Data Center only a sub-task has a `fields.parent` at
-    all (`transport.py:645-690`), so this row needs its own hierarchy: two candidate parents and
-    a sub-task, all bound before the pass.
+    RE-HOMED FROM THE SUB-TASK SHAPE ([rebar:9f26-66c2-14af-4223]), and the distinction that
+    justifies it is that the sub-task was never this cell's SUBJECT. The subject is rebar's
+    INBOUND pass — does a parent change made on the instance reach the local ticket? The
+    sub-task reparent was only
+    the SETUP that produced the change, and that setup is the part Data Center cannot do:
+    `PUT fields.parent` on a sub-task returns HTTP 204 and is silently ignored (capability map
+    req-0056/req-0058). Live run 30951453979 shows this cell failing at the setup line itself
+    with `NotImplementedError` — "asked for RBJREXN-2 … a fresh read still reports RBJREXN-1" —
+    so the inbound pass was never once exercised in twelve runs.
 
-    RE-PARENTS RATHER THAN PARENTS, so the assertion is about a value THIS CELL wrote. A
-    sub-task cannot be created parentless, so it arrives already pointing at one parent and the
-    priming import may already have carried that; asserting THAT value would be re-reading a
-    field the cell did not set. Moving it to a second parent makes the oracle a genuine
-    round-trip, and the precondition below asserts the two differ so it cannot be vacuous.
+    THE SETUP MOVES TO THE MECHANISM DC SUPPORTS; THE ORACLE DOES NOT MOVE. The parent is now
+    the "Epic Link" custom field on a NON-sub-task child, proven on this instance in both
+    directions (`test_outbound_epic_parent_round_trips_via_the_epic_link` and
+    `test_inbound_clear_parent_round_trips`, both green in that same run; map req-0040/0041).
+    What is asserted is unchanged and still end to end: after a real inbound pass, the child's
+    local `.parent_id` is the local id of the parent it was given on the instance.
 
-    BOTH PARENTS MUST BE BOUND. `inbound_differ._extract_parent_local_id` resolves the Jira
-    parent key through `binding_store.get_local_id` and returns None when the key is not yet
-    bound, and the caller then SKIPS the field rather than emitting it (`inbound_differ.py:90-110`,
-    `:257-270`). An unbound parent therefore produces no mutation at all — the same
-    unresolvable-counterpart trap the link cells document.
+    THE CHILD STARTS PARENTLESS, and that is a correctness requirement rather than a
+    simplification. The sub-task version had to RE-PARENT (A -> B) because a sub-task cannot be
+    created without a parent, so asserting its creation-time parent would have re-read a field
+    the cell did not write. A standard issue has no such constraint — so the cell can create it
+    parentless and assert the parent IT set, which is a genuine round trip AND avoids a
+    collision the re-parent shape would walk into:
+
+      * `parent` is NOT in `_INBOUND_MIRRORED_FIELDS`, so a local parent that disagrees with
+        the remote one is resolved LOCAL-WINS, not adopted;
+      * `_OUTBOUND_TO_INBOUND_FIELD` maps `parent` -> `parent_id`, so an outbound parent
+        emission SUPPRESSES the inbound mirror for the same ticket in that pass.
+
+      A cell that primed the child under epic A locally and then moved it to epic B on the
+      instance would therefore have outbound re-assert A, suppress the inbound adopt, and
+      REVERT the instance-side move — a red that says nothing about the inbound pass. With no
+      local parent at all there is nothing to re-assert: a detached local ticket produces a
+      CLEAR candidate, `_parent_clear_is_managed` finds the remote parent unmanaged (rebar
+      never set it), and the pass takes the documented "adopt inbound, don't clobber" path.
+      The precondition below asserts the local parent is EMPTY, which is what keeps that true.
+
+    THE PARENT MUST BE BOUND. `inbound_differ._extract_parent_local_id` resolves the parent key
+    through `binding_store.get_local_id` and returns None when it is not yet bound; the caller
+    then SKIPS the field rather than emitting it, so an unbound parent produces no mutation at
+    all — indistinguishable from a bridge defect.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
-    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
-    first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 parent A"))
-    second = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 parent B"))
-    child = _seed(
-        dc_transport,
-        jira_dc_project,
-        track_issue,
-        _uniq("rebar J11 reparented subtask"),
-        issuetype=subtask_type,
-        extra={"parent": {"key": first}},
-    )
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the parent path DC supports cannot be exercised. See rebar ticket 9f26."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 adopt child"))
     child_local = _jira_key_to_local_id(child)
-    first_local = _jira_key_to_local_id(first)
-    second_local = _jira_key_to_local_id(second)
+    epic_local = _jira_key_to_local_id(epic_key)
 
-    scope = ",".join((child_local, child, first_local, first, second_local, second))
+    scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
     store = load_binding_store(dc_store_copy_repo)
-    for local_ref, key_ref in ((child_local, child), (second_local, second)):
+    for local_ref, key_ref in ((child_local, child), (epic_local, epic_key)):
         bound = store.get_jira_key(local_ref)
         assert bound == key_ref, (
-            f"SETUP FAILED (not the reparent): {local_ref} is not bound (got {bound!r}, expected "
+            f"SETUP FAILED (not the adopt): {local_ref} is not bound (got {bound!r}, expected "
             f"{key_ref!r}). An unbound parent key resolves to None and the differ SKIPS the "
-            f"parent field entirely (`inbound_differ.py:257-270`), so no mutation would even be "
-            f"attempted."
+            f"parent field entirely, so no mutation would even be attempted."
         )
     before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
-    assert before != second_local, (
-        f"SETUP FAILED (not the reparent): the sub-task's local parent_id is ALREADY "
-        f"{second_local!r} before this cell reparents it, so the assertion below would pass "
-        f"without any mutation having happened."
+    assert not before, (
+        f"SETUP FAILED (not the adopt): the child's local parent_id is already {before!r} "
+        f"before the instance-side set. The assertion below could then pass without the "
+        f"inbound pass carrying anything, AND a local parent would be re-asserted outbound "
+        f"(local-wins), suppressing the very inbound mirror this cell is about."
+    )
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    pre_link = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert status == 200 and not pre_link, (
+        f"SETUP FAILED (not the adopt): {child} already carries an Epic Link ({pre_link!r}) "
+        f"before this cell sets one (HTTP {status}), so its presence afterwards proves nothing."
     )
 
-    # DIAGNOSTIC PROBES — [rebar:1a9f-50c0-e7a5-4fda] AC1: does DC 8.17.1 return SUCCESS or an
-    # ERROR for this reparent? `dc_transport.set_parent` cannot answer that itself (pycontribs
-    # does not surface the raw HTTP response), and the `bridge_alerts` store cannot either — this
-    # cell calls the transport DIRECTLY, bypassing the dispatch code that writes alerts, so the
-    # store would read empty regardless of what DC does (see 1a9f's second design comment). None
-    # of these three probes assert; their results are folded into the existing oracle's failure
-    # message below so a CI reader sees the raw platform response without a rerun.
-    editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
-    probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
-    update_verb_status, update_verb_body = _probe_subtask_parent_put(
-        dc_request, child, second, verb="update"
+    # THE MUTATION UNDER TEST — set the parent on the INSTANCE, prove it landed there by a raw
+    # REST read, then let a real inbound pass carry it into the local store.
+    dc_transport.set_parent(child, epic_key)
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    landed = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert status == 200 and landed == epic_key, (
+        f"SETUP FAILED (not the bridge): set_parent returned without error but {child}'s Epic "
+        f"Link ({epic_field}) reads {landed!r}, expected {epic_key!r} (HTTP {status})."
     )
-    probe_diagnostics = (
-        f"raw PUT (fields form) for the reparent -> HTTP {probe_status}, body "
-        f"{str(probe_body)[:300]}; raw PUT (update-verb form) -> HTTP {update_verb_status}, "
-        f"body {str(update_verb_body)[:300]}; /editmeta for 'parent' (HTTP {editmeta_status}) "
-        f"exposes operations {editmeta_ops!r}"
-    )
-
-    dc_transport.set_parent(child, second)
+    # Wait on the PRODUCTION read — `get_parent_map` is an index-backed paged search (9bb9
+    # taught it the Epic Link fallback), so a direct GET agreeing proves nothing about what the
+    # pass will see. The predicate takes the WHOLE map: a degraded map is `{}`, and a predicate
+    # written over `mapping[child]` alone cannot tell that from "no parent".
     _wait_until_parent_map_reflects(
         dc_transport,
         jira_dc_project,
         child,
-        lambda mapping: mapping.get(child) == second,
-        f"the reparent to {second} (raw platform probes: {probe_diagnostics})",
+        lambda mapping: mapping.get(child) == epic_key,
+        f"the parent set to {epic_key}",
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound reparent pass raised:\n{cp.stderr[-2000:]}"
+    assert "Traceback" not in cp.stderr, f"inbound parent pass raised:\n{cp.stderr[-2000:]}"
 
     after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
-    assert after == second_local, (
-        f"the DC reparent did not reach the local ticket: .parent_id on {child_local} is "
-        f"{after!r} (it was {before!r} before), expected {second_local!r} — the local id of "
-        f"{second}, which `get_parent_map` confirms is now the sub-task's parent. Raw platform "
-        f"probes: {probe_diagnostics}"
+    assert after == epic_local, (
+        f"the DC parent did not reach the local ticket: .parent_id on {child_local} is "
+        f"{after!r} (it was empty before), expected {epic_local!r} — the local id of "
+        f"{epic_key}, which `get_parent_map` confirms is now the child's parent on the "
+        f"instance."
     )
 
 
@@ -1906,104 +1944,148 @@ def test_outbound_clear_parent_round_trips(
 
 @_skip
 @_skip_no_extra
-def test_outbound_set_subtask_parent_round_trips(
-    dc_transport: Any, jira_dc_project: str, track_issue: Any, dc_request: Any
+def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_dropped(
+    dc_store_copy_repo: Path,
+    dc_transport: Any,
+    jira_dc_project: str,
+    track_issue: Any,
+    dc_request: Any,
 ) -> None:
-    """Row 12 OUTBOUND, the SUB-TASK case: rebar WRITING a parent onto a DC issue.
+    """Row 12 outbound, RE-HOMED (ticket 9f26): the user must be TOLD when a parent cannot land.
 
-    THIS ROW HAD NO TEST IN THIS DIRECTION, and the gap was invisible because a neighbour
-    looked like it. `test_outbound_clear_parent_round_trips` (row 13 outbound) does assert a
-    parent is present — but that parent came from ISSUE CREATION
-    (`extra={"parent": {"key": parent}}`), not from a rebar write, so nothing anywhere proved
-    rebar can SET a parent on Data Center. This is the untested corner of the exact area every
-    "Cloud has the translation, DC never got its half" defect in this epic has landed in —
-    d067 (status), 8d68 (inbound identity mint), 751e (unassign), 2b16 / 88d9 (link removal,
-    parent clear) — and every one of them was a SILENT success.
+    WHY THE OLD SUBJECT HAD TO GO. This cell used to assert that rebar can SET a sub-task's
+    `fields.parent` on Data Center. It cannot, and neither can anything else: DC answers that
+    write with HTTP 204 and ignores it (capability map req-0056/req-0058), which live run
+    30951453979 reproduces in the cell's own failure text — "asked for RBJVZQW-2 … a fresh read
+    still reports RBJVZQW-1". Twelve consecutive runs, never green. An oracle for an operation
+    the platform cannot perform is a wrong oracle.
 
-    ASSERTED AGAINST THE TRANSPORT, NOT THROUGH A PASS, and unlike row 12's epic case this is
-    not because of the swallow. It is because the pass-level round-trip is STRUCTURALLY
-    UNREACHABLE on Data Center: two independent gates, each correct on its own terms, do not
-    compose.
+    WHY IT IS NOT RE-HOMED TO THE EPIC PARENT. That would make it a duplicate:
+    `test_outbound_epic_parent_round_trips_via_the_epic_link` already pins the transport-level
+    write and `test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS` already pins it
+    through a real pass, both green. A third copy would assert nothing new, which is the
+    adjacent-green substitution this epic has been burned by three times (changes 1276, 1288,
+    1302).
 
-      * TO BE APPLIED, the DC transport SPLITS on the child's shape. `set_parent` writes
-        `fields.parent` for a sub-task, and for anything else writes the instance-discovered
-        "Epic Link" custom field instead (ticket 39c1, change 1311) — declining only when that
-        field cannot be found. It NEVER writes `fields.parent` for a non-sub-task, which DC
-        silently no-ops.
-      * TO BE EMITTED, the outbound differ requires the LOCAL PARENT to be an EPIC.
-        `outbound_field_diff._resolve_local_parent:136-139` returns `(False, None)` — the
-        field is omitted entirely — for any parent whose local `ticket_type` is not `epic`
-        (bug 8b25's hierarchy guard; unit-covered by
-        `tests/unit/rebar_reconciler/conflict/test_parent_hierarchy_guard.py`).
+    THE CLAIM IT TAKES INSTEAD IS THE ONE NOTHING ASSERTS ANYWHERE, and it is the actual
+    user-visible defect. Two gates, each correct alone, silently swallow a hierarchy edit:
 
-    A DC sub-task's parent is a STANDARD issue, whose local ticket_type is `task` — so the one
-    child DC will accept a `fields.parent` write for is exactly the one whose parent the differ
-    suppresses. Routing this row through a pass would therefore assert a mutation nothing
-    emits. That is the same reason row 14 outbound
-    (`test_outbound_delete_leaves_the_issue_absent_by_key_AND_by_id`) asserts the PRIMITIVE,
-    and it is the shape reused here. THIS IS STILL A GENUINE ROUND-TRIP — rebar writes, the
-    instance is read back independently — it is just scoped to the layer that can actually run.
+      * `outbound_field_diff._resolve_local_parent` OMITS the parent field entirely when the
+        local parent's `ticket_type` is not `epic` (bug 8b25's guard, correctly refusing to
+        write a parent the tracker rejects or ignores) — and, before this ticket, returned
+        BYTE-IDENTICALLY to its "unbound this pass, retry next pass" return, with no log and no
+        record;
+      * so `parent` never enters `fields`, `dispatch_one._update_one_apply_parent` never runs,
+        and the entire `record_parent_divergence` / `bridge_alerts` apparatus that ticket 39c1
+        built for exactly this failure is STRUCTURALLY UNREACHABLE.
 
-    THE ORACLE READS RAW REST, deliberately not `get_issue_by_rest` (the same transport that
-    wrote, which cannot separate "DC stored it" from "the object we mutated reports what we
-    set") and not `get_parent_map` (a JQL paged search — eventually consistent, and the read
-    the INBOUND row already owns). The reasoning lives with the oracle in
-    `_dc_support.assert_remote_parent_is`, which is where the harness-free mutation check
-    drives it.
+    The pass then exits 0 and reports convergence while the user's parent edit is gone. That is
+    the same invisibility `pass_io.py` names as the reason this class "stayed invisible through
+    five instances" — 39c1 wired it into apply-time failure and left emit-time suppression mute.
 
-    RE-PARENTS RATHER THAN PARENTS, for the reason the inbound row-12 cell gives: a sub-task
-    cannot be created parentless, so it arrives already pointing at one parent and asserting
-    THAT value would re-read a field this cell did not write. The precondition asserts the
-    starting parent, so the ending value is attributable to the mutation and a silent no-op is
-    named as one.
+    THE ORACLE IS THE USER-VISIBLE OUTCOME, ASSERTED BOTH WAYS. rebar must (1) TELL the operator
+    — a durable `outbound-field-dropped` bridge alert naming this issue and the `parent` field,
+    not a log line — and (2) still NOT have written anything, because a write DC accepts and
+    ignores is the failure mode the whole ticket is about. Asserting only the first would pass
+    for an implementation that alerts AND writes; asserting only the second is what twelve runs
+    already did.
+
+    DISTINCT FROM `test_a_subtask_reparent_is_REFUSED_rather_than_silently_ignored`, which
+    asserts the TRANSPORT raising when called directly. This asserts what a real reconcile PASS
+    surfaces — and `dispatch_one` swallows set_parent's exception, so the transport's raise is
+    invisible at pass level. They are different layers and both are needed.
+
+    THE PARENT'S LOCAL TICKET_TYPE IS ASSERTED, NOT ASSUMED. If the seeded parent imported as
+    local `epic`, the guard would not fire, the parent would be emitted, and this cell would go
+    green for a reason that has nothing to do with the alert.
     """
-    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
-    first = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outset par A"))
-    second = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 outset par B"))
-    child = _seed(
-        dc_transport,
-        jira_dc_project,
-        track_issue,
-        _uniq("rebar J11 outset subtask"),
-        issuetype=subtask_type,
-        extra={"parent": {"key": first}},
+    from rebar_reconciler.binding_store import load_binding_store
+    from rebar_reconciler.inbound_translate import _jira_key_to_local_id
+
+    import rebar
+
+    # Resolved up front because the "nothing was written" oracle below reads it: the Epic Link
+    # is the field a write for THIS child shape would actually land in, so without it that
+    # assertion cannot fail.
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the 'nothing was written' half of this cell could not be asserted against the "
+            "field a write would land in. See rebar ticket 9f26."
+        )
+    parent = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 unrep parent"))
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 unrep child"))
+    child_local = _jira_key_to_local_id(child)
+    parent_local = _jira_key_to_local_id(parent)
+
+    scope = ",".join((child_local, child, parent_local, parent))
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    store = load_binding_store(dc_store_copy_repo)
+    for local_ref, key_ref in ((child_local, child), (parent_local, parent)):
+        bound = store.get_jira_key(local_ref)
+        assert bound == key_ref, (
+            f"SETUP FAILED (not the emit): {local_ref} is not bound (got {bound!r}), so an "
+            f"outbound update would take the CREATE path instead of touching {key_ref}."
+        )
+    parent_type = (_local(dc_store_copy_repo, parent_local).get("ticket_type") or "").lower()
+    assert parent_type and parent_type != "epic", (
+        f"SETUP FAILED (not the emit): the seeded parent {parent} imported as local ticket_type "
+        f"{parent_type!r}. The suppression under test fires only for a NON-epic parent, so an "
+        f"epic here would emit the parent normally and this cell would prove nothing."
     )
 
-    # SETUP — the sub-task must START under `first`, or "it is under `second` afterwards" could
-    # be true before the mutation. Asserted through the SAME raw-REST oracle as the result, so
-    # the two cannot disagree about where `fields.parent` lives.
-    status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
-    _assert_remote_parent_is(child, status, body, first, stage="SETUP (not the reparent)")
-
-    # DIAGNOSTIC PROBES — [rebar:1a9f-50c0-e7a5-4fda] AC1: does DC 8.17.1 return SUCCESS or an
-    # ERROR for this reparent? `dc_transport.set_parent` cannot answer that itself — pycontribs'
-    # `issue.update(...)` does not surface the raw HTTP response to its caller. These bypass it
-    # entirely over raw REST. None of the three assert; their results are folded into the
-    # existing oracle's failure message below so a CI reader sees the raw platform response
-    # without a rerun.
-    editmeta_status, editmeta_ops = _probe_subtask_parent_editmeta_ops(dc_request, child)
-    probe_status, probe_body = _probe_subtask_parent_put(dc_request, child, second)
-    update_verb_status, update_verb_body = _probe_subtask_parent_put(
-        dc_request, child, second, verb="update"
-    )
-    probe_diagnostics = (
-        f"raw PUT (fields form) for the reparent -> HTTP {probe_status}, body "
-        f"{str(probe_body)[:300]}; raw PUT (update-verb form) -> HTTP {update_verb_status}, "
-        f"body {str(update_verb_body)[:300]}; /editmeta for 'parent' (HTTP {editmeta_status}) "
-        f"exposes operations {editmeta_ops!r}"
+    # THE MUTATION UNDER TEST — the user attaches a parent the tracker cannot hold for this
+    # child shape, and a real pass carries (or drops) it.
+    rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=parent_local)
+    staged = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
+    assert staged == parent_local, (
+        f"SETUP FAILED (not the emit): .parent_id on {child_local} is {staged!r}, expected "
+        f"{parent_local!r}, so the outbound pass has no attach to drop."
     )
 
-    # THE MUTATION UNDER TEST — rebar's own write path for a DC parent.
-    dc_transport.set_parent(child, second)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, (
+        f"outbound unrepresentable-parent pass raised:\n{cp.stderr[-2000:]}"
+    )
 
-    status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent")
-    _assert_remote_parent_is(
-        child,
-        status,
-        body,
-        second,
-        previous_parent=first,
-        stage=f"the outbound parent set (raw platform probes: {probe_diagnostics})",
+    # (1) THE OPERATOR IS TOLD. `assert_bridge_alert_for_mutation` refuses to read the store at
+    # all unless the pass provably completed — an absent alert directory is otherwise
+    # indistinguishable from "nobody looked".
+    dedup_key = f"outbound-field-dropped:{child}:parent"
+    alerts = _assert_bridge_alert_for_mutation(cp, dc_store_copy_repo, child_local, key=dedup_key)
+    assert any(a.get("key") == dedup_key for a in alerts), (
+        f"the pass DROPPED the parent attach for {child_local} -> {parent_local} and recorded "
+        f"NOTHING: no `{dedup_key}` in {alerts!r}. The pass exited 0 and reported convergence "
+        f"while the user's hierarchy edit was discarded, which is exactly the silent-divergence "
+        f"failure 39c1 made durable for the apply side and this ticket closes for the emit side."
+    )
+
+    # (2) AND NOTHING WAS WRITTEN. The whole reason the field is suppressed is that DC would
+    # accept-and-ignore it; an implementation that alerts AND writes is not fixed. Read over
+    # RAW REST, never the transport that would have performed the write.
+    #
+    # BOTH FIELDS ARE READ, and that is what makes this assertion able to fail at all. `child`
+    # is a standard issue, and `set_parent` NEVER writes `fields.parent` for a non-sub-task —
+    # it writes the Epic Link instead (it declines `fields.parent` precisely because DC would
+    # no-op it). So a `?fields=parent` read alone is empty by construction whatever rebar did,
+    # and would pass vacuously. The Epic Link is the field a write WOULD land in here, so it
+    # is the one that carries the claim.
+    assert epic_field is not None  # narrowed by the SETUP guard above
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields=parent,{epic_field}")
+    assert status == 200 and isinstance(body, dict) and "fields" in body, (
+        f"could not read {child} back to verify nothing was written (HTTP {status}, body "
+        f"{str(body)[:200]}) — an unreadable issue must not be mistaken for an unwritten one."
+    )
+    fields = body.get("fields") or {}
+    wrote_parent = fields.get("parent")
+    wrote_link = fields.get(epic_field)
+    assert not wrote_parent and not wrote_link, (
+        f"rebar reported the dropped parent AND still wrote one: {child} now carries "
+        f"fields.parent = {wrote_parent!r} and Epic Link ({epic_field}) = {wrote_link!r}. The "
+        f"suppression exists because this parent shape cannot be represented on Data Center, "
+        f"so emitting it anyway reintroduces the very silent no-op the alert warns about."
     )
 
 

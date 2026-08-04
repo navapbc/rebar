@@ -116,6 +116,8 @@ def _resolve_local_parent(
     ticket: dict[str, Any],
     binding_store: Any,
     local_ticket_types: dict[str, str] | None,
+    *,
+    suppressed_out: list[str] | None = None,
 ) -> tuple[bool, str | None]:
     """Resolve the local parent to a remote key for the UPDATE diff (present?, value).
 
@@ -128,6 +130,25 @@ def _resolve_local_parent(
     * a locally-DETACHED ticket (no parent_id) → ``(True, None)`` — the clear
       candidate the diff loop gates on the managed-ref check;
     * no binding store → ``(False, None)``.
+
+    The two ``(False, None)`` returns are byte-identical but mean OPPOSITE things, and
+    conflating them is what made a suppressed hierarchy edit invisible: an UNBOUND parent
+    self-resolves on a later pass, while a BOUND non-epic parent will NEVER converge — the
+    user's parent edit is dropped for good, yet the pass exits 0 reporting convergence
+    (ticket 9f26; the same class of silence ``pass_io.record_parent_divergence`` was built
+    for).
+
+    ``suppressed_out`` is how the caller learns which of the two happened: the BOUND
+    non-epic case appends the remote key it WOULD have emitted. This reports the fact and
+    stops there deliberately — whether that suppression actually costs the user anything
+    depends on what the tracker already holds, and this function cannot see the remote
+    snapshot. ``diff_canonical_fields`` owns that comparison, because a parent the tracker
+    ALREADY carries was not dropped at all (the common shape: an inbound-mirrored sub-task's
+    parent is a non-epic and is already correct), and alerting there would fire every pass
+    for every such ticket and drain the channel of meaning.
+
+    The suppression itself is unchanged: the parent is still omitted from ``changed``, and
+    the unbound case still appends nothing.
     """
     if binding_store is None:
         return (False, None)
@@ -136,7 +157,14 @@ def _resolve_local_parent(
         if local_ticket_types is not None and local_parent_id in local_ticket_types:
             parent_type = (local_ticket_types.get(local_parent_id) or "").lower()
             if parent_type != "epic":
-                return (False, None)  # Jira permits only Epic parents — suppress (8b25)
+                # Jira permits only Epic parents — suppress (8b25). Report the suppression
+                # (bound parents only; an unbound one has not been offered to the tracker
+                # yet and converges later) and let the caller judge whether it cost anything.
+                if suppressed_out is not None:
+                    suppressed_key = binding_store.get_jira_key(local_parent_id)
+                    if suppressed_key:
+                        suppressed_out.append(suppressed_key)
+                return (False, None)
         remote_parent_key = binding_store.get_jira_key(local_parent_id)
         if remote_parent_key:
             return (True, remote_parent_key)
@@ -380,7 +408,22 @@ def diff_canonical_fields(
                 changed["_assignee_is_account_id"] = True
 
     # --- parent (driven by LOCAL parent state; local-wins SET, managed-gated CLEAR) ---
-    present, local_parent = _resolve_local_parent(ticket, binding_store, local_ticket_types)
+    suppressed_parents: list[str] = []
+    present, local_parent = _resolve_local_parent(
+        ticket, binding_store, local_ticket_types, suppressed_out=suppressed_parents
+    )
+    # Bug 8b25's guard drops a non-epic parent silently, and before ticket 9f26 that silence
+    # was total: the field never entered `changed`, so `dispatch_one._update_one_apply_parent`
+    # never ran and the whole `record_parent_divergence` / bridge_alerts apparatus was
+    # unreachable — the pass exited 0 reporting convergence while the edit was gone.
+    # Report it on the EXISTING drop channel, but ONLY when it actually costs something: if
+    # the tracker already carries the parent the user asked for, nothing was dropped. That is
+    # the common case (an inbound-mirrored sub-task's parent is a non-epic and already
+    # correct), and alerting on it would fire every pass for every such ticket. Same rule the
+    # sibling `issuetype` drop follows: record when the local value DIFFERS from the remote.
+    if suppressed_parents and dropped_field_sink is not None and jira_key:
+        if suppressed_parents[0] != (canonical_remote.get("remote_parent_id") or None):
+            dropped_field_sink.append((jira_key, "parent"))
     if present:
         remote_parent = canonical_remote.get("remote_parent_id")
         if local_parent != remote_parent:
