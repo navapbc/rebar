@@ -586,16 +586,16 @@ def cli(argv: list[str]) -> int:
     report: list[dict] = []  # one entry per NON-verified in-scope event
     enforced_not_verified = 0
     for ev in events:
-        # A compacted LEDGER entry can carry a null commit_sha when compaction could not
-        # resolve the introducing commit at fold time (bug B). Re-resolve it here from the
-        # recorded ``position`` (which resolves to the real introducing commit) so BOTH the
-        # era classification (_verify_signed's ledger branch reads ``ev.commit_sha``) and the
-        # enforcement decision (_resolve_commit returns ``ev.commit_sha``) use the real
-        # commit — otherwise a validly-signed event fail-closes to ``key_not_valid_at_era``.
+        # A compacted LEDGER entry's recorded commit_sha is a cache. Re-resolve its position
+        # against the current history so an epoch rewrite cannot make a valid signature appear
+        # wrong-era; retain the recorded SHA only when current resolution fails. This also
+        # repairs null SHAs recorded when compaction could not resolve the introducing commit.
         # Use the batched --full-history position map first (O(1)); only fall back to the
         # per-entry resolver for a position the map misses (fail-closed).
-        if ev.event is None and ev.commit_sha is None and ev.position:
-            ev.commit_sha = _resolve_position(ev.position)
+        if ev.event is None and ev.position:
+            resolved_sha = _resolve_position(ev.position)
+            if resolved_sha is not None:
+                ev.commit_sha = resolved_sha
         cls = _classify(ev, tracker, args.root, position_resolver=_resolve_position)
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
