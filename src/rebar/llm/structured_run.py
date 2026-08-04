@@ -275,6 +275,22 @@ def build_model_settings(
     # doesn't truncate (finish_reason=length), without mutating a shared runner's self._config.
     # A request can only RAISE the configured floor, never lower it.
     eff_max_tokens = effective_max_tokens(cfg.max_tokens, getattr(req.config, "max_tokens", None))
+    # Clamp to the RESOLVED model's published output ceiling (bug 1019-e1e9-5117-4795). The cap
+    # above is monotonically RAISED — `max_output_cfg` lifts it to the ceiling of whichever model
+    # was resolved at the time and never lowers it again — so a cap raised for a 128K verifier
+    # rides into a later call that resolves to the 64K trivial model. Anthropic's API tolerated
+    # the oversized ask; Bedrock rejects it outright with
+    # `ValidationException: The maximum tokens you requested exceeds the model limit`, and the
+    # call never runs. Asking a model for more output than it accepts cannot produce a larger
+    # answer — only a guaranteed failure — so clamping here loses nothing.
+    #
+    # Applied ONLY to a model the ceiling table actually knows. `model_max_output_tokens` falls
+    # back to the configured default (16000) for an unmapped model, and clamping to THAT would
+    # silently shrink a deliberate operator floor on any model outside the gate ladder — a
+    # regression worse than the bug. An unmapped model keeps today's behaviour.
+    _ceiling = _known_model_output_ceiling(resolved)
+    if _ceiling is not None:
+        eff_max_tokens = min(eff_max_tokens, _ceiling)
     if req.output_token_limit is not None:
         eff_max_tokens = min(eff_max_tokens, max(256, int(req.output_token_limit)))
     if eff_max_tokens:
@@ -344,6 +360,25 @@ def effective_max_iterations(floor: int, requested: int | None) -> int:
     under other steps. The request can only raise the operator-configured floor, never lower it —
     so ``max(floor, requested)``; a missing/None request value leaves the floor untouched."""
     return max(floor, requested or floor)
+
+
+def _known_model_output_ceiling(model: str | None) -> int | None:
+    """The published output ceiling for ``model``, or ``None`` when the table does not know it.
+
+    Deliberately NOT :func:`review_kernel.verify.model_max_output_tokens`, which answers the
+    different question "what budget should a review ride at" and therefore substitutes the
+    configured default for an unmapped model. Here an unmapped model must yield ``None`` (leave
+    the cap alone) rather than a default that would clamp a legitimate operator floor downward.
+    Imported lazily off the same single-source table so the two cannot drift.
+    """
+    if not model:
+        return None
+    from rebar.llm.review_kernel.verify import MODEL_MAX_OUTPUT_TOKENS
+
+    for name, cap in MODEL_MAX_OUTPUT_TOKENS:
+        if name in model:
+            return cap
+    return None
 
 
 def effective_max_tokens(floor: int, requested: int | None) -> int:
