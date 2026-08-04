@@ -127,6 +127,13 @@ trail lives in the store.
 the **most-recently-created** link between that ordered pair, one per call. If a pair has
 multiple links, call `unlink` repeatedly.
 
+**Direction and visibility.** A link is stored one-sided on the **source** ticket's record
+(`deps`: outgoing edges only). `show` additionally renders the computed **`inbound_deps`**
+list — every other ticket linking *to* the shown one, as `{from_id, relation, status}`
+meaning "`from_id` \<relation\> this ticket" — so a ticket's blocked-ness (an inbound
+`blocks`, or its own outgoing `depends_on`) is readable from a single `show`, consistent
+with what `ready`/`next-batch` compute.
+
 **Hierarchy escalation (blocking links only).** For `blocks` / `depends_on`, rebar requires
 the two endpoints to be **siblings** — to share a parent. Comparability is *structural*: it
 depends only on where the tickets sit in the parent hierarchy, never on their `ticket_type`,

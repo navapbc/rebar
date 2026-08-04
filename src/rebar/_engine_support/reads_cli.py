@@ -141,7 +141,15 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         if idx > 0 and fmt != "llm":
             print()
         try:
-            state = show_state(raw_id, tracker, include_scratch=include_scratch)
+            # The `llm` arm stays inbound-free to preserve the show↔list llm
+            # parity contract (test_llm_parity_show_vs_list); the default view
+            # gains the computed `inbound_deps` key (bug 05cb).
+            state = show_state(
+                raw_id,
+                tracker,
+                include_scratch=include_scratch,
+                include_inbound=fmt != "llm",
+            )
             if not include_provenance and fmt != "llm":
                 # Hide the monotonic removal-sync projection from the default view so
                 # unlinked/removed refs don't read as live links. Scoped to the default
