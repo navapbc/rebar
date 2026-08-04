@@ -385,6 +385,27 @@ def fallback_targets_for(
     return ()
 
 
+def primary_endpoint_for(resolved: str, slots: Mapping[str, ClassSlot] | None = None) -> str | None:
+    """The slot-level ``endpoint`` configured for the class whose PRIMARY resolves to
+    ``resolved``, or ``None``.
+
+    The companion of :func:`fallback_targets_for` for the PRIMARY model. A slot's ``endpoint``
+    (the ``[tool.rebar.llm.model_classes]`` field and ``REBAR_LLM_<CLASS>_ENDPOINT``) is a
+    per-class OpenAI-compatible base URL, but ``resolve_class`` returns only a ``provider:model``
+    string, so an op collapsing a class onto ``cfg.model`` drops it — leaving the primary with no
+    endpoint while ``build_fallback_model`` honors every FALLBACK entry's. This lets the runner
+    recover it from the resolved string (the same identity ``fallback_targets_for`` keys on),
+    apply it as ``cfg.base_url``, and route the primary through rebar's builder instead of
+    pydantic-ai's stock provider (bug 6e70). Classes are consulted in :data:`CLASS_NAMES` order,
+    so if two slots name the same primary the first wins."""
+    slots = load_class_slots() if slots is None else slots
+    for name in CLASS_NAMES:
+        slot = slots.get(name)
+        if slot is not None and _resolve_target(slot.model, slot.provider) == resolved:
+            return slot.endpoint
+    return None
+
+
 def build_fallback_model(
     resolved: str, targets: Sequence[FallbackTarget], *, session: Any
 ) -> tuple[Any, list[str]]:

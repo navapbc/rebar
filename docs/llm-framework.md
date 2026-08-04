@@ -212,7 +212,17 @@ model can serve the decisive checks while a frontier model does the open-ended w
 [tool.rebar.llm.model_classes]
 frontier = { model = "openai:gpt-4o" }
 standard = { model = "google:gemini-2.5-pro" }
-trivial  = { model = "local-model", provider = "openai", endpoint = "http://localhost:1234/v1" }
+# A per-class `endpoint` points that class's model at a local OpenAI-compatible server; rebar
+# routes it through its own builder (no key required) and records `tier=best_effort`.
+trivial  = { model = "mlx-community/Qwen3-8B", provider = "openai", endpoint = "http://127.0.0.1:1234/v1" }
+```
+
+Equivalently, set a single top-level `base_url` to send **every** class's primary model to
+one local server (it also flips the signed tier to `best_effort`):
+
+```toml
+[tool.rebar.llm]
+base_url = "http://127.0.0.1:1234/v1"
 ```
 
 The same slots are settable from the environment, one variable per class and field:
@@ -223,10 +233,12 @@ REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review-code
 # `standard` drives plan-review, the completion verifier, the code-review verify passes
 # and the overlap judge:
 REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review-plan <id>
-# `trivial` drives ticket enrichment and the epic bug screen. Pointing it at a local
-# OpenAI-compatible server (LMStudio / Ollama / vLLM):
-REBAR_LLM_TRIVIAL_MODEL=local-model REBAR_LLM_TRIVIAL_PROVIDER=openai \
-  REBAR_LLM_TRIVIAL_ENDPOINT=http://localhost:1234/v1
+# `trivial` drives ticket enrichment and the epic bug screen. Point it at a local
+# OpenAI-compatible server (LMStudio / Ollama / vLLM) with the per-class endpoint:
+REBAR_LLM_TRIVIAL_MODEL=mlx-community/Qwen3-8B REBAR_LLM_TRIVIAL_PROVIDER=openai \
+  REBAR_LLM_TRIVIAL_ENDPOINT=http://127.0.0.1:1234/v1
+# ...or send EVERY class's primary to one local server with the top-level base URL:
+REBAR_LLM_BASE_URL=http://127.0.0.1:1234/v1
 # (no dummy REBAR_LLM_API_KEY needed — the builder supplies one; such a run records tier=best_effort)
 ```
 
@@ -244,6 +256,41 @@ class the operation declares) to move a classless operation.
 > **`REBAR_LLM_MODEL` is DEPRECATED** (scheduled for removal in v1.0.0). It still works and
 > now applies its value to **all three** classes, warning once per call; any class slot or
 > `REBAR_LLM_<CLASS>_MODEL` you set wins over it. Migrate to the slots above.
+
+### A validated local-model run
+
+Verified end to end against a local OpenAI-compatible server (an MLX model served at
+`http://127.0.0.1:1234/v1`, no API key). Install the openai provider group, point the
+`trivial` class at the server, and run any operation that declares it — here ticket
+enrichment, the highest-volume `trivial` site:
+
+```bash
+pip install 'pydantic-ai-slim[openai]'   # the OpenAI-compatible provider group
+
+# Either recipe works — a per-class endpoint, or a top-level base_url:
+REBAR_LLM_TRIVIAL_MODEL=<your-local-model> REBAR_LLM_TRIVIAL_PROVIDER=openai \
+  REBAR_LLM_TRIVIAL_ENDPOINT=http://127.0.0.1:1234/v1 \
+  python -c "import json, rebar.llm.enrich as e; \
+print(json.dumps(e.enrich(text='Title: retries lack jitter; add exponential backoff')['digest']))"
+```
+
+The call reaches the local server through rebar's builder (no `OPENAI_API_KEY`, no dummy
+`REBAR_LLM_API_KEY`), returns a schema-valid `ticket_digest`, and records `tier=best_effort` in
+the signed provenance because a local/opaque endpoint was used. Observed abridged output:
+
+```json
+{
+  "problem_keywords": ["retry", "jitter", "exponential backoff"],
+  "component_or_area": "client retry handler",
+  "propositions": [
+    "Client retries lack jitter",
+    "Acceptance requires adding exponential backoff with jitter to retry logic"
+  ]
+}
+```
+
+> A missing provider group fails loudly and by name (`pip install 'pydantic-ai-slim[openai]'`)
+> rather than with a bare `ModuleNotFoundError` — the framework's clean-degradation contract.
 
 The `[agents]` extra ships **`pydantic-ai-slim[anthropic,retries]`** (Claude, the default)
 out of the box. Bedrock has rebar's own **`[bedrock]`** extra (see above, and note its declared
