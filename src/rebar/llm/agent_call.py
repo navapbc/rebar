@@ -51,15 +51,16 @@ def build_agent_kwargs(
     reach the ADR's ~6-parameter threshold for one).
 
     ``web_caps`` is passed IN rather than computed here, deliberately:
-    ``_anthropic_web_search_capabilities`` is a ``runner`` module global the suite reaches via
+    ``web_search_capabilities`` is a ``runner`` module global the suite reaches via
     ``monkeypatch.setattr(runner_mod, ...)``, and moving its CALL SITE into this module would
     resolve the name through THIS module's globals and silently defeat such a patch — the
     hazard ADR 0056's Consequences section records. Keeping the call in ``run()`` means this
-    extraction needs no monkeypatch repoint at all.
+    extraction needs no monkeypatch repoint at all. (It also keeps ONE seam deciding web access
+    and the provenance that attests it — bug 129e.)
 
     Both optional keys are OMITTED rather than set to ``None`` when absent: a present-but-None
-    value would reach the provider, so an unflagged / non-anthropic request must stay
-    byte-identical to the pre-capability era."""
+    value would reach the provider, so an unflagged request must stay byte-identical to the
+    pre-capability era."""
     if req.tool_step_limit is not None and tools:
         # Executable convergence boundary — intentionally not a forced tool.
         from pydantic_ai.toolsets import FunctionToolset
@@ -82,9 +83,8 @@ def build_agent_kwargs(
         # can't interrupt a blocking call — those are bounded by the derived step caps).
         "tool_timeout": float(cfg.llm_tool_timeout_s),
     }
-    # Server-side web search (bug ff64) — anthropic-GATED like the cache settings the caller
-    # resolves (an injected test model never gets a provider server tool); any
-    # non-flagged-anthropic request stays byte-identical (no ``capabilities`` key).
+    # Web search (bug ff64; provider-independent since bug 129e) — resolved by the caller for
+    # every provider alike; an UNflagged request stays byte-identical (no ``capabilities`` key).
     if web_caps is not None:
         kwargs["capabilities"] = web_caps
     if model_settings:

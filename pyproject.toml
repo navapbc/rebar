@@ -119,7 +119,16 @@ agents = [
     # <1.107 with a current anthropic SDK breaks `AnthropicModel` at import time. Floors only,
     # no speculative upper cap (nava-rebar is consumed from PyPI); the committed uv.lock pins
     # the repo's own envs to a verified pair.
-    "pydantic-ai-slim[anthropic,retries]>=1.107,<2",
+    # `[duckduckgo]` adds pydantic_ai.common_tools.duckduckgo (via `ddgs`) — the LOCAL web-search
+    # backend behind `capabilities.web_search_capabilities` (bug 129e). NOT optional-at-runtime
+    # like the provider extras: plan-review criterion T1 is BLOCKING and its routing declares
+    # web access, which rebar guarantees on every provider — and MEASURED, Bedrock's Converse API
+    # cannot carry Anthropic's server-side web_search (`supported_native_tools` is empty), so on
+    # the production provider the local backend IS the only route. The capability resolves its
+    # local tool EAGERLY at construction, so a missing group raises `UserError` at gate time
+    # rather than silently withdrawing the tool — which is exactly the failure 129e fixed. It
+    # therefore belongs in `agents` itself, not in an opt-in extra a deployment could forget.
+    "pydantic-ai-slim[anthropic,retries,duckduckgo]>=1.107,<2",
     "json-repair>=0.61",  # >=0.61 for repair_json(schema=…) schema-guided repair (story drake)
     "pydantic>=2",
 ]

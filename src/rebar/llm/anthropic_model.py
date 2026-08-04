@@ -10,7 +10,10 @@ with the Anthropic-specific construction path the runner funnels through on the
 ``rebar.llm.capabilities`` (story S2) — that module reads capability FIELDS off a
 ``ModelProfile`` rather than string-matching a provider name, which this module's old
 the removed anthropic-only cache-settings helper (``startswith`` gated) did not: it
-silently disabled caching for Bedrock-hosted Claude.
+silently disabled caching for Bedrock-hosted Claude. The web-search capability helper
+(once ``_anthropic_web_search_capabilities`` here, ``startswith``-gated in the same way)
+moved to that module too and stopped being provider-gated at all — bug 129e: the Bedrock
+cutover silently withdrew the T1 blocking criterion's grounding tool.
 
 Heavy libraries (httpx, anthropic, pydantic-ai, tenacity, urllib) are imported
 **inside** the functions that need them, never at module top, so this module
@@ -37,25 +40,6 @@ _PAI_PROVIDER_PREFIX = {
     "google_genai": "google-gla",
     "google": "google-gla",
 }
-
-
-def _anthropic_web_search_capabilities(resolved: str, *, web: bool):
-    """Anthropic-GATED server-side web-search capability list, or ``None`` for every
-    other case (bug ff64 — the T1 prior-art criterion mandates web grounding but the
-    in-process toolset has no web access). Emitted ONLY when the request is flagged
-    (``web=True``, set by the routing seam for a criterion whose routing entry declares
-    ``"web": true``) AND the resolved model string is anthropic-qualified. The tool is
-    Anthropic's SERVER-SIDE ``web_search`` — executed provider-side, no homegrown HTTP
-    fetch tool — attached via pydantic-ai's supported capability mechanism
-    (``Agent(capabilities=[WebSearch()])``, the successor of the deprecated
-    ``builtin_tools``). ``local=None`` (the default) means NO local fallback: on any
-    non-anthropic provider the request is byte-identical to today (``None`` here, no
-    capabilities kwarg), matching the cache-settings gating above."""
-    if not web or not resolved.startswith("anthropic"):
-        return None
-    from pydantic_ai.capabilities import WebSearch
-
-    return [WebSearch()]
 
 
 _DIRECT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
