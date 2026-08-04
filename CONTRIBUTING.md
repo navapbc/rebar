@@ -246,14 +246,21 @@ label — you run Submit yourself.
 > natively by the Submit ACL in `infra/gerrit/project.config` (managed by
 > `infra/gerrit/setup-project.sh` via `CONTRIBUTOR_MEMBERS`).
 
-### 2f. After merge — fast-forward your worktree, THEN close the ticket
+### 2f. Close AFTER the change merges — then satisfy the close precheck
 
-Once the change **merges**, and **before** `rebar transition <id> in_progress closed`,
-**fast-forward your own worktree** so the merged commit is reachable from its HEAD — from inside
-the worktree run `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`).
-The close runs a completion precheck that reads **your worktree's** git history and requires the
-merged `rebar-ticket: <id>` commit to be reachable from HEAD; without the fast-forward it fails
-with "cannot confirm the work landed."
+Do not close a ticket until its change is `Verified +1` and has **merged** — that ordering is
+the review-gate policy above, not something the close gate enforces. The close's completion
+precheck is narrower: when the ticket records `file_impact` (and the completion-verification
+close gate is on), it requires a commit reachable from **your worktree's current HEAD** carrying
+a `rebar-ticket:` trailer (or a leading `<id>:` subject) for the ticket **or any transitive
+descendant**; merge status is not checked, so a local unlanded commit satisfies it. If your
+worktree's history lacks such a commit (a fresh worktree, or a checkout that never had it), the
+close fails with "cannot confirm the work landed" — fast-forward first: from inside the worktree
+run `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`). To close a
+stacked story against its own commit while the worktree stays at the epic tip, use
+`rebar transition <id> in_progress closed --ref <sha>` — `--ref` retargets the completion
+verification and signature to that ref's tree; it does **not** narrow the referencing-commit
+scan — see `docs/plan-review-gate.md` §"Which commit the completion gate verifies — `--ref`".
 
 > **NEVER** fast-forward, reset, or stash the shared main checkout to satisfy a close — it may
 > hold uncommitted operator WIP that a fast-forward would clobber. Advance **your worktree**, or

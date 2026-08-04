@@ -236,11 +236,20 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   Rebase-If-Necessary: Gerrit rebases + submits server-side, so you do **not** pre-rebase
   except on a textual conflict it cannot resolve. Do **not** close a ticket until its change
   is `Verified +1` — a passing completion-verifier is **not** a substitute for green CI.
-- **After the change MERGES, fast-forward YOUR worktree before you close.** The close's
-  completion precheck reads your worktree's git history and requires the merged
-  `rebar-ticket: <id>` commit reachable from HEAD (else it fails with "cannot confirm the work
-  landed"). So from inside the worktree, before `rebar transition <id> in_progress closed`, run
-  `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`). **NEVER**
+- **Close AFTER the change merges — that ordering is the `Verified +1` policy above, not
+  something the close gate enforces.** The close's completion precheck is narrower: when the
+  ticket records `file_impact` (and the completion-verification close gate is on), it requires
+  a commit reachable from your worktree's **current HEAD** carrying a `rebar-ticket:` trailer
+  (or a leading `<id>:` subject) for the ticket **or any transitive descendant** — merge status
+  is not checked, so a local unlanded commit satisfies it. If your history lacks that commit (a
+  fresh worktree, or a checkout that never had it), it fails with "cannot confirm the work
+  landed"; fast-forward first: from inside the worktree run
+  `git fetch origin && git merge --ff-only origin/main` (or `git pull --ff-only`). To close a
+  stacked story against its own commit while the worktree stays at the epic tip, use
+  `rebar transition <id> in_progress closed --ref <sha>` — `--ref` retargets the completion
+  verification and signature to that ref's tree; it does **not** narrow the referencing-commit
+  scan — see `docs/plan-review-gate.md` §"Which commit the completion gate verifies — `--ref`".
+  **NEVER**
   fast-forward, reset, or stash the shared main checkout to satisfy a close — it may hold
   uncommitted operator WIP. Advance your own worktree (or a throwaway worktree at `origin/main`)
   instead.
