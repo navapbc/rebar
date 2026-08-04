@@ -122,6 +122,22 @@ class _HierarchyMixin(_TransportBase):
         no "Epic Link" field discoverable on this instance — because writing
         ``fields.parent`` for a non-sub-task would be silently no-op'd by DC, which is
         the failure mode this method exists to refuse.
+
+        **The SUB-TASK write is VERIFIED BY READ-BACK (bug 1a9f-50c0-e7a5-4fda).** Do
+        not "simplify" that extra round trip away as redundant: on DC 8.17.1 the
+        ``fields.parent`` write answers **HTTP 204 and is silently ignored** — the
+        sub-task's parent does not move and the field reads back unchanged. That was
+        proven by raw REST with no rebar code in the path and is recorded in
+        ``docs/jira-dc-capability-map.md``. No status code can detect it, and every
+        caller swallows this method's failure (``dispatch_one`` warns and continues),
+        so the unchanged field is the ONLY observable evidence that the mutation never
+        happened; without the read-back a no-op is reported as applied. The mismatch
+        raises ``NotImplementedError`` for the same classification reason as the
+        decline above — ``dispatch_one`` maps it to ``outbound-parent-unrepresentable``
+        and every other exception type to the RETRYABLE ``outbound-parent-failed``, and
+        a retry cannot help against a platform ignoring the write deterministically.
+        The verification runs strictly AFTER the update call, so a genuine transport
+        error (a 503, say) still propagates untouched rather than being replaced by it.
         """
         issue = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
         raw = _unwrap(issue)
@@ -152,3 +168,32 @@ class _HierarchyMixin(_TransportBase):
             return
         body = {"parent": {"key": parent_key}} if parent_key else {"parent": None}
         _call_logged("set_parent", remote_id, lambda: issue.update(fields=body))
+        # Bug 1a9f-50c0-e7a5-4fda: DC answers this write with 204 and ignores it, so the write
+        # is verified by reading the field back. A FRESH `self._client.issue(...)` round trip,
+        # never the `issue` object fetched above — that one carries the pre-write payload, so
+        # re-reading it would "confirm" whatever we already believed. Unwrapped through
+        # `_unwrap` exactly as the issue-type read at the top of this method is.
+        verified = _call_logged("set_parent", remote_id, lambda: self._client.issue(remote_id))
+        verified_raw = _unwrap(verified)
+        verified_fields = verified_raw.get("fields") if isinstance(verified_raw, dict) else None
+        # An ABSENT `parent` is read as "this issue has no parent", not as "we could not tell".
+        # The read-back above requests the whole issue with no `fields=` projection, so for a
+        # sub-task the key is always present when a parent is set; treating its absence as
+        # inconclusive would reintroduce the silent pass this method exists to remove — a SET
+        # that produced no parent is a FAILED set, whatever the status code said.
+        # `parent` nests a whole issue object (id, key, self, fields), so the comparison is on
+        # the KEY; an explicit null is the no-parent state a CLEAR is asking for.
+        observed = verified_fields.get("parent") if isinstance(verified_fields, dict) else None
+        observed_key = observed.get("key") if isinstance(observed, dict) else None
+        wanted_key = parent_key or None
+        if observed_key != wanted_key:
+            raise NotImplementedError(
+                f"set_parent could not move the parent of sub-task {remote_id!r} on Jira Data "
+                f"Center: it asked for "
+                f"{'no parent' if wanted_key is None else repr(wanted_key)} and Jira accepted "
+                f"the fields.parent write, but a fresh read of the issue still reports "
+                f"{'no parent' if observed_key is None else repr(observed_key)}. Data Center "
+                "accepts this write and silently ignores it (HTTP 204, field unchanged — see "
+                "docs/jira-dc-capability-map.md), so the mutation did not happen and retrying "
+                "the same write cannot make it happen."
+            )

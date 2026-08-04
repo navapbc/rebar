@@ -48,12 +48,12 @@ from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTr
 
 
 class _FakeIssue:
-    def __init__(self, raw: dict[str, Any], sink: list[dict[str, Any]]) -> None:
+    def __init__(self, raw: dict[str, Any], on_update: Any) -> None:
         self.raw = raw
-        self._sink = sink
+        self._on_update = on_update
 
     def update(self, fields: dict[str, Any]) -> None:
-        self._sink.append({"call": "update", "fields": fields})
+        self._on_update(fields)
 
 
 class _FakeClient:
@@ -66,20 +66,37 @@ class _FakeClient:
     ``epic_link_name`` lets a cell simulate an instance where "Epic Link" cannot be discovered
     (Jira Software absent, or a renamed field), which must DECLINE rather than fall back to
     ``fields.parent``.
+
+    **THE DOUBLE APPLIES SUB-TASK PARENT WRITES, and that is now load-bearing** (bug
+    1a9f-50c0-e7a5-4fda). This fake used to return a fixed payload that never reflected a write,
+    which was harmless while ``set_parent`` trusted the status code. It no longer does: DC
+    answers a sub-task ``fields.parent`` write with 204 and ignores it, so the transport verifies
+    by reading the field back. A double that never reflects the write is indistinguishable from
+    the platform bug, and would make this module's sub-task cell fail for a reason that has
+    nothing to do with what it asserts (routing, not persistence). Modelling the write keeps the
+    cell about its own subject.
     """
 
     def __init__(self, *, subtask: bool, epic_link_name: str | None = "Epic Link") -> None:
         self.updates: list[dict[str, Any]] = []
         self.epic_calls: list[tuple[str, list[str]]] = []
         self.field_calls = 0
+        self.parent_key: str | None = None
         self._subtask = subtask
         self._epic_link_name = epic_link_name
 
+    def _apply(self, fields: dict[str, Any]) -> None:
+        self.updates.append({"call": "update", "fields": fields})
+        if "parent" in fields:
+            parent = fields["parent"]
+            self.parent_key = parent["key"] if isinstance(parent, dict) else None
+
     def issue(self, remote_id: str) -> _FakeIssue:
-        return _FakeIssue(
-            {"key": remote_id, "fields": {"issuetype": {"subtask": self._subtask}}},
-            self.updates,
-        )
+        fields: dict[str, Any] = {"issuetype": {"subtask": self._subtask}}
+        if self.parent_key is not None:
+            # Nested object, as the real payload is — the transport must read the KEY out of it.
+            fields["parent"] = {"id": "10029", "key": self.parent_key}
+        return _FakeIssue({"key": remote_id, "fields": fields}, self._apply)
 
     def fields(self) -> list[dict[str, Any]]:
         """``GET /rest/api/2/field`` — the instance's field inventory.
