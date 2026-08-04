@@ -110,17 +110,47 @@ def _active_snapshots(ticket_dir: str) -> list[str]:
     )
 
 
+def _has_retired_create(ticket_dir: str) -> bool:
+    """Return whether a folded CREATE remains available for a full-log rebuild."""
+    try:
+        names = os.listdir(ticket_dir)
+    except OSError:
+        return False
+    return any(n.endswith("-CREATE.json" + RETIRED_SUFFIX) for n in names)
+
+
+def _is_stale_channel_snapshot(ticket_dir: str, snapshot_filename: str) -> bool:
+    """Return whether a SNAPSHOT predates persisted ``creation_channel`` support."""
+    try:
+        with open(os.path.join(ticket_dir, snapshot_filename), encoding="utf-8") as f:
+            snapshot = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+    compiled = snapshot.get("data", {}).get("compiled_state")
+    return (
+        isinstance(compiled, dict)
+        and "creation_channel" not in compiled
+        and _has_retired_create(ticket_dir)
+    )
+
+
 def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
     """Derive a per-ticket repair plan mirroring _check_snapshot's detection.
 
     Returns {"retire": [filenames], "auto_orphans": [(name,type)],
-    "triage_orphans": [(name,type)]}. ``retire`` are still-present folded sources
-    (SNAPSHOT_INCONSISTENT → rename to .retired, NOT a rebuild); ``auto_orphans`` are
-    AUTO-RECOVER pre-snapshot orphans (→ full-log rebuild); ``triage_orphans`` are
-    order-sensitive orphans surfaced for a human.
+    "triage_orphans": [(name,type)], "stale_channel": [filenames]}. ``retire`` are
+    still-present folded sources (SNAPSHOT_INCONSISTENT → rename to .retired, NOT a
+    rebuild); ``auto_orphans`` are AUTO-RECOVER pre-snapshot orphans (→ full-log
+    rebuild); ``triage_orphans`` are order-sensitive orphans surfaced for a human;
+    ``stale_channel`` snapshots are selected only by the narrow repair mode.
     """
     snaps = _active_snapshots(ticket_dir)
-    plan: dict[str, list] = {"retire": [], "auto_orphans": [], "triage_orphans": []}
+    plan: dict[str, list] = {
+        "retire": [],
+        "auto_orphans": [],
+        "triage_orphans": [],
+        "stale_channel": [],
+    }
     if not snaps:
         return plan
     latest_snap = snaps[-1]
@@ -151,6 +181,8 @@ def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
                 sources = json.load(f).get("data", {}).get("source_event_uuids", [])
         except (json.JSONDecodeError, OSError):
             continue
+        if _is_stale_channel_snapshot(ticket_dir, snap):
+            plan["stale_channel"].append(snap)
         all_sources.update(sources)
         # SNAPSHOT_INCONSISTENT: a folded source still present as an active file.
         for u in sources:
@@ -170,7 +202,15 @@ def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
     return plan
 
 
-def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bool) -> dict:
+def _repair_ticket(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    *,
+    dry_run: bool,
+    repair_stale_channel: bool = False,
+    no_commit: bool = False,
+) -> dict:
     """Apply (or, in dry-run, describe) a ticket's _repair_plan. Retires still-present
     folded sources under the write lock, then rebuilds if any AUTO-RECOVER orphan
     remains. HUMAN-TRIAGE orphans and MISSING_CREATE are surfaced, never auto-written.
@@ -182,10 +222,13 @@ def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bo
         "retired": list(plan["retire"]),
         "rebuilt": False,
         "triage": [f"{n} ({t})" for n, t in plan["triage_orphans"]],
+        "stale_channel": list(plan["stale_channel"]),
         "skipped": skipped,
     }
     if dry_run:
-        disp["rebuilt"] = bool(plan["auto_orphans"])
+        disp["rebuilt"] = bool(plan["auto_orphans"]) or (
+            repair_stale_channel and bool(plan["stale_channel"])
+        )
         return disp
 
     if plan["retire"]:
@@ -219,10 +262,12 @@ def _repair_ticket(tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bo
         finally:
             handle.release()
 
-    if plan["auto_orphans"]:
+    if plan["auto_orphans"] or (repair_stale_channel and plan["stale_channel"]):
         from rebar._commands.compact import rebuild_snapshot_from_full_log
 
-        disp["rebuilt"] = rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir)
+        disp["rebuilt"] = rebuild_snapshot_from_full_log(
+            tracker, ticket_id, ticket_dir, no_commit=no_commit
+        )
     return disp
 
 
@@ -273,7 +318,12 @@ def _reconciler_in_flight(repo_root=None) -> bool:
 
 # raw-git-ok: store-maintenance command, seam-internal
 def _repair_run(
-    tracker: str, *, dry_run: bool, limit: int | None = None, repo_root=None
+    tracker: str,
+    *,
+    dry_run: bool,
+    limit: int | None = None,
+    repo_root=None,
+    only: str | None = None,
 ) -> tuple[list[str], int]:
     """A3 remediation: drive the store to fsck-zero, safely and resumably.
 
@@ -287,8 +337,25 @@ def _repair_run(
     flagged: list[tuple[str, dict]] = []
     for tid in _ticket_dirs(tracker):
         plan = _repair_plan(os.path.join(tracker, tid), tid)
-        if plan["retire"] or plan["auto_orphans"] or plan["triage_orphans"]:
+        if only == "stale-channel":
+            if plan["stale_channel"]:
+                flagged.append((tid, plan))
+        elif plan["retire"] or plan["auto_orphans"] or plan["triage_orphans"]:
             flagged.append((tid, plan))
+    if only == "stale-channel":
+        mixed = False
+        for tid, plan in flagged:
+            kinds: list[str] = []
+            if plan["retire"]:
+                kinds.append("SNAPSHOT_INCONSISTENT")
+            if plan["auto_orphans"] or plan["triage_orphans"]:
+                kinds.append("ORPHAN_EVENT")
+            if kinds:
+                lines.append(f"REFUSE {tid}: {', '.join(kinds)}")
+                mixed = True
+        if mixed:
+            lines.append("ABORT: stale-channel repair refuses mixed faults before mutation")
+            return lines, -1
     total = len(flagged)
     if limit is not None:
         flagged = flagged[:limit]
@@ -298,10 +365,13 @@ def _repair_run(
 
     if dry_run:
         for tid, plan in flagged:
-            lines.append(
-                f"DRY-RUN {tid}: retire={len(plan['retire'])} "
-                f"rebuild={len(plan['auto_orphans'])} triage={len(plan['triage_orphans'])}"
-            )
+            if only == "stale-channel":
+                lines.append(f"DRY-RUN {tid}: stale_channel={len(plan['stale_channel'])}")
+            else:
+                lines.append(
+                    f"DRY-RUN {tid}: retire={len(plan['retire'])} "
+                    f"rebuild={len(plan['auto_orphans'])} triage={len(plan['triage_orphans'])}"
+                )
         triage = sum(len(p["triage_orphans"]) for _, p in flagged)
         lines.append(
             f"a3-remediation DRY-RUN: {len(flagged)}/{total} ticket(s) would be repaired "
@@ -337,7 +407,14 @@ def _repair_run(
             )
             return lines, -1
         for i, (tid, _plan) in enumerate(flagged):
-            disp = _repair_ticket(tracker, tid, os.path.join(tracker, tid), dry_run=False)
+            disp = _repair_ticket(
+                tracker,
+                tid,
+                os.path.join(tracker, tid),
+                dry_run=False,
+                repair_stale_channel=only == "stale-channel",
+                no_commit=True,
+            )
             if disp.get("error"):
                 lines.append(f"SKIP {tid}: {disp['error']}")  # per-ticket failure: log + skip
             elif marker_dir:
@@ -367,6 +444,18 @@ def _repair_run(
         if paused:
             _reconciler_resume()
             lines.append("a3-remediation: reconciler re-enabled")
+
+    if only == "stale-channel":
+        remaining = sum(
+            1
+            for tid in _ticket_dirs(tracker)
+            if _repair_plan(os.path.join(tracker, tid), tid)["stale_channel"]
+        )
+        lines.append(
+            f"a3-remediation: {len(flagged)} ticket(s) processed; "
+            f"{remaining} stale-channel fault(s) remain"
+        )
+        return lines, remaining
 
     remaining = sum(
         1
