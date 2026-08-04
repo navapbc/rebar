@@ -42,6 +42,7 @@ from typing import Any, cast
 
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._engine_support.ticket_query import TicketQuery
+from rebar._ids import binding_jira_key_map
 from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
 from rebar.reducer import (
@@ -500,6 +501,19 @@ def search_state(
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
     )
+    # Enrich each state with its bound Jira key so `search <JIRA-KEY>` surfaces the
+    # ticket `show <JIRA-KEY>` resolves (the reported footgun). Built ONCE from the
+    # binding store reverse map — the same authoritative source
+    # `_resolve_via_binding_store` reads — keeping `search_states` pure (no
+    # filesystem/binding access inside the reducer).
+    jira_by_ticket = binding_jira_key_map(tracker)
+    if jira_by_ticket:
+        for st in states:
+            if isinstance(st, dict):
+                ticket_id = st.get("ticket_id")
+                jira_key = jira_by_ticket.get(ticket_id) if isinstance(ticket_id, str) else None
+                if jira_key:
+                    st["jira_key"] = jira_key
     results = search_states(
         states,
         query,
