@@ -1,4 +1,4 @@
-Usage: rebar fsck [--output json] [--repair [--dry-run] [--limit=N]]
+Usage: rebar fsck [--output json] [--repair [--only=stale-channel] [--dry-run] [--limit=N]]
 
 Store integrity validator. Checks JSON validity, CREATE presence, stale
 index.lock, and SNAPSHOT source_event_uuids consistency.
@@ -9,6 +9,12 @@ index.lock, and SNAPSHOT source_event_uuids consistency.
                        Pre-tags pre-a3-remediation, commits+pushes per batch, and
                        aborts on a push failure. Order-sensitive orphans are
                        surfaced for human triage, not auto-rebuilt.
+  --only=stale-channel With --repair: rebuild only stale creation-channel
+                       snapshots through the same batched commit-and-push path.
+                       Refuses tickets that also have SNAPSHOT_INCONSISTENT or
+                       ORPHAN_EVENT findings; it does not run the ensure sweep.
   --dry-run            With --repair: print the per-ticket plan; write nothing.
   --limit=N            With --repair: repair at most N tickets this run (resumable).
-  --repair-snapshots   Rebuild only snapshots with a merged-in pre-snapshot orphan.
+  --repair-snapshots   Broad legacy rebuild of snapshots with a merged-in orphan
+                       or stale creation channel; it does not batch, push, or
+                       refuse mixed faults.

@@ -35,6 +35,8 @@ from rebar import config
 from rebar._commands.fsck_repair import (  # noqa: F401
     _AUTO_RECOVER_ORPHAN_TYPES,
     _HUMAN_TRIAGE_ORPHAN_TYPES,
+    _has_retired_create,
+    _is_stale_channel_snapshot,
     _repair_plan,
     _repair_run,
     _repair_ticket,
@@ -45,7 +47,7 @@ from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store import compat
 from rebar._store.gitutil import _reclaim_if_stale_index_lock, run_git
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
+from rebar.reducer._cache import is_active_event
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
 # are sub-second rev-parse/log/symbolic-ref reads, so 120s only distinguishes a wedged
@@ -256,19 +258,6 @@ def _scan(
     return lines, issue_count
 
 
-def _has_retired_create(ticket_dir: str) -> bool:
-    """True when the ticket retains its genesis CREATE as a folded ``*.retired`` source
-    (``{ts}-{uuid}-CREATE.json.retired``). Compaction renames folded events rather than
-    deleting them (invariant I1), so a compacted ticket normally still carries its CREATE
-    here — which is what lets ``rebuild_snapshot_from_full_log`` (``include_retired=True``)
-    replay the CREATE and re-project ``creation_channel`` into a refreshed SNAPSHOT."""
-    try:
-        names = os.listdir(ticket_dir)
-    except OSError:
-        return False
-    return any(n.endswith("-CREATE.json" + RETIRED_SUFFIX) for n in names)
-
-
 def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> list[str]:
     out: list[str] = []
     try:
@@ -286,12 +275,7 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     # rebuild_snapshot_from_full_log (which replays the retained CREATE). Gate strictly on a
     # real compiled_state dict that lacks the key AND a retained CREATE, so a post-feature
     # snapshot (channel present) never trips this.
-    _compiled = _data.get("compiled_state")
-    if (
-        isinstance(_compiled, dict)
-        and "creation_channel" not in _compiled
-        and _has_retired_create(ticket_dir)
-    ):
+    if _is_stale_channel_snapshot(ticket_dir, snapshot_filename):
         out.append(
             f"SNAPSHOT_STALE_CHANNEL: {ticket_id}/{snapshot_filename} — compiled_state "
             "predates creation_channel; rebuild from the retained CREATE to persist it"
@@ -493,6 +477,23 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     repair_snapshots = "--repair-snapshots" in argv
     do_repair = "--repair" in argv
     dry_run = "--dry-run" in argv
+    only_args = [a for a in argv if a == "--only" or a.startswith("--only=")]
+    only: str | None = None
+    if "--only" in only_args:
+        sys.stderr.write("Error: --only requires a value\n")
+        return 2
+    if len(only_args) > 1:
+        sys.stderr.write("Error: --only may be specified only once\n")
+        return 2
+    if only_args:
+        if only_args[0] != "--only=stale-channel":
+            value = only_args[0].split("=", 1)[1]
+            sys.stderr.write(f"Error: unknown --only value '{value}'\n")
+            return 2
+        if not do_repair:
+            sys.stderr.write("Error: --only=stale-channel requires --repair\n")
+            return 2
+        only = "stale-channel"
     limit: int | None = None
     for a in argv:
         if a.startswith("--limit="):
@@ -504,7 +505,9 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     argv = [
         a
         for a in argv
-        if a not in ("--repair-snapshots", "--repair", "--dry-run") and not a.startswith("--limit=")
+        if a not in ("--repair-snapshots", "--repair", "--dry-run")
+        and not a.startswith("--limit=")
+        and a not in only_args
     ]
     try:
         fmt, _rest = parse_output(argv, "report")
@@ -539,7 +542,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             sys.stderr.write("Error: --repair requires mutation; use --dry-run for a preview\n")
             return 2
         repair_lines, _unresolved = _repair_run(
-            tracker, dry_run=dry_run, limit=limit, repo_root=repo_root
+            tracker, dry_run=dry_run, limit=limit, repo_root=repo_root, only=only
         )
         # Fold the idempotent ensure-sweep into the existing "drive healthy" verb
         # (epic odd-vortex-elbow / WS3): a DISTINCT phase from the A3 data-repair —
@@ -547,7 +550,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         # is log-and-continue (a failed unit never rolls back committed ticket data).
         # Only on a live run; --dry-run stays read-only and does not sweep.
         ensure_lines: list[str] = []
-        if not dry_run:
+        if not dry_run and only is None:
             from rebar._store import ensures as _ensures
 
             outcomes = _ensures.run_ensures(tracker)
