@@ -5,9 +5,10 @@
   "type": "object",
   "properties": {
     "plan": {"type": "string"},
+    "shared_prefix": {"type": "string"},
     "instructions": {"type": "array", "items": {"type": "string"}},
     "input_too_large_ids": {"type": "array", "items": {"type": "string"}}
   },
-  "required": ["plan", "instructions", "input_too_large_ids"],
+  "required": ["plan", "shared_prefix", "instructions", "input_too_large_ids"],
   "additionalProperties": false
 }

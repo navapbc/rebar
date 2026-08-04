@@ -177,3 +177,39 @@ def test_yaml_and_schema_wire_shared_prefix_not_plan() -> None:
     assert "shared_prefix" in schema["required"]
     assert "plan" not in schema["properties"]
     assert "{{plan}}" not in schema_raw
+
+
+# ── bug 1dbe: prerequisite verifier reordered to LEAD with the shared prefix ──────
+def test_prerequisite_verifier_leads_with_shared_prefix_no_content_lost() -> None:
+    """The Pass-2 prerequisite verifier's resolved system prompt must now begin,
+    byte-for-byte, with ``shared_plan_prefix(plan)`` — so its cache breakpoint lands at
+    the same boundary the finder writes (bug 1dbe) — WITHOUT dropping any stance content
+    or the whole plan material (the model-visible reorder is content-preserving)."""
+    prompt = prompts.get_prompt(passes.PASS_PREREQUISITE_VERIFIER)
+    prefix = prompts.shared_plan_prefix(FIXTURE_PLAN)
+    system, _meta = prompts.resolve_prompt(prompt, {"shared_prefix": prefix})
+    # Cache-prefix alignment: byte-identical leading prefix (same seam as the finder).
+    assert system.startswith(prefix)
+    assert FIXTURE_PLAN in prefix  # the prefix still carries the full plan material
+    # No content dropped by the reorder: the pass-specific stance survives, after the plan.
+    assert "Independently verify each listed prerequisite-consistency finding" in system
+    assert "prerequisite_attribution_valid" in system
+    # The template no longer carries a separate trailing ``{{plan}}`` block.
+    assert "{{plan}}" not in prompt.text
+
+
+def test_prerequisite_verify_inputs_emits_shared_prefix() -> None:
+    from rebar.llm.plan_review import prerequisite_workflow_ops as ops
+
+    ctx = StepContext(
+        run_id="r",
+        step_id="prerequisite_verify_inputs",
+        kind="uses",
+        step={"id": "prerequisite_verify_inputs", "uses": "plan_review_prerequisite_verify_inputs"},
+        inputs={"subject_plan": FIXTURE_PLAN, "findings": [], "prerequisites": []},
+        workflow={"name": "plan-review"},
+        target_ticket="T-1",
+        repo_root=None,
+    )
+    out = ops.plan_review_prerequisite_verify_inputs(ctx)
+    assert out["shared_prefix"] == prompts.shared_plan_prefix(FIXTURE_PLAN)

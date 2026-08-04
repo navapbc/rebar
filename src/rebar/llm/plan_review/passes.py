@@ -39,6 +39,7 @@ from typing import Any
 
 from rebar.llm import contracts
 from rebar.llm.config import LLMConfig
+from rebar.llm.prompting import prompts
 
 # ── Pass-2 + Pass-3: the shared review KERNEL owns the verification contract, the verify
 #    listing builders, and the decision math now (epic vivid-gang-day WS1+WS2). Re-exported
@@ -277,8 +278,6 @@ def _resolve_system(prompt_id: str, plan: str, cfg: LLMConfig) -> str:
     supplied so any template may reference either; strict rendering only requires the
     ones a template actually uses. A project `.rebar/prompts/<id>.md` override wins over
     the packaged prompt. Reuses the da27 prompt machinery — no inline prompt strings."""
-    from rebar.llm.prompting import prompts
-
     variables = {"plan": plan, "shared_prefix": prompts.shared_plan_prefix(plan)}
     prompt = prompts.get_prompt(prompt_id, repo_root=cfg.repo_path)
     system, _meta = prompts.resolve_prompt(prompt, variables, repo_root=cfg.repo_path)
@@ -317,6 +316,10 @@ def pass1_chunk(
     context_block = f"{extra_context}\n\n" if extra_context else ""
     req = RunRequest(
         system_prompt=_resolve_system(PASS_FINDER, plan, cfg),
+        # Bug 1dbe: put the cache breakpoint at the END of the byte-identical
+        # ``shared_plan_prefix`` (the leading segment the Pass-2 verifier prompts also start
+        # with) so the finder's cache WRITE is READ by the verifier within one run.
+        cache_prefix=prompts.shared_plan_prefix(plan),
         instructions=(
             f"{context_block}"
             f"## Rubric criteria for this pass (ids: {', '.join(ids)})\n{rubric}\n\n"
@@ -543,8 +546,6 @@ def summarize_for_isf(
     summary plus the call's ``_usage`` dict (``{}`` when absent); the sole caller
     (the ISF oversized-log path in ``pass1``) records the usage as an ISF-attributed
     call record."""
-    from rebar.llm.prompting import prompts
-
     prompt = prompts.get_prompt("plan-review-isf-summarizer", repo_root=cfg.repo_path)
     system, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
     req = RunRequest(
