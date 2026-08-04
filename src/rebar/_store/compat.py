@@ -33,6 +33,7 @@ import json
 import os
 
 from rebar._store import fsutil
+from rebar._store.gitutil import run_git
 
 __all__ = [
     "CURRENT_FORMAT_VERSION",
@@ -41,6 +42,8 @@ __all__ = [
     "COMPAT_FILENAME",
     "StoreIncompatibleError",
     "check_store_compat",
+    "store_epoch_merge_target",
+    "store_epoch_problem",
     "write_compat_record",
     "describe_store_compat",
 ]
@@ -76,6 +79,133 @@ class StoreIncompatibleError(Exception):
 
 def _record_path(tracker: str | os.PathLike[str]) -> str:
     return os.path.join(os.fspath(tracker), COMPAT_FILENAME)
+
+
+def _epoch_from_record(raw: str, source: str) -> tuple[str | None, str | None]:
+    """Return a record's optional epoch, or a fail-closed diagnostic.
+
+    The epoch guard needs a stricter view than :func:`_analyze`: ``epoch`` is an
+    additive key there so old binaries must ignore it, while a binary that knows
+    the guard must reject a malformed epoch record rather than mistake it for a
+    pre-epoch store.
+    """
+    try:
+        record = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as err:
+        return None, f"store-compat record at {source} is not valid JSON: {err}"
+    if not isinstance(record, dict):
+        return None, f"store-compat record at {source} is malformed: expected a JSON object"
+
+    version = record.get("format_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None, (
+            f"store-compat record at {source} is malformed: 'format_version' must be an integer"
+        )
+    caps = record.get("required_capabilities")
+    if not isinstance(caps, list) or not all(isinstance(cap, str) for cap in caps):
+        return None, (
+            f"store-compat record at {source} is malformed: 'required_capabilities' "
+            "must be a list of strings"
+        )
+
+    if "epoch" not in record:
+        return None, None
+    epoch = record["epoch"]
+    if not isinstance(epoch, str):
+        return None, f"store-compat record at {source} is malformed: 'epoch' must be a string"
+    return epoch, None
+
+
+def _epoch_refusal(detail: str) -> str:
+    return (
+        "tickets store epoch guard refused the operation: "
+        f"{detail}; re-clone the tracker before retrying"
+    )
+
+
+def _local_store_epoch(tracker: str | os.PathLike[str]) -> tuple[str | None, str | None]:
+    path = _record_path(tracker)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            epoch, problem = _epoch_from_record(fh.read(), path)
+            return epoch, f"local {problem}" if problem is not None else None
+    except FileNotFoundError:
+        return None, None
+    except OSError as err:
+        return None, f"local store-compat record at {path} is unreadable: {err}"
+
+
+def _remote_store_epoch(
+    tracker: str | os.PathLike[str], remote_ref: str
+) -> tuple[str | None, str | None]:
+    """Read the remote-side record directly from its Git tree, not the worktree."""
+    tracker_path = os.fspath(tracker)
+    source = f"{remote_ref}:{COMPAT_FILENAME}"
+    try:
+        shown = run_git(tracker_path, "show", source, check=False)
+    except OSError as err:
+        return None, f"remote ref {remote_ref} is unreadable: {err}"
+    if shown.returncode == 0:
+        epoch, problem = _epoch_from_record(shown.stdout, source)
+        return epoch, f"remote {problem}" if problem is not None else None
+
+    # `git show ref:path` uses the same non-zero status for a missing path and an
+    # unreadable ref. Resolve the ref separately so operators get the right remedy.
+    try:
+        resolved = run_git(
+            tracker_path, "rev-parse", "--verify", f"{remote_ref}^{{commit}}", check=False
+        )
+    except OSError as err:
+        return None, f"remote ref {remote_ref} is unreadable: {err}"
+    if resolved.returncode != 0:
+        return None, f"remote ref {remote_ref} is unreadable"
+    return None, None  # The readable remote tree simply predates the record.
+
+
+def store_epoch_problem(tracker: str | os.PathLike[str], remote_ref: str) -> str | None:
+    """Return a refusal diagnostic when a union would cross incompatible epochs.
+
+    This is intentionally non-raising: sync and push are best-effort paths. An
+    absent record and a present record with no epoch both describe the pre-reclaim
+    store and are compatible; otherwise epochs must be equal opaque strings.
+    """
+    local_epoch, local_problem = _local_store_epoch(tracker)
+    if local_problem is not None:
+        return _epoch_refusal(local_problem)
+    remote_epoch, remote_problem = _remote_store_epoch(tracker, remote_ref)
+    if remote_problem is not None:
+        return _epoch_refusal(remote_problem)
+    if local_epoch == remote_epoch:
+        return None
+    local_description = repr(local_epoch) if local_epoch is not None else "absent"
+    remote_description = repr(remote_epoch) if remote_epoch is not None else "absent"
+    return _epoch_refusal(
+        "store epoch mismatch: "
+        f"local epoch {local_description}; remote {remote_ref} epoch {remote_description}"
+    )
+
+
+def store_epoch_merge_target(
+    tracker: str | os.PathLike[str], remote_ref: str
+) -> tuple[str | None, str | None]:
+    """Pin *remote_ref*, then check and return the exact commit safe to merge.
+
+    Remote-tracking refs are updated by fetch outside the store write lock. Resolving
+    first prevents a concurrent fetch from swapping a checked tree for a different
+    epoch between the guard and the merge. The caller must merge the returned commit,
+    never resolve ``remote_ref`` again for that operation.
+    """
+    tracker_path = os.fspath(tracker)
+    try:
+        resolved = run_git(
+            tracker_path, "rev-parse", "--verify", f"{remote_ref}^{{commit}}", check=False
+        )
+    except OSError as err:
+        return None, _epoch_refusal(f"remote ref {remote_ref} is unreadable: {err}")
+    target = resolved.stdout.strip()
+    if resolved.returncode != 0 or not target:
+        return None, _epoch_refusal(f"remote ref {remote_ref} is unreadable")
+    return target, store_epoch_problem(tracker, target)
 
 
 def _analyze(tracker: str | os.PathLike[str]) -> dict[str, str] | None:
@@ -183,14 +313,22 @@ def write_compat_record(tracker: str | os.PathLike[str]) -> None:
     """Write the current-version ``.store-compat.json`` record atomically (the ensure
     unit stamps it at init). Uses :func:`rebar._store.fsutil.atomic_write` so a reader
     never observes a torn record."""
-    body = (
-        json.dumps(
-            {"format_version": CURRENT_FORMAT_VERSION, "required_capabilities": []},
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    epoch: str | None = None
+    try:
+        with open(_record_path(tracker), encoding="utf-8") as fh:
+            existing = json.loads(fh.read())
+        if isinstance(existing, dict) and isinstance(existing.get("epoch"), str):
+            epoch = existing["epoch"]
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
+    record: dict[str, object] = {
+        "format_version": CURRENT_FORMAT_VERSION,
+        "required_capabilities": [],
+    }
+    if epoch is not None:
+        record["epoch"] = epoch
+    body = json.dumps(record, indent=2, sort_keys=True) + "\n"
     fsutil.atomic_write(_record_path(tracker), body)
 
 

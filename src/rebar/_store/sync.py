@@ -46,6 +46,7 @@ import logging
 import os
 import subprocess
 
+from rebar._store import compat
 from rebar._store import lock as _lock
 from rebar._store.gitutil import run_git
 
@@ -173,11 +174,16 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
     reflog is no longer load-bearing). ``extra`` carries ``--allow-unrelated-histories``
     for the no-common-ancestor case. On the rare genuine conflict: abort, keep
     local, hint fsck — never discard local commits."""
+    merge_target, problem = compat.store_epoch_merge_target(tracker, remote)
+    if merge_target is None or problem is not None:
+        logger.warning("%s", problem or "tickets store epoch guard could not pin remote ref")
+        return
+
     merge = _git(
         tracker,
         "merge",
         *extra,
-        remote,
+        merge_target,
         "--no-edit",
         "-m",
         f"Merge {remote} (auto-reconcile during sync)",

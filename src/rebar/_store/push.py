@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 
+from rebar._store import compat
 from rebar._store.gitutil import run_git
 
 logger = logging.getLogger(__name__)
@@ -213,10 +214,17 @@ def push_tickets_branch(base_path: str) -> None:
                     )
                     return  # best-effort
 
+                merge_target, problem = compat.store_epoch_merge_target(base_path, remote_ref)
+                if merge_target is None or problem is not None:
+                    logger.warning(
+                        "%s", problem or "tickets store epoch guard could not pin remote ref"
+                    )
+                    return
+
                 merge = _git(
                     base_path,
                     "merge",
-                    remote_ref,
+                    merge_target,
                     "--no-edit",
                     "-m",
                     f"Merge {remote_ref} (auto-reconcile during push retry)",
@@ -239,10 +247,18 @@ def push_tickets_branch(base_path: str) -> None:
                             "tickets branch push failed: stash failed (attempt %s)", attempt
                         )
                         continue
+                    merge_target, problem = compat.store_epoch_merge_target(base_path, remote_ref)
+                    if merge_target is None or problem is not None:
+                        pop = _git(base_path, "stash", "pop", "--quiet")
+                        _resolve_conflicted_pop(base_path, pop)
+                        logger.warning(
+                            "%s", problem or "tickets store epoch guard could not pin remote ref"
+                        )
+                        return
                     merge2 = _git(
                         base_path,
                         "merge",
-                        remote_ref,
+                        merge_target,
                         "--no-edit",
                         "-m",
                         f"Merge {remote_ref} (auto-reconcile, post-stash)",
