@@ -152,8 +152,11 @@ def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) 
 
     Each extracted candidate is put through the SAME shared resolver the commit-ticket gate
     uses (:func:`resolve_ticket_id`), so every id form — full / short / alias / Jira key /
-    prefix — matches any of the accepted ids. Resolves are cached across commits. A git
-    failure (not a repo, no commits) yields ``False`` (no referencing commit found)."""
+    prefix — matches any of the accepted ids. Resolves run ``quiet`` — these are historical
+    candidates the user never supplied, so an unrelated ambiguity is noise, not a diagnostic
+    (bug af11); ambiguous candidates still resolve to ``None`` either way, so the decision is
+    unchanged. Resolves are cached across commits. A git failure (not a repo, no commits)
+    yields ``False`` (no referencing commit found)."""
     from rebar._commands.verify_commit import extract_ticket_refs
     from rebar._engine_support.resolver import resolve_ticket_id
 
@@ -168,7 +171,7 @@ def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) 
     for message in proc.stdout.split("\0"):
         for ref in extract_ticket_refs(message):
             if ref not in resolved_cache:
-                resolved_cache[ref] = resolve_ticket_id(ref, tracker)
+                resolved_cache[ref] = resolve_ticket_id(ref, tracker, quiet=True)
             if resolved_cache[ref] in accepted_ids:
                 return True
     return False
