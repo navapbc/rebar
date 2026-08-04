@@ -72,9 +72,9 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     stack up unsubmittable.
 
     Runbook: infra/runbooks/review-bot-ops.md, "Kill-switch: revert the LLM path
-    from Bedrock to direct Anthropic". Note that llm_retry_max_attempts / timeout_s
-    do NOT apply on the Bedrock path (botocore stock client defaults only), so
-    tuning them is not a remedy.
+    from Bedrock to direct Anthropic". llm_retry_max_attempts / the configured
+    timeout DO apply on the Bedrock path (wired into the botocore client Config,
+    bug 61d8), so tuning them is a real remedy alongside the kill-switch.
   EOT
 
   # 15-minute periods, two in a row. A 4xx spike inside one 15-minute window is

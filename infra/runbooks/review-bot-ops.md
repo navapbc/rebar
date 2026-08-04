@@ -346,28 +346,25 @@ Leave it in place. Its presence costs nothing while Bedrock is in use (the Bedro
 authenticates off the ambient AWS credential chain — the instance role — and reads no
 rebar-managed key) and it is what makes the revert above instant.
 
-### Retry / timeout posture on Bedrock: botocore stock defaults ONLY
+### Retry / timeout posture on Bedrock: rebar-configured (adaptive retries + timeouts)
 
 Know this before you tune anything during a Bedrock incident:
 
-- `rebar.llm.bedrock_model.build_bedrock_provider` ends at
-  `src/rebar/llm/bedrock_model.py:88` with `return BedrockProvider(region_name=region)`.
-  It passes **no** `botocore.config.Config(retries=...)` and opens no custom client or
-  transport. The Bedrock client therefore runs on **botocore's stock client defaults** for
-  retries, retry mode, and socket/connect timeouts.
-- The tenacity retry envelope (`AsyncTenacityTransport` + `RetryConfig` +
-  `wait_retry_after`) and the `httpx.Timeout` wiring live **only** in
-  `src/rebar/llm/anthropic_model.py` (`_build_retrying_anthropic_model`), on the
-  direct-Anthropic transport.
-- Consequence: **`llm_retry_max_attempts` and `timeout_s` do NOT apply to Bedrock.**
-  Turning them up during a Bedrock throttling incident changes nothing. Your actual
-  options are: wait out the throttle, or pull the kill-switch above and let the
-  direct-Anthropic path (which *does* honour those settings) carry the gate.
-
-This describes the posture **as it stands**, not a design intent. The gap is tracked as
-bug `61d8-ff23-8ee0-4289` ("Bedrock ignores `llm_retry_max_attempts` and `timeout_s`: no
-botocore retry envelope", discovered from eb6e) — check that ticket before assuming the
-paragraph above is still current.
+- `rebar.llm.bedrock_model.build_bedrock_provider` constructs the `bedrock-runtime` boto3
+  client itself with a `botocore.config.Config` built from rebar's documented knobs
+  (bug `61d8-ff23-8ee0-4289`, fixed): `llm_retry_max_attempts`
+  (`REBAR_LLM_RETRY_MAX_ATTEMPTS`) becomes `retries={"max_attempts": N, "mode": "adaptive"}`,
+  and the timeout (`timeout` in `[tool.rebar.llm]` / `REBAR_LLM_TIMEOUT`) becomes BOTH the
+  read and connect timeout.
+- Semantics: botocore's `max_attempts` counts **total attempts including the first** — the
+  same counting as the Anthropic path's tenacity `stop_after_attempt(N)`, so the one
+  configured integer means the same thing on both transports. `N <= 1` clamps to a single
+  attempt (fail-fast). `"adaptive"` mode adds client-side rate limiting on throttling.
+  `llm_retry_max_wait_s` has no botocore equivalent and applies to the Anthropic path only.
+- Consequence: **`llm_retry_max_attempts` and the timeout DO apply to Bedrock.** Turning
+  `llm_retry_max_attempts` up (or the timeout down) during a Bedrock throttling incident is
+  now a real remedy, alongside waiting out the throttle or pulling the kill-switch above to
+  let the direct-Anthropic path carry the gate.
 
 Reverting back to Bedrock is the same edit in reverse: restore the three
 `REBAR_LLM_*_MODEL` lines and `docker compose up -d --force-recreate review-bot`.

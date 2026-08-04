@@ -284,7 +284,10 @@ calls (the SDK's own retries are disabled, `max_retries=0`): a `{429,529,5xx}` /
 network blip is re-sent below the agent loop, so completed tool calls are never re-executed.
 `Retry-After` is honored (capped at `llm_retry_max_wait_s`), else exponential backoff. Set
 `llm_retry_max_attempts = 1` to disable retry (fail-fast back-out, no code revert). See
-[ADR 0037](adr/0037-transport-retry.md).
+[ADR 0037](adr/0037-transport-retry.md). On the Bedrock path the same knob is wired into the
+botocore client Config as `retries={"max_attempts": N, "mode": "adaptive"}` (total attempts,
+matching tenacity's counting) and `timeout` becomes the client's read + connect timeout;
+`llm_retry_max_wait_s` has no botocore equivalent and applies to the Anthropic path only.
 
 Liveness is activity-based, not a total-runtime cap: the per-request read timeout (reuses
 `timeout` above) bounds a hung model, and `llm_tool_timeout_s` bounds a hung ASYNC/MCP tool

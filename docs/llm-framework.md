@@ -351,8 +351,8 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_TEMPERATURE` | unset | sampling temperature; unset sends none |
 | `REBAR_LLM_MAX_TOKENS` | `16000` | per-response token ceiling |
 | `REBAR_LLM_MAX_STEPS` | `250` | agent-loop step cap (~2 per tool call) |
-| `REBAR_LLM_TIMEOUT` | `600` | per-call wall-clock seconds (wired to the model's request timeout — see note below). **Anthropic path only** |
-| `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `4` | transport retry attempts. **Anthropic path only** — Bedrock inherits botocore's stock defaults |
+| `REBAR_LLM_TIMEOUT` | `600` | per-call wall-clock seconds (wired to the model's request timeout — see note below). On Bedrock: read + connect timeout on the botocore client |
+| `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `4` | transport retry attempts (total, incl. the first). On Bedrock: botocore `retries={"max_attempts": N, "mode": "adaptive"}` |
 | `REBAR_LLM_RETRY_MAX_WAIT_S` | `60` | cap on the honored `Retry-After` backoff. **Anthropic path only** |
 | `REBAR_LLM_TOOL_TIMEOUT_S` | — | per-tool-call wall-clock bound |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | off | permit an inherited loopback `ANTHROPIC_BASE_URL` instead of bypassing it |
@@ -372,8 +372,11 @@ for the future code-review op's "deterministic reviewer-selection rules."
 > add retry/backoff — but **retry is on by default on the direct-Anthropic path**, as a
 > tenacity transport wrapping the httpx client (`REBAR_LLM_RETRY_MAX_ATTEMPTS`, default 4;
 > `REBAR_LLM_RETRY_MAX_WAIT_S`, default 60), with the Anthropic SDK's own retries disabled so
-> the two do not compound. **Neither the timeout nor the retry envelope reaches Bedrock**, which
-> runs on botocore's stock defaults.
+> the two do not compound. **On Bedrock** the same two knobs reach the botocore client Config
+> (bug 61d8): `REBAR_LLM_RETRY_MAX_ATTEMPTS` maps to `retries={"max_attempts": N, "mode":
+> "adaptive"}` (botocore counts total attempts, matching tenacity's `stop_after_attempt(N)`)
+> and the timeout maps to both read and connect timeout; only `REBAR_LLM_RETRY_MAX_WAIT_S`
+> has no botocore equivalent and stays Anthropic-only.
 
 Tracing is the optional `[tracing]` **OpenTelemetry exporter** to Langfuse's OTLP
 endpoint (Langfuse is an OTLP sink, not an SDK dependency) — wired in
