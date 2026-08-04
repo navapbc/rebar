@@ -27,3 +27,26 @@ environments:
         # Era anchor = the tickets-branch tip log position stamped at deploy time.
         added_at_log_position: "1784078198455948001-35a1ea66-3c97-4d94-9966-380d79489425"
         revoked_at_log_position: null
+
+  # The maintainer's local gate environment (bug 846b). WHY THIS EXISTS: the Gerrit
+  # bugfix-size gate demands a plan-review op-cert whose principal is pinned HERE, and
+  # `nava-opcert-prod` above was the only pinned environment — but the op-cert service that
+  # holds its key has no client in this repo and, by design (`REBAR_SYNC_PUSH: "off"`), never
+  # persists what it signs. So a large bug fix reviewed in a developer environment had NO
+  # obtainable attestation and blocked unconditionally, which is bug 846b. Pinning this
+  # environment is the operator's chosen resolution.
+  #
+  # WHAT THIS DOES AND DOES NOT GRANT. It lets THIS environment's plan-review certs verify —
+  # it does not widen who may VOTE. `LLM-Review` and `Verified` are still cast only by the
+  # bots, so a change still cannot self-approve; what changes is that a plan review this
+  # environment genuinely ran is no longer rejected purely on provenance.
+  #
+  # ERA START is the tickets-branch tip at the moment of pinning, NOT backdated to cover the
+  # certs this environment had already written. Certs anchored before this position stay
+  # outside the era and must be re-signed — which is the anti-backdating property story 4214
+  # added, and deliberately not circumvented here.
+  - env_id: "ade0f2ef-51cc-45a2-bb97-c09846cd3df5"
+    keys:
+      - public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBJYVGrlY0lry1wXJUH16LysXt4NezYJ98El+EK1yuo3 rebar-opcert"
+        added_at_log_position: "1785855397918577001-d97467a4-aac0-4c06-a1f0-9c41ab4dd435"
+        revoked_at_log_position: null
