@@ -184,7 +184,12 @@ def _completion_precheck(
     # The bug-class guard above and all structural/write-time close guards still apply.
     tracker = str(config.tracker_dir(repo_root))
     if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
-        return None
+        # ATTEST the disposition rather than withholding a signature (bug 738a): skipping the
+        # verifier is right, but leaving the close unsigned made the certification path count an
+        # exempt child as uncertified and withhold its parent's signature, with no honest exit.
+        from rebar._commands import close_disposition
+
+        return close_disposition.verdict(ticket_id, close_class, tracker)
 
     # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
     txn.ensure_ac_boxes_checked(ticket_id, tracker)
