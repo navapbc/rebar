@@ -36,6 +36,7 @@ import urllib.request
 from typing import Any
 
 import pytest
+from _dc_support import derive_rename_target
 from _jira_shape_contract import (
     assert_comment_map_shape,
     assert_issuelinks_map_shape,
@@ -512,7 +513,12 @@ def test_a_rekeyed_issue_resolves_by_id_and_records_what_the_stale_key_returns(
     old_issue_key = created["key"]
     numeric_id = created["id"]
 
-    new_project_key = (jira_dc_project[:-1] if len(jira_dc_project) >= 4 else jira_dc_project) + "Z"
+    # Derived by a shared helper that CANNOT return the source key, and is pinned by a repo-only
+    # unit test over all 26 possible final letters (bug d582 — a fixed "Z" collided 1 run in 26).
+    # The setup assertion is RETAINED as a safety net: it is what caught the collision instead of
+    # letting the cell rename the project to the key it already had and then assert about a key
+    # that was never stale.
+    new_project_key = derive_rename_target(jira_dc_project)
     assert new_project_key != jira_dc_project
 
     status, body = _admin_request(
