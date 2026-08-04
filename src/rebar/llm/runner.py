@@ -26,7 +26,6 @@ from rebar.llm import usage_log
 from rebar.llm.agent_call import build_agent_kwargs, log_call_success, record_call_spend
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
-    _anthropic_web_search_capabilities,
     _local_proxy_bypass_base_url,  # noqa: F401  (re-exported for tests / back-compat)
     _pai_model,
 )
@@ -35,6 +34,7 @@ from rebar.llm.capabilities import (
     cache_settings_for,
     capabilities_for,
     provenance_for,
+    web_search_capabilities,
 )
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMError
@@ -112,10 +112,12 @@ class RunRequest:
     # Remove all tools after this pydantic-ai run step, leaving a final turn
     # that can summarize gathered evidence as text.
     tool_step_limit: int | None = None
-    # Server-side web-search flag (bug ff64), set by the plan-review routing seam for a
-    # criterion whose routing entry declares ``"web": true`` (T1 initially). Honored ONLY
-    # on an anthropic-resolved model (the server-side ``web_search`` capability); every
-    # other provider and every unflagged request is byte-identical. DEFAULTED False.
+    # Web-search flag (bug ff64), set by the plan-review routing seam for a criterion whose
+    # routing entry declares ``"web": true`` (T1 initially). Honored on EVERY provider and
+    # model since bug 129e — the provider's native tool where the model's profile supports it,
+    # an in-process fallback where it does not; the old anthropic-prefix gate silently
+    # withdrew a BLOCKING criterion's grounding tool at the Bedrock cutover. Every UNflagged
+    # request is still byte-identical (no ``capabilities`` kwarg). DEFAULTED False.
     web: bool = False
 
 
@@ -402,8 +404,18 @@ class PydanticAIRunner:
             # path), and the effective capability record — onto the verdict, additively,
             # alongside the existing `model` string. Built from the SAME `caps` already
             # resolved above (never recomputed — see capabilities.provenance_for's docstring).
+            # Web access (bug 129e). Resolved ONCE here so the capability actually attached and
+            # the provenance that attests it cannot disagree. The ONLY thing that can withdraw it
+            # is the injected-test-model path (`model_override`): a test double has no provider to
+            # search with, and every model_override test pins the byte-identical wire shape. It is
+            # NOT withdrawn for any real provider — that prefix-shaped withdrawal is the bug.
+            web_requested = bool(req.web) and not self._model_override
             provider_provenance = provenance_for(
-                provider=_provider_name, model=resolved, base_url=cfg.base_url, caps=caps
+                provider=_provider_name,
+                model=resolved,
+                base_url=cfg.base_url,
+                caps=caps,
+                web=web_requested,
             )
             if fallback_targets:
                 # A verdict produced by a fallback must not attest the primary. The ordered
@@ -411,12 +423,10 @@ class PydanticAIRunner:
                 # response that actually answered (the wrapper's own name is the synthetic
                 # `fallback:a,b` string).
                 provider_provenance["candidates"] = list(candidates)
-            # Server-side web search (bug ff64) — anthropic-GATED like the cache settings above
-            # (an injected test model never gets a provider server tool); any non-flagged-anthropic
-            # request stays byte-identical (no ``capabilities`` key).
-            web_caps = _anthropic_web_search_capabilities(
-                resolved if not self._model_override else "", web=req.web
-            )
+            # Web search (bug ff64, universalised by bug 129e): the provider's native tool where
+            # its profile supports it, an in-process fallback everywhere else — no provider gate.
+            # An unflagged request stays byte-identical (no ``capabilities`` key).
+            web_caps = web_search_capabilities(web=web_requested)
             # Model settings + usage limits are built by the ADR 0056 decision-3 leaf helpers
             # (structured_run.py); see their docstrings for the max_tokens/timeout/temperature/
             # step-budget rationale (bug ids, measured numbers, and invariants preserved there).
@@ -632,6 +642,10 @@ def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapa
         prompt_cache_style=per_candidate[0].prompt_cache_style if len(styles) == 1 else "none",
         supports_thinking=all(c.supports_thinking for c in per_candidate),
         supports_temperature=all(c.supports_temperature for c in per_candidate),
+        # `all`, like every other field: web access is attached to the chain as a WHOLE, so the
+        # record may only claim the provider-side route when EVERY candidate can serve it —
+        # otherwise the answering model decides the route and provenance would attest by luck.
+        native_web_search=all(c.native_web_search for c in per_candidate),
     )
 
 

@@ -74,7 +74,15 @@ WORKDIR /app
 # Copy the whole repo (the build context is the repo root) and install the package
 # with the agents + reviewbot + bedrock extras THROUGH the committed uv.lock (ticket ce5d):
 #   - reviewbot -> fastapi + uvicorn[standard] (the ASGI server)
-#   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it)
+#   - agents    -> the rebar.llm runtime the review kernel uses (S4b will exercise it).
+#       This is ALSO what puts the LOCAL web-search backend (`pydantic-ai-slim[duckduckgo]`
+#       -> `ddgs`) in this image: plan-review criterion T1 is BLOCKING and its routing
+#       declares web access, which rebar guarantees on every provider, and Bedrock — this
+#       image's provider — is MEASURED unable to carry the server-side tool, so the local
+#       backend is the ONLY route here (bug 129e). It rides inside `agents` on purpose
+#       rather than as a separate `--extra` line, so no deployment can install the agents
+#       runtime and forget it; the capability construction raises at gate time if it is
+#       absent. Do not narrow the `agents` extra without checking that.
 #   - bedrock   -> pydantic-ai-slim[bedrock], the dependency of the AWS Bedrock provider
 #       that rebar.llm.bedrock_model.build_bedrock_provider imports lazily
 #       (`pydantic_ai.providers.bedrock`) once this container's model-class slots point at

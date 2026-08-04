@@ -122,6 +122,7 @@ def test_capabilities_are_the_passed_record_not_a_recomputation() -> None:
         prompt_cache_style="bedrock",
         supports_thinking=True,
         supports_temperature=False,
+        native_web_search=True,
     )
     rec = _provenance(provider="bedrock", model="bedrock:x", base_url=None, caps=odd)
     assert rec["capabilities"] == {
@@ -129,6 +130,11 @@ def test_capabilities_are_the_passed_record_not_a_recomputation() -> None:
         "prompt_cache_style": "bedrock",
         "supports_thinking": True,
         "supports_temperature": False,
+        # Bug 129e. `_provenance` here passes no `web`, i.e. the request did not attach web
+        # access — so the record must say "off" and must NOT leak the model's native-tool
+        # capability as if it had been used. `native_web_search=True` above is deliberately
+        # contradictory for exactly that reason.
+        "web_access": "off",
     }
 
 
