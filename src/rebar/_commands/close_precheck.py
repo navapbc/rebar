@@ -143,7 +143,18 @@ def _completion_precheck(
     validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
     the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
     so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
-    non-force close is attempted."""
+    non-force close is attempted.
+
+    THE RETURN CONTRACT HAS A THIRD CASE, and leaving it out of this docstring is part of what let
+    bug 738a hide. A **disposition** close (a bug closed ``duplicate`` / ``not_a_bug`` /
+    ``escalated`` while naming a live replacement) skips the billable verifier — it never claimed to
+    implement its own criteria — but still returns a sign signal, built by
+    :mod:`rebar._commands.close_disposition`. It used to return ``None``, so the closure was
+    unsigned, and :func:`rebar.llm.completion.child_closure_findings` counts ANY unsigned closure as
+    uncertified and withholds the parent's signature. Read as "unsigned implies gate-off or forced",
+    which is what this docstring said, that state looked like a force-close and was reopened as one.
+    So: ``None`` means off or forced; a disposition returns a verdict whose manifest says
+    ``DISPOSITION``, not ``PASS``."""
     # session_log / code_review are lifecycle-exempt — they cannot be transitioned, so
     # transition_core will refuse this close authoritatively. Skip the gate BEFORE the (billable)
     # verifier runs, so a doomed close attempt never fires an LLM call.
@@ -184,7 +195,12 @@ def _completion_precheck(
     # The bug-class guard above and all structural/write-time close guards still apply.
     tracker = str(config.tracker_dir(repo_root))
     if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
-        return None
+        # ATTEST the disposition rather than withholding a signature (bug 738a): skipping the
+        # verifier is right, but leaving the close unsigned made the certification path count an
+        # exempt child as uncertified and withhold its parent's signature, with no honest exit.
+        from rebar._commands import close_disposition
+
+        return close_disposition.verdict(ticket_id, close_class, tracker)
 
     # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
     txn.ensure_ac_boxes_checked(ticket_id, tracker)
