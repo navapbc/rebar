@@ -19,15 +19,21 @@ working tree in two ways that matter:
 # from the repo root
 make install                                    # uv sync --locked (dev extra) + the pre-commit hook (the commit gate)
 source .venv/bin/activate
-export ANTHROPIC_API_KEY=sk-ant-...             # required for the LLM ops (review-plan, verify-completion)
+export AWS_PROFILE=...                          # the LLM ops (review-plan, verify-completion) default to Bedrock
+export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock has no default
 ```
+
+> **The LLM gates default to AWS Bedrock on this project**, so they need AWS credentials and a
+> region rather than `ANTHROPIC_API_KEY`. No Bedrock access? One-line opt-out:
+> `export REBAR_LLM_CONFIG_FILE="$PWD/.github/llm-providers/anthropic.toml"` and export
+> `ANTHROPIC_API_KEY` instead — see "Running your local gates on AWS Bedrock" below.
 
 > **Starting a NEW worktree? One command does the whole setup.** `make worktree name=<branch>`
 > creates a fresh worktree at `../<branch>` (override with `dir=<path>`) branched from a
 > freshly-fetched `origin/main`, then provisions its `.venv` and runs the canonical
 > `make install` above inside it — the one-command form of the manual "fresh worktree + local
 > venv" sequence this repo mandates. Then `cd ../<branch> && source .venv/bin/activate` and
-> export your `ANTHROPIC_API_KEY`.
+> export your provider credentials (AWS by default — see the note above).
 
 > **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
 > tickets should own its **own** identity + SSH signing key (never the shared bot). One-time
@@ -132,58 +138,74 @@ addition to the editable install:
   (included in `[dev]`);
 - the core deps `pyyaml`, `jsonschema`, `referencing` (declared in `[project.dependencies]`,
   installed automatically by any `pip install -e .`);
-- **`ANTHROPIC_API_KEY`** in the environment (the calls are live + billable).
+- **credentials for the provider this project defaults to, which is AWS Bedrock, not direct
+  Anthropic** — working AWS credentials on the ambient chain plus a resolvable region (the
+  calls are live + billable). See the section below, including the one-line opt-out back to
+  `ANTHROPIC_API_KEY` if you do not have Bedrock access.
 
 When the gate is enabled but a dependency is missing, the review currently degrades to a
 deterministic-floor-only result instead of failing loudly — a known defect (bug
 `fuel-posse-ball`). Until it's fixed, treat any `review-plan` output with
 `coverage.llm_ran == false` as **not a real review**, regardless of the `PASS` verdict.
 
-### Running your local gates on AWS Bedrock instead of direct Anthropic
+### Running your local gates on AWS Bedrock (the project default) and how to opt out
 
-Bedrock is a first-class provider (`docs/llm-example-configs.md` §2), so a developer can point
-`review-plan` / `review-code` / `verify-completion` at it without touching `src/`. Prefer the
-**layered config file** over the deprecated bare `REBAR_LLM_MODEL`: the pointer sets the three
-model classes at once, deep-merges over (rather than replaces) the discovered config, and is
-reverted by unsetting one variable.
+**This project's local LLM gates default to AWS Bedrock, not direct Anthropic.** `rebar.toml`
+— the project's authoritative config — carries an `[llm]` table naming Bedrock inference
+profiles for all three model classes, so a clean checkout with no `REBAR_LLM_*` variable set
+runs `review-plan` / `review-code` / `verify-completion` on Bedrock. Nothing to opt in to.
 
-**The checkout already ships one you can point at.** CI's provider matrix uses the same mechanism,
-so its overlays are committed and are the exact files the weekly live suite runs on
-(`docs/ci-provider-matrix.md`):
+That is deliberate (bug `d2ce-36f5-fd08-4e40`, epic `061c-ecd1`): the path rebar is developed
+against should be the path rebar's users run, and the local gates are the gates a developer and
+every coding agent hit constantly. **The cost, accepted knowingly:** your local gates now need
+**working AWS credentials** on the ambient chain (`AWS_PROFILE`, env keys, instance role) **and
+a resolvable region**. `ANTHROPIC_API_KEY` is not consulted on this path.
+
+**If you do not have Bedrock access (or are offline), take the opt-out — one variable.**
+`REBAR_LLM_CONFIG_FILE` outranks the discovered project config, and the checkout ships the
+overlay to point it at. These are the same committed overlays CI's provider matrix runs on
+(`docs/ci-provider-matrix.md`), so the opt-out path is exercised, not hypothetical:
 
 ```sh
-export REBAR_LLM_CONFIG_FILE="$PWD/.github/llm-providers/bedrock.toml"   # or anthropic/openai
+export REBAR_LLM_CONFIG_FILE="$PWD/.github/llm-providers/anthropic.toml"   # opt OUT to Anthropic
+unset  REBAR_LLM_CONFIG_FILE                                              # back to the Bedrock default
 ```
 
-Or write your own — anywhere readable; `~/.config/rebar/bedrock.toml` keeps it out of the
-checkout, and the table is `[llm.model_classes]` (not `[tool.rebar.llm…]`, which is the
-`pyproject.toml` spelling):
+With that exported you are back on direct Anthropic and need `ANTHROPIC_API_KEY` instead of AWS
+credentials. `openai.toml` is available the same way; `bedrock.toml` is what the project default
+mirrors, so pointing at it explicitly is a no-op you never need.
+
+Or write your own overlay — anywhere readable; `~/.config/rebar/my-provider.toml` keeps it out
+of the checkout, and the table is `[llm.model_classes]` (not `[tool.rebar.llm…]`, which is the
+`pyproject.toml` spelling). Set `[llm] model` alongside it: `cfg.model` is a second resolution
+path the class table cannot reach, and leaving it unset falls back to a bare literal that infers
+provider `anthropic`, so an overlay that sets only the classes still leaks direct-Anthropic
+calls from any op that resolves `cfg.model`.
 
 ```toml
-# ~/.config/rebar/bedrock.toml
+# ~/.config/rebar/my-provider.toml
+[llm]
+model = "bedrock:us.anthropic.claude-opus-4-8"
+
 [llm.model_classes]
 frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
 standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
 trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
 ```
 
-**Opt in** (one variable) and **revert** (unset it):
-
-```sh
-export REBAR_LLM_CONFIG_FILE=~/.config/rebar/bedrock.toml   # opt in
-unset  REBAR_LLM_CONFIG_FILE                                # revert to Anthropic
-```
+Do **not** reach for the deprecated bare `REBAR_LLM_MODEL`: it fans one value out to all three
+classes and collapses the per-pass frontier/standard split the gates depend on.
 
 Confirm which way you are pointed without spending a token — this reads config only:
 
 ```sh
 python -c "from rebar.llm.model_classes import resolve_model_string as r; \
 print([ (c, r(c)) for c in ('trivial','standard','frontier') ])"
-# opted in : [('trivial', 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0'), …]
-# reverted : [('trivial', 'anthropic:claude-haiku-4-5'), …]
+# project default : [('trivial', 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0'), …]
+# opted out       : [('trivial', 'anthropic:claude-haiku-4-5'), …]
 ```
 
-Things that bite:
+Things that bite on the Bedrock default:
 
 - **Only inference-profile ids work.** A bare on-demand id (`anthropic.claude-sonnet-4-6`)
   is not invokable and returns a `ValidationException` telling you to use an inference
