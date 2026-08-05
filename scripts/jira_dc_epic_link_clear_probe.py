@@ -35,9 +35,20 @@ import logging
 import os
 import pathlib
 import sys
-import time
 import urllib.error
 import urllib.request
+
+# The readiness definition is SHARED with the live harness fixture
+# (`tests/external/live_jira_dc/conftest.py`) — bug 9790-cafa-dffa-462e. It lives next
+# to this file, which is importable as-is under `python scripts/<this file>` because
+# the script's directory leads sys.path; the insert below is defensive so the probe
+# also imports cleanly when invoked from elsewhere (e.g. `python -m`, or a runner that
+# rewrites sys.path[0]).
+_SCRIPTS_DIR = str(pathlib.Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import jira_dc_field_readiness  # noqa: E402
 
 BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira").rstrip("/")
 USER = os.environ.get("JIRA_DC_USER", "admin")
@@ -53,14 +64,6 @@ logger = logging.getLogger("jira-dc-epic-link-probe")
 # provision the SAME shape of project the suite runs against, or its answer is about some other
 # environment.
 PROJECT_TEMPLATE = "com.pyxis.greenhopper.jira:gh-scrum-template"
-
-#: Poll interval while waiting for the Jira Software custom fields to register
-#: (bug 9790-cafa-dffa-462e). Coarse on purpose: the plugin takes minutes, so a
-#: tight loop only inflates the evidence log with identical inventories.
-_FIELD_POLL_INTERVAL_S = 10.0
-
-#: How long to wait for those fields before giving up.
-_FIELD_READY_BUDGET_S = 600.0
 
 _EVIDENCE: list[dict] = []
 
@@ -94,31 +97,6 @@ def _req(path: str, *, method: str = "GET", payload: dict | None = None) -> tupl
     return status, parsed
 
 
-def _field_id(name: str) -> str | None:
-    status, body = _req("/rest/api/2/field")
-    if status != 200 or not isinstance(body, list):
-        # Say WHY rather than collapsing an unreachable/unauthorised instance and a genuinely
-        # absent field into the same `None`. The first probe run reported only
-        # "Epic Link=None Epic Name=None", which does not distinguish the two.
-        logger.info(
-            "  field inventory unusable: GET /rest/api/2/field -> HTTP %s, body type %s",
-            status,
-            type(body).__name__,
-        )
-        return None
-    found = next(
-        (str(f.get("id")) for f in body if isinstance(f, dict) and f.get("name") == name), None
-    )
-    if found is None:
-        logger.info(
-            "  field %r absent from an inventory of %d field(s); names present: %s",
-            name,
-            len(body),
-            sorted({str(f.get("name")) for f in body if isinstance(f, dict)})[:40],
-        )
-    return found
-
-
 def _create_issue(project: str, issuetype: str, summary: str, extra: dict | None = None) -> str:
     fields = {"project": {"key": project}, "issuetype": {"name": issuetype}, "summary": summary}
     fields.update(extra or {})
@@ -129,43 +107,42 @@ def _create_issue(project: str, issuetype: str, summary: str, extra: dict | None
 
 
 def _await_named_fields(names: tuple[str, ...]) -> dict[str, str | None]:
-    """Poll ``/rest/api/2/field`` until every name is registered, or the budget expires.
+    """Wait for the Jira Software custom fields to REGISTER, then map name -> field id.
 
-    WHY THIS EXISTS, measured (bug 9790-cafa-dffa-462e). The workflow's readiness
-    gate polls ``/rest/api/2/serverInfo`` until 200, and that is NOT readiness for
-    the Jira Software (GreenHopper) custom fields this probe needs. On run
-    30944211742 ``serverInfo`` went green after 8m32s and, ONE SECOND later,
-    ``/rest/api/2/field`` returned 27 fields of which every one was a SYSTEM field:
-    no ``customfield_*`` at all, so no ``Epic Link`` and no ``Epic Name``.
+    Delegates the whole readiness definition to ``jira_dc_field_readiness`` so this
+    probe and the live harness fixture cannot drift apart again (bug
+    9790-cafa-dffa-462e). Change 1387 fixed this path alone, which left the harness
+    still polling ``/rest/api/2/serverInfo`` — two definitions of "ready" for one
+    question. The measured evidence (run 30944211742: serverInfo green at 8m32s, a
+    27-field SYSTEM-only inventory one second later) now lives with the shared module.
 
-    The live harness never trips this only because it is SLOWER afterwards; it
-    installs deps and runs a ~41-minute suite before its fixture checks the same
-    fields, by which time the plugin is up. That margin is incidental, not a
-    guarantee, which is why this wait is explicit here rather than inherited from
-    how long unrelated work happens to take.
-
-    Waits for the CAPABILITY rather than a proxy for it. Values may be ``None`` on
-    expiry so the caller can report exactly which name never arrived.
+    Returns the same ``dict[str, str | None]`` shape ``main`` expects; values may be
+    ``None`` on expiry so the caller can report exactly which name never arrived.
     """
-    deadline = time.monotonic() + _FIELD_READY_BUDGET_S
-    resolved: dict[str, str | None] = dict.fromkeys(names)
-    attempts = 0
-    while time.monotonic() < deadline:
-        attempts += 1
-        for name in names:
-            if resolved[name] is None:
-                resolved[name] = _field_id(name)
-        if all(resolved[name] for name in names):
-            logger.info("  field inventory ready after %d attempt(s): %s", attempts, resolved)
-            return resolved
-        time.sleep(_FIELD_POLL_INTERVAL_S)
-    logger.info(
-        "  field inventory NEVER ready within %.0fs (%d attempts): %s",
-        _FIELD_READY_BUDGET_S,
-        attempts,
-        resolved,
+    result = jira_dc_field_readiness.await_required_fields(
+        # Resolved at call time from the module globals, not captured at import, so a
+        # patched ``_req`` (and its evidence recording) is honoured.
+        lambda path: _req(path),
+        names=names,
     )
-    return resolved
+    # Keep logging the OBSERVED inventory either way — it is the evidence that separates
+    # "plugin still starting" from "image genuinely lacks the fields".
+    if result.ready:
+        logger.info(
+            "  field inventory ready after %d attempt(s): %s | %s",
+            result.attempts,
+            result.ids,
+            result.inventory,
+        )
+    else:
+        logger.info(
+            "  field inventory NEVER ready within %.0fs (%d attempts): missing %s | %s",
+            jira_dc_field_readiness.FIELD_READY_BUDGET_S,
+            result.attempts,
+            result.missing,
+            result.inventory,
+        )
+    return result.ids
 
 
 def main() -> int:

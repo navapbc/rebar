@@ -104,13 +104,33 @@ guard): the suite reports `skipped`, never a hard failure or a raw connection tr
 
 ### Readiness
 
-The readiness probe (`conftest.py::wait_for_jira_dc_ready`) polls
-`/rest/api/2/serverInfo` with a **default 20-minute budget** and a ~5 second poll cadence,
-overridable via `JIRA_DC_READY_TIMEOUT` (seconds). The generous default is deliberate: an
-emulated amd64-under-arm64 base plus a ~900-artifact Maven download makes upstream's quoted
-"3-5 minutes" unattainable on an arm64 runner. On expiry it fails with an explicit
-"harness not running / not ready" message naming `make jira-dc-up` — never a raw connection
-traceback.
+Readiness is a **two-stage gate** (`conftest.py::wait_for_jira_dc_ready`):
+
+1. **Does Jira answer at all?** Poll `/rest/api/2/serverInfo` with a **default 20-minute
+   budget** and a ~5 second poll cadence, overridable via `JIRA_DC_READY_TIMEOUT` (seconds).
+   The generous default is deliberate: an emulated amd64-under-arm64 base plus a
+   ~900-artifact Maven download makes upstream's quoted "3-5 minutes" unattainable on an
+   arm64 runner. On expiry it fails with an explicit "harness not running / not ready"
+   message naming `make jira-dc-up` — never a raw connection traceback.
+2. **Are the Epic custom fields registered?** Then poll `/rest/api/2/field` until both
+   `Epic Link` and `Epic Name` appear, under its own **default 10-minute budget** (~10s
+   cadence), overridable via `JIRA_DC_FIELD_READY_TIMEOUT` (seconds).
+
+Stage 2 exists because a `serverInfo` 200 does **not** imply the Jira Software (GreenHopper)
+custom fields are usable — Jira serves REST well before the plugin finishes registering them.
+Measured on probe run `30944211742`: `serverInfo` went green at **8m32s**, and **one second
+later** `/rest/api/2/field` returned **27 fields, every one a SYSTEM field** (no
+`customfield_*`, so neither Epic field). This suite only survived that because it does slower
+work afterwards — dependency install plus a ~41-minute run — before
+`_assert_project_capabilities` asserts the same fields; that margin was incidental, not a
+guarantee, i.e. a latent flake (bug `9790-cafa-dffa-462e`).
+
+The definition is shared with the deterministic probe
+(`scripts/jira_dc_epic_link_clear_probe.py`) via `scripts/jira_dc_field_readiness.py`, so
+there is exactly one answer to "is it ready?". On expiry the failure names both candidate
+causes — the fields **never registered** within the budget (timing), or this image **does not
+offer** them (a genuine degrade) — and dumps the observed field names as the evidence that
+separates them.
 
 ## Feasibility evidence (recorded reproducibly)
 

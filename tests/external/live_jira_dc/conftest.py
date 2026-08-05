@@ -54,6 +54,17 @@ from _engine_path import engine_dir  # noqa: E402
 if str(engine_dir()) not in sys.path:
     sys.path.insert(0, str(engine_dir()))
 
+# ONE shared definition of readiness, shared with the deterministic probe
+# (`scripts/jira_dc_epic_link_clear_probe.py`) — bug 9790-cafa-dffa-462e. `scripts/`
+# is not a package and is not installed, so it is put on `sys.path` the same way
+# `_TESTS_DIR` and `engine_dir()` above are, rather than reached by a relative
+# import that only works from one working directory.
+_SCRIPTS_DIR = _TESTS_DIR.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+import jira_dc_field_readiness  # noqa: E402
+
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 _ADMIN_USER = os.environ.get("JIRA_DC_ADMIN", "admin")
 _ADMIN_PASSWORD = os.environ.get("JIRA_DC_ADMIN_PASSWORD", "admin")
@@ -69,6 +80,12 @@ _READY_POLL_INTERVAL_S = 5.0
 # a stuck delete should fail fast and loudly, not hang for 20 minutes.
 _TEARDOWN_POLL_TIMEOUT_S = 60.0
 _TEARDOWN_POLL_INTERVAL_S = 2.0
+
+#: Ceiling on `_assert_project_capabilities`'s re-confirmation of the Epic fields
+#: (bug 9790). Readiness already waited out the full field budget before any project
+#: existed, so this is a grace window of ~one extra poll cycle, not a second cold-boot
+#: wait — see the comment at its use site.
+_CAPABILITY_FIELD_CONFIRM_BUDGET_S = 15.0
 
 _NOT_READY_MESSAGE = (
     "Jira DC harness at {base} did not become ready within {timeout:.0f}s. "
@@ -124,29 +141,81 @@ def _ready_timeout() -> float:
     return float(raw)
 
 
-def wait_for_jira_dc_ready(timeout: float | None = None) -> None:
-    """Poll ``/rest/api/2/serverInfo`` until the harness answers, or fail loudly.
+def _field_ready_timeout() -> float:
+    """Budget for stage two of readiness — the wait for the Epic custom fields.
 
-    Default budget is 20 minutes (overridable via ``JIRA_DC_READY_TIMEOUT``,
+    Separate from ``JIRA_DC_READY_TIMEOUT`` on purpose: the two stages fail for
+    different reasons (Jira not answering at all vs. the GreenHopper plugin not
+    finished registering), so an operator must be able to stretch one without
+    stretching the other.
+    """
+    raw = os.environ.get("JIRA_DC_FIELD_READY_TIMEOUT")
+    if raw is None or not raw.strip():
+        return float(jira_dc_field_readiness.FIELD_READY_BUDGET_S)
+    return float(raw)
+
+
+def _field_request(path: str) -> tuple[int, Any]:
+    """Adapter handing the shared readiness module this module's own HTTP helper.
+
+    Resolves ``_request`` from the module globals AT CALL TIME rather than
+    capturing it at definition time, so a test (or a caller) that monkeypatches
+    ``_request`` on this module is actually honoured.
+    """
+    return _request(path, timeout=15)
+
+
+def wait_for_jira_dc_ready(timeout: float | None = None) -> None:
+    """Wait until the harness is usable — in TWO stages — or fail loudly.
+
+    Stage 1, the cheap gate: poll ``/rest/api/2/serverInfo`` until it answers.
+    Default budget 20 minutes (overridable via ``JIRA_DC_READY_TIMEOUT``,
     seconds), polled every ~5s. On expiry raises ``RuntimeError`` naming both
     `make jira-dc-up` and `REBAR_RUN_EXTERNAL=1` — never a raw connection
     traceback.
+
+    Stage 2, the capability gate (bug 9790-cafa-dffa-462e): a ``serverInfo`` 200
+    does NOT mean the Jira Software (GreenHopper) custom fields this suite
+    requires are registered. Measured on probe run 30944211742, ``serverInfo``
+    went green at 8m32s and ONE SECOND later ``/rest/api/2/field`` returned 27
+    fields, every one a SYSTEM field — no ``customfield_*``, so neither
+    ``Epic Link`` nor ``Epic Name``. This tier only survived that because it does
+    slower work afterwards (dependency install, then a ~41-minute suite) before
+    ``_assert_project_capabilities`` asserts the same fields; that margin is
+    incidental, not a guarantee. So the field wait is explicit here, bounded by
+    its own budget (``JIRA_DC_FIELD_READY_TIMEOUT``, seconds), and shares its
+    definition with the deterministic probe via ``jira_dc_field_readiness``.
     """
     budget = _ready_timeout() if timeout is None else timeout
     deadline = time.monotonic() + budget
     last_error: Exception | None = None
+    server_info_ready = False
     while time.monotonic() < deadline:
         try:
             status, _ = _request("/rest/api/2/serverInfo", timeout=5)
             if status == 200:
-                return
+                server_info_ready = True
+                break
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = exc
         time.sleep(_READY_POLL_INTERVAL_S)
-    message = _NOT_READY_MESSAGE.format(base=_BASE, timeout=budget)
-    if last_error is not None:
-        message = f"{message} Last error: {last_error!r}"
-    raise RuntimeError(message)
+
+    if not server_info_ready:
+        message = _NOT_READY_MESSAGE.format(base=_BASE, timeout=budget)
+        if last_error is not None:
+            message = f"{message} Last error: {last_error!r}"
+        raise RuntimeError(message)
+
+    field_budget = _field_ready_timeout()
+    result = jira_dc_field_readiness.await_required_fields(
+        _field_request,
+        names=_REQUIRED_FIELDS,
+        budget=field_budget,
+    )
+    if not result.ready:
+        raise RuntimeError(
+            jira_dc_field_readiness.not_ready_message(result, base_url=_BASE, budget=field_budget)
+        )
 
 
 # Every scratch project this harness creates carries this prefix, which is what
@@ -380,7 +449,11 @@ _REQUIRED_ISSUE_TYPES = ("Task", "Sub-task", "Epic")
 #: requires `Epic Name` to create an Epic at all, and `Epic Link` is how a child
 #: is attached to one. They are instance-wide custom fields, so they are asserted
 #: against ``/rest/api/2/field`` rather than against the project.
-_REQUIRED_FIELDS = ("Epic Link", "Epic Name")
+#:
+#: This IS the shared tuple, not a copy of it (bug 9790): the probe waits for the
+#: same names, and two independent literals is exactly the drift that let the
+#: harness and the probe disagree about what "ready" means.
+_REQUIRED_FIELDS = jira_dc_field_readiness.REQUIRED_FIELDS
 
 
 def _create_scratch_project(key: str) -> tuple[int, Any]:
@@ -463,22 +536,43 @@ def _assert_project_capabilities(key: str) -> None:
             f"`_PROJECT_TEMPLATE` / `_REQUIRED_ISSUE_TYPES` — do not add a fallback template."
         )
 
-    status, fields = _request("/rest/api/2/field")
-    if status != 200 or not isinstance(fields, list):
+    # Routed through the SAME bounded wait the readiness gate uses (bug 9790), not a
+    # single read. A one-shot read here cannot distinguish "the GreenHopper plugin has
+    # not registered its custom fields yet" from "this image genuinely does not offer
+    # them" — they are byte-identical on the wire, and only elapsed TIME separates them.
+    # A read that is still unusable, or an inventory still missing the names, after the
+    # whole budget is what makes the abort attributable. An unusable read is likewise
+    # treated as NOT-READY here (`missing_required_fields` returns every name for a
+    # non-200 / non-list body), preserving the rule that an UNVERIFIED contract is
+    # refused rather than assumed.
+    #
+    # The budget here is the readiness budget CAPPED at a short confirmation window
+    # (`_CAPABILITY_FIELD_CONFIRM_BUDGET_S`), because this call site is not a cold boot:
+    # `wait_for_jira_dc_ready` already waited out the full field budget at session start,
+    # so by the time a project has been provisioned the fields have been seen once. What
+    # remains is a grace of one extra poll cycle for the narrow window where provisioning
+    # raced ahead of a still-settling inventory. Spending the whole cold-boot budget again
+    # here would only delay a verdict that is already decided. The cap is a `min`, so an
+    # operator who SHORTENS the budget (JIRA_DC_FIELD_READY_TIMEOUT, or the module
+    # constant) still shortens this wait too.
+    field_budget = min(_field_ready_timeout(), _CAPABILITY_FIELD_CONFIRM_BUDGET_S)
+    readiness = jira_dc_field_readiness.await_required_fields(
+        _field_request,
+        names=_REQUIRED_FIELDS,
+        budget=field_budget,
+    )
+    if not readiness.ready:
+        # AssertionError, not RuntimeError: this is a provisioning-contract failure and
+        # the tier's callers key off that type.
         raise AssertionError(
-            f"PROVISIONING FAILED: could not list instance fields to verify "
-            f"{list(_REQUIRED_FIELDS)} (HTTP {status}, body {fields!r}). The declared contract "
-            f"is UNVERIFIED, and an unverified contract is refused rather than assumed."
-        )
-    present = {str(field.get("name")) for field in fields if isinstance(field, dict)}
-    missing_fields = [name for name in _REQUIRED_FIELDS if name not in present]
-    if missing_fields:
-        raise AssertionError(
-            f"PROVISIONING FAILED: this instance exposes no {missing_fields} field(s), which "
-            f"Data Center requires to create an Epic ('Epic Name') and to attach a child to "
-            f"one ('Epic Link'). Without them the epic-parent cells cannot run. Re-run the "
-            f"capability map against the current image and update `_REQUIRED_FIELDS` if the "
-            f"instance genuinely renamed them."
+            f"PROVISIONING FAILED: scratch project {key} cannot be used for the epic-parent "
+            f"cells — Data Center requires 'Epic Name' to create an Epic at all and "
+            f"'Epic Link' to attach a child to one. "
+            + jira_dc_field_readiness.not_ready_message(
+                readiness, base_url=_BASE, budget=field_budget
+            )
+            + " If the inventory shows the names genuinely changed, re-run the capability "
+            "map against the current image and update `_REQUIRED_FIELDS`."
         )
 
     # ISSUE-TYPE NAME UNIQUENESS, within the provisioned project (bug 2e47-ae62-c0cf-48a0).

@@ -225,3 +225,236 @@ def test_an_already_gone_token_counts_as_reclaimed(harness, monkeypatch) -> None
         deleted=404,
     )
     assert harness._sweep_leaked_harness_tokens() == ["rebar-j5-harness-aaaa1111"]
+
+
+# ---------------------------------------------------------------------------
+# Readiness is the FIELD INVENTORY, not a serverInfo 200 (bug 9790-cafa-dffa-462e)
+#
+# WHY HERE. `wait_for_jira_dc_ready` used to return on the first
+# `/rest/api/2/serverInfo` 200 and never read `/rest/api/2/field` at all, while
+# `_assert_project_capabilities` — running later in the same session — asserts
+# `_REQUIRED_FIELDS` as a hard precondition. Measured on probe run 30944211742:
+# `serverInfo` went green at 8m32s and ONE SECOND later the inventory was 27
+# fields, every one a SYSTEM field, no `customfield_*`. The suite survived only
+# because it does slower work afterwards, so the margin was incidental. These
+# cells pin the CAPABILITY as the readiness predicate, and the negative one is
+# load-bearing: a system-only inventory must read as NOT ready rather than as a
+# degraded image.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_ONLY_FIELDS = [
+    {"id": f"sys{i}", "name": name, "custom": False}
+    for i, name in enumerate(
+        ["Attachment", "Comment", "Created", "Creator", "Key", "Project", "Status", "Updated"]
+    )
+]
+_EPIC_FIELDS = [
+    {"id": "customfield_10100", "name": "Epic Link", "custom": True},
+    {"id": "customfield_10104", "name": "Epic Name", "custom": True},
+]
+
+
+def _shared_readiness(harness):
+    """The one shared readiness definition, or a failure that says it is missing.
+
+    Deliberately not a hard attribute access: a bare ``AttributeError`` reads as a
+    broken test, while the thing actually being asserted is that the harness routes
+    through a shared definition at all.
+    """
+    module = getattr(harness, "jira_dc_field_readiness", None)
+    assert module is not None, (
+        "the harness conftest does not import a shared field-readiness module, so its "
+        "readiness definition is its own and can drift from the probe's"
+    )
+    return module
+
+
+@pytest.fixture
+def fast_field_poll(harness, monkeypatch):
+    """Collapse the field wait's wall clock so these cells stay sub-second."""
+    monkeypatch.setenv("JIRA_DC_FIELD_READY_TIMEOUT", "0.05")
+    readiness = getattr(harness, "jira_dc_field_readiness", None)
+    if readiness is not None:
+        monkeypatch.setattr(readiness, "FIELD_POLL_INTERVAL_S", 0.001)
+        monkeypatch.setattr(readiness, "FIELD_READY_BUDGET_S", 0.05)
+    return readiness
+
+
+def _stub_readiness_transport(harness, monkeypatch, field_bodies):
+    """Answer serverInfo 200 always; serve ``field_bodies`` in order (last repeats)."""
+    seen: list[str] = []
+    remaining = list(field_bodies)
+
+    def _fake(path, *, method="GET", payload=None, token=None, basic_auth=None, timeout=30):
+        seen.append(path)
+        if path == "/rest/api/2/serverInfo":
+            return 200, {"version": "8.17.1"}
+        if path == "/rest/api/2/field":
+            body = remaining[0] if len(remaining) == 1 else remaining.pop(0)
+            return 200, body
+        if path.startswith("/rest/api/2/project/"):
+            return 200, {"issueTypes": [{"name": n} for n in ("Task", "Sub-task", "Epic")]}
+        return 404, None
+
+    monkeypatch.setattr(harness, "_request", _fake)
+    return seen
+
+
+def test_a_system_only_field_inventory_reads_as_not_ready(
+    harness, monkeypatch, fast_field_poll
+) -> None:
+    """THE LOAD-BEARING ASSERTION (AC5). An inventory of only system fields is the
+    state the probe measured one second after `serverInfo` went green. It means the
+    GreenHopper plugin has not registered its fields YET — it does not mean the
+    image stopped offering them — so readiness must refuse rather than hand the
+    suite an instance whose declared contract cannot hold."""
+    _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
+
+    with pytest.raises(RuntimeError) as excinfo:
+        harness.wait_for_jira_dc_ready(timeout=0.05)
+
+    message = str(excinfo.value)
+    assert "Epic Link" in message and "Epic Name" in message, (
+        "readiness failed without naming which required field(s) never arrived"
+    )
+
+
+def test_the_not_ready_failure_dumps_the_observed_inventory(
+    harness, monkeypatch, fast_field_poll
+) -> None:
+    """AC2. The failure has to be self-diagnosing: the reader must be able to tell
+    'no custom fields at all yet' from 'the image renamed them' without re-running
+    anything, which takes the observed inventory in the message."""
+    _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
+
+    with pytest.raises(RuntimeError) as excinfo:
+        harness.wait_for_jira_dc_ready(timeout=0.05)
+
+    message = str(excinfo.value)
+    assert "Attachment" in message and "Status" in message, (
+        "the expiry message does not dump the field inventory it actually observed"
+    )
+    assert "never registered" in message.lower(), (
+        "the expiry message does not say the fields never REGISTERED, which is what "
+        "distinguishes a timing failure from an image degrade"
+    )
+
+
+def test_readiness_actually_polls_the_field_inventory(harness, monkeypatch) -> None:
+    """The discriminator. A gate that only ever touches `/rest/api/2/serverInfo` is
+    structurally blind to the capability, whatever its budget is."""
+    seen = _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS + _EPIC_FIELDS])
+
+    harness.wait_for_jira_dc_ready(timeout=5)
+
+    assert "/rest/api/2/field" in seen, (
+        f"readiness declared the instance ready having polled only {sorted(set(seen))} — "
+        f"it never asked whether the Epic fields exist"
+    )
+
+
+def test_readiness_returns_once_the_epic_fields_register(harness, monkeypatch) -> None:
+    """Positive control for the negative above: the refusal must be caused by the
+    missing capability, not by the wait being unable to succeed at all. The fields
+    arrive on the second poll, exactly as they do on a live cold start."""
+    monkeypatch.setattr(_shared_readiness(harness), "FIELD_POLL_INTERVAL_S", 0.001)
+    _stub_readiness_transport(
+        harness, monkeypatch, [_SYSTEM_ONLY_FIELDS, _SYSTEM_ONLY_FIELDS + _EPIC_FIELDS]
+    )
+
+    harness.wait_for_jira_dc_ready(timeout=5)
+
+
+def test_the_capability_abort_distinguishes_not_registered_from_not_offered(
+    harness, monkeypatch, fast_field_poll
+) -> None:
+    """AC3. `_assert_project_capabilities`' old message sent the reader straight at
+    the image ('update `_REQUIRED_FIELDS` if the instance genuinely renamed them'),
+    which is the wrong diagnosis when the plugin simply had not finished starting.
+    The message must name BOTH candidate causes."""
+    _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
+
+    with pytest.raises(AssertionError) as excinfo:
+        harness._assert_project_capabilities("RBTEST")
+
+    message = str(excinfo.value).lower()
+    assert "never registered" in message, (
+        "the abort does not offer 'the fields never registered' as a candidate cause"
+    )
+    assert "does not offer" in message, (
+        "the abort does not offer 'this image does not offer them' as a candidate cause"
+    )
+
+
+def test_the_probe_and_the_harness_share_one_readiness_definition(harness, monkeypatch) -> None:
+    """AC4, the anti-drift pin. Gerrit 1387 fixed the probe alone and by doing so
+    CREATED the divergence this criterion exists to prevent. Both tiers must route
+    through the same function, so a change to the required names or the budget
+    cannot land on one path only."""
+    import importlib.util
+    import pathlib as _pathlib
+
+    repo_root = _pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "_probe_under_test", repo_root / "scripts/jira_dc_epic_link_clear_probe.py"
+    )
+    assert spec and spec.loader
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+
+    readiness = _shared_readiness(harness)
+    assert getattr(probe, "jira_dc_field_readiness", None) is readiness, (
+        "the probe does not import the shared readiness module, so the two tiers hold "
+        "two definitions and can drift again"
+    )
+    assert tuple(harness._REQUIRED_FIELDS) == tuple(readiness.REQUIRED_FIELDS), (
+        "the harness declares its own required-field list instead of the shared one"
+    )
+
+    routed: list[tuple[str, ...]] = []
+    real = readiness.await_required_fields
+
+    def _spy(request, **kwargs):
+        routed.append(tuple(kwargs.get("names") or readiness.REQUIRED_FIELDS))
+        return real(request, **kwargs)
+
+    monkeypatch.setattr(readiness, "await_required_fields", _spy)
+    monkeypatch.setattr(probe, "_req", lambda path, **kw: (200, _SYSTEM_ONLY_FIELDS + _EPIC_FIELDS))
+    monkeypatch.setattr(readiness, "FIELD_POLL_INTERVAL_S", 0.001)
+    _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS + _EPIC_FIELDS])
+
+    probe._await_named_fields(readiness.REQUIRED_FIELDS)
+    harness.wait_for_jira_dc_ready(timeout=5)
+
+    assert len(routed) == 2, (
+        f"only {len(routed)} of the two tiers routed through the shared wait: "
+        f"one of them still has its own readiness definition"
+    )
+
+
+def test_an_unreadable_field_inventory_reads_as_not_ready(
+    harness, monkeypatch, fast_field_poll
+) -> None:
+    """The vacuous-pass guard, same family as 3fe5 and 59b2. "We could not see the
+    fields" is NOT evidence that they are there. If an unusable read (a 503, or a
+    body that is not a list) collapsed into "nothing missing", readiness would pass
+    on exactly the instance it cannot vouch for — and the suite would rediscover it
+    as a mid-run capability abort."""
+
+    def _fake(path, *, method="GET", payload=None, token=None, basic_auth=None, timeout=30):
+        if path == "/rest/api/2/serverInfo":
+            return 200, {"version": "8.17.1"}
+        if path == "/rest/api/2/field":
+            return 503, {"errorMessages": ["Jira is starting up"]}
+        return 404, None
+
+    monkeypatch.setattr(harness, "_request", _fake)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        harness.wait_for_jira_dc_ready(timeout=0.05)
+
+    message = str(excinfo.value)
+    assert "Epic Link" in message and "Epic Name" in message, (
+        "an unreadable field inventory was not reported as leaving the required fields unconfirmed"
+    )
+    assert "503" in message, "the failure does not record the HTTP status it actually got"
