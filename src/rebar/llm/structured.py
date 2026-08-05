@@ -49,16 +49,25 @@ def output_mode(model_cls, caps, *, thinking: bool = False):
     NativeOutput when ``caps.native_structured_output`` (a :class:`rebar.llm.capabilities.
     ModelCapabilities`, read from the model's PROFILE — never a provider-name string, story
     S2); PromptedOutput for everyone else (the broadest, and — crucially — not a
-    constrained/native output mode, so it stays compatible with Claude extended thinking,
-    which pydantic_ai's default ToolOutput mode is not). ``thinking`` forces PromptedOutput
-    regardless of capability: pairing extended thinking with a native/forced output
-    constraint is the documented Anthropic 400, so the prompted mode is the only
-    thinking-compatible choice. This deliberately does NOT read ``caps.supports_thinking`` —
-    the 400 is a property of the CALL, so the caller's ``thinking`` argument is authoritative;
-    ``supports_thinking`` exists for signed provenance, not for this branch."""
+    constrained/native output mode). ``thinking`` withdraws NativeOutput ONLY when the model is
+    not MEASURED to accept native output under extended thinking
+    (``caps.native_output_with_thinking``): the exact gate is
+    ``native_structured_output and (not thinking or native_output_with_thinking)``.
+
+    The old blanket "thinking forces prompted" rested on a stale rationale — the documented
+    Anthropic 400 was ``tool_choice`` x thinking ("Thinking may not be enabled when tool_choice
+    forces tool use"), NOT ``outputConfig`` json_schema x thinking, which succeeds on the wire
+    today (measured E1: sonnet adaptive, haiku budget 2048). So native-under-thinking is gated
+    per-model by a MEASURED capability fact, defaulting fail-closed to False so no cell flips
+    until the rows story records measured PASS cells. This branch is reached only from the
+    no-tools single-shot path (:func:`rebar.llm.structured_run`): tools x thinking x native
+    suppresses tool calling (E1: 2/2 skipped), so the agentic runner never consults it — the
+    no-tools scoping is structural, not a parameter. Deliberately does NOT read
+    ``caps.supports_thinking`` — the constraint is a property of the CALL, so the caller's
+    ``thinking`` argument is authoritative; ``supports_thinking`` exists for signed provenance."""
     from pydantic_ai import NativeOutput, PromptedOutput
 
-    if not thinking and caps.native_structured_output:
+    if caps.native_structured_output and (not thinking or caps.native_output_with_thinking):
         return NativeOutput(model_cls)
     return PromptedOutput(model_cls)
 

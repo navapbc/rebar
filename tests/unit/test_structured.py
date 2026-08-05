@@ -206,6 +206,57 @@ def test_output_mode_forces_prompted_under_thinking():
     )
 
 
+def _caps(*, native: bool, with_thinking: bool):
+    # A minimal ModelCapabilities record for the output_mode contrast tests (0fa4): only the
+    # two fields the guard reads vary; everything else takes its default.
+    from rebar.llm.capabilities import ModelCapabilities
+
+    return ModelCapabilities(
+        native_structured_output=native,
+        prompt_cache_style="none",
+        supports_thinking=True,
+        native_output_with_thinking=with_thinking,
+    )
+
+
+def test_output_mode_native_under_thinking_when_measured_compatible():
+    # 0fa4 (NEW GATE): a model measured to accept native/json_schema output UNDER extended
+    # thinking (native_output_with_thinking=True) uses NativeOutput even when thinking=True —
+    # the blanket thinking->prompted guard is replaced by a per-model measured fact.
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai import NativeOutput
+
+    mode = structured.output_mode(_Verdict, _caps(native=True, with_thinking=True), thinking=True)
+    assert isinstance(mode, NativeOutput)
+
+
+def test_output_mode_prompted_under_thinking_when_unmeasured():
+    # NEGATIVE CONTROL: with the fail-closed default (native_output_with_thinking=False), a
+    # native-capable model still falls back to PromptedOutput under thinking — proving NO cell
+    # flips in this ticket until the rows story adds measured cells.
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai import PromptedOutput
+
+    mode = structured.output_mode(_Verdict, _caps(native=True, with_thinking=False), thinking=True)
+    assert isinstance(mode, PromptedOutput)
+
+
+def test_output_mode_existing_branches_pinned_unchanged():
+    # The two pre-existing branches are unchanged: native-capable + no thinking -> NativeOutput;
+    # non-native -> PromptedOutput regardless.
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai import NativeOutput, PromptedOutput
+
+    assert isinstance(
+        structured.output_mode(_Verdict, _caps(native=True, with_thinking=False), thinking=False),
+        NativeOutput,
+    )
+    assert isinstance(
+        structured.output_mode(_Verdict, _caps(native=False, with_thinking=True), thinking=False),
+        PromptedOutput,
+    )
+
+
 # ── stop_reason handling ───────────────────────────────────────────────────────
 
 
