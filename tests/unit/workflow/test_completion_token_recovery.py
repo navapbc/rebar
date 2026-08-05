@@ -497,3 +497,192 @@ def test_budget_diagnostic_survives_when_recovery_also_fails(monkeypatch) -> Non
     assert diagnostic["aggregate_requests"] == 240
     assert diagnostic["aggregate_tool_calls"] == 260
     assert diagnostic["aggregate_exception_type"] == "LLMBudgetExhaustedError"
+
+
+class _LoopingBudgetRunner(_RecoverableRunner):
+    """Budget stop whose diagnostic carries the full repetition summary, then
+    every recovery call truncates — the 8b97 'computed then dropped' shape."""
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        if not self.requests:
+            from rebar.llm.errors import LLMBudgetExhaustedError
+
+            self.requests.append(req)
+            err = LLMBudgetExhaustedError("agent exceeded its step budget")
+            err.diagnostic = {  # type: ignore[attr-defined]
+                "requests": 240,
+                "tool_calls": 253,
+                "tool_calls_distinct": 30,
+                "max_consecutive_repeat": 217,
+                "distinct_ratio_window": 0.208,
+                "top_repeated_tool_calls": [{"signature": "search_files:ab12cd34", "count": 217}],
+                "prompt_text": "SECRET-ARGS-MARKER",
+            }
+            raise err
+        self.requests.append(req)
+        raise UnretryableOutputError("finish_reason=length")
+
+
+def _run_looping_budget_step(monkeypatch) -> CompletionAgentStep:
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda *args, **kwargs: _ticket())
+    step = CompletionAgentStep(
+        runner=_LoopingBudgetRunner(),
+        repo_root=None,
+        config=LLMConfig(runner="fake"),
+    )
+    with pytest.raises(CompletionRecoveryError):
+        step.run(_ctx())
+    return step
+
+
+def test_repetition_summary_survives_onto_failure_diagnostic(monkeypatch) -> None:
+    """8b97 AC1: the loop-vs-breadth discriminator (distinct/max-repeat/window-ratio
+    and the list-valued top repeats) survives the bounded-diagnostic merge under the
+    aggregate_ names the sidecar is built from."""
+    step = _run_looping_budget_step(monkeypatch)
+
+    diagnostic = step.failure_diagnostic
+    assert diagnostic is not None
+    assert diagnostic["aggregate_tool_calls_distinct"] == 30
+    assert diagnostic["aggregate_max_consecutive_repeat"] == 217
+    assert diagnostic["aggregate_distinct_ratio_window"] == 0.208
+    assert diagnostic["aggregate_top_repeated_tool_calls"] == [
+        {"signature": "search_files:ab12cd34", "count": 217}
+    ]
+
+
+def test_close_gate_message_renders_distinct_vs_total(monkeypatch) -> None:
+    """8b97 AC2: the operator-facing failure message renders the CONCRETE counts
+    (bare-key projection of the aggregate_ diagnostic), never None placeholders."""
+    from rebar.llm.workflow.completion_recovery import raise_completion_workflow_failure
+    from rebar.llm.workflow.executor import RunResult
+
+    step = _run_looping_budget_step(monkeypatch)
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "rebar.llm.gate_error_sidecar.emit_gate_error",
+        lambda *args, **kwargs: emitted.append(kwargs) or True,
+    )
+    result = RunResult(
+        run_id="run-1",
+        workflow_name="completion-verification",
+        status="failed",
+        outputs={},
+        terminal_step="verify",
+        terminal_output=None,
+        error="completion verifier exhausted its aggregate history",
+    )
+
+    with pytest.raises(CompletionRecoveryError) as excinfo:
+        raise_completion_workflow_failure("T-1", result, step.failure_diagnostic, 1, None)
+
+    message = str(excinfo.value)
+    assert "distinct=30" in message
+    assert "max_consecutive_repeat=217" in message
+    assert "tool_calls=253" in message
+    assert "None" not in message
+
+
+def test_sidecar_diagnostic_stays_argument_free(monkeypatch) -> None:
+    """8b97 AC3 (control): widening the allowlist must not open arbitrary keys —
+    raw prompt/argument text planted on the exception never reaches the sidecar,
+    and repeat entries stay hashed signatures + counters only."""
+    from rebar.llm.workflow.completion_recovery import raise_completion_workflow_failure
+    from rebar.llm.workflow.executor import RunResult
+
+    step = _run_looping_budget_step(monkeypatch)
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "rebar.llm.gate_error_sidecar.emit_gate_error",
+        lambda *args, **kwargs: emitted.append(kwargs) or True,
+    )
+    result = RunResult(
+        run_id="run-1",
+        workflow_name="completion-verification",
+        status="failed",
+        outputs={},
+        terminal_step="verify",
+        terminal_output=None,
+        error="recovery failed",
+    )
+
+    with pytest.raises(CompletionRecoveryError):
+        raise_completion_workflow_failure("T-1", result, step.failure_diagnostic, 1, None)
+
+    assert emitted, "sidecar must be emitted when a diagnostic exists"
+    serialized = json.dumps(emitted[0].get("diagnostic", {}), default=str)
+    assert "SECRET-ARGS-MARKER" not in serialized
+    assert "prompt_text" not in serialized
+    assert "search_files:ab12cd34" in serialized
+
+
+def test_bare_failure_still_raises_plain_llm_error(monkeypatch) -> None:
+    """8b97 AC4 (control): no diagnostic -> the pre-existing bare LLMError path,
+    and no manufactured empty sidecar."""
+    from rebar.llm.errors import LLMError
+    from rebar.llm.workflow.completion_recovery import raise_completion_workflow_failure
+    from rebar.llm.workflow.executor import RunResult
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "rebar.llm.gate_error_sidecar.emit_gate_error",
+        lambda *args, **kwargs: emitted.append(kwargs) or True,
+    )
+    result = RunResult(
+        run_id="run-1",
+        workflow_name="completion-verification",
+        status="failed",
+        outputs={},
+        terminal_step="verify",
+        terminal_output=None,
+        error="LLM tier failed",
+    )
+
+    with pytest.raises(LLMError) as excinfo:
+        raise_completion_workflow_failure("T-1", result, None, 1, None)
+
+    assert not isinstance(excinfo.value, CompletionRecoveryError)
+    assert not emitted
+
+
+def test_short_run_exhaustion_still_renders_repetition(monkeypatch) -> None:
+    """Seam-review Issue 1: below REPETITION_WINDOW tool calls usage_log GUARANTEES
+    distinct_ratio_window is None (usage_log.py: `if len(signatures) >= REPETITION_WINDOW`).
+    A token exhaustion at 10 calls must still render the five concrete counters in the
+    operator-facing message -- dropping the whole line re-creates the computed-then-
+    discarded defect 8b97 removes. No literal None placeholders either way."""
+    from rebar.llm.workflow.completion_recovery import raise_completion_workflow_failure
+    from rebar.llm.workflow.executor import RunResult
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "rebar.llm.gate_error_sidecar.emit_gate_error",
+        lambda *args, **kwargs: emitted.append(kwargs) or True,
+    )
+    diagnostic = {
+        "trace_id": "trace-short",
+        "aggregate_requests": 10,
+        "aggregate_tool_calls": 10,
+        "aggregate_tool_calls_distinct": 9,
+        "aggregate_max_consecutive_repeat": 2,
+        "aggregate_distinct_ratio_window": None,
+        "aggregate_top_repeated_tool_calls": [{"signature": "read_file:ab12cd34", "count": 2}],
+    }
+    result = RunResult(
+        run_id="run-short",
+        workflow_name="completion-verification",
+        status="failed",
+        outputs={},
+        terminal_step="verify",
+        terminal_output=None,
+        error="completion verifier exhausted its aggregate history",
+    )
+
+    with pytest.raises(CompletionRecoveryError) as excinfo:
+        raise_completion_workflow_failure("T-1", result, diagnostic, 1, None)
+
+    message = str(excinfo.value)
+    assert "tool_calls=10" in message
+    assert "distinct=9" in message
+    assert "max_consecutive_repeat=2" in message
+    assert "None" not in message

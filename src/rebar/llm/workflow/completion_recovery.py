@@ -267,6 +267,10 @@ def _bounded_diagnostic(
         "request_limit",
         "tool_calls",
         "tool_calls_limit",
+        "tool_calls_distinct",
+        "max_consecutive_repeat",
+        "top_repeated_tool_calls",
+        "distinct_ratio_window",
         "input_tokens",
         "output_tokens",
         "cache_read_tokens",
@@ -295,6 +299,18 @@ def _bounded_diagnostic(
             return
         for key, value in source.items():
             if key not in allowed:
+                continue
+            if key == "top_repeated_tool_calls":
+                # The one sanctioned non-scalar: a bounded list of
+                # {"signature", "count"} dicts (hashed signatures, no prompt or
+                # argument text). Copy it so the diagnostic never aliases the
+                # exception's own structure.
+                if not isinstance(value, list):
+                    continue
+                if overwrite or diagnostic.get(key) is None:
+                    diagnostic[key] = [
+                        dict(item) if isinstance(item, dict) else item for item in value
+                    ]
                 continue
             if not isinstance(value, (str, int, float, bool)) and value is not None:
                 continue
@@ -385,6 +401,7 @@ def raise_completion_workflow_failure(
     diagnostic.setdefault("workflow_steps_recorded", workflow_steps_recorded)
     diagnostic.setdefault("workflow_status", result.status)
     if failure_diagnostic:
+        from rebar.llm import usage_log
         from rebar.llm.gate_error_sidecar import emit_gate_error
 
         emit_gate_error(
@@ -395,8 +412,33 @@ def raise_completion_workflow_failure(
             diagnostic=diagnostic,
             repo_root=repo_root,
         )
+        message = (
+            result.error or "completion verification bounded recovery failed without a verdict"
+        )
+        # The primary run's repetition summary lands under aggregate_-prefixed
+        # keys; format_repetition reads bare names, so project before rendering.
+        repetition = {
+            key.removeprefix("aggregate_"): value
+            for key, value in diagnostic.items()
+            if key.startswith("aggregate_")
+        }
+        if all(
+            repetition.get(field) is not None
+            for field in (
+                "requests",
+                "tool_calls",
+                "tool_calls_distinct",
+                "max_consecutive_repeat",
+                "top_repeated_tool_calls",
+            )
+        ):
+            # distinct_ratio_window is None BY DESIGN below REPETITION_WINDOW
+            # tool calls; render a placeholder rather than dropping the line.
+            if repetition.get("distinct_ratio_window") is None:
+                repetition["distinct_ratio_window"] = "n/a(<window)"
+            message = f"{message}\n{usage_log.format_repetition(repetition)}"
         raise CompletionRecoveryError(
-            result.error or "completion verification bounded recovery failed without a verdict",
+            message,
             diagnostic=diagnostic,
         )
     raise LLMError(
