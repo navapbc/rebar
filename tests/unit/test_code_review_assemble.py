@@ -17,6 +17,10 @@ from rebar.llm.code_review import assemble as A
 
 pytestmark = pytest.mark.unit
 
+#: Resolved from the imported module rather than from a repo-relative literal, so the import
+#: guard below travels with `assemble.py` and is independent of the process cwd (bug 8a5e).
+_ASSEMBLE_SRC = pathlib.Path(A.__file__)
+
 _SAMPLE_DIFF = """\
 diff --git a/src/rebar/foo.py b/src/rebar/foo.py
 index 1111111..2222222 100644
@@ -89,7 +93,11 @@ def test_assemble_does_not_import_single_pass_route():
     """AC: assemble.py is self-contained — it must not import the single-pass code_review
     route (review_code / select_code_reviewers / _review_code_inner), so WS4's retirement of
     that route leaves the assembler standing. We AST-inspect the imports."""
-    src = pathlib.Path("src/rebar/llm/code_review/assemble.py").read_text()
+    # Anchored to __file__, not to the process cwd (bug 8a5e): a relative path makes this
+    # guard depend on pytest being invoked from the repo root, and a `read_text` that cannot
+    # find its target raises rather than reporting a violation — the guard's own reliability
+    # must not be an artefact of where the runner was launched.
+    src = _ASSEMBLE_SRC.read_text()
     tree = ast.parse(src)
     forbidden = {"review_code", "select_code_reviewers", "_review_code_inner", "_compose_context"}
     for node in ast.walk(tree):

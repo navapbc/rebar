@@ -115,32 +115,145 @@ def test_translation_is_registry_membership_not_a_colon_split():
     )
 
 
+# NON-VACUITY (bug 8a5e, same rot class as bug 34c2). The guard below used to read exactly
+# one file, `usage_log.py`, which today contains ZERO string-parsing calls of any kind — the
+# predicate has no denominator, so it cannot distinguish "clean" from "aimed at the wrong
+# file". That is survivable only by accident: `_pricing_model_ref` still happens to live in
+# `usage_log.py`, and the day a split moves the pricing path into a sibling this guard goes
+# silently hollow exactly as its four siblings in bug 8a5e did.
+#
+# The repair is the one proven on bug 34c2: derive the scan POPULATION rather than pin it,
+# and assert the population still holds the function the criterion governs.
+
+#: The functions AC4 governs. The scan POPULATION is derived from where these are DEFINED
+#: rather than from a hardcoded filename, so relocating them re-aims the guard automatically
+#: — a filename pin is exactly what rotted this guard's four siblings in bug 8a5e.
+_PRICING_FUNCS = {"_pricing_model_ref", "_price_row"}
+
+_BANNED_PARSE_METHODS = {"startswith", "endswith", "split", "partition", "removeprefix"}
+
+
+def _pricing_path_sources(pkg_dir: pathlib.Path) -> dict[str, str]:
+    """``{module name: source}`` for every module in `pkg_dir` that DEFINES a pricing-path
+    function.
+
+    Derived, not pinned: a split that moves `_pricing_model_ref` into a sibling moves the
+    guard with it. Deliberately narrower than "everything usage_log imports" — the wider
+    package legitimately parses ':' in places this criterion does not govern (provider
+    registries, capability tables), and a guard that fires on those is a guard that gets
+    deleted.
+
+    Parameterised on the package directory so the teeth test below can drive the same
+    derivation over a throwaway package.
+    """
+    sources: dict[str, str] = {}
+    for path in sorted(pkg_dir.glob("*.py")):
+        src = path.read_text()
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name in _PRICING_FUNCS
+            for node in ast.walk(ast.parse(src))
+        ):
+            sources[path.stem] = src
+    return sources
+
+
+def _colon_parsing_calls(sources: dict[str, str]) -> list[str]:
+    """Every banned ``":"``-splitting call across `sources`, as ``"<module>:<line>"``."""
+    return [
+        f"{name}:{node.lineno}"
+        for name, src in sorted(sources.items())
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _BANNED_PARSE_METHODS
+        and any(isinstance(a, ast.Constant) and a.value == ":" for a in node.args)
+    ]
+
+
+def _usage_log_pkg() -> pathlib.Path:
+    return pathlib.Path(usage_log.__file__).parent
+
+
 def test_usage_log_does_not_prefix_match_or_colon_split_provider_names():
     """AC4's structural pin, mirroring ``capabilities.py``'s attested no-prefix-matching guard
     (``test_capabilities_module_still_has_no_provider_name_prefix_matching``). Asserted on real
     calls, not on text, so a comment naming the banned pattern stays legal."""
-    tree = ast.parse(pathlib.Path(usage_log.__file__).read_text())
-    banned = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"startswith", "endswith", "split", "partition", "removeprefix"}
-        and any(isinstance(a, ast.Constant) and a.value == ":" for a in node.args)
-    ]
+    sources = _pricing_path_sources(_usage_log_pkg())
+    banned = _colon_parsing_calls(sources)
     assert not banned, (
-        "usage_log.py must decide the pricing model_ref by registry membership "
-        f"(config.split_provider_qualifier), not by parsing ':' itself: "
-        f"{[node.lineno for node in banned]}"
+        "the usage-log pricing path must decide the pricing model_ref by registry membership "
+        f"(config.split_provider_qualifier), not by parsing ':' itself: {banned}"
     )
     # No provider name is hard-coded either — the registry is the single source.
     provider_literals = [
-        node.lineno
-        for node in ast.walk(tree)
+        f"{name}:{node.lineno}"
+        for name, src in sorted(sources.items())
+        for node in ast.walk(ast.parse(src))
         if isinstance(node, ast.Constant) and node.value in {"anthropic", "openai", "bedrock"}
     ]
     assert not provider_literals, (
         f"provider names must come from config.KNOWN_PROVIDER_NAMES: {provider_literals}"
+    )
+
+
+def test_the_colon_split_guard_scans_the_module_that_builds_the_pricing_ref():
+    """ANTI-VACUITY (bug 8a5e). The guard above polices an ABSENCE, so it passes both when
+    the code is clean and when it is aimed at a file the pricing logic has left. Assert the
+    POPULATION: the scanned sources must still define ``_pricing_model_ref``, the function
+    AC4 is actually about. A split that moves it outside the walk fails here instead of
+    silently disarming the guard."""
+    sources = _pricing_path_sources(_usage_log_pkg())
+    holders = sorted(
+        name
+        for name, src in sources.items()
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == "_pricing_model_ref"
+            for node in ast.walk(ast.parse(src))
+        )
+    )
+    assert holders, (
+        f"no module reachable from usage_log defines _pricing_model_ref; the guard scans "
+        f"{sorted(sources)} and would pass no matter how any of them parsed ':'. Either the "
+        f"pricing ref builder moved out of the walk (re-aim _pricing_path_sources) or this "
+        f"guard is now unnecessary."
+    )
+
+
+def test_the_colon_split_guard_follows_the_pricing_path_into_a_sibling(tmp_path):
+    """TEETH for the derived scan. A synthetic-source test proves the offender predicate
+    works but cannot detect the guard being aimed at the wrong FILE — the whole defect class
+    here. So drive the real derivation over a throwaway package shaped like the relocation we
+    fear: the pricing ref builder has moved out of ``usage_log.py`` into a sibling, and the
+    sibling does the banned inline colon split.
+
+    Also pins the sanctioned-delegate carve-out: ``config.split_provider_qualifier`` doing the
+    same split must stay legal, or the guard would ban the very helper it demands callers use.
+    """
+    (tmp_path / "usage_log.py").write_text(
+        "from rebar.llm.pricing_ref import _pricing_model_ref\n\n__all__ = ['_pricing_model_ref']\n"
+    )
+    (tmp_path / "pricing_ref.py").write_text(
+        "def _pricing_model_ref(model):\n    return model.partition(':')[2] or model\n"
+    )
+    (tmp_path / "config.py").write_text(
+        "def split_provider_qualifier(model):\n    return model.partition(':')\n"
+    )
+
+    pinned_only = {"usage_log": (tmp_path / "usage_log.py").read_text()}
+    assert not _colon_parsing_calls(pinned_only), (
+        "precondition: usage_log.py is itself clean, so a guard pinned to it sees nothing"
+    )
+
+    sources = _pricing_path_sources(tmp_path)
+    assert set(sources) == {"pricing_ref"}, (
+        f"the derivation must follow _pricing_model_ref to the sibling that now defines it, "
+        f"and must NOT drag in config.py (which is allowed to split); it selected "
+        f"{sorted(sources)}"
+    )
+    offenders = _colon_parsing_calls(sources)
+    assert any(o.startswith("pricing_ref:") for o in offenders), (
+        f"the inline colon split in the sibling holding the relocated pricing ref went "
+        f"unreported (offenders: {offenders!r}) — the guard is still pinned to one file"
     )
 
 

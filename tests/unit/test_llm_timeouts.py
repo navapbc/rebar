@@ -317,20 +317,116 @@ def test_runner_sets_tool_timeout_on_the_agent(monkeypatch):
 
 
 # ── No total-runtime timer in the gate path (SUPPLEMENTAL structural guard) ────
-def test_no_total_runtime_timer_mechanism():
-    """SUPPLEMENTAL structural guard — NOT counted as behavioral liveness coverage. The
-    runner introduces no total-runtime wall-clock KILL primitive (no ``signal.alarm``
-    SIGALRM, no ``threading.Timer`` deadline). The actual liveness contract (per-request
-    read timeout, per-tool timeout, step caps) is exercised behaviorally by the
-    read-timeout / tool-timeout probe tests elsewhere in this module; this guard only pins
-    the negative-space invariant that no NEW wall-clock timer primitive has crept in. The
-    brittle exact ``asyncio.run(...)`` source-string assertion was removed (a rename of the
-    teardown call must not fail this guard) — teardown correctness is a behavioral concern,
-    not a source-token one."""
-    import inspect
+_WALL_CLOCK_PRIMITIVES = ("signal.alarm", "Timer(")
+
+
+def _runner_scanned_sources() -> dict[str, str]:
+    """The exact source the wall-clock guard below inspects, as ``{module name: source}``.
+
+    Named and separated so the guard's POPULATION is itself assertable.
+
+    NON-VACUITY (bug 8a5e, same rot class as bug 34c2). This guard used to read exactly one
+    module — ``inspect.getsource(rebar.llm.runner)``. The run path has since been split, and
+    the timeout-bearing code moved into siblings (``structured_run``, ``agent_call``), so the
+    guard was left reading a module that names ``timeout`` once and could not have caught a
+    new wall-clock primitive landing in the half it no longer saw.
+
+    The repair is the one proven on bug 34c2: derive the population rather than pin it. Walk
+    the runner's intra-``rebar.llm`` imports transitively, so every module the run path was
+    split into is scanned. A relocation cannot orphan this — the runner must import whatever
+    it delegates to.
+    """
+    import ast
+    import pathlib
 
     import rebar.llm.runner as runner_mod
 
-    src = inspect.getsource(runner_mod)
-    assert "signal.alarm" not in src  # no SIGALRM wall-clock kill
-    assert "Timer(" not in src  # no threading.Timer wall-clock deadline
+    pkg = pathlib.Path(runner_mod.__file__).parent
+    sources: dict[str, str] = {}
+    queue = ["runner"]
+    while queue:
+        name = queue.pop()
+        if name in sources:
+            continue
+        path = pkg / f"{name}.py"
+        if not path.is_file():
+            continue
+        sources[name] = path.read_text()
+        for node in ast.walk(ast.parse(sources[name])):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("rebar.llm"):
+                tail = (node.module or "").rsplit(".", 1)[-1]
+                queue.append(tail)
+                queue.extend(a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                queue.extend(
+                    a.name.rsplit(".", 1)[-1] for a in node.names if a.name.startswith("rebar.llm")
+                )
+    return sources
+
+
+def test_no_total_runtime_timer_mechanism():
+    """SUPPLEMENTAL structural guard — NOT counted as behavioral liveness coverage. The
+    runner's whole run path introduces no total-runtime wall-clock KILL primitive (no
+    ``signal.alarm`` SIGALRM, no ``threading.Timer`` deadline). The actual liveness contract
+    (per-request read timeout, per-tool timeout, step caps) is exercised behaviorally by the
+    read-timeout / tool-timeout probe tests elsewhere in this module; this guard only pins
+    the negative-space invariant that no NEW wall-clock timer primitive has crept in."""
+    offenders = [
+        f"{name}: {primitive}"
+        for name, src in sorted(_runner_scanned_sources().items())
+        for primitive in _WALL_CLOCK_PRIMITIVES
+        if primitive in src
+    ]
+    assert not offenders, (
+        f"a total-runtime wall-clock kill primitive appeared in the run path: {offenders}. "
+        f"Liveness is activity-based here (per-request read timeout, per-tool timeout, step "
+        f"caps); a wall-clock kill truncates a healthy long call mid-flight"
+    )
+
+
+def test_the_wall_clock_guard_scans_the_modules_that_hold_the_timeout_machinery():
+    """ANTI-VACUITY (bug 8a5e). The guard above can only be meaningful if the source it
+    scans is where a wall-clock primitive would plausibly LAND — i.e. the modules that
+    actually carry the call's timeout handling. Pinning it to ``runner.py`` alone is what
+    hollowed it out: the run-path split left that module naming ``timeout`` once while its
+    siblings carried the rest.
+
+    Assert the POPULATION, not just the verdict, so the next split fails the build instead
+    of silently disarming the guard.
+    """
+    sources = _runner_scanned_sources()
+    timeout_bearing = sorted(name for name, src in sources.items() if "timeout" in src)
+    assert len(timeout_bearing) >= 2, (
+        f"the wall-clock guard scans {sorted(sources)}, of which only {timeout_bearing} "
+        f"mention a timeout at all. The runner delegates its call machinery to siblings, so "
+        f"a single-module timeout surface means the import walk broke and a new wall-clock "
+        f"primitive could land unscanned. Re-aim _runner_scanned_sources()."
+    )
+
+
+def test_the_wall_clock_guard_fires_on_a_primitive_outside_the_runner_module():
+    """TEETH for the widened scan, driven through the REAL modules rather than a synthetic
+    string — a synthetic-source teeth test proves the predicate works but cannot detect the
+    guard being aimed at the wrong file, which is exactly how this one survived the split.
+
+    Plant each banned primitive in a scanned module OTHER than ``runner`` and require the
+    guard to report it against that module.
+    """
+    sources = _runner_scanned_sources()
+    others = sorted(name for name in sources if name != "runner")
+    assert others, "precondition: the runner delegates to at least one sibling module"
+    victim = others[0]
+
+    for primitive in _WALL_CLOCK_PRIMITIVES:
+        mutated = dict(sources)
+        mutated[victim] = f"x = {primitive}30)\n" + mutated[victim]
+        offenders = [
+            f"{name}: {p}"
+            for name, src in sorted(mutated.items())
+            for p in _WALL_CLOCK_PRIMITIVES
+            if p in src
+        ]
+        assert any(o.startswith(f"{victim}: ") for o in offenders), (
+            f"a {primitive!r} planted in {victim}.py went unreported (offenders: "
+            f"{offenders!r}) — the guard is still effectively aimed at runner.py alone"
+        )
