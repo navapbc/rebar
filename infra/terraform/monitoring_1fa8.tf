@@ -36,9 +36,15 @@
 #
 # Reuses var.aws_region + data.aws_caller_identity.current (iam.tf) and the shared
 # aws_sns_topic.alerts (monitoring.tf). Structurally this mirrors S4b's voter_errors
-# alarm; UNLIKE S4b it WIRES SNS (like monitoring_ws7.tf), because a broken CI
+# alarm, INCLUDING its SNS wiring (like monitoring_ws7.tf), because a broken CI
 # dispatcher silently blocks ALL submits once the gate is active — a gate-critical
 # failure that must page an operator, not just sit on a dashboard.
+#
+# (This comment used to read "UNLIKE S4b it WIRES SNS". That was true when written, but it
+# described a BUG in S4b rather than a deliberate difference: S4b is gate-critical for the
+# same reason stated above — submit requires the LLM-Review vote — so it always should have
+# notified. Ticket 9baf wired S4b and S5, and tests/unit/test_alarm_actions_terraform.py now
+# enforces that every alarm notifies somebody, so no future alarm can be silently actionless.)
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "g2p_dispatch_errors" {

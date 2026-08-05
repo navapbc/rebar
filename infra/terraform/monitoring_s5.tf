@@ -51,6 +51,14 @@ resource "aws_cloudwatch_metric_alarm" "replication_errors" {
   # should NOT alarm, so missing data is treated as not-breaching.
   treat_missing_data = "notBreaching"
 
+  # Notify the shared alerts topic on BOTH edges (ticket 9baf). Like S4b's voter_errors, this
+  # alarm declared neither and so notified nobody. A non-fast-forward rejection means GitHub
+  # history diverged from Gerrit — a violation of the one-way-door contract (ADR-0010) that
+  # explicitly "needs operator attention" per this alarm's own description above, which an
+  # actionless alarm cannot deliver.
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
   tags = {
     Project = "rebar"
     Story   = "S5"
