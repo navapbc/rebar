@@ -1,0 +1,7 @@
+{
+  "id": "v4_verdict_before_dep_passes_today",
+  "description": "Control variant: the real verdict object is rendered BEFORE the quoted dep-link record, so today's first-parseable-object scan already recovers it (this variant passes on the current parser). Under schema-filtered last-valid-wins the dep record is screened out (zero key overlap) so the sole valid candidate is still the verdict — it must keep passing.",
+  "fails_on_first_wins": false,
+  "expected_verdict": "PASS",
+  "reply": "After reviewing the change against every acceptance criterion, here is my verdict:\n\n{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"All acceptance criteria are demonstrably met.\"}\n\nFor reference, the ticket's dependency link (from show_ticket) is {\"relation\": \"depends_on\", \"target_id\": \"f2f3-9cb1-335b-4e31\"}."
+}

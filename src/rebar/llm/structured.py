@@ -32,10 +32,13 @@ stdlib-only.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
 from rebar.llm.errors import StructuredOutputError, UnretryableOutputError
+
+logger = logging.getLogger(__name__)
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
@@ -209,10 +212,119 @@ def validate_to(model_cls, data: Any):
         raise StructuredOutputError(f"structured output failed validation: {exc}") from exc
 
 
+def _all_json_objects(text: str) -> list[Any]:
+    """Every top-level, non-overlapping balanced ``{…}`` object in ``text`` that PARSES as
+    JSON, in discovery order (same string-aware brace state machine as
+    :func:`_first_json_object`, but yields ALL such objects instead of only the first).
+
+    A region that opens a brace but does not close-and-parse is skipped, and the scan
+    advances to the next ``{`` after the (attempted) region so nested/enclosed objects are
+    not double-counted."""
+    objects: list[Any] = []
+    start = text.find("{")
+    n = len(text)
+    while start >= 0:
+        depth, in_str, esc = 0, False, False
+        closed_at = -1
+        for i in range(start, n):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    closed_at = i
+                    break
+        if closed_at >= 0:
+            try:
+                objects.append(json.loads(text[start : closed_at + 1]))
+                start = text.find("{", closed_at + 1)
+                continue
+            except json.JSONDecodeError:
+                pass
+        start = text.find("{", start + 1)
+    return objects
+
+
+def _candidate_dicts(text: str, model_cls) -> list[dict]:
+    """Enumerate candidate JSON objects from ``text`` (fenced blocks, every balanced
+    top-level object, and the whole text when it is itself valid JSON), screen each by
+    top-level key-overlap with ``model_cls.model_fields``, and return the survivors in
+    discovery order. Uses plain ``json.loads`` only — NO json-repair at this stage."""
+    fields = set(getattr(model_cls, "model_fields", {}))
+    candidates: list[Any] = []
+
+    for match in _FENCE_RE.finditer(text):
+        try:
+            candidates.append(json.loads(match.group(1)))
+        except json.JSONDecodeError:
+            continue
+
+    candidates.extend(_all_json_objects(text)[-32:])
+
+    try:
+        whole = json.loads(text)
+    except json.JSONDecodeError:
+        whole = None
+    else:
+        candidates.append(whole)
+
+    survivors: list[dict] = []
+    for cand in candidates:
+        probed = cand
+        if isinstance(probed, list):
+            dict_elems = [item for item in probed if isinstance(item, dict)]
+            probed = dict_elems[0] if len(dict_elems) == 1 else None
+        if isinstance(probed, dict) and fields & set(probed):
+            survivors.append(probed)
+    return survivors
+
+
 def parse_structured(text: str, model_cls):
-    """The deterministic layers (2)+(3) as one call: tolerant-parse then validate.
-    Returns a validated ``model_cls`` instance, or raises :class:`StructuredOutputError`
-    (the signal a caller turns into a single bounded retry — layer 4)."""
+    """The deterministic layers (2)+(3) as one call: SCHEMA-FILTERED candidate selection,
+    then validate. Returns a validated ``model_cls`` instance, or raises
+    :class:`StructuredOutputError` (the signal a caller turns into a single bounded retry —
+    layer 4).
+
+    ``tolerant_parse`` is schema-BLIND — it returns the FIRST parseable JSON object, so a
+    reply that quotes an unrelated record (e.g. a ``{"relation": …}`` dependency-link record
+    from a tool result) BEFORE the real verdict loses the verdict and fail-closes a
+    legitimate close (bug df3a). Here we instead enumerate every cleanly-parseable candidate
+    object, keep only those that SHARE a top-level key with ``model_cls`` (the all-defaults
+    contract validates ``{}``, so the key-overlap screen is mandatory), and among the ones
+    that VALIDATE the LAST wins. Anything needing json-repair (trailing commas, unclosed
+    braces, smart quotes, non-JSON ``${{ }}`` braces) matches no clean candidate and falls
+    through byte-for-byte to today's ``tolerant_parse`` pipeline, so near-miss/repair
+    behavior is unchanged."""
+    survivors = _candidate_dicts(text, model_cls)
+    if survivors:
+        validated = []
+        for cand in survivors:
+            try:
+                validated.append(validate_to(model_cls, cand))
+            except StructuredOutputError:
+                continue
+        if validated:
+            if len(validated) >= 2 and validated[-1] is not validated[0]:
+                logger.warning(
+                    "parse_structured: multiple candidates validated for %s; "
+                    "selecting the LAST (first=%r, last=%r)",
+                    getattr(model_cls, "__name__", model_cls),
+                    validated[0],
+                    validated[-1],
+                )
+            return validated[-1]
+        # Candidates passed the screen but none validated — raise the LAST one's error.
+        return validate_to(model_cls, survivors[-1])
     return validate_to(model_cls, tolerant_parse(text, schema=model_cls))
 
 
