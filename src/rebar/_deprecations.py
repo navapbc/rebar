@@ -94,6 +94,19 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # the parent epic decided the migration window explicitly. Within the window the
     # variable still works and fans out to all three classes; it only warns.
     _scheduled("env", "REBAR_LLM_MODEL", "the [tool.rebar.llm.model_classes] slots"),
+    # ── cli/lib/mcp: SCHEDULED (a SUPERSESSION, not a rename) — story 316a ─────
+    # `rebar review` / `rebar.llm.review_ticket` / the MCP `review_ticket` tool are
+    # retired in favour of the plan-review gate (`rebar review-plan` /
+    # `rebar.llm.review_plan` / the MCP `review_plan` tool). This is a SUPERSESSION,
+    # not a rename: the replacement is a materially different interface — it signs
+    # an attestation, enforces a blocking-finding floor, and fast-fails a
+    # not-yet-claimable ticket with no LLM call — so, per the rule above, it is
+    # `_scheduled` (removable) rather than `_permanent` (kept forever). The old
+    # surfaces are NOT deleted (announce-then-remove): `review_ticket` and its MCP
+    # tool keep working, they just signal on every call.
+    _scheduled("cli", "rebar review", "rebar review-plan"),
+    _scheduled("lib", "rebar.llm.review_ticket", "rebar.llm.review_plan"),
+    _scheduled("mcp", "review_ticket", "the review_plan tool"),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the

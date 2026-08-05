@@ -54,7 +54,8 @@ Structured via `--output json`:
 | `delete`                         | `delete_result`           |
 | `summary`                        | `summary`                 |
 | `fsck`                           | `fsck`                    |
-| `review` (CLI/library)           | `review_result`           |
+| `review` (deprecated CLI shim)   | `plan_review_verdict`     |
+| `review_ticket` (library/MCP)    | `review_result`           |
 | `verify-completion` (CLI/library) | `completion_verdict`     |
 | `grounding-info`                 | `grounding_info`          |
 | `review-plan`                    | `plan_review_verdict`     |
@@ -171,12 +172,14 @@ tools (`comment`/`tag`/`archive`/`edit`/`link`/`set_*`/`compact`/…) and the MC
 `{ticket_id, from, to, …}` result uses the Python reserved word `from` (they
 return a plain dict; their CLI/library JSON is still pinned to `transition_result`);
 `reconcile` has no canonical schema for its plan/result; and `review_ticket`
-(`rebar.llm`) returns a plain dict because it makes a **live LLM call** — it must
-not be auto-driven on the fixture store in CI, so it advertises no `outputSchema`
-and is a documented exemption. Its **CLI/library** `--output json` path *is* pinned
-to `review_result` via `OUTPUT_SCHEMAS["review"]` (the model-produced shape is still
-normalized + schema-validated before it is returned; see
-[llm-framework.md](llm-framework.md)).
+(`rebar.llm`, **deprecated** — story 316a) returns a plain dict because it makes a
+**live LLM call** — it must not be auto-driven on the fixture store in CI, so it
+advertises no `outputSchema` and is a documented exemption. Its **library** return
+shape *is* pinned to `review_result` via the synthetic `OUTPUT_SCHEMAS["review_ticket"]`
+key (the model-produced shape is still normalized + schema-validated before it is
+returned; see [llm-framework.md](llm-framework.md)). The `OUTPUT_SCHEMAS["review"]`
+key now describes the deprecated `rebar review` CLI shim, which emits the
+`plan_review_verdict` its target verb produces.
 
 Adding a new structured output therefore means: author the schema (reuse
 `common` `$ref`s), register it in `OUTPUT_SCHEMAS`, and add a conformance case —

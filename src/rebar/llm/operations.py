@@ -1,9 +1,13 @@
 """LLM operations — the high-level capabilities the framework exposes.
 
-This milestone ships ONE reference operation, :func:`review_ticket` (an LLM review
-of a ticket or ticket-graph), wired end-to-end across library/CLI/MCP. It also
-exposes :func:`select_reviewers`, the deterministic reviewer-selection rules the
-future code-review operation will use.
+The original reference operation here was :func:`review_ticket` (a single-pass LLM
+review of a ticket or ticket-graph). Story 316a retired its CLI verb (``rebar
+review``) in favour of the plan-review gate (``rebar review-plan`` /
+:func:`rebar.llm.review_plan`), which is now the primary review surface;
+``review_ticket`` survives as a deprecated library/MCP op (see
+:func:`_review_ticket_impl` for the implementation internal callers should use).
+This module also exposes :func:`select_reviewers`, the deterministic
+reviewer-selection rules the code-review operation uses.
 
 The operation owns the **deterministic** parts (assembling the target ticket
 context from rebar's own reads, resolving the reviewer prompt, picking the runner)
@@ -116,6 +120,15 @@ def review_ticket(
 ) -> dict:
     """Run an LLM review of a ticket (or its graph) and return a ``review_result``.
 
+    .. deprecated:: story 316a
+        The CLI verb ``rebar review`` is retired in favour of the plan-review gate
+        (``rebar review-plan``). This library function still works but is
+        superseded by :func:`rebar.llm.review_plan` — see the registered
+        deprecation ``lib:rebar.llm.review_ticket``. It is a thin public wrapper
+        that warns and delegates to :func:`_review_ticket_impl`; internal callers
+        should use ``_review_ticket_impl`` directly so a single surface does not
+        fire this warning twice.
+
     Args:
         ticket_id: the ticket to review (id, short id, or alias).
         reviewer_id: a reviewer from the catalog (default: the catalog's default).
@@ -129,6 +142,37 @@ def review_ticket(
     runner, model, trace_id, summary}). Raises :class:`LLMError` subclasses on
     missing deps/credentials or a failed/empty structured review.
     """
+    from rebar._deprecations import warn_deprecated
+
+    warn_deprecated("lib:rebar.llm.review_ticket", via="warning")
+    return _review_ticket_impl(
+        ticket_id,
+        reviewer_id,
+        graph=graph,
+        ref=ref,
+        source=source,
+        repo_root=repo_root,
+        config=config,
+        runner=runner,
+    )
+
+
+def _review_ticket_impl(
+    ticket_id: str,
+    reviewer_id: str | None = None,
+    *,
+    graph: bool = False,
+    ref: str | None = None,
+    source: str | None = None,
+    repo_root=None,
+    config: LLMConfig | None = None,
+    runner: Runner | None = None,
+) -> dict:
+    """The actual review-ticket implementation (see :func:`review_ticket`).
+
+    Internal callers (the workflow-parity harness, the eval solver, the MCP tool
+    body) call THIS directly so they don't ALSO trigger the public wrapper's
+    deprecation signal — one surface, one signal."""
     from rebar.llm import gate_source
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)
@@ -140,8 +184,8 @@ def review_ticket(
         # vocabulary exists to spend differently ACROSS the passes of a multi-pass gate. Binding a
         # class here would take `llm.model` away as a steering knob for this command while giving
         # nothing back. Same reasoning as `spec_scan`; both are registered as by-design in
-        # `tests/unit/test_subcall_class_selection.py`. Whether this op should exist at all is
-        # ticket 316a — if it is retired the question is moot.
+        # `tests/unit/test_subcall_class_selection.py`. Story 316a retired this op's CLI verb;
+        # it survives as a deprecated library/MCP surface, so this reasoning still applies to it.
         if cfg.max_iterations < _REVIEW_MIN_STEPS:
             cfg = replace(cfg, max_iterations=_REVIEW_MIN_STEPS)
         rid = reviewer_id or default_reviewer_id()

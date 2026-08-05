@@ -146,30 +146,41 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
 
 
 def _review(argv: list[str]) -> int:
-    """``rebar review`` → rebar.llm.review_ticket (native; not a dispatcher arm).
+    """``rebar review`` → a LOUD DEPRECATION SHIM over ``rebar review-plan`` (story 316a).
 
-    Like ``reconcile``, this is intercepted in main() before the bash-golden help
-    system, so it owns its own ``--help``. JSON output conforms to the
-    ``review_result`` schema (OUTPUT_SCHEMAS['review'])."""
-    import json as _json
-
+    The single-pass review op is retired as a CLI verb: this forwards to the
+    plan-review gate (``_review_plan``) and returns ITS exit code unchanged. It owns
+    its own ``--help`` (intercepted in main() before the bash-golden help system,
+    like ``reconcile``). ``--output``/``--check``/``--ref``/``--source`` exist on
+    both verbs and are forwarded verbatim; ``--no-sign`` is forwarded UNCONDITIONALLY
+    so the bare verb keeps its old read-only semantics (no attestation written) —
+    ``--force`` is never forwarded, it stays an explicit, audited escape hatch.
+    ``--graph`` and a positional ``reviewer_id`` have no counterpart on
+    ``review-plan`` and FAIL LOUDLY (argparse exit 2) rather than being silently
+    accepted and discarded."""
     parser = argparse.ArgumentParser(
         prog="rebar review",
-        description="Run an LLM review of a ticket (or its ticket-graph) and emit "
-        "structured findings. Needs the 'agents' extra + a model API key (provider "
-        "per the [tool.rebar.llm.model_classes] slots); see `rebar review --check`.",
+        description="DEPRECATED: this is a shim over `rebar review-plan`, the plan-review "
+        "gate. Four differences from the retired single-pass op: review-plan normally "
+        "signs an ATTESTATION (this shim passes --no-sign to keep the old read-only "
+        "behaviour); it enforces a BLOCKING-finding floor; it will FAST-FAIL with no LLM "
+        "call (exit 2) on a ticket that is not yet claimable (closed/idea/blocked, or "
+        "open-but-blocked); and it runs the gate's MULTI-PASS "
+        "(find -> verify -> decide -> coach) review instead of one pass. Use "
+        "`rebar review-plan` directly going forward.",
     )
     parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
     parser.add_argument(
         "reviewer_id",
         nargs="?",
         default=None,
-        help="reviewer from the catalog (default: the catalog's default reviewer)",
+        help="REMOVED: `rebar review-plan` has no reviewer-selection arg; passing this "
+        "fails loudly",
     )
     parser.add_argument(
         "--graph",
         action="store_true",
-        help="also review the ticket's descendants, as one unit",
+        help="REMOVED: `rebar review-plan` reviews one ticket; passing this fails loudly",
     )
     parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
     parser.add_argument(
@@ -180,30 +191,35 @@ def _review(argv: list[str]) -> int:
     _add_ref_source(parser)
     args = parser.parse_args(argv)
 
-    from rebar import llm
+    if args.graph:
+        parser.error(
+            "--graph is not supported by `rebar review-plan`, which reviews one "
+            "ticket. Review each ticket in dependency order instead."
+        )
+    if args.reviewer_id:
+        parser.error(
+            f"unrecognized positional argument: {args.reviewer_id!r} — `rebar "
+            "review-plan` has no reviewer-selection argument, it always runs the "
+            "gate's own multi-pass criteria."
+        )
 
+    from rebar._deprecations import warn_deprecated
+
+    warn_deprecated("cli:rebar review", via="stderr")
+
+    # DELEGATE rather than re-implement: forwarding the argv means the shim inherits
+    # whatever `review-plan` does today and tomorrow (exit codes, rendering, gate-source
+    # error handling) instead of drifting from a copied body.
     if args.check:
-        sys.stdout.write(_json.dumps(llm.available_backends(), indent=2) + "\n")
-        return 0
+        return _review_plan(["--check"])
     if not args.ticket_id:
         parser.error("ticket_id is required")
-    ensure_initialized(init_only=True)
-    try:
-        result = llm.review_ticket(
-            args.ticket_id, args.reviewer_id, graph=args.graph, ref=args.ref, source=args.source
-        )
-    except llm.LLMError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
-    except _gate_source_error() as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
-    if args.output == "json":
-        sys.stdout.write(_json.dumps(result) + "\n")
-    else:
-        _render_review_text(result)
-        _render_source_line(result)
-    return 0
+    forwarded = [args.ticket_id, "--no-sign", "--output", args.output]
+    if args.ref is not None:
+        forwarded += ["--ref", args.ref]
+    if args.source is not None:
+        forwarded += ["--source", args.source]
+    return _review_plan(forwarded)
 
 
 def _review_code(argv: list[str]) -> int:

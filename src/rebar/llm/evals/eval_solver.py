@@ -309,7 +309,7 @@ def run_case(
             tid = rebar.create_ticket(
                 tt, _title(desc, "Eval ticket"), description=desc, repo_root=root, return_alias=True
             )["id"]
-            return operations.review_ticket(
+            return operations._review_ticket_impl(
                 tid, repo_root=root, runner=runner, graph=graph, source=src
             )
         if prompt_id == "spec-alignment":
