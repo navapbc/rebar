@@ -264,14 +264,34 @@ def _tool_signature(part: object) -> str:
     return f"{name}:{digest}"
 
 
+#: Minimum sample size (trailing tool calls) before loop accusation is valid.
+REPETITION_WINDOW = 24
+
+#: Trip threshold: distinct_ratio_window at or below this reads as a loop.
+REPETITION_TRIP_RATIO = 0.50
+
+
 def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
-    """Loop-versus-work signal derived from the tool-call signature sequence."""
+    """Loop-versus-work signal derived from the tool-call signature sequence.
+
+    Returns a dict with four keys:
+    - ``tool_calls_distinct``: cardinality of the unique signatures.
+    - ``max_consecutive_repeat``: longest back-to-back repetition (1-cycle only; blind spot
+      for k-cycles where k >= 2).
+    - ``top_repeated_tool_calls``: ranked list of the top-N most-repeated signatures.
+    - ``distinct_ratio_window``: set cardinality of the trailing REPETITION_WINDOW calls,
+      divided by REPETITION_WINDOW and rounded to 3 decimals. This is order-insensitive
+      and catches every cycle length (including k-cycles that ``max_consecutive_repeat``
+      cannot see). ``None`` when ``len(signatures) < REPETITION_WINDOW`` (insufficient
+      sample to accuse a loop).
+    """
 
     if not signatures:
         return {
             "tool_calls_distinct": 0,
             "max_consecutive_repeat": 0,
             "top_repeated_tool_calls": [],
+            "distinct_ratio_window": None,
         }
     counts: dict[str, int] = {}
     for sig in signatures:
@@ -281,10 +301,14 @@ def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
         current = current + 1 if sig == previous else 1
         longest = max(longest, current)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    window_ratio: float | None = None
+    if len(signatures) >= REPETITION_WINDOW:
+        window_ratio = round(len(set(signatures[-REPETITION_WINDOW:])) / REPETITION_WINDOW, 3)
     return {
         "tool_calls_distinct": len(counts),
         "max_consecutive_repeat": longest,
         "top_repeated_tool_calls": [{"signature": sig, "count": n} for sig, n in ranked if n > 1],
+        "distinct_ratio_window": window_ratio,
     }
 
 
@@ -300,12 +324,14 @@ def format_repetition(usage: dict) -> str:
         "requests={requests} tool_calls={tool_calls} "
         "distinct={tool_calls_distinct} "
         "max_consecutive_repeat={max_consecutive_repeat} "
+        "distinct_ratio_window={distinct_ratio_window} "
         "top_repeats={top_repeated_tool_calls}"
     ).format(
         requests=usage.get("requests"),
         tool_calls=usage.get("tool_calls"),
         tool_calls_distinct=usage.get("tool_calls_distinct"),
         max_consecutive_repeat=usage.get("max_consecutive_repeat"),
+        distinct_ratio_window=usage.get("distinct_ratio_window"),
         top_repeated_tool_calls=usage.get("top_repeated_tool_calls"),
     )
 
