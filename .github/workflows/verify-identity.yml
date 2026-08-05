@@ -14,14 +14,24 @@ name: Verify Authorship Identity
 
 # CI-trigger audit (op-cert lane, story 4214): every on: trigger is classified so no
 # merge path silently skips the gate.
-#   push              — INCLUDED (branches-ignore feature/**; NO_FILTER on main — no paths filter)
+#   push              — INCLUDED (branches-ignore feature/** and main; NO_FILTER — no paths filter)
 #   pull_request      — INCLUDED (NO_FILTER: no paths filter, so every PR runs the gate)
-#   workflow_dispatch — INCLUDED (manual)
+#   workflow_dispatch — INCLUDED (manual; the on-demand "is main healthy?" button)
+#   schedule          — INCLUDED (NO_FILTER: the 6-hourly branch-health tick that replaced the
+#                       per-push `main` run, ticket 03ef-6fb5-158b-4abd)
+#
+# `main` left the push filter because branch CI on the mirror now reports branch HEALTH on a
+# schedule rather than a per-commit verdict (cancelled superseded runs rendered a healthy
+# `main` as red X's). This gate still runs against `main` — four times a day and on demand —
+# and the pre-merge Verified gate is untouched.
 on:
   push:
-    branches-ignore: ["feature/**"]
+    branches-ignore: ["feature/**", "main"]
   pull_request: {}
   workflow_dispatch: {}
+  schedule:
+    # Every 6 hours, minute 53 (off the hour, and staggered from the sibling health lanes).
+    - cron: "53 */6 * * *"
 
 permissions:
   contents: read

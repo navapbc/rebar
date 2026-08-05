@@ -9,10 +9,17 @@ name: Optional-Dependency Isolation (mirror)
 
 on:
   push:
-    # every branch EXCEPT the S3-replicated feature/** (redundant mirror CI).
-    branches-ignore: ["feature/**"]
+    # every branch EXCEPT `main` and the S3-replicated feature/** (redundant mirror CI).
+    # `main` branch-health moved to the shared 6-hourly schedule below so post-merge CI
+    # reports "is main healthy NOW" instead of a per-commit verdict that cancellation
+    # rendered as red X's (ticket 03ef-6fb5-158b-4abd). Pre-merge gating is unchanged: the
+    # SAME reusable runs against the patchset in the Verified lane.
+    branches-ignore: ["feature/**", "main"]
   pull_request: {}
   workflow_dispatch: {}
+  schedule:
+    # Every 6 hours, minute 47 (off the hour, and staggered from the sibling health lanes).
+    - cron: "47 */6 * * *"
 
 permissions:
   contents: read

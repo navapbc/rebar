@@ -68,6 +68,12 @@ EXCLUDED_JOBS = frozenset(
         # and non-blocking (continue-on-error). The blocking eval DISCIPLINE runs in
         # `eval-discipline`, which IS required in vote.needs.
         "eval-live",
+        # test.yml: the branch-health report (last known-green SHA + bisect recipe). It runs
+        # ONLY on the 6-hourly schedule and on manual dispatch, never on the push/PR critical
+        # path, and it GATES NOTHING — it describes a run that has already finished. Its whole
+        # input is `needs.<gate>.result`, so there is nothing for the Verified vote to
+        # aggregate (ticket 03ef-6fb5-158b-4abd).
+        "main-health-report",
     }
 )
 

@@ -20,12 +20,32 @@ name: Test Suite (mirror)
 
 on:
   push:
-    # every branch EXCEPT the S3-replicated feature/** (those fan out redundant mirror CI
-    # that casts no Verified vote — the gerrit-verify workflow_dispatch is the sole Verified
-    # source; see fern-belief-gap). Nested depths matched by **.
-    branches-ignore: ["feature/**"]
+    # every branch EXCEPT `main` and the S3-replicated feature/** (feature branches fan out
+    # redundant mirror CI that casts no Verified vote — the gerrit-verify workflow_dispatch is
+    # the sole Verified source; see fern-belief-gap). Nested depths matched by **.
+    #
+    # `main` is excluded because this lane's `concurrency` cancels in-progress runs and, on
+    # `main`, `github.ref` is the CONSTANT refs/heads/main — so every push cancelled its
+    # predecessor and GitHub rendered a healthy `main` as a trail of red X's. The branch-health
+    # signal moved to the schedule below: "is main healthy NOW", not "was every commit green".
+    # Pre-merge gating is untouched — the Verified vote runs the same reusables against the
+    # exact patchset via gerrit-verify.yaml (ticket 03ef-6fb5-158b-4abd).
+    branches-ignore: ["feature/**", "main"]
   pull_request: {}
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run_external:
+        description: >-
+          Also run the LIVE external-integration tier (billable). Leave false for a plain
+          "is main healthy?" check — dispatch is now the routine on-demand health button.
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Every 6 hours — four "is main healthy" runs a day, a fixed cost independent of the
+    # commit rate. Minute 41 (never 0) keeps this repo off the hour boundary that every
+    # other project on the platform schedules onto.
+    - cron: "41 */6 * * *"
 
 permissions:
   contents: read
@@ -55,10 +75,19 @@ jobs:
   # Fork guard: only run on the canonical repo (owner == actor), never on a PR
   # from a fork, so secrets are never exposed to untrusted code. Manual dispatch
   # only — keep live mutations off the every-push/every-PR path.
+  #
+  # `run_external` opt-in: dispatching this workflow is now the routine way to ask "is main
+  # healthy?", so the live billable tier must not ride along with every such dispatch. The
+  # schedule can never reach here either (the event_name guard). External integrations are
+  # capped at once a day and their own weekly workflow (external-integration.yml) is
+  # unchanged (ticket 03ef-6fb5-158b-4abd).
   external:
     name: external-integration (live Jira + LLM)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == github.actor }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+          && github.repository_owner == github.actor
+          && github.event.inputs.run_external == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -134,3 +163,57 @@ jobs:
   # passes the Gerrit refspec to check out the exact patchset (jira-reb-1163).
   artifact-probe:
     uses: ./.github/workflows/_artifact-probe.yml
+
+  # Branch-health report (ticket 03ef-6fb5-158b-4abd). A scheduled lane trades per-commit
+  # attribution for a fixed cost, so it has to hand that attribution back on demand: this job
+  # publishes the verdict, the LAST KNOWN-GREEN `main` SHA, and a copy-pasteable `git bisect
+  # run` recipe using this repo's own CI reproduction. Without it the first responder to a red
+  # tick would have to reconstruct the technique under pressure across a multi-commit window.
+  #
+  # The last-known-green SHA is resolved from this workflow's OWN successful run history via
+  # the Actions API — no new state to persist, and nothing is written (the GitHub side is a
+  # read-only mirror; `main` advances only by mirror push from Gerrit). If the lookup cannot
+  # resolve one, the report says so and still passes: a missing lower bound must never turn a
+  # green `main` red.
+  main-health-report:
+    name: main health report (last known green + bisect recipe)
+    # Branch-health lanes only. A PR has its own per-commit attribution and needs no bisect
+    # window; a branch push is likewise attributable to one commit.
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: [build-and-test, golden-path, artifact-probe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read    # list this workflow's own runs to find the last green one
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Both the Actions-API lookup and the rendering live in scripts/main_health_report.py,
+      # not inline here: workflow YAML is unreachable from the test suite, so a quoting bug in
+      # a bisect recipe — or a lower-bound lookup that silently 403s on a missing
+      # `actions: read` scope — would first surface during an incident. The script injects the
+      # `gh` call as an injected Runner — the pattern the canary-bridge script already uses for
+      # its Actions-API reads — so every failure mode is exercised in
+      # tests/unit/test_main_health_report.py without a network.
+      #
+      # GH_TOKEN + the job-level `actions: read` above are BOTH required: the run-history
+      # endpoint 403s without the scope, and the script would then degrade to its
+      # no-lower-bound placeholder on every single run instead of visibly once.
+      - name: Publish the verdict, the last known-green SHA, and the bisect recipe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULTS: >-
+            {"build-and-test": "${{ needs.build-and-test.result }}",
+             "golden-path": "${{ needs.golden-path.result }}",
+             "artifact-probe": "${{ needs.artifact-probe.result }}"}
+        run: |
+          set -euo pipefail
+          python scripts/main_health_report.py \
+            --ref-name "$GITHUB_REF_NAME" \
+            --head-sha "$GITHUB_SHA" \
+            --jobs "$JOB_RESULTS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow-file test.yml >> "$GITHUB_STEP_SUMMARY"
