@@ -7,12 +7,18 @@ name: CodeQL SAST
 # code-analysis layer. Actions are pinned by major version tag to match the repo
 # convention (see test.yml / gerrit-verify.yaml), not by commit SHA.
 
+# `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd):
+# push-on-`main` runs cancelled each other and rendered a healthy `main` as red X's. CodeQL
+# joins that policy by dropping its push trigger, but NOT the 6-hourly branch-health tick — a
+# security scanner's cadence is a deliberate cost/coverage choice and 6-hourly would be a 28x
+# increase nobody asked for. The weekly scan therefore becomes this workflow's primary pass
+# rather than a between-pushes backstop; it still runs against the default branch, and the
+# dispatch below scans on demand after a change worth scanning immediately.
 on:
-  push:
-    branches: [main]
   schedule:
-    # Weekly, Monday 04:23 UTC — catches advisories that land between pushes.
+    # Weekly, Monday 04:23 UTC.
     - cron: "23 4 * * 1"
+  workflow_dispatch: {}
 
 # Least privilege by default; the analyze job elevates only what CodeQL needs.
 permissions:

@@ -352,6 +352,30 @@ keep working; tags are not locked, so releases still publish normally.)
 > un-lock in [`infra/runbooks/github-mirror-lock.md`](infra/runbooks/github-mirror-lock.md).
 > A single rejected human push is the lock working as intended, not a reason to roll back.
 
+### 3_0. Mirror `main` CI runs on a SCHEDULE, not on every push
+
+The mirror runs the test suite, the optionality check, and the authorship gate against `main`
+on a **6-hourly schedule** rather than on every push. Gerrit's `Verified` vote already tests
+every patchset before it lands, so the mirror's job is to answer *"is `main` healthy now?"* —
+not to re-issue a per-commit verdict.
+
+It used to run per-push, and that actively misled: those lanes cancel an in-progress run when
+a new commit arrives, GitHub renders a cancelled run as a **red X**, and a healthy `main`
+therefore grew a trail of red X's. GitHub offers no way to suppress that, so the trigger moved
+instead of the symptom.
+
+What this means in practice:
+
+- **Nothing about landing a change is different.** The pre-merge gate is untouched: every
+  change still needs `LLM-Review +1` **and** `Verified +1`, and the Verified lane runs the same
+  shared reusables against your exact patchset.
+- **To check `main` on demand**, dispatch the workflow (Actions → *Test Suite (mirror)* → Run
+  workflow) instead of waiting for the tick. Leave `run_external` unchecked unless you
+  deliberately want the live, billable external tier.
+- **If a scheduled run is red**, its run summary already carries the last-known-green `main`
+  SHA and a copy-pasteable `git bisect run` recipe — a red tick covers every commit since the
+  last green one, so start there rather than reconstructing the technique by hand.
+
 > **Changing a public surface?** rebar is 0.x, but its public surfaces have
 > differing stability guarantees — the `--output json` schemas and the event wire
 > format are compatibility-bearing even pre-1.0. Before you change a CLI flag, a
