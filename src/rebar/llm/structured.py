@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import lru_cache
 from typing import Any
 
 from rebar.llm.errors import StructuredOutputError, UnretryableOutputError
@@ -60,6 +61,159 @@ SENTINEL_DIRECTIVE = (
 )
 
 
+# ── Layer-1 schema-complexity bound (bug 895c) ─────────────────────────────────
+# Native/constrained decoding does not merely "prefer" a small schema — Anthropic COMPILES
+# the contract's JSON Schema into a decoding grammar, under a documented 180-second
+# compilation timeout and documented complexity caps (24 optional parameters, 16
+# union-typed parameters). Past that the request does not degrade, it 400s
+# (`ValidationException`: "Grammar compilation timed out." at ~185s, or "Schema is too
+# complex." at ~50-60s) — and it does so on EVERY retry, forever, because the schema is a
+# property of the contract, not of the request. rebar's Pass-2 verification contracts are
+# all-optional by construction (every field declares a `default=`, so every field is
+# optional in JSON Schema), which is exactly the axis the compiler charges for.
+#
+# MEASURED live (us-east-1, serial, one variable at a time), optional-parameter count vs
+# native result:
+#
+#     review_result             10 optional   NATIVE  OK      14.0s
+#     completion_verdict        14 optional   NATIVE  OK      29.0s
+#     verification              22 optional   NATIVE  FAIL   185.3s
+#     plan_review_verification  31 optional   NATIVE  FAIL   185.4s
+#     code_review_verification  36 optional   NATIVE  FAIL   185.4s
+#     plan_review_verification  (identical payload, PROMPTED)  OK  11.2s
+#
+# Schema BYTE size is NOT the predictor: stripping every description (8,719 -> 2,403 bytes)
+# still failed, while a 4,022-byte contract passed. Optional-parameter count is.
+#
+# The bound sits at 16 — BELOW Anthropic's published 24 — because the published number
+# UNDER-predicts: `verification` fails at 22, two under the documented cap. 16 sits inside
+# the measured gap (14 = largest measured PASS, 22 = smallest measured FAIL) and deliberately
+# nearer the PASS side, so it keeps every contract measured to work on the native path,
+# refuses every contract measured to hang, and leaves headroom for a contract that grows a
+# field or two. The union bound (12) mirrors the same conservatism against the published 16;
+# the largest union count on any measured-PASSING contract is 9 (review_result,
+# completion_verdict), so it downgrades nothing that is known to work.
+# Downgrading is CHEAP and always safe (the prompted path returned the identical verdict in
+# 11.2s); exceeding the bound is a guaranteed ~185s failure, so the asymmetry is deliberate.
+_NATIVE_MAX_OPTIONAL_PROPERTIES = 16
+_NATIVE_MAX_UNION_PROPERTIES = 12
+
+
+# ── Layer-1 STACK-capability gate (bug 895c, variant B) ────────────────────────
+# The complexity bound above assumes the native request at least REACHES the provider. On an
+# older botocore it does not: boto3 validates Converse's input shape CLIENT-SIDE, and a
+# botocore whose `bedrock-runtime` service model predates `outputConfig` rejects the request
+# in 0.0s before a byte is sent:
+#
+#     FAILED in 0.0s: Parameter validation failed: Unknown parameter in input: "outputConfig",
+#     must be one of: modelId, messages, system, inferenceConfig, toolConfig, …
+#
+# MEASURED: botocore 1.43.64 carries `outputConfig`; botocore 1.40.61 does not. The 1.40.61
+# failure hit `ticket_digest` — a 722-BYTE contract, 4 optional properties — so this is NOT
+# the complexity failure wearing a different hat: on an under-versioned stack EVERY native
+# call fails regardless of schema size, and it degrades silently ("store-wide overlap step
+# failed; no overlap findings"). Error-string matching could never have caught this from the
+# complexity phrases — the two failures share no vocabulary — which is why the gate, not the
+# fallback, is the load-bearing half.
+#
+# Scoped to BEDROCK via `caps.prompt_cache_style == "bedrock"`, the capability record's
+# existing Bedrock discriminator (a profile exposing `bedrock_supports_prompt_caching`) — a
+# fact read off the model PROFILE, never a provider-name string, per story S2. Non-Bedrock
+# providers do not go through botocore and are untouched.
+
+
+@lru_cache(maxsize=1)
+def _bedrock_converse_output_config_support() -> bool | None:
+    """Tri-state: does the INSTALLED botocore's ``bedrock-runtime`` Converse operation accept
+    the ``outputConfig`` parameter?
+
+    ``True`` supported, ``False`` NOT supported (or present-but-unintrospectable — fail
+    closed), ``None`` when botocore is absent from this process entirely.
+
+    ``None`` is deliberately distinct from ``False``: with no botocore installed there is no
+    boto3 Bedrock transport in this process at all, so this probe has observed NOTHING about a
+    live call and must not veto routing on that silence (the lean/no-``reviewbot``-extra
+    install, where the Bedrock capability record is only ever exercised against a profile
+    stub). Fail-closed applies where it can actually bite: botocore IS installed — a real
+    Bedrock call is possible — and we cannot confirm the parameter. Cached because it reads a
+    botocore JSON service model, and the answer cannot change within a process. NEVER raises."""
+    try:
+        import botocore.session
+    except Exception:  # noqa: BLE001 — no botocore at all: nothing observed, veto nothing
+        return None
+    try:
+        service = botocore.session.get_session().get_service_model("bedrock-runtime")
+        members = getattr(service.operation_model("Converse").input_shape, "members", None)
+        return "outputConfig" in (members or {})
+    except Exception:  # noqa: BLE001 — botocore present but unreadable: fail CLOSED
+        return False
+
+
+def native_output_stack_supported(caps) -> bool:
+    """Whether the installed stack can actually SEND a native output constraint for ``caps``.
+
+    Always ``True`` off Bedrock (no botocore in the path). On Bedrock, defers to
+    :func:`_bedrock_converse_output_config_support`, treating its ``None`` (no botocore
+    installed) as no evidence against native. PURE apart from the cached probe, and never
+    raises — an unreadable ``caps`` cannot be Bedrock-scoped, so it keeps today's routing."""
+    if getattr(caps, "prompt_cache_style", None) != "bedrock":
+        return True
+    return _bedrock_converse_output_config_support() is not False
+
+
+def _schema_objects(node: Any):
+    """Yield every sub-schema in ``node`` that declares ``properties`` (an object schema),
+    walking nested dicts/lists — which reaches ``$defs`` (nested contract models),
+    ``properties`` values, ``items``, and ``anyOf`` branches alike. ``$ref`` is deliberately
+    NOT expanded: each ``$def`` is visited exactly once at its definition site, so a model
+    referenced from three fields is counted once, matching what the grammar compiler sees."""
+    if isinstance(node, dict):
+        if isinstance(node.get("properties"), dict):
+            yield node
+        for value in node.values():
+            yield from _schema_objects(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _schema_objects(item)
+
+
+def schema_complexity(model_cls) -> tuple[int, int]:
+    """``(optional_property_count, union_property_count)`` over ``model_cls``'s FULL JSON
+    Schema — the two axes Anthropic's grammar compiler charges for (see the bound above).
+
+    A property is OPTIONAL when it is not listed in its own object's ``required`` list (the
+    all-``default=`` contracts list nothing as required, so every field counts). A property is
+    UNION-typed when its sub-schema carries ``anyOf`` or gives ``type`` as a list — the shape
+    ``X | None`` compiles to. Counted across nested objects and ``$defs``, not just the top
+    level, because a contract's cost is dominated by the per-finding sub-model it repeats."""
+    schema = model_cls.model_json_schema()
+    optional = union = 0
+    for obj in _schema_objects(schema):
+        required = obj.get("required")
+        required_names = set(required) if isinstance(required, list) else set()
+        for name, prop in obj["properties"].items():
+            if name not in required_names:
+                optional += 1
+            if isinstance(prop, dict) and ("anyOf" in prop or isinstance(prop.get("type"), list)):
+                union += 1
+    return optional, union
+
+
+def native_output_within_bound(model_cls) -> bool:
+    """Whether ``model_cls`` is small enough for provider-native constrained decoding.
+
+    PURE and importable so the bound can be asserted on a contract directly, with no model
+    call. FAIL-OPEN on a class that has no usable ``model_json_schema()`` (a stand-in/stub
+    output class): an unmeasurable contract keeps whatever routing ``caps`` alone selects,
+    exactly as before this bound existed — this gate only ever SUBTRACTS native routing from
+    a contract it can positively show is over the line."""
+    try:
+        optional, union = schema_complexity(model_cls)
+    except Exception:  # noqa: BLE001 — an unmeasurable contract is not a contract we downgrade
+        return True
+    return optional <= _NATIVE_MAX_OPTIONAL_PROPERTIES and union <= _NATIVE_MAX_UNION_PROPERTIES
+
+
 def output_mode(model_cls, caps, *, thinking: bool = False):
     """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
 
@@ -81,11 +235,56 @@ def output_mode(model_cls, caps, *, thinking: bool = False):
     suppresses tool calling (E1: 2/2 skipped), so the agentic runner never consults it — the
     no-tools scoping is structural, not a parameter. Deliberately does NOT read
     ``caps.supports_thinking`` — the constraint is a property of the CALL, so the caller's
-    ``thinking`` argument is authoritative; ``supports_thinking`` exists for signed provenance."""
+    ``thinking`` argument is authoritative; ``supports_thinking`` exists for signed provenance.
+
+    NativeOutput is additionally gated on SCHEMA COMPLEXITY (bug 895c): a contract whose JSON
+    Schema exceeds :func:`native_output_within_bound` is routed to PromptedOutput even on a
+    native-capable model, because the provider compiles that schema into a decoding grammar and
+    400s (`Grammar compilation timed out.` / `Schema is too complex.`) after ~185s on every
+    attempt — a permanent, un-retryable failure of that STEP, burning ~185s per run. Scope
+    the claim there: a failing step does not necessarily fail its whole gate (a review has
+    been observed certifying seconds after one such step failed), so this is a step-level
+    correctness-and-latency fix, not a gate-outage fix. Not a slow success either. This is a
+    BOUND, not a disable: contracts within it (``review_result``, ``completion_verdict``) keep
+    the native path. The gate reads only ``model_cls``, never the model id, so it stays a
+    property of the CONTRACT — the same reason the thinking gate reads the call, not the
+    profile.
+
+    NativeOutput is FURTHER gated on whether the installed stack can send a native output
+    constraint at all (:func:`native_output_stack_supported`, bug 895c variant B): an
+    under-versioned botocore rejects Bedrock's ``outputConfig`` client-side in 0.0s for EVERY
+    contract, however small. That check runs FIRST, because when it fails the contract's size
+    is irrelevant."""
     from pydantic_ai import NativeOutput, PromptedOutput
 
     if caps.native_structured_output and (not thinking or caps.native_output_with_thinking):
-        return NativeOutput(model_cls)
+        if not native_output_stack_supported(caps):
+            # Variant B: the installed botocore cannot even SEND `outputConfig`, so every
+            # native call would 0.0s-fail client-side regardless of contract size. Warning,
+            # not info — this one is a whole-stack condition an operator can fix by upgrading
+            # botocore, and it silently emptied every structured step while it went unnoticed.
+            logger.warning(
+                "structured output: the installed botocore cannot send Bedrock's outputConfig "
+                "parameter — routing contract %s to PromptedOutput (bug 895c). Upgrade botocore "
+                "(>=1.43.64 carries it; 1.40.61 does not) to restore native structured output.",
+                getattr(model_cls, "__name__", model_cls),
+            )
+            return PromptedOutput(model_cls)
+        if native_output_within_bound(model_cls):
+            return NativeOutput(model_cls)
+        optional, union = schema_complexity(model_cls)
+        # Never silent: a downgrade changes which reliability layers run, so an operator
+        # debugging a verdict must be able to see WHICH contract was moved and why.
+        logger.info(
+            "structured output: contract %s exceeds the native grammar bound "
+            "(optional properties %d, max %d; union-typed %d, max %d) — routing to "
+            "PromptedOutput to avoid the provider's grammar-compilation rejection (bug 895c)",
+            getattr(model_cls, "__name__", model_cls),
+            optional,
+            _NATIVE_MAX_OPTIONAL_PROPERTIES,
+            union,
+            _NATIVE_MAX_UNION_PROPERTIES,
+        )
     return PromptedOutput(model_cls)
 
 

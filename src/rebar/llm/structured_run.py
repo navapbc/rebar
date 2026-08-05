@@ -189,18 +189,38 @@ def _pai_structured(
     model_cls = contracts.response_model_for(req.output_schema)
     mode_obj = structured.output_mode(model_cls, caps, thinking=req.thinking)
     if isinstance(mode_obj, NativeOutput):
-        agent = Agent(
-            model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
-        )
-        with usage_log.capture_attempt_messages():
-            run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
-        # Silent-success parity (story drake): the PromptedOutput path below already checks
-        # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
-        # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
-        # check here — a length/max_tokens/content_filter/refusal finish_reason raises
-        # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
-        structured.check_response(run_result.response)
-        return run_result.output, _extract_usage(run_result)
+        # Bug 895c: the provider compiles this contract's JSON Schema into a decoding grammar
+        # and can 400 outright ("Grammar compilation timed out." / "Schema is too complex.").
+        # `structured.output_mode` already keeps measured-too-complex contracts off this path,
+        # so reaching here means the bound under-predicted for THIS model/contract pair — fall
+        # back to the PROMPTED path below (measured to return the same verdict in ~11s) rather
+        # than losing this step to a request that can never succeed as configured.
+        try:
+            agent = Agent(
+                model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
+            )
+            with usage_log.capture_attempt_messages():
+                run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+            # Silent-success parity (story drake): the PromptedOutput path below already checks
+            # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
+            # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
+            # check here — a length/max_tokens/content_filter/refusal finish_reason raises
+            # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
+            structured.check_response(run_result.response)
+            return run_result.output, _extract_usage(run_result)
+        except Exception as exc:  # noqa: BLE001 — narrowed immediately by the translator below
+            from rebar.llm.failure import translate_schema_complexity_rejection
+
+            ran_model = getattr(model, "model_name", None) or str(model)
+            if translate_schema_complexity_rejection(exc, ran_model) is None:
+                raise
+            logger.warning(
+                "llm structured output: model=%s rejected contract %s's JSON Schema "
+                "(grammar compilation) — falling back to the PROMPTED path (bug 895c): %s",
+                ran_model,
+                getattr(model_cls, "__name__", model_cls),
+                exc,
+            )
 
     # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
     # schema directive is appended so the model knows the EXACT output keys (the json-repair
