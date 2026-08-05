@@ -913,6 +913,58 @@ this precheck is attestation-safe: checkbox state is normalized out of the mater
 fingerprint (330c; the single normalization seam covers both the plan-review claim gate and
 the completion-verifier staleness check), so the flips do not invalidate a signed plan review.
 
+## The Gerrit bugfix-size attestation gate (code review, not claim/close)
+
+A third consumer of the plan-review attestation lives at code-review time, on Gerrit only:
+`rebar.llm.code_review.bugfix_size_gate`. A change whose `rebar-ticket:` trailer names a **bug**
+and whose diff exceeds **150 non-test lines** must carry an acceptable plan-review attestation on
+that bug, or the review bot casts `LLM-Review -1` with the `bugfix-size-attestation` criterion. A
+fix that large is a design change wearing a bug label — the "drive-by rewrite" mode this project's
+bug-trend analysis surfaced. Only Gerrit reviews run it; a local `rebar review-code` preview never
+blocks on it, and test-only diffs, non-bug tickets, and under-floor diffs are exempt.
+
+**The remedy, executable end to end from any developer environment:**
+
+```sh
+rebar review-plan <id> --status        # is there a current attestation? (read-only, no LLM)
+# not current → write the fix plan into the ticket's description, declare its file impact, then:
+rebar review-plan <id>                 # runs the review and SIGNS an attestation on a PASS
+rebar sign-review <id>                 # only if the review PASSED but no attestation landed
+git commit --amend --no-edit && git push gerrit HEAD:refs/for/main
+```
+
+**The gate asks whether an attested plan review was COMPLETED — never which environment certified
+it** (current policy, bug `846b`). It does not consult `.rebar/trusted_environments.yaml`. That
+distinction is what makes the remedy above executable: a review run on your own machine signs with
+*your* environment id as the DSSE principal, and a contributor cannot pin their own environment
+(the pin file is CODEOWNERS-protected on the code branch), so a source-gated check rejected
+genuinely passing, genuinely signed reviews purely on provenance and could not be satisfied by
+anyone. Lifecycle and freshness still bind normally: `certified` / `stale-code` / `stale-head` are
+accepted (the plan *was* reviewed; the trunk moved on), while `stale-material` — you attested and
+then edited the plan — still blocks, so the gate is not bypassable by editing after signing.
+
+**Subject binding is still enforced**, because it asks *what* the attestation covers rather than
+*who* signed it: a cert bound to another ticket, or of another kind, classifies `wrong-kind` and
+blocks — read from the SIGNED payload, so a lying plaintext mirror on the record buys nothing.
+
+**The security posture, stated plainly.** `.rebar/trusted_environments.yaml` is the only trust
+root, so an unpinned principal has no key to verify against — there is no coherent middle where
+signatures are checked but unpinned signers are waved through (an attacker would simply use an
+unpinned principal). Dropping provenance therefore makes this criterion an **anti-sloppiness gate**
+("did you write and review a plan before shipping 150+ non-test lines under a bug label?"), not an
+anti-adversary one: the attestation record lives on the auto-pushed, non-Gerrit-gated tickets
+branch, which `opcert.opcert_from_record` documents as attacker-writable. That is acceptable
+because this gate was never the adversarial boundary — landing on `main` still needs `LLM-Review
++1` **and** `Verified +1`, both cast only by bots/admins, and the code branch (where the pin file
+and the rubric live) stays Gerrit-gated. Nothing here widens who may vote, so a change still cannot
+self-approve. Restoring provenance gating is re-adding the keyring lookup and the `verify_opcert`
+call to `classify_plan_review_attestation`; the bucket partition and the fail-open default are
+unchanged, so nothing else would have to move.
+
+Store trouble and any unrecognized future verdict degrade to an **advisory**, never a block. The
+same classifier backs the self-service `recheck-review` trigger, which stays fail-closed: anything
+other than an accepted attestation refuses the re-review.
+
 ### The epic-close bug screen (three stages, epic closes only)
 
 Agents file bugs OUTSIDE an epic's hierarchy during epic execution and deem them

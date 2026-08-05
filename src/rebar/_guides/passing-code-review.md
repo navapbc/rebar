@@ -77,6 +77,26 @@ change; and never introduce a secret or an unauthenticated exposure on a securit
 path. Keep each `src/rebar` file **under 800 LOC** — the module-size gate is a `Verified`
 failure, not an advisory.
 
+## A big bug fix needs a reviewed plan
+
+One blocking finding is not about your code at all. If your commit's `rebar-ticket:` names a
+**bug** and the diff touches **more than 150 non-test lines**, the `bugfix-size-attestation`
+criterion blocks unless that bug carries a current plan-review attestation — a fix that large is a
+design change wearing a bug label. The remedy is a ticket action, not a code change:
+
+```bash
+rebar review-plan <id> --status   # is an attestation current right now? (read-only, no LLM)
+rebar review-plan <id>            # write the fix plan into the description first; signs on a PASS
+rebar sign-review <id>            # only if the review PASSED but no attestation landed
+```
+
+Then amend and re-push. The gate asks only whether an attested plan review **was completed**, never
+which machine certified it, so running the review locally satisfies it. Note the one thing that
+still bites: attest *first, then* edit the plan and the attestation goes `stale-material` and blocks
+again — re-review after any plan edit. Only Gerrit runs this criterion; a local `review-code`
+preview never blocks on it. Details:
+[plan-review-gate.md](https://github.com/navapbc/rebar/blob/main/docs/plan-review-gate.md).
+
 ## Preview the review locally before you push
 
 You don't have to wait for the bot. `rebar review-code` runs the **same** four-pass reviewer
