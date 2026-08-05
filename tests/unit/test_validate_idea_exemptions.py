@@ -15,10 +15,30 @@ check (duplicate titles) is pinned to STILL fire for idea tickets.
 
 from __future__ import annotations
 
+import ast
+import os
+import time
+from pathlib import Path
+
+import pytest
+
 from rebar._engine_support import validate_checks as vc
 
+_VALIDATE_CHECKS_SRC = (Path(vc.__file__).resolve().parent / "validate_checks.py").read_text(
+    encoding="utf-8"
+)
 
-def _issue(iid, status, itype="task", parent=None, title=None, desc="a real body", deps=None):
+
+def _issue(
+    iid,
+    status,
+    itype="task",
+    parent=None,
+    title=None,
+    desc="a real body",
+    deps=None,
+    created_at="2026-01-01T09:00:00",
+):
     return {
         "id": iid,
         "status": status,
@@ -28,7 +48,7 @@ def _issue(iid, status, itype="task", parent=None, title=None, desc="a real body
         "description": desc,
         "notes": "",
         "dependencies": deps or [],
-        "created_at": "2026-01-01T09:00:00",
+        "created_at": created_at,
     }
 
 
@@ -149,3 +169,115 @@ def test_cross_epic_child_dep_still_fires_for_idea():
     assert any(f.severity == "critical" and "Cross-epic" in f.message for f in findings), (
         "cross-epic child dependency check must still fire for idea tickets"
     )
+
+
+# ── DTZ ratchet: validate_checks orphan-cluster uses AWARE UTC datetimes (story 28cd) ──
+def _is_timezone_utc(node) -> bool:
+    """True iff ``node`` is the AST for ``timezone.utc``."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "utc"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "timezone"
+    )
+
+
+def _calls_named(tree, attr):
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attr
+        ):
+            yield node
+
+
+def test_source_fromtimestamp_is_timezone_aware():
+    tree = ast.parse(_VALIDATE_CHECKS_SRC)
+    calls = list(_calls_named(tree, "fromtimestamp"))
+    assert calls, "expected a datetime.fromtimestamp call in validate_checks.py"
+    for call in calls:
+        tz_kw = next((kw for kw in call.keywords if kw.arg == "tz"), None)
+        assert tz_kw is not None, "every fromtimestamp call must pass tz="
+        assert _is_timezone_utc(tz_kw.value), "fromtimestamp tz= must be timezone.utc"
+
+
+def test_source_strptime_path_replaces_tzinfo_utc():
+    tree = ast.parse(_VALIDATE_CHECKS_SRC)
+    # every strptime call must be immediately wrapped in .replace(tzinfo=timezone.utc)
+    wrapped = []
+    for repl in _calls_named(tree, "replace"):
+        tzinfo_kw = next((kw for kw in repl.keywords if kw.arg == "tzinfo"), None)
+        if (
+            tzinfo_kw is not None
+            and _is_timezone_utc(tzinfo_kw.value)
+            and isinstance(repl.func.value, ast.Call)
+            and isinstance(repl.func.value.func, ast.Attribute)
+            and repl.func.value.func.attr == "strptime"
+        ):
+            wrapped.append(repl)
+    assert wrapped, "the strptime path must be followed by .replace(tzinfo=timezone.utc)"
+    strptime_calls = list(_calls_named(tree, "strptime"))
+    assert strptime_calls, "expected a strptime call"
+    wrapped_strptimes = {id(w.func.value) for w in wrapped}
+    for call in strptime_calls:
+        assert id(call) in wrapped_strptimes, (
+            "a naive strptime (not wrapped in .replace(tzinfo=timezone.utc)) remains"
+        )
+
+
+def _major_cluster_msg(findings):
+    return next(
+        (f.message for f in findings if f.severity == "major" and "orphaned tasks" in f.message),
+        None,
+    )
+
+
+def test_int_epoch_orphans_cluster_on_utc_hour():
+    # 2026-01-01T09:00:00Z == epoch 1767258000; three same-hour int-epoch orphans -> MAJOR.
+    base = 1767258000  # 2026-01-01 09:00:00 UTC
+    orphans = [_issue(f"e{i}", "open", parent=None, created_at=base + i * 60) for i in range(3)]
+    findings = vc.check_orphaned_tasks(orphans)
+    msg = _major_cluster_msg(findings)
+    assert msg is not None, "3 same-UTC-hour int-epoch orphans must fire the MAJOR cluster"
+    assert "2026-01-01 09:00" in msg, msg
+
+
+def test_string_timestamp_orphans_cluster_on_utc_hour():
+    orphans = [
+        _issue(f"s{i}", "open", parent=None, created_at=f"2026-01-01T09:{i:02d}:00")
+        for i in range(3)
+    ]
+    findings = vc.check_orphaned_tasks(orphans)
+    msg = _major_cluster_msg(findings)
+    assert msg is not None, "3 same-UTC-hour string-timestamp orphans must fire the MAJOR cluster"
+    assert "2026-01-01 09:00" in msg, msg
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset unavailable on this platform")
+def test_int_epoch_cluster_hour_is_tz_invariant():
+    base = 1767258000  # 2026-01-01 09:00:00 UTC
+    orphans = [_issue(f"e{i}", "open", parent=None, created_at=base + i * 60) for i in range(3)]
+    original_tz = os.environ.get("TZ")
+
+    def cluster_hour():
+        return _major_cluster_msg(vc.check_orphaned_tasks(orphans))
+
+    try:
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        utc_msg = cluster_hour()
+
+        os.environ["TZ"] = "America/Los_Angeles"
+        time.tzset()
+        la_msg = cluster_hour()
+    finally:
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        time.tzset()
+
+    assert utc_msg is not None and la_msg is not None
+    assert "2026-01-01 09:00" in utc_msg
+    assert utc_msg == la_msg, "the UTC cluster hour must not depend on the host TZ"
