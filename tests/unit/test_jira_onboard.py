@@ -143,7 +143,9 @@ def test_emit_toml_fails_closed_on_unsupported_type() -> None:
     import datetime
 
     with pytest.raises(cfg.ConfigError):
-        cfg._emit_toml({"jira": {"when": datetime.datetime(2020, 1, 1)}})
+        cfg._emit_toml(
+            {"jira": {"when": datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)}}
+        )
     with pytest.raises(cfg.ConfigError):
         cfg._emit_toml({"jira": {"nested": {"k": "v"}}})  # nested sub-table
 

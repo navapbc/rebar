@@ -372,7 +372,7 @@ line-length = 100
 # GitHub Code Quality (CodeQL) surfaced; it is low-noise here (the few deliberate
 # long-lived handles carry an inline `# noqa: SIM115`). We take SIM115 only, not
 # the wider SIM group, which is noisier for this codebase.
-select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
+select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115", "ASYNC", "DTZ"]
 
 # ── BLE001 / T201 per-file-ignores (epic ring-gun-jot — CLOSED OUT) ───────────
 # The shrinking allowlist (a clone of the `.github/module-size-allowlist.txt`

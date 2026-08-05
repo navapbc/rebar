@@ -1420,8 +1420,7 @@ def test_reconcile_once_times_out_a_hung_review_and_continues(monkeypatch, tmp_p
 
 def _idle_reconcile_loop(*a, **k):
     async def _loop():
-        while True:
-            await asyncio.sleep(3600)
+        await asyncio.Event().wait()
 
     return _loop()
 
@@ -1608,7 +1607,7 @@ def test_shutdown_completes_an_in_flight_store_write_and_releases_the_lock(monke
         # The shape of emit_code_review_artifact: synchronous, lock-held, no await inside.
         with _lock.write_lock(tracker, dual_window=True):
             held.append(lock_dir.is_dir())
-            time.sleep(0.3)
+            time.sleep(0.3)  # noqa: ASYNC251 - deliberately synchronous: models emit_code_review_artifact's no-await-inside lock-held window
 
     monkeypatch.setattr(appmod._voter, "review_and_vote", _review_that_writes, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
