@@ -68,7 +68,7 @@ jobs:
 
       - name: Install rebar + the agents stack (from the committed lock)
         run: |
-          uv sync --locked --extra agents
+          uv sync --locked --extra dev
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Configure git identity
