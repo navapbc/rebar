@@ -16,7 +16,14 @@ import rebar
 import rebar.llm  # noqa: F401
 from rebar._cli import _llm_commands as cli
 
-# The pinned one-to-one CLI<->MCP mapping (the five code-reading operations).
+# The pinned one-to-one CLI<->MCP mapping (the five code-reading operations). Only the
+# KEYS are consumed below (they name the MCP tools that must expose ref + source); the
+# values record each tool's CLI counterpart.
+#
+# `review_ticket` is the one loose pairing, deliberately, since story 316a: the MCP tool
+# still runs the single-pass op, while its same-named CLI verb `rebar review` is a
+# deprecation shim that forwards to `review-plan`. Both surfaces still thread ref/source
+# — which is all this mapping is used to assert — but they no longer emit the same schema.
 _MAPPING = {
     "review_ticket": cli._review,
     "review_code": cli._review_code,
@@ -80,8 +87,10 @@ def test_cli_threads_ref_source(rebar_repo, monkeypatch, tmp_path):
     spec = tmp_path / "spec.txt"
     spec.write_text("spec")
 
+    # `rebar review` is a deprecation shim over `rebar review-plan` (story 316a): it
+    # threads ref/source into `rebar.llm.review_plan`, not `review_ticket`.
     cli._review([tid, "--ref", "release/x", "--source", "local"])
-    assert cap["review_ticket"] == ("release/x", "local")
+    assert cap["review_plan"] == ("release/x", "local")
 
     cli._review_code(["--diff-file", str(spec), "--ref", "feat/y", "--source", "attested"])
     assert cap["review_code"] == ("feat/y", "attested")

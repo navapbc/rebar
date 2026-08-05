@@ -43,7 +43,7 @@ Registered by `register_llm_tools` and always present, but each makes a live, bi
 |------|---------|
 | `review_code` | Run a multi-reviewer LLM code review of a git range (base..head) -> |
 | `review_plan` | Run the plan-review gate on a ticket -> a plan_review_verdict dict |
-| `review_ticket` | Run an LLM review of a ticket (or its graph) -> a review_result dict |
+| `review_ticket` | DEPRECATED (use review_plan) — LLM review of a ticket -> a review_result dict |
 | `scan_spec` | Batch-scan the store's open epics against a specification -> a |
 | `verify_completion` | Verify a ticket's completion requirements are met -> a completion_verdict dict |
 

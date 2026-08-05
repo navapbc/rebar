@@ -105,9 +105,10 @@ FSCK = "fsck"
 # graph — output of `rebar doctor`: blocking edges that disagree with the
 # structural link rule, plus their repair disposition after a `--repair` pass.
 DOCTOR = "doctor"
-# rebar.llm — output of an LLM review operation (`rebar review`). The MCP tool is
-# exempt (live LLM call → plain dict, no outputSchema); the CLI/library JSON path
-# is pinned to this schema via the "review" key below.
+# rebar.llm — output of the (deprecated, story 316a) review_ticket op. The MCP tool
+# is exempt (live LLM call → plain dict, no outputSchema); the surviving library
+# JSON path is pinned to this schema via the synthetic "review_ticket" key below —
+# the CLI verb `rebar review` no longer emits it (it forwards to review-plan).
 REVIEW_RESULT = "review_result"
 # rebar.llm — output of the completion-verification op (`rebar verify-completion`).
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
@@ -305,7 +306,16 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "metrics": METRICS,
     "fsck": FSCK,
     "doctor": DOCTOR,
-    "review": REVIEW_RESULT,
+    # `rebar review` is now a deprecation shim over the plan-review gate (story 316a),
+    # so its --output json path is pinned to the plan-review verdict schema, not
+    # review_result. The surviving library/MCP review_ticket surface is wired below
+    # under the synthetic "review_ticket" key.
+    "review": PLAN_REVIEW_VERDICT,
+    # rebar.llm.review_ticket / the MCP review_ticket tool (deprecated, story 316a):
+    # synthetic key, no CLI help arm (the CLI verb no longer emits this schema) —
+    # registered so the every-schema-file-is-wired guard sees review_result is still
+    # produced by the surviving library/MCP surface.
+    "review_ticket": REVIEW_RESULT,
     # completion-verification op: like `review`, no CLI help arm (so the --output
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
     # registered here so the every-schema-file-is-wired guard sees completion_verdict.
