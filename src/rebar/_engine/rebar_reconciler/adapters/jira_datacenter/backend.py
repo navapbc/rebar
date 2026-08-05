@@ -89,7 +89,12 @@ class _DCOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         emit_detach_clear: bool = False,
+        *,
+        suppressed_out: list[str] | None = None,
     ) -> dict[str, Any]:
+        # ``suppressed_out`` (ticket 8390) is accepted and IGNORED on purpose:
+        # ``_map_local_to_dc_fields`` never maps a parent at all, so this backend has
+        # no suppression to report and appending anything here would invent one.
         return _map_local_to_dc_fields(ticket)
 
     def map_fields_to_remote(

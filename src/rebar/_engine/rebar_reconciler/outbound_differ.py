@@ -68,6 +68,17 @@ from rebar_reconciler.outbound_comments import (  # noqa: F401
     _normalize_comment_body,
 )
 
+# The label-diff cluster lives in outbound_labels.py (split for module size; the same
+# seam-extraction the comment/link/assignee clusters above already went through). It is
+# self-contained — nothing else in this module feeds it. All four names are re-exported
+# so outbound_differ.<name> keeps resolving for existing callers and tests.
+from rebar_reconciler.outbound_labels import (  # noqa: F401
+    _EXCLUDED_PREFIXES,
+    _STATUS_ANNOTATION_LABEL,
+    _diff_labels,
+    _diff_status_annotation_labels,
+)
+
 # The link-diff cluster lives in outbound_links.py (split for module size); ticket
 # eefd made it compare in canonical shape via an injected SupportsLinks capability.
 from rebar_reconciler.outbound_links import _diff_links  # noqa: F401
@@ -258,113 +269,6 @@ class OutboundDiffConfig:
 
 
 # ---------------------------------------------------------------------------
-# Label diff
-# ---------------------------------------------------------------------------
-
-# NOTE: applier.py writes the bridge-internal binding label as
-# f"rebar-id:{local_id}" (COLON separator). Legacy code paths used a HYPHEN
-# separator ("rebar-id-<local_id>"); both forms must be excluded from outbound
-# diffs to avoid emitting spurious remove mutations for identity labels.
-# See bug 68a4-f9d5-5540-4b95.
-# rebar-status: labels are reconciler-managed annotation labels (emitted/removed
-# by status logic only); they must be excluded from the normal user-tag diff
-# so that rebar-status: labels on Jira do not produce spurious REMOVE mutations
-# via the tag diff path (ticket 929a).
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "rebar-status:")
-
-
-def _diff_labels(
-    ticket: dict[str, Any],
-    jira_fields: dict[str, Any],
-    intent_set: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Compare local tags to Jira labels. Exclude bridge-internal labels.
-
-    Bug a06c — REMOVE intent gating: when ``intent_set`` is provided
-    (non-None), a label in ``jira_labels - local_tags`` only produces a
-    REMOVE mutation when it appears in ``intent_set`` (the local
-    "ever-seen" set computed by ``local_label_intent``). This prevents
-    spurious REMOVEs for labels Jira side-added that local never had —
-    the root cause of T3 IB-ADD silently dropping under PR #457 bidir
-    suppression.
-
-    When ``intent_set`` is None, the legacy "remove anything in jira
-    but not in local" behavior is preserved (backwards compatible for
-    every existing test and call site).
-    """
-    local_tags: set[str] = set(
-        t for t in ticket.get("tags", []) if not any(t.startswith(p) for p in _EXCLUDED_PREFIXES)
-    )
-    jira_labels: set[str] = set(
-        label
-        for label in (jira_fields.get("labels") or [])
-        if not any(label.startswith(p) for p in _EXCLUDED_PREFIXES)
-    )
-
-    mutations: list[dict[str, Any]] = []
-    for label in sorted(local_tags - jira_labels):
-        if intent_set is not None and label not in intent_set:
-            # Label is in local's current tag set but was never user-added
-            # (only inbound-applied). Suppress the outbound ADD so a
-            # subsequent Jira-side REMOVE is not cancelled by a spurious
-            # re-ADD (T4 IB-REMOVE regression). See bug a06c.
-            continue
-        mutations.append({"action": "add", "label": label})
-    for label in sorted(jira_labels - local_tags):
-        if intent_set is not None and label not in intent_set:
-            # Label was never in local's history -> suppress spurious REMOVE.
-            continue
-        mutations.append({"action": "remove", "label": label})
-    return mutations
-
-
-# ---------------------------------------------------------------------------
-# Status annotation label helpers (ticket 929a)
-# ---------------------------------------------------------------------------
-
-# Local statuses that need an annotation label to preserve lossless intent.
-# Maps local_status -> rebar-status:<label> emitted when that status is active.
-# (blocked/cancelled have no direct equivalent in the live DIG workflow, so the
-# nearest live state plus this annotation label is the lossless encoding.)
-_STATUS_ANNOTATION_LABEL: dict[str, str] = {
-    "blocked": "rebar-status:blocked",
-    "cancelled": "rebar-status:cancelled",
-}
-
-
-def _diff_status_annotation_labels(
-    local_status: str,
-    jira_labels: list[str],
-) -> list[dict[str, Any]]:
-    """Compute add/remove mutations for rebar-status: annotation labels.
-
-    These labels encode lossless status information for statuses that have no
-    direct equivalent in the live DIG Jira workflow (currently blocked and
-    cancelled, which map to In Progress and Done respectively).
-
-    Rules:
-    - When local_status is in _STATUS_ANNOTATION_LABEL, emit ADD for the
-      corresponding rebar-status: label if Jira does not already carry it.
-    - When a rebar-status: annotation label is present on Jira but local_status
-      no longer matches it, emit REMOVE to clean up the stale label.
-    """
-    mutations: list[dict[str, Any]] = []
-    desired_annotation = _STATUS_ANNOTATION_LABEL.get(local_status)
-    jira_annotation_labels = {label for label in jira_labels if label.startswith("rebar-status:")}
-
-    # Add desired annotation if not already present
-    if desired_annotation is not None and desired_annotation not in jira_annotation_labels:
-        mutations.append({"action": "add", "label": desired_annotation})
-
-    # Remove stale annotations (rebar-status: labels that no longer match)
-    for stale in sorted(jira_annotation_labels):
-        if stale != desired_annotation:
-            mutations.append({"action": "remove", "label": stale})
-
-    return mutations
-
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -516,6 +420,7 @@ def compute_outbound_mutations(
                 binding_store,
                 local_ticket_types,
                 outbound_mapper,
+                dropped_field_sink=dropped_field_sink,
             )
         else:
             _compute_outbound_update_mutation(
@@ -595,12 +500,31 @@ def _compute_outbound_select_absent_gets(
 
 
 def _compute_outbound_create_mutation(
-    mutations, ticket, status, local_id, binding_store, local_ticket_types, outbound_mapper
+    mutations,
+    ticket,
+    status,
+    local_id,
+    binding_store,
+    local_ticket_types,
+    outbound_mapper,
+    *,
+    dropped_field_sink: list[tuple[str, str]] | None = None,
 ) -> None:
     """Phase: append the outbound CREATE mutation for an unbound local ticket.
 
     ``outbound_mapper`` is the injected Backend-port ``OutboundMapper`` (ticket 4af8);
     its ``map_local_to_remote`` replaces the former direct vendor-mapper import.
+
+    DROPPED-PARENT REPORTING (ticket 8390): bug 8b25's hierarchy guard omits a non-epic
+    parent from the mapped fields, and on this path that omission was totally silent —
+    a ticket created under a non-epic parent lost its hierarchy at birth with no durable
+    trace. Report it on the EXISTING drop channel (``run_differs._emit_outbound_field_alerts``
+    turns the pair into a deduped ``outbound-field-dropped`` bridge alert), keyed by the
+    LOCAL id because a create has no Jira key yet by construction.
+
+    Unlike the sibling UPDATE path there is no convergence gate here, and there must not
+    be one: at CREATE the issue does not exist on the tracker, so there is no remote
+    parent it could already match — the drop is unconditionally a real loss.
 
     TOMBSTONE GUARD (bug 3b5f): a local ticket with NO live binding but WITH a retired
     one was paired with a Jira issue a bounded direct GET confirmed 404 — deleted.
@@ -620,16 +544,21 @@ def _compute_outbound_create_mutation(
         local_status=status,
         jira_labels=[],
     )
+    suppressed_parents: list[str] = []
+    create_fields = outbound_mapper.map_local_to_remote(
+        ticket,
+        binding_store=binding_store,
+        local_ticket_types=local_ticket_types,
+        suppressed_out=suppressed_parents,
+    )
+    if suppressed_parents and dropped_field_sink is not None:
+        dropped_field_sink.append((local_id, "parent"))
     mutations.append(
         OutboundMutation(
             local_id=local_id,
             jira_key=None,
             action="create",
-            fields=outbound_mapper.map_local_to_remote(
-                ticket,
-                binding_store=binding_store,
-                local_ticket_types=local_ticket_types,
-            ),
+            fields=create_fields,
             comments=_map_comments_for_create(ticket),
             labels=(
                 [
