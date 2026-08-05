@@ -152,6 +152,30 @@ def test_the_success_row_carries_the_limits_and_duration_it_ran_under(monkeypatc
     assert isinstance(row["duration_s"], (int, float)) and row["duration_s"] >= 0.0
 
 
+def test_success_shape_capture_swallows_reducer_failure_and_warns(monkeypatch, caplog):
+    """The success-path shape capture (extracted into `_merge_success_run_shape`) is telemetry:
+    a failure in `run_shape`/`shape_only` must NEVER break the call path. It is swallowed with a
+    single warning and leaves the authoritative `usage` dict untouched, so a reducer bug can
+    never corrupt the billable figures `_extract_usage` already placed there."""
+    from rebar.llm import runner as _runner
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("reducer exploded")
+
+    monkeypatch.setattr(usage_log, "run_shape", _boom)
+    usage = {"input_tokens": 11, "output_tokens": 7}
+    before = dict(usage)
+    with caplog.at_level("WARNING"):
+        _runner._merge_success_run_shape(
+            usage, [], request_limit=5, tool_calls_limit=8, call_label="op-x"
+        )
+    assert usage == before, "a telemetry failure must not mutate the authoritative usage dict"
+    assert any(
+        "run-shape capture failed" in rec.getMessage() and "op-x" in rec.getMessage()
+        for rec in caplog.records
+    ), "the swallowed reducer failure was not logged with the op label"
+
+
 def test_a_loop_and_a_breadth_run_are_separable_from_the_record_alone(monkeypatch, tmp_path):
     """THE acceptance criterion, and the reason the axis must vary: two runs that look
     identical in `requests` must be told apart by the recorded distinct-vs-total ratio,
