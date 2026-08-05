@@ -82,6 +82,29 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # now ALWAYS dual-written and ALWAYS consumed as the outbound field differ's
 # arbitration ancestor (ADR 0026). No reconciler keys remain to configure here.
 
+# ── Code-health analysis: THIS project's stack, not the adapter's ────────────────
+#
+# The scc adapter is deliberately POLYGLOT — it ships no hardcoded language filter, and with
+# `include_extensions` unset it measures every file type scc recognises. Narrowing is
+# PER-PROJECT configuration, and this is rebar's narrowing: rebar's shipped code is Python
+# under `src/rebar`, so that is what its module-size metric should describe. A polyglot repo
+# leaves these keys off; a Go/TS repo sets its own.
+#
+# It deliberately MIRRORS WHAT CI ALREADY ENFORCES. The Module-size gate measures
+# `find src/rebar -name '*.py' | xargs wc -l` against `.github/module-size-limit.txt`, so the
+# metric is pointed at the same tree, the same file type, and the same number — `size_cap`
+# below IS the integer in `.github/module-size-limit.txt` (800). If that file's limit ever
+# changes, change it here too or the metric and the gate will disagree.
+#
+# These keys only SCOPE the analysis; there is no on/off switch to set (the former
+# `code_health.enabled` was removed and is now tombstoned) — `rebar metrics` always evaluates
+# its structural metrics, and without these it would measure every file under the repo root.
+[code_health]
+scan_roots = ["src/rebar"]
+include_extensions = ["py"]
+size_cap = 800
+size_near_fraction = 0.1
+
 [identity]
 
 # Authenticated-authorship merge-gate (epic gnu-whale-ichor, AC7). The CI workflow

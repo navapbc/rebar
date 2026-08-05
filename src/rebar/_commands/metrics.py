@@ -142,6 +142,7 @@ def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
         since=since,
         until=until,
         scan_roots=code_health.scan_roots,
+        include_extensions=code_health.include_extensions,
         size_cap=code_health.size_cap,
         size_near_fraction=code_health.size_near_fraction,
         analysis_cache={},
