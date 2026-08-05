@@ -697,6 +697,10 @@ def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapa
         native_structured_output=all(c.native_structured_output for c in per_candidate),
         prompt_cache_style=per_candidate[0].prompt_cache_style if len(styles) == 1 else "none",
         supports_thinking=all(c.supports_thinking for c in per_candidate),
+        # `all` like every sibling: a chain may claim native output UNDER THINKING only when EVERY
+        # candidate is MEASURED to support it (story 18ae) — any candidate could answer, so a
+        # mixed chain must fail closed to PromptedOutput rather than route native by luck.
+        native_output_with_thinking=all(c.native_output_with_thinking for c in per_candidate),
         supports_temperature=all(c.supports_temperature for c in per_candidate),
         # `all`, like every other field: web access is attached to the chain as a WHOLE, so the
         # record may only claim the provider-side route when EVERY candidate can serve it —

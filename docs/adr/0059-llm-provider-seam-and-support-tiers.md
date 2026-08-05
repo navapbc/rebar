@@ -130,7 +130,10 @@ Two override tables sit deliberately apart, and both are **membership-keyed**:
   READ whose value happens to be a string enum; that is materially different from
   `resolved.startswith("anthropic")`.
 - `_MODEL_ID_CAPABILITY_OVERRIDES` (`capabilities.py:186-206`) keys on the EXACT full model id
-  and records per-model API DEFECTS (six entries, all `supports_temperature: False`). It is a
+  and records per-model API DEFECTS (six entries, all `supports_temperature: False`) plus the
+  two E1-measured Bedrock cells (`us.anthropic.claude-sonnet-4-6` and the dated
+  `us.anthropic.claude-haiku-4-5-20251001-v1:0`) that set `native_structured_output: True` and
+  `native_output_with_thinking: True`. It is a
   separate table rather than a widening of the first because the first table's predicate
   signature is a signed contract of a closed story, and a downstream leaf must not silently
   redefine a shipped signed contract. A **denylist** is used rather than an allowlist so an

@@ -296,3 +296,118 @@ def test_no_native_output_provider_is_dropped_except_the_disclosed_groq():
     }
     actual = {m: _caps(m).native_structured_output for m in previously_native}
     assert actual == previously_native
+
+
+# ── §S3/18ae — measured Bedrock native-output rows + native_output_with_thinking plumbing ───
+#
+# APPENDED to tests/unit/test_llm_capabilities.py. Uses the module's existing _Verdict, _caps,
+# and _bedrock_claude_profile_stub helpers.
+
+_MEASURED_SONNET_ID = "us.anthropic.claude-sonnet-4-6"
+_MEASURED_HAIKU_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def _bedrock_claude_model(model_id: str):
+    """A model OBJECT carrying a Bedrock-hosted Claude profile plus the exact ``model_name`` the
+    exact-id override table (story S3/18ae) matches against."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(model_name=model_id, profile=_bedrock_claude_profile_stub())
+
+
+def test_measured_bedrock_sonnet_flips_to_native_under_thinking():
+    """The motivating enablement: the E1-measured `us.anthropic.claude-sonnet-4-6` cell must win
+    the exact-id override over the Claude family default (`native_structured_output: False`) and
+    route NativeOutput — INCLUDING under extended thinking, because its row also sets
+    `native_output_with_thinking: True` (E1: outputConfig json_schema + thinking wire-legal)."""
+    caps = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
+    assert caps.native_structured_output is True, (
+        "the exact-id override must beat the Claude family default of False"
+    )
+    assert caps.native_output_with_thinking is True
+    assert isinstance(structured.output_mode(_Verdict, caps), NativeOutput)
+    assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), NativeOutput)
+
+
+def test_measured_bedrock_dated_haiku_flips_to_native_under_thinking():
+    """The dated haiku PROFILE id (the bare alias 400s at request validation; measured E1) is the
+    second enabled cell — same contract as sonnet."""
+    caps = _caps(_bedrock_claude_model(_MEASURED_HAIKU_ID))
+    assert caps.native_structured_output is True
+    assert caps.native_output_with_thinking is True
+    assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), NativeOutput)
+
+
+# ── plumbing pins: native_output_with_thinking must reach the constructed record on every path ─
+
+
+def test_native_under_thinking_reaches_record_on_profile_construction_site():
+    """Plumbing regression pin (review BLOCK 1): `_capabilities_from_profile` must SEED the field
+    in its caps dict AND pass it to the `ModelCapabilities(...)` constructor. A build that omits
+    it leaves the field at its dataclass default False and the row is silently inert — this pin
+    goes RED in that case."""
+    caps = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
+    assert caps.native_output_with_thinking is True
+
+
+def test_native_under_thinking_reaches_record_on_string_fallback_site():
+    """Plumbing regression pin: the string-fallback path (a `bedrock:<id>` STRING has no profile
+    resolver by design) must seed + pass the field too. Same measured cell, addressed as a
+    string, must still enable native-under-thinking — otherwise the two construction paths are
+    split-brain."""
+    caps = _caps(f"bedrock:{_MEASURED_SONNET_ID}")
+    assert caps.native_structured_output is True
+    assert caps.native_output_with_thinking is True
+    assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), NativeOutput)
+
+
+def test_fallback_chain_all_supporting_preserves_native_under_thinking():
+    """Third construction site (review BLOCK/T3): `_intersect_capabilities` builds the conservative
+    record for a FallbackModel chain and feeds it straight into `output_mode`. It must intersect
+    `native_output_with_thinking` with `all(...)` like every sibling field — a chain whose
+    candidates ALL support native-under-thinking keeps it True and routes NativeOutput under
+    thinking. A build omitting the field collapses it to False and this goes RED."""
+    from rebar.llm.runner import _intersect_capabilities
+
+    measured = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
+    chain = _intersect_capabilities([measured, measured])
+    assert chain.native_output_with_thinking is True
+    assert chain.native_structured_output is True
+    assert isinstance(structured.output_mode(_Verdict, chain, thinking=True), NativeOutput)
+
+
+def test_fallback_chain_mixed_collapses_to_prompted_under_thinking():
+    """The conservative half of the intersection: a chain mixing a measured cell with a
+    non-measured Claude cell must NOT claim native-under-thinking (any candidate could answer), so
+    the field collapses to False and thinking routes PromptedOutput."""
+    from rebar.llm.runner import _intersect_capabilities
+
+    measured = _caps(_bedrock_claude_model(_MEASURED_SONNET_ID))
+    unmeasured = _caps(_bedrock_claude_model("us.anthropic.claude-opus-4-8"))
+    chain = _intersect_capabilities([measured, unmeasured])
+    assert chain.native_output_with_thinking is False
+    assert isinstance(structured.output_mode(_Verdict, chain, thinking=True), PromptedOutput)
+
+
+# ── negative controls: fail-closed cells must stay PromptedOutput ────────────────────────────
+
+
+def test_opus_with_only_temperature_row_stays_prompted_under_thinking():
+    """Fail-closed negative control: `us.anthropic.claude-opus-4-8` carries ONLY a
+    `supports_temperature: False` row (ticket 2932/1903) and NO native-output/thinking row, so it
+    keeps the Claude family default and stays PromptedOutput even under thinking. This proves the
+    enablement is scoped to the exact measured ids, not the whole Bedrock-Claude family."""
+    caps = _caps(_bedrock_claude_model("us.anthropic.claude-opus-4-8"))
+    assert caps.native_structured_output is False
+    assert caps.native_output_with_thinking is False
+    assert caps.supports_temperature is False  # the row it DOES carry is untouched
+    assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), PromptedOutput)
+
+
+def test_unknown_bedrock_claude_id_stays_prompted_under_thinking():
+    """An arbitrary unmeasured Bedrock-Claude id (no override row at all) preserves the
+    family-level fail-closed default — no speculative enablement."""
+    caps = _caps(_bedrock_claude_model("us.anthropic.claude-sonnet-9-9"))
+    assert caps.native_structured_output is False
+    assert caps.native_output_with_thinking is False
+    assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), PromptedOutput)
