@@ -35,8 +35,6 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
             "-c",
             "code_health.scan_roots=src,web",
             "-c",
-            'code_health.analyzers={"python":"lizard","typescript":"jscpd"}',
-            "-c",
             "code_health.size_cap=900",
             "-c",
             "code_health.size_near_fraction=0.2",
@@ -58,14 +56,12 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
     assert payload["config"]["code_health"] == {
         "enabled": True,
         "scan_roots": ["src", "web"],
-        "analyzers": {"python": "lizard", "typescript": "jscpd"},
         "size_cap": 900,
         "size_near_fraction": 0.2,
     }
     assert payload["sources"]["code_health"] == {
         "enabled": "cli",
         "scan_roots": "cli",
-        "analyzers": "cli",
         "size_cap": "cli",
         "size_near_fraction": "cli",
     }
@@ -75,7 +71,6 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
     ("key", "value", "message"),
     [
         ("size_near_fraction", 1.01, "must be <= 1.0"),
-        ("analyzers", ["lizard"], "code_health.analyzers"),
     ],
 )
 def test_invalid_code_health_values_fail_at_load(
@@ -94,14 +89,12 @@ def test_config_surface_golden_includes_code_health_keys_and_env_names() -> None
     assert {
         "code_health.enabled",
         "code_health.scan_roots",
-        "code_health.analyzers",
         "code_health.size_cap",
         "code_health.size_near_fraction",
     } <= set(payload["config_keys"])
     assert {
         "REBAR_CODE_HEALTH_ENABLED",
         "REBAR_CODE_HEALTH_SCAN_ROOTS",
-        "REBAR_CODE_HEALTH_ANALYZERS",
         "REBAR_CODE_HEALTH_SIZE_CAP",
         "REBAR_CODE_HEALTH_SIZE_NEAR_FRACTION",
     } <= set(payload["canonical_env_vars"])

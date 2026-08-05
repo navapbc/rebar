@@ -104,20 +104,6 @@ def _as_str_list(v: Any, key: str) -> list[str]:
     return list(_as_str_tuple(v, key))
 
 
-def _as_str_dict(v: Any, key: str) -> dict[str, str]:
-    """A string mapping from a TOML table or JSON-object CLI override."""
-    if isinstance(v, str):
-        import json
-
-        try:
-            v = json.loads(v)
-        except json.JSONDecodeError:
-            raise ConfigError(f"{key}: expected a JSON object, got {v!r}") from None
-    if not isinstance(v, dict):
-        raise ConfigError(f"{key}: expected a table or JSON object, got {type(v).__name__}")
-    return {str(name): _as_str(value, key) for name, value in v.items()}
-
-
 def _as_choice(v: Any, key: str, choices: set[str]) -> str:
     s = str(v).strip().lower()
     if s not in choices:
