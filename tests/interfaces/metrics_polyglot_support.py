@@ -86,6 +86,14 @@ def fake_analyzer_bin(tmp_path: Path) -> Path:
 
     bin_dir = tmp_path / "analyzer-bin"
     bin_dir.mkdir()
+    # The stub MODELS REAL SCC's argv contract rather than answering unconditionally
+    # (rebar-ticket c5b3-1b8a-08dd-40af). Real scc only populates per-language ``Files``
+    # when ``--by-file`` is passed; without it every group carries an EMPTY list. The
+    # original stub emitted entries regardless, which made it strictly more permissive
+    # than the tool it stands in for -- and that permissiveness is precisely why this
+    # test could not catch the missing ``--by-file`` in the first place. Keeping the
+    # stub argv-faithful turns this into a real regression guard: drop the flag and the
+    # adapter measures nothing, reports unavailable, and this test goes red.
     _write_executable(
         bin_dir / "scc",
         """#!/usr/bin/env python3
@@ -93,11 +101,33 @@ import json
 import pathlib
 import sys
 
-root = pathlib.Path(sys.argv[-1]).resolve()
+argv = sys.argv[1:]
+root = pathlib.Path(argv[-1]).resolve()
+
+# ``--include-ext py,ts`` narrows to those bare extensions, as real scc does. Absent,
+# every file counts -- the polyglot default.
+extensions = set()
+if "--include-ext" in argv:
+    extensions = {
+        item for item in argv[argv.index("--include-ext") + 1].split(",") if item
+    }
+
 files = []
-for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
-    code = len(path.read_text(encoding="utf-8").splitlines())
-    files.append({"Location": str(path.resolve()), "Code": code})
+if "--by-file" in argv:
+    for path in sorted(c for c in root.rglob("*") if c.is_file()):
+        if extensions and path.suffix.lstrip(".") not in extensions:
+            continue
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        files.append(
+            {
+                "Location": str(path.resolve()),
+                # ``Lines`` is the raw line count (what ``wc -l`` reports); ``Code``
+                # excludes blank lines. Real scc emits both, and they differ.
+                "Lines": len(lines),
+                "Code": sum(1 for line in lines if line.strip()),
+            }
+        )
 print(json.dumps([{"Name": "Fixture", "Files": files}]))
 """,
     )

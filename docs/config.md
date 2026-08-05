@@ -187,6 +187,7 @@ values are otherwise identical:
 # rebar.toml
 [code_health]
 scan_roots = ["src", "web"]           # list[str]; default []
+include_extensions = ["py"]            # list[str]; default [] (every type scc recognises)
 size_cap = 800                          # optional int; default unset/None
 size_near_fraction = 0.15              # float; default 0.1
 ```
@@ -195,14 +196,21 @@ size_near_fraction = 0.15              # float; default 0.1
 # pyproject.toml
 [tool.rebar.code_health]
 scan_roots = ["src", "web"]
+include_extensions = ["py"]
 size_cap = 800
 size_near_fraction = 0.15
 ```
 
-`scan_roots` is `list[str]` and defaults to `[]`; `size_cap` is an optional `int` and defaults
-to unset/`None`; and `size_near_fraction` is a `float` and defaults to `0.1`. TOML has no null
-value, so omit `size_cap` unless setting an integer. There is no per-language analyzer
-*selection* key: `git_metrics` composes the scc, lizard, and jscpd adapters directly. Install the required tools separately as described in
+`scan_roots` is `list[str]` and defaults to `[]`; `include_extensions` is `list[str]` and
+defaults to `[]`, meaning **every file type scc recognises** — the analyzer is polyglot and
+ships no hardcoded language filter; `size_cap` is an optional `int` and defaults to
+unset/`None`; and `size_near_fraction` is a `float` and defaults to `0.1`. TOML has no null
+value, so omit `size_cap` unless setting an integer. Setting `include_extensions` (bare
+extensions, no leading dot — e.g. `["py"]`, `["go", "ts"]`) narrows the module-size metric to
+the file types a project's own size policy governs, so the metric describes the same files the
+project's size gate enforces rather than every file in the scan roots. There is no per-language
+analyzer *selection* key: `git_metrics` composes the scc, lizard, and jscpd adapters directly.
+Install the required tools separately as described in
 [user-guide.md](user-guide.md) (§ Metrics).
 
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
