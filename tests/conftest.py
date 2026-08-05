@@ -41,7 +41,20 @@ if _TESTS_DIR not in sys.path:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers so pytest does not emit UnknownMarkWarning."""
+    """Enforce the declared Git floor, then register custom markers.
+
+    The floor is checked FIRST and fails the whole session (it never skips): the
+    two-clone convergence regressions need ``git merge-tree --write-tree`` (Git 2.38+),
+    and a regression that quietly does not run reads as coverage while providing none —
+    ticket 980d-83ac-a6bb-4edb. The declared value lives in
+    ``.github/git-version-floor.txt``, shared with the contributor docs and the CI gate.
+    """
+    import _git_floor
+
+    violation = _git_floor.floor_violation()
+    if violation is not None:
+        raise pytest.UsageError(violation)
+
     config.addinivalue_line(
         "markers",
         "allow_network: opt out of the network-escape guard for tests that "

@@ -140,9 +140,15 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 
 **System prerequisites:**
 - [Python](https://www.python.org) ≥ 3.11
-- [`git`](https://git-scm.com) — required (the store is a git orphan branch +
-  worktree). The engine is pure in-process Python; `bash` and `jq` are **not**
-  required at runtime.
+- [`git`](https://git-scm.com) **≥ 2.38** — required (the store is a git orphan
+  branch + worktree). The engine is pure in-process Python; `bash` and `jq` are
+  **not** required at runtime. The **2.38 floor** is a *development* requirement:
+  the two-clone convergence regressions merge divergent tracker histories with
+  `git merge-tree --write-tree`, added in Git 2.38, and rebar enforces that floor
+  rather than skipping those tests on older clients — a test that quietly does not
+  run reads as coverage while providing none. The floor is declared once in
+  `.github/git-version-floor.txt` and enforced by both `tests/conftest.py` (the
+  suite refuses to start, naming the required version) and CI.
 - **No external lock binary is required.** Write serialization uses a two-window
   lock built entirely from the Python standard library — a `fcntl.flock(LOCK_EX)`
   advisory lock plus an atomic `mkdir` lock (`src/rebar/_store/lock.py`) — so there
@@ -194,7 +200,8 @@ See [Install](#install) and [Tests](#tests).
 
 rebar ships from one Python package — PyPI distribution **`nava-rebar`** (the
 import package and commands stay `rebar` / `rebar-mcp`). Pick the channel that
-fits. (System prerequisites in all cases: `git` and `python3` (≥ 3.11); write
+fits. (System prerequisites in all cases: `git` (≥ 2.38 to develop/test rebar; see
+[Requirements](#requirements)) and `python3` (≥ 3.11); write
 serialization uses a built-in `fcntl.flock` + `mkdir` lock with no external
 binary; `acli` only for live Jira reconciliation.)
 

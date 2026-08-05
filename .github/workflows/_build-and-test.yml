@@ -288,6 +288,32 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
 
+      # Git version floor gate: the two-clone convergence regressions merge divergent
+      # tracker histories with `git merge-tree --write-tree`, a mode Git gained in 2.38.
+      # rebar DECLARES and ENFORCES that floor rather than skipping those regressions on
+      # older clients — a regression that quietly does not run reads as coverage while
+      # providing none (ticket 980d-83ac-a6bb-4edb). This step fails the runner early and
+      # by name; tests/conftest.py enforces the same floor for every contributor. The
+      # value is single-sourced in .github/git-version-floor.txt, which the contributor
+      # docs and tests/unit/test_git_version_floor.py also read, so the three cannot drift.
+      - name: Git version floor gate
+        shell: bash
+        run: |
+          floorfile=.github/git-version-floor.txt
+          if [ ! -f "$floorfile" ]; then
+            echo "::error::missing $floorfile (the single source of the Git version floor)"
+            exit 1
+          fi
+          floor=$(tr -d '[:space:]' < "$floorfile")
+          have=$(git --version | awk '{print $3}')
+          echo "declared floor: git >= $floor; runner has git $have"
+          if [ "$(printf '%s\n%s\n' "$floor" "$have" | sort -V | head -n1)" != "$floor" ]; then
+            echo "::error::this runner has git $have but rebar requires git >= $floor" \
+                 "(git merge-tree --write-tree). Upgrade git on the runner image;" \
+                 "the merge-tree regressions must run here, not be skipped."
+            exit 1
+          fi
+
       # Module-size gate: an ABSOLUTE hard cap on every src/rebar/**/*.py file. There is no
       # allowlist escape hatch any more (epic 716f drained it to zero). The limit is
       # single-sourced in .github/module-size-limit.txt and LOCKED: changing it requires an
