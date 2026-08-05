@@ -104,33 +104,62 @@ guard): the suite reports `skipped`, never a hard failure or a raw connection tr
 
 ### Readiness
 
-Readiness is a **two-stage gate** (`conftest.py::wait_for_jira_dc_ready`):
+**Session readiness asks exactly one question: does Jira answer REST at all?**
+`conftest.py::wait_for_jira_dc_ready` polls `/rest/api/2/serverInfo` with a **default
+20-minute budget** and a ~5 second poll cadence, overridable via `JIRA_DC_READY_TIMEOUT`
+(seconds). The generous default is deliberate: an emulated amd64-under-arm64 base plus a
+~900-artifact Maven download makes upstream's quoted "3-5 minutes" unattainable on an arm64
+runner. On expiry it fails with an explicit "harness not running / not ready" message naming
+`make jira-dc-up` — never a raw connection traceback.
 
-1. **Does Jira answer at all?** Poll `/rest/api/2/serverInfo` with a **default 20-minute
-   budget** and a ~5 second poll cadence, overridable via `JIRA_DC_READY_TIMEOUT` (seconds).
-   The generous default is deliberate: an emulated amd64-under-arm64 base plus a
-   ~900-artifact Maven download makes upstream's quoted "3-5 minutes" unattainable on an
-   arm64 runner. On expiry it fails with an explicit "harness not running / not ready"
-   message naming `make jira-dc-up` — never a raw connection traceback.
-2. **Are the Epic custom fields registered?** Then poll `/rest/api/2/field` until both
-   `Epic Link` and `Epic Name` appear, under its own **default 10-minute budget** (~10s
-   cadence), overridable via `JIRA_DC_FIELD_READY_TIMEOUT` (seconds).
+**It does not — and must not — wait for the Epic custom fields.** GreenHopper provisions
+`Epic Link` and `Epic Name` **when the first Jira Software project is created**, not when the
+plugin starts. Measured on GitHub Actions experiment run `30981084637` against this image:
 
-Stage 2 exists because a `serverInfo` 200 does **not** imply the Jira Software (GreenHopper)
-custom fields are usable — Jira serves REST well before the plugin finishes registering them.
-Measured on probe run `30944211742`: `serverInfo` went green at **8m32s**, and **one second
-later** `/rest/api/2/field` returned **27 fields, every one a SYSTEM field** (no
-`customfield_*`, so neither Epic field). This suite only survived that because it does slower
-work afterwards — dependency install plus a ~41-minute run — before
-`_assert_project_capabilities` asserts the same fields; that margin was incidental, not a
-guarantee, i.e. a latent flake (bug `9790-cafa-dffa-462e`).
+```
+[before]            HTTP 200 total=27 customfield_count=0   EpicLink=False EpicName=False
+[after-180s-quiet]  HTTP 200 total=27 customfield_count=0   EpicLink=False EpicName=False
+create project -> HTTP 201 {'id': 10000, 'key': 'RBJEXPT'}
+[after-create+0s]   HTTP 200 total=55 customfield_count=13  EpicLink=True  EpicName=True
+VERDICT: elapsed_after_create=0.0512
+```
+
+So a 27-field, zero-`customfield_*` inventory is the **normal, healthy** state of a fresh
+instance with no project — and a session-start wait for those fields is a deadlock, not a slow
+path: it waits for something only the action it blocks can produce. Bug
+`9790-cafa-dffa-462e` added exactly such a gate and it errored **all 62 cells at fixture
+setup** (run `30975323866`); tripling its allowance to 1800s changed nothing (run
+`30978613228` expired after 181 polls on a byte-identical inventory), while the run
+immediately before it landed passed **62/62** (run `30964805133`). Corrected by bug
+`941b-f049-5f29-4410`.
+
+**Where the Epic capability IS checked:** `conftest.py::_assert_project_capabilities`, which
+runs immediately after `_create_scratch_project` — the first moment the fields can exist. It
+is a bounded **wait**, not a single read (0.0512s is fast but not atomic with the create's
+`201`, so one read can lose the race), it raises `AssertionError` if the fields never appear,
+and on success it prints the elapsed time, poll count and resolved field ids to the job log.
+Its allowance is **`JIRA_DC_FIELD_READY_TIMEOUT` (seconds), default 120** — ~2400x the
+measured 0.0512s, so it has enormous headroom while still failing a genuinely broken image in
+two minutes. Override it per-invocation:
+
+```bash
+REBAR_RUN_EXTERNAL=1 JIRA_DC_FIELD_READY_TIMEOUT=300 \
+  pytest -m external tests/external/live_jira_dc -q -rA
+```
 
 The definition is shared with the deterministic probe
 (`scripts/jira_dc_epic_link_clear_probe.py`) via `scripts/jira_dc_field_readiness.py`, so
-there is exactly one answer to "is it ready?". On expiry the failure names both candidate
-causes — the fields **never registered** within the budget (timing), or this image **does not
-offer** them (a genuine degrade) — and dumps the observed field names as the evidence that
-separates them.
+there is exactly one answer to "are the Epic fields registered?" — and the probe creates its
+project before asking, for the same reason.
+
+**Reading a failure.** The message dumps the field inventory it observed; that dump is the
+decision procedure, and waiting longer is never the answer:
+
+| What the inventory shows | What it means | What to do |
+| --- | --- | --- |
+| **No `customfield_*` entries at all** | The check ran before any Jira Software project existed on the instance | A code fault, not an environment one — the call site is in the wrong place (this is bug `941b-f049-5f29-4410`) |
+| **Other `customfield_*` entries present, but not `Epic Link`/`Epic Name`** | Provisioning happened; this image genuinely no longer ships the Epic fields | A real degrade — re-run the capability map against the current image and update `_REQUIRED_FIELDS` |
+| **A non-200 status, or a body that is not a list** | The inventory could not be read at all | Treated as not-ready (never a vacuous pass); the message records the HTTP status actually received |
 
 ## Feasibility evidence (recorded reproducibly)
 
