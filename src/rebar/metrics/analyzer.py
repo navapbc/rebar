@@ -1,4 +1,11 @@
-"""Language-agnostic analyzer contract for code-health metrics."""
+"""Language-agnostic analyzer contract for code-health metrics.
+
+The concrete adapters in :mod:`rebar.metrics.analyzers` (``scc_loc``,
+``lizard_complexity``, ``jscpd_dup``) are composed directly by
+:mod:`rebar.metrics.git_metrics`; this module supplies the shared result shape
+and the structural protocol they conform to. It deliberately holds no registry
+or dispatch — per-language analyzer *selection* is not a shipped capability.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from rebar._optional import OptionalDependencyError, guard_import
 from rebar.metrics.registry import Unavailable
 
 
@@ -27,39 +33,3 @@ class Analyzer(Protocol):
         repo_root: Path,
         languages: tuple[str, ...] | None = None,
     ) -> AnalyzerResult | Unavailable: ...
-
-
-ANALYZERS: dict[str, Analyzer] = {}
-
-
-def load_lizard(*, accruing_since: str) -> Any | Unavailable:
-    """Load the optional lizard module, or report why it is unavailable."""
-
-    try:
-        return guard_import("lizard", extra="metrics")
-    except OptionalDependencyError as exc:
-        return Unavailable(reason=str(exc), accruing_since=accruing_since)
-
-
-def resolve_analyzer(language: str) -> Analyzer | None:
-    """Resolve the analyzer configured for ``language``."""
-
-    return ANALYZERS.get(language)
-
-
-def analyze_or_unavailable(
-    language: str,
-    repo_root: Path,
-    *,
-    languages: tuple[str, ...] | None = None,
-    accruing_since: str,
-) -> AnalyzerResult | Unavailable:
-    """Analyze a repository or report that no analyzer is configured."""
-
-    analyzer = resolve_analyzer(language)
-    if analyzer is None:
-        return Unavailable(
-            reason=f"no analyzer configured for {language}",
-            accruing_since=accruing_since,
-        )
-    return analyzer.analyze(repo_root, languages=languages)

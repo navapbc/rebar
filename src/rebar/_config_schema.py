@@ -29,7 +29,6 @@ from rebar._config_coercion import (  # noqa: F401 — re-exported for callers
     _as_git_remote,
     _as_int,
     _as_str,
-    _as_str_dict,
     _as_str_list,
     _as_str_tuple,
     _as_tracker_dir,
@@ -537,8 +536,6 @@ class CodeHealthConfig:
 
     enabled: bool = False
     scan_roots: list[str] = field(default_factory=list)
-    # read-via: inert pending bug dce2-b93d-4112-451c
-    analyzers: dict[str, str] = field(default_factory=dict)
     size_cap: int | None = None
     size_near_fraction: float = 0.1
 
@@ -713,7 +710,6 @@ _SECTIONS: dict[str, dict] = {
     "code_health": {
         "enabled": lambda v, k: _as_bool(v, k),
         "scan_roots": lambda v, k: _as_str_list(v, k),
-        "analyzers": lambda v, k: _as_str_dict(v, k),
         "size_cap": lambda v, k: None if v is None else _as_int(v, k, minimum=0),
         "size_near_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
     },
