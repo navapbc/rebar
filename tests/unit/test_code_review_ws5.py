@@ -551,3 +551,66 @@ def test_diff_scope_still_rejects_a_genuinely_different_file(monkeypatch, tmp_pa
     assert not _security_match_lands(
         monkeypatch, location_file="other.py", changed_files=["app.py"], repo_root=str(tmp_path)
     ), "a different file must NOT match after canonicalization"
+
+
+# ── security-pin freshness boundary + DTZ-aware date source (story 28cd) ─────────────────────
+def test_freshness_boundary_equal_is_not_stale():
+    import datetime as _dt
+
+    from rebar.grounding.detectors import security_pin
+
+    pin = {"vendored_at": "2026-01-01", "cadence_days": 90, "families": ["x"]}
+    # age_days == cadence_days -> NOT stale (stale is age > cadence, strict).
+    status = security_pin.freshness(_dt.date(2026, 4, 1), pin=pin)  # exactly 90d
+    assert status["age_days"] == 90
+    assert status["stale"] is False
+
+
+def test_freshness_boundary_one_over_is_stale():
+    import datetime as _dt
+
+    from rebar.grounding.detectors import security_pin
+
+    pin = {"vendored_at": "2026-01-01", "cadence_days": 90, "families": ["x"]}
+    status = security_pin.freshness(_dt.date(2026, 4, 2), pin=pin)  # 91d, one over
+    assert status["age_days"] == 91
+    assert status["stale"] is True
+
+
+def test_security_pin_main_uses_aware_now_local_date_not_date_today():
+    """main() must derive today from an AWARE current instant converted to the local date —
+    NOT from the DTZ-flagged datetime.date.today(). Asserted structurally over the source."""
+    import ast
+    from pathlib import Path
+
+    from rebar.grounding.detectors import security_pin
+
+    src = Path(security_pin.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    main_fn = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main"),
+        None,
+    )
+    assert main_fn is not None, "security_pin.main must exist"
+
+    # No date.today() anywhere in main().
+    today_calls = [
+        n
+        for n in ast.walk(main_fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "today"
+    ]
+    assert not today_calls, "main() must not call date.today() (DTZ011)"
+
+    # An aware now(tz=...) -> .astimezone() -> .date() chain must be present.
+    now_calls = [
+        n
+        for n in ast.walk(main_fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "now"
+    ]
+    assert now_calls, "main() must obtain an aware current instant via datetime.now(tz=...)"
+    for call in now_calls:
+        assert any(kw.arg == "tz" for kw in call.keywords), "now() must pass an explicit tz="
+    assert ".date()" in src.split("def main")[1].split("\n\n")[0] or any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "date"
+        for n in ast.walk(main_fn)
+    ), "main() must convert the aware instant to a local date via .date()"

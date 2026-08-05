@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import NamedTuple
 
 
@@ -62,10 +62,10 @@ def check_orphaned_tasks(issues: list[dict]) -> list[Finding]:
         created = o.get("created_at", o.get("created", ""))
         try:
             if isinstance(created, int):
-                ts = str(datetime.fromtimestamp(created))[:19]
+                dt = datetime.fromtimestamp(created, tz=timezone.utc)
             else:
                 ts = created[:19].replace("T", " ")
-            dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
             clusters[dt.strftime("%Y-%m-%d %H:00")].append(o)
         except (ValueError, IndexError, TypeError, OSError, OverflowError):
             pass
