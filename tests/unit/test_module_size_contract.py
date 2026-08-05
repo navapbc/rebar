@@ -18,31 +18,18 @@ gate's ``wc -l`` semantics exactly (``wc -l`` counts newlines).
 
 from __future__ import annotations
 
-from pathlib import Path
+# The computation lives in ``tests/module_size_support`` so this gate mirror and the
+# scc-backed size-metric reconciliation share ONE definition of the module-size rule
+# (rebar-ticket c5b3-1b8a-08dd-40af). ``tests/`` is on sys.path by conftest guarantee.
+from module_size_support import (
+    LIMIT_FILE,
+    REPO_ROOT,
+    SRC_ROOT,
+    compute_over_cap_modules,
+    read_limit,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = REPO_ROOT / "src" / "rebar"
-LIMIT_FILE = REPO_ROOT / ".github" / "module-size-limit.txt"
-
-
-def read_limit() -> int:
-    """The module-size limit, read from the single source the CI gate also reads."""
-    return int(LIMIT_FILE.read_text(encoding="utf-8").strip())
-
-
-def compute_over_cap_modules(src_root: Path, *, cap: int) -> dict[str, int]:
-    """Repo-relative POSIX path -> LOC for every ``src_root`` ``*.py`` file OVER ``cap`` lines.
-
-    Line counting uses ``text.count("\\n")`` to match the CI gate's ``wc -l`` semantics exactly.
-    ``__pycache__`` is skipped, mirroring the gate's ``grep -v __pycache__``."""
-    over: dict[str, int] = {}
-    for path in src_root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        loc = path.read_text(encoding="utf-8", errors="surrogateescape").count("\n")
-        if loc > cap:
-            over[path.relative_to(REPO_ROOT).as_posix()] = loc
-    return over
+__all__ = ["LIMIT_FILE", "REPO_ROOT", "SRC_ROOT", "compute_over_cap_modules", "read_limit"]
 
 
 def test_limit_file_is_a_single_positive_int() -> None:
