@@ -56,6 +56,26 @@
           ]
         }
       ]
+    },
+    "project.measurement-provenance": {
+      "exec": "AGENT",
+      "facet": "codebase-grounding",
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
+      "default_posture": "advisory",
+      "block_threshold": 0.9,
+      "checklist": [],
+      "trigger": [
+        {
+          "text_all": [
+            "\\[operator-attested\\]"
+          ]
+        }
+      ]
     }
   },
   "code_review": {
@@ -78,6 +98,9 @@
       "code_review"
     ],
     "project.engine-layer-enforcement": [
+      "plan_review"
+    ],
+    "project.measurement-provenance": [
       "plan_review"
     ]
   }
