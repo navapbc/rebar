@@ -44,10 +44,10 @@ export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock
 > the store.
 
 **Use `make install` — it is the one canonical setup path.** It runs `uv sync --locked
---extra dev`, installing the repo's env **through the committed `uv.lock`** (so every
+--extra dev --extra metrics`, installing the repo's env **through the committed `uv.lock`** (so every
 checkout gets the same verified-importable dependency set — the unlocked path once resolved
 an import-broken `pydantic-ai-slim`/`anthropic` pair; the dev extra pulls
-`nava-rebar[agents]` plus the lint/type/test tooling), **and** wires the pre-commit hook
+`nava-rebar[agents,metrics]` plus the lint/type/test tooling), **and** wires the pre-commit hook
 via `make hooks`, which is what makes lint/format run on every `git commit`. The Makefile
 is the single source of truth for lint/format/type/test — see `make help`.
 
@@ -58,7 +58,7 @@ is the single source of truth for lint/format/type/test — see `make help`.
 > follow it with the hook step and verify it:
 >
 > ```sh
-> uv sync --locked --extra dev  # the canonical locked install (pip -e '.[dev]' is the unlocked fallback)
+> uv sync --locked --extra dev --extra metrics  # the canonical locked install (pip -e '.[dev,metrics]' is the unlocked fallback)
 > make hooks                   # installs + VERIFIES the pre-commit hook; re-runnable anytime
 > ```
 >
@@ -272,6 +272,54 @@ The other half of this story: a `PreToolUse` hook
 an agent about Serena's symbol tools whenever a `Bash` command invokes `grep`/`rg`/`egrep`/
 `fgrep`, since launch-time guidance decays over a session. See `docs/code-navigation.md` for
 the rationale.
+
+## Code-health analyzers (`rebar metrics`) — one Python, two optional external CLIs
+
+`rebar metrics`' **code-health lens** is backed by three separate analyzers. Only one of them
+is a Python package, so only one can ride the venv. (What the metrics *mean*, and the
+`unavailable` contract in general, are in
+[`user-guide.md`](user-guide.md#code-health-analyzer-installation-and-fallback); this section is
+just the contributor-side install.)
+
+| Analyzer | Ecosystem | Powers | Comes from |
+|---|---|---|---|
+| **lizard** | Python | `complexity_summary` | `make install` (the `metrics` extra — nothing to do) |
+| **scc** | Go | `module_size_distribution` | **you install it** (optional) |
+| **jscpd** | Node | `duplication_summary` | **you install it** (optional) |
+
+**lizard needs no action.** `make install` runs `uv sync --locked --extra dev --extra metrics`,
+so every venv it provisions — including one made by `make worktree` — has it.
+
+**scc and jscpd are optional.** They are ordinary CLIs on `PATH`, not Python packages, so no
+`pip`/`uv` extra can deliver them. Install them only if you want the size and duplication
+metrics locally:
+
+```sh
+# scc (Go) — pick whichever suits your platform
+go install github.com/boyter/scc/v3@latest        # any platform with a Go toolchain (needs Go >= 1.25)
+brew install scc                                  # macOS / Linuxbrew
+sudo snap install scc                             # Linux (snap); MacPorts/Fedora COPR also package it
+scoop install scc                                 # Windows (or: winget install --id benboyter.scc)
+# no toolchain? grab a prebuilt binary from https://github.com/boyter/scc/releases and put it on PATH
+
+# jscpd (Node) — needs a Node.js toolchain
+npm install -g jscpd
+```
+
+Verify with `command -v scc` and `command -v jscpd`.
+
+> **Not installing them is a supported configuration — it degrades, it does not fail.** When an
+> analyzer is missing, only *its own* metric reports the `unavailable` state, naming the reason
+> (`"scc executable is unavailable"`, `"jscpd executable not found"`); `rebar metrics` still
+> exits **0** and every other metric still reports normally. Nothing else is affected either:
+> `make install`, `make lint`, `make typecheck`, `make check` and the test suite neither invoke
+> nor require these binaries. So a contributor who never installs scc or jscpd can run the full
+> gate set and land changes exactly as normal.
+
+> **Known gap:** even with `scc` installed, `module_size_distribution` currently reports a
+> confident zero — the adapter omits `scc`'s `--by-file` flag. Tracked as bug
+> `c5b3-1b8a-08dd-40af`. Until that lands, treat the scc-backed size metrics as not yet
+> trustworthy; the lizard and jscpd lenses are unaffected.
 
 ## Day-to-day gates
 
