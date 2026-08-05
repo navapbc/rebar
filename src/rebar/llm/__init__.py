@@ -1,7 +1,15 @@
 """rebar.llm — a framework for running tool-using LLM agents that emit structured
 findings, exposed (like the rest of rebar) over library, CLI, and MCP.
 
-Design in one paragraph: an **operation** (e.g. :func:`review_ticket`) assembles
+The primary review surface is the **plan-review gate** (:func:`review_plan` /
+``rebar review-plan``): a deterministic floor plus a multi-pass (find → verify →
+decide → coach) review of a ticket's whole plan, which signs a claim-gating
+attestation. :func:`review_ticket` — a single-pass review of a ticket or
+ticket-graph — is now **deprecated** (story 316a; its CLI verb ``rebar review`` is
+a forwarding shim over ``review-plan``); it still works but signals a registered
+deprecation on every call.
+
+Design in one paragraph: an **operation** (e.g. :func:`review_plan`) assembles
 deterministic context from rebar's own reads, resolves a **prompt** git-canonically
 (a packaged prompt or a ``.rebar/prompts/<id>.md`` override — Langfuse is never
 consulted for prompt text), and dispatches to a
@@ -19,8 +27,8 @@ rebar.llm`` stay stdlib-only; running needs the ``nava-rebar[agents]`` extra +
 ``ANTHROPIC_API_KEY``.
 
     import rebar.llm
-    result = rebar.llm.review_ticket("abc123", "ticket-quality")   # -> review_result dict
-    result["findings"]  # [{severity, dimension, detail, citations[...]}, ...]
+    result = rebar.llm.review_plan("abc123")   # -> plan_review_verdict dict
+    result["blocking"]  # [{criteria[...], finding, ...}, ...]
 """
 
 from __future__ import annotations

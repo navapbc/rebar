@@ -79,7 +79,7 @@
   "ticket-quality": {
     "dimension": "ticket-quality",
     "title": "Ticket quality reviewer",
-    "description": "Reviews a ticket (or ticket graph) for clarity, acceptance criteria, scope, dependencies, and implementation risk. The default reviewer for the `review` operation.",
+    "description": "Reviews a ticket (or ticket graph) for clarity, acceptance criteria, scope, dependencies, and implementation risk. The default reviewer for the `rebar.llm.review_ticket` operation.",
     "default": true,
     "langfuse_prompt": "rebar-ticket-quality",
     "fallback_file": "ticket_quality.md",

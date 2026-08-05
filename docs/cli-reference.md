@@ -481,7 +481,7 @@ The 23 advanced commands handled before the dispatcher. Each owns its own `--hel
 | `prompt` | Run prompt-library evals over the packaged/overridden prompts. |
 | `reconcile` | Reconcile the rebar store with Jira (dry-run by default; `live` performs the sync). |
 | `remote-cert` | Request an op-cert from the trusted gate service at `verify.opcert_remote_url` (SigV4-signed): submit `<ticket-id> <kind>`, poll to a verdict, and on PASS persist the returned signed envelope as a `SIGNATURE` event the merge gate certifies. |
-| `review` | Run the tool-using LLM agent to review a ticket (or its graph) and emit structured findings. |
+| `review` | **Deprecated** (story 316a; removal in v1.0.0) — a shim that forwards to `review-plan` with `--no-sign`, so it writes no attestation. `--graph` and a positional `reviewer_id` are rejected with exit 2: neither exists on the replacement. Use `rebar review-plan` instead. |
 | `review-code` | Run the LLM code-review agent over a diff or commit range and emit structured findings. |
 | `review-plan` | Run the plan-review gate on a ticket; on a non-blocking PASS it signs the plan-review attestation the claim gate consumes. Signing is the DEFAULT — `--no-sign` is the explicit opt-out — and a BLOCK, an INDETERMINATE, or a degraded run is never signed. Recover a PASS whose signature was lost with `sign-review` (no LLM call). |
 | `scan-spec` | Scan prose/spec text for spec-implied work in batches, emitting findings. |
