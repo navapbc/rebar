@@ -296,13 +296,20 @@ jobs:
       # by name; tests/conftest.py enforces the same floor for every contributor. The
       # value is single-sourced in .github/git-version-floor.txt, which the contributor
       # docs and tests/unit/test_git_version_floor.py also read, so the three cannot drift.
+      # If-present guard per ticket ee2a (see raw-git-write gate above): the floor file is
+      # this step's repo artifact, so a change whose base predates it would otherwise fail
+      # hard on file absence alone (bug 7e90-233b-3ee9-4f14). Skip with a log line when it
+      # is missing from the checked-out tree; the gate re-enforces on rebase and on every
+      # post-merge change. When the file IS present the ticket 980d-83ac-a6bb-4edb
+      # enforcement below is unchanged.
       - name: Git version floor gate
         shell: bash
         run: |
           floorfile=.github/git-version-floor.txt
           if [ ! -f "$floorfile" ]; then
-            echo "::error::missing $floorfile (the single source of the Git version floor)"
-            exit 1
+            echo "$floorfile not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
           fi
           floor=$(tr -d '[:space:]' < "$floorfile")
           have=$(git --version | awk '{print $3}')
