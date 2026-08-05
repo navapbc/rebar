@@ -349,3 +349,151 @@ def test_non_length_error_containing_context_does_not_enter_recovery() -> None:
         step.run(_ctx())
 
     assert len(runner.requests) == 1
+
+
+# ── fd84: a step-budget exhaustion routes into the SAME bounded recovery ──────────────────
+#
+# `interpret_failure`'s budget branch raises LLMBudgetExhaustedError (a strict LLMRunnerError
+# subclass). Before fd84 the except spine here caught ONLY UnretryableOutputError, so a budget
+# stop PROPAGATED past the recovery machinery that exists exactly for it — the operator was
+# told "narrow the task" while the code that narrows the task sat unreachable one except
+# clause away. The catch is purely TYPED: a plain LLMRunnerError carrying the identical
+# message must still propagate (no message or diagnostic-shape sniffing).
+
+
+class _BudgetExhaustedRunner(_RecoverableRunner):
+    """The aggregate (first) call trips the step budget instead of truncating."""
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        if not self.requests:
+            from rebar.llm.errors import LLMBudgetExhaustedError
+
+            self.requests.append(req)
+            err = LLMBudgetExhaustedError(
+                "agent exceeded its step budget (max_iterations=480; "
+                "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
+                "the task."
+            )
+            err.diagnostic = {  # type: ignore[attr-defined]
+                "requests": 240,
+                "tool_calls": 260,
+                "request_limit": 240,
+                "tool_calls_limit": 480,
+            }
+            raise err
+        return super().run(req)
+
+
+def test_step_budget_exhaustion_enters_bounded_recovery(monkeypatch) -> None:
+    """The budget stop enters the same per-criterion recovery as a truncation and
+    produces a real verdict — the machinery the failure needs is now reachable."""
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda *args, **kwargs: _ticket())
+    runner = _BudgetExhaustedRunner()
+    step = CompletionAgentStep(
+        runner=runner,
+        repo_root=None,
+        config=LLMConfig(runner="fake"),
+    )
+
+    result = step.run(_ctx()).outputs
+
+    assert result["verdict"] == "PASS"
+    assert len(runner.requests) == 9  # aggregate + seven evidence + finalizer
+    assert runner.requests[-1].execution_mode == "single_turn"
+
+
+class _PlainRunnerErrorRunner(_RecoverableRunner):
+    """Raises a BARE LLMRunnerError whose message is byte-identical to the budget one —
+    the discriminator between a typed catch and message sniffing."""
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        from rebar.llm.errors import LLMRunnerError
+
+        self.requests.append(req)
+        raise LLMRunnerError(
+            "agent exceeded its step budget (max_iterations=480; "
+            "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
+            "the task."
+        )
+
+
+def test_plain_runner_error_still_propagates_unchanged() -> None:
+    """Negative control: NOT the budget subclass -> no recovery, the exception propagates
+    with its exact type, and no diagnostic is recorded. If this fails after a refactor,
+    the catch has widened beyond the typed contract."""
+    from rebar.llm.errors import LLMRunnerError
+
+    runner = _PlainRunnerErrorRunner()
+    step = CompletionAgentStep(
+        runner=runner,
+        repo_root=None,
+        config=LLMConfig(runner="fake"),
+    )
+
+    with pytest.raises(LLMRunnerError) as caught:
+        step.run(_ctx())
+
+    assert type(caught.value) is LLMRunnerError, (
+        f"a bare LLMRunnerError became {type(caught.value).__name__}; the catch must be "
+        "purely typed on the subclass, never message-shaped"
+    )
+    assert len(runner.requests) == 1, "recovery must not have engaged"
+    assert step.failure_diagnostic is None
+
+
+def test_budget_recovery_still_fails_closed_without_criteria(monkeypatch) -> None:
+    """The new entry edge must never become a route to an unearned PASS: a ticket that
+    cannot enumerate explicit criteria still fails closed, even via the budget path."""
+    monkeypatch.setattr(
+        "rebar._reads.show_ticket",
+        lambda *args, **kwargs: {
+            "ticket_id": "T-1",
+            "title": "vague task",
+            "ticket_type": "task",
+            "description": "Improve the workflow when appropriate.",
+        },
+    )
+    runner = _BudgetExhaustedRunner()
+    step = CompletionAgentStep(
+        runner=runner,
+        repo_root=None,
+        config=LLMConfig(runner="fake"),
+    )
+
+    with pytest.raises(CompletionRecoveryError, match="cannot enumerate"):
+        step.run(_ctx())
+
+    assert len(runner.requests) == 1, "no evidence call may run without criteria"
+
+
+class _BudgetThenEvidenceFailureRunner(_BudgetExhaustedRunner):
+    """Budget stop on the aggregate call, then every evidence run truncates."""
+
+    def run(self, req):  # noqa: ANN001, ANN201
+        if self.requests:
+            self.requests.append(req)
+            raise UnretryableOutputError("finish_reason=length")
+        return super().run(req)
+
+
+def test_budget_diagnostic_survives_when_recovery_also_fails(monkeypatch) -> None:
+    """When recovery ALSO fails, the ORIGINAL budget diagnostic's loop-vs-breadth
+    counters must survive onto failure_diagnostic (aggregate_*) — losing them is the
+    'computed then discarded' defect this cluster exists to remove."""
+    monkeypatch.setattr("rebar._reads.show_ticket", lambda *args, **kwargs: _ticket())
+    runner = _BudgetThenEvidenceFailureRunner()
+    step = CompletionAgentStep(
+        runner=runner,
+        repo_root=None,
+        config=LLMConfig(runner="fake"),
+    )
+
+    with pytest.raises(CompletionRecoveryError):
+        step.run(_ctx())
+
+    diagnostic = step.failure_diagnostic
+    assert diagnostic is not None
+    assert diagnostic["stage"] == "evidence"
+    assert diagnostic["aggregate_requests"] == 240
+    assert diagnostic["aggregate_tool_calls"] == 260
+    assert diagnostic["aggregate_exception_type"] == "LLMBudgetExhaustedError"

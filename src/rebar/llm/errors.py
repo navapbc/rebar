@@ -30,6 +30,16 @@ class LLMRunnerError(LLMError):
     """A runner failed to execute the operation."""
 
 
+class LLMBudgetExhaustedError(LLMRunnerError):
+    """The agent hit its OWN step/tool-call budget (pydantic-ai ``UsageLimitExceeded``) —
+    rebar stopping itself, not a provider failure or an output defect. A dedicated type
+    because ``interpret_failure`` attaches the SAME diagnostic key set to every exception
+    it raises, so a budget stop is identifiable ONLY by type — downstream routing (the
+    completion gate's bounded per-criterion recovery) must never sniff messages or
+    diagnostic shapes. A strict :class:`LLMRunnerError` subclass, so every existing
+    ``except LLMRunnerError`` / ``except LLMError`` handler still catches it."""
+
+
 class StructuredOutputError(LLMRunnerError):
     """The agent produced no validated structured findings (see #36349) — an empty
     review must never be reported as a clean one, so this is a hard failure."""

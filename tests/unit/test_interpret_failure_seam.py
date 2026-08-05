@@ -29,6 +29,7 @@ import pydantic_ai.models
 from pydantic_ai.exceptions import UsageLimitExceeded
 
 from rebar.llm.errors import (
+    LLMBudgetExhaustedError,
     LLMConfigError,
     LLMError,
     LLMRunnerError,
@@ -74,6 +75,25 @@ def test_step_budget_stop_becomes_a_runner_error():
     )
 
 
+def test_step_budget_stop_raises_the_typed_budget_subclass():
+    """fd84: the budget stop must be identifiable PURELY BY TYPE. interpret_failure attaches
+    the same failure_usage() dict (same key set) to every exception it raises, so diagnostic-
+    shape sniffing cannot tell the budget branch from a sampling rejection or an outage; the
+    subclass is the only reliable discriminator, and it is what routes the completion gate
+    into bounded recovery instead of propagating verdict-less."""
+    with pytest.raises(LLMRunnerError) as caught:
+        interpret_failure(UsageLimitExceeded("limit"), [], _ctx())
+    assert type(caught.value) is LLMBudgetExhaustedError, (
+        f"budget stop raised {type(caught.value).__name__}; the typed subclass is the "
+        "contract downstream recovery routing depends on"
+    )
+    assert "max_iterations" in str(caught.value)
+    diagnostic = getattr(caught.value, "diagnostic", None)
+    assert isinstance(diagnostic, dict)
+    for key in ("requests", "tool_calls", "request_limit", "tool_calls_limit"):
+        assert key in diagnostic, f"budget diagnostic lost its {key!r} counter"
+
+
 def test_an_already_typed_llm_error_is_re_raised_unchanged():
     """The spine's middle arm enriches a typed failure; it never re-wraps it."""
     original = StructuredOutputError("bad shape")
@@ -113,7 +133,7 @@ def test_a_budget_stop_is_not_swallowed_by_the_broad_arm():
     stop is reclassified as an outage and an operator chases a provider that never failed."""
     with pytest.raises(LLMError) as caught:
         interpret_failure(UsageLimitExceeded("limit"), [], _ctx())
-    assert type(caught.value) is LLMRunnerError, (
+    assert type(caught.value) is LLMBudgetExhaustedError, (
         f"budget stop became {type(caught.value).__name__}; the broad arm ran first"
     )
 

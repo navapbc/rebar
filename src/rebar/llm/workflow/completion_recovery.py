@@ -19,7 +19,9 @@ from typing import Any, NoReturn
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import (
     CompletionRecoveryError,
+    LLMBudgetExhaustedError,
     LLMError,
+    LLMRunnerError,
     UnretryableOutputError,
 )
 from rebar.llm.prompting import prompts
@@ -426,6 +428,8 @@ class CompletionAgentStep(_ex.AgentStepRunner):
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         try:
             return self._primary.run(ctx)
+        except LLMBudgetExhaustedError as primary_exc:
+            return self._recover(ctx, primary_exc)
         except UnretryableOutputError as primary_exc:
             if not _is_token_exhaustion(primary_exc):
                 raise
@@ -434,7 +438,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
     def _recover(
         self,
         ctx: _ex.StepContext,
-        primary_exc: UnretryableOutputError,
+        primary_exc: LLMRunnerError,
     ) -> _ex.StepResult:
         from rebar import _reads
 
