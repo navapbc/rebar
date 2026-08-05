@@ -236,8 +236,8 @@ def _pai_structured(
             prompt = (
                 f"{req.instructions}\n\n{schema_hint}\n\nYour previous reply could not be "
                 f"parsed/validated ({exc}). Your previous reply was:\n{faulty}\n\n"
-                f"Reply with ONLY the JSON object matching the schema above — no prose, "
-                f"no code fence."
+                f"Reply with ONLY the JSON object matching the schema above. "
+                f"{structured.SENTINEL_DIRECTIVE}"
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
     if artifact_dir:

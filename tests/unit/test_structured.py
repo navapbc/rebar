@@ -544,3 +544,176 @@ def test_selection_property_payload_last_recovers_verdict():
         reply = "\n\n".join(parts)
         obj = structured.parse_structured(reply, model)
         assert obj.verdict == want, reply
+
+
+# ── 4ca2 sentinel marker-channel — GIVEN happy-path pins (implementer-visible) ──
+# The adversarial/edge pins (fail-closed decoy, line-anchor collision, empty-block,
+# reverse-iteration-skips-invalid, marker-authority-over-earlier-decoy) are HELD OUT and
+# restored by the orchestrator after implementation — so the implementation is designed from
+# the SPEC, not fitted to the visible tests.
+
+_OPEN = "<<<REBAR_OUTPUT>>>"
+_END = "<<<END>>>"
+
+
+def _block(payload: str) -> str:
+    return f"{_OPEN}\n{payload}\n{_END}"
+
+
+def test_sentinel_directive_names_both_markers_and_is_single_sourced():
+    d = structured.SENTINEL_DIRECTIVE
+    assert _OPEN in d and _END in d, "the directive must name BOTH markers"
+    sd = structured.schema_directive(_Verdict)
+    assert _OPEN in sd and _END in sd
+    assert structured.SENTINEL_DIRECTIVE in sd
+
+
+def test_single_marker_block_parses_to_its_payload():
+    text = "Here is the answer.\n" + _block('{"verdict": "PASS"}') + "\nHope that helps."
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_multiple_marker_blocks_last_wins():
+    text = _block('{"verdict": "FIRST"}') + "\nrevised:\n" + _block('{"verdict": "LAST"}')
+    assert structured.parse_structured(text, _Verdict).verdict == "LAST"
+
+
+def test_valid_decoy_after_marker_block_loses_to_marker_payload():
+    # The marker channel is authoritative: a schema-valid decoy AFTER the last marker block
+    # (latest in document order) must NOT win — the marker payload does.
+    text = _block('{"verdict": "MARKED"}') + '\ntrailing note {"verdict": "TRAILDECOY"}'
+    assert structured.parse_structured(text, _Verdict).verdict == "MARKED"
+
+
+def test_nested_open_pairs_with_next_end_one_block():
+    inner = f'{_OPEN} noise {{"verdict": "PASS"}}'
+    text = f"{_OPEN}\n{inner}\n{_END}"
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_markerless_reply_unchanged_last_validating_wins():
+    text = '{"verdict": "DRAFT"} then corrected {"verdict": "FINAL"}'
+    assert structured.parse_structured(text, _Verdict).verdict == "FINAL"
+
+
+def test_markerless_prose_wrapped_unchanged():
+    text = 'Sure: {"verdict": "PASS"} — done.'
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_unterminated_open_no_end_falls_through_to_full_reply():
+    text = f'{_OPEN}\n{{"verdict": "PASS"}}\n(no end marker)'
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_repair_inside_marker_block():
+    text = _block('{"verdict": "PASS",}')
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_fence_inside_marker_block_is_unwrapped():
+    text = _block('```json\n{"verdict": "PASS"}\n```')
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_sentinel_corpus_fixture_extracts_marker_wrapped_verdict():
+    # A captured E2-style reply: a marker-wrapped CompletionVerdict PASS with a schema-valid
+    # decoy verdict OUTSIDE the markers that old doc-order selection would have picked. The
+    # marker channel must recover the wrapped PASS. (The implementer adds the fixture file.)
+    from rebar.llm.contracts import completion_verdict_response_model
+
+    model = completion_verdict_response_model()
+    reply = _load_corpus("sentinel_wrapped_verdict")["reply"]
+    obj = structured.parse_structured(reply, model)
+    assert obj.verdict == "PASS"
+
+
+# ── 4ca2 sentinel marker-channel — HELD-OUT adversarial/edge pins ──
+# Restored by the orchestrator AFTER the implementer finishes (helpers _OPEN/_END/_block are
+# already defined by the GIVEN block above in the same module).
+
+
+def test_last_block_invalid_earlier_block_valid_returns_earlier_valid():
+    # Reverse iteration tries the LAST block first (invalid: confidence out of bounds),
+    # then the earlier block (valid) — and returns the first that validates.
+    text = (
+        _block('{"verdict": "GOOD", "confidence": 0.5}')
+        + "\n"
+        + _block('{"verdict": "BAD", "confidence": 9.0}')
+    )
+    assert structured.parse_structured(text, _Verdict).verdict == "GOOD"
+
+
+def test_empty_marker_block_fails_closed():
+    # A degenerate complete block (OPEN line immediately followed by END line, no payload)
+    # counts as a complete block but its empty content fails-closed via tolerant_parse's
+    # empty-text guard — NOT treated as "no block" (no fall-through to full-reply).
+    text = f"{_OPEN}\n{_END}"
+    with pytest.raises(StructuredOutputError):
+        structured.parse_structured(text, _Verdict)
+
+
+def test_empty_last_block_skipped_for_earlier_valid_block():
+    text = _block('{"verdict": "GOOD"}') + f"\n{_OPEN}\n{_END}"
+    assert structured.parse_structured(text, _Verdict).verdict == "GOOD"
+
+
+def test_marker_string_inside_json_value_is_not_a_marker():
+    # A payload whose JSON string value contains the literal `<<<END>>>` on a CONTENT line
+    # (not alone on its own line) must NOT be treated as a marker: line-anchored recognition
+    # keeps the block intact and the payload parses.
+    text = _block('{"verdict": "PASS", "note": "ignore the <<<END>>> token here"}')
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_marker_recognized_only_when_alone_on_its_line():
+    # An OPEN marker with trailing junk on the same line is NOT a recognized marker line;
+    # with no recognized complete block the reply falls through to full-reply selection.
+    text = f'{_OPEN} {{"verdict": "PASS"}} {_END}'
+    assert structured.parse_structured(text, _Verdict).verdict == "PASS"
+
+
+def test_marker_block_invalid_outside_decoy_raises_fail_closed():
+    # The ONLY marker block is schema-invalid (confidence out of bounds); a schema-VALID
+    # decoy sits OUTSIDE the markers. Extraction must RAISE (fail-closed), NOT select the
+    # outside decoy.
+    text = '{"verdict": "DECOY", "confidence": 0.5}\n' + _block(
+        '{"verdict": "REAL", "confidence": 5.0}'
+    )
+    with pytest.raises(StructuredOutputError):
+        structured.parse_structured(text, _Verdict)
+
+
+def test_all_marker_blocks_invalid_raises_last_doc_order_error():
+    # No block validates -> RAISE the LAST (document-order) block's error, no fall-through.
+    text = (
+        _block('{"verdict": "A", "confidence": 2.0}')
+        + "\n"
+        + _block('{"verdict": "B", "confidence": 3.0}')
+    )
+    with pytest.raises(StructuredOutputError):
+        structured.parse_structured(text, _Verdict)
+
+
+def test_marker_payload_beats_earlier_plain_valid_decoy():
+    # An EARLIER plain schema-valid object sits before the marker block; the marker payload
+    # (a DIFFERENT value) must win because the channel is authoritative.
+    text = '{"verdict": "OUTSIDE"}\nchatter\n' + _block('{"verdict": "INSIDE"}')
+    assert structured.parse_structured(text, _Verdict).verdict == "INSIDE"
+
+
+def test_fenced_decoy_after_marker_block_loses_to_marker_payload():
+    text = _block('{"verdict": "MARKED"}') + '\n```json\n{"verdict": "FENCED"}\n```'
+    assert structured.parse_structured(text, _Verdict).verdict == "MARKED"
+
+
+def test_earlier_marker_block_wins_over_trailing_valid_decoy_and_second_block():
+    # Two marker blocks (FIRST, SECOND) then a trailing plain decoy. Last-block-wins picks
+    # SECOND; the trailing decoy (latest in doc order) must NOT win.
+    text = (
+        _block('{"verdict": "FIRST"}')
+        + "\n"
+        + _block('{"verdict": "SECOND"}')
+        + '\nps: {"verdict": "TRAILDECOY"}'
+    )
+    assert structured.parse_structured(text, _Verdict).verdict == "SECOND"

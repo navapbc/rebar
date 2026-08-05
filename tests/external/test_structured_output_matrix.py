@@ -32,6 +32,7 @@ import _structured_matrix as sm
 import pytest
 
 import rebar  # noqa: F401 — ensures the package (and its conftest fixtures) import cleanly
+from rebar.llm import structured
 from rebar.llm.contracts import completion_verdict_response_model
 
 pytestmark = pytest.mark.external
@@ -72,12 +73,10 @@ PROMPTS: tuple[tuple[str, str], ...] = (
     ("single_shot", _SINGLE_SHOT_PROMPT),
 )
 
-#: The output-format directive the ``sentinel`` variant appends to the base prompt. Deliberately
-#: simple and clearly labelled — the sentinel story (a sibling) owns refining it.
-_SENTINEL_DIRECTIVE = (
-    "\n\nOUTPUT FORMAT: reply with ONLY the raw JSON object, no code fence, no prose, no "
-    "surrounding quotes."
-)
+#: The output-format directive the ``sentinel`` variant appends to the base prompt. Sourced
+#: from production so the live sweep exercises the real marker directive; the leading "\n\n"
+#: preserves spacing from the prompt.
+_SENTINEL_DIRECTIVE = "\n\n" + structured.SENTINEL_DIRECTIVE
 
 #: How many times each (cell × variant × prompt) is repeated, to sample non-determinism.
 _N_REPEATS = 10

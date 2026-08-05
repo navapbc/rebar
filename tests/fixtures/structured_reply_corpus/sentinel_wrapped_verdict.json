@@ -1,0 +1,6 @@
+{
+  "id": "sentinel_wrapped_verdict",
+  "description": "Captured E2 shape: the real CompletionVerdict PASS is wrapped between the two sentinel markers (each alone on its own line), while a schema-valid decoy FAIL verdict appears AFTER the markers. Old last-wins doc-order selection would pick the trailing FAIL decoy; only the marker channel recovers PASS.",
+  "expected_verdict": "PASS",
+  "reply": "I reviewed the change against every acceptance criterion. Below is my final verdict, wrapped so it can be extracted unambiguously.\n\n<<<REBAR_OUTPUT>>>\n{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"The change landed on main and CI is green; every acceptance criterion is demonstrably met.\"}\n<<<END>>>\n\nFor reference, an earlier draft verdict I considered but discarded looked like this:\n\n{\"verdict\": \"FAIL\", \"findings\": [], \"summary\": \"Draft: acceptance criteria not yet met.\"}"
+}

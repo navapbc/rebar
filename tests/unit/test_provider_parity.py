@@ -38,6 +38,11 @@ class _DirectiveProbe(pydantic.BaseModel):
 # (the schema JSON is separator-compact), so a split on "\n" isolates it exactly.
 _SCHEMA_DIRECTIVE_LEADIN = _structured.schema_directive(_DirectiveProbe).split("\n", 1)[0]
 
+# The schema JSON now TRAILS into "\n\n" + SENTINEL_DIRECTIVE, so the schema is no longer the
+# last thing in the turn. The lead-in and this sentinel tail are FIXED (model-independent); only
+# the compact schema line between them varies by model. Both are single-sourced from production.
+_SENTINEL_TAIL = "\n\n" + _structured.SENTINEL_DIRECTIVE
+
 
 def _drop_prompted_directive(messages: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], bool]:
     """Strip the trailing prompted-path schema directive from the message stream.
@@ -47,9 +52,10 @@ def _drop_prompted_directive(messages: list[tuple[str, str]]) -> tuple[list[tupl
     to its FINAL user turn -- the one documented, measured payload difference the standard slot
     tolerates (see ``test_the_native_output_capability_difference_is_measured_and_id_scoped``).
 
-    Only the final user turn's TRAILING block is considered, and the schema must be the whole
-    remainder (one compact JSON line, nothing after) -- so a directive on the wrong turn, a
-    duplicated directive, or unexpected trailing content is NOT silently stripped away."""
+    Only the final user turn's TRAILING block is stripped, and only when it is the full directive:
+    the fixed lead-in, exactly one compact JSON schema line, then the fixed ``_SENTINEL_TAIL`` --
+    so a directive on the wrong turn, a duplicated directive, or unexpected trailing content is
+    NOT silently stripped away."""
     out = list(messages)
     for i in range(len(out) - 1, -1, -1):
         role, content = out[i]
@@ -57,11 +63,12 @@ def _drop_prompted_directive(messages: list[tuple[str, str]]) -> tuple[list[tupl
             continue
         marker = "\n\n" + _SCHEMA_DIRECTIVE_LEADIN + "\n"
         idx = content.find(marker)
-        if idx == -1:
+        if idx == -1 or not content.endswith(_SENTINEL_TAIL):
             return out, False
-        schema_text = content[idx + len(marker) :]
-        # the directive is the LAST thing in the turn: exactly one compact JSON schema line.
-        assert "\n" not in schema_text, "unexpected content after the schema directive"
+        schema_text = content[idx + len(marker) : -len(_SENTINEL_TAIL)]
+        # the schema is exactly one compact JSON line, bracketed by lead-in and sentinel tail.
+        if "\n" in schema_text:
+            return out, False
         json.loads(schema_text)  # the appended schema must be well-formed JSON
         out[i] = (role, content[:idx])
         return out, True
@@ -74,7 +81,8 @@ def _prompted_directive_schema(messages: list[tuple[str, str]]) -> dict | None:
         marker = "\n\n" + _SCHEMA_DIRECTIVE_LEADIN + "\n"
         idx = content.find(marker)
         if idx != -1:
-            return json.loads(content[idx + len(marker) :])
+            schema_line = content[idx + len(marker) :].split("\n", 1)[0]
+            return json.loads(schema_line)
     return None
 
 

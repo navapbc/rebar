@@ -42,6 +42,23 @@ logger = logging.getLogger(__name__)
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
+# The two line-anchored sentinel markers that delimit the single JSON answer in a
+# prompted reply. Defined ONCE here and referenced from both SENTINEL_DIRECTIVE (the
+# prompt text) and parse_structured (the parser), so the literals are single-sourced.
+_SENTINEL_OPEN = "<<<REBAR_OUTPUT>>>"
+_SENTINEL_END = "<<<END>>>"
+
+# The durable contract for the sentinel marker channel: models are told to wrap their
+# single JSON answer between the two line-anchored markers so extraction is unambiguous.
+# Each marker must be alone on its own physical line; recognition is line-anchored so a
+# JSON string value containing the literal END marker cannot terminate a block.
+SENTINEL_DIRECTIVE = (
+    "Then wrap that single JSON object between two marker lines so it can be extracted "
+    f"unambiguously: put a line containing ONLY {_SENTINEL_OPEN}, then the single JSON "
+    f"object (no prose, no markdown fence), then a line containing ONLY {_SENTINEL_END}. "
+    "Each marker must be alone on its own line."
+)
+
 
 def output_mode(model_cls, caps, *, thinking: bool = False):
     """Select the Pydantic AI output mode for ``model_cls`` (layer 1).
@@ -86,8 +103,12 @@ def schema_directive(model_cls) -> str:
     ``no-verification``.)"""
     schema = json.dumps(model_cls.model_json_schema(), separators=(",", ":"))
     return (
-        "Respond with ONLY a single JSON object conforming to this JSON Schema "
-        "(use these EXACT keys; no prose, no markdown fence):\n" + schema
+        (
+            "Respond with ONLY a single JSON object conforming to this JSON Schema "
+            "(use these EXACT keys; no prose, no markdown fence):\n" + schema
+        )
+        + "\n\n"
+        + SENTINEL_DIRECTIVE
     )
 
 
@@ -298,7 +319,7 @@ def _candidate_dicts(text: str, model_cls) -> list[dict]:
     return survivors
 
 
-def parse_structured(text: str, model_cls):
+def _select_and_validate(text: str, model_cls):
     """The deterministic layers (2)+(3) as one call: SCHEMA-FILTERED candidate selection,
     then validate. Returns a validated ``model_cls`` instance, or raises
     :class:`StructuredOutputError` (the signal a caller turns into a single bounded retry —
@@ -335,6 +356,56 @@ def parse_structured(text: str, model_cls):
         # Candidates passed the screen but none validated — raise the LAST one's error.
         return validate_to(model_cls, survivors[-1])
     return validate_to(model_cls, tolerant_parse(text, schema=model_cls))
+
+
+def _sentinel_blocks(text: str) -> list[str]:
+    """Extract the CONTENT of every complete sentinel block in ``text``, in document order.
+
+    LINE-ANCHORED, NON-NESTED pairing: a line is an OPEN marker iff its stripped form equals
+    the OPEN literal, an END marker iff its stripped form equals the END literal. Scanning
+    left-to-right, each OPEN pairs with the NEXT END line after it (extra OPENs in between are
+    ignored → OPEN…OPEN…END is ONE block); scanning resumes after that END. An OPEN with no
+    following END is not a complete block. A block's content is the lines strictly between the
+    markers rejoined with "\\n" (empty when OPEN is immediately followed by END)."""
+    lines = text.split("\n")
+    blocks: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if lines[i].strip() == _SENTINEL_OPEN:
+            j = i + 1
+            while j < n and lines[j].strip() != _SENTINEL_END:
+                j += 1
+            if j < n:
+                blocks.append("\n".join(lines[i + 1 : j]))
+                i = j + 1
+                continue
+            break
+        i += 1
+    return blocks
+
+
+def parse_structured(text: str, model_cls):
+    """Marker-aware wrapper around :func:`_select_and_validate` (layers 2+3).
+
+    Models are told (via :data:`SENTINEL_DIRECTIVE`) to wrap their single JSON answer between
+    the two line-anchored sentinel markers. When ≥1 complete marker block exists, extraction
+    PREFERS a marker-delimited payload over any decoy JSON elsewhere in the reply and
+    FAILS-CLOSED (raises) when a marker block exists but no block validates — it never
+    silently falls through to an out-of-band decoy. When there are no complete blocks
+    (markerless reply, or an unterminated OPEN), it delegates to ``_select_and_validate`` on
+    the full original reply, byte-for-byte unchanged."""
+    blocks = _sentinel_blocks(text)
+    if blocks:
+        for content in reversed(blocks):
+            try:
+                return _select_and_validate(content, model_cls)
+            except StructuredOutputError:
+                continue
+        # No block validated — raise the LAST doc-order block's error (fail-closed; never
+        # fall through to an out-of-band decoy in the full reply).
+        return _select_and_validate(blocks[-1], model_cls)
+    return _select_and_validate(text, model_cls)
 
 
 # Stop/finish reasons that are NOT a usable structured answer and must never be read

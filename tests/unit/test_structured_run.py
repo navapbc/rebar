@@ -163,3 +163,52 @@ def test_config_key_is_documented_with_default_and_rotation(tmp_path) -> None:
     # Names both the default-off posture and the rotation cap.
     lowered = doc.lower()
     assert "rotat" in lowered or "newest" in lowered or "20" in doc
+
+
+# ── 4ca2 retry-tail pin (appended into tests/unit/test_structured_run.py) ──
+#
+# The bounded-retry prompt must name the SAME sentinel markers as the first attempt, not
+# instruct bare JSON — so the fail-closed retry channel matches layer 1. Driven through the
+# real runner with a _sequence_model whose first reply fails to parse (forcing one retry);
+# we capture the SECOND call's prompt and assert it names both markers.
+
+_OPEN = "<<<REBAR_OUTPUT>>>"
+_END = "<<<END>>>"
+
+
+def _capture_sequence_model(texts):
+    """Like _sequence_model but also records the user prompt text of every call in `prompts`."""
+    from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
+    from pydantic_ai.models.function import FunctionModel
+
+    state = {"i": 0, "prompts": []}
+
+    def gen(messages, info):
+        # the newest user turn is the prompt this call is being asked to answer
+        for m in reversed(messages):
+            for part in getattr(m, "parts", []):
+                if isinstance(part, UserPromptPart):
+                    state["prompts"].append(str(part.content))
+                    break
+            else:
+                continue
+            break
+        idx = min(state["i"], len(texts) - 1)
+        state["i"] += 1
+        return ModelResponse(parts=[TextPart(texts[idx])])
+
+    return FunctionModel(gen), state
+
+
+def test_bounded_retry_prompt_names_the_markers_not_bare_json():
+    # First reply is schema-invalid free text (no usable object) -> one retry.
+    model, state = _capture_sequence_model(["not valid at all", '{"verdict": "PASS"}'])
+    # (parse of the 2nd reply is markerless -> full-reply selection, so the run succeeds.)
+    PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_req())
+    assert len(state["prompts"]) >= 2, "expected at least one retry"
+    retry_prompt = state["prompts"][-1]
+    assert _OPEN in retry_prompt and _END in retry_prompt, (
+        "the bounded-retry prompt must name BOTH sentinel markers, not instruct bare JSON"
+    )
+    # and it must NOT tell the model to emit bare JSON with no fence/markers.
+    assert "no code fence" not in retry_prompt or _OPEN in retry_prompt
