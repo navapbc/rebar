@@ -1864,65 +1864,99 @@ def test_outbound_clear_parent_round_trips(
     track_issue: Any,
     dc_request: Any,
 ) -> None:
-    """Row 13 outbound: detaching the local parent must leave `fields.parent` ABSENT in DC.
+    """Row 13 outbound: detaching the parent LOCALLY must clear it on the instance.
 
-    THROUGH A PASS, not against the transport, and that is the opposite choice from row 12's
-    epic case for a reason worth stating: row 12's epic case asserts an EXCEPTION, and
-    `dispatch_one._update_one_apply_parent` catches `Exception` and only warns
-    (`dispatch_one.py:571-578`), so an exception assertion is untestable through a pass. This
-    row asserts a POST-STATE on the instance, which the swallow cannot hide.
+    RE-HOMED FROM THE SUB-TASK SHAPE ([rebar:4b9e-bcad-456a-4233]), the outbound twin of the
+    move [rebar:37e7-d751-0042-4b94] already made for the inbound clear. The old cell detached
+    a SUB-TASK's `fields.parent`, which
+    Data Center will not do: `{"fields":{"parent":null}}` is rejected 400 `data was not an
+    object` and `{"update":{"parent":[{"set":null}]}}` is rejected 400 `not on the appropriate
+    screen`, and a sub-task's `/editmeta` exposes no `parent` field at all (capability map
+    req-0054/0055/0057). `dispatch_one` swallows that 400 (it warns and continues), so the pass
+    exited 0 and the remote parent survived — which is exactly what live run 30951453979 reports:
+    "the local parent was DETACHED but RBJUFQU-2 still carries fields.parent = RBJUFQU-1".
 
-    THE CLEAR IS EXPRESSED AS `--parent=null`. An empty value is rejected outright ("--parent
-    requires a non-empty value (use --parent=null to detach)"), and the differ needs the
-    "parent" key PRESENT-WITH-A-FALSY-VALUE to distinguish a CLEAR from "no parent op this
-    mutation" — `_update_one_apply_parent` keys out that presence explicitly and routes the
-    clear through the same `set_parent` call as a set (`dispatch_one.py:539-550`).
+    The inbound twin was re-homed to the Epic Link and has been green ever since; this cell was
+    left behind, and it has been red in all twelve runs. It was also self-contradicted inside this
+    very file: `test_inbound_clear_parent_round_trips` ends with a pin asserting that
+    `set_parent(subtask, None)` RAISES. One of the two had to be wrong, and 37e7's ruling says it
+    is this one.
 
-    IF THIS FAILS, THE THREE CANDIDATE MECHANISMS ARE, IN ORDER: the differ never emitted the
-    parent clear; `set_parent` raised and was swallowed at `dispatch_one.py:571-578`; or Data
-    Center accepted `{"parent": None}` on a sub-task and ignored it. The precondition below
-    rules out a fourth (nothing to clear) by asserting the parent is present on BOTH sides
-    first.
+    THE BLOCKING UNKNOWN 4b9e HELD THIS WORK BEHIND IS ALREADY ANSWERED — BY THE HARNESS. That
+    ticket would not write this cell until a dedicated probe established whether
+    `{epic_link: null}` actually clears on DC 8.17.1. Two cells in run 30951453979 answer YES and
+    both PASSED: `test_outbound_epic_parent_round_trips_via_the_epic_link`, whose final assertion
+    is literally `set_parent(child, None)` followed by `assert not cleared`, and
+    `test_inbound_clear_parent_round_trips`, which observes an Epic Link clear arriving inbound.
+    The probe was answering a question the suite had already answered.
+
+    THE PARENT IS SET BY REBAR, NOT BY JIRA, AND THAT IS A CORRECTNESS REQUIREMENT rather than
+    convenience. `_parent_clear_is_managed` gates the outbound clear on
+    `should_propagate_removal`, which fires only for a ref in the ticket's `managed_refs` — the
+    fail-open rule that stops rebar clobbering a parent a human set on the Jira side. A local
+    `edit_ticket(..., parent=...)` folds `("parent", <id>)` into `managed_refs`
+    (`reducer/_processors.py:528`), so priming through a local edit is what makes the later
+    detach propagate at all. Priming by CREATING the issue under a parent Jira-side — what the
+    old cell did — is the shape that does not.
+
+    THE PRIMING SET IS PROVEN LANDED BEFORE THE CLEAR IS ASKED FOR, so "the Epic Link is empty at
+    the end" cannot be satisfied by a parent that was never there. And the parent's local
+    `ticket_type` is asserted to be `epic`, because bug 8b25's emit guard omits the parent field
+    for any non-epic parent — without that, the priming pass would plan nothing and the cell would
+    go red for an import reason rather than a clear reason.
+
+    READ BACK OVER RAW REST, never through the transport that performed the write: a writer that
+    returns cleanly without persisting must not be able to pass itself.
     """
     from rebar_reconciler.binding_store import load_binding_store
     from rebar_reconciler.inbound_translate import _jira_key_to_local_id
 
     import rebar
 
-    subtask_type = _subtask_type_name(dc_request, jira_dc_project)
-    parent = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 out-detach par"))
-    child = _seed(
-        dc_transport,
-        jira_dc_project,
-        track_issue,
-        _uniq("rebar J11 out-detached subtask"),
-        issuetype=subtask_type,
-        extra={"parent": {"key": parent}},
-    )
+    epic_field = _epic_link_field_id(dc_request)
+    if epic_field is None:
+        pytest.fail(
+            "SETUP FAILED (not a rebar defect): this instance exposes no 'Epic Link' field, so "
+            "the parent-clear path DC supports cannot be exercised. See rebar ticket 4b9e."
+        )
+    epic_key = _seed_epic(dc_request, dc_transport, jira_dc_project, track_issue)
+    child = _seed(dc_transport, jira_dc_project, track_issue, _uniq("rebar J11 out-detach child"))
     child_local = _jira_key_to_local_id(child)
-    parent_local = _jira_key_to_local_id(parent)
+    epic_local = _jira_key_to_local_id(epic_key)
 
-    scope = ",".join((child_local, child, parent_local, parent))
+    scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
     bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
     assert bound == child, (
-        f"SETUP FAILED (not the clear): the sub-task {child_local} is not bound (got {bound!r}), "
-        f"so an outbound update would take the CREATE path instead of touching {child}."
+        f"SETUP FAILED (not the clear): the child {child_local} is not bound (got {bound!r}), so "
+        f"an outbound update would take the CREATE path instead of touching {child}."
     )
-    remote_parent = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent") or {}
-    assert remote_parent.get("key") == parent, (
-        f"SETUP FAILED (not the clear): {child} does not carry fields.parent = {parent!r} (got "
-        f"{remote_parent!r}), so its absence after the pass would prove nothing."
+    parent_type = (_local(dc_store_copy_repo, epic_local).get("ticket_type") or "").lower()
+    assert parent_type == "epic", (
+        f"SETUP FAILED (not the clear): the seeded epic {epic_key} imported as local ticket_type "
+        f"{parent_type!r}, not 'epic'. Bug 8b25's emit guard omits the parent field unless the "
+        f"local parent is an epic, so the priming SET below would plan nothing."
     )
-    before = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
-    assert before, (
-        f"SETUP FAILED (not the clear): the local ticket {child_local} has no parent_id to "
-        f"detach, so the differ has no CHANGE to emit — a pass would plan nothing and the "
-        f"remote parent would survive for a reason unrelated to this row."
+
+    # PRIMING — rebar itself attaches the parent, so the ref is MANAGED and the detach is allowed
+    # to propagate. Carried by a real pass and proven landed on the instance before continuing.
+    rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
+    cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
+    assert "Traceback" not in cp.stderr, f"priming attach pass raised:\n{cp.stderr[-2000:]}"
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    primed = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
+    assert primed == epic_key, (
+        f"SETUP FAILED (not the clear): rebar's priming attach did not land — {child}'s Epic "
+        f"Link ({epic_field}) is {primed!r}, expected {epic_key!r} (HTTP {status}). There is no "
+        f"parent for this cell to observe being cleared, and its absence later would prove "
+        f"nothing."
     )
 
     # THE MUTATION UNDER TEST — detach locally, then read the instance back.
+    # An empty value is rejected outright ("--parent requires a non-empty value (use
+    # --parent=null to detach)"), and the differ needs the "parent" key PRESENT-WITH-A-FALSY-
+    # VALUE to tell a CLEAR from "no parent op this mutation".
     rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent="null")
     cleared_local = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
     assert not cleared_local, (
@@ -1933,12 +1967,25 @@ def test_outbound_clear_parent_round_trips(
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
     assert "Traceback" not in cp.stderr, f"outbound clear-parent pass raised:\n{cp.stderr[-2000:]}"
 
-    after = (dc_transport.get_issue_by_rest(child).get("fields") or {}).get("parent")
+    status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
+    # The STATUS is asserted before the value is read, and that is load-bearing rather than
+    # defensive. A 401/403/500 answers with a dict like `{"errorMessages": [...]}`, whose
+    # `.get("fields")` is None — so a falsy `after` would be indistinguishable from a genuine
+    # clear and this cell would go GREEN on a failed read. The positive assertions above are
+    # safe without this (they compare against an expected key); a "must be absent" oracle is
+    # not.
+    assert status == 200 and isinstance(body, dict) and "fields" in body, (
+        f"could not read {child} back to verify the clear (HTTP {status}, body "
+        f"{str(body)[:200]}) — an unreadable issue must not be reported as a cleared one."
+    )
+    after = (body.get("fields") or {}).get(epic_field)
     assert not after, (
-        f"the local parent was DETACHED but {child} still carries fields.parent = {after!r}. "
-        f"Candidates, in order: the differ never emitted the clear; `set_parent` raised and was "
-        f"swallowed (`dispatch_one.py:571-578` warns and continues); or Data Center accepted "
-        f"PUT {{'parent': None}} and ignored it (`transport.py:688-689`)."
+        f"the local parent was DETACHED but {child}'s Epic Link ({epic_field}) still reads "
+        f"{after!r} (HTTP {status}). Candidates, in order: the differ never emitted the clear "
+        f"(check that the attach above made the ref MANAGED — `_parent_clear_is_managed` gates "
+        f"on it); `set_parent` raised and was swallowed (`dispatch_one` warns and continues); or "
+        f"Data Center accepted the Epic Link null and ignored it — which would contradict "
+        f"`test_outbound_epic_parent_round_trips_via_the_epic_link`, green on the same instance."
     )
 
 
