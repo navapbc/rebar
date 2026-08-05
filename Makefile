@@ -151,6 +151,11 @@ format:  ## MUTATES: auto-fix lint + format the code (the ONLY rewriting target)
 lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (release.yml) + actionlint (all workflows) + DCO identity consistency. The gate CI runs.
 	ruff check $(sources)
 	ruff format --check $(sources)
+	@# Shrink-only function-complexity ratchet (story c9f7): C901 over src/rebar only,
+	@# threshold from [tool.ruff.lint.mccabe] in pyproject.toml, compared against the
+	@# checked-in .github/complexity-baseline.json. Fails on new/increased complexity;
+	@# the ruff/format checks above still cover both src and tests.
+	python scripts/check_complexity_baseline.py --check
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py
