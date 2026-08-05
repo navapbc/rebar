@@ -1,0 +1,7 @@
+{
+  "id": "v1_bare_dep_before_verdict",
+  "description": "Captured b586 shape: a bare dep-link record quoted from show_ticket appears inline before the real verdict object; both bare (unfenced). Today's first-parseable-object scan returns the dep record and fails validation (verdict Field required).",
+  "fails_on_first_wins": true,
+  "expected_verdict": "PASS",
+  "reply": "I inspected the ticket graph with show_ticket. Its dependency link is {\"relation\": \"depends_on\", \"target_id\": \"f2f3-9cb1-335b-4e31\"} which I note for context.\n\nHaving reviewed the change against the acceptance criteria, here is my verdict:\n\n{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"The change landed on main and CI is green; every acceptance criterion is demonstrably met.\"}"
+}

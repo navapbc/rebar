@@ -1,0 +1,7 @@
+{
+  "id": "v2_fenced_dep_before_verdict",
+  "description": "The quoted dep-link record is fence-wrapped (```json ... ```) exactly as a model echoes a tool result; the real verdict follows bare. Today's fenced-block-first rule returns the dep record and fails validation.",
+  "fails_on_first_wins": true,
+  "expected_verdict": "PASS",
+  "reply": "The show_ticket tool returned this dependency-link record:\n\n```json\n{\"relation\": \"depends_on\", \"target_id\": \"f2f3-9cb1-335b-4e31\", \"link_uuid\": \"2403ad44-2927-43c3-bfee-a2f1d4afaf35\"}\n```\n\nBased on that context and the diff, my assessment is:\n\n{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"Acceptance criteria met; change verified on main.\"}"
+}
