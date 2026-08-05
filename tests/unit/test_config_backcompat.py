@@ -205,3 +205,51 @@ def test_from_mapping_strict_flag() -> None:
     assert cfg.Config.from_mapping({"sync": {"push": "off"}}, strict=True).sync.push == "off"
     with pytest.raises(cfg.ConfigError):
         cfg.Config.from_mapping({"sync": {"nope": 1}}, strict=True)
+
+
+# ── removed key: the inert code-health off switch (bug a573-00ea-2bf6-4eb1) ────
+def test_removed_code_health_enabled_cfg_key_warns_and_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`code_health.enabled` was removed: it had ZERO read sites, so it never
+    switched the structural metrics off. It is a WARN-class TOMBSTONE, not a silent
+    drop — an operator who still has it set must be told it is gone.
+
+    The strict unknown-key policy is what makes this discriminating: an untombstoned
+    unknown key RAISES ConfigError under `REBAR_CONFIG_UNKNOWN_KEYS=error`, so a run
+    that merely warns and returns a config proves the TOMBSTONE fired, not the
+    generic unknown-key path."""
+    monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text(
+        "[code_health]\nenabled = true\nsize_cap = 800\n", encoding="utf-8"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        c = cfg.load_config(root=p)  # must NOT raise — warn class
+
+    assert not hasattr(c.code_health, "enabled")
+    assert c.code_health.size_cap == 800  # the surviving keys still apply
+    assert any(
+        "code_health.enabled" in r.getMessage() and "was removed in" in r.getMessage()
+        for r in caplog.records
+    ), f"expected a tombstone warning, got: {[r.getMessage() for r in caplog.records]}"
+
+
+def test_removed_code_health_enabled_env_var_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The `REBAR_CODE_HEALTH_ENABLED` env twin is tombstoned too. Without a
+    tombstone an env var for a dead key is dropped in TOTAL SILENCE (env is only read
+    for live section/key pairs), so the warning is the whole contract here."""
+    monkeypatch.setenv("REBAR_CODE_HEALTH_ENABLED", "true")
+    p = _proj(tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        c = cfg.load_config(root=p)  # must NOT raise — warn class
+
+    assert not hasattr(c.code_health, "enabled")
+    assert any(
+        "REBAR_CODE_HEALTH_ENABLED" in r.getMessage() and "was removed in" in r.getMessage()
+        for r in caplog.records
+    ), f"expected a tombstone warning, got: {[r.getMessage() for r in caplog.records]}"
