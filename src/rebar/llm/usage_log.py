@@ -9,8 +9,12 @@ live prompt-eval (``prompt-eval.yml``) — which otherwise surface no spend at a
 Opt-in via the ``REBAR_USAGE_LOG`` env var: when it points at a path, :func:`record`
 appends one JSON object per LLM call (JSONL). :func:`summarize` folds that file into a
 Markdown table for ``$GITHUB_STEP_SUMMARY``; the raw JSONL is uploaded as a CI artifact.
-When the env var is unset (every normal library/test run) :func:`record` is a **no-op**,
-so the default runner path and ``make test`` are byte-unchanged.
+
+With that var unset, a run inside a GATE SESSION falls back to ``<repo root>/.rebar/usage.jsonl``
+when that directory already exists (bug aec1 — an operator's own gate run is billable, agentic,
+and the one that loops, yet it recorded nothing at all). Every OTHER call with the var unset —
+every normal library/test run — still makes :func:`record` a **no-op**, so the default runner
+path and ``make test`` are byte-unchanged. :func:`_resolve_sink` owns that precedence.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,26 @@ ENV_VAR = "REBAR_USAGE_LOG"
 
 #: The integer token fields ``_extract_usage()`` reports (runner.py); summed by summarize().
 _FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "requests")
+
+#: The RUN-SHAPE fields :func:`run_shape` derives from a run's accumulated pydantic-ai messages.
+#
+# A SECOND allowlist rather than more ``_FIELDS`` because the write rules differ: ``_FIELDS`` are
+# token counters every caller has, written unconditionally; these describe the SHAPE of the agent
+# loop and exist only when the caller could reduce the messages, so each is written only when
+# present (see :func:`record`). Before bug aec1 all seven were computed and then DISCARDED at the
+# write — a 125-request loop reduced to ``tool_calls=125, tool_calls_distinct=1`` and the row
+# carried neither, so the one signal separating a LOOP from BREADTH never reached the record.
+# Explicit, not ``**usage`` passthrough: this module owns its durable schema, because a row is
+# read back months later and what may appear in it is a decision made HERE.
+_SHAPE_FIELDS = (
+    "tool_calls",
+    "tool_calls_distinct",
+    "max_consecutive_repeat",
+    "top_repeated_tool_calls",
+    "request_limit",
+    "tool_calls_limit",
+    "finish_reason",
+)
 
 #: The four billable token fields genai-prices consumes (``requests`` is not billable).
 _TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
@@ -139,7 +164,14 @@ def failure_usage(
     request_limit: int,
     tool_calls_limit: int,
 ) -> dict[str, int | str | None]:
-    """Return safe counters from pydantic-ai messages when a run raises.
+    """Reduce a run's accumulated pydantic-ai messages to its SHAPE, on EITHER outcome.
+
+    Originally written for the raise path only (hence the name), but nothing here is
+    failure-specific: the same reduction over the same accumulated messages is exactly what a
+    SUCCESSFUL run needs to be readable too (bug aec1 — a success row carried no shape at all,
+    so a run that succeeded after 40 near-identical tool calls was indistinguishable from one
+    that succeeded in three). Reused verbatim by both paths rather than duplicated, so the two
+    outcomes can never drift into reporting the same run differently.
 
     Prompts, response text, tool arguments, and tool results are deliberately
     excluded so the payload is safe for a durable gate-error record.
@@ -189,6 +221,28 @@ def failure_usage(
         "tool_calls_limit": tool_calls_limit,
         **_repetition_summary(signatures),
     }
+
+
+# Outcome-neutral name for the SAME function. Both names exist deliberately: ``failure_usage``
+# has live call sites (llm/structured_run.py) that are being edited concurrently, so renaming it
+# would collide; but the success path now calls the same reducer, and a success-path call reading
+# ``failure_usage(...)`` would tell a reader the opposite of the truth. New call sites should use
+# ``run_shape``; the old name stays as the compatible spelling until its callers migrate.
+run_shape = failure_usage
+
+
+def shape_only(shape: dict) -> dict[str, Any]:
+    """Just the :data:`_SHAPE_FIELDS` entries of a :func:`run_shape` result.
+
+    So a caller merging the shape into its own usage dict need not reach into this module's
+    private field tuple: which keys are durable schema belongs HERE, next to the only thing that
+    writes them, and a caller filtering by its own inline list would be a second, drifting copy.
+    It also DROPS the reducer's token totals, which are summed from the messages whereas a
+    successful caller already holds the provider's own authoritative figures — merging the
+    approximation over them would silently corrupt cost accounting.
+    """
+
+    return {field: shape[field] for field in _SHAPE_FIELDS if field in shape}
 
 
 def _tool_signature(part: object) -> str:
@@ -256,6 +310,70 @@ def format_repetition(usage: dict) -> str:
     )
 
 
+def _repo_root_for_default_sink() -> str | None:
+    """The repo root the default gate sink lives under, or None when it cannot be determined.
+
+    Its own named function so :func:`_resolve_sink` reads as one decision rather than an inline
+    try/except, and so a test can pin the root without a chdir. ``rebar.config`` is imported
+    LAZILY because this module is deliberately stdlib-only at import time (module docstring): it
+    is imported from the runner's hot path and from an ``except`` block. Never raises — root
+    discovery walks the filesystem and consults git, either of which can fail for reasons
+    unrelated to the call being measured, and telemetry that raised there would break the very
+    call it exists to observe.
+    """
+
+    try:
+        from rebar import config as _config
+
+        return str(_config.repo_root())
+    except Exception:  # noqa: BLE001 — see docstring: telemetry must never raise into the caller
+        return None
+
+
+def _resolve_sink() -> str | None:
+    """The JSONL path :func:`record` should append to, or None when recording is off.
+
+    Two sources, in strict precedence order:
+
+    1. ``REBAR_USAGE_LOG`` — an operator/CI pointing the sink somewhere explicit. Used verbatim,
+       and it wins, because an explicit path is an instruction, not a hint.
+    2. The DEFAULT GATE SINK ``<repo root>/.rebar/usage.jsonl`` — but ONLY inside a gate session.
+       Before bug aec1 the env var was the only source, so a normal operator gate run (a
+       ``review-plan``, a ``verify-completion``) recorded NOTHING and its spend and run shape were
+       gone the moment the process exited. A gate run is exactly the run worth measuring: it is
+       billable, it is agentic, and it is the one that loops.
+
+    The gate-session condition keeps this from becoming "rebar writes files during library use":
+    a call OUTSIDE a gate session with the env var unset resolves to None and :func:`record`
+    no-ops byte-for-byte as it always has — load-bearing, since ``import rebar`` and
+    ``make test`` must not start dropping JSONL into a checkout. The ``.rebar`` directory must
+    already EXIST for the same reason: its presence is the signal that this checkout is a rebar
+    store, and we create nothing.
+    """
+
+    # Read via the string literal (== ENV_VAR) so the env-var registry generator
+    # (scripts/gen_env_registry.py) names REBAR_USAGE_LOG rather than listing it as an
+    # opaque non-literal read — this is a fixed, operator-facing var, so it belongs in
+    # the named table in docs/env-vars.md.
+    path = os.environ.get("REBAR_USAGE_LOG")
+    if path:
+        return path
+    # Lazy for the same stdlib-only reason as `_repo_root_for_default_sink`. Imported through
+    # `rebar.llm.config`, NOT from `gate_context` where it is defined: the suite's monkeypatch
+    # targets name `rebar.llm.config.<name>`, so a consumer reading the new module directly would
+    # keep working while those patches silently stopped applying. `test_gate_context_seam.py`
+    # enforces this for every module under src/.
+    from rebar.llm.config import in_gate_session
+
+    if not in_gate_session():
+        return None
+    root = _repo_root_for_default_sink()
+    if root is None:
+        return None
+    default = os.path.join(root, ".rebar", "usage.jsonl")
+    return default if os.path.isdir(os.path.join(root, ".rebar")) else None
+
+
 def record(
     usage: dict,
     *,
@@ -265,6 +383,8 @@ def record(
     step: str | None = None,
     model_class: str | None = None,
     outcome: str = OUTCOME_OK,
+    duration_s: float | None = None,
+    ticket: str | None = None,
 ) -> None:
     """Append one usage record for a single LLM call to ``$REBAR_USAGE_LOG`` (JSONL).
 
@@ -284,15 +404,16 @@ def record(
     written unconditionally — unlike the optional identity fields above — because the whole point
     is that a reader can tell the two apart without inferring anything from an absence.
 
-    No-op when the env var is unset (the default) or ``usage`` is empty. Best-effort: a
-    telemetry sink must never break the LLM call path, so any write error is logged and
-    swallowed rather than raised into the runner.
+    ``duration_s`` and ``ticket`` are optional and written only when supplied. They answer the
+    two questions the token counters cannot: how long the spend took — a run can be cheap and
+    still be a twenty-minute stall — and WHICH work it belongs to, which is what makes spend
+    comparable across tickets rather than only across ops.
+
+    No-op when :func:`_resolve_sink` finds no sink (the default outside a gate session) or
+    ``usage`` is empty. Best-effort: a telemetry sink must never break the LLM call path, so any
+    write error is logged and swallowed rather than raised into the runner.
     """
-    # Read via the string literal (== ENV_VAR) so the env-var registry generator
-    # (scripts/gen_env_registry.py) names REBAR_USAGE_LOG rather than listing it as an
-    # opaque non-literal read — this is a fixed, operator-facing var, so it belongs in
-    # the named table in docs/env-vars.md.
-    path = os.environ.get("REBAR_USAGE_LOG")
+    path = _resolve_sink()
     if not path or not usage:
         return
     row: dict[str, object] = {"op": op, "outcome": outcome}
@@ -310,6 +431,19 @@ def record(
     row["timestamp"] = datetime.now(timezone.utc).isoformat()
     for field in _FIELDS:
         row[field] = int(usage.get(field, 0) or 0)
+    # Same omission pattern as model/step/model_class above, but here it is load-bearing rather
+    # than tidy: defaulting to 0 would make a caller that reduced no messages claim
+    # `tool_calls: 0`, the strong false statement "this run used no tools", which later
+    # aggregates would then sum as fact. An absent key says the only true thing — not measured.
+    # Values pass through unconverted (`top_repeated_tool_calls` is a list, `finish_reason` a
+    # string), so a blanket int() would be wrong.
+    for field in _SHAPE_FIELDS:
+        if field in usage:
+            row[field] = usage[field]
+    if duration_s is not None:
+        row["duration_s"] = float(duration_s)
+    if ticket:
+        row["ticket"] = ticket
     try:
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
@@ -323,12 +457,18 @@ def record_failure(
     model: str | None,
     request_limit: int,
     eff_max_iter: int,
+    *,
+    duration_s: float | None = None,
+    ticket: str | None = None,
 ) -> None:
     """Append the one usage row for an LLM call that RAISED (bug 8455).
 
     Positional rather than keyword-only purely so the runner's call fits its line budget — the
     caller sits under a hard module-size gate; the arguments are ``(accumulated pydantic-ai
     messages, op/prompt label, model that ran, request limit, effective max iterations)``.
+    ``duration_s``/``ticket`` (bug aec1) are appended as KEYWORD-only with defaults rather than
+    extending that positional run, so every existing call site keeps working unchanged and a
+    future reader cannot silently transpose them into the ints above.
 
     ``PydanticAIRunner.run`` reaches :func:`record` only on its success path — its except spine
     (``interpret_failure``) always re-raises — so before 8455 a call that burned input tokens and
@@ -367,6 +507,8 @@ def record_failure(
             step=step_id,
             model_class=declared_model_class(model_token),
             outcome=OUTCOME_FAILED,
+            duration_s=duration_s,
+            ticket=ticket,
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must never mask the provider's error
         logger.warning("usage-log: failed-call record failed for op=%s: %s", op, exc)
@@ -463,6 +605,68 @@ def _price_row(pricing, row: dict) -> float | None:
 
 def _cost_cell(cost: float, priced: int) -> str:
     return f"${cost:.4f}" if priced else "—"
+
+
+def _run_shape_section(rows: list[dict]) -> list[str]:
+    """The loop-versus-breadth table, or ``[]`` when no row carries run-shape fields.
+
+    Persisting the counts is only half of bug aec1: the point is that an operator who hits a
+    budget exhaustion can tell whether they paid for a LOOP or for genuine BREADTH. A retrieval
+    command rendering only token counters leaves the signal written and never displayed — the
+    same "computed then discarded" defect, one layer out — so the command that READS the log
+    must show the discriminator, not merely carry it.
+
+    ``ratio`` is ``distinct / total``, the one number that separates them: near 1.0 every call
+    differed (breadth), near 0 the agent span on a handful (a loop). Measured live, 238/258 =
+    0.92 is healthy; 76/257 = 0.30, 167/270 = 0.62 and 135/264 = 0.51 are pathological.
+
+    A SEPARATE section appended after the token table, never extra columns on it: that table
+    feeds ``$GITHUB_STEP_SUMMARY`` on the billable weekly jobs and several tests assert on it,
+    so additive keeps every existing reader byte-identical. Shapeless rows are skipped and an
+    all-shapeless log yields ``[]``, so every pre-aec1 log renders exactly as it did. Counts are
+    SUMMED per op — exact for the usual single-call case, an upper bound across calls, so a loop
+    can only look *better* than it is: the safe direction for a number used to accuse one.
+    """
+
+    shaped = [row for row in rows if "tool_calls" in row]
+    if not shaped:
+        return []
+    # (column, row field, combine). Limits are MAXed rather than summed: they are the ceiling
+    # each call ran under, so the largest is the one that mattered, whereas summing them would
+    # invent a budget no call ever had.
+    cols = (
+        ("tool_calls", "tool_calls", sum),
+        ("distinct", "tool_calls_distinct", sum),
+        ("repeat", "max_consecutive_repeat", max),
+        ("req", "request_limit", max),
+        ("cap", "tool_calls_limit", max),
+    )
+    per_op: dict[str, dict[str, int]] = {}
+    for row in shaped:
+        agg = per_op.setdefault(str(row.get("op", "?")), dict.fromkeys([c[0] for c in cols], 0))
+        agg["calls"] = agg.get("calls", 0) + 1
+        for key, field, combine in cols:
+            agg[key] = combine((agg[key], int(row.get(field, 0) or 0)))
+    out = [
+        "",
+        "#### Run shape (loop vs breadth)",
+        "",
+        "| op | calls | tool_calls | distinct | ratio | max_repeat | request_limit "
+        "| tool_calls_limit |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for op in sorted(per_op):
+        agg = per_op[op]
+        total = int(agg["tool_calls"])
+        distinct = int(agg["distinct"])
+        # No tool calls at all is not a ratio of 0 (which would read as a perfect loop) — it is
+        # the absence of a measurement, so it prints as an em dash.
+        ratio = f"{distinct / total:.3f}" if total else "—"
+        out.append(
+            f"| {op} | {int(agg['calls'])} | {total} | {distinct} | {ratio} "
+            f"| {int(agg['repeat'])} | {int(agg['req'])} | {int(agg['cap'])} |"
+        )
+    return out
 
 
 def summarize(path: str) -> str:
@@ -574,7 +778,7 @@ def summarize(path: str) -> str:
             for model in sorted(per_model):
                 rollup = per_model[model]
                 lines.append(f"| {model} | {int(rollup['calls'])} | ${rollup['cost']:.4f} |")
-    return "\n".join(lines)
+    return "\n".join(lines + _run_shape_section(rows))
 
 
 def main(argv: list[str] | None = None) -> int:

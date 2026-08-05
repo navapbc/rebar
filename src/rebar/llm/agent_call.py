@@ -153,15 +153,28 @@ def log_call_success(
     )
 
 
-def record_call_spend(usage: dict, *, call_label: str, ran_model: str) -> None:
-    """Durable, opt-in spend record for the weekly billable CI jobs (no-op unless
-    REBAR_USAGE_LOG is set) — the runner is the one chokepoint shared by both the external
-    tier and the live prompt-eval, so a single sink covers both.
+def record_call_spend(
+    usage: dict,
+    *,
+    call_label: str,
+    ran_model: str,
+    duration_s: float | None = None,
+    ticket: str | None = None,
+) -> None:
+    """Durable spend record for the weekly billable CI jobs (and, since bug aec1, for a gate
+    session's default ``.rebar/usage.jsonl`` — ``usage_log._resolve_sink`` owns that precedence
+    and the no-op case) — the runner is the one chokepoint shared by both the external tier and
+    the live prompt-eval, so a single sink covers both.
 
     Attribute the row to the workflow step that made the call (b690). ``op`` is the PROMPT
     name, which cannot separate steps that share a prompt, so the step id and the raw declared
     class token ride in on a ContextVar the step executor binds. Both are absent for a call
-    made outside any step, and ``record`` omits them accordingly."""
+    made outside any step, and ``record`` omits them accordingly.
+
+    ``duration_s``/``ticket`` (bug aec1) are optional and forwarded verbatim: the runner owns
+    both facts (it holds the ``time.monotonic()`` start and the request target), so they are
+    passed IN rather than recomputed here — this module is an edge helper with no access to
+    either, and re-deriving a duration from a later clock read would measure the wrong span."""
     step = usage_log.active_step()
     step_id, model_token = step if step is not None else (None, None)
     usage_log.record(
@@ -171,4 +184,6 @@ def record_call_spend(usage: dict, *, call_label: str, ran_model: str) -> None:
         provider=infer_provider(ran_model),
         step=step_id,
         model_class=usage_log.declared_model_class(model_token),
+        duration_s=duration_s,
+        ticket=ticket,
     )

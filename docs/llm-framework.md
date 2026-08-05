@@ -478,6 +478,56 @@ without the declared class a reader cannot tell "resolved to opus *because* `fro
 "resolved to opus *because* it fell through to `cfg.model`" — the distinction that makes a
 per-pass model claim checkable.
 
+**Run shape** (bug aec1). Every row — success and failure alike — also carries the shape of the
+agent loop that produced it, reduced from the run's accumulated pydantic-ai messages by the ONE
+reducer both outcomes share (`run_shape`, the outcome-neutral alias of `failure_usage`):
+`tool_calls`, `tool_calls_distinct`, `max_consecutive_repeat`, `top_repeated_tool_calls`
+(signature + count, arguments **hashed** so the privacy contract is unchanged), plus the
+`request_limit`/`tool_calls_limit` the call ran under and the provider's `finish_reason`. These
+exist because the token counters cannot tell a **LOOP** from genuine **BREADTH**: a run that burned
+its whole budget looks identical either way. The **distinct-vs-total ratio** separates them —
+`tool_calls=125, tool_calls_distinct=1` is an agent spinning on one call; `tool_calls=40,
+tool_calls_distinct=38` is an agent exploring — and it reads straight off the durable row, so the
+diagnosis costs nothing and needs no re-run of a billable call. Each is written **only when
+present**: absent means "not measured", never `0` (which would falsely assert "used no tools").
+Rows also carry **`duration_s`** (wall clock for the call — a run can be cheap and still be a
+twenty-minute stall) and **`ticket`** (the ticket the call was made against, which makes spend
+comparable per unit of work rather than only per op).
+
+**The default gate sink.** `REBAR_USAGE_LOG` still wins outright when set, but with it unset a run
+inside a **gate session** (`review-plan`, `verify-completion`, …) now appends to
+`<repo root>/.rebar/usage.jsonl` when that `.rebar` directory already exists. Before this, the env
+var was the only source, so a normal operator gate run — the billable, agentic, loop-prone run most
+worth measuring — recorded nothing and its spend vanished with the process. Read it back with
+`python -m rebar.llm.usage_log summarize .rebar/usage.jsonl`, which prints the token/cost table
+**and** a `Run shape (loop vs breadth)` section — writing the counts without displaying them
+would leave the operator exactly as unable to answer the question, so the retrieval command
+renders the discriminator:
+
+```
+| op            | calls | tool_calls | distinct | ratio | max_repeat | request_limit | tool_calls_limit |
+| plan-reviewer |    12 |        129 |      129 | 1.000 |          1 |           125 |              250 |
+| verify        |     1 |        125 |        1 | 0.008 |        125 |           125 |              250 |
+```
+
+Both rows are real: the first is a healthy plan-review (every tool call different — breadth),
+the second an agent that span on one call until the budget tripped (a loop). An op that made no
+tool calls prints `—`, never `0.000`, because no measurement is not a perfect loop. The
+gate-session condition is
+load-bearing: outside a gate session with the env var unset, `record()` still writes **nothing at
+all**, so library use and `make test` never drop JSONL into a checkout; and the directory is never
+created, because its presence is what identifies the checkout as a rebar store.
+
+**Lifecycle of `.rebar/usage.jsonl`: append-only, unrotated, and safe to delete at any time.** It is
+git-ignored local telemetry owned by the checkout, never read back by rebar itself — only by
+`summarize` and by you — so truncating or removing it loses history and breaks nothing. Nothing
+prunes it, so it grows with every gate run; delete it when you have finished a measurement, or
+point `REBAR_USAGE_LOG` at a per-session path when you want a clean window. (The same
+no-rotation caveat already applies to the long-lived review-bot sink configured in
+`infra/compose/docker-compose.yml`.) Each row is written with a single append of one complete
+line, so concurrent gate runs interleave rows without corrupting one; and the write is
+best-effort — a failure is logged and swallowed, never raised into the gate run it measures.
+
 **Est. cost is an optional add-in**: install the `pricing` extra
 (`pip install 'nava-rebar[pricing]'` → [genai-prices](https://github.com/pydantic/genai-prices),
 pydantic's offline price data with cache read/write tiers and historical prices by
