@@ -56,12 +56,14 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
     assert payload["config"]["code_health"] == {
         "enabled": True,
         "scan_roots": ["src", "web"],
+        "include_extensions": [],
         "size_cap": 900,
         "size_near_fraction": 0.2,
     }
     assert payload["sources"]["code_health"] == {
         "enabled": "cli",
         "scan_roots": "cli",
+        "include_extensions": "default",
         "size_cap": "cli",
         "size_near_fraction": "cli",
     }
