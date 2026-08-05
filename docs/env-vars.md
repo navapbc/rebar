@@ -178,8 +178,8 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/apply_inbound.py:62` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/binding_store.py:107` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/inbound_translate.py:50` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/outbound_differ.py:78` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/outbound_differ.py:103` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/outbound_differ.py:89` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/outbound_differ.py:114` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:411` — `os.environ.get(<non-literal>)`
 - `src/rebar/_mcp_auth.py:658` — `os.environ.get(<non-literal>)`

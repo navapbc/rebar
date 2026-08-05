@@ -373,7 +373,15 @@ class OutboundMapper(Protocol):
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         emit_detach_clear: bool = False,
-    ) -> dict[str, Any]: ...
+        *,
+        suppressed_out: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """``suppressed_out`` (ticket 8390): an optional sink an implementation MAY
+        append to when it drops a parent it could otherwise have sent, so the caller
+        can report the loss. Reporting only — it never changes the mapped dict, and a
+        backend with no such suppression (Data Center maps no parent at all) accepts
+        and ignores it."""
+        ...
 
     def map_fields_to_remote(
         self,

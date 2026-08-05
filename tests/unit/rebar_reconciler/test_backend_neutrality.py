@@ -261,7 +261,13 @@ class _RecordingOutboundMapper:
         self.calls: list[dict] = []
 
     def map_local_to_remote(
-        self, ticket, binding_store=None, local_ticket_types=None, emit_detach_clear=False
+        self,
+        ticket,
+        binding_store=None,
+        local_ticket_types=None,
+        emit_detach_clear=False,
+        *,
+        suppressed_out: list[str] | None = None,
     ) -> dict:
         self.calls.append(ticket)
         return {"summary": "SENTINEL-FROM-INJECTED-MAPPER"}

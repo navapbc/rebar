@@ -157,6 +157,8 @@ class _FakeOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         emit_detach_clear: bool = False,
+        *,
+        suppressed_out: list[str] | None = None,
     ) -> dict[str, Any]:
         return {
             "summary": ticket.get("title") or "",
