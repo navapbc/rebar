@@ -58,6 +58,16 @@ resource "aws_cloudwatch_metric_alarm" "voter_errors" {
   # alarm, so missing data is treated as not-breaching.
   treat_missing_data = "notBreaching"
 
+  # Notify the shared alerts topic on BOTH edges (ticket 9baf). This alarm previously declared
+  # neither, so it transitioned OK -> ALARM and told nobody — the "silent-alarm gap" named in
+  # monitoring.tf. That silence contradicted this file's own contract above, which claims the
+  # alarm "surfaces a persistently broken voter to an operator". Because submit REQUIRES the
+  # LLM-Review vote (ADR-0013), a failing voter is gate-critical and must page, not just sit on
+  # a dashboard. ok_actions is wired too so a recovery is announced and the alarm does not read
+  # as permanently firing.
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
   tags = {
     Project = "rebar"
     Story   = "S4b"
