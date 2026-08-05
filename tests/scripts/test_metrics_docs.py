@@ -56,7 +56,7 @@ def test_metrics_surface_documented():
 
     config = _read("docs/config.md")
     assert "[code_health]" in config
-    for key in ("enabled", "scan_roots", "size_cap", "size_near_fraction"):
+    for key in ("enabled", "scan_roots", "include_extensions", "size_cap", "size_near_fraction"):
         assert key in config, f"config reference must document code_health.{key}"
 
     user_guide = _read("docs/user-guide.md")

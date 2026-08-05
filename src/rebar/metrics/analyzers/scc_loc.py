@@ -29,16 +29,18 @@ def analyze(
     repo_root: Path,
     scan_roots: Iterable[str | Path] | None = None,
     *,
+    include_extensions: Iterable[str] | None = None,
     run: Runner = _run_scc,
 ) -> AnalyzerResult | Unavailable:
     """Return per-file LOC from scc, or an unavailable metric on tool failure."""
 
     root = repo_root.resolve()
     roots = _scan_roots(root, scan_roots)
+    extensions = [str(extension) for extension in (include_extensions or ())]
     files: dict[str, int] = {}
 
     for scan_root in roots:
-        command = ["scc", "--format", "json", str(scan_root)]
+        command = _scc_command(scan_root, extensions)
         try:
             completed = run(command)
         except FileNotFoundError:
@@ -57,7 +59,24 @@ def analyze(
         except (TypeError, ValueError) as exc:
             return _unavailable(f"scc produced invalid JSON: {exc}")
 
+    # An empty map means scc measured NOTHING (a bad filter, an empty root, or a build that
+    # emitted only language summaries) — never "this repository has zero lines". Reporting it
+    # as a zero-valued result would publish a confident structural zero, so it is unavailable.
+    if not files:
+        return _unavailable("scc reported no files")
+
     return AnalyzerResult(loc={"files": files, "max_loc": max(files.values(), default=0)})
+
+
+def _scc_command(scan_root: Path, extensions: list[str]) -> list[str]:
+    """Build the scc argv for one scan root, narrowing by extension when configured."""
+
+    # ``--by-file`` is REQUIRED: without it scc emits per-language summaries whose ``Files``
+    # key is present but empty, which parses cleanly into zero entries.
+    command = ["scc", "--by-file"]
+    if extensions:
+        command += ["--include-ext", ",".join(extensions)]
+    return [*command, "--format", "json", str(scan_root)]
 
 
 def _scan_roots(repo_root: Path, scan_roots: Iterable[str | Path] | None) -> list[Path]:
@@ -90,10 +109,12 @@ def _parse_files(payload: object, repo_root: Path) -> dict[str, int]:
             if not isinstance(entry, dict):
                 raise ValueError("file entry is not an object")
             location = entry.get("Location")
-            code = entry.get("Code")
-            if not isinstance(location, str) or not isinstance(code, int):
-                raise ValueError("file entry has invalid location or code")
-            files[_relative_location(location, repo_root)] = code
+            # ``Lines`` (raw line count), not ``Code``: the CI module-size gate measures
+            # `wc -l`, which scc's ``Lines`` matches exactly while ``Code`` never can.
+            lines = entry.get("Lines")
+            if not isinstance(location, str) or not isinstance(lines, int):
+                raise ValueError("file entry has invalid location or line count")
+            files[_relative_location(location, repo_root)] = lines
     return files
 
 

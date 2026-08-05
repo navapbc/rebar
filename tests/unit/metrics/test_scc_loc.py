@@ -29,13 +29,13 @@ def test_parse(tmp_path: Path) -> None:
         {
             "Name": "Python",
             "Files": [
-                {"Location": str(repo_root / "src" / "small.py"), "Code": 100},
+                {"Location": str(repo_root / "src" / "small.py"), "Lines": 100},
             ],
         },
         {
             "Name": "TypeScript",
             "Files": [
-                {"Location": str(repo_root / "web" / "large.ts"), "Code": 850},
+                {"Location": str(repo_root / "web" / "large.ts"), "Lines": 850},
             ],
         },
     ]

@@ -196,12 +196,20 @@ def _scc_analysis(ctx: Any) -> AnalyzerResult | Unavailable:
     """Return the cached SCC result for the context's configured scan roots."""
 
     scan_roots = tuple(str(scan_root) for scan_root in ctx.scan_roots)
-    return _cached_analysis(
-        ctx,
-        "scc",
-        (scan_roots,),
-        lambda root: scc_loc.analyze(root, ctx.scan_roots),
-    )
+    configured = getattr(ctx, "include_extensions", ()) or ()
+    extensions = tuple(str(extension) for extension in configured)
+
+    # Narrowing is passed only when configured, so an unconfigured project makes exactly the
+    # polyglot call it always made. The extensions join the cache key: two differently
+    # narrowed runs describe different file sets and must not share a cached result.
+    def analyze(root: Path) -> AnalyzerResult | Unavailable:
+        """Run the scc adapter, narrowing by extension only when one is configured."""
+
+        if extensions:
+            return scc_loc.analyze(root, ctx.scan_roots, include_extensions=extensions)
+        return scc_loc.analyze(root, ctx.scan_roots)
+
+    return _cached_analysis(ctx, "scc", (scan_roots, extensions), analyze)
 
 
 def _lizard_analysis(ctx: Any) -> AnalyzerResult | Unavailable:

@@ -536,6 +536,10 @@ class CodeHealthConfig:
 
     enabled: bool = False
     scan_roots: list[str] = field(default_factory=list)
+    # Empty means "every file scc recognises" — the polyglot default. Narrowing it scopes the
+    # module-size metric to the file types a project's own size policy governs.
+    # read-via: _commands/metrics.py ctx.include_extensions -> metrics/analyzers/scc_loc.py
+    include_extensions: list[str] = field(default_factory=list)
     size_cap: int | None = None
     size_near_fraction: float = 0.1
 
@@ -710,6 +714,7 @@ _SECTIONS: dict[str, dict] = {
     "code_health": {
         "enabled": lambda v, k: _as_bool(v, k),
         "scan_roots": lambda v, k: _as_str_list(v, k),
+        "include_extensions": lambda v, k: _as_str_list(v, k),
         "size_cap": lambda v, k: None if v is None else _as_int(v, k, minimum=0),
         "size_near_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
     },
