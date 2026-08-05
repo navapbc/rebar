@@ -1,4 +1,5 @@
 {
+  "_generated_by": "GENERATED from digests of the criteria cited by the `src/rebar/_guides/*.md` prose guides — do not edit by hand. Regenerate with `python -m rebar.llm.plan_review.guide_parity regenerate`; a CI drift gate fails the build if this file is stale.",
   "guides": {
     "commit-ticket-trailer.md": {},
     "passing-code-review.md": {},
