@@ -10,7 +10,7 @@ existing call seam — ``_run_plan_review`` calls both, in order):
   attestation path can never fire for it; instead reuse the stored BLOCK verdict from
   the latest ``REVIEW_RESULT`` sidecar when its ``material_fingerprint`` AND
   ``verified_at_sha`` both still match the current plan/code (the same
-  sidecar-baseline comparison as ``attest._sidecar_branch_decision``).
+  sidecar-baseline comparison as ``remediation_mode._sidecar_branch_decision``).
 
 Both are read-only (no LLM, no new sidecar, no re-sign) and both are bypassed by
 ``--force``. Alternative rejected (7e77): signing BLOCK attestations would complicate
@@ -134,7 +134,7 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
       (the plan is unrevised); and
     * its ``verified_at_sha`` equals the current review code SHA (the code is undrifted) —
       both sides of that comparison come from ONE rule (:func:`sidecar.review_code_sha`),
-      mirroring ``attest._sidecar_branch_decision``.
+      mirroring ``remediation_mode._sidecar_branch_decision``.
 
     Emits NO new sidecar (reuse is a read, not a review) and is bypassed by ``--force``
     (the caller gates on it). Fail-safe: any read error → ``None`` → full review."""
