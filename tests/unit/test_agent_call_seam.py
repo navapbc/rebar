@@ -23,7 +23,12 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from rebar.llm.agent_call import build_agent_kwargs, log_call_success, record_call_spend
+from rebar.llm.agent_call import (
+    TOOL_STEP_STEERING_NOTICE,
+    build_agent_kwargs,
+    log_call_success,
+    record_call_spend,
+)
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import RunRequest
 
@@ -87,50 +92,89 @@ def test_optional_keys_are_absent_not_none():
     assert "model_settings" not in out, "a falsy model_settings must not be sent"
 
 
-def test_tool_step_limit_rewrites_tools_into_a_filtered_toolset():
-    """The executable convergence boundary: past the limit the tools stop being offered.
-    Losing this rewrite would silently un-bound a tool loop, so it is asserted on the
-    filter's own predicate rather than only on the shape."""
-    from pydantic_ai.toolsets import FunctionToolset
+def test_tool_step_limit_wraps_toolsets_for_steering():
+    """The executable convergence boundary: past the limit, tool CALLS are answered with a
+    steering notice instead of being executed — while the tool DEFINITIONS stay advertised.
+    Emptying the advertised surface mid-run is a provider-protocol violation (Bedrock 400:
+    "toolConfig field must be defined when using toolUse..."), so the boundary must never
+    remove tools from the request."""
+    import asyncio
+
+    cfg = _cfg()
 
     def a_tool() -> str:
         return "x"
 
-    cfg = _cfg()
+    executed = []
+
+    class _FakeToolset:
+        async def call_tool(self, name, tool_args, ctx, tool):
+            executed.append(name)
+            return "real-result"
+
     out = build_agent_kwargs(
         cfg,
-        _req(cfg, tool_step_limit=3),
+        _req(cfg, tool_step_limit=1),
         [a_tool],
-        [FunctionToolset([])],
+        [_FakeToolset()],
         model_settings=None,
         web_caps=None,
     )
-    assert out["tools"] == [], "the tools must move into the filtered toolsets"
+    assert out["tools"] == [], "the tools must move into the steering toolsets"
     assert len(out["toolsets"]) == 2, "the function tools plus the pre-existing toolset"
 
     class _Ctx:
         def __init__(self, step):
             self.run_step = step
 
-    inner = out["toolsets"][0]
-    assert inner.filter_func(_Ctx(3), None) is True, "at the limit the tool is still offered"
-    assert inner.filter_func(_Ctx(4), None) is False, "past the limit it is withheld"
+    wrapper = out["toolsets"][1]
+
+    result = asyncio.run(wrapper.call_tool("t", {}, _Ctx(1), None))
+    assert result == "real-result", "at the limit the tool still executes"
+    assert executed == ["t"]
+
+    steered = asyncio.run(wrapper.call_tool("t", {}, _Ctx(2), None))
+    assert steered == TOOL_STEP_STEERING_NOTICE, "past the limit the call is steered"
+    assert executed == ["t"], "the underlying tool must NOT execute past the limit"
 
 
-def test_a_negative_step_limit_clamps_to_zero_rather_than_inverting():
+def test_a_negative_step_limit_steers_from_the_first_call():
+    import asyncio
+
     cfg = _cfg()
 
     def a_tool() -> str:
         return "x"
 
+    executed = []
+
+    class _FakeToolset:
+        async def call_tool(self, name, tool_args, ctx, tool):
+            executed.append(name)
+            return "real-result"
+
     out = build_agent_kwargs(
-        cfg, _req(cfg, tool_step_limit=-5), [a_tool], [], model_settings=None, web_caps=None
+        cfg,
+        _req(cfg, tool_step_limit=-5),
+        [a_tool],
+        [_FakeToolset()],
+        model_settings=None,
+        web_caps=None,
     )
 
     class _Ctx:
         run_step = 1
 
-    assert out["toolsets"][0].filter_func(_Ctx(), None) is False
+    steered = asyncio.run(out["toolsets"][1].call_tool("t", {}, _Ctx(), None))
+    assert steered == TOOL_STEP_STEERING_NOTICE
+    assert executed == [], "a clamped-to-zero limit must steer from the very first call"
+
+
+def test_the_steering_notice_demands_a_final_answer():
+    """The notice is the model's only exit sign — it must say tool results stopped AND
+    demand the final answer; an empty or vague string would strand the run."""
+    assert "final" in TOOL_STEP_STEERING_NOTICE.lower()
+    assert "tool" in TOOL_STEP_STEERING_NOTICE.lower()
 
 
 def test_step_limit_without_tools_is_a_no_op():
