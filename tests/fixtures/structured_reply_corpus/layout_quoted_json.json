@@ -1,0 +1,6 @@
+{
+  "id": "layout_quoted_json",
+  "expected_layout": "quoted_json",
+  "description": "A single JSON verdict quoted inline inside prose backticks (quote-in-prose) \u2014 the sentinel story's E2 shape whose rate the directive is measured to move.",
+  "reply": "My structured answer, quoted inline, is `{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"Criteria met.\"}` \u2014 that is the whole payload."
+}

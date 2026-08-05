@@ -1,0 +1,115 @@
+name: Structured-Output Baseline
+
+# Operator-triggered structured-output MEASUREMENT harness (story a40f). This is NOT a gate:
+# it makes real, billable model calls to measure how the df3a schema-filtered selection parser
+# (and the sentinel output-format directive) move structured-output reliability across a matrix
+# of providers × directive variants × production-shaped prompts, and uploads the raw replies +
+# a before/after score table as an artifact bundle.
+#
+# All DETERMINISTIC logic (scoring, layout classification, the credential gate, the call cap)
+# lives in tests/external/_structured_matrix.py and is proven offline by
+# tests/unit/test_structured_matrix_scorer.py — this workflow only wires the live call site and
+# the per-provider secret scoping, mirroring the external-integration.yml provider matrix.
+#
+# workflow_dispatch ONLY: never on push/pull_request/schedule, so a paid sweep is always a
+# deliberate human action.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_calls:
+        description: "Per-run live model-call budget (the harness refuses an over-budget sweep before making a single call)."
+        required: false
+        default: "300"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  structured-matrix:
+    name: structured-output baseline (live ${{ matrix.provider }})
+    # Canonical repo only — forks/Dependabot get no secrets and must never reach a billable job.
+    if: ${{ github.repository == 'navapbc/rebar' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for OIDC AssumeRoleWithWebIdentity on the Bedrock arm (job-wide because GitHub
+      # has no per-matrix-arm permissions block; the token is only exchanged by the bedrock step).
+      id-token: write
+    strategy:
+      # One provider's outage must not cancel the others — each result is read independently.
+      fail-fast: false
+      matrix:
+        include:
+          - provider: anthropic
+            config_file: .github/llm-providers/anthropic.toml
+          - provider: bedrock
+            config_file: .github/llm-providers/bedrock.toml
+          - provider: openai
+            config_file: .github/llm-providers/openai.toml
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+
+      # Bedrock authenticates from the AMBIENT AWS chain — no instance role/IMDS route exists on
+      # a GitHub-hosted runner, so this arm federates via OIDC to the scoped Bedrock CI role.
+      - name: Configure AWS credentials (OIDC → the scoped Bedrock CI role)
+        if: matrix.provider == 'bedrock'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_BEDROCK_CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_BEDROCK_CI_REGION }}
+
+      - name: Install rebar + the agents stack (from the committed lock)
+        run: |
+          uv sync --locked --extra agents
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Run the structured-output measurement harness on ${{ matrix.provider }}
+        env:
+          # Each arm receives ONLY its own provider's credential: every key expression is guarded
+          # on `matrix.provider`, so no arm can fall back to a foreign provider on any path that
+          # reads a key rather than the resolved model string.
+          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          # Bedrock has no key of its own — it needs the OIDC role to assume and the region to
+          # assume it in, both repository VARIABLES (a role ARN and a region are not secrets).
+          BEDROCK_ROLE_ARN: ${{ vars.AWS_BEDROCK_CI_ROLE_ARN }}
+          BEDROCK_REGION: ${{ vars.AWS_BEDROCK_CI_REGION }}
+          # BOTH region variables (ticket a574): IMDS supplies no region and rebar's own knob
+          # alone was insufficient — AWS_DEFAULT_REGION was also required.
+          AWS_DEFAULT_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
+          REBAR_LLM_BEDROCK_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
+          # THE provider switch: the per-arm config overlay that repoints all model classes.
+          REBAR_LLM_CONFIG_FILE: ${{ github.workspace }}/${{ matrix.config_file }}
+          # The dispatch input is the per-run live-call budget the harness enforces.
+          REBAR_STRUCTURED_MATRIX_MAX_CALLS: ${{ inputs.max_calls }}
+          # Where the harness writes raw replies + the before/after score table (uploaded below).
+          REBAR_STRUCTURED_MATRIX_ARTIFACT_DIR: ${{ runner.temp }}/structured-matrix-${{ matrix.provider }}
+          # The external tier is inert unless this opt-in is set (a guard against accidental
+          # billable calls).
+          REBAR_RUN_EXTERNAL: "1"
+        run: >-
+          pytest tests/external/test_structured_output_matrix.py -q
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
+
+      - name: Upload the structured-output artifact bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          # Per-arm name: artifact names must be unique across a matrix.
+          name: structured-output-baseline-${{ matrix.provider }}
+          path: ${{ runner.temp }}/structured-matrix-${{ matrix.provider }}
+          if-no-files-found: ignore
