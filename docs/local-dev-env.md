@@ -13,6 +13,25 @@ working tree in two ways that matter:
   run, so `review-plan` / `verify-completion` degrade (see
   [plan-review-gate.md](plan-review-gate.md) and [llm-framework.md](llm-framework.md)).
 
+## Prerequisite — Git ≥ 2.38
+
+**rebar declares a hard Git floor of 2.38 for development and CI.** The two-clone
+convergence regressions (`tests/integration/test_concurrency_regression.py`) merge two
+independently written tracker histories with `git merge-tree --write-tree`, a mode Git
+gained in 2.38.
+
+The floor is **enforced, not skipped**. On an older client `pytest` refuses to start and
+prints the required version and the remedy — deliberately, because a regression that
+quietly does not run reads as coverage while providing none. Check yours with
+`git --version`; on macOS the Xcode command-line Git can lag, so prefer `brew install git`,
+and on Debian/Ubuntu use the git-core PPA or a backports build.
+
+The value is single-sourced in **`.github/git-version-floor.txt`** and read by three
+consumers that must agree: `tests/conftest.py` (the suite preflight), the
+`Git version floor gate` step in `.github/workflows/_build-and-test.yml`, and
+`tests/unit/test_git_version_floor.py` (which fails if any consumer drifts, and fails
+if a merge-tree regression ever acquires skip machinery).
+
 ## TL;DR (canonical setup)
 
 ```sh

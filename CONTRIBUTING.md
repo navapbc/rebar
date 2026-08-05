@@ -35,6 +35,19 @@ don't need Gerrit.
 
 ## 1. One-time setup
 
+### 1_0. Prerequisite — Git ≥ 2.38
+
+**rebar requires Git 2.38 or newer to develop and test.** The two-clone convergence
+regressions merge divergent tracker histories with `git merge-tree --write-tree`, added in
+Git 2.38. That floor is **declared and enforced, never skipped**: on an older client the
+test suite refuses to start and names the required version, because a regression that
+quietly does not run reads as coverage while providing none.
+
+Check with `git --version`. Older? macOS: `brew install git` (the Xcode command-line Git
+can lag); Debian/Ubuntu: the git-core PPA or a backports build. The floor value is
+single-sourced in `.github/git-version-floor.txt`, shared by `tests/conftest.py`, the
+`Git version floor gate` CI step, and `tests/unit/test_git_version_floor.py`.
+
 ### 1a. Get a Gerrit account + credentials
 1. Open **https://rebar.solutions.navateam.com** and click **Sign in**. You'll be
    redirected to **GitHub** to authorize (auth is GitHub OAuth — use your GitHub
