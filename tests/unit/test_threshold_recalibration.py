@@ -74,6 +74,10 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "T12": (0.95, "advisory"),
     "T13": (0.95, "advisory"),
     "T14": (0.95, "advisory"),
+    # T15 (overlay-derisk, story ea28) pins NO posture in its routing entry, so it inherits
+    # the registry default — (0.95, advisory). Advisory-vs-blocking is decided by the normal
+    # review process, deliberately out of scope for the story that added the criterion.
+    "T15": (0.95, "advisory"),
     "T2": (0.95, "advisory"),
     "T3": (0.9, "blocking"),
     "T4": (0.7, "blocking"),
