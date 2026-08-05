@@ -509,7 +509,11 @@ class PydanticAIRunner:
                 ",".join(req.reviewers) if req.reviewers else (req.target.get("ticket_id") or "?")
             )
             _t0 = time.monotonic()
-            usage: dict[str, int] = {}
+            # Widened from `dict[str, int]` for bug aec1: the run-shape keys merged in after a
+            # successful call are not all ints (`finish_reason` is a string,
+            # `top_repeated_tool_calls` a list of dicts). The token counters it carries are still
+            # ints; only the annotation admits the shape fields alongside them.
+            usage: dict[str, Any] = {}
             run_messages: list[Any] = []
             # `agent.run_sync` never enters the model (only `async with agent` does), so a chain's
             # sub-models — and thus the HTTP client lifecycle pydantic-ai's OWN providers manage
@@ -582,7 +586,13 @@ class PydanticAIRunner:
                 # unreachable here, so a call that burned tokens and THEN failed used to leave no
                 # spend row (8455) — write it now; rules in `record_failure`'s docstring.
                 usage_log.record_failure(
-                    run_messages, _call_label, ran_model, req_limit, eff_max_iter
+                    run_messages,
+                    _call_label,
+                    ran_model,
+                    req_limit,
+                    eff_max_iter,
+                    duration_s=time.monotonic() - _t0,
+                    ticket=req.target.get("ticket_id"),
                 )
                 interpret_failure(
                     exc,
@@ -636,8 +646,35 @@ class PydanticAIRunner:
         # record cache efficacy into coverage/observability. Private key — non-breaking
         # for every existing consumer of the review_result/structured dict.
         result["_usage"] = usage
+        # Run shape on the SUCCESS path too (bug aec1). Before this, only a FAILED call recorded
+        # how the agent loop actually went, so a run that succeeded after 40 near-identical tool
+        # calls was indistinguishable in the log from one that succeeded in three — and the
+        # distinct-vs-total ratio is the only thing that separates a LOOP from genuine BREADTH
+        # without re-running the call. `run_messages` is populated here as well as on the raise
+        # path: `capture_attempt_messages` extends the sink from its `finally`, not from an
+        # except. Reuses the SAME reducer the failure path uses, so the two outcomes can never
+        # describe the same run differently.
+        try:
+            shape = usage_log.run_shape(
+                run_messages, request_limit=req_limit, tool_calls_limit=max(8, eff_max_iter)
+            )
+            # ONLY the shape keys — `shape_only` owns that filter, because which keys are
+            # durable schema belongs to the module that writes them, not to this caller. It
+            # drops the reducer's token totals, which are a message-derived APPROXIMATION,
+            # whereas `usage` here came from `_extract_usage` reading the provider's own usage
+            # object — the authoritative, billable figures. Overwriting those with the
+            # approximation would silently corrupt cost accounting.
+            usage.update(usage_log.shape_only(shape))
+        except Exception as exc:  # noqa: BLE001 — telemetry must never break the call path
+            logger.warning("usage-log: run-shape capture failed for op=%s: %s", _call_label, exc)
         # The opt-in spend row (rules, and the step-attribution rationale, in its docstring).
-        record_call_spend(usage, call_label=_call_label, ran_model=ran_model)
+        record_call_spend(
+            usage,
+            call_label=_call_label,
+            ran_model=ran_model,
+            duration_s=time.monotonic() - _t0,
+            ticket=req.target.get("ticket_id"),
+        )
         return result
 
 
