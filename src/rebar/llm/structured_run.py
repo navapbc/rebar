@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from rebar.llm import usage_log
 from rebar.llm.capabilities import CACHE_MIN_PREFIX_TOKENS, ModelCapabilities
 from rebar.llm.errors import (
+    LLMBudgetExhaustedError,
     LLMConfigError,
     LLMError,
-    LLMRunnerError,
     LLMUnavailableError,
     StructuredOutputError,
     UnretryableOutputError,
@@ -92,7 +92,7 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
             time.monotonic() - ctx.started_at,
             usage_log.format_repetition(budget_diag),
         )
-        budget_err = LLMRunnerError(
+        budget_err = LLMBudgetExhaustedError(
             f"agent exceeded its step budget (max_iterations={ctx.eff_max_iter}; "
             "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
             "the task."
