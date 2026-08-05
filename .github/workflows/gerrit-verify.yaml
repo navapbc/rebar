@@ -203,10 +203,24 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f.
       - name: README quickstart golden-path (against the installed rebar)
-        run: python scripts/check_readme_quickstart.py
+        run: |
+          if [ ! -f scripts/check_readme_quickstart.py ]; then
+            echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_readme_quickstart.py
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f.
       - name: End-to-end CLI probe (against the installed rebar)
-        run: python scripts/probe_rebar.py </dev/null
+        run: |
+          if [ ! -f scripts/probe_rebar.py ]; then
+            echo "scripts/probe_rebar.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/probe_rebar.py </dev/null
 
   verify-identity:
     # PRE-MERGE whole-store authenticated-authorship gate. Mitigates the gap that let the

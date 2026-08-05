@@ -119,15 +119,29 @@ jobs:
       # push/PR mirror lanes. A job that gates main but is missing from vote.needs would earn
       # Verified +1 pre-merge yet redden main post-merge (green-verify/red-main). This fails
       # the build on any such drift. Style mirrors the server.json / criteria-routing gates.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: Verified-gate parity gate
-        run: python scripts/check_verify_gate_parity.py
+        run: |
+          if [ ! -f scripts/check_verify_gate_parity.py ]; then
+            echo "scripts/check_verify_gate_parity.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_verify_gate_parity.py
 
       # Comment-hygiene gate (ticket b047): comments/docstrings must not anchor on
       # rot-prone history tokens (bare commit SHAs, CI run ids, dated incident
       # narratives). Cite a resolvable ticket/ADR id or describe behavior instead —
       # the ticket system owns history; source comments carry current state.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: comment-hygiene gate
-        run: python scripts/check_comment_hygiene.py
+        run: |
+          if [ ! -f scripts/check_comment_hygiene.py ]; then
+            echo "scripts/check_comment_hygiene.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_comment_hygiene.py
 
       # Raw-git-write gate (ticket d37e): direct git mutations of the tickets
       # store must flow through the sanctioned write seams (gitutil.run_git_write,
@@ -393,9 +407,15 @@ jobs:
       # env-var reads under src/rebar and committed. Regenerate and fail if the working tree
       # now differs — a stale registry means a new REBAR_* read shipped without regenerating.
       # Style mirrors the Prompt-index drift gate above.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: Env-var registry drift gate
         shell: bash
         run: |
+          if [ ! -f scripts/gen_env_registry.py ]; then
+            echo "scripts/gen_env_registry.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/gen_env_registry.py
           if ! git diff --exit-code -- docs/env-vars.md; then
             echo "::error::docs/env-vars.md is stale — regenerate it with"
@@ -409,9 +429,15 @@ jobs:
       # docs/*.md must be linked from docs/README.md (allowlist: *.local.md), and every
       # relative markdown link that resolves inside docs/ must point at an existing file.
       # Fails the build on an unindexed living doc or a broken docs-internal link.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: Docs-index completeness gate
         shell: bash
         run: |
+          if [ ! -f scripts/check_docs_index.py ]; then
+            echo "scripts/check_docs_index.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/check_docs_index.py --check
           echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
 
@@ -419,17 +445,29 @@ jobs:
       # '## Quickstart' heading and RUN those exact lines end-to-end in a throwaway git
       # repo. A wrong command *printed* in the README (e.g. a bad subcommand or a stale
       # hard-coded id) then fails the build — command TEXT rot, not just executability.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: README quickstart golden-path gate
         shell: bash
         run: |
+          if [ ! -f scripts/check_readme_quickstart.py ]; then
+            echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/check_readme_quickstart.py
 
       # CLI-reference drift gate (ticket e866): docs/cli-reference.md is DERIVED from the
       # CLI's own help data (known_subcommands() + the curated intercept table). Regenerate
       # and fail on any diff, so a new/renamed command cannot ship undocumented.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: CLI-reference drift gate
         shell: bash
         run: |
+          if [ ! -f scripts/gen_cli_reference.py ]; then
+            echo "scripts/gen_cli_reference.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/gen_cli_reference.py
           if ! git diff --exit-code -- docs/cli-reference.md; then
             echo "::error::docs/cli-reference.md is stale — regenerate it with"
@@ -441,9 +479,15 @@ jobs:
       # MCP-reference drift gate (ticket 235a): docs/mcp-reference.md is DERIVED from the
       # MCP server's own registrars (read/llm/write), classified by gate tier. Regenerate
       # and fail on any diff, so a newly-registered MCP tool cannot ship undocumented.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: MCP-reference drift gate
         shell: bash
         run: |
+          if [ ! -f scripts/gen_mcp_reference.py ]; then
+            echo "scripts/gen_mcp_reference.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/gen_mcp_reference.py
           if ! git diff --exit-code -- docs/mcp-reference.md; then
             echo "::error::docs/mcp-reference.md is stale — regenerate it with"
@@ -479,9 +523,16 @@ jobs:
       # truth for the env gates. This fails when the manifest's advertised env-var set
       # diverges from that canonical list (missing/extra var). Style mirrors the
       # prompt-index / criteria-routing drift gates above.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: server.json env-contract drift gate
         shell: bash
-        run: python scripts/check_server_manifest.py
+        run: |
+          if [ ! -f scripts/check_server_manifest.py ]; then
+            echo "scripts/check_server_manifest.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_server_manifest.py
 
       # Public-types drift gate (story 3a10): src/rebar/types.py is DERIVED from the
       # canonical JSON Schemas (the schema-backed rebar.* return shapes). Regenerate
@@ -503,9 +554,15 @@ jobs:
       # Config-read gate (ticket 6754): every _config_schema.py dataclass field must
       # have at least one attribute-read site outside the schema/config plumbing, or
       # carry a ``# read-via: <pointer>`` escape marker.
+      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
       - name: Config-read gate
         shell: bash
         run: |
+          if [ ! -f scripts/check_config_reads.py ]; then
+            echo "scripts/check_config_reads.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/check_config_reads.py
 
       - name: Run the default suite (Python tiers; excludes integration + external)
