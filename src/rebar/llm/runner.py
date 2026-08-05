@@ -534,8 +534,15 @@ class PydanticAIRunner:
                     usage = _extract_usage(run_result)
                 else:
                     with usage_log.collect_failure_messages(run_messages):
+                        # Only forward `artifact_dir` when the operator opted in, so the
+                        # default path calls `_pai_structured` with its historical arg list.
+                        _extra = (
+                            {"artifact_dir": cfg.parse_failure_artifact_dir}
+                            if cfg.parse_failure_artifact_dir
+                            else {}
+                        )
                         structured, usage = _pai_structured(
-                            Agent, model, caps, req, kwargs, usage_limits
+                            Agent, model, caps, req, kwargs, usage_limits, **_extra
                         )
                     outcome = {"structured_response": structured}
                 # Agent-build invariant (story anole): telemetry warning on a REAL run whose

@@ -158,7 +158,16 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
 _FAULTY_OUTPUT_SNIPPET_CHARS = 2000
 
 
-def _pai_structured(Agent, model, caps, req: RunRequest, kwargs: dict, usage_limits):
+def _pai_structured(
+    Agent,
+    model,
+    caps,
+    req: RunRequest,
+    kwargs: dict,
+    usage_limits,
+    *,
+    artifact_dir: str | None = None,
+):
     """Obtain a validated structured object via the reliability stack (1268).
 
     NATIVE path: where the provider enforces a strict json_schema (output_mode ->
@@ -231,7 +240,57 @@ def _pai_structured(Agent, model, caps, req: RunRequest, kwargs: dict, usage_lim
                 f"no code fence."
             )
     assert last is not None  # the loop only exits here after a failed parse set `last`
+    if artifact_dir:
+        from rebar.llm import structured
+
+        path = _write_parse_failure_artifact(
+            artifact_dir,
+            reply=str(result.output),  # the LAST attempt's raw reply
+            model=getattr(model, "model_name", None) or str(model),
+            contract=req.output_schema or "",
+            attempts=structured.OUTPUT_RETRIES + 1,
+        )
+        if path is not None:
+            raise type(last)(f"{last} [raw reply captured: {path}]") from last
     raise last  # exhausted the bounded retry; surface the last validation error
+
+
+def _write_parse_failure_artifact(
+    artifact_dir: str, *, reply: str, model: str, contract: str, attempts: int
+) -> str | None:
+    """Best-effort capture of the raw model reply on FINAL structured-parse failure (story
+    2fd6). Writes ONE JSON artifact into ``artifact_dir`` and returns its path, then rotates the
+    directory to the newest 20 ``*.json`` files. ANY error (mkdir/permission/disk) is swallowed
+    and ``None`` is returned — it MUST NEVER raise, so the caller's original parse error is never
+    masked."""
+    try:
+        import json
+        import uuid
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        now = datetime.now(timezone.utc)
+        d = Path(artifact_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = now.strftime("%Y%m%dT%H%M%S%f")
+        path = d / f"parse-failure-{stamp}-{uuid.uuid4().hex[:8]}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "reply": reply,
+                    "model": str(model),
+                    "contract": str(contract),
+                    "attempts": int(attempts),
+                    "timestamp": now.isoformat(),
+                }
+            )
+        )
+        existing = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        for stale in existing[:-20]:
+            stale.unlink()
+        return str(path)
+    except Exception:  # noqa: BLE001 — best-effort capture must never mask the parse error
+        return None
 
 
 def build_model_settings(

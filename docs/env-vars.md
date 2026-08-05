@@ -76,6 +76,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_OVERLAP_PROPOSITIONS_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_SOAK_MIN` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_OVERLAP_SURFACE_CAP` | `src/rebar/llm/config.py` |  |
+| `REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_WAIT_S` | `src/rebar/llm/config.py` |  |
@@ -164,7 +165,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_154 variables._
+_155 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
