@@ -125,6 +125,14 @@ class ModelCapabilities:
     # provider or from the in-process fallback. Defaults False — the conservative record must
     # not claim a provider-side tool it cannot evidence.
     native_web_search: bool = False
+    # Whether THIS model accepts a native/json_schema output constraint WHILE extended thinking
+    # is on (0fa4). Fail-closed default False: `output_mode` only routes native-under-thinking
+    # for a model MEASURED to accept it; every unmeasured model keeps the safe prompted path.
+    # The historic blanket "thinking -> prompted" guard rested on a stale Anthropic 400 that was
+    # tool_choice x thinking, not outputConfig(json_schema) x thinking (measured E1); this field
+    # is the per-model measured replacement, set only by the capability-rows story for cells a
+    # live measurement passed.
+    native_output_with_thinking: bool = False
 
 
 def _supports_native_web_search(profile: Any) -> bool:
