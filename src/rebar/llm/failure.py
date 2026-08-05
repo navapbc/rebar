@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from rebar.llm.errors import LLMConfigError
+from rebar.llm.errors import LLMConfigError, UnretryableOutputError
 
 # `httpx` + `pydantic_ai` are [agents]-extra deps, NOT core. They are imported LAZILY
 # (call-boundary) inside `_map` / `_base_diagnostic` so this boundary module imports
@@ -407,6 +407,113 @@ def translate_sampling_parameter_rejection(
             f"{{'supports_{named_param}': False}} (if such a field exists — today only "
             "'supports_temperature' is tracked), or (2) unsetting the corresponding "
             f"config (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} is never sent."
+        )
+    return None
+
+
+# ── Grammar/schema-complexity rejection translation (bug 895c) ──────────────────
+# The exact sibling of `translate_sampling_parameter_rejection` above, for the OTHER way a
+# healthy provider permanently refuses a well-formed rebar request: native/constrained
+# decoding compiles the contract's JSON Schema into a grammar, and rebar's Pass-2
+# verification contracts (22-36 OPTIONAL parameters) blow the documented compilation budget.
+# Bedrock returns HTTP 400 `ValidationException` with "Grammar compilation timed out."
+# (~185s) or "Schema is too complex." (~50-60s).
+#
+# This is emphatically NOT an `LLMUnavailableError`: that type means "provider outage, try
+# later", and here the provider is HEALTHY and the identical request will fail identically
+# forever — a retry ladder built on it burns ~185s per attempt and still fails. It is
+# `UnretryableOutputError`, the existing type for "re-running the SAME call reliably
+# reproduces this", which is also already a `StructuredOutputError`, so every existing
+# `except StructuredOutputError` / `except LLMError` handler keeps catching it.
+#
+# TWO wire shapes, measured, with NO shared vocabulary — which is why the phrase set alone was
+# never sufficient protection and the preflight gate in `structured.output_mode` is the
+# load-bearing half; this translator is the safety net for whatever the gate under-predicts:
+#
+#   Variant A (newer botocore, e.g. 1.43.64) — the request reaches Bedrock and the grammar
+#   fails to compile SERVER-side after ~185s: `status_code: 400 ValidationException` /
+#   "The model returned the following errors: Grammar compilation timed out." (or "Schema is
+#   too complex.").
+#
+#   Variant B (older botocore, e.g. 1.40.61) — boto3 rejects the request CLIENT-side in 0.0s,
+#   before it is ever sent: `Parameter validation failed: Unknown parameter in input:
+#   "outputConfig", must be one of: modelId, messages, system, inferenceConfig, …`. There is
+#   no status code and no `ValidationException` here, so variant B needs its OWN conjunctive
+#   rule — and it is a STACK fact, not a schema fact: it fired on a 722-byte contract.
+_GRAMMAR_REJECTION_PHRASES: tuple[str, ...] = (
+    "grammar compilation timed out",
+    "schema is too complex",
+    "compiled grammar",
+)
+# Variant B: botocore's own ParamValidationError wording. Required TOGETHER with an explicit
+# `outputConfig` mention, so an unrelated botocore parameter-validation failure (a bad
+# `inferenceConfig`, a malformed `toolConfig`) is not swept in here.
+_PARAM_VALIDATION_PHRASES: tuple[str, ...] = (
+    "unknown parameter",
+    "parameter validation failed",
+)
+
+
+def translate_schema_complexity_rejection(
+    exc: BaseException, model_id: str
+) -> UnretryableOutputError | None:
+    """Return an :class:`UnretryableOutputError` if ``exc`` says NATIVE STRUCTURED OUTPUT is
+    unusable for this contract on this stack — else ``None``. (The name is kept as-is because
+    it is the exported symbol; the scope is the schema/native-output seam, both variants.)
+
+    Checked on ``exc`` or its ``__cause__`` (a provider SDK error is often wrapped). Two
+    independent CONJUNCTIVE rules, one per measured wire shape — never a disjunction of loose
+    keywords:
+
+    * **Variant A — server-side grammar rejection.** BOTH of: (1) it looks like a client
+      rejection — ``status_code == 400`` (pydantic-ai's ``ModelHTTPError`` carries it as an
+      ATTRIBUTE) OR ``"ValidationException"`` in the text (raw boto3 has no status code); and
+      (2) the text carries one of a small CLOSED set of documented grammar phrases
+      (case-insensitive): ``grammar compilation timed out``, ``schema is too complex``,
+      ``compiled grammar``.
+    * **Variant B — client-side parameter rejection.** BOTH of: the text names
+      ``outputConfig``, AND it carries botocore's parameter-validation wording
+      (``unknown parameter`` / ``parameter validation failed``). This shape has NO status code
+      and no ``ValidationException``, so it cannot ride variant A's first conjunct.
+
+    Because each rule is conjunctive and phrase-closed, this cannot silently become a
+    catch-all: an unrelated 400 (a deprecated ``temperature``, a malformed request), any 5xx,
+    a connection error, and an existing ``LLMUnavailableError`` all keep their current
+    classification and fall through to the generic ``LLMUnavailableError`` path.
+    """
+    for candidate in (exc, getattr(exc, "__cause__", None)):
+        if candidate is None:
+            continue
+        text = str(candidate)
+        low = text.lower()
+        status_code = getattr(candidate, "status_code", None)
+        looks_like_rejection = status_code == 400 or "ValidationException" in text
+        if looks_like_rejection and any(p in low for p in _GRAMMAR_REJECTION_PHRASES):
+            cause = "the provider could not compile it into a decoding grammar"
+            remedy = (
+                "(1) re-measuring rebar.llm.structured._NATIVE_MAX_OPTIONAL_PROPERTIES — that "
+                "bound already routes over-complex contracts to the PROMPTED path, which "
+                "returns the same verdict, so a contract reaching here has drifted past it; "
+                "(2) shrinking the contract's optional-parameter count; or (3) clearing "
+                f"native_structured_output for {model_id!r} in rebar.llm.capabilities"
+            )
+        elif "outputconfig" in low and any(p in low for p in _PARAM_VALIDATION_PHRASES):
+            cause = (
+                "the installed botocore rejected the native outputConfig parameter "
+                "client-side, before the request was sent"
+            )
+            remedy = (
+                "(1) upgrading botocore — 1.43.64 carries outputConfig on bedrock-runtime "
+                "Converse, 1.40.61 does not; or (2) nothing, if the prompted fallback is "
+                "acceptable: rebar.llm.structured.native_output_stack_supported already "
+                "detects this stack and routes every contract to the PROMPTED path"
+            )
+        else:
+            continue
+        return UnretryableOutputError(
+            f"model {model_id!r} could not be called with native structured output — {cause}: "
+            f"{text}. This is NOT a provider outage: the identical request will fail "
+            f"identically on every retry. Fix by either {remedy}."
         )
     return None
 
