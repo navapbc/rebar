@@ -97,15 +97,52 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
         return "\n".join(out) or "(empty)"
 
     def search_files(query: str, path: str = ".") -> str:
-        """Case-sensitive substring search across text files under ``path`` (repo-root
-        confined), applying the SAME discovery filter + caps as the default runner so
-        both present an identical file view. Returns ``file:line: text`` hits. Read-only."""
+        """Case-sensitive substring search for ``query`` (repo-root confined). ``path``
+        may name a DIRECTORY (walked recursively, applying the SAME discovery filter +
+        caps as the default runner so both present an identical file view) or a single
+        FILE (scanned on its own). Returns ``file:line: text`` hits, ``(no matches)``
+        when the text is genuinely absent, or ``Error: …`` when ``path`` cannot be
+        searched — an error is never reported as ``(no matches)``. Read-only."""
         try:
             base = _safe_path(root, path, denied)
         except ValueError as exc:
             return f"Error: {exc}"
         hits: list[str] = []
         scanned = 0
+
+        def scan_one(abs_path: str) -> str | None:
+            """Append ``abs_path``'s matching lines to ``hits``. Returns a terminal
+            result string when a cap trips, else None. Shared by both branches so the
+            hit format and the caps cannot drift apart."""
+            nonlocal scanned
+            scanned += 1
+            if scanned > _SCAN_MAX_FILES:
+                return "\n".join(hits) + f"\n…(scan limit {_SCAN_MAX_FILES} reached; narrow `path`)"
+            try:
+                with open(abs_path, encoding="utf-8", errors="strict") as fh:
+                    for lineno, line in enumerate(fh, 1):
+                        if query in line:
+                            rel = os.path.relpath(abs_path, root)
+                            hits.append(f"{rel}:{lineno}: {line.strip()[:200]}")
+                            if len(hits) >= _SEARCH_MAX_HITS:
+                                return "\n".join(hits) + "\n…(more hits truncated)"
+            except (OSError, UnicodeDecodeError):
+                return None
+            return None
+
+        # `os.walk()` yields nothing for a file AND nothing for a nonexistent path, so
+        # both used to fall through to "(no matches)" — telling the agent the literal is
+        # absent when it was never searched for (bug bf31: measured false negatives that
+        # trapped the completion verifier in a repeating tool cycle). Discriminate first,
+        # so "(no matches)" means one thing only: searched, and genuinely absent.
+        if os.path.isfile(base):
+            # Like `read_file`, an EXPLICITLY named file skips the DISCOVERY noise
+            # filter (see fs_tools' _NOISE_DIRS note) — the agent asked for this exact
+            # file. Only the security envelope blocks it, and `_safe_path` above already
+            # applied the root confinement + deny-list.
+            return scan_one(base) or ("\n".join(hits) or "(no matches)")
+        if not os.path.isdir(base):
+            return f"Error: cannot search {path!r} — it is not a readable file or directory."
         for dirpath, dirs, files in os.walk(base):
             real_dir = os.path.realpath(dirpath)
             # Prune denied / outside-root / noise dirs IN PLACE (and don't descend).
@@ -122,22 +159,9 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
                 abs_path = os.path.realpath(os.path.join(dirpath, name))
                 if not _within_root(abs_path, root) or skip_file(abs_path, name):
                     continue
-                scanned += 1
-                if scanned > _SCAN_MAX_FILES:
-                    return (
-                        "\n".join(hits)
-                        + f"\n…(scan limit {_SCAN_MAX_FILES} reached; narrow `path`)"
-                    )
-                try:
-                    with open(abs_path, encoding="utf-8", errors="strict") as fh:
-                        for lineno, line in enumerate(fh, 1):
-                            if query in line:
-                                rel = os.path.relpath(abs_path, root)
-                                hits.append(f"{rel}:{lineno}: {line.strip()[:200]}")
-                                if len(hits) >= _SEARCH_MAX_HITS:
-                                    return "\n".join(hits) + "\n…(more hits truncated)"
-                except (OSError, UnicodeDecodeError):
-                    continue
+                terminal = scan_one(abs_path)
+                if terminal is not None:
+                    return terminal
         return "\n".join(hits) or "(no matches)"
 
     return [read_file, list_directory, search_files]
