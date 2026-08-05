@@ -65,6 +65,29 @@ class _UnderLockMismatch(RuntimeError):
     pass
 
 
+def _related_material_delta(fresh, initial) -> str:
+    """Name WHICH dependency moved. ``resign`` already names the ids; a bare "a dependency"
+    left the reader to re-derive the pin set by hand (bug 94a3). An id present on one side
+    only was added/removed; otherwise the id whose pinned fingerprint changed."""
+    added_or_removed = sorted({p.canonical_id for p in fresh} ^ {p.canonical_id for p in initial})
+    changed = added_or_removed or sorted(p.canonical_id for p in fresh if p not in initial)
+    return ", ".join(changed) if changed else "unknown"
+
+
+def _own_material_delta(ticket_id: str, initial_generation, repo_root) -> str:
+    """Name the material component that moved mid-review (bug 94a3). The reviewed state is
+    still in hand as ``initial_generation.relation_snapshot``, so this is an exact diff, not
+    a guess. Best-effort: an unreadable side degrades to a neutral clause."""
+    from .material_diff import explain_snapshot_change
+
+    try:
+        return explain_snapshot_change(
+            initial_generation.relation_snapshot, ticket_id, repo_root=repo_root
+        )
+    except Exception:  # noqa: BLE001 — a diagnostic clause must never mask the real abort
+        return "the changed component could not be determined"
+
+
 # ── mid-run cancellation on OWN-material change (story 2c89) ──────────────────
 #
 # A plan edited mid-review used to run every remaining pass and only fail at the
@@ -264,12 +287,17 @@ def sign_manifest(
             )
             if fresh.own_material != initial_generation.own_material:
                 message = (
-                    "the reviewed ticket's own plan material changed since the review "
-                    "(description/AC/file_impact/children edited); re-review required"
+                    "the reviewed ticket's own plan material changed mid-review — "
+                    f"{_own_material_delta(ticket_id, initial_generation, repo_root)}"
+                    "; re-review required"
                 )
             elif fresh.related_material != initial_generation.related_material:
+                named = _related_material_delta(
+                    fresh.related_material, initial_generation.related_material
+                )
                 message = (
-                    "a dependency's plan material changed since the review; re-review required"
+                    f"a dependency's plan material changed since the review ({named}); "
+                    "re-review required"
                 )
             elif (
                 fresh.phase != initial_generation.phase

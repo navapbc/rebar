@@ -68,6 +68,28 @@ def _generation_child_states(initial_generation) -> tuple[list[dict[str, Any]] |
         return None, {"event": "plan_review_child_impact_snapshot_invalid", "reason": "malformed"}
 
 
+def _material_delta(payload: dict[str, Any], ticket_id: str, repo_root) -> str:
+    """Name the component that moved between the recorded review and the live ticket.
+
+    The reviewed per-component fingerprints ride on the sidecar (``material_parts``), so
+    this is an exact diff for any review recorded after bug 94a3. An older sidecar has only
+    the composite, which cannot be decomposed — say so rather than recite a list."""
+    from .material_diff import _current_components, describe_delta
+
+    try:
+        recorded = payload.get("material_parts")
+        if isinstance(recorded, dict) and recorded:
+            signed = {k: (v[0], int(v[1])) for k, v in recorded.items() if len(v) == 2}
+            current = _current_components(ticket_id, repo_root)
+            if signed and current is not None:
+                return describe_delta(signed, current) or "no material component differs"
+    except Exception:  # noqa: BLE001 — a diagnostic clause must never mask the real refusal
+        logger.warning("could not diff recorded material for %s", ticket_id, exc_info=True)
+    return (
+        "the changed component cannot be named: this review predates per-component fingerprinting"
+    )
+
+
 def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     """Cheaply (re)persist the plan-review attestation for an ALREADY-COMPUTED, still-valid
     PASS verdict — WITHOUT re-running the multi-pass LLM review.
@@ -202,8 +224,9 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             "ticket_id": ticket_id,
             "verdict": recorded_verdict,
             "reason": (
-                "the plan changed since the review (description/AC/file_impact/children edited), "
-                "so the recorded PASS is stale — run `rebar review-plan` to re-review and sign"
+                "the plan changed since the review — "
+                f"{_material_delta(payload, ticket_id, repo_root)}"
+                " — so the recorded PASS is stale; run `rebar review-plan` to re-review and sign"
             ),
         }
 

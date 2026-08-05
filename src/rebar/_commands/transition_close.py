@@ -135,7 +135,8 @@ def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]
     prior signature is invalidated.
 
     It also records the ticket's ``material: <fingerprint>`` (epic dark-acme-lumen) — the SAME
-    fingerprint plan-review signs (description/AC/file_impact/children) — so completion
+    fingerprint plan-review signs (ticket_id/description/file_impact/children, and
+    file_impact_scope when it is an explicit ``none``) — so completion
     validity-on-read can detect a material edit made after this verdict was signed, symmetric
     with the plan-review claim gate. Omitted if the fingerprint can't be computed (then the
     material check is simply skipped on read)."""

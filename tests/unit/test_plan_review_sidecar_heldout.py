@@ -97,6 +97,7 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
         verdict,
         *,
         material=None,
+        material_parts=None,
         reviewed_related_material=None,
         review_phase=None,
         priority_floor=None,

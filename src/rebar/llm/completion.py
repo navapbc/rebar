@@ -176,7 +176,9 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
                 v = compute_validity(sig, c, "completion-verifier", repo_root=repo_root)
                 valid, detail = v.get("valid", False), v.get("reason", "")
             else:
-                valid, detail = False, f"signature: {sig.get('verdict')}"
+                # Carry the REASON, not just the verdict: the verdict alone ("unsigned")
+                # tells a reader nothing about what to do next (bug 94a3).
+                valid, detail = False, f"signature: {sig.get('verdict')} — {sig.get('reason', '')}"
         except Exception as exc:  # noqa: BLE001 — never let a signature read crash the verification: recorded in-band
             valid, detail = False, f"error: {exc}"
         if not valid:

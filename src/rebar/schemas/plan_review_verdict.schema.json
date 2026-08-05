@@ -59,7 +59,7 @@
     },
     "material_fingerprint": {
       "type": ["string", "null"],
-      "description": "Hash of the plan's material content (description/AC/file_impact/decomposition), bound into the signed attestation for material-edit invalidation."
+      "description": "Composite hash of the plan's material content (ticket_id, description, file_impact, children, and file_impact_scope when it is an explicit 'none'), bound into the signed attestation for material-edit invalidation. AC checkbox STATE is normalized out, so ticking a box never invalidates. Per-component hashes ride alongside as 'material-part:' manifest lines so a staleness message can name which component moved (bug 94a3)."
     },
     "signature": {
       "type": "object",

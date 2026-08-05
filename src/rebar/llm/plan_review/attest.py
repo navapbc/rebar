@@ -153,9 +153,15 @@ def sign_plan_review(
     disabled = registry.disabled_builtins(repo_root)
     if disabled:
         verdict.setdefault("coverage", {})["disabled_builtins"] = disabled
+    from .material_diff import reviewed_material_parts
+
     manifest = build_manifest(
         verdict,
         material=material,
+        # Per-component fingerprints of the SAME basis (bug 94a3) — additive, deterministic,
+        # and omitted entirely when they cannot be proven to reproduce ``material``, so the
+        # manifest never carries an attribution the gate did not actually decide on.
+        material_parts=reviewed_material_parts(snapshot, material),
         deps=deps,
         regver=registry_version(repo_root),
         verified_at_sha=current_code_sha(),
@@ -509,7 +515,9 @@ def compute_validity(
     if last_reopened is not None and (signed_at is None or signed_at <= last_reopened):
         return _result(
             False,
-            f"the {kind} attestation predates the latest reopen (stale)",
+            f"the {kind} attestation predates the latest reopen "
+            f"(signed at {signed_at}, reopened at {last_reopened}) — reopening resets the "
+            "attestation, so nothing in the plan need have changed",
             "stale-reopened",
         )
 
@@ -528,9 +536,18 @@ def compute_validity(
             if (current is None or current != signed_material) and not _legacy_material_ok(
                 signed_material, ticket_state.get("ticket_id", ""), repo_root
             ):
+                from .material_diff import explain_material_change
+
                 return {
                     "valid": False,
-                    "reason": "the ticket was materially edited since the completion verdict",
+                    "reason": (
+                        "the ticket was materially edited since the completion verdict — "
+                        + explain_material_change(
+                            attestation,
+                            ticket_state.get("ticket_id", ""),
+                            repo_root=repo_root,
+                        )
+                    ),
                     "verdict": "stale-material",
                 }
         return {
@@ -588,11 +605,15 @@ def compute_validity(
             if signed != current and not _legacy_material_ok(
                 signed, ticket_state.get("ticket_id", ""), repo_root
             ):
+                from .material_diff import explain_material_change
+
                 return _result(
                     False,
-                    (
-                        "the plan was materially edited since review "
-                        "(description/AC/file_impact/children changed)"
+                    "the plan was materially edited since review — "
+                    + explain_material_change(
+                        attestation,
+                        ticket_state.get("ticket_id", ""),
+                        repo_root=repo_root,
                     ),
                     "stale-material",
                 )

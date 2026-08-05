@@ -28,7 +28,7 @@ from typing import Any
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner
 
-from . import attest, drift_floor, orchestrator, sidecar
+from . import attest, drift_floor, material_diff, orchestrator, sidecar
 from .attest import claim_gate_check, plan_review_status
 from .resign import resign_plan_review
 
@@ -741,6 +741,7 @@ def _run_plan_review(
         sidecar.emit(
             verdict,
             material=material,
+            material_parts=material_diff.reviewed_material_parts(review_snapshot, material),
             reviewed_related_material=review_snapshot.related_material,
             review_phase=review_phase,
             priority_floor=priority_floor,

@@ -57,6 +57,7 @@ def emit(
     verdict: dict[str, Any],
     *,
     material: str | None = None,
+    material_parts: Mapping[str, tuple[str, int]] | None = None,
     reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
     review_phase: object = "planning",
     priority_floor: object = None,
@@ -76,6 +77,7 @@ def emit(
         payload = build_payload(
             verdict,
             material=material,
+            material_parts=material_parts,
             reviewed_related_material=reviewed_related_material,
             review_phase=review_phase,
             priority_floor=priority_floor,
@@ -517,6 +519,7 @@ def build_payload(
     verdict: dict[str, Any],
     *,
     material: str | None = None,
+    material_parts: Mapping[str, tuple[str, int]] | None = None,
     reviewed_related_material: Sequence[PlanMaterialPin] | None = None,
     review_phase: object = "planning",
     priority_floor: object = None,
@@ -618,6 +621,10 @@ def build_payload(
         "ticket_id": verdict.get("ticket_id"),
         "ticket_type": verdict.get("ticket_type"),
         "material_fingerprint": material,
+        # Per-component fingerprints of the SAME basis (bug 94a3), so `sign-review` can
+        # name which component moved instead of reciting every possibility. Diagnostic
+        # only; absent on a pre-94a3 sidecar, which simply degrades the message.
+        "material_parts": {k: list(v) for k, v in (material_parts or {}).items()} or None,
         "review_phase": phase_metadata["phase"],
         # Remediation-eligibility baseline (story a850): the review-time code SHA + registry
         # version, stamped on EVERY verdict (PASS and BLOCK alike, always self-sourced at emit)

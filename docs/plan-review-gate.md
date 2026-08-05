@@ -487,6 +487,40 @@ hold a plan-review *and* a completion-verifier attestation at once without eithe
 the other (the kind-keyed `attestations` map; the legacy top-level `signature` is a
 back-compat mirror of the most-recent one).
 
+### Ticking an AC checkbox is attestation-SAFE — and the message now names what changed
+
+**Flipping `- [ ]` to `- [x]` never invalidates an attestation.** Box state is normalized to
+`[ ]` before the fingerprint is hashed (change 330c), so the close precheck's
+require-all-ticked rule and the claim gate's material binding cannot contradict each other.
+Adding *evidence prose* next to a ticked box **is** an edit to `description`, and that does
+invalidate — which is why three agents once reported three different answers to the same
+question (bug 94a3).
+
+They could not tell the cases apart because every staleness message recited a fixed list —
+"description/AC/file_impact/children" — that named an input the fingerprint does not even
+have ("AC" is not a component; acceptance criteria live *inside* `description`). Since 94a3
+the manifest carries a per-component fingerprint for each basis key, as additive
+`material-part: <name> <hash16> <size>` lines, and a `stale-material` reason **names the
+component that actually moved**:
+
+```
+plan-review close gate: stale-material: the plan was materially edited since review —
+changed: description (4210 -> 4396 chars), children (3 -> 4)
+```
+
+The components are exactly `ticket_id`, `description`, `file_impact`, `children`, plus
+`file_impact_scope` when the scope is an explicit `none`. The lines are diagnostic only —
+nothing decides on them, and a malformed one is skipped rather than raised, so they can never
+turn a staleness refusal into a parse error. An attestation signed **before** 94a3 has no such
+lines; it degrades to naming a `children` change from its signed `plan-material-pin:` ids
+where it can, and otherwise says plainly that the component cannot be named and that
+re-running `rebar review-plan` will make future messages specific.
+
+The same principle applies to the other verdicts: `stale-code` names the drifted dependency
+files, `stale-head` names both SHAs, `stale-reopened` names the sign and reopen timestamps,
+and `unsigned` names both remedies (`review-plan` to earn an attestation, `sign-review` when a
+review PASSed but its attestation failed to persist).
+
 The attestation means **"a review process was followed, no blocking red flags, with
 coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live in the
 sidecar; a project composes any hard CI gate by checking the signed result + its

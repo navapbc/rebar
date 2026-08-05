@@ -19,7 +19,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
@@ -35,6 +35,12 @@ _REFRESHED_PREFIX = "refreshed-from:"  # provenance on a drift-refreshed attesta
 _DISABLED_PREFIX = "disabled_builtins:"  # built-in ids the project overlay disabled (story 08af)
 _ABSENT_HASH = "absent"  # sentinel for a dependency path that does not exist on disk
 _PIN_PREFIX = "plan-material-pin:"
+# Per-component material fingerprints (bug 94a3): ``material-part: <name> <hash16> <size>``.
+# Purely DIAGNOSTIC — nothing decides on them; they exist so a staleness message can name
+# WHICH basis key moved instead of reciting every possibility. Additive, so a manifest
+# without them parses to ``{}`` and an older verifier ignores them. The prefix deliberately
+# does not collide with :func:`manifest_material`'s ``material:`` match.
+_MATERIAL_PART_PREFIX = "material-part:"
 _PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
 _REVIEW_PHASE_PREFIX = "review-phase:"
 _PRIORITY_FLOOR_PREFIX = "priority-floor:"
@@ -362,6 +368,7 @@ def build_manifest(
     refreshed_from: str | None = None,
     verified_at_sha: str | None = None,
     pins: Sequence[PlanMaterialPin] = (),
+    material_parts: Mapping[str, tuple[str, int]] | None = None,
     review_phase: object = "planning",
     priority_floor: object = None,
     file_scope: object = "unscoped",
@@ -383,6 +390,10 @@ def build_manifest(
         f"{_MANIFEST_PREFIX}: {verdict.get('verdict', 'PASS')}",
         f"ticket: {verdict.get('ticket_id', '')}",
         f"material: {material}",
+        *(
+            f"{_MATERIAL_PART_PREFIX} {name} {digest} {size}"
+            for name, (digest, size) in sorted((material_parts or {}).items())
+        ),
         f"model: {verdict.get('model') or 'n/a'}",
         f"runner: {verdict.get('runner') or 'n/a'}",
         f"blocking: {counts.get('blocking', 0)}",
@@ -509,6 +520,30 @@ def is_plan_review_manifest(manifest: list[str] | None) -> bool:
     if not manifest:
         return False
     return str(manifest[0]).startswith(_MANIFEST_PREFIX + ":")
+
+
+def manifest_material_parts(manifest: list[str] | None) -> dict[str, tuple[str, int]]:
+    """Parse the per-component material fingerprints back out (``{}`` when absent).
+
+    Deliberately LENIENT where :func:`manifest_pins` is strict: these lines are diagnostic
+    only, so a malformed one is skipped rather than raised. Raising would let a cosmetic
+    field convert a ``stale-material`` refusal into a ``malformed-pin`` one and change a gate
+    outcome — exactly what this whole change must not do.
+    """
+    out: dict[str, tuple[str, int]] = {}
+    for line in manifest or []:
+        text = str(line)
+        if not text.startswith(_MATERIAL_PART_PREFIX):
+            continue
+        parts = text.split()
+        if len(parts) != 4:
+            continue
+        _, name, digest, size = parts
+        try:
+            out[name] = (digest, int(size))
+        except ValueError:
+            continue
+    return out
 
 
 def manifest_material(manifest: list[str] | None) -> str | None:

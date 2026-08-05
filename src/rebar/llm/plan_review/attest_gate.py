@@ -118,9 +118,18 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         return {"ok": False, "reason": f"signing-unavailable: {exc}", "verdict": "error"}
 
     if not result.get("verified"):
+        # rebar cannot tell "never reviewed" from "review PASSed but signing aborted" —
+        # both leave no record — so name BOTH remedies rather than the one that happens to
+        # fit the common case (bug 94a3). ``sign-review`` is the cheap no-LLM recovery for
+        # the second; ``review-plan`` is the only one for the first.
         return {
             "ok": False,
-            "reason": f"no certified plan-review attestation (signature: {result.get('verdict')})",
+            "reason": (
+                f"no certified plan-review attestation (signature: {result.get('verdict')}"
+                f"; {result.get('reason', '')}). Run `rebar review-plan {ticket_id}` to earn "
+                f"one, or `rebar sign-review {ticket_id}` if a review already PASSED but its "
+                "attestation failed to persist"
+            ),
             "verdict": result.get("verdict", "unsigned"),
         }
     # We requested kind="plan-review" strictly, so a certified result IS a plan-review
@@ -164,9 +173,13 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
 
     Returns ``{ok, verdict, reason, verified_at_sha, signed_at}`` where ``verdict`` is the
     :func:`compute_validity` classifier — ``certified`` when current, else one of ``stale-code`` /
-    ``stale-head`` / ``stale-material`` / ``stale-reopened`` / ``unsigned`` /
-    ``wrong-kind`` / ``malformed-pin`` / ``unverifiable-material`` / ``error``. Criteria-registry
-    drift is NOT among them: it is grandfathered (ADR 0053) and surfaces as the non-blocking
+    ``stale-head`` / ``stale-material`` / ``stale-reopened`` / ``stale-pin-drift`` /
+    ``stale-pin-missing`` / ``unsigned`` / ``wrong-kind`` / ``not-closed`` / ``malformed-pin`` /
+    ``malformed-phase`` / ``incompatible-phase`` / ``unverifiable-material`` / ``error``. Every
+    non-certified reason NAMES what changed (which material component, which dependency files,
+    which two SHAs, which reopen) rather than listing what might have — bug 94a3.
+    Criteria-registry drift is NOT among them: it is grandfathered (ADR 0053) and surfaces as
+    the non-blocking
     ``registry_drift`` field on :func:`compute_validity`'s result. ``verified_at_sha``
     is the code anchor the plan was reviewed against — the pinned verified-at-sha for a
     scoped/attested review, else the signed HEAD for an unscoped/local one — and ``signed_at`` the

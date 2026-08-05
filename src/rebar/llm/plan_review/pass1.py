@@ -19,7 +19,6 @@ import contextvars
 import hashlib
 import json
 import logging
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -737,40 +736,24 @@ def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-_CHECKBOX_STATE_RE = re.compile(r"^(\s*[-*]\s*\[)[xX ](\])", re.MULTILINE)
-
-
-def _normalize_checkbox_state(description: str) -> str:
-    """Erase checkbox STATE (``[x]``/``[X]`` → ``[ ]``) for fingerprinting. Box state
-    is progress metadata — the close precheck (433c) requires flipping it, so it must
-    not stale a signed review (bug 330c). Item TEXT stays material."""
-    return _CHECKBOX_STATE_RE.sub(r"\g<1> \g<2>", description)
-
-
 def material_fingerprint(ctx: PlanContext, *, normalize_checkboxes: bool = True) -> str:
     """A hash of the ticket's MATERIAL plan content (description / AC / file_impact /
     decomposition) — bound into the attestation so a material edit invalidates the
     signature. Tags/comments/links/assignee are NOT material (excluded), and neither
-    is AC checkbox STATE (normalized away — see :func:`_normalize_checkbox_state`).
+    is AC checkbox STATE (normalized away — see :func:`material_diff.normalize_checkbox_state`).
 
     ``normalize_checkboxes=False`` reproduces the PRE-normalization (pre-330c) algorithm
     that hashed the raw description. Validity-on-read uses it as a grandfather fallback
     (bug 96d1): a signed hash that byte-exactly matches the legacy recomputation proves
     the material is unchanged — not even box state moved — so a pre-330c attestation over
-    an unedited ticket is not spuriously invalidated as stale-material."""
-    basis = {
-        "ticket_id": ctx.ticket_id,
-        "description": _normalize_checkbox_state(ctx.description)
-        if normalize_checkboxes
-        else ctx.description,
-        "file_impact": ctx.state.get("file_impact") or [],
-        "children": sorted(c.get("ticket_id", "") for c in ctx.children),
-    }
-    if ctx.state.get("file_impact_scope") == "none":
-        reason = ctx.state.get("no_file_impact_reason")
-        basis["file_impact_scope"] = {
-            "kind": "none",
-            "reason": reason if isinstance(reason, str) else "",
-        }
+    an unedited ticket is not spuriously invalidated as stale-material.
+
+    The BASIS itself lives in :func:`material_diff.material_basis`, which also hashes each
+    key separately so a staleness message can name WHICH component moved (bug 94a3). One
+    definition of "material" keeps the composite and the per-component view in agreement.
+    """
+    from .material_diff import material_basis
+
+    basis = material_basis(ctx, normalize_checkboxes=normalize_checkboxes)
     blob = json.dumps(basis, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
