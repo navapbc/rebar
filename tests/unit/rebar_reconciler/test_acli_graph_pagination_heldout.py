@@ -645,3 +645,182 @@ def test_the_structural_guard_actually_sees_the_three_known_readers() -> None:
     assert {"get_parent_map", "get_comment_map", "get_issuelinks_map"} <= found, (
         f"expected all three whole-project readers in acli_graph.py; found {sorted(found)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# THE FETCHER BOUNDARY — [rebar:9a46-1c90-5dd9-44e1]
+#
+# The re-raises at acli_graph.py:304/394/477 get the stall out of the TRANSPORT. They do not
+# get it out of the PASS. `fetcher.fetch_snapshot` consumes all three readers behind broad
+# `except Exception` fail-open handlers (parent, comment, issuelink), and each is preceded by
+# `except BackendPaginationStallError: raise` — a match on the CORE type. A Cloud error that
+# is not in that type's hierarchy falls straight through to the fail-open beneath it, so the
+# pass writes a silently degraded snapshot and reports success: the whole silent-loss class,
+# just relocated one layer up. So the escape is asserted THROUGH the real `fetch_snapshot`,
+# with the REAL reader raising from the REAL shared cursor walk — never an injected exception,
+# which would prove only that `raise` re-raises.
+# ---------------------------------------------------------------------------
+
+import importlib.util  # noqa: E402
+import json as _json  # noqa: E402
+import sys  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+from rebar_reconciler._backend import BackendPaginationStallError  # noqa: E402
+
+_FETCHER_PATH = (
+    pathlib.Path(__file__).resolve().parents[3] / "src/rebar/_engine/rebar_reconciler/fetcher.py"
+)
+
+
+def _load_fetcher():
+    spec = importlib.util.spec_from_file_location("fetcher_9a46", _FETCHER_PATH)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fetcher_9a46"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _StallOnFieldServer:
+    """Repeats one cursor token forever for the reader that requests ``field``; serves every
+    OTHER reader a clean single page.
+
+    Keying on the requested ``fields`` is what lets one server stall exactly one of the three
+    enrichments while the other two succeed — so each fetcher handler is reached in turn
+    rather than all three cases stalling on whichever reader runs first.
+    """
+
+    def __init__(self, field: str) -> None:
+        self.field = field
+        self.calls = 0
+        self.hard_stopped = False
+
+    def __call__(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls > _RUNAWAY_CALL_CAP:
+            self.hard_stopped = True
+            raise RuntimeError("runaway cursor: harness stop, the reader never gave up")
+        requested = list(body.get("fields") or [])
+        if self.field in requested:
+            return {
+                "issues": [{"key": "DIG-1", "fields": _READERS_FIELDS[self.field](1)}],
+                "nextPageToken": "same-token-forever",
+            }
+        clean_field = requested[0] if requested else "parent"
+        return {
+            "issues": [{"key": "DIG-1", "fields": _READERS_FIELDS[clean_field](1)}],
+            "isLast": True,
+        }
+
+
+_READERS_FIELDS: dict[str, Any] = {
+    "parent": _parent_fields,
+    "comment": _comment_fields,
+    "issuelinks": _issuelinks_fields,
+}
+
+
+def _fetcher_client(server: Any) -> AcliClient:
+    """A real ``AcliClient`` whose REST seam is ``server`` and whose base scan is inert.
+
+    ``search_issues`` is stubbed to one non-empty page per JQL because the base scan is not
+    what is under test — the only thing that may raise is the enrichment cursor walk, which
+    is the REAL ``_iter_cursor_pages`` reached through the REAL reader.
+    """
+    client = _client(server)
+    served: set[str] = set()
+
+    def _search(jql: str, start_at: int = 0, max_results: int = 50, **_kw: Any) -> list[dict]:
+        if jql in served:
+            return []
+        served.add(jql)
+        return [{"key": "DIG-1", "fields": {"summary": "one"}}]
+
+    client.search_issues = _search  # type: ignore[method-assign]
+    return client
+
+
+@pytest.mark.parametrize("field", ["parent", "comment", "issuelinks"])
+def test_a_cloud_cursor_stall_escapes_every_fetch_snapshot_enrichment_fail_open(
+    tmp_path, field: str
+) -> None:
+    """AC1 — one case per broad fetcher handler. A stalled cursor is a TRUNCATED whole-project
+    read, not an absent one: degrading around it writes a snapshot the differ then treats as
+    authoritative (missing parents read as parentless, missing issuelinks as "no links", so
+    link removals become undetectable). Loud beats fail-open, and the loudness has to survive
+    the fetcher boundary — not just the transport's own handler.
+    """
+    fetcher = _load_fetcher()
+    server = _StallOnFieldServer(field)
+    client = _fetcher_client(server)
+
+    with patch.object(fetcher, "_load_acli", return_value=client):
+        with pytest.raises(RunawayPaginationError):
+            fetcher.fetch_snapshot(f"9a46-stall-{field}", repo_root=tmp_path)
+
+    assert not server.hard_stopped, (
+        f"the {field} reader never stopped on a repeated cursor: it issued {server.calls} "
+        f"requests and only the harness's hard stop ended the spin"
+    )
+
+
+def test_the_cloud_stall_error_is_the_core_stall_type() -> None:
+    """AC2 — the mechanism, stated directly. The three fetcher re-raise clauses match on
+    ``BackendPaginationStallError``; a Cloud error outside that hierarchy is invisible to them
+    no matter how correct the transport's own re-raise is. ``RuntimeError`` must STAY in the
+    MRO so the pre-existing ``except RuntimeError`` contract at other call sites survives.
+    """
+    assert issubclass(RunawayPaginationError, BackendPaginationStallError), (
+        "RunawayPaginationError is not a BackendPaginationStallError, so fetch_snapshot's "
+        "three `except BackendPaginationStallError: raise` clauses cannot see a Cloud stall "
+        "and the `except Exception` beneath each one swallows it"
+    )
+    assert issubclass(RunawayPaginationError, RuntimeError), (
+        "RuntimeError left the MRO — existing `except RuntimeError` sites would stop "
+        "catching a Cloud cursor stall"
+    )
+
+
+@pytest.mark.parametrize("failing", ["get_parent_map", "get_comment_map", "get_issuelinks_map"])
+def test_an_ordinary_enrichment_failure_still_fails_open_and_writes_the_snapshot(
+    tmp_path, failing: str
+) -> None:
+    """NEGATIVE CONTROL, and the reason this fix is narrow. Those three handlers exist to keep
+    a pass alive through a TRANSIENT enrichment fault, and that contract must survive
+    untouched — widening the re-raise (or re-basing the error on something the handlers catch
+    too broadly) would abort every pass on any hiccup. Only the STALL is loud.
+    """
+    fetcher = _load_fetcher()
+
+    class _OrdinaryFailure:
+        def __init__(self) -> None:
+            self._served: set[str] = set()
+
+        def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50):
+            if jql in self._served:
+                return []
+            self._served.add(jql)
+            return [{"key": "DIG-1", "fields": {"summary": "one"}}]
+
+        def _maybe(self, name: str):
+            if name == failing:
+                raise RuntimeError("transient enrichment hiccup")
+            return {}
+
+        def get_parent_map(self, project_key: str):
+            return self._maybe("get_parent_map")
+
+        def get_comment_map(self, project_key: str):
+            return self._maybe("get_comment_map")
+
+        def get_issuelinks_map(self, project_key: str):
+            return self._maybe("get_issuelinks_map")
+
+    with patch.object(fetcher, "_load_acli", return_value=_OrdinaryFailure()):
+        out = fetcher.fetch_snapshot(f"9a46-open-{failing}", repo_root=tmp_path)
+
+    assert out.exists(), "an ordinary enrichment failure must still write a degraded snapshot"
+    assert "DIG-1" in _json.loads(out.read_text()), (
+        "the degraded snapshot must still carry the base scan's issues"
+    )

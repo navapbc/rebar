@@ -19,6 +19,7 @@ import tempfile
 import urllib.error
 from typing import TYPE_CHECKING, Any
 
+from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.adapters.jira_family import sanitize_label as _sanitize_label
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 
-class RunawayPaginationError(RuntimeError):
+class RunawayPaginationError(BackendPaginationStallError):
     """A ``nextPageToken`` cursor walk saw the same non-null token twice in a row.
 
     The server has stopped advancing the cursor ([rebar:cabc-7a98-d173-4d7c]):
@@ -35,6 +36,17 @@ class RunawayPaginationError(RuntimeError):
     deliberately — a stalled cursor is a truncated whole-project read (the
     silent-loss class this adapter has shipped three times), not a transient
     fault to degrade around.
+
+    Base class (bug 9a46): this is Cloud's *instance* of the vendor-neutral
+    ``BackendPaginationStallError`` stall class, so it derives from it rather
+    than from ``RuntimeError`` directly. Core's ``fetcher.fetch_snapshot``
+    re-raises only ``BackendPaginationStallError`` past its per-enrichment
+    fail-open ``except Exception``; while this error sat outside that hierarchy
+    the re-raise clauses missed it and a Cloud cursor stall was swallowed into a
+    silently degraded snapshot. ``BackendPaginationStallError`` itself subclasses
+    ``RuntimeError``, so ``RuntimeError`` stays in this MRO and pre-existing
+    ``except RuntimeError`` sites keep catching it; the name and identity are
+    unchanged, so ``except RunawayPaginationError`` sites are unaffected.
     """
 
 
