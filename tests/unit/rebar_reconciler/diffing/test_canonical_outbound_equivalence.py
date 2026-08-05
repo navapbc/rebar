@@ -149,7 +149,13 @@ def test_snapshot_canonicalized_via_injected_inbound_mapper(od) -> None:
 
     class PassthroughOutbound:
         def map_local_to_remote(
-            self, ticket, binding_store=None, local_ticket_types=None, emit_detach_clear=False
+            self,
+            ticket,
+            binding_store=None,
+            local_ticket_types=None,
+            emit_detach_clear=False,
+            *,
+            suppressed_out=None,
         ):
             return {}
 

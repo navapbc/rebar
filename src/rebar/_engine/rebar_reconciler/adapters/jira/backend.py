@@ -66,9 +66,15 @@ class _JiraOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         emit_detach_clear: bool = False,
+        *,
+        suppressed_out: list[str] | None = None,
     ) -> dict[str, Any]:
         return outbound_fields._map_local_to_jira_fields(
-            ticket, binding_store, local_ticket_types, emit_detach_clear
+            ticket,
+            binding_store,
+            local_ticket_types,
+            emit_detach_clear,
+            suppressed_out=suppressed_out,
         )
 
     def map_fields_to_remote(

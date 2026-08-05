@@ -551,12 +551,15 @@ def _update_one_apply_parent(
         try:
             _call_with_retry(client.set_parent, issue_key, parent_key)
         except urllib.error.HTTPError as exc:
-            # Hierarchy guard (ticket 8b25): on this next-gen project only an
-            # Epic may be a parent; a Task→Task reparent (and any other unmet
-            # hierarchy constraint) is rejected with HTTP 400 carrying a
-            # misleading "same project" message. Treat any 400 as a hierarchy
-            # rejection: WARN + continue. Non-400 errors stay non-fatal too —
-            # a parent failure must not abort the rest of the batch.
+            # Hierarchy guard (ticket 8b25): only an Epic may be a parent; a
+            # Task→Task reparent (and any other unmet hierarchy constraint) is
+            # rejected with HTTP 400 carrying a misleading "same project"
+            # message. The guard is NOT vendor-conditional — Data Center reaches
+            # the same verdict by accepting the write and silently ignoring it
+            # (capability map req-0056/req-0058), which is worse, not better.
+            # Treat any 400 as a hierarchy rejection: WARN + continue. Non-400
+            # errors stay non-fatal too — a parent failure must not abort the
+            # rest of the batch.
             #
             # Every arm ALSO records a bridge_alerts entry (ticket 39c1 AC4).
             # Warn-and-continue alone is why "the parent never reached the
