@@ -91,7 +91,7 @@ def format_warning(status: dict[str, Any]) -> str | None:
 def main() -> int:
     """CI entry point: print a warning annotation when the pin is stale; ALWAYS exit 0 (warn-only,
     per the WS5 AC). Returns the exit code (0)."""
-    status = freshness(_dt.date.today())
+    status = freshness(_dt.datetime.now(tz=_dt.timezone.utc).astimezone().date())
     warning = format_warning(status)
     # T201: this is a CI gate — stdout (the GitHub Actions `::warning::` annotation / OK line) IS
     # its operational output, a legitimate-print surface like the other rebar CLI gates.
