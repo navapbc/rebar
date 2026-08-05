@@ -397,6 +397,18 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
 #     this scoped entry but left in place as per-site documentation.
 #   • `tests/**` is out of the convention's scope (test code legitimately catches
 #     broadly and prints) — a permanent exemption, never part of the allowlist.
+
+# ── C901 complexity threshold (story c9f7 — shrink-only baseline) ─────────────
+# The single source of truth for the McCabe cyclomatic-complexity threshold used
+# by the shrink-only complexity gate (`scripts/check_complexity_baseline.py`).
+# C901 is deliberately NOT in the `select` list above: raw C901 would exit 1 on
+# every change while there is legacy debt, and per-file / inline ignores cannot
+# reject a NEW complex function inside an exempt file. Instead the wrapper reads
+# the live C901 census under this threshold and fails only on new/increased debt
+# measured against `.github/complexity-baseline.json`.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
 [tool.ruff.lint.per-file-ignores]
 # Test code is out of the convention's scope: tests legitimately catch broadly (to
 # assert on failures) and print (debug/diagnostic output). PERMANENT, not part of
@@ -448,6 +460,10 @@ select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115"]
 # Config-read drift gate CLI (ticket 6754) — prints its violation report + OK line
 # to stdout (the CI gate surface). Legitimate-print category. KEEPS T201.
 "scripts/check_config_reads.py" = ["T201"]
+# Shrink-only complexity baseline gate CLI (story c9f7) — prints its counter summary
+# to stdout (the CI/pre-commit gate surface) + errors to stderr. Legitimate-print
+# category like the sibling gate CLIs above. KEEPS T201.
+"scripts/check_complexity_baseline.py" = ["T201"]
 # End-to-end CLI probe (ticket f1eb, port of probe-rebar.sh) — its PASS/FAIL
 # section report on stdout + failure detail on stderr ARE the tool's output.
 # Legitimate-print category. KEEPS T201.
