@@ -265,6 +265,59 @@ def test_string_read_fields_keep_their_marker_and_do_not_fire(gate, field_name, 
     assert gate.check(_REAL_SCHEMA, REPO_ROOT / "src" / "rebar") == []
 
 
+# ── ticket-pointer marker reporting (bug 2c58, AC7) ──────────────────────────────
+# A marker that points at a TICKET rather than at a reader is justified only while that
+# ticket is open -- `CodeHealthConfig.analyzers` carried `# read-via: inert pending bug
+# dce2-...` and dce2 has since closed. The reporter surfaces those. Its correct output
+# on the real tree is currently EMPTY, which is precisely why it needs a positive test:
+# a reporter that has never emitted anything looks identical to one that cannot.
+_TICKET_MARKER_SCHEMA = """\
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SectionConfig:
+    parked_knob: bool = False  # read-via: inert pending bug dce2-b93d-4112-451c
+    real_reader_knob: bool = False  # read-via: consumer.py getattr dispatch
+
+
+@dataclass
+class Config:
+    s: SectionConfig = field(default_factory=SectionConfig)  # read-via: section wiring
+"""
+
+
+def test_a_marker_pointing_at_a_ticket_is_reported(gate, tmp_path):
+    schema, _root = _tree(tmp_path, _TICKET_MARKER_SCHEMA, _READS_SECTION_ONLY)
+    reports = gate.ticket_pointer_reports(schema)
+    assert len(reports) == 1, f"exactly the ticket-pointing marker reports; got {reports!r}"
+    assert "parked_knob" in reports[0] and "SectionConfig" in reports[0]
+    assert "dce2-b93d-4112-451c" in reports[0], "the report must name the ticket"
+    assert "real_reader_knob" not in reports[0], "a reader pointer is not a ticket pointer"
+
+
+def test_the_short_ticket_id_form_is_reported_too(gate, tmp_path):
+    body = _TICKET_MARKER_SCHEMA.replace("dce2-b93d-4112-451c", "dce2-b93d")
+    schema, _root = _tree(tmp_path, body, _READS_SECTION_ONLY)
+    reports = gate.ticket_pointer_reports(schema)
+    assert len(reports) == 1 and "dce2-b93d" in reports[0]
+
+
+def test_ticket_pointer_reporting_never_changes_the_exit_code(gate, tmp_path, capsys):
+    """The report is advisory: a parked marker is surfaced, not failed. Whether it is
+    still justified depends on the ticket's state, which this gate cannot know."""
+    schema, root = _tree(tmp_path, _TICKET_MARKER_SCHEMA, _READS_SECTION_ONLY)
+    rc = gate.main(["--schema", str(schema), "--root", str(root)])
+    combined = "".join(capsys.readouterr())
+    assert rc == 0, "a ticket-pointing marker must not fail the gate"
+    assert "dce2-b93d-4112-451c" in combined, "main must PRINT the report, not just compute it"
+
+
+def test_the_real_schema_has_no_marker_parked_against_a_ticket(gate):
+    """Today's expected state, pinned so a newly-parked marker surfaces in review."""
+    assert gate.ticket_pointer_reports(_REAL_SCHEMA) == []
+
+
 def test_ci_wires_the_gate(gate):
     body = _WORKFLOW.read_text(encoding="utf-8")
     assert "check_config_reads.py" in body

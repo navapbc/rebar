@@ -21,8 +21,13 @@ Receiver resolution binds an expression to a set of candidate schema classes via
 
 An expression that resolves to nothing contributes to no field.
 
+A ``# read-via:`` marker whose pointer names a rebar ticket id is additionally
+REPORTED (never an error): such a marker's justification expires when its ticket
+closes, so it would otherwise become permanent by default.
+
 API contract:
   - check(schema_path: Path, root: Path) -> list[str]
+  - ticket_pointer_reports(schema_path: Path) -> list[str]
   - main(argv: list[str] | None = None) -> int
 """
 
@@ -44,6 +49,14 @@ _MARKER_RE = re.compile(r"#\s*read-via:(.*)")
 
 # Plumbing filenames excluded from the read-site scan.
 _PLUMBING = {"_config_schema.py", "config.py"}
+
+# A rebar ticket id inside a marker pointer: the grouped-hex short (``dce2-b93d``) or
+# full (``dce2-b93d-4112-451c``) form. A marker that points at a TICKET rather than at
+# a reader is a marker whose justification EXPIRES when that ticket closes — e.g.
+# ``# read-via: inert pending bug dce2-b93d-4112-451c``, whose ticket has since closed.
+# Nothing else in the gate notices that, so such markers would become permanent by
+# default; `ticket_pointer_reports` surfaces them (see `main`).
+_TICKET_ID_RE = re.compile(r"\b[0-9a-f]{4}-[0-9a-f]{4}(?:-[0-9a-f]{4}-[0-9a-f]{4})?\b")
 
 # Safety bound on the binding fixed-point iterations.
 _MAX_PASSES = 8
@@ -426,6 +439,41 @@ def check(schema_path: Path, root: Path) -> list[str]:
     return [msg for _, msg in errors]
 
 
+def ticket_pointer_reports(schema_path: Path) -> list[str]:
+    """Return one report line per ``# read-via:`` marker whose pointer names a rebar
+    ticket id, so a marker parked against a ticket is visible rather than silently
+    permanent. This is a REPORT, not an error: the lines are printed by ``main`` and
+    never contribute to the exit code, because whether such a marker is still justified
+    is a judgement about the ticket's state, not something this gate can decide.
+
+    An empty list means no marker currently points at a ticket — which is the expected
+    state today, and exactly why this reporter needs its own test: a reporter that has
+    never emitted anything is indistinguishable from one that cannot.
+    """
+    fields = _collect_fields(schema_path)
+    if not fields:
+        return []
+    source_lines = schema_path.read_text(encoding="utf-8").splitlines()
+    reports: list[tuple[int, str]] = []
+    for cls_name, field_name, lineno in fields:
+        found, pointer = _check_marker(source_lines, lineno)
+        if not found or not pointer:
+            continue
+        ticket_ids = _TICKET_ID_RE.findall(pointer)
+        if not ticket_ids:
+            continue
+        joined = ", ".join(ticket_ids)
+        reports.append((
+            lineno,
+            f"{schema_path}:{lineno}: {cls_name}.{field_name}: '# read-via:' marker "
+            f"points at ticket {joined} — this marker expires when that ticket closes. "
+            f"Confirm the ticket is still open, or replace the pointer with the field's "
+            f"real reader.",
+        ))
+    reports.sort(key=lambda t: t[0])
+    return [msg for _, msg in reports]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Check every _config_schema.py dataclass field has a read site.",
@@ -443,6 +491,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Source root to scan for read sites (default: %(default)s)",
     )
     args = parser.parse_args(argv)
+
+    for report in ticket_pointer_reports(args.schema):
+        print(report)
 
     errors = check(args.schema, args.root)
     if errors:
