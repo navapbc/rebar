@@ -125,6 +125,30 @@ def test_capabilities_module_still_has_no_provider_name_prefix_matching():
     import rebar.llm.capabilities as caps_mod
 
     tree = ast.parse(pathlib.Path(caps_mod.__file__).read_text())
+
+    # ANTI-VACUITY (bug 8a5e). This guard polices an ABSENCE in ONE module, so it reads
+    # identical whether the module is clean or the exact-id table has moved out from under
+    # it — the failure mode that hollowed out four sibling guards. Pin the landmark: the
+    # scanned module must still hold the tables this criterion is about.
+    tables = {
+        node.target.id if isinstance(node.target, ast.Name) else ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AnnAssign)
+    } | {
+        t.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+    }
+    missing = {"_REBAR_OVERRIDES", "_MODEL_ID_CAPABILITY_OVERRIDES"} - tables
+    assert not missing, (
+        f"capabilities.py no longer defines {sorted(missing)} — the exact-id capability "
+        f"table this guard polices has moved, so the guard now scans a module with no "
+        f"model-id matching in it and would pass unconditionally. Re-aim it at the module "
+        f"that holds the table."
+    )
+
     calls = [
         n
         for n in ast.walk(tree)
