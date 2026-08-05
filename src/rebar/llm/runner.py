@@ -646,27 +646,13 @@ class PydanticAIRunner:
         # record cache efficacy into coverage/observability. Private key — non-breaking
         # for every existing consumer of the review_result/structured dict.
         result["_usage"] = usage
-        # Run shape on the SUCCESS path too (bug aec1). Before this, only a FAILED call recorded
-        # how the agent loop actually went, so a run that succeeded after 40 near-identical tool
-        # calls was indistinguishable in the log from one that succeeded in three — and the
-        # distinct-vs-total ratio is the only thing that separates a LOOP from genuine BREADTH
-        # without re-running the call. `run_messages` is populated here as well as on the raise
-        # path: `capture_attempt_messages` extends the sink from its `finally`, not from an
-        # except. Reuses the SAME reducer the failure path uses, so the two outcomes can never
-        # describe the same run differently.
-        try:
-            shape = usage_log.run_shape(
-                run_messages, request_limit=req_limit, tool_calls_limit=max(8, eff_max_iter)
-            )
-            # ONLY the shape keys — `shape_only` owns that filter, because which keys are
-            # durable schema belongs to the module that writes them, not to this caller. It
-            # drops the reducer's token totals, which are a message-derived APPROXIMATION,
-            # whereas `usage` here came from `_extract_usage` reading the provider's own usage
-            # object — the authoritative, billable figures. Overwriting those with the
-            # approximation would silently corrupt cost accounting.
-            usage.update(usage_log.shape_only(shape))
-        except Exception as exc:  # noqa: BLE001 — telemetry must never break the call path
-            logger.warning("usage-log: run-shape capture failed for op=%s: %s", _call_label, exc)
+        _merge_success_run_shape(
+            usage,
+            run_messages,
+            request_limit=req_limit,
+            tool_calls_limit=max(8, eff_max_iter),
+            call_label=_call_label,
+        )
         # The opt-in spend row (rules, and the step-attribution rationale, in its docstring).
         record_call_spend(
             usage,
@@ -676,6 +662,32 @@ class PydanticAIRunner:
             ticket=req.target.get("ticket_id"),
         )
         return result
+
+
+def _merge_success_run_shape(
+    usage: dict,
+    run_messages: list[Any],
+    *,
+    request_limit: int,
+    tool_calls_limit: int,
+    call_label: str,
+) -> None:
+    """Merge the SUCCESS-path run shape into ``usage`` in place (bug aec1).
+
+    Records how the agent loop actually went on a clean run (the distinct-vs-total tool-call
+    ratio that separates a LOOP from genuine BREADTH), reusing the SAME reducer the failure
+    path uses. Only ``shape_only`` keys are merged — the reducer's token totals are a
+    message-derived APPROXIMATION and would corrupt the authoritative billable figures
+    ``_extract_usage`` already placed in ``usage``. Telemetry must never break the call path,
+    so any reducer failure is swallowed with a warning.
+    """
+    try:
+        shape = usage_log.run_shape(
+            run_messages, request_limit=request_limit, tool_calls_limit=tool_calls_limit
+        )
+        usage.update(usage_log.shape_only(shape))
+    except Exception as exc:  # noqa: BLE001 — telemetry must never break the call path
+        logger.warning("usage-log: run-shape capture failed for op=%s: %s", call_label, exc)
 
 
 def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
