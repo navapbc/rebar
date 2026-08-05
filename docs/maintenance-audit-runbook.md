@@ -61,6 +61,13 @@ grep -E ' - [DEF] \(' "$OUT/radon_cc.txt" | sort -t'(' -k2 -rn   # worst first
 ruff check src --select C90,SIM,PERF,RUF,PLR,PLW,TRY,TID,ARG,N,A,DTZ,RET,PTH,FBT --statistics > "$OUT/ruff_extended.txt"
 ruff check src --select C901 2>&1 | grep -oE 'src/[^:]+' | sort | uniq -c | sort -rn   # complexity by file
 
+# 6b. C901 function-complexity ratchet (story c9f7) — the ENFORCED production gate.
+# Resolve the project's pinned Ruff first (do not assume a version); threshold 15 and
+# production scope src/rebar are the gate contract, not the advisory scan above.
+ruff --version                                                                    # project-resolved Ruff
+ruff check --select C901 --config 'lint.mccabe.max-complexity=15' --statistics src/rebar   # raw census (exits 1)
+python scripts/check_complexity_baseline.py --check                               # the gate verdict (exit 0 = no new/increased debt)
+
 # 7. duplication (token clones)
 npx jscpd src/rebar --min-tokens 50 --min-lines 8 --format python --reporters json --output "$OUT/jscpd"
 
@@ -116,7 +123,11 @@ grep -rn 'def _rebar_env\|def _env_int\|_SEVERITY_RANK = {' src/rebar/   # known
 - **8 files over the 800 soft cap** (docs table documented only 4 — see audit).
 - Worst complexity: `reconcile_once` F(82), `compute_mutations` F(61),
   `next_batch.compute` F(55), `_apply_inbound_update` F(52), `fsck_recover_cli`
-  F(44). 102 `C901` hits.
+  F(44). 102 `C901` hits. These are **dated observations, not the gate contract**:
+  the enforced C901 ratchet reads the live census from the project-resolved Ruff
+  (`ruff --version`) at threshold 15 over `src/rebar` and is verified by
+  `python scripts/check_complexity_baseline.py --check`; historical counts here are
+  only for drift comparison.
 - Dead code: only 2 vulture-100% items; ~10 genuinely-unreferenced functions
   (mostly `bridge_fsck.enumerate_*` dead parallel impl + reconciler stubs).
 - `except Exception`: 135 sites, 0 real bare `except:`, 0 mutable default args.
