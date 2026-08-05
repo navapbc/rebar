@@ -2,7 +2,7 @@
 schema_version: 1
 title: Ticket quality reviewer
 description: Reviews a ticket (or ticket graph) for clarity, acceptance criteria,
-  scope, dependencies, and implementation risk. The default reviewer for the `review`
+  scope, dependencies, and implementation risk. The default reviewer for the `rebar.llm.review_ticket`
   operation.
 inputs: reviewer_input
 outputs: review_result

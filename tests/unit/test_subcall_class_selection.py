@@ -293,11 +293,14 @@ def _unwrap_model_transparent(expr: str) -> str | None:
 # ONLY way a raw site passes: a new hand-built sub-call fails until someone either declares a
 # class or writes down why the operator's bare model is the right one there.
 _CFG_MODEL_BY_DESIGN: dict[str, str] = {
-    "llm/operations.py::review_ticket": (
-        "`rebar review`'s PRIMARY op call, not a sub-call. A top-level op makes ONE call, so there "
-        "are no passes to differentiate and the operator's configured model is the right knob; the "
-        "class vocabulary exists to spend differently ACROSS a gate's passes. Same reasoning as "
-        "spec_scan below. Retirement of this op is ticket 316a."
+    "llm/operations.py::_review_ticket_impl": (
+        "`rebar.llm.review_ticket`'s PRIMARY op call, not a sub-call (story 316a split the "
+        "public wrapper, which warns, from this implementation, which is what the deprecated "
+        "op and its internal callers actually run). A top-level op makes ONE call, so there "
+        "are no passes to differentiate and the operator's configured model is the right knob; "
+        "the class vocabulary exists to spend differently ACROSS a gate's passes. Same "
+        "reasoning as spec_scan below. The op's CLI verb (`rebar review`) is already retired "
+        "as a forwarding shim over `rebar review-plan`."
     ),
     "llm/spec_scan.py::_scan_epics_inner": (
         "`scan-spec`'s PRIMARY op call, not a sub-call — a top-level op runs the operator's "
