@@ -334,6 +334,24 @@ _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
     "global.anthropic.claude-opus-4-8": {"supports_temperature": False},
     "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
     "global.anthropic.claude-opus-4-7": {"supports_temperature": False},
+    # MEASURED native structured output UNDER extended thinking (run E1, recorded on ticket
+    # df3a "EXPERIMENT RESULTS" comment: 39 live Bedrock calls, AWS account 896586841071 /
+    # us-east-1; outputConfig json_schema + extended thinking proven wire-legal — sonnet-4-6
+    # adaptive, haiku-4-5 budget 2048; no 400). Client-side Pydantic validators remain MANDATORY:
+    # Bedrock's schema transform strips ge/le bounds (E1 emitted a 1.0 out-of-bounds value).
+    "us.anthropic.claude-sonnet-4-6": {
+        "native_structured_output": True,
+        "native_output_with_thinking": True,
+    },
+    # The DATED haiku profile id — the bare alias 400s at request validation.
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "native_structured_output": True,
+        "native_output_with_thinking": True,
+    },
+    # NON-ROW: Bedrock opus-4-7 / opus-4-8 are rejected server-side by Converse structured
+    # output under thinking (provider rollout gap; re-measure when AWS announces support), so
+    # they get NO native-output row and stay fail-closed (their supports_temperature rows above
+    # are a separate ticket's fact and untouched here).
 }
 
 
@@ -357,6 +375,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         "supports_thinking": supports_thinking,
         "supports_temperature": True,
         "native_web_search": _supports_native_web_search(profile),
+        "native_output_with_thinking": False,
     }
     for predicate, overrides in _REBAR_OVERRIDES:
         if predicate(profile):
@@ -375,6 +394,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         supports_thinking=bool(caps["supports_thinking"]),
         supports_temperature=bool(caps["supports_temperature"]),
         native_web_search=bool(caps["native_web_search"]),
+        native_output_with_thinking=bool(caps["native_output_with_thinking"]),
         # Derived from the RESOLVED style + id, never from an override table: the floor is a
         # published property of the model, not a rebar policy knob.
         cache_min_prefix_tokens=_cache_min_prefix_tokens(resolved_cache_style, model_id),
@@ -427,7 +447,10 @@ _PROFILE_RESOLVERS = {
 }
 
 _CONSERVATIVE = ModelCapabilities(
-    native_structured_output=False, prompt_cache_style="none", supports_thinking=False
+    native_structured_output=False,
+    prompt_cache_style="none",
+    supports_thinking=False,
+    native_output_with_thinking=False,
 )
 
 
@@ -479,6 +502,7 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
             "supports_thinking": _CONSERVATIVE.supports_thinking,
             "supports_temperature": _CONSERVATIVE.supports_temperature,
             "native_web_search": _CONSERVATIVE.native_web_search,
+            "native_output_with_thinking": _CONSERVATIVE.native_output_with_thinking,
         }
         merged.update(id_overrides)
         merged_cache_style = str(merged["prompt_cache_style"])
@@ -488,6 +512,7 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
             supports_thinking=bool(merged["supports_thinking"]),
             supports_temperature=bool(merged["supports_temperature"]),
             native_web_search=bool(merged["native_web_search"]),
+            native_output_with_thinking=bool(merged["native_output_with_thinking"]),
             cache_min_prefix_tokens=_cache_min_prefix_tokens(merged_cache_style, fallback_id),
         )
     return _CONSERVATIVE
