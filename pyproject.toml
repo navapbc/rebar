@@ -244,9 +244,15 @@ dev = [
     "pydantic-ai-slim[openai]>=1,<2",
     # Bedrock provider support (story S3, ticket 2932). Opt-in at runtime (kept OUT of the
     # `agents` extra — `pip install nava-rebar[agents]` must still install without boto3) but
-    # present here so `tests/unit/test_bedrock_provider.py`'s construction-path tests RUN in
-    # CI rather than skipping — the same `[openai]` precedent immediately above.
     "pydantic-ai-slim[bedrock]>=1,<2",
+    # Bedrock Converse `outputConfig` (native structured output) is rejected client-side by
+    # botocore < 1.43 (`ParamValidationError` before any network call — E1 measurement on the
+    # selection bug ticket); the wire feature needs botocore >= 1.43. Floor botocore/boto3
+    # here so the dev/bedrock resolution carries the fix. The `[tool.uv]` conflicts block below
+    # forks eval (which caps boto3 < 1.40.62 via aiobotocore) away from bedrock/dev, so this
+    # floor applies only where bedrock resolves. Drop once aiobotocore catches up upstream.
+    "botocore>=1.43.0",
+    "boto3>=1.43.0",
 ]
 
 [project.scripts]
