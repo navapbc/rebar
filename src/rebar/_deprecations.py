@@ -190,6 +190,7 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     _tomb("env", "REBAR_PUSH", "REBAR_SYNC_PUSH", "warn"),
     _tomb("env", "REBAR_RECONCILER_LOCK_MAX_RETRIES", "", "warn"),
     _tomb("env", "REBAR_RECONCILER_LOCK_RETRY_BUDGET", "", "warn"),
+    _tomb("env", "REBAR_CODE_HEALTH_ANALYZERS", "", "warn"),
     # cfg, error — lifecycle/close gate rename.
     _tomb(
         "cfg",
@@ -200,6 +201,10 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     # cfg, warn — dropped reconciler lock tunables.
     _tomb("cfg", "reconciler.lock_backend", "", "warn"),
     _tomb("cfg", "reconciler.lock_max_retries", "", "warn"),
+    # cfg, warn — the never-wired per-language analyzer selection map. The dispatch
+    # it fed was designed but never populated, so the key never had behaviour to
+    # preserve; it is dropped with no replacement (its env twin is tombstoned above).
+    _tomb("cfg", "code_health.analyzers", "", "warn"),
     # file, error — the legacy flat config reader.
     _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error"),
     # env, error (llm) — retired LLM step-budget knob (checked in llm.config.from_env).
