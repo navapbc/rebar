@@ -220,8 +220,21 @@ def load_guide_pins() -> dict[str, Any] | None:
 
 
 def build_guide_pins() -> dict[str, Any]:
-    """:func:`compute_pins` over the REAL packaged guides and the REAL packaged registry."""
-    return compute_pins(_real_guides(), _real_criteria())
+    """:func:`compute_pins` over the REAL packaged guides and the REAL packaged registry,
+    plus the ``_generated_by`` marker banner (ticket 9100).
+
+    JSON has no comment syntax, so this reserved key is how the committed manifest
+    announces it is derived. ``compute_pins`` itself stays marker-free — its own unit
+    tests compare its output directly — and :func:`diff_pins` reads only
+    ``schema_version``/``guides``, so the extra key is inert for the parity gate."""
+    return {
+        "_generated_by": (
+            "GENERATED from digests of the criteria cited by the `src/rebar/_guides/*.md` "
+            "prose guides — do not edit by hand. Regenerate with "
+            f"`{REGENERATE_COMMAND}`; a CI drift gate fails the build if this file is stale."
+        ),
+        **compute_pins(_real_guides(), _real_criteria()),
+    }
 
 
 def regenerate_guide_criterion_pins() -> str:

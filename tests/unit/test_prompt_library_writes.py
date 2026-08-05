@@ -162,11 +162,11 @@ def test_user_write_does_not_change_committed_index(tmp_path: Path) -> None:
             encoding="utf-8"
         )
     )
-    assert prompts.build_prompt_index() == committed  # baseline: index is up to date
+    assert prompts.build_index_document() == committed  # baseline: index is up to date
     create_prompt("my-prompt", _PROMPT_MD, repo_root=str(tmp_path))
     create_prompt("plan-review-custom", _CRITERION_MD, repo_root=str(tmp_path))
     # regen (packaged-only, as CI runs it) is unchanged by the user-dir writes
-    assert prompts.build_prompt_index() == committed
+    assert prompts.build_index_document() == committed
 
 
 # ── validation paths ─────────────────────────────────────────────────────────────

@@ -59,7 +59,7 @@ def test_every_reviewer_has_execution_mode_stamped() -> None:
 def test_index_on_disk_matches_regenerated() -> None:
     import json
 
-    built = prompts.build_prompt_index()
+    built = prompts.build_index_document()
     on_disk = json.loads(prompts._index_path().read_text(encoding="utf-8"))
     assert on_disk == built  # committed index is not stale
 
