@@ -167,6 +167,8 @@ def load_catalog() -> dict[str, Reviewer]:
     raw = json.loads(_index_path().read_text(encoding="utf-8"))
     out: dict[str, Reviewer] = {}
     for rid, spec in raw.items():
+        if rid.startswith("_"):
+            continue  # reserved key (e.g. "_generated_by") — never a phantom reviewer
         out[rid] = Reviewer(
             id=rid,
             dimension=spec.get("dimension", rid),
@@ -327,12 +329,32 @@ def build_prompt_index(repo_root=None) -> dict[str, dict]:
     return index
 
 
+def build_index_document(repo_root=None) -> dict[str, object]:
+    """The SERIALIZED shape of ``reviewers/index.json`` — the marker banner plus the
+    pure :func:`build_prompt_index` entries (ticket 9100).
+
+    JSON has no comment syntax, so the reserved ``_generated_by`` key is how the
+    committed file announces it is derived, not authored. ``build_prompt_index``
+    itself stays marker-free — its invariant tests (no two defaults, no dimension
+    collision, retirement) treat every key as a prompt id, and a stray ``_``-prefixed
+    key would break that. ``load_catalog`` skips ``_``-prefixed keys, so the marker
+    never becomes a phantom reviewer."""
+    return {
+        "_generated_by": (
+            "GENERATED from the packaged prompt front-matter — do not edit by hand. "
+            "Regenerate with `python -m rebar.llm.prompting.prompts regenerate-index`; "
+            "a CI drift gate fails the build if this file is stale."
+        ),
+        **build_prompt_index(repo_root=repo_root),
+    }
+
+
 def regenerate_prompt_index(repo_root=None) -> str:
     """Regenerate ``reviewers/index.json`` from the packaged prompt front-matter and
     write it (story afe6). Returns the canonical JSON text written. CI calls this via
     ``python -m rebar.llm.prompting.prompts`` then diffs the file for drift."""
-    index = build_prompt_index(repo_root=repo_root)
-    text = json.dumps(index, indent=2, ensure_ascii=False) + "\n"
+    doc = build_index_document(repo_root=repo_root)
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     path = Path(str(_index_path()))
     path.write_text(text, encoding="utf-8")
     return text

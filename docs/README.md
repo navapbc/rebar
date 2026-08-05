@@ -254,6 +254,46 @@ These are **not** living references — do not treat them as current guidance.
   provenance; not living docs (see its own `README.md`).
 - **[licenses/](licenses/)** — third-party license texts bundled with rebar.
 
+## Generated artifacts
+
+Some files in this repo are **DERIVED** — a generator writes them from a source elsewhere in
+the tree, and a CI gate regenerates them and fails the build on any diff. Editing one directly
+is always wrong: the edit is either erased by the next regeneration or it fails the gate.
+Story 316a needed four CI iterations to land and lost three of them to exactly that mistake,
+so this table is the one place that says which files are derived and from what.
+
+**If a file is listed below, change its SOURCE and re-run its regenerate command.**
+
+### Generated — never edit these by hand
+
+Each of these carries a self-identifying marker: a banner near the top for markdown/Python, or
+a reserved top-level `_generated_by` key for JSON (which has no comment syntax).
+
+| File | Derived from | Regenerate with | Enforcing CI gate |
+|---|---|---|---|
+| `docs/cli-reference.md` | the CLI's own help data (`rebar._cli._help`) + the curated intercept table in the generator | `python scripts/gen_cli_reference.py` | CLI-reference drift gate |
+| `docs/env-vars.md` | an AST scan of `src/rebar/**/*.py` for env reads, plus `rebar._deprecations.REGISTRY` and `rebar.mcp_server.MCP_ENV_VARS` | `python scripts/gen_env_registry.py` | Env-var registry drift gate |
+| `docs/mcp-reference.md` | the MCP server's own tool registrars and their docstrings | `python scripts/gen_mcp_reference.py` | MCP-reference drift gate |
+| `docs/plan-review-criteria-guide.md` | the merged criteria registry (`rebar.llm.plan_review.registry.load_criteria`) | `python -m rebar.llm.plan_review.registry regenerate-criteria-guide` | Criteria-routing parity gate |
+| `src/rebar/types.py` | the canonical JSON Schemas in `src/rebar/schemas/*.schema.json` | `python -m rebar.schemas.gen_types` | Public-types drift gate |
+| `src/rebar/llm/reviewers/index.json` | the packaged prompt front-matter in `src/rebar/llm/reviewers/*.md` | `python -m rebar.llm.prompting.prompts regenerate-index` | Prompt-index drift gate |
+| `src/rebar/_guides/criterion-pins.json` | digests of the criteria cited by the `src/rebar/_guides/*.md` prose guides | `python -m rebar.llm.plan_review.guide_parity regenerate` | Criteria-routing parity gate |
+
+### Hand-authored but parity-gated — do NOT banner these
+
+These are written by hand, so they carry **no** generated marker — but a CI gate still checks
+them against a source of truth, so an edit here can fail the build. Edit them deliberately.
+
+| File | Checked against | Check with | Enforcing CI gate |
+|---|---|---|---|
+| `server.json` | only its `packages[0].environmentVariables` block mirrors `rebar.mcp_server.MCP_ENV_VARS`; the rest is hand-authored | `python scripts/check_server_manifest.py` | server.json env-contract drift gate |
+| `src/rebar/llm/plan_review/criteria_routing.json` | the canonical criteria vocabulary — thresholds and `applies_at` are judgement, with no derivation source | `python -m rebar.llm.plan_review.registry validate-routing` | Criteria-routing parity gate |
+| `src/rebar/llm/reviewers/*.md` | the prompt BODY is authored freely, but the front-matter must be a FIXED POINT of `write_front_matter()` — hand-wrapped YAML that is semantically correct still fails | `pytest tests/unit/test_prompt_front_matter.py` | pytest (`test_built_in_prompt_round_trips_canonically`) |
+
+Both tables are pinned by `tests/unit/test_generated_surface_markers.py`, which fails if a
+known derived surface is missing a row or a listed file has lost its marker — so this index
+cannot quietly go stale the way the files themselves used to.
+
 ## Reference data
 
 - **[sample-ticket-log.jsonl](sample-ticket-log.jsonl)** — a small sample of the
