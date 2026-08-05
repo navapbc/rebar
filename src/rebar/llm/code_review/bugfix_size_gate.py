@@ -13,24 +13,28 @@ Design constraints:
 
 * **Gerrit-only** — ``finalize_code_review_verdict`` invokes this gate only when the request
   carries a ``change_id``; a local ``rebar review-code`` preview never blocks on it.
-* **Fail-open on infrastructure** — a store read failure, an unresolvable storage anchor, or
-  an unknown future verdict yields an ADVISORY finding (never a block). Only an affirmative
-  "the attestation is missing/invalid/stale-material" classification blocks.
+* **Fail-open on infrastructure** — a store read failure or an unknown future verdict yields
+  an ADVISORY finding (never a block). Only an affirmative "the attestation is
+  missing/stale-material" classification blocks.
 * **Code drift is ACCEPTED** — ``stale-code`` / ``stale-head`` mean the plan WAS reviewed and
   the tree moved on afterwards (routine on a rebase-if-necessary trunk); punishing them would
   make the gate flaky-by-design.
-* **Cross-host verification** — the review bot is NOT the environment that signed the
-  attestation, so this module verifies the op-cert against the PINNED
-  ``.rebar/trusted_environments.yaml`` keyring (never the bot's own env key), mirroring
-  ``verify_required_environment``'s not-pinned arm for unpinned principals.
+* **The FACT of a plan review, not its SOURCE** (current policy, adopted under bug 846b) —
+  the gate asks only whether an attested plan review was completed for the bug, and
+  deliberately NOT which environment or identity certified it. It does not consult
+  ``.rebar/trusted_environments.yaml``. Gating on the signer made the criterion
+  unsatisfiable in practice: a plan review run in an ordinary developer environment signs
+  with that developer's own environment id as the DSSE principal, and no contributor can pin
+  their own environment (that file is CODEOWNERS-protected), so a genuinely PASSING, genuinely
+  signed review was rejected purely on its provenance. What this does NOT grant: it does not
+  widen who may cast the Gerrit ``LLM-Review``/``Verified`` votes, so a change still cannot
+  self-approve — the plan review is an input to those gates, not a substitute for them.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -43,9 +47,11 @@ CRITERION_ID = "bugfix-size-attestation"
 _PLAN_REVIEW_KIND = "plan-review"
 
 # ── verdict vocabulary ────────────────────────────────────────────────────────────────────
-# (a) compute_validity's plan-review-reachable literals ('not-closed' is the completion-
-# verifier arm's literal and deliberately NOT part of this vocabulary), (b) the canonical
-# verify-layer enum (verify_signature_result.schema.json), (c) this gate's own error verdict.
+# compute_validity's plan-review-reachable literals ('not-closed' is the completion-verifier
+# arm's literal and deliberately NOT part of this vocabulary), plus this gate's own `error`.
+# The verify-layer enum (mismatch / key_not_valid_at_era / invalid / unavailable / ...) is
+# deliberately ABSENT: since 846b the gate no longer verifies WHO signed, so those literals are
+# unreachable here and carrying them would be dead vocabulary contradicting the stated policy.
 _COMPUTE_VALIDITY_VERDICTS = frozenset(
     {
         "certified",
@@ -63,27 +69,10 @@ _COMPUTE_VALIDITY_VERDICTS = frozenset(
         "incompatible-phase",
     }
 )
-# (b) the cross-host op-cert verification vocabulary — the literals emitted through
-# verify_opcert + the registry scheme passthrough. NOT the whole verify_signature_result
-# enum: `foreign_key` is the OWN-ENV wrapper's verdict (verify_opcert_record), which B2
-# never calls precisely because it reads foreign_key for every legitimate foreign signer;
-# `unsigned`/`certified` enter the vocabulary via (a). A foreign_key string can therefore
-# never reach this gate — if enum growth ever routes one here, bucket_for_verdict fails
-# open (infra/advisory) and the coverage test forces an explicit decision.
-_VERIFY_LAYER_VERDICTS = frozenset(
-    {
-        "mismatch",
-        "key_not_valid_at_era",
-        "invalid",
-        "unavailable",
-        "unknown_kind",
-        "unknown_scheme",
-    }
-)
-KNOWN_VERDICTS = _COMPUTE_VALIDITY_VERDICTS | _VERIFY_LAYER_VERDICTS | frozenset({"error"})
+KNOWN_VERDICTS = _COMPUTE_VALIDITY_VERDICTS | frozenset({"error"})
 
 ACCEPTED_VERDICTS = frozenset({"certified", "stale-code", "stale-head"})
-INFRA_VERDICTS = frozenset({"unavailable", "error"})
+INFRA_VERDICTS = frozenset({"error"})
 FLAG_VERDICTS = KNOWN_VERDICTS - ACCEPTED_VERDICTS - INFRA_VERDICTS
 
 
@@ -168,58 +157,19 @@ def _load_ticket_state(ticket_id: str, repo_root: Any = None) -> dict[str, Any]:
     return _reads.show_ticket(ticket_id, repo_root=repo_root)
 
 
-def _plan_review_anchor(ticket_id: str, repo_root: Any = None) -> tuple[str, str] | None:
-    """The storage anchor ``(commit, position)`` of the TERMINAL plan-review SIGNATURE event.
-
-    The plan-review analog of ``_commands/verify_opcert.py``'s completion-verifier anchor
-    derivation: the last envelope-bearing SIGNATURE event in the ticket's directory whose
-    manifest-authoritative kind is ``plan-review`` (filename order == timestamp order — the
-    same last-writer-wins rule the reducer applies per kind). ``None`` when no such event
-    exists or its introducing tickets-branch commit cannot be resolved (→ infra fail-open,
-    NOT a flag: an unresolvable anchor is a store problem, not evidence of a bad cert)."""
-    from rebar import config as _config
-    from rebar.attest.authorship import resolve_event_commit
-    from rebar.reducer._processors import attestation_kind
-
-    ticket_dir = Path(str(_config.tracker_dir(repo_root))) / ticket_id
-    if not ticket_dir.is_dir():
-        return None
-    terminal: str | None = None
-    for name in sorted(os.listdir(ticket_dir)):
-        if not name.endswith("-SIGNATURE.json"):
-            continue
-        try:
-            event = json.loads((ticket_dir / name).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        data = event.get("data") or {}
-        if not isinstance(data, dict) or not data.get("envelope"):
-            continue
-        if attestation_kind(data.get("manifest"), data) != _PLAN_REVIEW_KIND:
-            continue
-        terminal = name
-    if terminal is None:
-        return None
-    position = terminal[: -len("-SIGNATURE.json")]
-    commit = resolve_event_commit(position, str(ticket_dir), repo_root=repo_root)
-    if not commit:
-        return None
-    return str(commit), position
-
-
 def classify_plan_review_attestation(
     ticket_id: str, repo_root: Any = None, state: dict[str, Any] | None = None
 ) -> dict[str, str]:
-    """Classify ``ticket_id``'s plan-review attestation for a foreign (bot-side) verifier.
+    """Classify ``ticket_id``'s plan-review attestation: was an attested review COMPLETED?
 
-    The cross-host chain: read the attestation record → decode its op-cert envelope → verify
-    the signature against the PRINCIPAL's pinned trusted-environment keyring at the record's
-    storage anchor → on a verified signature, compute lifecycle/freshness validity
-    (``compute_validity``). Returns ``{"verdict", "reason"}`` with the verdict drawn from
-    ``KNOWN_VERDICTS``; any exception is caught and reported as ``error`` (infra)."""
+    The chain: read the attestation record → decode its op-cert envelope (its presence is the
+    evidence that a review ran and was signed) → compute lifecycle/freshness validity
+    (``compute_validity``), which is about the PLAN changing under the review, not about who
+    signed it. Per the module docstring, the signing principal is deliberately NOT consulted.
+    Returns ``{"verdict", "reason"}`` with the verdict drawn from ``KNOWN_VERDICTS``; any
+    exception is caught and reported as ``error`` (infra)."""
     try:
         from rebar.attest import opcert as _opcert
-        from rebar.attest import trusted_env as _trusted_env
         from rebar.llm.plan_review.attest import PlanValidityProfile, compute_validity
 
         if state is None:
@@ -233,39 +183,9 @@ def classify_plan_review_attestation(
                 "verdict": "unsigned",
                 "reason": "attestation record carries no decodable op-cert envelope",
             }
-        envelope, bound = decoded
-        principal = envelope.signatures[0].keyid if envelope.signatures else ""
-        keyring = _trusted_env.trusted_env_keyring(principal, repo_root)
-        if keyring is None:
-            # verify_required_environment's not-pinned arm: an unpinned signer is a flag —
-            # the bot cannot certify an environment the project never chose to trust.
-            return {
-                "verdict": "mismatch",
-                "reason": f"signing environment {principal or '<unknown>'!r} is not pinned "
-                "in trusted_environments.yaml",
-            }
-        anchor = _plan_review_anchor(ticket_id, repo_root=repo_root)
-        if anchor is None:
-            return {
-                "verdict": "unavailable",
-                "reason": "cannot resolve the attestation's storage anchor",
-            }
-        anchor_commit, anchor_position = anchor
-        verdict = _opcert.verify_opcert(
-            envelope,
-            str(bound.get("ticket_id") or ticket_id),
-            str(bound.get("material_fingerprint") or ""),
-            str(bound.get("merged_log_commit") or ""),
-            keyring,
-            kind=_PLAN_REVIEW_KIND,
-            principal=principal,
-            storage_anchor_commit=anchor_commit,
-            storage_anchor_position=anchor_position,
-            repo_root=str(repo_root) if repo_root is not None else None,
-        )
-        if not verdict.verified:
-            return {"verdict": str(verdict.verdict), "reason": str(verdict.reason or "")}
-        # Signature verified → lifecycle/freshness validity on the SIGNED payload's fields.
+        _envelope, bound = decoded
+        # Lifecycle/freshness validity on the SIGNED payload's fields — the only remaining
+        # question, and the one that catches a plan that MOVED after it was reviewed.
         shaped: dict[str, Any] = {
             "opcert": True,
             "verified": True,
@@ -302,7 +222,10 @@ def _teaching_finding(ticket_id: str, non_test_lines: int, classification: dict[
         f"(verdict: {classification.get('verdict')}; {classification.get('reason')}). "
         "A fix this large is a design change wearing a bug label: write the fix plan into the "
         f"ticket's description, run `rebar review-plan {ticket_id}` (it auto-escalates a bug "
-        "with non-test file impact to the full review), then re-push once the review passes."
+        "with non-test file impact to the full review and SIGNS an attestation on a PASS; if "
+        f"the review passed but no attestation landed, `rebar sign-review {ticket_id}` "
+        f"re-persists it cheaply, and `rebar review-plan {ticket_id} --status` confirms it is "
+        "current without an LLM call), then re-push."
     )
 
 

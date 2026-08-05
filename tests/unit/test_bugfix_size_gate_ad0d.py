@@ -6,10 +6,13 @@ unverifiable / stale attestation is BLOCKED at code review with a teaching findi
 Fail-open on infrastructure trouble: store/verify errors yield an ADVISORY note, never a block.
 
 Vocabulary discipline: the classifier's verdict strings are drawn from exactly
-(a) `compute_validity`'s plan-review-reachable literals, (b) the canonical
-`verify_signature_result.schema.json` enum, and (c) this gate's own `{error}`. The coverage
-test pins the three buckets to that union BY SET EQUALITY so a new verdict literal upstream
-fails here and forces an explicit bucket decision.
+(a) `compute_validity`'s plan-review-reachable literals and (b) this gate's own `{error}`.
+The coverage test pins the three buckets to that union BY SET EQUALITY so a new verdict literal
+upstream fails here and forces an explicit bucket decision.
+
+Bug 846b removed the cross-host verify layer: the gate asks whether an attested plan review WAS
+COMPLETED, never which environment certified it, because a contributor cannot pin their own
+signing environment and so could never satisfy a source-gated check.
 """
 
 from __future__ import annotations
@@ -44,27 +47,21 @@ _COMPUTE_VALIDITY_PLAN_REVIEW = {
     "unverifiable-material",
     "incompatible-phase",
 }
-# (b) the cross-host op-cert verification vocabulary as emitted through verify_opcert and
-# the registry scheme passthrough. `foreign_key` is deliberately ABSENT: it is the own-env
-# wrapper's verdict (verify_opcert_record), which B2 never calls — on a review-bot host every
-# legitimate foreign attestation would read foreign_key there, which is why the classifier
-# uses the pinned-keyring chain instead. An unexpected foreign_key would bucket as infra
-# (fail-open advisory) and this test forces the explicit decision on any enum growth.
-_VERIFY_LAYER = {
-    "mismatch",
-    "key_not_valid_at_era",
-    "invalid",
-    "unavailable",
-    "unknown_kind",
-    "unknown_scheme",
-}
-# (c) the gate's own error verdict for read/exception paths.
+# (b) the gate's own error verdict for read/exception paths.
+#
+# BUG 846b: there is deliberately no third, verify-layer set here any more. The classifier used
+# to verify the op-cert against the PINNED trusted_environments.yaml keyring and could emit
+# `mismatch` / `key_not_valid_at_era` / `invalid` / `unavailable` / `unknown_kind` /
+# `unknown_scheme`. That chain gated on the SOURCE of certification and made the criterion
+# unsatisfiable for every locally-reviewed bug, so it is gone. Those literals are now simply
+# unrecognized — and `bucket_for_verdict` fails OPEN on an unrecognized literal, so the removal
+# can never turn into a surprise block.
 _GATE_OWN = {"error"}
 
 
 def test_verdict_vocabulary_is_exactly_partitioned() -> None:
-    """ACCEPTED ∪ FLAG ∪ INFRA == (a) ∪ (b) ∪ (c), pairwise disjoint — set equality, not ⊆."""
-    vocabulary = _COMPUTE_VALIDITY_PLAN_REVIEW | _VERIFY_LAYER | _GATE_OWN
+    """ACCEPTED ∪ FLAG ∪ INFRA == (a) ∪ (b), pairwise disjoint — set equality, not ⊆."""
+    vocabulary = _COMPUTE_VALIDITY_PLAN_REVIEW | _GATE_OWN
     assert bsg.KNOWN_VERDICTS == frozenset(vocabulary)
     assert bsg.ACCEPTED_VERDICTS | bsg.FLAG_VERDICTS | bsg.INFRA_VERDICTS == bsg.KNOWN_VERDICTS
     assert not bsg.ACCEPTED_VERDICTS & bsg.FLAG_VERDICTS
@@ -78,7 +75,10 @@ def test_accepted_and_infra_membership() -> None:
     """Code-drift staleness is ACCEPTED (the plan was reviewed; the tree moved on — normal on
     a rebase-heavy trunk); availability trouble is INFRA (fail-open, never a block)."""
     assert bsg.ACCEPTED_VERDICTS == frozenset({"certified", "stale-code", "stale-head"})
-    assert bsg.INFRA_VERDICTS == frozenset({"unavailable", "error"})
+    assert bsg.INFRA_VERDICTS == frozenset({"error"})
+    # 846b: the removed verify-layer literals must not linger in the BLOCKING bucket.
+    assert not bsg.FLAG_VERDICTS & {"mismatch", "key_not_valid_at_era", "invalid", "unavailable"}
+    assert bsg.bucket_for_verdict("mismatch") == "infra"
 
 
 def test_bucket_for_verdict_covers_every_literal_and_fails_open_on_unknown() -> None:
@@ -458,14 +458,39 @@ def test_classify_pinned_foreign_environment_reaches_accepted(tmp_path, monkeypa
 
 
 @_needs_ssh
-def test_classify_unpinned_foreign_environment_flags(tmp_path, monkeypatch) -> None:
+def test_classify_unpinned_signing_environment_is_accepted(tmp_path, monkeypatch) -> None:
+    """BUG 846b — THE SOURCE-OF-CERTIFICATION AC. A plan review run and signed in an ordinary
+    developer environment carries a principal that no project pins, and pinning is not something
+    a contributor can grant themselves. Gating on the SOURCE of certification therefore made this
+    criterion unsatisfiable for every locally-reviewed bug. The gate asks only whether an attested
+    plan review WAS COMPLETED — so an unpinned principal, same material, must reach ACCEPTED."""
     repo, tracker, tid, _pos = _bug_in_store(tmp_path, monkeypatch)
-    env_id = "unpinned-ci@rebar.test"
+    env_id = "unpinned-dev@rebar.test"
     _mint_plan_review_record(repo, tracker, tid, "unpinned-env", env_id, tmp_path)
-    # No trusted_environments.yaml → the principal is not pinned → mismatch (flag).
+    # Precondition: nothing pins this principal — the exact situation a developer is in.
+    assert not (repo / ".rebar" / "trusted_environments.yaml").exists()
     res = bsg.classify_plan_review_attestation(tid, repo_root=str(repo))
-    assert res["verdict"] == "mismatch", res
-    assert bsg.bucket_for_verdict(res["verdict"]) == "flag"
+    assert res["verdict"] == "certified", res
+    assert bsg.bucket_for_verdict(res["verdict"]) == "accepted"
+
+
+@_needs_ssh
+def test_oversized_bug_fix_reviewed_in_an_unpinned_environment_does_not_block(
+    tmp_path, monkeypatch
+) -> None:
+    """BUG 846b end to end: the gate itself, not just the classifier. An oversized bug fix whose
+    plan review was signed locally must pass — no blocking finding on provenance grounds."""
+    repo, tracker, tid, _pos = _bug_in_store(tmp_path, monkeypatch)
+    _mint_plan_review_record(repo, tracker, tid, "unpinned-env-e2e", "dev@rebar.test", tmp_path)
+    verdict = bsg.apply_bugfix_size_gate(
+        {"verdict": "PASS", "blocking": [], "advisory": []},
+        diff_text=_file_diff("src/rebar/big.py", added=_BIG),
+        commit_message=f"Fix thing\n\nrebar-ticket: {tid}",
+        repo_root=str(repo),
+    )
+    assert verdict["verdict"] == "PASS", verdict
+    assert verdict["blocking"] == []
+    assert verdict["coverage"]["bugfix_size_gate"]["bucket"] == "accepted"
 
 
 # ── pipeline wiring: finalize runs the gate for Gerrit requests only ─────────────────────
