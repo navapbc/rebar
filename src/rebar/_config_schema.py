@@ -347,9 +347,9 @@ class SyncConfig:
 
 @dataclass
 class McpConfig:
-    readonly: bool = False
-    allow_llm: bool = False
-    allow_jira_sync: bool = False
+    readonly: bool = False  # read-via: config.py mcp_readonly()
+    allow_llm: bool = False  # read-via: mcp_server.py _mcp_gate string key
+    allow_jira_sync: bool = False  # read-via: mcp_server.py _mcp_gate string key
     # Streamable-HTTP transport (S1): stdio remains the default; "http" selects the
     # optional SDK Streamable-HTTP transport with DNS-rebinding protection + fail-closed
     # startup gates. The http_* keys tune the bind + allowlists; each auto-derives a
@@ -489,7 +489,7 @@ class JiraConfig:
     # Overrides ONLY the url scheme check below (parity with reconciler.allow_insecure);
     # never relaxes certificate verification. Env override auto-derives to
     # REBAR_JIRA_ALLOW_INSECURE. Intended for a loopback/trusted test instance (bug bdb8).
-    allow_insecure: bool = False
+    allow_insecure: bool = False  # read-via: JiraConfig.__post_init__ url-scheme check
 
     def __post_init__(self) -> None:
         # Parity with the DC ReconcilerConfig: a cleartext jira.url risks exposing the
