@@ -1161,6 +1161,17 @@
     "overlay_routing": "llm",
     "trigger": "plan introduces a new git ref pattern / event source / schedule, or new release-time-exercised infra. Deterministically PRE-GATED (ticket 4ee2, ADR 0034 amendment): skipped only on total absence of scheduler/release/CI-surface vocabulary AND no CI/build-surface file_impact path (rule ci-trigger-surface in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority"
   },
+  "T15": {
+    "exec": "AGENT",
+    "facet": "overlay-derisk",
+    "applies_at": {
+      "suppress_types": [
+        "bug"
+      ]
+    },
+    "routing": "overlay",
+    "overlay_routing": "llm"
+  },
   "removal-rationale": {
     "exec": "AGENT",
     "facet": "codebase-grounding",
