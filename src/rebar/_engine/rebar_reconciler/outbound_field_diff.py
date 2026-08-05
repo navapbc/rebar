@@ -267,9 +267,7 @@ def compute_update_fields(
     canonical_baseline = inbound_mapper.map_remote_to_local(raw_baseline) if raw_baseline else None
     if assignee_resolver is not None:
         try:
-            outbound_mapper._assignee_resolver = (  # type: ignore[attr-defined]
-                lambda lv: assignee_resolver(lv, jira_key)
-            )
+            outbound_mapper._assignee_resolver = lambda lv: assignee_resolver(lv, jira_key)
         except (AttributeError, TypeError):
             pass  # a mapper that forbids attribute injection keeps its own resolution
     changed = diff_canonical_fields(

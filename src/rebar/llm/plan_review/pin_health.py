@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 from .relation_snapshot import PlanMaterialPin, is_canonical_ticket_id
 
@@ -169,7 +169,7 @@ def derive_health(
         targets.append(
             {
                 "canonical_id": pin.canonical_id,
-                "role": cast(Literal["child", "prerequisite"], pin.role),
+                "role": pin.role,
                 "pinned_fingerprint": pin.material_fingerprint,
                 "current_fingerprint": current,
                 "pin_status": status,

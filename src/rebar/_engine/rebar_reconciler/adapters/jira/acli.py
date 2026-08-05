@@ -465,7 +465,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         uses when interpreting unqualified JQL datetime strings. Cached per instance.
         """
         if hasattr(self, "_myself_cache"):
-            return self._myself_cache  # type: ignore[return-value]
+            return self._myself_cache
         url = f"{self.jira_url.rstrip('/')}/rest/api/2/myself"
         creds = base64.b64encode(f"{self.user}:{self.api_token}".encode()).decode()
         req = urllib.request.Request(

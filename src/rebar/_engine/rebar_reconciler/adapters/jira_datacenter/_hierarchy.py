@@ -45,7 +45,7 @@ class _HierarchyMixin(_TransportBase):
                 else next((f.get("id") for f in lister() if f.get("name") == "Epic Link"), None)
             )
             self._epic_link_field_id = cached
-        return cached  # type: ignore[return-value]
+        return cached
 
     def get_parent_map(self, project_key: str, jql: str | None = None) -> dict[str, str | None]:
         """``{issue_key → parent_key | None}`` for a project, via DC REST **v2**

@@ -45,7 +45,7 @@ def _load_sibling(module_name: str, file_name: str) -> ModuleType:
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules.setdefault(cache_key, mod)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -85,7 +85,7 @@ def _load_mutation() -> ModuleType:
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[_MUTATION_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     return mod
 
 

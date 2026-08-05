@@ -253,7 +253,7 @@ class ProviderSession:
                 "provider package is not installed: pip install 'pydantic-ai-slim[openai]'"
             ) from exc
 
-        class _RebarOpenAICompatibleProvider(OpenAIProvider):  # type: ignore[misc]
+        class _RebarOpenAICompatibleProvider(OpenAIProvider):
             """Withdraws ONLY ``supports_json_schema_output`` from upstream's OpenAI profile
             (story S4 AC5) — nothing else about the profile is touched. An opaque
             OpenAI-*compatible* endpoint has no obligation to implement strict ``json_schema``

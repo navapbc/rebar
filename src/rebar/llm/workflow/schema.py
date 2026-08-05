@@ -83,7 +83,7 @@ def _build_loader():
     class _StrictWorkflowLoader(yaml.SafeLoader):  # type: ignore[name-defined]  # yaml is loaded lazily (Any)
         """SafeLoader hardened for the workflow DSL (anchors/merge/1.1-bools)."""
 
-        def compose_node(self, parent, index):  # type: ignore[override]
+        def compose_node(self, parent, index):
             # A non-None .anchor on any event covers BOTH an anchored node (`&a`)
             # and an alias reference (`*a`, an AliasEvent) — reject both so a
             # workflow file cannot smuggle structure-sharing past a diff.
@@ -97,7 +97,7 @@ def _build_loader():
                 )
             return super().compose_node(parent, index)
 
-        def construct_mapping(self, node: Any, deep: bool = False) -> Any:  # type: ignore[override]
+        def construct_mapping(self, node: Any, deep: bool = False) -> Any:
             # YAML 1.2 Core errors on duplicate mapping keys; PyYAML's SafeLoader
             # silently keeps the last. A duplicate `uses:`/`if:` silently shadowing
             # an earlier one is a real footgun (both Argo and GHA reject it), so we

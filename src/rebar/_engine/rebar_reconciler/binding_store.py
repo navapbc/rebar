@@ -282,7 +282,7 @@ class BindingStore:
             if spec is None or spec.loader is None:
                 return
             alert_mod = _ilu.module_from_spec(spec)
-            spec.loader.exec_module(alert_mod)  # type: ignore[union-attr]
+            spec.loader.exec_module(alert_mod)
             full_record = {**record, "key": key, "resolved": False}
             if not alert_mod.is_deduped(key, self._repo_root):
                 alert_mod.append(full_record, self._repo_root)

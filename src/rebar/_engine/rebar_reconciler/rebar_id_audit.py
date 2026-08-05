@@ -45,7 +45,7 @@ except ImportError:  # standalone load without package context
         assert _loader_spec is not None and _loader_spec.loader is not None
         _loader_mod = importlib.util.module_from_spec(_loader_spec)
         sys.modules[_loader_key] = _loader_mod
-        _loader_spec.loader.exec_module(_loader_mod)  # type: ignore[union-attr]
+        _loader_spec.loader.exec_module(_loader_mod)
     lazy_load = sys.modules[_loader_key].lazy_load
 
 

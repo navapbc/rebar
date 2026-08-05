@@ -67,7 +67,7 @@ def _load_sibling_keyed(dotted_key: str, filename: str):
         raise ImportError(f"Cannot create spec for {path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[dotted_key] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -99,7 +99,7 @@ def _try_load_step(name: str):
         return None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[dotted_name] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     return mod
 
 

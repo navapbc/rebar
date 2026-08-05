@@ -42,7 +42,7 @@ def _load_adf():
         raise FileNotFoundError(f"adf.py not found at {adf_path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[_ADF_KEY_INBOUND] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     _AdfModule_Inbound = mod
     return mod
 

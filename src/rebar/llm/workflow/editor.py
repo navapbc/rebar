@@ -512,7 +512,7 @@ def edit_workflow(
     # server_address is typed as a broad union (str | bytes | tuple | …); for an AF_INET
     # HTTP server it is always (host: str, port: int), so narrow with a cast.
     bound_host = cast(str, server.server_address[0])
-    bound_port = cast(int, server.server_address[1])
+    bound_port = server.server_address[1]
     url = f"http://{bound_host}:{bound_port}/"
     if open_browser:
         threading.Thread(target=lambda: webbrowser.open(url), daemon=True).start()

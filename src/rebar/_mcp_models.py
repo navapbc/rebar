@@ -38,7 +38,7 @@ try:
         """Preserve omitted additive fields when nested health is serialized."""
 
         @model_serializer(mode="wrap")
-        def _serialize_only_set_fields(self, handler):  # type: ignore[no-untyped-def]
+        def _serialize_only_set_fields(self, handler):
             data = handler(self)
             for name in type(self).model_fields:
                 if name not in self.model_fields_set:
@@ -125,7 +125,7 @@ try:
         )
 
         @classmethod
-        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
             schema = super().model_json_schema(*args, **kwargs)
             defs = schema.get("$defs", {})
             properties = schema.get("properties", {})

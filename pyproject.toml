@@ -485,6 +485,11 @@ follow_imports = "silent"
 # so bugs inside un-annotated defs slipped through). Phase 2 layers per-package
 # `disallow_untyped_defs` via the overrides below.
 check_untyped_defs = true
+# Story d9f5 approved ratchet flags (safe immediate strictness)
+no_implicit_optional = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unused_ignores = true
 
 # ── mypy strictness ratchet: per-package `disallow_untyped_defs` ─────────────────
 # SHRINK-ONLY ratchet. Packages listed here have every function annotated and are

@@ -74,7 +74,7 @@ def _load_link_direction():
         raise FileNotFoundError(f"link_direction.py not found at {path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[_LINK_DIR_KEY] = mod
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    spec.loader.exec_module(mod)
     _LinkDirModule = mod
     return mod
 
