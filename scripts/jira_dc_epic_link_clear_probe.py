@@ -109,12 +109,16 @@ def _create_issue(project: str, issuetype: str, summary: str, extra: dict | None
 def _await_named_fields(names: tuple[str, ...]) -> dict[str, str | None]:
     """Wait for the Jira Software custom fields to REGISTER, then map name -> field id.
 
-    Delegates the whole readiness definition to ``jira_dc_field_readiness`` so this
-    probe and the live harness fixture cannot drift apart again (bug
-    9790-cafa-dffa-462e). Change 1387 fixed this path alone, which left the harness
-    still polling ``/rest/api/2/serverInfo`` — two definitions of "ready" for one
-    question. The measured evidence (run 30944211742: serverInfo green at 8m32s, a
-    27-field SYSTEM-only inventory one second later) now lives with the shared module.
+    **CALL THIS ONLY AFTER THE PROBE'S PROJECT HAS BEEN CREATED** (bug
+    941b-f049-5f29-4410). GreenHopper registers ``Epic Link``/``Epic Name`` on the
+    first Jira Software project create, so calling it earlier waits for something only
+    the blocked step can produce — which is exactly how probe runs 30944211742 and
+    30930839323 both died at ``PROBE SETUP FAILED: Epic Link=None Epic Name=None``.
+    ``main`` below now creates the project first and calls this immediately after.
+
+    Delegates the whole definition to ``jira_dc_field_readiness`` so this probe and the
+    live harness fixture cannot drift apart again (bug 9790-cafa-dffa-462e): change
+    1387 fixed this path alone, which left two answers to one question in the tree.
 
     Returns the same ``dict[str, str | None]`` shape ``main`` expects; values may be
     ``None`` on expiry so the caller can report exactly which name never arrived.
@@ -125,22 +129,21 @@ def _await_named_fields(names: tuple[str, ...]) -> dict[str, str | None]:
         lambda path: _req(path),
         names=names,
     )
-    # Keep logging the OBSERVED inventory either way — it is the evidence that separates
-    # "plugin still starting" from "image genuinely lacks the fields".
+    # Log the SHARED success prose on the happy path (bug 941b-f049-5f29-4410): the wait
+    # used to record nothing when it worked, so no probe run ever reported how long
+    # provisioning actually took and the only numbers anyone had came from expiries. The
+    # failure path keeps dumping the OBSERVED inventory, which is what separates "this ran
+    # before a Software project existed" from "the image genuinely lacks these fields".
     if result.ready:
-        logger.info(
-            "  field inventory ready after %d attempt(s): %s | %s",
-            result.attempts,
-            result.ids,
-            result.inventory,
-        )
+        logger.info("  %s", jira_dc_field_readiness.ready_message(result, base_url=BASE))
     else:
         logger.info(
-            "  field inventory NEVER ready within %.0fs (%d attempts): missing %s | %s",
-            jira_dc_field_readiness.FIELD_READY_BUDGET_S,
-            result.attempts,
-            result.missing,
-            result.inventory,
+            "  %s",
+            jira_dc_field_readiness.not_ready_message(
+                result,
+                base_url=BASE,
+                budget=jira_dc_field_readiness.FIELD_READY_BUDGET_S,
+            ),
         )
     return result.ids
 
@@ -149,19 +152,15 @@ def main() -> int:
     verdicts: dict[str, str] = {}
 
     # ── setup ────────────────────────────────────────────────────────────────────────────────
-    # Wait for the Epic machinery to be REGISTERED, not merely for Jira to answer
-    # serverInfo (bug 9790-cafa-dffa-462e).
-    _fields = _await_named_fields(("Epic Link", "Epic Name"))
-    epic_link = _fields["Epic Link"]
-    epic_name = _fields["Epic Name"]
-    if not epic_link or not epic_name:
-        raise SystemExit(
-            f"PROBE SETUP FAILED: Epic Link={epic_link!r} Epic Name={epic_name!r} — "
-            "these are Jira Software (GreenHopper) custom fields and they never "
-            "registered within the wait budget. A system-only field inventory means "
-            "NOT-READY, not a degraded image (see the dump above; bug 9790)."
-        )
-
+    # PROJECT FIRST, FIELDS SECOND — and that ORDER is the whole of bug
+    # 941b-f049-5f29-4410's fix on this side. GreenHopper registers `Epic Link`/`Epic Name`
+    # when the first Jira Software project is created, NOT when the plugin starts, so the
+    # previous order (wait for the fields, then create the project) waited on a thing only
+    # the step it was blocking could produce. Both real probe runs died there —
+    # 30944211742 and 30930839323, each with `PROBE SETUP FAILED: Epic Link=None Epic
+    # Name=None`. Experiment run 30981084637 measured the mechanism directly: 27 fields and
+    # zero customfield_* entries before the create AND after 180s of quiet, then 55 fields
+    # with both Epic fields present 0.0512s after the create.
     key = "ELP"
     _req(f"/rest/api/2/project/{key}", method="DELETE")  # idempotent: ignore the outcome
     status, body = _req(
@@ -177,6 +176,26 @@ def main() -> int:
     )
     if status != 201:
         raise SystemExit(f"PROBE SETUP FAILED: project create -> {status} {body!r}")
+
+    # NOW the fields can exist — resolve their instance ids, which every Epic Link
+    # write/clear check below is written in terms of. Still a bounded WAIT rather than one
+    # read: 0.0512s is fast but not atomic with the 201 above, so a single read can lose
+    # that race. `REQUIRED_FIELDS` is the SHARED tuple, not a local literal — the harness
+    # asserts the same names, and two independent literals is precisely the drift bug 9790
+    # collapsed.
+    _fields = _await_named_fields(jira_dc_field_readiness.REQUIRED_FIELDS)
+    epic_link = _fields["Epic Link"]
+    epic_name = _fields["Epic Name"]
+    if not epic_link or not epic_name:
+        raise SystemExit(
+            f"PROBE SETUP FAILED: Epic Link={epic_link!r} Epic Name={epic_name!r} — "
+            f"these are Jira Software (GreenHopper) custom fields and they did not appear "
+            f"even though project {key!r} was created first. Read the inventory dumped "
+            "above: no customfield_* entries at all would mean the create did not actually "
+            "provision (check its HTTP 201 in the evidence log), whereas other custom "
+            "fields present without these two means this image genuinely dropped the Epic "
+            "fields (bugs 9790-cafa-dffa-462e / 941b-f049-5f29-4410)."
+        )
 
     epic = _create_issue(key, "Epic", "probe epic", {epic_name: "probe epic"})
     child = _create_issue(key, "Task", "probe child")

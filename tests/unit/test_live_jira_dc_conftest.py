@@ -228,18 +228,30 @@ def test_an_already_gone_token_counts_as_reclaimed(harness, monkeypatch) -> None
 
 
 # ---------------------------------------------------------------------------
-# Readiness is the FIELD INVENTORY, not a serverInfo 200 (bug 9790-cafa-dffa-462e)
+# WHEN the Epic fields can be demanded — after provisioning, never before
+# (bug 941b-f049-5f29-4410, correcting bug 9790-cafa-dffa-462e)
 #
-# WHY HERE. `wait_for_jira_dc_ready` used to return on the first
-# `/rest/api/2/serverInfo` 200 and never read `/rest/api/2/field` at all, while
-# `_assert_project_capabilities` — running later in the same session — asserts
-# `_REQUIRED_FIELDS` as a hard precondition. Measured on probe run 30944211742:
-# `serverInfo` went green at 8m32s and ONE SECOND later the inventory was 27
-# fields, every one a SYSTEM field, no `customfield_*`. The suite survived only
-# because it does slower work afterwards, so the margin was incidental. These
-# cells pin the CAPABILITY as the readiness predicate, and the negative one is
-# load-bearing: a system-only inventory must read as NOT ready rather than as a
-# degraded image.
+# 9790 was right that a `serverInfo` 200 does not imply the Epic machinery is
+# usable, and wrong about why. It read a system-only field inventory as "the
+# GreenHopper plugin is still starting" and made the fields a SESSION-START
+# readiness predicate under a timeout. MEASURED on experiment run 30981084637:
+#
+#     [before]           27 fields, customfield_count=0, EpicLink=False
+#     [after-180s-quiet] 27 fields, customfield_count=0, EpicLink=False
+#     create project  -> HTTP 201
+#     [after-create+0s]  55 fields, customfield_count=13, EpicLink=True
+#
+# 180 seconds of extra time changed NOTHING; creating the pinned GreenHopper
+# project changed everything in 0.05s. GreenHopper provisions its custom fields
+# when the first Jira SOFTWARE PROJECT is created. So an empty custom-field
+# inventory is the NORMAL state of a fresh instance, not a fault — and demanding
+# the fields before any project exists is a deadlock: the gate waits for a
+# capability only the action it blocks can create. It expired identically at 600s
+# (run 30975323866) and at 1800s (run 30978613228), erroring all 62 cells.
+#
+# These cells therefore pin WHERE the capability may be demanded: session
+# readiness must tolerate the pre-provisioning inventory, and the post-create
+# check must be a real bounded WAIT that still fails loudly.
 # ---------------------------------------------------------------------------
 
 _SYSTEM_ONLY_FIELDS = [
@@ -251,6 +263,14 @@ _SYSTEM_ONLY_FIELDS = [
 _EPIC_FIELDS = [
     {"id": "customfield_10100", "name": "Epic Link", "custom": True},
     {"id": "customfield_10104", "name": "Epic Name", "custom": True},
+]
+#: The GENUINE-DEGRADE inventory: `customfield_*` entries ARE present — so a
+#: Software project exists and GreenHopper has provisioned — but neither Epic
+#: field is among them. This is the axis `_SYSTEM_ONLY_FIELDS` does not vary, and
+#: it is the one that still has to fail loudly.
+_DEGRADED_CUSTOM_FIELDS = _SYSTEM_ONLY_FIELDS + [
+    {"id": "customfield_10200", "name": "Sprint", "custom": True},
+    {"id": "customfield_10201", "name": "Story Points", "custom": True},
 ]
 
 
@@ -300,89 +320,174 @@ def _stub_readiness_transport(harness, monkeypatch, field_bodies):
     return seen
 
 
-def test_a_system_only_field_inventory_reads_as_not_ready(
+def test_session_readiness_tolerates_the_pre_provisioning_inventory(
     harness, monkeypatch, fast_field_poll
 ) -> None:
-    """THE LOAD-BEARING ASSERTION (AC5). An inventory of only system fields is the
-    state the probe measured one second after `serverInfo` went green. It means the
-    GreenHopper plugin has not registered its fields YET — it does not mean the
-    image stopped offering them — so readiness must refuse rather than hand the
-    suite an instance whose declared contract cannot hold."""
+    """THE DEADLOCK (bug 941b-f049-5f29-4410). A fresh Jira Software instance with
+    no project has ZERO custom fields — measured on run 30981084637, and unchanged after 180s of
+    additional quiet time. 9790 read that state as "not ready yet" and blocked
+    session start on it, but the fields are provisioned BY the first project
+    create, which cannot happen while session start is blocked. So the gate waited
+    for something only the action it blocked could produce, and expired identically
+    at 600s and at 1800s, erroring all 62 cells at setup.
+
+    Session readiness must therefore RETURN against this inventory. It is the
+    normal pre-provisioning state, not a fault."""
     _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
 
-    with pytest.raises(RuntimeError) as excinfo:
-        harness.wait_for_jira_dc_ready(timeout=0.05)
-
-    message = str(excinfo.value)
-    assert "Epic Link" in message and "Epic Name" in message, (
-        "readiness failed without naming which required field(s) never arrived"
-    )
+    harness.wait_for_jira_dc_ready(timeout=0.05)
 
 
-def test_the_not_ready_failure_dumps_the_observed_inventory(
+def test_session_readiness_does_not_gate_on_the_epic_fields_at_all(
     harness, monkeypatch, fast_field_poll
 ) -> None:
-    """AC2. The failure has to be self-diagnosing: the reader must be able to tell
-    'no custom fields at all yet' from 'the image renamed them' without re-running
-    anything, which takes the observed inventory in the message."""
-    _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
+    """Teeth for the cell above, and the reason it is not just "loosen the check".
 
-    with pytest.raises(RuntimeError) as excinfo:
-        harness.wait_for_jira_dc_ready(timeout=0.05)
+    A gate that merely got a bigger budget would still be waiting on the wrong
+    predicate; the point is that the Epic fields are NOT a session-start property
+    of the instance. Session readiness must not poll for them at all — the
+    inventory it would read cannot answer the question before a project exists."""
+    seen = _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
 
-    message = str(excinfo.value)
-    assert "Attachment" in message and "Status" in message, (
-        "the expiry message does not dump the field inventory it actually observed"
-    )
-    assert "never registered" in message.lower(), (
-        "the expiry message does not say the fields never REGISTERED, which is what "
-        "distinguishes a timing failure from an image degrade"
-    )
+    harness.wait_for_jira_dc_ready(timeout=0.05)
 
-
-def test_readiness_actually_polls_the_field_inventory(harness, monkeypatch) -> None:
-    """The discriminator. A gate that only ever touches `/rest/api/2/serverInfo` is
-    structurally blind to the capability, whatever its budget is."""
-    seen = _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS + _EPIC_FIELDS])
-
-    harness.wait_for_jira_dc_ready(timeout=5)
-
-    assert "/rest/api/2/field" in seen, (
-        f"readiness declared the instance ready having polled only {sorted(set(seen))} — "
-        f"it never asked whether the Epic fields exist"
+    assert "/rest/api/2/serverInfo" in seen, "session readiness never asked whether Jira answers"
+    assert "/rest/api/2/field" not in seen, (
+        f"session readiness still polls the field inventory (saw {sorted(set(seen))}), so it is "
+        f"still gating on a capability that does not exist until a Software project is created"
     )
 
 
-def test_readiness_returns_once_the_epic_fields_register(harness, monkeypatch) -> None:
-    """Positive control for the negative above: the refusal must be caused by the
-    missing capability, not by the wait being unable to succeed at all. The fields
-    arrive on the second poll, exactly as they do on a live cold start."""
+def test_the_capability_check_waits_after_the_project_exists(harness, monkeypatch) -> None:
+    """The capability guard 9790 wanted, relocated to where it can be answered.
+
+    Moving the check off session start must not delete it. Once the project
+    EXISTS the fields can appear, so `_assert_project_capabilities` has to be a
+    real bounded WAIT rather than a single read — provisioning is observed at
+    0.05s on a quiet runner, but a one-shot read makes that a race. The fields
+    arrive on the second poll here."""
     monkeypatch.setattr(_shared_readiness(harness), "FIELD_POLL_INTERVAL_S", 0.001)
-    _stub_readiness_transport(
+    seen = _stub_readiness_transport(
         harness, monkeypatch, [_SYSTEM_ONLY_FIELDS, _SYSTEM_ONLY_FIELDS + _EPIC_FIELDS]
     )
 
-    harness.wait_for_jira_dc_ready(timeout=5)
+    harness._assert_project_capabilities("RBTEST")
+
+    assert seen.count("/rest/api/2/field") >= 2, (
+        f"the capability check read the field inventory {seen.count('/rest/api/2/field')} "
+        f"time(s) — it is a one-shot read, so it races provisioning instead of waiting for it"
+    )
 
 
-def test_the_capability_abort_distinguishes_not_registered_from_not_offered(
+def test_a_degraded_image_still_fails_the_capability_check_loudly(
     harness, monkeypatch, fast_field_poll
 ) -> None:
-    """AC3. `_assert_project_capabilities`' old message sent the reader straight at
-    the image ('update `_REQUIRED_FIELDS` if the instance genuinely renamed them'),
-    which is the wrong diagnosis when the plugin simply had not finished starting.
-    The message must name BOTH candidate causes."""
+    """The guard 9790 removed must NOT come back. Once `customfield_*` entries are
+    present the instance has provisioned, so Epic fields that are still missing is
+    a GENUINE DEGRADE and has to fail loudly rather than let 62 cells run against
+    an instance whose declared contract cannot hold. This varies the axis the
+    system-only fixture holds fixed."""
+    _stub_readiness_transport(harness, monkeypatch, [_DEGRADED_CUSTOM_FIELDS])
+
+    with pytest.raises(AssertionError) as excinfo:
+        harness._assert_project_capabilities("RBTEST")
+
+    message = str(excinfo.value)
+    assert "Epic Link" in message and "Epic Name" in message, (
+        "the abort does not name which required field(s) are missing"
+    )
+    assert "Sprint" in message and "Story Points" in message, (
+        "the abort does not dump the OTHER custom fields it saw — the only evidence that "
+        "separates 'nothing provisioned yet' from 'this image dropped the Epic fields'"
+    )
+
+
+def test_the_failure_message_does_not_send_the_reader_at_the_budget(
+    harness, monkeypatch, fast_field_poll
+) -> None:
+    """THE MOST EXPENSIVE ARTIFACT OF THE BUG, so it gets its own cell.
+
+    9790's message states a decision rule: *"if it contains no customfield_*
+    entries whatsoever the plugin is still starting and the budget
+    (JIRA_DC_FIELD_READY_TIMEOUT) is too short"*. That rule is wrong AND
+    self-confirming — an empty custom-field inventory is the normal state of an
+    instance with no project, so the message points every reader at the budget.
+    It misdiagnosed 9790, it misdiagnosed this bug's own opening analysis, and it
+    bought a 50-minute run at 1800s that failed byte-identically to the 600s one.
+
+    A message that names the wrong remedy is worse than no message, so the prose
+    must name the real precondition and must not blame the budget."""
     _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS])
 
     with pytest.raises(AssertionError) as excinfo:
         harness._assert_project_capabilities("RBTEST")
 
-    message = str(excinfo.value).lower()
-    assert "never registered" in message, (
-        "the abort does not offer 'the fields never registered' as a candidate cause"
+    message = str(excinfo.value)
+    lowered = message.lower()
+    assert "project" in lowered and (
+        "provision" in lowered or "created" in lowered or "creation" in lowered
+    ), (
+        "the failure does not name the real precondition — that GreenHopper provisions these "
+        f"fields when the first Software project is created. Message: {message!r}"
     )
-    assert "does not offer" in message, (
-        "the abort does not offer 'this image does not offer them' as a candidate cause"
+    assert "budget" not in lowered and "JIRA_DC_FIELD_READY_TIMEOUT" not in message, (
+        "the failure still points the reader at the readiness budget, which is the diagnosis "
+        f"that cost two live runs and is refuted by run 30981084637. Message: {message!r}"
+    )
+
+
+def test_the_probe_creates_its_project_before_it_awaits_the_epic_fields(monkeypatch) -> None:
+    """THE PARITY SIBLING. The deterministic probe has the identical ordering bug —
+    `_await_named_fields` runs before its project create — which is why probe runs
+    30944211742 and 30930839323 both died at `PROBE SETUP FAILED: Epic Link=None
+    Epic Name=None`. Fixing only the harness would leave the probe deadlocked, and
+    the probe is the cheap tool this class of question gets answered with."""
+    import importlib.util
+    import pathlib as _pathlib
+
+    repo_root = _pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "_probe_order_under_test", repo_root / "scripts/jira_dc_epic_link_clear_probe.py"
+    )
+    assert spec and spec.loader
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+
+    order: list[str] = []
+
+    def _fake_req(path, method="GET", payload=None, **kw):
+        if method == "POST" and path == "/rest/api/2/project":
+            order.append("create-project")
+            return 201, {"key": payload["key"]}
+        if path == "/rest/api/2/field":
+            order.append("await-fields")
+            # Model the instance faithfully: NO custom fields until the project
+            # exists, both Epic fields immediately afterwards.
+            if "create-project" in order:
+                return 200, _SYSTEM_ONLY_FIELDS + _EPIC_FIELDS
+            return 200, _SYSTEM_ONLY_FIELDS
+        if method == "POST" and path == "/rest/api/2/issue":
+            return 201, {"key": "ELP-1"}
+        # Anything else (the idempotent project DELETE, issue reads/writes) is not
+        # part of the ordering question — answer it blandly rather than raising,
+        # so an unmodelled call can never masquerade as "the probe did nothing".
+        return 200, {}
+
+    monkeypatch.setattr(probe, "_req", _fake_req)
+    monkeypatch.setattr(probe.jira_dc_field_readiness, "FIELD_POLL_INTERVAL_S", 0.001)
+    monkeypatch.setattr(probe.jira_dc_field_readiness, "FIELD_READY_BUDGET_S", 0.05)
+
+    try:
+        probe.main()
+    except BaseException:  # noqa: BLE001 - only the ORDER of the first two ops is under test
+        pass
+
+    first = [step for step in order if step in ("create-project", "await-fields")]
+    assert first, "the probe performed neither a project create nor a field read"
+    assert first[0] == "create-project", (
+        f"the probe awaits the Epic fields before creating its project (order: {first[:4]}), so "
+        f"it waits for fields that only the create it has not reached can provision — the "
+        f"deadlock that made runs 30944211742 and 30930839323 fail at setup"
     )
 
 
@@ -424,7 +529,7 @@ def test_the_probe_and_the_harness_share_one_readiness_definition(harness, monke
     _stub_readiness_transport(harness, monkeypatch, [_SYSTEM_ONLY_FIELDS + _EPIC_FIELDS])
 
     probe._await_named_fields(readiness.REQUIRED_FIELDS)
-    harness.wait_for_jira_dc_ready(timeout=5)
+    harness._assert_project_capabilities("RBTEST")
 
     assert len(routed) == 2, (
         f"only {len(routed)} of the two tiers routed through the shared wait: "
@@ -446,12 +551,14 @@ def test_an_unreadable_field_inventory_reads_as_not_ready(
             return 200, {"version": "8.17.1"}
         if path == "/rest/api/2/field":
             return 503, {"errorMessages": ["Jira is starting up"]}
+        if path.startswith("/rest/api/2/project/"):
+            return 200, {"issueTypes": [{"name": n} for n in ("Task", "Sub-task", "Epic")]}
         return 404, None
 
     monkeypatch.setattr(harness, "_request", _fake)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        harness.wait_for_jira_dc_ready(timeout=0.05)
+    with pytest.raises(AssertionError) as excinfo:
+        harness._assert_project_capabilities("RBTEST")
 
     message = str(excinfo.value)
     assert "Epic Link" in message and "Epic Name" in message, (
