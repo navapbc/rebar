@@ -33,21 +33,35 @@ help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev extra) + the pre-commit hook (the commit gate).
+install:  ## Install rebar from the committed uv.lock (uv sync --locked, dev + metrics extras) + the pre-commit hook (the commit gate).
 	@# uv-canonical (ticket ce5d): the repo's own envs install THROUGH the committed lock so
 	@# every checkout gets the same verified-importable dependency set (the unlocked pip path
 	@# once resolved an import-broken pydantic-ai-slim/anthropic pair). `--locked` refuses to
 	@# resolve fresh — a drifted lock fails here exactly like CI's `uv lock --check` gate.
+	@#
+	@# `--extra metrics` (ticket fd30) pins the code-health analyzer stack — lizard, which
+	@# `rebar metrics` needs for its complexity lens — to the DEV BOOTSTRAP's own intent.
+	@# It is behaviour-preserving today: the `dev` extra self-references
+	@# `nava-rebar[agents,metrics]`, so lizard already arrives transitively. But that
+	@# self-reference exists to make optional-capability TESTS run in CI, not to equip a
+	@# developer's venv; naming the extra here means trimming that CI-motivated
+	@# self-reference can no longer silently regress `rebar metrics` to `unavailable`
+	@# locally. It adds no lock churn — the metrics extra is already in the committed lock.
+	@# scc (Go) and jscpd (Node) cannot come from a Python extra; they are optional and
+	@# documented in docs/local-dev-env.md, and their absence degrades to `unavailable`.
 	@command -v uv >/dev/null 2>&1 || { \
 		echo "ERROR: 'uv' is required (canonical bootstrap installs through the committed uv.lock)."; \
 		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
 		echo "       Unlocked fallback (resolves fresh — NOT the canonical env): make install-unlocked"; \
 		exit 1; }
-	uv sync --locked --extra dev
+	uv sync --locked --extra dev --extra metrics
 	$(MAKE) hooks
 
 install-unlocked:  ## Fallback: editable pip install (UNLOCKED — resolves fresh; prefer `make install`).
-	python -m pip install -e '.[dev]'
+	@# `metrics` named explicitly for the same reason as in `install` above — the dev
+	@# extra's `nava-rebar[agents,metrics]` self-reference is CI-motivated, so this states
+	@# the dev-env requirement itself rather than inheriting it by coincidence.
+	python -m pip install -e '.[dev,metrics]'
 	$(MAKE) hooks
 
 hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit gate).

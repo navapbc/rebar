@@ -320,6 +320,10 @@ metric returns a structured `Unavailable`; rebar does not fabricate a zero and t
 `rebar metrics` command does not crash. Git- and event-derived metrics remain independently
 available.
 
+> **Contributing to rebar itself?** `make install` already provisions lizard, and the concrete
+> per-platform install commands for scc and jscpd are in
+> [`local-dev-env.md`](local-dev-env.md) under "Code-health analyzers".
+
 ## Concurrency, in one line
 
 rebar is meant to be used by many people/clones at once. Status-changing operations
