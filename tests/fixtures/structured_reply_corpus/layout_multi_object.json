@@ -1,0 +1,6 @@
+{
+  "id": "layout_multi_object",
+  "expected_layout": "multi_object",
+  "description": "Two top-level JSON objects in one reply (a quoted dep-link record followed by the real verdict) \u2014 the df3a-shaped multi-object case the selection fix targets.",
+  "reply": "The dependency link I read is {\"relation\": \"depends_on\", \"target_id\": \"f2f3-9cb1-335b-4e31\"}.\n\nMy verdict: {\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"Criteria met.\"}"
+}

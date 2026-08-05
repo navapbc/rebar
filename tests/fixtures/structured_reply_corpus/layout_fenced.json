@@ -1,0 +1,6 @@
+{
+  "id": "layout_fenced",
+  "expected_layout": "fenced",
+  "description": "A single JSON verdict wrapped in a ```json fenced code block, the shape a model uses when it 'presents' the payload as a code block.",
+  "reply": "Here is my final verdict:\n\n```json\n{\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"All acceptance criteria are demonstrably met.\"}\n```\n"
+}

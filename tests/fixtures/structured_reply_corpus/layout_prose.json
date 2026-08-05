@@ -1,0 +1,6 @@
+{
+  "id": "layout_prose",
+  "expected_layout": "prose",
+  "description": "A single bare JSON verdict embedded in surrounding prose, no code fence and no inline quoting \u2014 the plainest 'model just emits the object mid-sentence' shape.",
+  "reply": "After reviewing the change against every acceptance criterion, my verdict is {\"verdict\": \"PASS\", \"findings\": [], \"summary\": \"All criteria met.\"} and nothing further is required."
+}
