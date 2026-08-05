@@ -2450,6 +2450,8 @@ bedrock = [
     { name = "pydantic-ai-slim", extra = ["bedrock"], marker = "extra == 'extra-10-nava-rebar-bedrock' or (extra == 'extra-10-nava-rebar-dev' and extra == 'extra-10-nava-rebar-eval')" },
 ]
 dev = [
+    { name = "boto3", version = "1.43.62", source = { registry = "https://pypi.org/simple" } },
+    { name = "botocore", version = "1.43.62", source = { registry = "https://pypi.org/simple" } },
     { name = "build" },
     { name = "hatchling" },
     { name = "json-repair" },
@@ -2507,7 +2509,9 @@ ui = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.43.0" },
     { name = "boto3", marker = "extra == 'reviewbot'" },
+    { name = "botocore", marker = "extra == 'dev'", specifier = ">=1.43.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "fastapi", marker = "extra == 'reviewbot'" },
     { name = "fastapi", marker = "extra == 'ui'" },
