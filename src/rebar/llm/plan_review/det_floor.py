@@ -471,7 +471,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
     and whether any verification command/section is present. Never blocks."""
-    from . import det_citation, det_operator_attested
+    from . import det_citation, det_measurement_provenance, det_operator_attested
 
     items = det_operator_attested.ac_item_lines(ctx.plan_text)
     issues: list[str] = []
@@ -513,6 +513,12 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     # self-gated by the deterministic lexicon eval (docs/experiments/plan-review-gate/).
     oa_issues = det_operator_attested.operator_evidence_issues(items)
     issues.extend(oa_issues)
+    # Measurement-provenance lint (story f161, ADR-0043 x ADR-0016): [operator-attested] AC
+    # items whose measurement-provenance continuation line is absent/incomplete/placeholder/
+    # enum-invalid. ADVISORY coaching only (p6 never blocks); each gap's fix is inline. Needs
+    # the RAW plan text (not just checkbox lines) to see the indented continuation line.
+    prov_issues = det_measurement_provenance.provenance_issues(ctx.plan_text)
+    issues.extend(prov_issues)
     # Cross-ticket citation edge-verify lint (story 266e): a `[rebar:<id>]` citation whose
     # cited id is not a VERIFIED upstream prerequisite of P (P.depends_on(C) or C.blocks(P)).
     # ADVISORY coaching only (p6 never blocks); Layer-2 (the LLM finders) owns crediting.
@@ -542,6 +548,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
         "verify_commands_linted": len(linted),
         "verify_lint_abstained": lint_abstained,
         "operator_attested_gaps": len(oa_issues),
+        "provenance_gaps": len(prov_issues),
         "citation_gaps": len(cit_issues),
     }
     if not issues:
