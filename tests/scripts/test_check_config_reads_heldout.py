@@ -1,8 +1,9 @@
-"""Held-out edge suite for the config-is-read gate (ticket 6754).
+"""Held-out edge suite for the config-is-read gate (ticket 6754, corrected by bug 2c58).
 
-Pins the receiver-agnostic detection shape, marker placement/validation edges,
-plumbing exclusion, exit codes, the accepted fail-quiet collision trade-off,
-CI wiring, and tree-cleanliness of the real repo at landing.
+Pins the OWNER-RESOLVED detection shapes (bug 2c58-e710-275e-4ff7), marker
+placement/validation edges, plumbing exclusion, exit codes, the name-collision
+contract, the real schema's string-read negative fixtures, CI wiring, and
+tree-cleanliness of the real repo at landing.
 """
 
 from __future__ import annotations
@@ -31,14 +32,27 @@ def gate() -> ModuleType:
     return module
 
 
+# The root ``Config`` binding is what makes owner resolution possible: ``Config.s:
+# SectionConfig`` is the edge that tells the gate a read off ``<expr>.s`` belongs to
+# ``SectionConfig``.
 _SCHEMA = """\
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class SectionConfig:
     ghost_knob: bool = False
+
+
+@dataclass
+class Config:
+    # Marked so the section-wiring field never confounds an assertion about the knob.
+    s: SectionConfig = field(default_factory=SectionConfig)  # read-via: section wiring
 """
+
+
+# The baseline reader for the "this knob is unread" edges below: it touches no knob.
+_READS_SECTION_ONLY = "def f():\n    return None\n"
 
 
 def _tree(tmp_path: Path, schema_body: str, reader_body: str) -> tuple[Path, Path]:
@@ -50,19 +64,39 @@ def _tree(tmp_path: Path, schema_body: str, reader_body: str) -> tuple[Path, Pat
     return schema, root
 
 
-# ── receiver-agnostic read shapes (the G6/E2 finding the plan pinned) ────────────
+# ── owner-resolvable receiver shapes (bug 2c58) ──────────────────────────────────
+# Each shape is a real pattern in src/rebar. Owner resolution must bind the receiver
+# through a DIFFERENT route in each case; a resolver that only understands one of
+# them would false-fire on live fields and break CI.
 @pytest.mark.parametrize(
-    "reader",
+    ("label", "reader"),
     [
-        "def f():\n    return load_config().section.ghost_knob\n",
-        "def f(section_cfg):\n    return section_cfg.ghost_knob\n",
-        "class C:\n    def m(self):\n        return self.config.section.ghost_knob\n",
-        "def f(cfg=None):\n    x = cfg.section\n    return x.ghost_knob\n",
+        # (1) the section attribute name itself carries the owner
+        ("section-name", "def f():\n    return load_config().s.ghost_knob\n"),
+        # (2) an explicit annotation on the receiving parameter
+        ("annotation", "def f(section_cfg: SectionConfig):\n    return section_cfg.ghost_knob\n"),
+        # (3) a section name reached through an attribute chain on self
+        ("self-chain", "class C:\n    def m(self):\n        return self.config.s.ghost_knob\n"),
+        # (4) a local alias assigned from the section
+        ("alias", "def f(cfg=None):\n    x = cfg.s\n    return x.ghost_knob\n"),
+        # (5) an UNANNOTATED parameter bound from its call site — the real
+        #     mcp_server.build_composite_verifier(mcp_cfg) pattern
+        (
+            "call-site-binding",
+            "def helper(sect):\n    return sect.ghost_knob\n\n\n"
+            "def caller(cfg):\n    return helper(cfg.s)\n",
+        ),
+        # (6) a function whose RETURN annotation names the owning class
+        (
+            "return-annotation",
+            "def get_section() -> SectionConfig:\n    raise NotImplementedError\n\n\n"
+            "def f():\n    return get_section().ghost_knob\n",
+        ),
     ],
 )
-def test_every_real_receiver_shape_counts_as_a_read(gate, tmp_path, reader):
+def test_every_real_receiver_shape_counts_as_a_read(gate, tmp_path, label, reader):
     schema, root = _tree(tmp_path, _SCHEMA, reader)
-    assert gate.check(schema, root) == []
+    assert gate.check(schema, root) == [], f"shape {label!r} must resolve to its owner"
 
 
 def test_store_context_assignment_is_not_a_read(gate, tmp_path):
@@ -71,12 +105,48 @@ def test_store_context_assignment_is_not_a_read(gate, tmp_path):
     assert len(errors) == 1 and "ghost_knob" in errors[0]
 
 
-def test_unrelated_same_named_attribute_keeps_the_gate_quiet(gate, tmp_path):
-    """Accepted trade-off (stated in the plan): terminal-name matching is permissive —
-    an unrelated object's same-named attribute read suppresses the firing (fail-QUIET),
-    which can never false-fire on a live field."""
+def test_unrelated_same_named_attribute_no_longer_satisfies_the_field(gate, tmp_path):
+    """Bug 2c58: this test previously asserted the OPPOSITE and pinned the defect.
+
+    It was written as an "accepted fail-quiet trade-off": a read of the same bare name
+    on an unrelated object suppressed the firing. That is precisely the false-negative
+    class this gate exists to prevent — it is why an inert `CodeHealthConfig.enabled`
+    passed for as long as it did, while its uniquely-named sibling `analyzers` tripped
+    the gate. Catching an inert field only when its name happens to be globally unique
+    is luck, not a check. The expectation is therefore INVERTED: an unresolvable /
+    unrelated receiver contributes to no field, so the field still fires.
+    """
     schema, root = _tree(tmp_path, _SCHEMA, "def f(unrelated):\n    return unrelated.ghost_knob\n")
-    assert gate.check(schema, root) == []
+    errors = gate.check(schema, root)
+    assert len(errors) == 1 and "ghost_knob" in errors[0]
+
+
+def test_a_read_is_credited_to_exactly_one_owner(gate, tmp_path):
+    """Two sections declaring the same bare field name: only the one actually read
+    is satisfied. This is the owner-resolution contract in its smallest form."""
+    body = """\
+from dataclasses import dataclass, field
+
+
+@dataclass
+class LiveConfig:
+    shared_name: bool = False
+
+
+@dataclass
+class InertConfig:
+    shared_name: bool = False
+
+
+@dataclass
+class Config:
+    live: LiveConfig = field(default_factory=LiveConfig)  # read-via: section wiring
+    inert: InertConfig = field(default_factory=InertConfig)  # read-via: section wiring
+"""
+    schema, root = _tree(tmp_path, body, "def f(cfg: Config):\n    return cfg.live.shared_name\n")
+    errors = gate.check(schema, root)
+    assert len(errors) == 1
+    assert "InertConfig" in errors[0] and "LiveConfig" not in errors[0]
 
 
 # ── marker placement + validation edges ──────────────────────────────────────────
@@ -85,7 +155,7 @@ def test_marker_on_the_preceding_line_is_honoured(gate, tmp_path):
         "    ghost_knob: bool = False",
         "    # read-via: getattr dispatch in consumer.py\n    ghost_knob: bool = False",
     )
-    schema, root = _tree(tmp_path, body, "def f():\n    return None\n")
+    schema, root = _tree(tmp_path, body, _READS_SECTION_ONLY)
     assert gate.check(schema, root) == []
 
 
@@ -94,7 +164,7 @@ def test_whitespace_only_pointer_is_rejected_as_bare(gate, tmp_path):
         "    ghost_knob: bool = False",
         "    ghost_knob: bool = False  # read-via:   ",
     )
-    schema, root = _tree(tmp_path, body, "def f():\n    return None\n")
+    schema, root = _tree(tmp_path, body, _READS_SECTION_ONLY)
     errors = gate.check(schema, root)
     assert len(errors) == 1 and "ghost_knob" in errors[0]
 
@@ -104,7 +174,7 @@ def test_every_dead_field_is_reported_not_just_the_first(gate, tmp_path):
         "    ghost_knob: bool = False",
         "    ghost_knob: bool = False\n    phantom_knob: int = 3",
     )
-    schema, root = _tree(tmp_path, body, "def f():\n    return None\n")
+    schema, root = _tree(tmp_path, body, _READS_SECTION_ONLY)
     errors = gate.check(schema, root)
     assert len(errors) == 2
     joined = "\n".join(errors)
@@ -113,7 +183,7 @@ def test_every_dead_field_is_reported_not_just_the_first(gate, tmp_path):
 
 def test_non_dataclass_annotations_are_not_collected(gate, tmp_path):
     body = "class Plain:\n    ghost_knob: bool = False\n"
-    schema, root = _tree(tmp_path, body, "def f():\n    return None\n")
+    schema, root = _tree(tmp_path, body, _READS_SECTION_ONLY)
     assert gate.check(schema, root) == []
 
 
@@ -133,7 +203,7 @@ def test_reads_inside_config_plumbing_do_not_count(gate, tmp_path):
 
 # ── CLI contract ───────────────────────────────────────────────────────────────────
 def test_main_exit_codes_and_output(gate, tmp_path, capsys):
-    schema, root = _tree(tmp_path, _SCHEMA, "def f():\n    return None\n")
+    schema, root = _tree(tmp_path, _SCHEMA, _READS_SECTION_ONLY)
     rc = gate.main(["--schema", str(schema), "--root", str(root)])
     out = capsys.readouterr()
     combined = out.out + out.err
@@ -165,6 +235,34 @@ def test_real_schema_markers_all_carry_pointers(gate):
     assert markers, "landing enumerated indirect fields — expected at least one marker"
     for pointer in markers:
         assert pointer.strip(), "bare read-via marker committed to the real schema"
+
+
+# ── required negative fixtures: legitimate STRING-keyed reads (bug 2c58) ──────────
+# An owning-dataclass resolver must still tolerate fields consumed through a string
+# key or getattr, where no attribute read exists for any resolver to find. These are
+# LIVE fields; a gate that fires on them would be a false positive that breaks CI.
+# They stay green via their `# read-via:` markers, which the sweep must not disturb.
+@pytest.mark.parametrize(
+    ("field_name", "reader_hint"),
+    [
+        # getattr dispatch — _engine/rebar_reconciler/_advisory_lock.py
+        ("lock_lease_secs", "getattr"),
+        # gate_enabled(root, "<key>", ...) string keys — _commands/gates.py
+        ("require_plan_review_for_close", "gate_enabled"),
+        ("require_plan_review_for_claim", "string key"),
+        ("require_completion_verification_for_close", "string key"),
+    ],
+)
+def test_string_read_fields_keep_their_marker_and_do_not_fire(gate, field_name, reader_hint):
+    text = _REAL_SCHEMA.read_text(encoding="utf-8")
+    assert f"{field_name}:" in text, f"{field_name} must still exist in the real schema"
+    # the field is protected by a marker (own line or the line immediately above)
+    lines = text.splitlines()
+    idx = next(i for i, ln in enumerate(lines) if ln.strip().startswith(f"{field_name}:"))
+    window = "\n".join(lines[max(0, idx - 1) : idx + 1])
+    assert "read-via:" in window, f"{field_name} lost its read-via marker"
+    # and the real tree as a whole is clean, so it is not firing
+    assert gate.check(_REAL_SCHEMA, REPO_ROOT / "src" / "rebar") == []
 
 
 def test_ci_wires_the_gate(gate):
