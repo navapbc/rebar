@@ -9,15 +9,20 @@ name: CodeQL SAST
 
 # `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd):
 # push-on-`main` runs cancelled each other and rendered a healthy `main` as red X's. CodeQL
-# joins that policy by dropping its push trigger, but NOT the 6-hourly branch-health tick — a
-# security scanner's cadence is a deliberate cost/coverage choice and 6-hourly would be a 28x
-# increase nobody asked for. The weekly scan therefore becomes this workflow's primary pass
-# rather than a between-pushes backstop; it still runs against the default branch, and the
-# dispatch below scans on demand after a change worth scanning immediately.
+# follows that policy by dropping its push trigger, and joins the shared 6-hourly branch-health
+# tick that replaced it (ticket 34b5-ad7d-b983-47f9). Scanning every push to `main` was this
+# workflow's original posture, so the tick preserves it rather than raising it: leaving the old
+# weekly cron as the only automatic pass would have stretched worst-case exposure for a
+# newly-introduced finding to seven days. Frequency is not a billing question here —
+# `navapbc/rebar` is a PUBLIC repository, where CodeQL and Actions minutes are free — so the
+# only real cost is queue time. `workflow_dispatch` below still scans on demand when a change
+# warrants it immediately.
 on:
   schedule:
-    # Weekly, Monday 04:23 UTC.
-    - cron: "23 4 * * 1"
+    # Every 6 hours at :35 — off the hour, and staggered against the sibling branch-health
+    # lanes (test.yml :41, optionality.yml :47, verify-identity.yml :53) so they do not all
+    # queue at once.
+    - cron: "35 */6 * * *"
   workflow_dispatch: {}
 
 # Least privilege by default; the analyze job elevates only what CodeQL needs.

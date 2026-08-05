@@ -18,11 +18,13 @@ The policy these tests pin:
   their ``push`` key outright.
 * **Push CI for other branches is preserved** — only `main` (and the already-excluded
   S3-replicated ``feature/**``) is dropped.
-* **A 6-hourly schedule at an off-the-hour minute** carries the branch-health signal for the
-  three cheap always-on lanes, and ``workflow_dispatch`` answers "is main healthy?" on demand.
-* **Deliberately-paced lanes keep their own cadence** — the live-LLM prompt-eval tier and the
-  CodeQL security scan stay weekly, terraform-drift stays daily. Moving them to 6-hourly would
-  be a frequency INCREASE nobody asked for.
+* **A 6-hourly schedule at a distinct off-the-hour minute** carries the branch-health signal
+  for the cheap always-on lanes, and ``workflow_dispatch`` answers "is main healthy?" on
+  demand. CodeQL joined that tick in ticket 34b5-ad7d-b983-47f9 — see
+  :func:`test_codeql_joined_the_six_hourly_branch_health_tick` for why.
+* **Deliberately-paced lanes keep their own cadence** — the live-LLM prompt-eval tier stays
+  weekly and terraform-drift stays daily, because for those two the frequency really is a
+  cost/coverage tradeoff (billable model calls; a cloud drift sweep).
 * **The separate mechanisms are untouched** — the Gerrit ``Verified`` lane, the reconcilers,
   the mirror guard, and the weekly external-integration tier.
 """
@@ -43,16 +45,22 @@ _WORKFLOWS = _ROOT / ".github" / "workflows"
 # shared 6-hourly branch-health tick. Each keeps push CI for NON-main branches.
 _SIX_HOURLY = ("test.yml", "optionality.yml", "verify-identity.yml")
 
+# Also on the 6-hourly tick, but SCHEDULE-ONLY: these have no `push` trigger for any branch, so
+# the "push CI for non-main branches survives" case below does not apply to them.
+_SIX_HOURLY_SCHEDULE_ONLY = ("codeql.yml",)
+
+# Every lane on the shared branch-health tick, however it is triggered otherwise.
+_ALL_SIX_HOURLY = (*_SIX_HOURLY, *_SIX_HOURLY_SCHEDULE_ONLY)
+
 # Workflows that must stop running on a push to `main` but keep their OWN, deliberately slower
 # cadence: value is the cron that must survive this change.
 _OWN_CADENCE = {
     "prompt-eval.yml": "0 7 * * 1",  # weekly — the live tier is billable
-    "codeql.yml": "23 4 * * 1",  # weekly — a security scanner's deliberate pace
     "terraform-drift.yml": "17 6 * * *",  # daily — already its own drift sweep
 }
 
 # Every workflow whose `main`-push trigger this ticket removes.
-_NO_MAIN_PUSH = (*_SIX_HOURLY, *_OWN_CADENCE)
+_NO_MAIN_PUSH = (*_ALL_SIX_HOURLY, *_OWN_CADENCE)
 
 # Separate mechanisms. Touching any of these is out of scope by operator instruction.
 _MUST_NOT_CHANGE = (
@@ -141,7 +149,7 @@ def test_push_ci_for_non_main_branches_is_preserved(name: str) -> None:
 # --- AC3/AC4/AC5: the cadences -----------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", _SIX_HOURLY)
+@pytest.mark.parametrize("name", _ALL_SIX_HOURLY)
 def test_branch_health_lanes_run_every_six_hours_off_the_hour(name: str) -> None:
     crons = _crons(name)
     assert crons, f"{name} needs a schedule — it is the only remaining `main` health signal"
@@ -149,10 +157,45 @@ def test_branch_health_lanes_run_every_six_hours_off_the_hour(name: str) -> None
     assert six_hourly, f"{name} has no 6-hourly cron (found {crons!r})"
     for cron in six_hourly:
         minute = cron.split()[0]
-        assert minute.isdigit() and int(minute) != 0, (
+        assert minute.isdigit() and int(minute) not in (0, 30), (
             f"{name} schedules on minute {minute!r}; use an off-the-hour minute so this "
             "repo's runs do not pile onto the hour boundary with every other project"
         )
+
+
+def test_six_hourly_lanes_are_staggered_on_distinct_minutes() -> None:
+    """The tick's lanes must not all fire at once.
+
+    GitHub queues scheduled workflows globally and drops or delays runs under load, so four
+    lanes sharing a minute is the same self-inflicted pile-up as scheduling on the hour.
+    """
+    minutes = {
+        name: sorted(
+            {cron.split()[0] for cron in _crons(name) if cron.split()[1] == "*/6"},
+        )
+        for name in _ALL_SIX_HOURLY
+    }
+    flat = [minute for entry in minutes.values() for minute in entry]
+    assert len(flat) == len(set(flat)), (
+        f"the 6-hourly lanes collide on a minute: {minutes!r}; stagger them"
+    )
+
+
+def test_codeql_joined_the_six_hourly_branch_health_tick() -> None:
+    """CodeQL moved off its weekly cron onto the shared tick (ticket 34b5-ad7d-b983-47f9).
+
+    03ef removed CodeQL's push-to-`main` trigger, which had been its primary scan of newly
+    landed code, and left only the weekly cron behind — silently stretching worst-case
+    exposure for a newly-introduced SAST finding from "next push" to seven days. The 6-hourly
+    tick is the specified replacement for push-on-`main`, and the frequency is not a billing
+    question here: navapbc/rebar is a PUBLIC repository, where both CodeQL and Actions minutes
+    are free.
+    """
+    crons = _crons("codeql.yml")
+    assert crons == ["35 */6 * * *"], (
+        "codeql.yml must schedule exactly the 6-hourly branch-health tick; the weekly "
+        f"'23 4 * * 1' pass is superseded by it, not kept alongside it (found {crons!r})"
+    )
 
 
 @pytest.mark.parametrize(("name", "cron"), sorted(_OWN_CADENCE.items()))
