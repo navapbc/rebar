@@ -31,8 +31,6 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
             "-m",
             "rebar",
             "-c",
-            "code_health.enabled=true",
-            "-c",
             "code_health.scan_roots=src,web",
             "-c",
             "code_health.size_cap=900",
@@ -54,13 +52,11 @@ def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> Non
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["config"]["code_health"] == {
-        "enabled": True,
         "scan_roots": ["src", "web"],
         "size_cap": 900,
         "size_near_fraction": 0.2,
     }
     assert payload["sources"]["code_health"] == {
-        "enabled": "cli",
         "scan_roots": "cli",
         "size_cap": "cli",
         "size_near_fraction": "cli",
@@ -87,13 +83,11 @@ def test_config_surface_golden_includes_code_health_keys_and_env_names() -> None
     payload = json.loads(golden.read_text(encoding="utf-8"))
 
     assert {
-        "code_health.enabled",
         "code_health.scan_roots",
         "code_health.size_cap",
         "code_health.size_near_fraction",
     } <= set(payload["config_keys"])
     assert {
-        "REBAR_CODE_HEALTH_ENABLED",
         "REBAR_CODE_HEALTH_SCAN_ROOTS",
         "REBAR_CODE_HEALTH_SIZE_CAP",
         "REBAR_CODE_HEALTH_SIZE_NEAR_FRACTION",

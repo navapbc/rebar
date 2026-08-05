@@ -532,9 +532,8 @@ class TrackerConfig:
 
 @dataclass
 class CodeHealthConfig:
-    """Inert-by-default analyzer selection and module-size policy."""
+    """Scan roots and module-size policy for the code-health metrics."""
 
-    enabled: bool = False
     scan_roots: list[str] = field(default_factory=list)
     size_cap: int | None = None
     size_near_fraction: float = 0.1
@@ -708,7 +707,6 @@ _SECTIONS: dict[str, dict] = {
         "hint_enabled": lambda v, k: _as_bool(v, k),
     },
     "code_health": {
-        "enabled": lambda v, k: _as_bool(v, k),
         "scan_roots": lambda v, k: _as_str_list(v, k),
         "size_cap": lambda v, k: None if v is None else _as_int(v, k, minimum=0),
         "size_near_fraction": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),

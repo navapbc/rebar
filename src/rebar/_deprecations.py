@@ -204,6 +204,7 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     _tomb("env", "REBAR_RECONCILER_LOCK_MAX_RETRIES", "", "warn"),
     _tomb("env", "REBAR_RECONCILER_LOCK_RETRY_BUDGET", "", "warn"),
     _tomb("env", "REBAR_CODE_HEALTH_ANALYZERS", "", "warn"),
+    _tomb("env", "REBAR_CODE_HEALTH_ENABLED", "", "warn"),
     # cfg, error — lifecycle/close gate rename.
     _tomb(
         "cfg",
@@ -218,6 +219,11 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     # it fed was designed but never populated, so the key never had behaviour to
     # preserve; it is dropped with no replacement (its env twin is tombstoned above).
     _tomb("cfg", "code_health.analyzers", "", "warn"),
+    # cfg, warn — the advertised code-health off switch that never switched anything.
+    # It had zero read sites, so structural metrics evaluated regardless of it; per the
+    # operator ruling on bug a573-00ea-2bf6-4eb1 it is dropped rather than wired, with no
+    # replacement (its env twin is tombstoned above).
+    _tomb("cfg", "code_health.enabled", "", "warn"),
     # file, error — the legacy flat config reader.
     _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error"),
     # env, error (llm) — retired LLM step-budget knob (checked in llm.config.from_env).

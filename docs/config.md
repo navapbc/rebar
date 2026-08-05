@@ -178,14 +178,14 @@ ensure.hint_enabled       = true     # kill-switch: false silences the nudge ent
 
 ### Code-health analyzers (`code_health.*`)
 
-Code-health analysis is inert by default. Configure it in standalone `rebar.toml` with a
+Code-health analysis has no on/off switch — `rebar metrics` always evaluates its structural
+metrics. These keys only *tune* that analysis. Configure it in standalone `rebar.toml` with a
 `[code_health]` table, or in `pyproject.toml` with `[tool.rebar.code_health]`; the keys and
 values are otherwise identical:
 
 ```toml
 # rebar.toml
 [code_health]
-enabled = true                         # bool; default false
 scan_roots = ["src", "web"]           # list[str]; default []
 size_cap = 800                          # optional int; default unset/None
 size_near_fraction = 0.15              # float; default 0.1
@@ -194,17 +194,15 @@ size_near_fraction = 0.15              # float; default 0.1
 ```toml
 # pyproject.toml
 [tool.rebar.code_health]
-enabled = true
 scan_roots = ["src", "web"]
 size_cap = 800
 size_near_fraction = 0.15
 ```
 
-`enabled` is a `bool` and defaults to `false`; `scan_roots` is `list[str]` and defaults to
-`[]`; `size_cap` is an optional `int` and defaults to unset/`None`; and `size_near_fraction`
-is a `float` and defaults to `0.1`. TOML has no null value, so omit `size_cap` unless setting
-an integer. There is no per-language analyzer *selection* key: `git_metrics` composes the scc,
-lizard, and jscpd adapters directly. Install the required tools separately as described in
+`scan_roots` is `list[str]` and defaults to `[]`; `size_cap` is an optional `int` and defaults
+to unset/`None`; and `size_near_fraction` is a `float` and defaults to `0.1`. TOML has no null
+value, so omit `size_cap` unless setting an integer. There is no per-language analyzer
+*selection* key: `git_metrics` composes the scc, lizard, and jscpd adapters directly. Install the required tools separately as described in
 [user-guide.md](user-guide.md) (§ Metrics).
 
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
@@ -458,9 +456,10 @@ distinct from the alias registry) that classifies each removed input:
 - **`warn` (operationally inert) → WARN and continue (exit 0).** Renamed/dropped tunables
   with no behavioural bite: `REBAR_PUSH` (use `REBAR_SYNC_PUSH`),
   `REBAR_RECONCILER_LOCK_MAX_RETRIES` / `REBAR_RECONCILER_LOCK_RETRY_BUDGET` (dropped),
-  `REBAR_CODE_HEALTH_ANALYZERS` (dropped), and the config keys
+  `REBAR_CODE_HEALTH_ANALYZERS` / `REBAR_CODE_HEALTH_ENABLED` (dropped), and the config keys
   `reconciler.lock_backend` / `reconciler.lock_max_retries` (the ref lock is the only
-  backend) and `code_health.analyzers` (per-language analyzer selection was never wired).
+  backend), `code_health.analyzers` (per-language analyzer selection was never wired) and
+  `code_health.enabled` (it was never read, so it never switched anything off).
 
 **`rebar config validate`** is a non-raising sweep that reports **every** tombstoned input
 (and its replacement + removed-in) currently set in the environment / parsed config / as the
