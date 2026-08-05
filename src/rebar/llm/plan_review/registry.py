@@ -154,6 +154,11 @@ CANONICAL_LLM = frozenset(
         # T14 new-ref/event→workflow-trigger filters + release-infra.
         "T13",
         "T14",
+        # Overlay de-risk (story ea28) — an AGENT-tier overlay that fires when a plan relies
+        # on a slow/costly codified loop (CI pipeline, environment/infra apply) to validate
+        # runtime-only correctness, and asks the plan to prove the risky mechanism out-of-loop
+        # (fast local/manual experiment) BEFORE committing it to the slow loop.
+        "T15",
         # Removal-side dual of A1 (epic cite-stone-sea / WS11) — Chesterton's Fence: an advisory,
         # code-grounded gate that fires when a plan removes/weakens an observable behavior, a guard,
         # or an intent-marked artifact, and asks for a grounded triggering scenario.
