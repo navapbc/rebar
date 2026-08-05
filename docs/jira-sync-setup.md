@@ -297,6 +297,32 @@ deeper (non-Epic-parented) levels simply absent on the Jira side. This is
 consistent and non-destructive: no churn, and the local hierarchy is never
 altered by the exclusion.
 
+#### Data Center: the same guard, for the opposite reason
+
+The suppression is **unconditional** — it is not gated on the vendor, and both Jira
+Cloud and Jira Data Center get it. The two platforms reach the same verdict by
+different routes, and DC's route is the more dangerous one:
+
+- **Cloud** *rejects* a non-Epic parent outright, with `HTTP 400` (and a misleading
+  "same project" message). The failure is at least loud.
+- **Data Center** *accepts* the write and then **silently ignores it**. rebar's DC
+  capability map records this measured: `PUT /rest/api/2/issue/{key}` with
+  `{"fields":{"parent":{"key":…}}}` on a sub-task returns **HTTP 204** (`req-0056`)
+  and a fresh read-back shows the issue **still parented to its original parent**
+  (`req-0058`) — accept-and-ignore, not rejection. The status code is a lie.
+
+So on DC, emitting the parent would produce a write that *looks* like it succeeded
+while changing nothing — and the differ would re-emit it every pass forever, since
+the read-back never converges. Suppressing is if anything **more** important there
+than on Cloud. See [`jira-dc-capability-map.md`](jira-dc-capability-map.md)
+§"Parent and hierarchy — the dangerous paths" for the probes; the supported DC
+parent mechanism is the **Epic Link** on a non-sub-task child, not `fields.parent`.
+
+In both cases the suppression is now **reported** rather than merely logged: a
+dropped parent files an `outbound-field-dropped` bridge alert (tickets `9f26` for
+the update path, `8390` for the create path), so the divergence is durable and
+operator-visible instead of living only in a debug log.
+
 ### Why the deeper edge is dropped, not "promoted to the nearest Epic"
 
 A tempting fix is to promote `L`'s parent to its nearest **Epic** ancestor (`E`)

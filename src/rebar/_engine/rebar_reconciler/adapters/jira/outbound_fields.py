@@ -99,6 +99,8 @@ def _map_local_to_jira_fields(
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
     emit_detach_clear: bool = False,
+    *,
+    suppressed_out: list[str] | None = None,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -118,6 +120,17 @@ def _map_local_to_jira_fields(
     silently omitted from the returned dict (not ``None`` / empty-string) so
     the diff layer can distinguish "no parent set" from "parent set but
     unbound this pass" and skip / retry accordingly.
+
+    ``suppressed_out`` (ticket 8390) is how a caller learns that the 8b25
+    hierarchy guard just dropped a parent: the BOUND non-epic case appends the
+    remote key this call WOULD have emitted. It reports the fact and judges
+    nothing — same split ``_resolve_local_parent`` uses on the UPDATE side
+    (ticket 9f26), because only the caller knows whether the suppression cost
+    anything. An UNBOUND parent appends NOTHING: it has not been offered to the
+    tracker yet and converges on a later pass, so alerting on it is churn.
+
+    The returned dict is unchanged by this parameter on every input — nothing
+    rebar sends to Jira depends on it.
     """
     result: dict[str, Any] = {
         "summary": ticket.get("title") or "",
@@ -153,6 +166,15 @@ def _map_local_to_jira_fields(
                     ticket.get("ticket_id"),
                     parent_type,
                 )
+                # Ticket 8390: report the suppression so the create is not silent.
+                # At CREATE the issue does not exist on the tracker yet, so a
+                # dropped parent is unconditionally a real loss of hierarchy —
+                # but only a BOUND parent has a key we could ever have sent; an
+                # unbound one converges later and is not a drop.
+                if suppressed_out is not None:
+                    suppressed_key = binding_store.get_jira_key(local_parent_id)
+                    if suppressed_key:
+                        suppressed_out.append(suppressed_key)
                 return result
 
         jira_parent_key = binding_store.get_jira_key(local_parent_id)

@@ -128,8 +128,24 @@ def _attach_parent_guarded(client: Any, child_key: str, parent_key: str) -> None
     treated as a hierarchy rejection: log a WARNING and continue the pass
     (generic 400-skip — also covers Epic-as-child and other unmet hierarchy
     constraints without bespoke probing). Non-400 errors propagate.
+
+    The 400 arm ALSO records a ``bridge_alerts`` entry (ticket 8390), the same
+    ``outbound-parent-rejected`` record ``dispatch_one`` writes for the identical
+    shape. This is the only path where Jira ACTIVELY REJECTED the parent and rebar
+    still reports the create as successful, so warn-and-continue alone left the
+    divergence with no durable, operator-visible trace. ``local_id`` is ``None``
+    because the transport boundary does not carry it. ``record_parent_divergence``
+    is fail-open by construction, so this cannot cost a create that would otherwise
+    land, and the 400 is still swallowed exactly as before.
+
+    The import is ABSOLUTE and function-scope: this module is also loaded by file
+    path (the ``_load`` / ``_load_sibling`` convention used across the reconciler),
+    where a relative import raises ``ImportError`` — which would escape here and
+    abort a create that had already succeeded on the tracker.
     """
     import logging as _logging
+
+    from rebar_reconciler.pass_io import record_parent_divergence
 
     try:
         client.set_parent(child_key, parent_key)
@@ -140,6 +156,7 @@ def _attach_parent_guarded(client: Any, child_key: str, parent_key: str) -> None
                 child_key,
                 parent_key,
             )
+            record_parent_divergence("outbound-parent-rejected", child_key, None, parent_key, exc)
             return
         raise
 
