@@ -447,6 +447,11 @@ class LLMConfig:
     model_provider: str | None = None
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
+    # Opt-in LOCAL capture of the raw model reply on FINAL structured-parse failure (story
+    # 2fd6). None (the default) = off: nothing is written and the failure path is byte-for-byte
+    # unchanged. When set, the terminal failure of the prompted reask loop writes ONE artifact
+    # here (best-effort; rotated to the newest 20 per directory) and names its path in the error.
+    parse_failure_artifact_dir: str | None = None
     # Bedrock (story S3/2932). NO rebar-managed key: Bedrock authenticates through the
     # AMBIENT AWS credential chain (instance role / AWS_PROFILE / boto3's own default chain),
     # so unlike `api_key` above there is no Bedrock credential field here at all.
@@ -575,6 +580,13 @@ class LLMConfig:
             model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),
             model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
             base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
+            parse_failure_artifact_dir=_llm_str(
+                table,
+                cli,
+                "REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR",
+                "parse_failure_artifact_dir",
+                None,
+            ),
             bedrock_region_name=_llm_str(
                 table, cli, "REBAR_LLM_BEDROCK_REGION", "bedrock_region_name", None
             ),

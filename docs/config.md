@@ -282,6 +282,7 @@ model          = "claude-opus-4-8"   # env REBAR_LLM_MODEL — DEPRECATED (remov
                                      # prefer [tool.rebar.llm.model_classes] per-class slots
 model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
+parse_failure_artifact_dir = ""      # env REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR (opt-in raw-reply capture; unset = off)
 max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
 max_steps      = 50                  # env REBAR_LLM_MAX_STEPS; ~2 steps per tool call
 timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)
@@ -312,6 +313,16 @@ deferred pending an async-runner migration (see the liveness ADR).
 and `tool_calls_limit = max(8, min_steps)`. The gate VERIFIER ops apply a review floor
 (`min_steps = 120`), so their concrete defaults are **`request_limit = 60`,
 `tool_calls_limit = 120`** — tune via `REBAR_LLM_MAX_STEPS`.
+
+**`llm.parse_failure_artifact_dir`** (env `REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR`) — opt-in,
+LOCAL capture of the raw model reply when the prompted structured-output reask loop exhausts
+its bounded retries and is about to raise. **Default: unset (`None`) = OFF** — nothing is
+written and the failure path is byte-for-byte unchanged. When set to a directory, the FINAL
+parse failure writes ONE JSON artifact there (the raw reply plus `model`, `contract`,
+`attempts`, and `timestamp` metadata) for replay/debugging, and names the artifact path in the
+raised error. The write is **best-effort** (any I/O error is swallowed and never masks the
+original parse error) and **self-limiting** — the directory is rotated to keep the newest 20
+files, evicting the oldest.
 
 ### LLM failure taxonomy (the resolution-disposition vocabulary)
 
