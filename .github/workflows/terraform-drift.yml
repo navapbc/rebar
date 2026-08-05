@@ -9,11 +9,14 @@
 # S3 state-lock write needed). No AWS static keys are stored in the repo.
 name: Terraform Drift
 
+# `main` CI on this mirror is SCHEDULED, not push-triggered (ticket 03ef-6fb5-158b-4abd).
+# The push-on-`main` trigger is dropped for consistency with every other branch lane; the
+# DAILY sweep below already is this workflow's branch-health signal, so nothing is lost but
+# the (path-filtered, therefore rare) per-commit run. It is not moved to the 6-hourly tick:
+# a plan needs an OIDC role assumption and a live AWS read, and daily is the cadence this
+# check was designed around.
 on:
   pull_request:
-    paths: ['infra/terraform/**']
-  push:
-    branches: [main]
     paths: ['infra/terraform/**']
   schedule:
     - cron: '17 6 * * *'   # daily drift sweep even without a code change

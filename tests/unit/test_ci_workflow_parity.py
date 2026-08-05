@@ -76,7 +76,15 @@ _SHARED_GATE_SIGNATURES = {
 # Verified lane. Empty by design: a derive-and-diff drift gate (scripts/gen_*.py / check_*.py)
 # that gates `main` must also gate pre-merge, or a broken artifact lands green. Add an entry
 # only with a written reason.
-_INTENTIONAL_SCRIPT_ASYMMETRIES: set[str] = set()
+_INTENTIONAL_SCRIPT_ASYMMETRIES: set[str] = {
+    # NOT a gate — it cannot fail a build, so there is nothing for the Verified vote to
+    # mirror. It renders the branch-health run summary (last known-green SHA + bisect recipe)
+    # for a run that has ALREADY finished, and only on the 6-hourly schedule / manual dispatch,
+    # never on the push/PR critical path. Its whole input is `needs.<gate>.result`, and the
+    # Verified lane has no equivalent to describe: Gerrit's vote is per-patchset, so it is
+    # attributable to one commit and needs no bisect window (ticket 03ef-6fb5-158b-4abd).
+    "scripts/main_health_report.py",
+}
 
 
 def _read(path: Path) -> str:
