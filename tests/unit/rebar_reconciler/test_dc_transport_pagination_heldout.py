@@ -23,15 +23,17 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 
 from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
-_TRANSPORT_SRC = (
+_DC_ADAPTER_DIR = (
     pathlib.Path(__file__).resolve().parents[3]
-    / "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/transport.py"
+    / "src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter"
 )
+_TRANSPORT_SRC = _DC_ADAPTER_DIR / "transport.py"
 
 
 class _PageCappingClient:
@@ -142,27 +144,46 @@ def test_an_empty_project_yields_an_empty_map_without_raising() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _search_issues_calls_taking_the_default(src: str | None = None) -> list[str]:
-    """Every `self.search_issues(...)` / `self._client.search_issues(...)` call in the
-    transport that passes NO explicit result cap.
+def _guard_scanned_sources() -> dict[str, str]:
+    """The exact source the structural guard below inspects, as ``{label: source}``.
+
+    Named and separated so the guard's POPULATION is itself assertable. A structural
+    guard is only as good as what it is pointed at: if this returns source that no longer
+    contains the construct being policed, the guard passes unconditionally and polices
+    nothing. `test_the_guard_scans_the_modules_that_hold_the_calls` asserts against this.
+
+    Scans EVERY module in the DC adapter package, not just `transport.py`. Pointing it at
+    one file is what rotted the guard: commit 4213081d ("Split DC transport into capability
+    mixins") relocated every `search_issues` call out of `transport.py` into sibling mixin
+    modules (`_base.py`, `_issues.py`) as a pure text move, leaving the guard scanning a
+    file with zero call sites — so its offender list was unconditionally empty. A package-
+    wide glob cannot be orphaned by the next such move.
+    """
+    return {path.name: path.read_text() for path in sorted(_DC_ADAPTER_DIR.glob("*.py"))}
+
+
+def _search_issues_calls_taking_the_default(sources: dict[str, str]) -> list[str]:
+    """Every `self.search_issues(...)` / `self._client.search_issues(...)` call in
+    `sources` that passes NO explicit result cap, reported as ``"<label>:<line>"``.
 
     An AST scan rather than a grep: the point is to catch a call, not a mention in a
     docstring or comment (this module's own prose names the method repeatedly).
 
-    `src` exists ONLY so the teeth test below can aim this same predicate at a synthetic
-    offender; omitting it scans the live transport, which is what the real guard does.
+    Takes its sources as an argument so the teeth tests below can aim this same predicate
+    at synthetic offenders; the real guard feeds it `_guard_scanned_sources()`.
     """
-    tree = ast.parse(src if src is not None else _TRANSPORT_SRC.read_text())
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        if not (isinstance(fn, ast.Attribute) and fn.attr == "search_issues"):
-            continue
-        kwargs = {kw.arg for kw in node.keywords}
-        if not ({"maxResults", "max_results"} & kwargs):
-            offenders.append(f"line {node.lineno}")
+    for label, src in sorted(sources.items()):
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not (isinstance(fn, ast.Attribute) and fn.attr == "search_issues"):
+                continue
+            kwargs = {kw.arg for kw in node.keywords}
+            if not ({"maxResults", "max_results"} & kwargs):
+                offenders.append(f"{label}:{node.lineno}")
     return offenders
 
 
@@ -172,7 +193,7 @@ def test_no_search_issues_call_relies_on_the_default_page_size() -> None:
     Every whole-project read must go through the shared pager (which passes an explicit
     page size); a bare `search_issues(jql)` takes `max_results=50` and silently truncates.
     """
-    offenders = _search_issues_calls_taking_the_default()
+    offenders = _search_issues_calls_taking_the_default(_guard_scanned_sources())
     assert not offenders, (
         f"search_issues call(s) in the DC transport rely on the default max_results=50 and "
         f"will silently truncate past 50 issues: {offenders}. Route them through the shared "
@@ -203,11 +224,84 @@ def test_the_structural_guard_fires_on_a_synthetic_unpaginated_caller() -> None:
     calls are the negative control — the predicate must accept BOTH spellings of the cap,
     so narrowing the accepted keyword set turns this red too.
     """
-    offenders = _search_issues_calls_taking_the_default(_SYNTHETIC_OFFENDER_SRC)
-    assert offenders == ["line 3"], (
+    offenders = _search_issues_calls_taking_the_default({"synthetic.py": _SYNTHETIC_OFFENDER_SRC})
+    assert offenders == ["synthetic.py:3"], (
         f"the shared AST predicate must report exactly the unpaginated call on line 3 of "
         f"the synthetic source and neither paginated call (maxResults on line 6, "
         f"max_results on line 9); it reported {offenders!r}"
+    )
+
+
+def _modules_holding_a_search_issues_call() -> dict[str, int]:
+    """`{module name: call count}` for every `*.py` in the DC adapter package that
+    actually contains a `search_issues` call — computed here, independently of the guard,
+    so it describes where the construct LIVES rather than where the guard looks."""
+    found: dict[str, int] = {}
+    for path in sorted(_DC_ADAPTER_DIR.glob("*.py")):
+        calls = [
+            node
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "search_issues"
+        ]
+        if calls:
+            found[path.name] = len(calls)
+    return found
+
+
+def test_the_guard_scans_the_modules_that_hold_the_calls() -> None:
+    """ANTI-ROT / NON-VACUITY (bug 34c2). The guard above can only fail if the source it
+    scans CONTAINS the construct it polices. Ticket 465d's one-module-per-capability split
+    moved every `search_issues` call out of `transport.py` (they were at transport.py:365
+    and :406 before commit 4213081d23, whose message says "Pure text move: no test
+    edited") while the guard's scan stayed pinned to that one file — so it scanned a file
+    with zero calls and passed unconditionally.
+
+    Assert the guard's POPULATION, not just its verdict: every module that actually holds a
+    `search_issues` call must be among the sources the guard inspects. This is what makes
+    the next module move fail the build instead of silently disarming the guard again.
+    """
+    live = _modules_holding_a_search_issues_call()
+    assert live, (
+        "no module in the DC adapter contains a search_issues call at all — either the "
+        "package moved (fix _DC_ADAPTER_DIR) or this whole guard is now unnecessary"
+    )
+    scanned = set(_guard_scanned_sources())
+    missing = sorted(set(live) - scanned)
+    assert not missing, (
+        f"the pagination guard never scans {missing}, which hold "
+        f"{ {m: live[m] for m in missing} } search_issues call(s): an uncapped call added "
+        f"there would NOT fail the build. The guard scans {sorted(scanned)}. Widen "
+        f"_guard_scanned_sources() to the whole {_DC_ADAPTER_DIR.name}/ package."
+    )
+
+
+def test_the_guard_would_catch_an_uncapped_call_in_a_non_transport_module() -> None:
+    """TEETH for the widened scan, driven through the REAL modules rather than a synthetic
+    string. Strip the explicit cap from every `search_issues` call in the live DC sources
+    and feed the result to the guard's own predicate: it must now name the offenders, and
+    they must include modules other than `transport.py`.
+
+    A synthetic-string teeth test (above) proves the PREDICATE works; it cannot detect the
+    guard being aimed at the wrong file — which is exactly how bug 34c2 survived. This one
+    can, because its offenders come from the guard's own source population.
+    """
+    uncapped = {
+        label: re.sub(r",\s*max_?[Rr]esults=[A-Za-z_0-9]+", "", src)
+        for label, src in _guard_scanned_sources().items()
+    }
+    offenders = _search_issues_calls_taking_the_default(uncapped)
+    assert offenders, (
+        "stripping every explicit cap from the DC adapter sources produced NO offenders — "
+        "the guard is scanning source that contains no search_issues call at all, so it "
+        "cannot fail no matter what is added"
+    )
+    non_transport = sorted(o for o in offenders if not o.startswith("transport.py:"))
+    assert non_transport, (
+        f"the guard only ever reports offenders from transport.py ({offenders!r}), but the "
+        f"calls now live in {sorted(_modules_holding_a_search_issues_call())}: an uncapped "
+        f"call in a mixin module would go unreported"
     )
 
 
