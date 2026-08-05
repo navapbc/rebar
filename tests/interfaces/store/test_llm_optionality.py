@@ -80,6 +80,17 @@ OPERATIONS = ("review_ticket", "review_code", "scan_epics_for_spec", "verify_com
 # tests/unit/test_code_review_ws4.py. It stays in OPERATIONS so the exhaustiveness check holds.
 _FAIL_SAFE = frozenset({"review_code"})
 
+# Ops whose CLI verb is no longer a 1:1 front-end for the library op, so the CLI-side
+# degradation contract below is the SHIM TARGET's, not the library op's. Story 316a
+# retired `rebar review`: it is now a shim over `rebar review-plan`, which runs a
+# deterministic floor BEFORE it needs the extra. So without the extra it still exits
+# non-zero (automation cannot mistake it for a successful review — the invariant this
+# suite exists to protect), but the missing-extra reason is reported INSIDE the emitted
+# plan_review_verdict (`coverage.llm_unavailable` + `coverage.llm_error`) rather than as
+# a bare `Error:` line on stderr. The LIBRARY op `rebar.llm.review_ticket` is unaffected
+# and is still pinned by test_library_operation_degrades_without_extra above.
+_CLI_SHIMMED = frozenset({"review_ticket"})
+
 
 # ── Import-cleanliness: every interface entrypoint imports lazily ──────────────
 @pytest.mark.parametrize(
@@ -170,14 +181,30 @@ def test_cli_operation_degrades_without_extra(
     diff = tmp_path / "change.diff"
     diff.write_text("--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+y\n", encoding="utf-8")
     argv = {
-        "review_ticket": ["review", epic, "ticket-quality"],
+        # No positional reviewer: `rebar review` is a shim over `review-plan`, which has
+        # no reviewer-selection argument and rejects one with exit 2 (story 316a).
+        "review_ticket": ["review", epic, "--source", "local"],
         "review_code": ["review-code", "--diff-file", str(diff)],
         "scan_epics_for_spec": ["scan-spec", "--spec-file", str(spec)],
         "verify_completion": ["verify-completion", epic],
     }[op]
 
     rc = main(argv)
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
+    err = captured.err
+    if op in _CLI_SHIMMED:
+        # The shim's degradation is its TARGET verb's: non-zero exit (so automation
+        # cannot read it as a successful review) and the missing extra named in the
+        # verdict's coverage, not on stderr. Asserting the reason — not merely the exit
+        # code — keeps this from degrading into "any non-zero will do".
+        assert rc != 0, f"{op} must not exit 0 when the extra is absent"
+        assert "Traceback" not in err, "degradation must not surface a raw traceback"
+        blob = captured.out + err
+        assert "agents" in blob.lower(), f"the missing extra must be named somewhere: {blob[:400]}"
+        assert '"llm_unavailable": true' in blob, (
+            "the verdict must record that the LLM tier could not run"
+        )
+        return
     if op in _FAIL_SAFE:  # review_code: off by default → inert clean exit, no traceback (WS4)
         assert rc == 0, f"{op} is fail-safe (off by default) → exit 0, not a degradation error"
         assert "Traceback" not in err, "fail-safe path must not surface a raw traceback"

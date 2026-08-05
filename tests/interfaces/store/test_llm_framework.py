@@ -772,36 +772,49 @@ def test_cli_review_check(
 def test_cli_review_with_fake_runner(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
+    """`rebar review` is a deprecation shim over `rebar review-plan` (story 316a): it
+    forwards to `rebar.llm.review_plan` and surfaces ITS verdict, so this stubs that
+    op directly (the same seam `test_cli_review_alias.py` uses) rather than driving
+    the real four-pass gate through a FakeRunner."""
     epic = _seed(rebar_repo)
-    # fake is off the public env surface (EV-4); inject it via the library seam the
-    # CLI review path uses (operations.get_runner) — the only offline injection point.
-    from rebar.llm import operations
-    from rebar.llm.runner import FakeRunner
+    import rebar.llm
 
-    monkeypatch.setattr(operations, "get_runner", lambda cfg, override=None: FakeRunner())
+    def _fake_review_plan(ticket_id, **kw):
+        return {
+            "verdict": "PASS",
+            "ticket_id": ticket_id,
+            "blocking": [],
+            "advisory": [],
+            "coaching": [],
+            "coverage": {"llm_ran": True},
+            "runner": "fake",
+            "model": "m",
+        }
+
+    monkeypatch.setattr(rebar.llm, "review_plan", _fake_review_plan)
     from rebar._cli import main
 
     rc = main(["review", epic, "--output", "json"])
     out = capsys.readouterr().out
     assert rc == 0, out
     result = json.loads(out)
-    schemas.validator(schemas.REVIEW_RESULT).validate(result)
-    assert result["runner"] == "fake" and result["findings"] == []
+    schemas.validator(schemas.PLAN_REVIEW_VERDICT).validate(result)
+    assert result["runner"] == "fake" and result["blocking"] == []
 
 
 def test_cli_review_bad_reviewer_is_graceful(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
+    """A positional reviewer id has no counterpart on `rebar review-plan` — the shim
+    FAILS LOUDLY (argparse exit 2), naming `review-plan`, rather than silently
+    discarding it or reaching an LLM (story 316a)."""
     epic = _seed(rebar_repo)
-    from rebar.llm import operations
-    from rebar.llm.runner import FakeRunner
-
-    monkeypatch.setattr(operations, "get_runner", lambda cfg, override=None: FakeRunner())
     from rebar._cli import main
 
-    rc = main(["review", epic, "no-such-reviewer"])
+    with pytest.raises(SystemExit) as exc:
+        main(["review", epic, "no-such-reviewer"])
     err = capsys.readouterr().err
-    assert rc == 1 and "Error:" in err  # clean error, not a traceback
+    assert exc.value.code == 2 and "review-plan" in err  # clean, loud rejection, not a traceback
 
 
 # ── MCP surface ───────────────────────────────────────────────────────────────

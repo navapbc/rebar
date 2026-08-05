@@ -50,9 +50,12 @@ def register_llm_tools(mcp, ctx) -> None:
         ref: str | None = None,
         source: str | None = None,
     ) -> dict:
-        """Run an LLM review of a ticket (or its graph) -> a review_result dict
+        """DEPRECATED (use review_plan) — LLM review of a ticket -> a review_result dict
         {findings[], target, reviewers, runner, model, trace_id, summary, source,
-        verified_at_sha, signable}.
+        verified_at_sha, signable}. Story 316a superseded this with the ``review_plan``
+        tool, which reviews a ticket's whole plan through the multi-pass plan-review
+        gate and signs an attestation; this tool is kept (announce-then-remove) but
+        signals a registered deprecation on every call.
 
         ``ref``/``source`` select the verified code: ``source=attested`` (default) reads a
         snapshot pinned at ``ref`` (default ``origin/main``) — NEVER the server's checked-out
@@ -70,9 +73,11 @@ def register_llm_tools(mcp, ctx) -> None:
                 "review_ticket is disabled: it makes a live, billable LLM call. "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        import rebar.llm
+        from rebar._deprecations import warn_deprecated
+        from rebar.llm.operations import _review_ticket_impl
 
-        return rebar.llm.review_ticket(ticket_id, reviewer_id, graph=graph, ref=ref, source=source)
+        warn_deprecated("mcp:review_ticket")
+        return _review_ticket_impl(ticket_id, reviewer_id, graph=graph, ref=ref, source=source)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_code(

@@ -83,7 +83,7 @@ def diff_review_paths(
     between the paths; equivalence is judged on the FINDINGS the runner produced —
     the contract WS-K1 froze — so this gates a cutover without demanding byte
     equality."""
-    legacy = operations.review_ticket(
+    legacy = operations._review_ticket_impl(
         ticket_id, reviewer_id, graph=graph, repo_root=repo_root, runner=runner
     )
     wf = run_review_ticket_as_workflow(

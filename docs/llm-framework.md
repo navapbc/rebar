@@ -18,12 +18,13 @@ Optionality holds across **every interface × every operation**, and when the
 `agents` extra is absent each surface **degrades cleanly** — never an
 `ImportError` traceback, never a silent success:
 
-- **Library** — each operation (`review_ticket`, `review_code`,
-  `scan_epics_for_spec`) raises a typed `LLMError` (the `LLMConfigError` subclass)
-  whose message points at the extra.
-- **CLI** — `rebar review` / `review-code` / `scan-spec` print `Error: …` and exit
-  non-zero (`rebar review --check` is an import-free preflight that reports
-  availability and always exits 0).
+- **Library** — each operation (`review_plan`, `review_code`, `scan_epics_for_spec`,
+  and the deprecated `review_ticket`) raises a typed `LLMError` (the `LLMConfigError`
+  subclass) whose message points at the extra.
+- **CLI** — `rebar review-plan` / `review-code` / `scan-spec` print `Error: …` and exit
+  non-zero (`rebar review-plan --check` is an import-free preflight that reports
+  availability and always exits 0). The **deprecated** `rebar review` forwards to
+  `review-plan` and inherits the same behaviour.
 - **MCP** — `review_ticket` / `review_code` / `scan_spec` are **gated off** unless
   `REBAR_MCP_ALLOW_LLM=1`; even when the gate is opened with the extra absent they
   surface the typed error as a tool error, so a default client can never trigger a
@@ -439,9 +440,10 @@ optional extra; a missing extra/credential raises a clear, actionable error.
 ```bash
 pip install 'nava-rebar[agents]'        # pydantic-ai-slim[anthropic,retries] + json-repair + pydantic
 export ANTHROPIC_API_KEY=...            # direct-Anthropic credentials (Bedrock uses the AWS chain)
-rebar review --check                    # show backend/credential availability
-rebar review <ticket-id> ticket-quality # JSON review_result on stdout
-rebar review <epic-id> --graph -o text  # review an epic + its children, human output
+rebar review-plan --check               # show backend/credential availability
+rebar review-plan <ticket-id>           # the plan-review gate; JSON plan_review_verdict on stdout
+# `rebar review` is DEPRECATED (story 316a): it forwards to `review-plan` with --no-sign,
+# and rejects `--graph` / a positional reviewer_id (exit 2) — neither exists on the target verb.
 rebar review-code --base main --head HEAD    # multi-reviewer code review of a git range
 rebar review-code --diff-file change.diff -o text   # review a diff file, human output
 rebar scan-spec --spec-file spec.md --batch-size 5   # scan open epics against a spec
@@ -551,8 +553,8 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 - **New operation:** assemble its deterministic context, resolve reviewer prompt(s)
   via `prompts.resolve_prompt`, build a `RunRequest`, and call
   `get_runner(config, override=…).run(req)`. Return a validated `review_result`.
-  Add a CLI intercept (like `review`/`reconcile`) and an MCP tool if it should be
-  on all three interfaces.
+  Add a CLI intercept (like `review-plan`/`reconcile`) and an MCP tool if it should
+  be on all three interfaces.
 
 ## How the motivating examples map
 
