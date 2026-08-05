@@ -1,0 +1,7 @@
+{
+  "id": "v3_both_fenced_verdict_last",
+  "description": "Both the quoted dep-link record and the real verdict are fence-wrapped; the dep record's fence comes first. Today's _FENCE_RE.search returns the FIRST fenced block (the dep record) and fails validation. The real verdict is a FAIL with a finding, proving the recovered object's full contents are preserved (not just PASS).",
+  "fails_on_first_wins": true,
+  "expected_verdict": "FAIL",
+  "reply": "Here is the dependency-link record I read from the ticket:\n\n```json\n{\"link_uuid\": \"70ec06fe-e063-4341-9b64-c83bf7a710ad\", \"relation\": \"blocks\", \"target_id\": \"f2f3-9cb1-335b-4e31\"}\n```\n\nAnd here is my final verdict after checking the acceptance criteria:\n\n```json\n{\"verdict\": \"FAIL\", \"findings\": [{\"criterion\": \"all tests green under make test\", \"detail\": \"CI reported a failing unit test; the suite is red.\"}], \"summary\": \"One acceptance criterion is not yet met.\"}\n```"
+}

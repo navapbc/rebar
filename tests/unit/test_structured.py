@@ -5,6 +5,9 @@ handling, and a structured-output validity eval — all offline (no model call).
 
 from __future__ import annotations
 
+import json as _json
+from pathlib import Path as _Path
+
 import pytest
 from pydantic import BaseModel, field_validator
 
@@ -372,3 +375,121 @@ def test_completion_verdict_accepts_coerced_citation_kind() -> None:
     dumped = obj.model_dump(exclude_none=True)
     schemas.validator(schemas.COMPLETION_VERDICT).validate(dumped)
     assert dumped["findings"][0]["citations"][0]["kind"] == "file"
+
+
+# ── df3a: schema-filtered candidate selection (last-valid-wins) ─────────────────
+# The completion verifier's agentic transcript quotes dependency-link records from
+# show_ticket tool results; today's schema-BLIND first-parseable-object selection lets a
+# quoted record win over the real verdict that appears later, fail-closing a legitimate
+# close. parse_structured now enumerates candidate JSON objects, screens each by top-level
+# key-overlap against the target model's fields, validates the survivors, and takes the
+# LAST valid one. Corpus fixtures replay the captured b586 reply shape.
+
+_CORPUS_DIR = _Path(__file__).parent.parent / "fixtures" / "structured_reply_corpus"
+
+
+def _load_corpus(name: str) -> dict:
+    return _json.loads((_CORPUS_DIR / f"{name}.json").read_text())
+
+
+def _all_corpus() -> list[dict]:
+    return [_json.loads(p.read_text()) for p in sorted(_CORPUS_DIR.glob("v*.json"))]
+
+
+def test_selection_recovers_verdict_over_quoted_dep_record():
+    # HAPPY PATH: a completion-verifier reply that quotes a dependency-link record (0 shared
+    # top-level keys with CompletionVerdict) before the real verdict object must parse to the
+    # VERDICT, not the dep record. Today the first parseable object (the dep record) wins and
+    # fails validation ("verdict Field required"), blocking the close.
+    from rebar.llm.contracts import completion_verdict_response_model
+
+    model = completion_verdict_response_model()
+    reply = _load_corpus("v1_bare_dep_before_verdict")["reply"]
+    obj = structured.parse_structured(reply, model)
+    assert obj.verdict == "PASS"
+
+
+@pytest.mark.parametrize("variant", _all_corpus(), ids=lambda v: v["id"])
+def test_selection_recovers_verdict_all_corpus_variants(variant):
+    # The captured b586 reply in 4 recorded layout variants (bare-dep-first, fenced-dep-first,
+    # both-fenced-verdict-last, and the verdict-first control that already passes today). All
+    # four must recover the REAL verdict after the fix; 3 of 4 fail on today's first-wins parser.
+    from rebar.llm.contracts import completion_verdict_response_model
+
+    model = completion_verdict_response_model()
+    obj = structured.parse_structured(variant["reply"], model)
+    assert obj.verdict == variant["expected_verdict"]
+
+
+def test_selection_last_valid_wins_and_warns_when_two_validate(caplog):
+    # When >=2 candidates validate and last != first, last-valid-wins takes the LAST and logs a
+    # warning naming both (a model that emits a draft verdict then a correction). The corrected
+    # (last) verdict is authoritative; the warning surfaces the ambiguity.
+    import logging
+
+    reply = (
+        'Draft assessment: {"verdict": "FAIL", "summary": "initial read, criteria unclear"}\n\n'
+        "On closer inspection every criterion is met, so my final verdict is:\n"
+        '{"verdict": "PASS", "summary": "final: all acceptance criteria demonstrably met"}'
+    )
+    with caplog.at_level(logging.WARNING):
+        obj = structured.parse_structured(reply, _Verdict)
+    assert obj.verdict == "PASS"
+    assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
+
+
+def test_selection_falls_back_byte_for_byte_when_no_candidate():
+    # AC3: a reply with NO schema-valid candidate falls back to today's pipeline byte-for-byte
+    # (same exception type AND message). The declined-entirely fixture has no parseable object,
+    # so selection finds nothing to screen and defers to tolerant_parse+validate_to unchanged.
+    text = "the model declined entirely, no json here at all"
+    with pytest.raises(StructuredOutputError) as new_exc:
+        structured.parse_structured(text, _Verdict)
+    # Byte-for-byte: identical to running the deterministic layers directly.
+    with pytest.raises(StructuredOutputError) as old_exc:
+        structured.validate_to(_Verdict, structured.tolerant_parse(text, schema=_Verdict))
+    assert str(new_exc.value) == str(old_exc.value)
+
+
+def test_selection_property_payload_last_recovers_verdict():
+    # Property: prose interleaved with zero-overlap JSON decoys (dep-link / tool-result shapes)
+    # with the REAL verdict payload rendered LAST always parses to the verdict. seed=20250804,
+    # n=500 (the E3 prototype ran 500/500).
+    import random
+
+    from rebar.llm.contracts import completion_verdict_response_model
+
+    model = completion_verdict_response_model()
+    rng = random.Random(20250804)
+    decoy_templates = [
+        '{{"relation": "{r}", "target_id": "{t}"}}',
+        '{{"link_uuid": "{u}", "target_id": "{t}", "relation": "{r}"}}',
+        '{{"criterion": "{c}", "detail": "quoted from a prior finding"}}',
+        '{{"id": "{t}", "status": "{s}"}}',
+        '{{"path": "src/rebar/llm/{c}.py", "line_start": {n}, "line_end": {n}}}',
+    ]
+    relations = ["depends_on", "blocks", "relates_to", "discovered_from", "caused_by"]
+    statuses = ["open", "in_progress", "closed", "idea"]
+    for _ in range(500):
+        parts = ["I reviewed the ticket graph and its acceptance criteria."]
+        for _ in range(rng.randint(1, 4)):
+            tmpl = rng.choice(decoy_templates)
+            decoy = tmpl.format(
+                r=rng.choice(relations),
+                t=f"{rng.randrange(16**4):04x}-{rng.randrange(16**4):04x}",
+                u=f"{rng.randrange(16**8):08x}",
+                c=rng.choice(["structured", "capabilities", "contracts"]),
+                s=rng.choice(statuses),
+                n=rng.randint(1, 400),
+            )
+            if rng.random() < 0.5:
+                decoy = f"```json\n{decoy}\n```"
+            parts.append(f"For context: {decoy}")
+        want = rng.choice(["PASS", "FAIL"])
+        payload = _json.dumps(
+            {"verdict": want, "findings": [], "summary": "final verdict rendered last"}
+        )
+        parts.append(f"My final verdict is:\n{payload}")
+        reply = "\n\n".join(parts)
+        obj = structured.parse_structured(reply, model)
+        assert obj.verdict == want, reply
