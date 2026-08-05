@@ -35,6 +35,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+TOOL_STEP_STEERING_NOTICE = (
+    "Tool results are no longer being provided: the evidence-gathering budget for this "
+    "run is exhausted. Do not call any more tools. Produce your final answer now, using "
+    "only the evidence already gathered above."
+)
+
+
+def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
+    """Wrap each toolset (function tools moved in first) with a steering boundary that executes
+    calls at run_step <= limit via the wrapped toolset, and returns the steering notice past it
+    — keeping tool definitions advertised for the whole run (the provider-protocol requirement:
+    an empty tool surface over a toolUse history is a Bedrock/Anthropic 400 rejection).
+    """
+    from dataclasses import dataclass
+
+    from pydantic_ai.toolsets import FunctionToolset, WrapperToolset
+
+    @dataclass
+    class _SteeringToolset(WrapperToolset):
+        limit: int = 0
+
+        async def call_tool(self, name, tool_args, ctx, tool):
+            if ctx.run_step > self.limit:
+                return TOOL_STEP_STEERING_NOTICE
+            return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+
+    all_toolsets = [FunctionToolset(tools), *toolsets]
+    return [_SteeringToolset(wrapped=ts, limit=limit) for ts in all_toolsets]
+
 
 def build_agent_kwargs(
     cfg: LLMConfig,
@@ -46,9 +75,10 @@ def build_agent_kwargs(
     web_caps: Any | None,
 ) -> dict[str, Any]:
     """Assemble the kwargs dict handed to ``Agent(model, **kwargs)`` and to
-    ``_pai_structured``, plus the ``tool_step_limit`` rewrite that produces the tool surface
-    it stores (ADR 0056 decision 3; plain parameters, no carrier — the signature does not
-    reach the ADR's ~6-parameter threshold for one).
+    ``_pai_structured``, plus the ``tool_step_limit`` steering wrapper that keeps tool
+    definitions advertised while answering post-limit calls with a fixed notice (ADR 0056
+    decision 3; plain parameters, no carrier — the signature does not reach the ADR's
+    ~6-parameter threshold for one).
 
     ``web_caps`` is passed IN rather than computed here, deliberately:
     ``web_search_capabilities`` is a ``runner`` module global the suite reaches via
@@ -62,17 +92,14 @@ def build_agent_kwargs(
     value would reach the provider, so an unflagged request must stay byte-identical to the
     pre-capability era."""
     if req.tool_step_limit is not None and tools:
-        # Executable convergence boundary — intentionally not a forced tool.
-        from pydantic_ai.toolsets import FunctionToolset
-
+        # Steering convergence boundary — keeps tool DEFINITIONS advertised (a
+        # provider-protocol requirement: an empty tool surface over a toolUse history is a
+        # Bedrock/Anthropic 400), and answers post-limit CALLS with a fixed notice instead
+        # of executing them, so the model produces its final answer from evidence already
+        # gathered. Intentionally not a forced tool.
         limit = max(0, int(req.tool_step_limit))
-
-        def available(run_ctx, _tool_def):
-            return run_ctx.run_step <= limit
-
-        all_toolsets = [FunctionToolset(tools), *toolsets]
+        toolsets = _steering_toolsets(tools, toolsets, limit)
         tools = []
-        toolsets = [toolset.filtered(available) for toolset in all_toolsets]
 
     kwargs: dict[str, Any] = {
         "system_prompt": req.system_prompt,
