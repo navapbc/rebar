@@ -93,9 +93,12 @@ def test_metric_backend_skip_is_reconstructable(
     assert metric["reasons"].get("no_tool", 0) >= 1
 
 
-def test_full_backend_account_is_present(mixed_repo, capsys) -> None:
+def test_full_backend_account_is_present(
+    mixed_repo, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Reconstruct the WHOLE per-backend account and assert every Engine B backend that
     # had an applicable detector is represented (ran or skipped) — never missing.
+    monkeypatch.setattr(engine_b, "_METRIC_CANDIDATES", ("missing-metric-tool",))
     result = engine_b.scan(mixed_repo)
     table = _coverage_table(result.records)
     with capsys.disabled():
@@ -107,6 +110,9 @@ def test_full_backend_account_is_present(mixed_repo, capsys) -> None:
             )
     # The metric backend is always present (its detectors are language-agnostic).
     assert engine_b.BACKEND_METRIC in table
+    metric = table[engine_b.BACKEND_METRIC]
+    assert metric["skipped"] >= 1
+    assert metric["reasons"].get("no_tool", 0) >= 1
     # At least one structural backend participated (ran or skipped) on the JS surface.
     structural = {engine_b.BACKEND_OPENGREP, engine_b.BACKEND_ASTGREP}
     assert structural & set(table), "a structural backend must be accounted for on a JS repo"
