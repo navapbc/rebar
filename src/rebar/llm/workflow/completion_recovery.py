@@ -320,6 +320,8 @@ def _bounded_diagnostic(
         "finalizer_input_char_limit",
         "criteria_unmet",
         "criteria_returned",
+        "criteria_exhausted",
+        "criteria_completed",
         "coverage_exact",
     }
 
@@ -377,6 +379,42 @@ def _evidence_text(result: dict[str, Any]) -> str:
             diagnostic={"evidence_chars": len(text), "evidence_char_limit": _EVIDENCE_CHARS},
         )
     return text
+
+
+def _run_criterion_evidence(
+    runner: Any,
+    request: RunRequest,
+    total: int,
+    completed: int,
+) -> tuple[str, dict[str, Any] | None]:
+    """Run one criterion's evidence call; return (evidence_text, exhausted_diag_or_None).
+
+    On success, exhausted_diag is None.  On a caught budget/token exhaustion,
+    exhausted_diag is the bounded diagnostic and evidence_text is a safe placeholder.
+    A non-exhaustion UnretryableOutputError propagates to the caller.
+    """
+    caught: BaseException | None = None
+    result: dict[str, Any] | None = None
+    try:
+        result = runner.run(request)
+    except (LLMBudgetExhaustedError, RunawayToolLoopError) as run_exc:
+        caught = run_exc
+    except UnretryableOutputError as run_exc:
+        if not _is_token_exhaustion(run_exc):
+            raise
+        caught = run_exc
+    if caught is None:
+        assert result is not None
+        return _evidence_text(result), None
+    diag = _bounded_diagnostic(caught, stage="evidence", total=total, completed=completed)
+    failure_class = type(caught).__name__
+    placeholder = (
+        "Evidence could not be gathered for this criterion within recovery bounds "
+        f"(failure={failure_class}, requests={diag.get('requests')}, "
+        f"tool_calls={diag.get('tool_calls')}). "
+        "No affirmative determination was reached."
+    )
+    return placeholder, diag
 
 
 def _validate_coverage(result: dict[str, Any], expected: list[str]) -> None:
@@ -521,7 +559,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
 
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         expected: list[str] = []
-        evidence: list[dict[str, str]] = []
+        evidence: list[dict[str, Any]] = []
         recovery_started = False
 
         try:
@@ -537,6 +575,8 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             expected = explicit_completion_criteria(ticket)
             _validate_recovery_inputs(expected, ticket_context, self._config.model)
             recovery_started = True
+            criteria_exhausted = 0
+            last_exhausted_diag: dict[str, Any] | None = None
             for index, criterion in enumerate(expected):
                 instructions = (
                     f"Ticket: {ticket_id}\n"
@@ -544,21 +584,21 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                     f"{criterion}\n\n"
                     f"Ticket context:\n{ticket_context}"
                 )
-                result = runner.run(
-                    RunRequest(
-                        system_prompt=_EVIDENCE_SYSTEM,
-                        instructions=instructions,
-                        config=self._config,
-                        reviewers=["completion-verifier-evidence"],
-                        target={"kind": "ticket", "ticket_ids": [ticket_id]},
-                        mode="text",
-                        execution_mode="agentic",
-                        iteration_limit=_EVIDENCE_ITERATIONS,
-                        output_token_limit=_EVIDENCE_OUTPUT_TOKENS,
-                        tool_step_limit=_EVIDENCE_TOOL_STEPS,
-                    )
+                request = RunRequest(
+                    system_prompt=_EVIDENCE_SYSTEM,
+                    instructions=instructions,
+                    config=self._config,
+                    reviewers=["completion-verifier-evidence"],
+                    target={"kind": "ticket", "ticket_ids": [ticket_id]},
+                    mode="text",
+                    execution_mode="agentic",
+                    iteration_limit=_EVIDENCE_ITERATIONS,
+                    output_token_limit=_EVIDENCE_OUTPUT_TOKENS,
+                    tool_step_limit=_EVIDENCE_TOOL_STEPS,
                 )
-                evidence_text = _evidence_text(result)
+                evidence_text, exhausted_diag = _run_criterion_evidence(
+                    runner, request, total=len(expected), completed=len(evidence)
+                )
                 total_evidence_chars = sum(len(item["evidence"]) for item in evidence)
                 total_evidence_chars += len(evidence_text)
                 if total_evidence_chars > _MAX_TOTAL_EVIDENCE_CHARS:
@@ -570,7 +610,37 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                             "criteria_completed": len(evidence),
                         },
                     )
-                evidence.append({"criterion": criterion, "evidence": evidence_text})
+                if exhausted_diag is not None:
+                    evidence.append(
+                        {"criterion": criterion, "evidence": evidence_text, "exhausted": True}
+                    )
+                    last_exhausted_diag = exhausted_diag
+                    criteria_exhausted += 1
+                else:
+                    evidence.append({"criterion": criterion, "evidence": evidence_text})
+            if criteria_exhausted == len(expected) > 0:
+                all_exhausted_diag: dict[str, Any] = {
+                    "criteria_total": len(expected),
+                    "criteria_exhausted": criteria_exhausted,
+                    "criteria_completed": 0,
+                }
+                _passthrough_keys = (
+                    "trace_id",
+                    "requests",
+                    "tool_calls",
+                    "input_tokens",
+                    "output_tokens",
+                )
+                for key in _passthrough_keys:
+                    if last_exhausted_diag and last_exhausted_diag.get(key) is not None:
+                        all_exhausted_diag[key] = last_exhausted_diag[key]
+                raise CompletionRecoveryError(
+                    "completion recovery: every criterion's evidence run exhausted its budget; "
+                    "increasing max_tokens alone cannot repair repeated tool-history growth. "
+                    "Inspect the gate_error_v1 diagnostic and retry after addressing the "
+                    "reported recovery stage.",
+                    diagnostic=all_exhausted_diag,
+                )
 
             finalizer = prompts.get_prompt(
                 "completion-verifier-finalizer", repo_root=self._repo_root
@@ -611,8 +681,10 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         except (LLMError, RebarError) as recovery_exc:
             if not recovery_started:
                 stage = "preflight"
+            elif len(evidence) == len(expected) and not any(e.get("exhausted") for e in evidence):
+                stage = "finalizer"
             else:
-                stage = "finalizer" if len(evidence) == len(expected) else "evidence"
+                stage = "evidence"
             diagnostic = _bounded_diagnostic(
                 recovery_exc,
                 stage=stage,
