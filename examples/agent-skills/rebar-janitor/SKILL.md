@@ -54,7 +54,12 @@ full convergence + OSS-tiebreak.
 - **Never edit code.** The pipeline emits a plan and tickets. The only files you write are the audit
   record and the tickets (via the repo's tracker).
 - **Evidence over opinion.** Every finding needs a `path:line` citation. No citation → not a finding.
-- **One concern per subagent.** Fan out; never have one agent chase everything at once.
+- **One concern per subagent.** Fan out; never have one agent chase everything at once. Two concerns
+  — comment quality and test-suite health — are too large for one agent even alone: **shard them by
+  subsystem or test-tree region**, and verify each shard's findings **as they arrive** rather than in
+  one batch at the end (Phase 2, "Streaming validation").
+- **Volume is not a reason to skip a concern.** "There are too many comments to examine" is a
+  description of the debt, not an argument against auditing it. Shard and spend the time.
 - **Confidence-blind by construction.** Discovery *finds* and never scores; Verification *scores* and
   never saw a score to anchor on. Findings carry **no severity and no confidence** until the
   independent verifier assigns them. This is load-bearing — do not let discovery agents self-rate.

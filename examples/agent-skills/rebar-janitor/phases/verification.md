@@ -6,6 +6,19 @@
 > over all findings and, per finding, emits coarse **impact attributes** + typed **binary
 > sub-answers**. The orchestrator then scores each finding with pure arithmetic and applies the floors.
 
+## Streaming validation (use when Discovery is sharded)
+
+For sharded concerns — comment triage and the test-suite audit both shard by construction — do **not**
+wait for the whole pool before verifying. Validate each shard's findings as they arrive. It keeps
+verifier context small, surfaces a bad shard while there is still time to re-run it, and stops a
+systematically wrong shard from contaminating the pooled dedupe.
+
+Streaming does not relax blindness: each verifier still sees only findings + the repo, never another
+verifier's answers and never any discovery agent's reasoning. Validate along all three axes at once —
+**correctness** against the code, **validity of the stated impact**, and **validity of the suggested
+remediation direction** — because a finding that is true but whose remediation is wrong will
+otherwise survive to Phase 3 and waste a proposer pair.
+
 ## Verifier discipline (put these in the verifier prompt)
 
 - **Reason first.** Reason through each finding's sub-questions against the code before committing answers.

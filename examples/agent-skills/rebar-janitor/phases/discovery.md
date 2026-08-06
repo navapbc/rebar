@@ -69,6 +69,68 @@ and **not to rate severity or confidence** (Phase 2 does that independently).
    information to choose it arrived?" **Gate on evidence of likely change:** intersect with the
    temporal hotspots below. Rigidity in stable, rarely-touched code is **not** a finding.
 
+9. **Unwired & partially wired functionality** — the highest-yield concern in practice: values that
+   are *accepted and then silently dropped*. A parameter declared and never read; a CLI flag parsed
+   into a variable no caller consumes; a request field the callee omits from the object it builds; a
+   `pass  # accepted, no-op`; a keyword arg placed after `**kwargs` so it can never reach the callee;
+   a capability protocol with zero implementers; a module whose sole entry point is gated behind a
+   file with no producer. These are *worse* than dead code, because the surface advertises a promise
+   the code does not keep — docstrings, `--help` text and ADRs go on asserting it.
+   - Enable the linter's unused-argument rule **in a scratch config, for detection only** (Ruff
+     `ARG*`, or equivalent) and read the violation list as a candidate pool. Do not propose turning
+     it on permanently without evidence — survey what comparable projects actually do.
+   - For each candidate, resolve the full path from surface to consumer. A value that reaches *a*
+     struct is not wired; check the struct is read. The strongest finding shape is: the field exists,
+     a consumer reads it, and the producer omits it — the value is *actively discarded*, not merely
+     unimplemented.
+   - Cross-check every finding against docs, `--help` text, MCP tool descriptions, and ADRs. A false
+     promise in documentation is what converts a dormant parameter into a trust problem.
+   - Also sweep for **dead surfaces that are honestly documented** — they are real but low value.
+     Rank them last rather than dropping them silently.
+
+10. **Comment quality & rationale placement** — comments have an important but narrow role: proximate
+    just-in-time context, in clear concise language. Everything else has a better home. The taxonomy
+    that makes each call decidable:
+
+    | Content | Belongs in |
+    |---|---|
+    | history, "why we changed this", incident references | the ticket system |
+    | architectural decisions and their rationale | an ADR |
+    | logic and control flow | the code itself |
+    | data shapes, field semantics, validity rules | schema |
+
+    Measure first: comment lines as a share of source, and **comment growth rate vs code growth
+    rate** — the second is the decay signal. Find ≥20-line rationale blocks that cite no ADR; a block
+    that is a complete ADR written inline is the clearest possible finding.
+    - **Shard by subsystem.** One agent cannot triage a large tree's commentary. Give each shard a
+      directory scope and a line budget.
+    - **Every shard's most valuable output is its `do_not_move` list**, not its removal list.
+      Measured external-API facts, replay-compatibility constraints, security invariants and
+      anti-refactor warnings cannot be re-derived from code and must survive verbatim. Make
+      "`do_not_move` list appended to the playbook **before** any edit lands" an explicit AC on each
+      shard ticket — a protection record that arrives after the deletion is worthless.
+    - Verify staleness claims rather than assuming: a comment saying "STUB, bodies to be implemented"
+      next to a symbol imported by 13 modules is a finding; a comment that merely *looks* dated is
+      not.
+    - Honest counterweight to report: comment triage often does **not** rescue the files you most
+      want rescued, because their bulk is exactly the load-bearing kind. Say which files it will not
+      help.
+
+11. **Test-suite health** — audit the suite as a system, not for coverage percentage. Ask:
+    - **Wasteful duplication** — several tests asserting one identical behavior or contract. Measure
+      the clone rate in tests and compare it to source; a large gap is the signal.
+    - **Change-detector tests** — tests that fail on any edit while proving no behavior; assertions
+      pinned to incidental output, formatting, or call order.
+    - **Justified regression confidence** — is the confidence the suite implies actually earned?
+      Look for tests exercising code paths that are themselves dead, and for fixtures synthesized
+      solely to reach an unreachable branch.
+    - **Optimizations that cut maintenance or wall-clock without cutting coverage** — where coverage
+      means behavioral, contractual, integration and regression coverage, not a line-coverage number.
+    - Check whether the suite has any size, duplication, or skip gate at all. A suite that grew to
+      multiples of source with no gate is the finding.
+    - **Shard this one too**, by test-tree region, and validate findings as they arrive rather than
+      in one batch at the end (see Verification).
+
 ### Temporal decay pass (only if `.git` exists)
 
 Run inline or as one more discovery agent — its output feeds the `likelihood` impact attribute in
@@ -87,7 +149,7 @@ history is shallow/squashed, say so and report what's computable.
 ## Discovery output schema (per finding — NO severity, NO confidence, NO fix)
 
 - `finding` — the problem stated as a **claim to verify** (not a verdict): what is wrong and where.
-- `concern` — which of the eight concerns above.
+- `concern` — which of the eleven concerns above.
 - `location` — the file/symbol/region the finding is about.
 - `evidence` — `path:line` citation(s) and/or a metric (LOC, param count, cycle, duplication count),
   or, for an absence finding, the rationale for why X is genuinely missing.
