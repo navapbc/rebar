@@ -56,6 +56,33 @@ _DEFAULT_MODEL_BY_CLASS: dict[str, str] = {
     "trivial": TRIVIAL_DEFAULT_MODEL,
 }
 
+# The per-model context-window table (moved here from plan_review/sizing.py so both the
+# plan-review escalation ladder and the completion verifier share one source of model
+# window knowledge). Bare Anthropic family names; substring-matched by accessors.
+MODEL_WINDOW_LADDER = (
+    ("claude-haiku-4-5", 200_000),
+    ("claude-sonnet-4-6", 1_000_000),
+    ("claude-opus-4-8", 1_000_000),
+)
+
+
+def own_window_tokens(model: str | None) -> int:
+    """The resolved model's OWN context window in tokens — NOT an escalation maximum.
+
+    Completion does not escalate models up the ladder (plan-review does), so it needs the
+    matched model's own window, not `plan_review.sizing.largest_window_tokens`'s
+    at-or-above maximum. Substring rung match, exactly like the ladder lookup. A model the
+    ladder cannot locate (or an absent model) → the ladder MINIMUM: under-admitting is loud
+    and recoverable, over-admitting fails mid-run (the conservative default from bug 48b3).
+    """
+    ladder_min = min(window for _name, window in MODEL_WINDOW_LADDER)
+    if model:
+        for name, window in MODEL_WINDOW_LADDER:
+            if name in model:
+                return window
+        return ladder_min
+    return ladder_min
+
 
 @dataclass(frozen=True)
 class FallbackTarget:

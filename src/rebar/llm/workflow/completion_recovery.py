@@ -60,12 +60,20 @@ _MAX_TOTAL_CRITERIA_CHARS = 32_000
 # a false PASS. A refusal is a visible false-block; a bad elision is an invisible signed
 # false PASS, and this gate SIGNS its verdict.
 #
-# 100,000 covers the largest real ticket observed (41,595 chars, ticket 2932 via db1c) with
-# ~2.4x headroom, and the ticket that motivated this work (9fd4, 34,282) with ~2.9x. It also
-# bounds the per-criterion re-send: recovery sends the context once per criterion, so the
-# worst case is _MAX_CRITERIA (32) x this budget, which stays a bounded spend rather than an
-# open-ended one.
-_MAX_CONTEXT_CHARS = 100_000
+# Two ceilings replace the retired flat _MAX_CONTEXT_CHARS (bug 8eb3): a flat per-context
+# bound chases a monotonically growing tail (raised 24,000 -> 100,000 by d59e, then outgrown
+# by c9f7 at 121,147 within weeks), so each ceiling now derives from the capacity it protects.
+# PHYSICAL — each evidence run must fit ONE model window. Derived from the resolved verifier
+# model's OWN window (model_classes.own_window_tokens) at a deliberately conservative 2
+# chars/token (English prose averages ~4), leaving the other half of the window for the
+# system prompt, criteria, tool traffic, and output.
+_CONTEXT_CHARS_PER_TOKEN = 2
+# ECONOMIC — recovery re-sends the context once PER criterion, so spend scales with
+# len(context) * len(criteria). Byte-identical to the previously-ratified worst case
+# (_MAX_CRITERIA 32 * the old 100,000 flat bound), now allocated where real tickets need it
+# instead of split per-axis. INTERIM: the banked-verification sibling (2948) deletes the
+# per-criterion fan-out and replaces this multiplier with successor_batches.
+_MAX_RECOVERY_INPUT_CHARS = 3_200_000
 _MAX_TOTAL_EVIDENCE_CHARS = 96_000
 _MAX_FINALIZER_INPUT_CHARS = 132_000
 _FINALIZER_OUTPUT_TOKENS = 8_000
@@ -128,7 +136,14 @@ def explicit_completion_criteria(ticket: dict[str, Any]) -> list[str]:
     return criteria
 
 
-def _validate_recovery_inputs(criteria: list[str], context: str) -> None:
+def physical_context_ceiling(model: str | None) -> int:
+    """The max recovery context in chars: the resolved model's own window * 2 chars/token."""
+    from rebar.llm.model_classes import own_window_tokens
+
+    return own_window_tokens(model) * _CONTEXT_CHARS_PER_TOKEN
+
+
+def _validate_recovery_inputs(criteria: list[str], context: str, model: str | None) -> None:
     """Reject hostile/unbounded recovery work before the first recovery call."""
 
     if len(criteria) > _MAX_CRITERIA:
@@ -169,12 +184,25 @@ def _validate_recovery_inputs(criteria: list[str], context: str) -> None:
                 "criteria_completed": 0,
             },
         )
-    if len(context) > _MAX_CONTEXT_CHARS:
+    context_ceiling = physical_context_ceiling(model)
+    if len(context) > context_ceiling:
         raise CompletionRecoveryError(
             "completion recovery context bound exceeded",
             diagnostic={
                 "context_chars": len(context),
-                "context_char_limit": _MAX_CONTEXT_CHARS,
+                "context_char_limit": context_ceiling,
+                "criteria_completed": 0,
+            },
+        )
+    recovery_input_chars = len(context) * len(criteria)
+    if recovery_input_chars > _MAX_RECOVERY_INPUT_CHARS:
+        raise CompletionRecoveryError(
+            "completion recovery input product bound exceeded",
+            diagnostic={
+                "context_chars": len(context),
+                "criteria_total": len(criteria),
+                "recovery_input_chars": recovery_input_chars,
+                "recovery_input_char_limit": _MAX_RECOVERY_INPUT_CHARS,
                 "criteria_completed": 0,
             },
         )
@@ -507,7 +535,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                 ctx.inputs.get("context") or ctx.inputs.get("ticket_context") or ""
             )
             expected = explicit_completion_criteria(ticket)
-            _validate_recovery_inputs(expected, ticket_context)
+            _validate_recovery_inputs(expected, ticket_context, self._config.model)
             recovery_started = True
             for index, criterion in enumerate(expected):
                 instructions = (

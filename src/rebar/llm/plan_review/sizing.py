@@ -26,6 +26,7 @@ from typing import Any
 
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
 from rebar.llm.runner import Runner
 
 from . import det_floor, passes, registry
@@ -95,12 +96,8 @@ def pack_container_bins(
 
 
 # Model-by-window escalation ladder (estimated tokens → the smallest model whose
-# window fits; escalate up on a context-limit signal).
-MODEL_LADDER = (
-    ("claude-haiku-4-5", 200_000),
-    ("claude-sonnet-4-6", 1_000_000),
-    ("claude-opus-4-8", 1_000_000),
-)
+# window fits; escalate up on a context-limit signal). The table now lives in
+# model_classes.py (bug 8eb3) and is re-exported above under its historical name.
 
 # Per-plan BUDGET CAP tiers (experiment-grounded; config-overridable via
 # REBAR_PLAN_REVIEW_BUDGET). DET ~free, single-turn ~$0.006 cached, AGENT ~$0.12 (≈85×).

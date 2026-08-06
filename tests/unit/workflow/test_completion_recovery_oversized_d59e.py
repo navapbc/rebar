@@ -36,7 +36,7 @@ import json
 
 import pytest
 
-from rebar.llm.config import LLMConfig
+from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.errors import CompletionRecoveryError, UnretryableOutputError
 from rebar.llm.workflow import completion_recovery as _cr
 from rebar.llm.workflow.completion_recovery import CompletionAgentStep
@@ -48,6 +48,12 @@ pytestmark = pytest.mark.unit
 # motivating cases rather than an invented number.
 _NINE_FD4_CHARS = 34_282
 _TWO_NINE_THREE_TWO_CHARS = 41_595
+
+# The flat `_MAX_CONTEXT_CHARS` constant is retired (bug 8eb3): the physical context ceiling
+# is now derived from the resolved verifier model's own window. These tests consume the same
+# accessor the code does, evaluated for the default verifier model, so they track the
+# window-derived bound instead of a hard-coded number.
+_DEFAULT_CONTEXT_CEILING = _cr.physical_context_ceiling(VERIFIER_DEFAULT_MODEL)
 
 
 class _RecoverableRunner:
@@ -175,9 +181,9 @@ def test_the_criteria_budget_never_exceeds_the_context_budget() -> None:
     """Criteria ⊂ description ⊂ context, so a criteria budget larger than the context budget
     advertises capacity that cannot be used — the 32,000-vs-24,000 incoherence that made the
     top quarter of the criteria budget structurally unreachable."""
-    assert _cr._MAX_TOTAL_CRITERIA_CHARS <= _cr._MAX_CONTEXT_CHARS, (
+    assert _cr._MAX_TOTAL_CRITERIA_CHARS <= _DEFAULT_CONTEXT_CEILING, (
         f"criteria budget ({_cr._MAX_TOTAL_CRITERIA_CHARS:,}) exceeds the context budget "
-        f"({_cr._MAX_CONTEXT_CHARS:,}); every criteria set above the context budget would be "
+        f"({_DEFAULT_CONTEXT_CEILING:,}); every criteria set above the context budget would be "
         "accepted by one bound and refused by the other"
     )
 
@@ -185,9 +191,9 @@ def test_the_criteria_budget_never_exceeds_the_context_budget() -> None:
 def test_the_budget_covers_the_tickets_this_defect_blocked() -> None:
     """Regression floor: the budget must not drift back below the sizes that motivated it."""
     for label, size in (("9fd4", _NINE_FD4_CHARS), ("2932", _TWO_NINE_THREE_TWO_CHARS)):
-        assert size <= _cr._MAX_CONTEXT_CHARS, (
+        assert size <= _DEFAULT_CONTEXT_CEILING, (
             f"ticket {label} ({size:,} chars) would be refused again by a context budget of "
-            f"{_cr._MAX_CONTEXT_CHARS:,}"
+            f"{_DEFAULT_CONTEXT_CEILING:,}"
         )
 
 
@@ -200,10 +206,14 @@ def test_an_over_budget_payload_still_fails_before_any_billable_call(monkeypatch
     """
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *a, **k: _ticket())
     runner = _RecoverableRunner()
-    step = CompletionAgentStep(runner=runner, repo_root=None, config=LLMConfig(runner="fake"))
+    cfg = LLMConfig(runner="fake")
+    step = CompletionAgentStep(runner=runner, repo_root=None, config=cfg)
 
+    # The step derives its physical ceiling from its own resolved model, so breach THAT
+    # ceiling (not a hard-coded constant) by one char.
+    over_budget = "x" * (_cr.physical_context_ceiling(cfg.model) + 1)
     with pytest.raises(CompletionRecoveryError, match=r"context.*bound"):
-        step.run(_ctx("x" * (_cr._MAX_CONTEXT_CHARS + 1)))
+        step.run(_ctx(over_budget))
 
     assert len(runner.requests) == 1, (
         "an over-budget payload must not buy any billable recovery call; only the primary "
