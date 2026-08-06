@@ -110,4 +110,4 @@ def render_workflow(source, repo_root: str | None = None) -> str:
     return to_mermaid(doc)
 
 
-__all__ = ["to_mermaid", "render_workflow", "MAX_GRAPH_NODES", "MAX_GRAPH_EDGES"]
+__all__ = ["MAX_GRAPH_EDGES", "MAX_GRAPH_NODES", "render_workflow", "to_mermaid"]

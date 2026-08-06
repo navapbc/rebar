@@ -155,7 +155,7 @@ _DET_LEAF_GATE_RULES: dict[str, DetGateRule] = {
     "asserted-capability": DetGateRule(
         "module-capability-conjunction",
         (
-            r"(?:[\w/]+\.(?:py|sh|ts|js|go|rs)\b|\b[a-z_]\w*\.[a-z_]\w*\.[a-z_]\w*\b|\b[a-z]+(?:_[a-z0-9]+)+\b|\b(?:module|helper|function|class|subsystem|registry|reducer|adapter|client|store|layer|service|component|pipeline|engine|wrapper|utils?|library|suite|script|hook|gate|sidecar|verifier|reviewer|table|command|test|check|flag)\b)",  # noqa: E501 — audit-verbatim trigger regex (ticket 696a); do not rewrap
+            r"(?:[\w/]+\.(?:py|sh|ts|js|go|rs)\b|\b[a-z_]\w*\.[a-z_]\w*\.[a-z_]\w*\b|\b[a-z]+(?:_[a-z0-9]+)+\b|\b(?:module|helper|function|class|subsystem|registry|reducer|adapter|client|store|layer|service|component|pipeline|engine|wrapper|utils?|library|suite|script|hook|gate|sidecar|verifier|reviewer|table|command|test|check|flag)\b)",
             r"\b(?:already\b|exist\w*|lean(?:s|ing)?\s+on|lives?\s+in|\bcovers?\b|takes?\s+care|responsible\s+for|does not (?:have|support|provide|exist|emit|handle)|doesn'?t (?:have|support|provide|exist)|lacks?\b|missing\b|no existing\b|must be (?:built|added|created)|not (?:yet )?(?:present|implemented|supported)|(?:provides|supports|exposes|implements|emits|handles|owns)\b|can(?:not|'t)?\s+(?:handle|do|parse|emit|sign)|(?:won'?t|will\s+not|never|only)\s+\w+|reus\w*|extend\w*|delegates?\s+to|calls?\s+into|nothing\s+in\b|wire\w*)",  # noqa: E501 — audit-verbatim trigger regex (ticket 696a); do not rewrap
         ),
     ),

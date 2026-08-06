@@ -268,7 +268,8 @@ _EPIC_FIELDS = [
 #: Software project exists and GreenHopper has provisioned — but neither Epic
 #: field is among them. This is the axis `_SYSTEM_ONLY_FIELDS` does not vary, and
 #: it is the one that still has to fail loudly.
-_DEGRADED_CUSTOM_FIELDS = _SYSTEM_ONLY_FIELDS + [
+_DEGRADED_CUSTOM_FIELDS = [
+    *_SYSTEM_ONLY_FIELDS,
     {"id": "customfield_10200", "name": "Sprint", "custom": True},
     {"id": "customfield_10201", "name": "Story Points", "custom": True},
 ]

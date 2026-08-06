@@ -58,7 +58,7 @@ def test_user_override_wins(tmp_path: Path) -> None:
     text = prompts.canonical_prompt_text(_reviewer(), repo_root=str(tmp_path))
     assert text == "OVERRIDE {{ticket_id}}"
     # And resolve renders it strictly.
-    out, meta = prompts.resolve_prompt(_reviewer(), {"ticket_id": "Z"}, repo_root=str(tmp_path))
+    out, _meta = prompts.resolve_prompt(_reviewer(), {"ticket_id": "Z"}, repo_root=str(tmp_path))
     assert out == "OVERRIDE Z"
 
 

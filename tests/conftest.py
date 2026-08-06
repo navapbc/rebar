@@ -395,7 +395,7 @@ def block_extra() -> Iterator[Any]:
     blocked: set[str] = set()
 
     class _Blocker:
-        def find_spec(self, fullname, path=None, target=None):  # noqa: ANN001
+        def find_spec(self, fullname, path=None, target=None):
             if fullname in blocked or any(fullname.startswith(b + ".") for b in blocked):
                 raise ModuleNotFoundError(f"{fullname} blocked by the block_extra fixture")
             return None

@@ -84,26 +84,25 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         # must not be laundered into a signed "no caused_by bugs" attestation.
         try:
             floor = epic_bug_floor_findings(canonical, ctx.repo_root)
-        except Exception as exc:  # noqa: BLE001 — degrade open, withhold certification
+        except Exception as exc:
             logger.warning(
                 "epic-close caused_by floor read failed for %s; withholding certification",
                 canonical,
                 exc_info=True,
             )
-            uncertified = list(uncertified) + [
+            uncertified = [
+                *list(uncertified),
                 {
                     "criterion": f"open caused_by bugs against {canonical} could not be read",
                     "severity": "high",
                     "dimension": "completion",
-                    "detail": (
-                        f"could not enumerate open bugs to compute the caused_by floor for "
-                        f"{canonical} ({exc}); the close may proceed on the epic's own "
-                        "criteria but UNSIGNED. Re-close once the store read succeeds."
-                    ),
+                    "detail": f"could not enumerate open bugs to compute the caused_by floor for "
+                    f"{canonical} ({exc}); the close may proceed on the epic's own "
+                    "criteria but UNSIGNED. Re-close once the store read succeeds.",
                     "citations": [
                         {"kind": "source", "description": f"epic_bug_floor_findings: {exc}"}
                     ],
-                }
+                },
             ]
     if blocking or floor:
         # A direct child is NOT closed (or an open caused_by bug indicts the epic's own work)

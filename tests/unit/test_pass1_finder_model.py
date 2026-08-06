@@ -93,7 +93,7 @@ def _run_batch(monkeypatch, ladder: list[str], with_inputs: dict[str, Any] | Non
 
     captured: dict[str, str] = {}
 
-    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):  # noqa: ANN001
+    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):
         captured["model"] = cfg.model
         return []
 
@@ -171,7 +171,7 @@ def test_the_prerequisite_finder_packs_against_the_frontier_model(monkeypatch):
 
     captured: dict[str, Any] = {}
 
-    def _spy(blocks, **kwargs):  # noqa: ANN001, ANN003
+    def _spy(blocks, **kwargs):
         captured["model"] = kwargs.get("model")
         return [], []
 

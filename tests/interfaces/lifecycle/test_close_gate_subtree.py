@@ -31,7 +31,7 @@ def _enable(repo: Path) -> None:
     (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
 
 
-def PASS(ticket_id, **kw):  # noqa: N802 — mirrors test_completion_gate.py
+def PASS(ticket_id, **kw):
     return {"verdict": "PASS", "findings": [], "runner": "fake", "model": "m"}
 
 

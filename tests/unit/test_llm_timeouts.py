@@ -161,7 +161,7 @@ def test_stalled_server_trips_read_timeout_under_run_sync(_dummy_anthropic_key):
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
         t0 = time.monotonic()
         try:
-            with pytest.raises(BaseException) as exc_info:  # noqa: PT011,B017 — chain asserted below
+            with pytest.raises(BaseException) as exc_info:
                 Agent(model).run_sync("go")
             elapsed = time.monotonic() - t0
         finally:

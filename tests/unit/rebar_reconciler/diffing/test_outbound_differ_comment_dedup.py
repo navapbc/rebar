@@ -197,7 +197,7 @@ def test_one_new_comment_plus_two_existing_emits_exactly_one_add(
     differ must emit exactly 1 'add' mutation — for the new comment only."""
     jira_key = "DIG-100"
     existing_bodies = ["Already synced A", "Already synced B"]
-    local_bodies = existing_bodies + ["Brand new comment"]
+    local_bodies = [*existing_bodies, "Brand new comment"]
     ticket = _make_ticket_with_comments("local-2", local_bodies)
     store = StubBindingStore({"local-2": jira_key})
     snapshot = _make_jira_snapshot_with_comments(jira_key, existing_bodies)

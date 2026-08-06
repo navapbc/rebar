@@ -121,7 +121,7 @@ def _write_applied(tracker: str, ids: list[str]) -> None:
     marker is only a hint, so a write failure is swallowed and never fails the sweep."""
     try:
         fsutil.atomic_write(_applied_path(tracker), json.dumps(sorted(set(ids))))
-    except OSError as exc:  # noqa: BLE001 handled — marker is a hint, not correctness
+    except OSError as exc:
         logger.warning("run_ensures: could not write %s: %s", APPLIED_MARKER, exc)
 
 
@@ -249,5 +249,5 @@ def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
             len(pending),
             ", ".join(sorted(pending)),
         )
-    except Exception:  # noqa: BLE001 — fail-silent: the hint must NEVER fail a write
+    except Exception:
         logger.debug("pending-hint suppressed", exc_info=True)

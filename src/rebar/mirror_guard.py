@@ -120,7 +120,7 @@ def ruleset_verdict(ruleset: dict[str, Any] | None) -> dict[str, Any]:
 # ===========================================================================
 def _http_get(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0) -> bytes:
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (trusted hosts)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 

@@ -269,7 +269,7 @@ class _BatchAuditView:
     label in its fields; otherwise an empty string makes the audit pass-through.
     """
 
-    __slots__ = ("target", "payload", "action")
+    __slots__ = ("action", "payload", "target")
 
     def __init__(self, batch_mutation: dict) -> None:
         self.action = batch_mutation.get("action", "")

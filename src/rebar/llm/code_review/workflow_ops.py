@@ -617,7 +617,7 @@ def score_code_novelty(
                 str(entry.get("matched_prior_id") or ""),
             )
         return out
-    except Exception:  # noqa: BLE001 — fail-safe: any error → un-floored (no drops)
+    except Exception:
         logger.warning("code-review novelty scoring failed; running un-floored", exc_info=True)
         return {}
 
@@ -699,5 +699,5 @@ def apply_region_gated_floor(
                 for c in verdict["coaching"]
                 if not (set(c.get("finding_refs") or []) & carried_ids)
             ]
-    except Exception:  # noqa: BLE001 — fail-safe: any error leaves the verdict unfiltered (no drops)
+    except Exception:
         logger.warning("region-gated floor failed; leaving verdict unfiltered", exc_info=True)

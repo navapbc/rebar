@@ -187,7 +187,7 @@ def test_build_hook_writes_build_info(tmp_path: Path) -> None:
     target = root / "src" / "rebar" / "_build_info.py"
     target.write_text(f"COMMIT = {commit!r}\n")
     ns: dict = {}
-    exec(target.read_text(), ns)  # noqa: S102 — reading back the generated module
+    exec(target.read_text(), ns)
     assert ns["COMMIT"] == commit
 
 

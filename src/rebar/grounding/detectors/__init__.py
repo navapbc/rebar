@@ -30,11 +30,11 @@ from .registry import (
 )
 
 __all__ = [
+    "BACKENDS",
     "BACKEND_ASTGREP",
     "BACKEND_METRIC",
     "BACKEND_OPENGREP",
     "BACKEND_SARIF",
-    "BACKENDS",
     "DIMENSIONS",
     "Detector",
     "Registry",

@@ -68,11 +68,17 @@ __all__ = [
     "_MANIFEST_PREFIX",
     "_REFRESHED_PREFIX",
     "_REGVER_PREFIX",
+    "ManifestFormatError",
+    # re-exported from attest_gate (kept importable as attest.<name>; see the foot of this file)
+    "_attested_delivered",
     "_cited_paths",
     "_hash_basis",
     "_hash_file",
+    "_supersedes_child",
     "build_manifest",
+    "claim_gate_check",
     "classify_file_scope",
+    "delivered_now",
     "dependency_hashes",
     "is_plan_review_manifest",
     "manifest_deps",
@@ -80,19 +86,13 @@ __all__ = [
     "manifest_file_scope",
     "manifest_material",
     "manifest_pins",
+    "manifest_priority_floor",
     "manifest_rebar_version",
     "manifest_regver",
     "manifest_review_phase",
-    "manifest_priority_floor",
+    "plan_review_status",
     "registry_version",
     "validate_review_phase_metadata",
-    "ManifestFormatError",
-    # re-exported from attest_gate (kept importable as attest.<name>; see the foot of this file)
-    "_attested_delivered",
-    "_supersedes_child",
-    "claim_gate_check",
-    "delivered_now",
-    "plan_review_status",
 ]
 
 
@@ -193,7 +193,7 @@ def sign_plan_review(
             soak_min=LLMConfig.from_env(repo_root=repo_root).overlap_soak_min,
             repo_root=repo_root,
         )
-    except Exception:  # noqa: BLE001 — enqueue is best-effort; a failure never fails the sign
+    except Exception:
         logging.getLogger(__name__).warning(
             "enrichment enqueue on certification failed; continuing", exc_info=True
         )

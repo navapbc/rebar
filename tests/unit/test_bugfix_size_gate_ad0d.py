@@ -302,7 +302,7 @@ def test_non_bug_ticket_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_under_threshold_diff_never_reads_the_store(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*a, **k):  # noqa: ANN002, ANN003
+    def _boom(*a, **k):
         raise AssertionError("store must not be read for an under-floor diff")
 
     monkeypatch.setattr(bsg, "ticket_for_commit_message", _boom)
@@ -318,7 +318,7 @@ def test_under_threshold_diff_never_reads_the_store(monkeypatch: pytest.MonkeyPa
 
 
 def test_test_only_diff_is_exempt_even_when_huge(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*a, **k):  # noqa: ANN002, ANN003
+    def _boom(*a, **k):
         raise AssertionError("store must not be read for a test-only diff")
 
     monkeypatch.setattr(bsg, "classify_plan_review_attestation", _boom)

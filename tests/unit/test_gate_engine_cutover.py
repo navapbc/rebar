@@ -9,6 +9,7 @@ a systemic LLM outage degrades cleanly (never a hollow PASS / silent close).
 from __future__ import annotations
 
 import dataclasses
+from typing import ClassVar
 
 import pytest
 
@@ -227,7 +228,7 @@ def test_produce_plan_review_does_not_thread_code_snapshot_as_ticket_root(monkey
 
     class _Res:
         status = "succeeded"
-        terminal_output = {"verdict": "PASS", "ticket_id": "T-1", "coverage": {}}
+        terminal_output: ClassVar[dict] = {"verdict": "PASS", "ticket_id": "T-1", "coverage": {}}
         error = None
 
     def _fake_run_workflow(doc, inputs=None, *, target_ticket=None, repo_root=None, **kw):

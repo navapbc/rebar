@@ -222,7 +222,7 @@ def retrieve(
         # Deterministic order: score desc, then ticket_id for stable ties.
         candidates.sort(key=lambda c: (-c.score, c.ticket_id))
         return candidates[: cfg.overlap_k]
-    except Exception:  # noqa: BLE001 — advisory retrieval; never blocks the caller
+    except Exception:
         import logging
 
         logging.getLogger(__name__).warning("overlap retrieve failed; returning []", exc_info=True)

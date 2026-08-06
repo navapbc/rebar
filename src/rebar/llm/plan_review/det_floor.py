@@ -61,8 +61,8 @@ from typing import Any
 from rebar._plan_clarity import evaluate_plan_clarity
 
 from .det_clarity import (
-    p10_verification_presence,  # noqa: F401 — DET_CHECKS entry; lives in det_clarity (800-LOC cap)
-    p11_ac_vagueness,  # noqa: F401 — DET_CHECKS entry; lives in det_clarity (800-LOC cap)
+    p10_verification_presence,
+    p11_ac_vagueness,
     vague_hits_in_line,
 )
 from .det_lint import (
@@ -71,7 +71,7 @@ from .det_lint import (
     _lint_verify_command,
     _verify_command_strings,
     decomposition_state_block,  # noqa: F401 — re-exported for pass1.py + test_g5_decomp_det
-    p9_file_impact_coverage,  # noqa: F401 — the DET_CHECKS entry; moved for the 800-LOC cap
+    p9_file_impact_coverage,
     veto_undecomposed_g5,  # noqa: F401 — re-exported for pass1.py + test_g5_decomp_det
 )
 
@@ -696,7 +696,7 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
     for check in DET_CHECKS:
         try:
             results.append(check(ctx))
-        except Exception as exc:  # noqa: BLE001 — fail-open: a broken check abstains, never blocks; broad-but-logged with the traceback
+        except Exception as exc:
             # A DET check raising is an internal bug (not an expected fail-open like an
             # absent oracle): record the abstain in-band AND log it with the traceback so
             # the broken check is observable, not silently swallowed.
@@ -715,7 +715,7 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
         from .det_invariants import run_project_det_checks
 
         results.extend(run_project_det_checks(ctx))
-    except Exception:  # noqa: BLE001 — fail-open: the whole project-DET phase degrades to nothing, logged
+    except Exception:
         logger.warning("project DET phase raised; skipping", exc_info=True)
     return results
 

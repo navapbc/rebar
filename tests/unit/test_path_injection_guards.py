@@ -151,7 +151,7 @@ def test_rerun_502_body_has_no_exception_detail(monkeypatch: pytest.MonkeyPatch)
     from rebar.review_bot.gerrit_client import GerritError
 
     class _FakeGerrit:
-        def __init__(self, cfg):  # noqa: D107
+        def __init__(self, cfg):
             pass
 
         def get_change_event(self, change):

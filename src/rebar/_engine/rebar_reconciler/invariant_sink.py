@@ -150,7 +150,7 @@ def file_at_most_one_violations(
             # leave the alert record on disk. The next pass will hit is_deduped()
             # and skip — operators must manually file the bug or roll the alert
             # forward.
-            print(  # noqa: T201
+            print(
                 f"WARN: invariants.check_at_most_one_local_id: "
                 f"alert {v.dedup_key!r} filed but bug-ticket creation "
                 f"failed ({cli_error}); alert is orphan-without-bug.",

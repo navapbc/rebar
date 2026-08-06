@@ -38,7 +38,7 @@ class _OutageRunner:
     def preflight(self) -> None:
         raise LLMUnavailableError("simulated systemic provider outage")
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         raise LLMUnavailableError("simulated systemic provider outage")
 
 
@@ -48,7 +48,7 @@ class _AlwaysTruncatedRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         exc = UnretryableOutputError("finish_reason=length token cap")
         exc.trace_id = "trace-cap-123"
         exc.usage = {
@@ -66,7 +66,7 @@ class _RefusalRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         raise UnretryableOutputError("the model refused to answer")
 
 

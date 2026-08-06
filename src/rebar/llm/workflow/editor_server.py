@@ -180,7 +180,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def do_GET(self):  # noqa: N802 - stdlib handler name
+    def do_GET(self):
         if not self._host_ok():
             self._send(403, "forbidden", "text/plain")
             return
@@ -237,7 +237,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         else:
             self._send(404, "not found", "text/plain")
 
-    def do_POST(self):  # noqa: N802 - stdlib handler name
+    def do_POST(self):
         if self.path not in _POST_WRITE_PATHS:
             self._send(404, '{"errors":["unknown endpoint"]}', "application/json")
             return

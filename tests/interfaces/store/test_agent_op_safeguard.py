@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 import rebar
-import rebar.llm  # noqa: F401
+import rebar.llm
 from rebar.llm import config as llmcfg
 from rebar.llm import gate_source
 from rebar.llm.workflow import runs
@@ -155,8 +156,8 @@ def test_run_workflow_executes_llm_workflow_inside_gate_session(tmp_path, monkey
             status = "succeeded"
             terminal_step = None
             terminal_output = None
-            outputs: dict = {}
-            steps: dict = {}
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()

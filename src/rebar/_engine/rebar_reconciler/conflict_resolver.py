@@ -128,7 +128,7 @@ def _element_id(field_name: str, element: Any) -> str:
 
     if isinstance(element, dict):
         if field_name == "comments":
-            if "id" in element and element["id"]:
+            if element.get("id"):
                 return str(element["id"])
             body = element.get("body", "")
             return hashlib.sha256(str(body).encode("utf-8")).hexdigest()

@@ -127,7 +127,7 @@ def test_fsck_warns_on_branch_mismatch(tmp_path: Path, monkeypatch: pytest.Monke
         '[tool.rebar]\ntracker.branch = "branch-b"\n', encoding="utf-8"
     )
     cfg.reset_config_cache()
-    rc, out, err = _run_fsck(repo)
+    _rc, out, err = _run_fsck(repo)
     combined = out + err
     assert "WARN" in combined
     assert "branch-b" in combined and "branch-a" in combined

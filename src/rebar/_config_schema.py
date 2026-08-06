@@ -20,7 +20,7 @@ import logging
 import urllib.parse
 from dataclasses import dataclass, field
 
-from rebar._config_coercion import (  # noqa: F401 — re-exported for callers
+from rebar._config_coercion import (
     ConfigError,
     _as_bool,
     _as_choice,

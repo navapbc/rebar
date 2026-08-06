@@ -83,7 +83,7 @@ def test_compact_rides_out_contended_index_lock(rebar_repo: Path, monkeypatch) -
     attempts: list[tuple[int, int, bool]] = []
     released = {"done": False}
 
-    def _probe(n: int, result) -> None:  # noqa: ANN001
+    def _probe(n: int, result) -> None:
         is_lock = gitutil._is_index_lock_error(result.stderr or result.stdout or "")
         attempts.append((n, result.returncode, is_lock))
         # Release the lock only AFTER the first genuine index.lock failure is confirmed, so

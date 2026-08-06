@@ -163,7 +163,7 @@ def test_an_ignored_subtask_reparent_raises_instead_of_reporting_success() -> No
     """
     client = _FakeClient(parent_key="RBJ-1", applies_writes=False)
 
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011 — type pinned by its own cell
+    with pytest.raises(Exception) as excinfo:
         _transport(client).set_parent("RBJ-3", "RBJ-2")
 
     message = str(excinfo.value)

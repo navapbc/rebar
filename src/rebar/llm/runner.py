@@ -48,8 +48,8 @@ from rebar.llm.providers import ProviderSession
 from rebar.llm.structured_run import (
     FailureContext,
     _extract_usage,
-    _import_pydantic_ai,  # noqa: F401  (re-exported: tests patch it on `runner`)
-    _pai_check_config,  # noqa: F401  (re-exported: tests import it from `runner`)
+    _import_pydantic_ai,
+    _pai_check_config,
     _pai_structured,
     _warn_if_zeroed_usage,
     build_model_settings,

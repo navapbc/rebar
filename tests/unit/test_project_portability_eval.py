@@ -112,7 +112,7 @@ def test_gold_set():
 
 # ── calibrate_criterion metric math under an injected perfect solve ──────────────
 def test_calibration_metrics():
-    def _perfect_solve(pid, case):  # noqa: ANN001
+    def _perfect_solve(pid, case):
         fires = case.get("expect") in ("finding", "fail")
         return {"findings": [{"criteria": ["project.portability"]}] if fires else []}
 

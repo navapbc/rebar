@@ -289,15 +289,13 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
         _reason = "no-write mode" if not persist else "filtered pass"
         # Diagnostic line → stderr so no-write mode keeps STDOUT a pure JSON
         # payload (the computed plan) for library/MCP callers.
-        print(  # noqa: T201
+        print(
             f"invariants: skipped ({_reason}, {len(curr_snapshot)} issues in snapshot)",
             file=sys.stderr,
         )
     else:
         filed = invariants_mod.check_at_most_one_local_id(curr_snapshot, repo_root=repo_root)
-        print(  # noqa: T201
-            f"invariants: scanned={len(curr_snapshot)} filed={len(filed)} (cap=5)"
-        )
+        print(f"invariants: scanned={len(curr_snapshot)} filed={len(filed)} (cap=5)")
 
     # Invariant phase: verify dual-identity round-trip on the post-fetch
     # snapshot before diffing. Quarantine one-sided keys (skipped by the
@@ -417,7 +415,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
             )
         except Exception as exc:  # noqa: BLE001 — fail-open: a total recovery failure is non-fatal
             recovery_failures.append({"local_id": "<all>", "reason": repr(exc)})
-            print(  # noqa: T201
+            print(
                 f"reconcile: binding recovery failed ({exc}), continuing",
                 file=sys.stderr,
             )
@@ -490,7 +488,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     _ob_creates = sum(1 for m in outbound_raw if m.action == "create")
     _ob_updates = sum(1 for m in outbound_raw if m.action == "update")
     _ob_deletes = sum(1 for m in outbound_raw if m.action == "delete")
-    print(  # noqa: T201
+    print(
         f"RECON: outbound_differ total={len(outbound_raw)} "
         f"create={_ob_creates} update={_ob_updates} delete={_ob_deletes}",
         file=sys.stderr,
@@ -601,13 +599,13 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
     _ib_with_fields = sum(1 for m in inbound_new if m.fields)
     _ib_with_labels = sum(1 for m in inbound_new if m.labels)
     _ib_with_comments = sum(1 for m in inbound_new if getattr(m, "comments", []))
-    print(  # noqa: T201
+    print(
         f"RECON: inbound_differ total={len(inbound_new)} "
         f"with_fields={_ib_with_fields} with_labels={_ib_with_labels} "
         f"with_comments={_ib_with_comments}",
         file=sys.stderr,
     )
-    print(  # noqa: T201
+    print(
         f"RECON: bidir_suppressed inbound={_ib_suppressed}",
         file=sys.stderr,
     )

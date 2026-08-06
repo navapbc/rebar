@@ -187,7 +187,7 @@ def test_cli_start_then_append(rebar_repo: Path) -> None:
 
 
 def test_cli_unknown_action_is_usage_error(rebar_repo: Path) -> None:
-    rc, out, err = _cli(rebar_repo, "session-log", "frobnicate")
+    rc, _out, err = _cli(rebar_repo, "session-log", "frobnicate")
     assert rc == 1
     assert "Usage" in err
 

@@ -72,11 +72,11 @@ class _ReadSpy:
         parent = _parent_state()
         child = _child_state()
 
-        def _show(tid, *, repo_root=None):  # noqa: ANN001
+        def _show(tid, *, repo_root=None):
             self.show_calls.append(tid)
             return dict(child) if tid == _CHILD else dict(parent)
 
-        def _list(*, parent=None, repo_root=None):  # noqa: ANN001
+        def _list(*, parent=None, repo_root=None):
             self.list_calls.append(parent)
             return [dict(child)] if children else []
 
@@ -208,7 +208,7 @@ def test_distinct_keys_are_cached_separately(monkeypatch) -> None:
 
     seen: list[str] = []
 
-    def _show(tid, *, repo_root=None):  # noqa: ANN001
+    def _show(tid, *, repo_root=None):
         seen.append(tid)
         return {
             "ticket_id": tid,

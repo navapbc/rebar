@@ -145,7 +145,7 @@ def emit(
             change_fp=change_fp,
         )
         append_event(target_ticket, EVENT_TYPE, payload, tracker, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — sidecar is best-effort; a failure must not fail the gate
+    except Exception:
         logger.warning("code-review REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
     return True
@@ -184,7 +184,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})")
         return len(old)
-    except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the gate
+    except Exception:
         logger.warning("code-review REVIEW_RESULT sidecar prune failed; continuing", exc_info=True)
         return 0
 
@@ -228,7 +228,7 @@ def reviewed_file_hashes(paths, *, repo_root=None) -> dict[str, str]:
     try:
         base = attest._hash_basis(repo_root)
         return {p: attest._hash_file(p, base=base) for p in sorted(set(paths or []))}
-    except Exception:  # noqa: BLE001 — deps collection is best-effort; never fails the gate
+    except Exception:
         logger.warning(
             "code-review reviewed_file_hashes failed; returning empty deps", exc_info=True
         )
@@ -273,7 +273,7 @@ def _latest_payload_with_ts(ticket_id: str, *, repo_root=None) -> tuple[dict[str
         return None, -1
     except (FileNotFoundError, NotADirectoryError):
         return None, -1
-    except Exception:  # noqa: BLE001 — reader is best-effort; never raises into the floor
+    except Exception:
         logger.warning("code_review _latest_payload_with_ts failed", exc_info=True)
         return None, -1
 
@@ -315,7 +315,7 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
         return out
     except (FileNotFoundError, NotADirectoryError):
         return []
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "code_review sidecar history read failed; treating as no history", exc_info=True
         )
@@ -385,7 +385,7 @@ def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | N
             "session_id": best_payload.get("session_id"),
             "change_id": best_payload.get("change_id"),
         }
-    except Exception:  # noqa: BLE001 — reader is best-effort; a failure ⇒ no prior memory (no drops)
+    except Exception:
         logger.warning(
             "code-review latest_code_review_result failed; treating as no prior memory",
             exc_info=True,

@@ -225,7 +225,7 @@ def test_unknown_criterion_raises(tmp_path):
 
 
 def test_neither_id_nor_inline_raises():
-    with pytest.raises(PreviewError, match="criterion_id.*inline"):
+    with pytest.raises(PreviewError, match=r"criterion_id.*inline"):
         preview_criterion({"fixture": {"input": "x"}}, repo_root=None)
 
 
@@ -233,7 +233,7 @@ def test_neither_id_nor_inline_raises():
 class _SlowRunner:
     name = "slow"
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         time.sleep(1.0)
         return {"findings": []}
 
@@ -392,7 +392,7 @@ def test_preview_or_job_slow_returns_job_then_polls_to_result(tmp_path):
     class _SlowFire:
         name = "slow-fire"
 
-        def run(self, req):  # noqa: ANN001, ANN201
+        def run(self, req):
             time.sleep(0.5)
             from rebar.llm import findings as _f
 
@@ -438,7 +438,7 @@ def test_poll_unknown_job_is_404():
 
 
 def test_poll_missing_job_id_is_400():
-    code, body = poll_job("")
+    code, _body = poll_job("")
     assert code == 400
 
 

@@ -63,7 +63,7 @@ def _tracing_extra_installed() -> bool:
     """True when the ``[tracing]`` extra (OTel SDK + OTLP exporter) is importable —
     without it ``setup_tracing`` is a silent no-op and nothing is exported."""
     try:
-        import opentelemetry.exporter.otlp.proto.http.trace_exporter  # noqa: F401
+        import opentelemetry.exporter.otlp.proto.http.trace_exporter
         import opentelemetry.sdk.trace  # noqa: F401
     except Exception:  # noqa: BLE001 — extra absent
         return False
@@ -90,7 +90,7 @@ def _lf_get(path: str) -> dict | None:
     token = base64.b64encode(f"{_LF_PK}:{_LF_SK}".encode()).decode()
     req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted local host)
+        with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

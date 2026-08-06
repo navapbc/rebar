@@ -177,7 +177,7 @@ def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root
     if target_type == "ARCHIVED":
         try:
             remove_marker(str(ticket_dir))
-        except Exception:  # noqa: BLE001 — best-effort .archived marker clear on REVERT-of-ARCHIVED; broad-but-logged
+        except Exception:
             logger.warning(
                 "could not clear .archived marker for %s after REVERT; continuing",
                 resolved,

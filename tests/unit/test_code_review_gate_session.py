@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -90,9 +91,14 @@ def test_code_review_gate_runs_attested_with_code_and_ticket_roots(
             workflow_name = doc.get("name")
             status = "succeeded"
             terminal_step = None
-            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
-            outputs: dict = {}
-            steps: dict = {}
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()
@@ -153,7 +159,7 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
     test already covers), and takes the PRODUCTION path (``runner=None``) so the rebuild is
     actually exercised — an injected runner would mask it.
     """
-    repo, tid = repo_with_origin
+    repo, _tid = repo_with_origin
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-store"))
     monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
@@ -192,9 +198,14 @@ def test_code_review_gate_runner_is_rebuilt_from_rerooted_ticket_store(
             workflow_name = doc.get("name")
             status = "succeeded"
             terminal_step = None
-            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
-            outputs: dict = {}
-            steps: dict = {}
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()
@@ -297,9 +308,14 @@ Review the change against the pinned project policy.
             workflow_name = doc.get("name")
             status = "succeeded"
             terminal_step = None
-            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
-            outputs: dict = {}
-            steps: dict = {}
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()
@@ -346,9 +362,14 @@ def test_code_review_gate_local_aligns_agent_config_with_execution_root(
             workflow_name = doc.get("name")
             status = "succeeded"
             terminal_step = None
-            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
-            outputs: dict = {}
-            steps: dict = {}
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()
@@ -386,8 +407,8 @@ def _stub_workflow(monkeypatch, verdict: dict) -> None:
             status = "succeeded"
             terminal_step = None
             terminal_output = verdict
-            outputs: dict = {}
-            steps: dict = {}
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()
@@ -481,9 +502,14 @@ def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
             workflow_name = doc.get("name")
             status = "succeeded"
             terminal_step = None
-            terminal_output = {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
-            outputs: dict = {}
-            steps: dict = {}
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
             error = None
 
         return _R()

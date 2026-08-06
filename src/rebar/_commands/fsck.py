@@ -595,8 +595,8 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         sys.stderr.write(f"WARNING: {compat_error['detail']}\n")
 
     if fmt == "json":
-        full = "\n".join(lines + [summary])
+        full = "\n".join([*lines, summary])
         sys.stdout.write(_transform_json(full, compat_error) + "\n")
         return rc
-    sys.stdout.write("\n".join(lines + [summary]) + "\n")
+    sys.stdout.write("\n".join([*lines, summary]) + "\n")
     return rc

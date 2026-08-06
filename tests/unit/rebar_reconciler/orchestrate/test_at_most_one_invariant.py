@@ -295,7 +295,7 @@ def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleTy
 
     stub = types.ModuleType("reconcile_fetcher")
 
-    def _fetch(pid, repo_root):  # noqa: ANN001
+    def _fetch(pid, repo_root):
         # Write the snapshot for this pass
         out_dir = repo_root / "bridge_state" / "snapshots"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +316,7 @@ def _make_stub_differ() -> ModuleType:
 def _make_stub_applier(tmp_path: Path) -> ModuleType:
     stub = types.ModuleType("reconcile_applier")
 
-    def _apply(mutations, pass_id, repo_root, **kwargs):  # noqa: ANN001
+    def _apply(mutations, pass_id, repo_root, **kwargs):
         # Bug 85a1: reconcile_once now passes binding_store=; accept and
         # ignore for stub purposes.
         manifest = repo_root / "bridge_state" / "manifests" / f"{pass_id}.json"
@@ -380,7 +380,7 @@ def test_reconcile_once_invokes_invariant_after_fetch(tmp_path):
         reconcile_mod.reconcile_once(pass_id, repo_root=tmp_path)
     finally:
         # Clean up injected stubs
-        for key in _RECONCILE_COLLAB_KEYS + ("reconcile",):
+        for key in (*_RECONCILE_COLLAB_KEYS, "reconcile"):
             sys.modules.pop(key, None)
 
     # check_at_most_one_local_id must have been called exactly once

@@ -16,7 +16,7 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 # The one shared structured-rejection code. A state-dependent write
 # (transition/claim/reopen) that fails optimistic concurrency surfaces this
@@ -184,7 +184,7 @@ class CliAdapter(Adapter):
         return self._ok_json("show", tid)
 
     # Library kwarg -> CLI list flag (ticket_type maps to --type).
-    _LIST_FLAGS = {
+    _LIST_FLAGS: ClassVar[dict] = {
         "status": "--status",
         "ticket_type": "--type",
         "priority": "--priority",

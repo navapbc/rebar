@@ -59,6 +59,7 @@ from rebar._mcp_writes import register_write_tools
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "MCP_ENV_VARS",
     "BridgeFsckOut",
     "ClaimResultOut",
     "ClarityResultOut",
@@ -68,6 +69,7 @@ __all__ = [
     "GateResultOut",
     "GroundingBackendOut",
     "GroundingInfoOut",
+    "McpStartupError",
     "NextBatchOut",
     "SignResultOut",
     "TicketStateOut",
@@ -75,8 +77,6 @@ __all__ = [
     "VerifyCommandItemOut",
     "VerifySignatureResultOut",
     "WorkflowRunOut",
-    "MCP_ENV_VARS",
-    "McpStartupError",
     "build_server",
     "main",
 ]
@@ -709,7 +709,7 @@ def main() -> None:
         # ``except Exception`` below; this explicit re-raise makes the intent loud and
         # survives a future widening of the handler.
         raise
-    except Exception:  # noqa: BLE001 — boot must never abort on the ensure sweep
+    except Exception:
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 
     # Load config once; a malformed config (ConfigError) may propagate and fail startup

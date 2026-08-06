@@ -101,7 +101,7 @@ def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — compact-on-close is non-blocking; broad-but-logged, the close still stands
+    except Exception:
         logger.warning(
             "compact-on-close failed for %s; continuing (close stands)", ticket_id, exc_info=True
         )
@@ -223,7 +223,7 @@ def _apply_caused_by(
         from rebar.graph._links import _write_link_event
 
         _write_link_event(ticket_id, culprit, "caused_by", str(config.tracker_dir(repo_root)))
-    except Exception:  # noqa: BLE001 — caused_by is best-effort; a failure must NEVER block the close
+    except Exception:
         logger.warning(
             "best-effort caused_by link on close of %s failed; close stands",
             ticket_id,
@@ -442,7 +442,7 @@ def close_ticket(
             from rebar._commands import leaf
 
             leaf.comment(ticket_id, body, repo_root=repo_root)
-        except Exception:  # noqa: BLE001 — best-effort force-close audit comment; broad-but-logged, close proceeds
+        except Exception:
             logger.warning(
                 "could not write FORCE_CLOSE audit comment on %s; continuing",
                 ticket_id,

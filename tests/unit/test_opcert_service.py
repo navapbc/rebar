@@ -264,7 +264,7 @@ def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch,
 
 
 def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkeypatch):
-    src, tid, main_head = _make_source(tmp_path, monkeypatch)
+    src, tid, _main_head = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
 
     def review_plan_signs(t, rr):

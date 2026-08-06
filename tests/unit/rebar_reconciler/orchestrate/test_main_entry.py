@@ -181,7 +181,7 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     mode_stub = types.ModuleType("_mode_stub")
 
     # Provide a real Mode-like object for LIVE
-    class _FakeMode:  # noqa: N801
+    class _FakeMode:
         value = "live"
 
         @classmethod

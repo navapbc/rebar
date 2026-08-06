@@ -28,7 +28,7 @@ import pytest
 
 # The interface adapters live at the tests/interfaces root (put on sys.path by the
 # tier conftest); ``_unwrap`` normalises a FastMCP call_tool result to a plain value.
-from adapters import _unwrap  # noqa: E402
+from adapters import _unwrap
 
 import rebar
 

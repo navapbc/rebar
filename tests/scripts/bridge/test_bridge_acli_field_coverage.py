@@ -188,7 +188,7 @@ class TestAcliClientCreateFieldExtraction:
         the dict must be unwrapped to its 'name' so the payload contains
         additionalAttributes.priority.name == "High".
         """
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
 
         # Jira REST snapshot shape — what fetcher.py:88-93 forwards into the
         # differ-emitted mutation, what applier.py:337-351 then passes through
@@ -228,7 +228,7 @@ class TestAcliClientCreateFieldExtraction:
     ) -> None:
         """When the priority dict lacks `name` but has `id`, fall back to the
         reverse-id lookup against _LOCAL_PRIORITY_TO_JIRA. id="2" -> "High"."""
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         ticket_data = {
             "ticket_type": "bug",
             "title": "Test id-only",
@@ -257,7 +257,7 @@ class TestAcliClientCreateFieldExtraction:
         """When the priority dict is malformed (no name, no usable id), the
         fallback must default to 'Medium' rather than crashing or sending an
         invalid priority to ACLI."""
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         ticket_data = {
             "ticket_type": "bug",
             "title": "Test malformed",
@@ -465,7 +465,7 @@ class TestAcliContractRegression:
         (set-replace, would destroy existing labels) or to a snake_case form,
         this test fails.
         """
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
 
@@ -495,7 +495,7 @@ class TestAcliContractRegression:
         self, acli_mod: Any, acli_capture: Any
     ) -> None:
         """remove_label MUST use 'labelsToRemove' (additive remove, not destructive)."""
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
 
@@ -526,7 +526,7 @@ class TestAcliContractRegression:
         projectKey is rejected by ACLI with 'ProjectKey can't be null or
         blank'. Tests with priority=1 to force the --from-json path.
         """
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
 
@@ -561,7 +561,7 @@ class TestAcliContractRegression:
         additionalAttributes.priority = {"name": "High"} or {"id": "2"}.
         Top-level 'priority' on the create payload yields 'unknown field'.
         """
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
 
@@ -789,7 +789,7 @@ class TestAcliSanitizers:
         self, acli_mod: Any, acli_capture: Any, mock_jira_verify: Any
     ) -> None:
         """Oversize titles must be truncated, not crash the reconciler."""
-        client, captured_cmds, fake_run_acli = acli_capture
+        client, _captured_cmds, fake_run_acli = acli_capture
         captured_payloads: list[Any] = []
         original_dump = json.dump
 

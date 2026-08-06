@@ -7,6 +7,9 @@ exactly one violated invariant:
 
 - ``[tool.ruff.lint].select`` enables the ``ASYNC`` family.
 - ``[tool.ruff.lint].select`` enables the ``DTZ`` family.
+- ``[tool.ruff.lint].select`` enables the ``RUF`` family, with the ambiguous-unicode
+  families ``RUF001``/``RUF002``/``RUF003`` deferred in exactly ``[tool.ruff.lint].ignore``
+  (no ``extend-ignore``, and no ``per-file-ignores`` entry selecting ``RUF``) — story 125d.
 - the ``S`` (flake8-bandit security) selector is NOT enabled — security scanning is
   handled by the dedicated grounding detectors, not Ruff's ``S`` family.
 - no root-level semgrep config artifact (``.semgrep.yml`` / ``.semgrep.yaml`` /
@@ -29,6 +32,12 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 SRC_REBAR = REPO_ROOT / "src" / "rebar"
+
+
+def _ruff_lint_table() -> dict:
+    """Return the ``[tool.ruff.lint]`` table from pyproject.toml (empty dict if absent)."""
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    return data.get("tool", {}).get("ruff", {}).get("lint", {})
 
 
 def _ruff_select() -> list[str]:
@@ -55,6 +64,46 @@ def test_ruff_select_enables_async() -> None:
 
 def test_ruff_select_enables_dtz() -> None:
     assert "DTZ" in _ruff_select(), "the DTZ rule family must be enabled in ruff select"
+
+
+def test_ruff_select_enables_ruf() -> None:
+    assert "RUF" in _ruff_select(), (
+        "the RUF (Ruff-native) rule family must be enabled in ruff select (story 125d)"
+    )
+
+
+def test_ruff_ignore_is_exactly_the_ruf_unicode_deferral() -> None:
+    # The global RUF deferral is pinned to exactly RUF001/RUF002/RUF003 (ambiguous-unicode
+    # families that flag intentional prose / UI content). Nothing else is globally ignored.
+    ignore = list(_ruff_lint_table().get("ignore", []))
+    assert ignore == ["RUF001", "RUF002", "RUF003"], (
+        "[tool.ruff.lint].ignore must be exactly ['RUF001', 'RUF002', 'RUF003'] "
+        f"(the deferred ambiguous-unicode families), got {ignore!r}"
+    )
+
+
+def test_ruff_lint_has_no_extend_ignore() -> None:
+    # The deferral lives only in the exact `ignore` key; `extend-ignore` would be a second,
+    # drift-prone place to silence rules.
+    assert "extend-ignore" not in _ruff_lint_table(), (
+        "[tool.ruff.lint] must not define `extend-ignore`; the only global deferral key is "
+        "`ignore` (story 125d)"
+    )
+
+
+def test_no_per_file_ignore_selects_ruf() -> None:
+    # Deterministically prohibit broad or code-specific RUF per-file exemptions: no configured
+    # per-file-ignores code may equal `RUF` or start with `RUF` (e.g. RUF100, RUF012).
+    per_file = _ruff_lint_table().get("per-file-ignores", {})
+    offenders = {
+        pattern: [code for code in codes if code == "RUF" or code.startswith("RUF")]
+        for pattern, codes in per_file.items()
+        if any(code == "RUF" or code.startswith("RUF") for code in codes)
+    }
+    assert not offenders, (
+        "no per-file-ignores entry may select the RUF family or a RUF code; the RUF deferral "
+        f"belongs only in the global `ignore` key. Offending patterns: {offenders}"
+    )
 
 
 def test_ruff_select_does_not_enable_bandit_security() -> None:

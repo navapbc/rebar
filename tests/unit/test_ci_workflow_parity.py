@@ -219,7 +219,7 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
     import subprocess
     import sys
 
-    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+    proc = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", selection, *paths],
         cwd=_ROOT,
         capture_output=True,

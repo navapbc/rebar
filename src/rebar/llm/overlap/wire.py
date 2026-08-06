@@ -55,6 +55,6 @@ def overlap_findings(
         return judge_mod.judge(
             ticket_id, query_digest, candidates, corpus, config=cfg, runner=runner
         )
-    except Exception:  # noqa: BLE001 — advisory-only; a failure NEVER blocks or fails the review
+    except Exception:
         logger.warning("store-wide overlap step failed; no overlap findings", exc_info=True)
         return []

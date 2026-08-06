@@ -331,7 +331,7 @@ def _truncating_paged_search(server: _ClampingSearch) -> list[dict[str, Any]]:
     status, body = server("/rest/api/2/search?jql=project%3DRBJ&startAt=0&maxResults=100")
     assert status == 200
     issues = body["issues"]
-    return issues if len(issues) >= 100 else issues
+    return issues
 
 
 def test_the_raw_count_sees_every_issue_a_clamped_search_withholds(support: Any) -> None:

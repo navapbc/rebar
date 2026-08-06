@@ -84,11 +84,6 @@ from rebar_reconciler.adapters.jira_family import sanitize_summary as _sanitize_
 # keeps resolving for callers and the characterization suites; ``__all__`` records
 # them as intentional re-exports.
 __all__ = [
-    "AcliMutationError",
-    "AcliTimeoutError",
-    "AssigneeNotFoundError",
-    "InvalidLabelError",
-    "RetryExhaustedError",
     "_ASSIGNEE_NOT_FOUND_ERROR",
     "_ASSIGNEE_PERMISSION_ERROR",
     "_AUTH_FAILURE_CODE",
@@ -96,6 +91,11 @@ __all__ = [
     "_JIRA_LABEL_MAX_CHARS",
     "_JIRA_SUMMARY_MAX_CHARS",
     "_MAX_ATTEMPTS",
+    "AcliMutationError",
+    "AcliTimeoutError",
+    "AssigneeNotFoundError",
+    "InvalidLabelError",
+    "RetryExhaustedError",
     "_attach_parent_guarded",
     "_build_env",
     "_check_mutation_failure",
@@ -360,7 +360,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 try:
                     self.unassign_issue(jira_key)
                 except Exception as exc:  # noqa: BLE001 — fail-open: unassign non-fatal, batch continues
-                    print(  # noqa: T201
+                    print(
                         f"update_issue: unassign_issue({jira_key}) failed: {exc!r}",
                         file=sys.stderr,
                     )

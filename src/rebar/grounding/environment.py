@@ -139,4 +139,4 @@ def refute_via_environment(ref: Mapping[str, Any]) -> dict[str, Any] | None:
     )
 
 
-__all__ = ["BACKEND_ENV", "resolve_in_environment", "refute_via_environment"]
+__all__ = ["BACKEND_ENV", "refute_via_environment", "resolve_in_environment"]

@@ -32,7 +32,7 @@ _TOKEN_ENV = "JIRA_API_TOKEN"
 class _Detected:
     """The resolved (non-secret) Jira coordinates + whether the secret token is set."""
 
-    __slots__ = ("url", "user", "project", "api_token")
+    __slots__ = ("api_token", "project", "url", "user")
 
     def __init__(self, url: str, user: str, project: str, api_token: str) -> None:
         self.url, self.user, self.project, self.api_token = url, user, project, api_token

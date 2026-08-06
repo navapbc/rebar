@@ -34,7 +34,7 @@ def _seed(repo: Path) -> str:
 def _spy_produce(monkeypatch, captured: dict) -> None:
     from rebar.llm.workflow import gate_dispatch
 
-    def _fake(ticket_id, *, graph, repo_root, cfg, runner):  # noqa: ANN001
+    def _fake(ticket_id, *, graph, repo_root, cfg, runner):
         captured["max_iterations"] = cfg.max_iterations
         return {"verdict": "PASS", "findings": [], "runner": "fake", "model": cfg.model}
 

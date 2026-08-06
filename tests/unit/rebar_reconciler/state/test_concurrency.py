@@ -166,7 +166,7 @@ def test_rebase_retry_reject_and_reschedule_when_all_attempts_drift(
     # Returning a different SHA each call guarantees drift on every attempt.
     sha_seq = iter(["aaaa" * 10, "bbbb" * 10, "cccc" * 10, "dddd" * 10, "eeee" * 10, "ffff" * 10])
 
-    def fake_snapshot_head(repo_root):  # noqa: ARG001
+    def fake_snapshot_head(repo_root):
         return next(sha_seq)
 
     def write_fn():
@@ -200,7 +200,7 @@ def test_rebase_retry_retries_on_drift_then_succeeds(concurrency, tmp_git_repo: 
 
     write_call_count = {"n": 0}
 
-    def fake_snapshot_head(repo_root):  # noqa: ARG001
+    def fake_snapshot_head(repo_root):
         return next(sha_seq)
 
     def write_fn():

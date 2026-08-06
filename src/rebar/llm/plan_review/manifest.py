@@ -235,7 +235,7 @@ def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
                 sha = resolve_ref(gate_source.default_ref(root), root, fetch=False)
                 handle = _cache.acquire(sha, source_mode="attested", repo_root=root, fetch=False)
                 return str(handle.path)
-        except Exception:  # noqa: BLE001 — gate-ref snapshot unavailable → degrade to the working tree (never crash the gate)
+        except Exception:
             logger.warning(
                 "current gate-ref snapshot unavailable; hashing the working tree", exc_info=True
             )

@@ -130,7 +130,7 @@ def close_plan_review_gate_check(
         if isinstance(validity.get("health"), dict):
             result["health"] = validity["health"]
         return result
-    except Exception:  # noqa: BLE001 -- local signature/plan reads must fail closed
+    except Exception:
         record = {"event": "plan_review_close_gate_unavailable", "ticket_id": ticket_id}
         logger.warning(
             "plan-review close gate unavailable: %s", record, extra=record, exc_info=True
@@ -203,7 +203,7 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
                 f'attestation was verified. Reason: "{force_reason}".',
                 repo_root=repo_root,
             )
-        except Exception:  # noqa: BLE001 — best-effort force-claim audit comment; broad-but-logged, the start proceeds
+        except Exception:
             logger.warning(
                 "could not write FORCE_CLAIM audit comment on %s; continuing",
                 ticket_id,

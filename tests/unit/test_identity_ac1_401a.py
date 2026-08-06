@@ -55,7 +55,7 @@ def test_create_identity_rejects_private_key(store: Path) -> None:
     """A CREATE carrying an OpenSSH PRIVATE key is refused (raises), and no identity is
     created (the store is unchanged)."""
     before = len(rebar.list_tickets(ticket_type="identity", repo_root=str(store)))
-    with pytest.raises(Exception):  # noqa: B017,PT011 — private-key material must be refused
+    with pytest.raises(Exception):  # noqa: B017 — private-key material must be refused
         rebar.create_identity(
             "Mallory", "m@example.com", keys=[_OPENSSH_PRIVATE], repo_root=str(store)
         )

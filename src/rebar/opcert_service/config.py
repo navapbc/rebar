@@ -15,7 +15,7 @@ from dataclasses import dataclass
 DEFAULT_JOB_TIMEOUT_SECONDS = 900
 
 #: The SSM SecureString holding the environment's passphrase-free Ed25519 op-cert PRIVATE key.
-DEFAULT_SSM_KEY_PARAM = "/rebar/prod/opcert-ed25519-key"  # noqa: S105 — a parameter NAME, not a secret
+DEFAULT_SSM_KEY_PARAM = "/rebar/prod/opcert-ed25519-key"
 
 #: The code branch fetched from the review remote (its tip is the ``merged_log_commit``).
 DEFAULT_REVIEW_BRANCH = "main"

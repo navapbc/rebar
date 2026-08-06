@@ -23,7 +23,7 @@ from rebar._store import lock as _lock
 
 
 def test_ensure_fresh_does_not_stall_on_held_write_lock(repo_with_origin_tickets):
-    repo, tracker, tid = repo_with_origin_tickets
+    _repo, tracker, tid = repo_with_origin_tickets
     _clear_sync_throttle(tracker)
 
     acquired = threading.Event()
@@ -61,7 +61,7 @@ def test_cli_show_complete_or_erroring_under_write_burst(repo_with_origin_ticket
     the real CLI under REBAR_SYNC_PUSH=always (background pushes contend) — every
     `rebar show` must be COMPLETE-or-ERRORING: never empty stdout with a zero exit.
     Exercises the consumer-facing path the bug broke (pipe `show` into a parser)."""
-    repo, tracker, tid = repo_with_origin_tickets
+    repo, _tracker, tid = repo_with_origin_tickets
     monkeypatch.delenv("REBAR_SYNC_PUSH", raising=False)  # let the CLI helper set =always
 
     # A few more tickets so the burst is real.

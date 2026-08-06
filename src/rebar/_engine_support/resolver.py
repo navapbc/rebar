@@ -35,11 +35,11 @@ from rebar._ids import (
 )
 
 __all__ = [
-    "resolve_ticket_id",
-    "resolve_ticket_dir_name",
+    "_FULL_ID_RE",
+    "_JIRA_KEY_RE",
+    "_SHORT_ID_RE",
     "_resolve_via_binding_store",
     "_scan_alias",
-    "_FULL_ID_RE",
-    "_SHORT_ID_RE",
-    "_JIRA_KEY_RE",
+    "resolve_ticket_dir_name",
+    "resolve_ticket_id",
 ]

@@ -49,7 +49,7 @@ def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> dict:
     real_run = gitutil.subprocess.run
     state = {"commits": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         is_commit = isinstance(cmd, list) and "commit" in cmd
         if is_commit:
             state["commits"] += 1
@@ -88,7 +88,7 @@ def test_nontransient_commit_failure_still_fails_immediately(
     real_run = gitutil.subprocess.run
     state = {"commits": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         if isinstance(cmd, list) and "commit" in cmd:
             state["commits"] += 1
             return subprocess.CompletedProcess(

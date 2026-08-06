@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import jwt
 import pytest
@@ -69,7 +70,7 @@ def _mint(priv=_PRIV, alg="RS256", **overrides) -> str:
 
 
 class _FakeJWKClient:
-    instances: list = []
+    instances: ClassVar[list] = []
 
     def __init__(self, uri, *args, timeout=None, **kwargs):
         self.uri = uri

@@ -129,7 +129,7 @@ def test_nonlock_failure_is_unaffected(tmp_path: Path, monkeypatch: pytest.Monke
     real_run = event_append.subprocess.run
     calls = {"commit": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         if isinstance(cmd, list) and "commit" in cmd:
             calls["commit"] += 1
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="fatal: some other error")

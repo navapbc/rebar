@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar.llm  # noqa: F401
+import rebar.llm
 from rebar._snapshot import repo_snapshot as rs
 from rebar.llm.runner import FakeRunner
 

@@ -61,7 +61,7 @@ class _RecoverableRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
@@ -202,7 +202,7 @@ def test_an_over_budget_payload_still_fails_before_any_billable_call(monkeypatch
     runner = _RecoverableRunner()
     step = CompletionAgentStep(runner=runner, repo_root=None, config=LLMConfig(runner="fake"))
 
-    with pytest.raises(CompletionRecoveryError, match="context.*bound"):
+    with pytest.raises(CompletionRecoveryError, match=r"context.*bound"):
         step.run(_ctx("x" * (_cr._MAX_CONTEXT_CHARS + 1)))
 
     assert len(runner.requests) == 1, (

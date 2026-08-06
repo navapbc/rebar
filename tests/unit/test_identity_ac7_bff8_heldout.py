@@ -109,7 +109,7 @@ def test_json_report_shape_and_schema(repo: Path) -> None:
     assert entry["display"] in {"verified", "unverified", "unsigned"}
 
     # Validate every entry against the shipped report schema.
-    import jsonschema  # noqa: PLC0415 — test-only dependency
+    import jsonschema
 
     schema_path = (
         Path(rebar.__file__).resolve().parent / "schemas" / "verify_identity_report.schema.json"

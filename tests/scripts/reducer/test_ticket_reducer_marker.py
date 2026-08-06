@@ -46,7 +46,7 @@ def test_marker_imports_from_package() -> None:
     RED: marker.py does not exist yet — ImportError expected until implemented.
     SC8: covers import contract for all three public functions.
     """
-    from rebar.reducer import check_marker, remove_marker, write_marker  # noqa: F401
+    from rebar.reducer import check_marker, remove_marker, write_marker
 
     assert callable(write_marker), "write_marker must be callable"
     assert callable(remove_marker), "remove_marker must be callable"

@@ -86,7 +86,7 @@ def test_fsck_quiet_when_in_sync(
     repo_with_origin: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo, tracker = repo_with_origin
+    _repo, tracker = repo_with_origin
     # Push HEAD to origin so local and origin/tickets are level.
     _git_q("push", "origin", "HEAD:tickets", cwd=tracker)
     _git_q("fetch", "origin", "tickets", cwd=tracker)
@@ -112,7 +112,7 @@ def test_fsck_reports_diverged_on_unrelated_history(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo, tracker = repo_with_origin
+    _repo, tracker = repo_with_origin
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # Rewrite the local tracker onto an orphan branch that shares NO history with
     # origin/tickets — exactly the divergent empty/independent store bug 01e8 produced.
@@ -140,7 +140,7 @@ def test_fsck_reports_diverged_on_non_fast_forward(
 ) -> None:
     from rebar._commands import fsck
 
-    repo, tracker = repo_with_origin
+    _repo, tracker = repo_with_origin
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")
     # Advance origin/tickets by one commit the local tracker never sees, then make a
     # divergent local commit atop the shared base: common ancestor exists, but neither

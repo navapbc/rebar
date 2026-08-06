@@ -138,7 +138,7 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
             repo_root=repo_root,
             creation_channel=provider,
         )
-    except Exception:  # noqa: BLE001 — best-effort ghost mint; never fail the inbound apply
+    except Exception:
         logger.debug(
             "inbound: could not ensure identity for jira user %r", external_id, exc_info=True
         )
@@ -271,7 +271,7 @@ def _inbound_create_record_binding(mutation, binding_store, local_id, jira_key) 
         else:
             import sys as _sys
 
-            print(  # noqa: T201
+            print(
                 f"WARNING: inbound_create: binding store lacks bind_confirm; "
                 f"{local_id!r}<->{jira_key!r} NOT bound at create — the next "
                 f"pass will re-emit an outbound create (dedup-skip will "
@@ -311,7 +311,7 @@ def _inbound_create_writeback_jira(
         except Exception as exc:  # noqa: BLE001 — fail-open: skip comment bootstrap, CREATE still succeeds
             import sys as _sys
 
-            print(  # noqa: T201
+            print(
                 f"WARNING: inbound_create: get_comments for {jira_key!r} failed "
                 f"({exc!r}). Skipping comment bootstrap — ticket created without "
                 f"pre-existing comments. Alert: jira_key={jira_key!r}",

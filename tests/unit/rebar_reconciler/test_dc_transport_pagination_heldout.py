@@ -50,7 +50,7 @@ class _PageCappingClient:
         self.server_cap = server_cap
         self.comment_calls: list[str] = []
 
-    def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):  # noqa: N803
+    def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):
         return self.issues[startAt : startAt + min(maxResults, self.server_cap)]
 
     def comments(self, key):
@@ -106,7 +106,7 @@ def test_get_parent_map_still_recovers_everything() -> None:
     the defect class."""
 
     class _ParentClient(_PageCappingClient):
-        def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):  # noqa: N803
+        def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):
             page = self.issues[startAt : startAt + min(maxResults, self.server_cap)]
             return [{"key": i["key"], "fields": {"parent": {"key": "DC-EPIC"}}} for i in page]
 
@@ -378,7 +378,7 @@ class _OffsetBlindClient:
             for i in range(page_len)
         ]
 
-    def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):  # noqa: N803
+    def search_issues(self, jql, startAt=0, maxResults=50, fields=None, **kw):
         self.calls.append(startAt)
         # A guarded pager stops at 2 calls. The cap keeps an UNGUARDED pager from hanging
         # the suite, and is deliberately far above 2 so "stopped at 2" is a real assertion

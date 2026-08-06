@@ -246,16 +246,14 @@ def run_repair(
 
 def _print_text(findings: list[dict[str, Any]], pre_oid: str, *, repaired: bool) -> None:
     if pre_oid:
-        print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")  # noqa: T201
+        print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
     for f in findings:
         status = f.get("repair_status")
         suffix = f" [{status}: {f.get('repair_reason', '')}]" if status else ""
-        print(  # noqa: T201
-            f"{f['kind']}: {f['source']} {f['relation']} {f['target']} — {f['detail']}{suffix}"
-        )
+        print(f"{f['kind']}: {f['source']} {f['relation']} {f['target']} — {f['detail']}{suffix}")
     outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
     verb = "outstanding" if repaired else "finding(s)"
-    print(f"doctor: {len(findings)} finding(s), {outstanding} {verb}")  # noqa: T201
+    print(f"doctor: {len(findings)} finding(s), {outstanding} {verb}")
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -263,14 +261,14 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     try:
         fmt, rest = parse_output(argv, allowed=("text", "json"), default="text")
     except OutputFormatError as exc:
-        print(f"Error: {exc}", file=sys.stderr)  # noqa: T201
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     do_repair = "--repair" in rest
     dry_run = "--dry-run" in rest
     unknown = [a for a in rest if a not in ("--repair", "--dry-run")]
     if unknown:
-        print(  # noqa: T201
+        print(
             f"Usage: rebar doctor [--repair] [--dry-run] [--output json]\n"
             f"  unexpected argument(s): {' '.join(unknown)}",
             file=sys.stderr,
@@ -285,11 +283,11 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
         try:
             findings, pre_oid = run_repair(findings, tracker, repo_root=repo_root)
         except CommandError as exc:
-            print(exc.message, file=sys.stderr)  # noqa: T201
+            print(exc.message, file=sys.stderr)
             return 1
 
     if fmt == "json":
-        print(  # noqa: T201
+        print(
             json.dumps(
                 {
                     "findings": findings,

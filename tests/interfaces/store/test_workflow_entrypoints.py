@@ -19,7 +19,7 @@ import rebar
 
 pytest.importorskip("jsonschema")
 
-from adapters import _unwrap  # noqa: E402  (tests/interfaces on sys.path)
+from adapters import _unwrap
 
 AGENT_WF = {
     "schema_version": "1",

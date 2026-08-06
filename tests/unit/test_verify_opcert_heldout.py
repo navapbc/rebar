@@ -139,7 +139,7 @@ def test_missing_opcert_fails_when_enforced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = _store(tmp_path, monkeypatch)
-    priv, pub = _keypair(tmp_path, "env")
+    _priv, pub = _keypair(tmp_path, "env")
     tid = rebar.create_ticket("task", "ungated", repo_root=str(repo))
     _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
     rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, but NO op-cert
@@ -182,7 +182,7 @@ def test_grandfathered_ticket_passes_without_cert(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = _store(tmp_path, monkeypatch)
-    priv, pub = _keypair(tmp_path, "env")
+    _priv, pub = _keypair(tmp_path, "env")
     tid = rebar.create_ticket("task", "old work", repo_root=str(repo))
     _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
     rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, no cert

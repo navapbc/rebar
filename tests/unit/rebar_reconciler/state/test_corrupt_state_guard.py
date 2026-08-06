@@ -399,7 +399,7 @@ class TestHealthyStateRegression:
             "ticket_type": "task",
             "assignee": "",
             "tags": [],
-            "comments": [{"body": b} for b in existing_bodies + [new_body]],
+            "comments": [{"body": b} for b in [*existing_bodies, new_body]],
             "deps": [],
         }
 

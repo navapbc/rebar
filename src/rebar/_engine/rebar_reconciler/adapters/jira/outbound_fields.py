@@ -431,7 +431,7 @@ def _diff_fields(
         # This runs only on the differ's bound-update path (jira_key present), so the
         # binding is bound; "confirmed" is therefore just "not still pending".
         if arbitration_prev is None and not binding_store.is_pending(local_id):
-            print(  # noqa: T201 — operator-facing RECON: cold-start diagnostic on stderr
+            print(
                 f"RECON: baseline_cold_start local_id={local_id}",
                 file=sys.stderr,
                 flush=True,
@@ -506,7 +506,7 @@ def _diff_fields(
                         # someone (else we'd have converged above) — clear it.
                         changed[field_name] = ""
                         if verbose:
-                            print(  # noqa: T201
+                            print(
                                 f"RECON: field_diff ticket={ticket_id} field=assignee "
                                 f"local={local_val!r:.80} -> unassign (unmappable)",
                                 file=sys.stderr,
@@ -519,7 +519,7 @@ def _diff_fields(
                         changed[field_name] = acct
                         changed["_assignee_is_account_id"] = True
                         if verbose:
-                            print(  # noqa: T201
+                            print(
                                 f"RECON: field_diff ticket={ticket_id} field=assignee "
                                 f"local={local_val!r:.80} -> accountId={acct!r:.80} (identity)",
                                 file=sys.stderr,
@@ -528,7 +528,7 @@ def _diff_fields(
                     # Resolvable but mismatched → assign (applier re-resolves the string).
             changed[field_name] = local_val
             if verbose:
-                print(  # noqa: T201
+                print(
                     f"RECON: field_diff ticket={ticket_id} "
                     f"field=assignee local={local_val!r:.80} "
                     f"jira={jira_assignee!r:.80}",
@@ -556,7 +556,7 @@ def _diff_fields(
                     continue  # never managed this Jira parent -> adopt inbound, don't clear
                 changed[field_name] = local_val
                 if verbose:
-                    print(  # noqa: T201
+                    print(
                         f"RECON: field_diff ticket={ticket_id} "
                         f"field=parent local={local_val!r:.80} "
                         f"jira={jira_parent_key!r:.80}",
@@ -610,7 +610,7 @@ def _diff_fields(
                     _l = _l[:77] + "..."
                 if len(_j) > 80:
                     _j = _j[:77] + "..."
-                print(  # noqa: T201
+                print(
                     f"RECON: field_diff ticket={ticket_id} field={field_name} local={_l} jira={_j}",
                     file=sys.stderr,
                 )

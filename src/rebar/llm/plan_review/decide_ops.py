@@ -206,7 +206,7 @@ def plan_review_decide(ctx: StepContext) -> dict[str, Any]:
     try:
         _desc = orchestrator.assemble_context(_ticket_id(ctx), repo_root=ctx.repo_root).description
         enrich_operator_attested(findings, verifs, _desc)
-    except Exception:  # noqa: BLE001 — best-effort enrichment; never fail the gate on it
+    except Exception:
         logger.debug("operator-attested enrichment skipped", exc_info=True)
 
     # The size-ladder's "too big at the largest model" findings are DET-style BLOCKS;

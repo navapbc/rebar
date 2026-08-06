@@ -44,7 +44,7 @@ def _attested_delivered(ticket: dict[str, Any], *, repo_root=None) -> bool:
         return bool(
             compute_validity(sig, ticket, "completion-verifier", repo_root=repo_root).get("valid")
         )
-    except Exception:  # noqa: BLE001 — never let a signature read crash the predicate; fail closed
+    except Exception:
         logger.warning("delivered_now: attestation read failed for %s", tid, exc_info=True)
         return False
 
@@ -111,7 +111,7 @@ def claim_gate_check(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
 
     try:
         result = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — signing subsystem unavailable → fail-closed at the gate; broad-but-logged
+    except Exception as exc:
         # Fail closed (the gate denies the claim) but log: a broken signing subsystem
         # is an operator-actionable failure, not a routine denial.
         logger.warning("signing unavailable; failing the claim gate closed", exc_info=True)

@@ -45,7 +45,7 @@ def _capture_review_plan(monkeypatch: pytest.MonkeyPatch, calls: list[dict]) -> 
     """Stub ``rebar.llm.review_plan`` and record every kwarg the shim forwards."""
     import rebar.llm
 
-    def _fake(ticket_id, **kw):  # noqa: ANN001, ANN003
+    def _fake(ticket_id, **kw):
         calls.append({"ticket_id": ticket_id, **kw})
         return {
             "verdict": "PASS",
@@ -183,7 +183,7 @@ def test_non_claimable_fast_fails(
 
     llm_calls: list[object] = []
 
-    def _boom(*a, **kw):  # noqa: ANN002, ANN003
+    def _boom(*a, **kw):
         llm_calls.append(a)
         raise AssertionError("the fast-fail path must not reach the model")
 

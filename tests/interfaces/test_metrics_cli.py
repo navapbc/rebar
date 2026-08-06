@@ -16,7 +16,7 @@ from datetime import date
 import pytest
 
 import rebar
-import rebar.metrics  # noqa: F401 — hydrate REGISTRY via package __init__ (side-effect import)
+import rebar.metrics
 from rebar.metrics.analyzer import AnalyzerResult
 from rebar.metrics.analyzers import jscpd_dup, lizard_complexity, scc_loc
 from rebar.metrics.registry import REGISTRY, MetricSpec, Unavailable

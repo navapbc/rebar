@@ -67,7 +67,7 @@ def test_parse_rejects_empty() -> None:
 def test_parse_rejects_over_byte_cap() -> None:
     big = "name: x\n" + ("# pad padding padding\n" * 20000)
     assert len(big.encode()) > wf.MAX_WORKFLOW_BYTES
-    with pytest.raises(WorkflowParseError, match="over the .* cap"):
+    with pytest.raises(WorkflowParseError, match=r"over the .* cap"):
         wf.parse_workflow(big)
 
 

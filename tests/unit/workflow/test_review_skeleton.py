@@ -78,7 +78,7 @@ def _run(plan_text: str):
 
 
 def test_skeleton_runs_offline_with_conditional_inclusion_and_journaled_plan():
-    rec, tracer = _run("the design persists a secret credential to disk")
+    rec, _tracer = _run("the design persists a secret credential to disk")
     # All four passes ran; the security criterion was INCLUDED (the plan trips the trigger).
     assert rec.store["triggers"]["status"] == "succeeded"
     finders = rec.store["finders"]["outputs"]

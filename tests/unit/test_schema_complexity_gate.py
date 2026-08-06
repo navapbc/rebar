@@ -31,11 +31,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai", reason="structured-output modes need the [agents] extra")
 
-from pydantic import BaseModel  # noqa: E402
-from pydantic_ai import NativeOutput, PromptedOutput  # noqa: E402
+from pydantic import BaseModel
+from pydantic_ai import NativeOutput, PromptedOutput
 
-from rebar.llm import capabilities, contracts, structured  # noqa: E402
-from rebar.llm.errors import LLMUnavailableError  # noqa: E402
+from rebar.llm import capabilities, contracts, structured
+from rebar.llm.errors import LLMUnavailableError
 
 # The model whose capability row makes native structured output reachable at all (story 18ae).
 # Named as a literal so this test fails loudly if the row is retargeted rather than passing
@@ -95,7 +95,7 @@ def test_output_mode_refuses_native_for_a_contract_the_provider_cannot_compile(c
     leaving the code-review gate broken still fails here — those are two different gates and
     the code-review one casts the Gerrit ``LLM-Review`` vote.
     """
-    import rebar.llm.plan_review.passes  # noqa: F401  (registers plan_review_verification)
+    import rebar.llm.plan_review.passes
 
     try:
         import rebar.llm.code_review.registry  # noqa: F401

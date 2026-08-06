@@ -302,7 +302,8 @@ def test_structured_validity_eval_meets_threshold():
     # recover a valid structured verdict from >= 99% of them (the recall/false-accept
     # gate that authorizes retiring the second-interpreter LLM). Only genuinely
     # content-empty output (no recoverable JSON) is allowed to fail.
-    recoverable = list(_NEAR_MISS.values()) + [
+    recoverable = [
+        *_NEAR_MISS.values(),
         '{"verdict":"FAIL","confidence":0.2}',
         'Result:\n```\n{"verdict": "PASS"}\n```',
         '{"verdict": "PASS"  "confidence": 0.7}',  # missing comma
@@ -312,7 +313,7 @@ def test_structured_validity_eval_meets_threshold():
     # tautological 1.0): the stack must recover EVERY recoverable item AND reject the
     # unrecoverable one, so validity over the recoverable subset is exactly 1.0 while
     # the unrecoverable one raises.
-    corpus = recoverable + ["the model declined; there is no json anywhere here"]
+    corpus = [*recoverable, "the model declined; there is no json anywhere here"]
     recovered = sum(1 for text in recoverable if _recovers(text))
     assert recovered == len(recoverable), "a recoverable near-miss was not recovered"
     assert not _recovers(corpus[-1]), "the unrecoverable item must NOT be fabricated into a value"

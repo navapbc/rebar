@@ -24,7 +24,7 @@ def boto3_ssm_fetcher(parameter_name: str) -> str:
     """The production fetcher: read the SSM SecureString with ``WithDecryption=True`` via the
     ambient AWS credentials/region. ``boto3`` is imported HERE (lazily) so the package stays
     importable without the ``reviewbot`` extra; a deploy that routes real jobs installs it."""
-    import boto3  # noqa: PLC0415 — lazy: only the running service (with the extra) needs boto3
+    import boto3
 
     client = boto3.client("ssm")
     resp = client.get_parameter(Name=parameter_name, WithDecryption=True)

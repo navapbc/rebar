@@ -303,7 +303,7 @@ def _create_from_json_payload(
             with os.fdopen(fd, "w") as f:
                 fd_owned = True  # fd is now owned by the file object
                 json.dump(payload, f)
-        except Exception:  # noqa: BLE001 — fd cleanup on write failure: close the fd if unowned, then re-raise (never swallowed)
+        except Exception:
             if not fd_owned:
                 os.close(fd)
             raise

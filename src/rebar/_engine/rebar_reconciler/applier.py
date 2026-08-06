@@ -286,30 +286,30 @@ from rebar_reconciler.apply_planning import (  # noqa: E402
 # Listing them in ``__all__`` documents that public surface and marks the imports
 # as intentional re-exports.
 __all__ = [
-    "ApplyResult",
-    "DirectionMismatchError",
     "EXIT_RESCHEDULE",
-    "JiraAPIError",
-    "RebarIdLabelWriteError",
-    "RescheduleError",
-    "RetryExhaustedError",
-    "StatusMappingError",
-    "UnknownActionError",
     "_AUTHORIZED_REBAR_ID_LABEL_ACTIONS",
     "_AUTHORIZED_REBAR_ID_LABEL_WRITERS",
     "_AUTHORIZED_REBAR_ID_LABEL_WRITERS_DOC",
     "_BRIDGE_INTERNAL_TAG_PREFIXES",
-    "_ErrorsModule",
     "_JIRA_PRIORITY_MAP",
     "_JIRA_TYPE_MAP",
     "_LEAF_NAMES",
     "_LEAVES",
     "_LOCAL_STATUS_VALUES",
     "_MUTATION_KEY",
-    "_MutationModule",
     "_REBAR_STATUS_LABEL_TO_LOCAL",
     "_TICKET_REDUCER_MODULE",
     "_VALID_PRIORITY_RANGE",
+    "ApplyResult",
+    "DirectionMismatchError",
+    "JiraAPIError",
+    "RebarIdLabelWriteError",
+    "RescheduleError",
+    "RetryExhaustedError",
+    "StatusMappingError",
+    "UnknownActionError",
+    "_ErrorsModule",
+    "_MutationModule",
     "_apply_inbound_clean_label",
     "_apply_inbound_conflict",
     "_apply_inbound_create",
@@ -446,7 +446,7 @@ def apply(
         if isinstance(pending, dict):
             pending_bug_tickets.append(pending)
 
-    print(  # noqa: T201
+    print(
         f"RECON: typed_inbound_dispatched count={len(inbound_typed)} "
         f"suppressed_pairs={len(suppression.suppressed_pairs)}",
         file=sys.stderr,
@@ -481,7 +481,7 @@ def apply(
                 try:
                     _file_conflict_bug_ticket(cli_path, pending)
                 except Exception as exc:  # noqa: BLE001 — best-effort deferred bug filing must not fail pass
-                    print(  # noqa: T201
+                    print(
                         f"deferred_bug_filing_failed: "
                         f"local_id={pending.get('local_id')!r} "
                         f"jira_key={pending.get('jira_key')!r} err={exc!r}",
@@ -688,7 +688,7 @@ def _recheck_drift(concurrency, repo_root: Path, head_pin: str) -> str:
     if _drift_is_benign(drift_subject):
         # Benign external writer — accept the new HEAD and continue. Log so
         # operators can see the writer.
-        print(  # noqa: T201
+        print(
             f"tolerated_drift: {head_pin[:8]}→{current_head[:8]} subject={drift_subject!r}",
             file=sys.stderr,
         )
@@ -748,7 +748,7 @@ def _print_batch_recon(action: str, outcome: dict, *, soft_failed: bool) -> None
         )
     else:
         _recon_subops = ""
-    print(  # noqa: T201
+    print(
         f"RECON: batch_outcome action={action} key={_outcome_key} "
         f"error={_outcome_err!r}{_recon_subops}",
         file=sys.stderr,

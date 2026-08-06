@@ -180,9 +180,9 @@ class DefaultBatchRunner(BatchRunner):
 
 __all__ = [
     "AgentStepRunner",
-    "FakeAgentRunner",
     "BatchRunRequest",
     "BatchRunResult",
     "BatchRunner",
     "DefaultBatchRunner",
+    "FakeAgentRunner",
 ]

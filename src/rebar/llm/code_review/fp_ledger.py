@@ -151,10 +151,10 @@ def compile_fp_ledger(repo_root: str | None = None) -> list[dict]:
 
 
 __all__ = [
-    "NON_TRIVIAL_DIFF_LINES",
-    "MIN_SURVIVING_HIGH_PRIORITY",
-    "MAX_PASS2_DROP_RATE",
     "FP_ROOT_CAUSES",
-    "is_non_trivial_diff",
+    "MAX_PASS2_DROP_RATE",
+    "MIN_SURVIVING_HIGH_PRIORITY",
+    "NON_TRIVIAL_DIFF_LINES",
     "compile_fp_ledger",
+    "is_non_trivial_diff",
 ]

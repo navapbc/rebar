@@ -32,7 +32,7 @@ from __future__ import annotations
 #    catalog INSTANCE. (Module assignments, not `import X as Y`, so isort never drops them.) The
 #    submodule is resolved via importlib because the kernel package re-exports a `coach` FUNCTION
 #    that shadows the `coach` submodule attribute on the package.
-import importlib  # noqa: E402
+import importlib
 import logging
 import re
 from typing import Any
@@ -122,7 +122,7 @@ def _pass1_model() -> type:
             description="Flexible grounding: a plan quote, section name, or ABSENCE rationale.",
         )
         scenarios: list[str] = Field(default_factory=list, description="Where this bites.")
-        impact: str = Field(default="", description="Consequence if unaddressed.")  # noqa: F811  (name reused across scopes: kernel re-export vs this Field)
+        impact: str = Field(default="", description="Consequence if unaddressed.")
         checklist_item: str = Field(
             default="",
             description="The finding expressed as ONE actionable `- [ ]` checklist line.",

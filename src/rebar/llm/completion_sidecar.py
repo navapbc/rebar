@@ -58,7 +58,7 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(verdict, material=material)
         append_event(payload["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the close
+    except Exception:
         # Observability floor: the sidecar is best-effort — a failed emit must never fail
         # the close, but the failure itself is a real signal worth a stderr diagnostic.
         logger.warning("COMPLETION_VERDICT sidecar emit failed; continuing", exc_info=True)
@@ -97,7 +97,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: COMPLETION_VERDICT sidecar for {rid} (retain {keep})")
         return len(old)
-    except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the close
+    except Exception:
         logger.warning("COMPLETION_VERDICT sidecar prune failed; continuing", exc_info=True)
         return 0
 
@@ -138,7 +138,7 @@ def latest_fail_verdict(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
         return None
     except FileNotFoundError:
         return None  # ticket dir absent → no prior FAIL record
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "COMPLETION_VERDICT sidecar read failed; treating as no prior record", exc_info=True
         )
@@ -182,7 +182,7 @@ def latest_pass_record(ticket_id: str, *, repo_root=None) -> dict[str, Any] | No
         return None
     except FileNotFoundError:
         return None  # ticket dir absent → no prior PASS record
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "COMPLETION_VERDICT PASS sidecar read failed; treating as no prior record",
             exc_info=True,
@@ -211,7 +211,7 @@ def emit_screen_tally(
     try:
         tracker = _config.tracker_dir(repo_root)
         append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort observability sidecar, never fails the close
+    except Exception:
         logger.warning("epic bug screen tally sidecar emit failed; continuing", exc_info=True)
         return False
     return True
@@ -246,7 +246,7 @@ def latest_screen_tally(ticket_id: str, *, repo_root=None) -> dict[str, Any] | N
         return None
     except FileNotFoundError:
         return None
-    except Exception:  # noqa: BLE001 — best-effort observability reader, never raises
+    except Exception:
         logger.warning("epic bug screen tally read failed; treating as absent", exc_info=True)
         return None
 

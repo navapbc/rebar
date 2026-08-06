@@ -116,7 +116,7 @@ def test_drift_mid_pass_raises_head_drift_error(tmp_path, applier):
 
     # Sequence: pin (stable), iter-1 check (stable), iter-2 check (drifted)
     head_seq = [sha_stable, sha_stable, sha_drifted]
-    mock_acli_mod, mock_client = _make_mock_acli_module()
+    mock_acli_mod, _mock_client = _make_mock_acli_module()
     mock_concurrency = _make_mock_concurrency_module(head_seq)
 
     mutations = [
@@ -166,7 +166,7 @@ def test_empty_mutations_no_head_check(tmp_path, applier):
     per-iteration check when the mutations list is empty.  (Internal calls made
     by rebase_retry are separately tracked and are not the drift guard.)
     """
-    mock_acli_mod, mock_client = _make_mock_acli_module()
+    mock_acli_mod, _mock_client = _make_mock_acli_module()
 
     # Tracks calls made directly by apply() (not inside rebase_retry)
     direct_snapshot_calls: list = []

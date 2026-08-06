@@ -372,7 +372,16 @@ line-length = 100
 # GitHub Code Quality (CodeQL) surfaced; it is low-noise here (the few deliberate
 # long-lived handles carry an inline `# noqa: SIM115`). We take SIM115 only, not
 # the wider SIM group, which is noisier for this codebase.
-select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115", "ASYNC", "DTZ"]
+select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115", "ASYNC", "DTZ", "RUF"]
+
+# ── RUF (Ruff-native) hygiene ratchet (story 125d) ────────────────────────────
+# The RUF family is enabled tree-wide. The only deferral is the ambiguous-unicode
+# trio RUF001/RUF002/RUF003: many flagged glyphs are intentional prose or UI content,
+# so they stay globally ignored here — and ONLY here (no `extend-ignore`, and no
+# `per-file-ignores` entry may select RUF; `test_ruff_ratchet.py` enforces both). Every
+# other enabled RUF diagnostic across `src/rebar` and `tests` was remediated before the
+# family was selected, so a NEW RUF finding fails CI everywhere.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 # ── BLE001 / T201 per-file-ignores (epic ring-gun-jot — CLOSED OUT) ───────────
 # The shrinking allowlist (a clone of the `.github/module-size-allowlist.txt`

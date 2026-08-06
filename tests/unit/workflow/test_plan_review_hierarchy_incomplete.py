@@ -46,10 +46,10 @@ def test_total_enumeration_failure_flags_hierarchy_incomplete(monkeypatch) -> No
     ``hierarchy_incomplete_detail == ["enumeration"]``, and ``children`` stays empty (the prior
     silent-continue behavior for the read itself is unchanged; only the new flag is added)."""
 
-    def _show(tid, *, repo_root=None):  # noqa: ANN001
+    def _show(tid, *, repo_root=None):
         return _parent_state(tid)
 
-    def _list(*, parent=None, repo_root=None):  # noqa: ANN001
+    def _list(*, parent=None, repo_root=None):
         raise RuntimeError("store unavailable")
 
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
@@ -86,12 +86,12 @@ def test_partial_child_fetch_failure_records_child_id(monkeypatch) -> None:
     ``list_tickets`` is still kept in ``children`` (the existing per-child fallback, unchanged)."""
     child_summary = {"ticket_id": _CHILD, "ticket_type": "task", "title": "child"}
 
-    def _show(tid, *, repo_root=None):  # noqa: ANN001
+    def _show(tid, *, repo_root=None):
         if tid == _CHILD:
             raise RuntimeError("child unreadable")
         return _parent_state(tid)
 
-    def _list(*, parent=None, repo_root=None):  # noqa: ANN001
+    def _list(*, parent=None, repo_root=None):
         return [dict(child_summary)] if parent == _TARGET else []
 
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
@@ -112,10 +112,10 @@ def test_retry_recovers_transient_enumeration_failure(monkeypatch) -> None:
     calls = {"n": 0}
     child_summary = {"ticket_id": _CHILD, "ticket_type": "task", "title": "child"}
 
-    def _show(tid, *, repo_root=None):  # noqa: ANN001
+    def _show(tid, *, repo_root=None):
         return dict(child_summary) if tid == _CHILD else _parent_state(tid)
 
-    def _list(*, parent=None, repo_root=None):  # noqa: ANN001
+    def _list(*, parent=None, repo_root=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("transient")

@@ -68,7 +68,7 @@ def _append(ticket_id: str, event_type: str, data: dict, repo_root) -> bool:
     try:
         append_event(ticket_id, event_type, data, Path(_tracker(repo_root)), repo_root=repo_root)
         return True
-    except Exception:  # noqa: BLE001 — best-effort queue write; broad-but-logged, never fails caller
+    except Exception:
         logger.warning("%s append failed; continuing", event_type, exc_info=True)
         return False
 

@@ -35,7 +35,7 @@ import pytest
 # only re-exported these functions and is being deleted, so we import the
 # package module directly rather than spec-loading the deleted helper.
 # ---------------------------------------------------------------------------
-import rebar.graph._unblock as ticket_unblock  # noqa: E402
+import rebar.graph._unblock as ticket_unblock
 
 
 @pytest.fixture(scope="module")

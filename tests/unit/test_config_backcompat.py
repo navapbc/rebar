@@ -141,7 +141,7 @@ def test_unknown_key_errors_under_strict_cutover(
     monkeypatch.setenv("REBAR_CONFIG_UNKNOWN_KEYS", "error")
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[sync]\npush = 'off'\nbogus = 1\n", encoding="utf-8")
-    with pytest.raises(cfg.ConfigError, match="sync.bogus"):
+    with pytest.raises(cfg.ConfigError, match=r"sync.bogus"):
         cfg.load_config(root=p)
 
 

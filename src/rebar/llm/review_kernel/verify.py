@@ -174,7 +174,7 @@ def verify_request_chunks(
         if request_tokens([item]) > budget:
             omitted.append(item[0])  # too big even alone → unverifiable at any model
             continue
-        if cur and request_tokens(cur + [item]) > budget:
+        if cur and request_tokens([*cur, item]) > budget:
             chunks.append(cur)
             cur = []
         cur.append(item)

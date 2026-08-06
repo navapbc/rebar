@@ -160,7 +160,7 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
             return None  # a BLOCK payload without blocking findings is unusable
         advisory = [dict(f) for f in stored if f.get("decision") == "advisory"]
         coaching = [dict(c) for c in prior.get("coaching") or []]
-    except Exception:  # noqa: BLE001 — fail-safe: any read error → full review, never crash
+    except Exception:
         logger.warning("BLOCK verdict-reuse check failed; running a full review", exc_info=True)
         return None
     coverage = dict(prior.get("coverage") or {})

@@ -199,7 +199,7 @@ def attestation_now_acceptable(
         if bucket != "accepted":
             return False, f"attestation-{bucket}:{verdict}"
         return True, f"attestation-accepted:{verdict}"
-    except Exception as exc:  # noqa: BLE001 — fail-closed: an error is not evidence of attestation
+    except Exception as exc:
         logger.warning("retrigger: attestation re-check failed for %s", change_id, exc_info=True)
         return False, f"attestation-check-error:{exc!r}"
 
@@ -342,7 +342,7 @@ def handle_comment_added(
     store = dedup or DedupStore(cfg.dedup_db_path)
     try:
         store.reset_attempts(change_id, revision)
-    except Exception:  # noqa: BLE001 — a budget-reset failure must not block the re-review
+    except Exception:
         logger.exception("retrigger: reset_attempts failed for %s (continuing)", change_id)
 
     fresh["_rebar_force"] = True
