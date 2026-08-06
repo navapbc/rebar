@@ -2627,6 +2627,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-14T00:00:40Z"
     },
+    "03ef-6fb5-158b-4abd": {
+      "created_at": "2026-08-06T19:00:41Z",
+      "jira_id": "4587333",
+      "jira_key": "REB-2449",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:00:45Z"
+    },
     "0408-e8e5-f8aa-4d70": {
       "baseline": {
         "assignee": null,
@@ -8441,6 +8448,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-18T23:32:12Z"
     },
+    "0ba2-15e6-d8a6-4a2a": {
+      "created_at": "2026-08-06T19:00:48Z",
+      "jira_id": "4587334",
+      "jira_key": "REB-2450",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:00:51Z"
+    },
     "0ba4-6a28-7a88-47b2": {
       "baseline": {
         "assignee": null,
@@ -8473,9 +8487,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`AGENTS.md` lines 235-242 describe the close's completion precheck inaccurately, and agents reason from the stated mechanism. The current text:\n\n> **After the change MERGES, fast-forward YOUR worktree before you close.** The close's\n> completion precheck reads your worktree's git history and requires the merged\n> `rebar-ticket: <id>` commit reachable from HEAD (else it fails with \"cannot confirm the work\n> landed\").\n\nVerified against the implementation on this tree (HEAD `1052bc856f`):\n\n1. **\"the MERGED commit\" is wrong.** `_referencing_commit_exists`\n   (`src/rebar/_commands/transition_close.py:149`) runs\n   `[\"git\", \"-C\", str(repo_root), \"log\", \"--format=%B%x00\"]` (`:159-163`) with **no ref\n   argument**, so it scans the whole history reachable from the current HEAD and returns True for\n   ANY commit whose message carries a `rebar-ticket:` trailer or a leading `<id>:` subject that\n   `resolve_ticket_id` maps into `accepted_ids` (`:170-176`). Merge status is never consulted. An\n   unlanded local commit on your own branch satisfies it.\n2. **The precheck is conditional; the doc presents it as unconditional.** It is guarded by\n   `if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(...)`\n   (`transition_close.py:283-284`), so a ticket with no recorded `file_impact` never reaches it.\n   It is also inside `_completion_precheck` (`:195`), which returns early when the\n   `require_completion_verification_for_close` gate is off (`:228-236`), on `--force-close`\n   (`:237`), and on a live duplicate/supersedes replacement link (`:256`).\n3. **`accepted_ids` is a subtree, not one id.** `:277-286` adds every transitive descendant\n   returned by `list_descendants` across the `epics`/`stories`/`tasks`/`bugs` buckets, so a\n   parent is satisfied by a commit referencing any child.\n4. **`--ref` is absent from AGENTS.md.** `rebar transition --ref=<ref>` is documented at\n   `src/rebar/_cli/help/transition.txt:7` (\"verify (and sign) against the committed tree at <ref>\n   instead of HEAD. Use it to close a stacked story against its own commit while your worktree\n   stays at the epic tip; default HEAD\") and at `docs/plan-review-gate.md:899-916`, whose\n   \"Stacked-epic recipe\" is exactly the workflow this repo runs. AGENTS.md never mentions it \u2014\n   `grep -n -- \"--ref\" AGENTS.md` returns nothing.\n\nThe fast-forward advice is a safe superset, so nobody following it is broken. The harm is the false mechanism: believing the precheck ENFORCES land-then-close leads agents to skip `--ref` when closing a stacked story, and to tell operators that a pre-land close is impossible. This happened live \u2014 a session told the operator that seven in-progress epic bugs could not be closed before landing; the operator corrected it. The rule that actually orders land-before-close is the POLICY line one bullet above, at `AGENTS.md:233-234`: \"Do **not** close a ticket until its change is `Verified +1` \u2014 a passing completion-verifier is **not** a substitute for green CI.\"\n\n## Approach\n\nRewrite the bullet to state the real mechanism and cite the real ordering rule, keeping the fast-forward guidance for the case it genuinely addresses.\n\nThe corrected bullet will:\n\n- lead with the POLICY (`Verified +1`, already stated at `AGENTS.md:233-234`) as the reason to\n  wait, instead of implying the precheck enforces it;\n- state the precheck accurately: when the ticket records `file_impact` and the\n  completion-verification close gate is on, the close requires a commit **reachable from your\n  current HEAD** carrying a `rebar-ticket:` trailer for the ticket **or any transitive\n  descendant** \u2014 merge status is not checked, so a local unlanded commit satisfies it;\n- keep the fast-forward recipe (`git fetch origin && git merge --ff-only origin/main`) as the\n  remedy for the case it actually fixes: a worktree whose history does NOT contain the commit \u2014\n  a fresh worktree, or closing from a checkout that never had it;\n- name `rebar transition <id> in_progress closed --ref <sha>` as the sanctioned way to close a\n  stacked story against its own commit while the worktree stays at the epic tip, and link\n  `docs/plan-review-gate.md` \u00a7\"Which commit the completion gate verifies \u2014 `--ref`\" for the\n  detail, per this file's stated \"keep this file lean \u2026 one-line pointers into `docs/`\" rule\n  (`AGENTS.md:9-11`);\n- state precisely what `--ref` does and does not do: it retargets the completion **verification\n  and signature** to that ref's tree; it does **not** narrow the referencing-commit scan, which\n  runs `git log` with no ref regardless (`transition_close.py:159-163`);\n- preserve the existing NEVER-fast-forward-the-shared-main-checkout warning **verbatim**, as the\n  final sentences of the bullet (`AGENTS.md:239-242`).\n\n**Why a rewrite in place rather than a pointer to `docs/`.** AGENTS.md is loaded at launch by every harness, so a wrong mechanism there is the default belief for every agent in the repo; a pointer alone would leave the false statement resident in context. The corrected text stays short and defers the `--ref` detail to `docs/plan-review-gate.md`, which already documents it correctly at lines 899-916 \u2014 no new doc is created and no existing doc is duplicated.\n\n**The whole population, not one sample.** The same misstatement exists in a second place: `CONTRIBUTING.md:219-230` (\u00a72f \"After merge \u2014 fast-forward your worktree, THEN close the ticket\") says the precheck \"requires the merged `rebar-ticket: <id>` commit to be reachable from HEAD; without the fast-forward it fails with 'cannot confirm the work landed.'\" `AGENTS.md:203` sends readers to CONTRIBUTING.md for \"the full recipe\", so fixing only AGENTS.md would leave the authoritative long-form copy wrong. `grep -rn \"cannot confirm the work landed\" . --exclude-dir=.git` returns exactly one Markdown hit, `CONTRIBUTING.md:226`, alongside the source string it quotes at `transition_close.py:291` \u2014 so those two Markdown passages ARE the population, and both are in scope. `templates/rebar-usage.md` and `templates/AGENTS.md` do not carry the claim (the `test_client_template_sync.py` drift gate covers only the marked rebar-usage region and forbids Gerrit content in it), so they are untouched.\n\n## Scope\n\n- `AGENTS.md` \u2014 the single bullet at lines 235-242, rewritten as described above. No other line of\n  the file changes.\n- `CONTRIBUTING.md` \u2014 \u00a72f, lines 219-230: the same three corrections (not-merged, conditional,\n  `--ref`), with the blockquote warning at lines 228-230 preserved verbatim.\n\nNo file under `src/` and no test file is edited. This is a documentation-accuracy change with no behaviour change, so there is no new testable behaviour to cover with a new test; the verification is that the existing doc-consistency tests still pass and that the corrected text matches the implementation, checked by the greps in the acceptance criteria below.\n\nAssumption checked, not assumed: no test pins the wording being replaced. `tests/unit/test_codex_agent_guidance.py:11-13` slices AGENTS.md between `\"**Codex Gerrit workflow rule:\"` and `\"\\n\\n## Record your work\"`, which ends well before line 235; `tests/unit/test_agents_serena_untyped_receiver.py` and `tests/unit/test_serena_grep_reminder_hook.py:166-167` assert only on the \"Navigating the codebase\" table; `tests/unit/test_check_dco_identity.py` asserts only the DCO placeholder pattern. None reads the Git-workflow bullet or CONTRIBUTING.md \u00a72f.\n\n## Testing\n\nNo new test: nothing executable changes, and the module-size / doc-drift gates that do read these files are already in the suite. Verification is by targeted grep assertions (each exits non-zero on failure) plus the existing suite:\n\n- `! grep -n \"requires the merged\" AGENTS.md CONTRIBUTING.md` \u2014 the false claim is gone from both.\n- `grep -q -- \"--ref\" AGENTS.md` \u2014 the stacked-close tool is now named.\n- `grep -q \"uncommitted operator WIP\" AGENTS.md && grep -q \"uncommitted operator WIP\" CONTRIBUTING.md`\n  \u2014 the shared-main-checkout warning survives in both (the phrase is on `AGENTS.md:241` and\n  `CONTRIBUTING.md:229` today).\n- `pytest tests/unit/test_codex_agent_guidance.py tests/unit/test_agents_serena_untyped_receiver.py\n  tests/unit/test_serena_grep_reminder_hook.py tests/unit/test_client_template_sync.py\n  tests/unit/test_check_dco_identity.py` \u2014 the doc-reading tests still pass.\n- `make lint` and `make typecheck` \u2014 unaffected, run to confirm exit 0.\n\n## Acceptance Criteria\n\n- [ ] The AGENTS.md bullet no longer claims the precheck requires a MERGED commit; verified by\n      `! grep -n \"requires the merged\" AGENTS.md` exiting 0 (no match).\n- [ ] CONTRIBUTING.md \u00a72f no longer makes the same claim; verified by\n      `! grep -n \"requires the merged\" CONTRIBUTING.md` exiting 0 (no match).\n- [ ] The AGENTS.md bullet states that the precheck runs only when the ticket records\n      `file_impact`; verified by `grep -q \"file_impact\" AGENTS.md` exiting 0.\n- [ ] The AGENTS.md bullet states that a referencing commit for the ticket OR any transitive\n      descendant satisfies the check; verified by `grep -q \"descendant\" AGENTS.md` exiting 0 and\n      by reading the bullet against `transition_close.py:277-286`.\n- [ ] The AGENTS.md bullet documents `rebar transition <id> in_progress closed --ref <sha>` as the\n      way to close a stacked story against its own commit without moving the worktree; verified by\n      `grep -q -- \"--ref\" AGENTS.md` exiting 0 (it matches nothing today).\n- [ ] The land-before-close ordering is attributed to the `Verified +1` policy rule rather than to\n      the precheck; verified by the rewritten bullet naming `Verified +1` \u2014 `grep -c \"Verified +1\"\n      AGENTS.md` is one greater than its current value of 3.\n- [ ] The NEVER-fast-forward-the-shared-main-checkout warning is preserved verbatim in both files;\n      verified by `grep -q \"uncommitted operator WIP\" AGENTS.md` and\n      `grep -q \"uncommitted operator WIP\" CONTRIBUTING.md` both exiting 0, and by\n      `git diff AGENTS.md CONTRIBUTING.md` showing those warning sentences unchanged.\n- [ ] No source or test file is modified; verified by `git diff --name-only origin/main` listing\n      exactly `AGENTS.md` and `CONTRIBUTING.md`.\n- [ ] The doc-reading tests still pass; verified by `pytest\n      tests/unit/test_codex_agent_guidance.py tests/unit/test_agents_serena_untyped_receiver.py\n      tests/unit/test_serena_grep_reminder_hook.py tests/unit/test_client_template_sync.py\n      tests/unit/test_check_dco_identity.py` exiting 0.\n- [ ] `make lint` exits 0 and `make typecheck` exits 0.",
+        "description": "## Context / Problem\n\n`AGENTS.md` lines 235-242 describe the close's completion precheck inaccurately, and agents reason from the stated mechanism. The current text:\n\n> **After the change MERGES, fast-forward YOUR worktree before you close.** The close's\n> completion precheck reads your worktree's git history and requires the merged\n> `rebar-ticket: <id>` commit reachable from HEAD (else it fails with \"cannot confirm the work\n> landed\").\n\nVerified against the implementation on this tree (HEAD `1052bc856f`):\n\n1. **\"the MERGED commit\" is wrong.** `_referencing_commit_exists`\n   (`src/rebar/_commands/transition_close.py:149`) runs\n   `[\"git\", \"-C\", str(repo_root), \"log\", \"--format=%B%x00\"]` (`:159-163`) with **no ref\n   argument**, so it scans the whole history reachable from the current HEAD and returns True for\n   ANY commit whose message carries a `rebar-ticket:` trailer or a leading `<id>:` subject that\n   `resolve_ticket_id` maps into `accepted_ids` (`:170-176`). Merge status is never consulted. An\n   unlanded local commit on your own branch satisfies it.\n2. **The precheck is conditional; the doc presents it as unconditional.** It is guarded by\n   `if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(...)`\n   (`transition_close.py:283-284`), so a ticket with no recorded `file_impact` never reaches it.\n   It is also inside `_completion_precheck` (`:195`), which returns early when the\n   `require_completion_verification_for_close` gate is off (`:228-236`), on `--force-close`\n   (`:237`), and on a live duplicate/supersedes replacement link (`:256`).\n3. **`accepted_ids` is a subtree, not one id.** `:277-286` adds every transitive descendant\n   returned by `list_descendants` across the `epics`/`stories`/`tasks`/`bugs` buckets, so a\n   parent is satisfied by a commit referencing any child.\n4. **`--ref` is absent from AGENTS.md.** `rebar transition --ref=<ref>` is documented at\n   `src/rebar/_cli/help/transition.txt:7` (\"verify (and sign) against the committed tree at <ref>\n   instead of HEAD. Use it to close a stacked story against its own commit while your worktree\n   stays at the epic tip; default HEAD\") and at `docs/plan-review-gate.md:899-916`, whose\n   \"Stacked-epic recipe\" is exactly the workflow this repo runs. AGENTS.md never mentions it \u2014\n   `grep -n -- \"--ref\" AGENTS.md` returns nothing.\n\nThe fast-forward advice is a safe superset, so nobody following it is broken. The harm is the false mechanism: believing the precheck ENFORCES land-then-close leads agents to skip `--ref` when closing a stacked story, and to tell operators that a pre-land close is impossible. This happened live \u2014 a session told the operator that seven in-progress epic bugs could not be closed before landing; the operator corrected it. The rule that actually orders land-before-close is the POLICY line one bullet above, at `AGENTS.md:233-234`: \"Do **not** close a ticket until its change is `Verified +1` \u2014 a passing completion-verifier is **not** a substitute for green CI.\"\n\n## Approach\n\nRewrite the bullet to state the real mechanism and cite the real ordering rule, keeping the fast-forward guidance for the case it genuinely addresses.\n\nThe corrected bullet will:\n\n- lead with the POLICY (`Verified +1`, already stated at `AGENTS.md:233-234`) as the reason to\n  wait, instead of implying the precheck enforces it;\n- state the precheck accurately: when the ticket records `file_impact` and the\n  completion-verification close gate is on, the close requires a commit **reachable from your\n  current HEAD** carrying a `rebar-ticket:` trailer for the ticket **or any transitive\n  descendant** \u2014 merge status is not checked, so a local unlanded commit satisfies it;\n- keep the fast-forward recipe (`git fetch origin && git merge --ff-only origin/main`) as the\n  remedy for the case it actually fixes: a worktree whose history does NOT contain the commit \u2014\n  a fresh worktree, or closing from a checkout that never had it;\n- name `rebar transition <id> in_progress closed --ref <sha>` as the sanctioned way to close a\n  stacked story against its own commit while the worktree stays at the epic tip, and link\n  `docs/plan-review-gate.md` \u00a7\"Which commit the completion gate verifies \u2014 `--ref`\" for the\n  detail, per this file's stated \"keep this file lean \u2026 one-line pointers into `docs/`\" rule\n  (`AGENTS.md:9-11`);\n- state precisely what `--ref` does and does not do: it retargets the completion **verification\n  and signature** to that ref's tree; it does **not** narrow the referencing-commit scan, which\n  runs `git log` with no ref regardless (`transition_close.py:159-163`);\n- preserve the existing NEVER-fast-forward-the-shared-main-checkout warning **verbatim**, as the\n  final sentences of the bullet (`AGENTS.md:239-242`).\n\n**Why a rewrite in place rather than a pointer to `docs/`.** AGENTS.md is loaded at launch by every harness, so a wrong mechanism there is the default belief for every agent in the repo; a pointer alone would leave the false statement resident in context. The corrected text stays short and defers the `--ref` detail to `docs/plan-review-gate.md`, which already documents it correctly at lines 899-916 \u2014 no new doc is created and no existing doc is duplicated.\n\n**The whole population, not one sample.** The same misstatement exists in a second place: `CONTRIBUTING.md:219-230` (\u00a72f \"After merge \u2014 fast-forward your worktree, THEN close the ticket\") says the precheck \"requires the merged `rebar-ticket: <id>` commit to be reachable from HEAD; without the fast-forward it fails with 'cannot confirm the work landed.'\" `AGENTS.md:203` sends readers to CONTRIBUTING.md for \"the full recipe\", so fixing only AGENTS.md would leave the authoritative long-form copy wrong. `grep -rn \"cannot confirm the work landed\" . --exclude-dir=.git` returns exactly one Markdown hit, `CONTRIBUTING.md:226`, alongside the source string it quotes at `transition_close.py:291` \u2014 so those two Markdown passages ARE the population, and both are in scope. `templates/rebar-usage.md` and `templates/AGENTS.md` do not carry the claim (the `test_client_template_sync.py` drift gate covers only the marked rebar-usage region and forbids Gerrit content in it), so they are untouched.\n\n## Scope\n\n- `AGENTS.md` \u2014 the single bullet at lines 235-242, rewritten as described above. No other line of\n  the file changes.\n- `CONTRIBUTING.md` \u2014 \u00a72f, lines 219-230: the same three corrections (not-merged, conditional,\n  `--ref`), with the blockquote warning at lines 228-230 preserved verbatim.\n\nNo file under `src/` and no test file is edited. This is a documentation-accuracy change with no behaviour change, so there is no new testable behaviour to cover with a new test; the verification is that the existing doc-consistency tests still pass and that the corrected text matches the implementation, checked by the greps in the acceptance criteria below.\n\nAssumption checked, not assumed: no test pins the wording being replaced. `tests/unit/test_codex_agent_guidance.py:11-13` slices AGENTS.md between `\"**Codex Gerrit workflow rule:\"` and `\"\\n\\n## Record your work\"`, which ends well before line 235; `tests/unit/test_agents_serena_untyped_receiver.py` and `tests/unit/test_serena_grep_reminder_hook.py:166-167` assert only on the \"Navigating the codebase\" table; `tests/unit/test_check_dco_identity.py` asserts only the DCO placeholder pattern. None reads the Git-workflow bullet or CONTRIBUTING.md \u00a72f.\n\n## Testing\n\nNo new test: nothing executable changes, and the module-size / doc-drift gates that do read these files are already in the suite. Verification is by targeted grep assertions (each exits non-zero on failure) plus the existing suite:\n\n- `! grep -n \"requires the merged\" AGENTS.md CONTRIBUTING.md` \u2014 the false claim is gone from both.\n- `grep -q -- \"--ref\" AGENTS.md` \u2014 the stacked-close tool is now named.\n- `grep -q \"uncommitted operator WIP\" AGENTS.md && grep -q \"uncommitted operator WIP\" CONTRIBUTING.md`\n  \u2014 the shared-main-checkout warning survives in both (the phrase is on `AGENTS.md:241` and\n  `CONTRIBUTING.md:229` today).\n- `pytest tests/unit/test_codex_agent_guidance.py tests/unit/test_agents_serena_untyped_receiver.py\n  tests/unit/test_serena_grep_reminder_hook.py tests/unit/test_client_template_sync.py\n  tests/unit/test_check_dco_identity.py` \u2014 the doc-reading tests still pass.\n- `make lint` and `make typecheck` \u2014 unaffected, run to confirm exit 0.\n\n## Acceptance Criteria\n\n- [x] The AGENTS.md bullet no longer claims the precheck requires a MERGED commit; verified by\n      `! grep -n \"requires the merged\" AGENTS.md` exiting 0 (no match).\n- [x] CONTRIBUTING.md \u00a72f no longer makes the same claim; verified by\n      `! grep -n \"requires the merged\" CONTRIBUTING.md` exiting 0 (no match).\n- [x] The AGENTS.md bullet states that the precheck runs only when the ticket records\n      `file_impact`; verified by `grep -q \"file_impact\" AGENTS.md` exiting 0.\n- [x] The AGENTS.md bullet states that a referencing commit for the ticket OR any transitive\n      descendant satisfies the check; verified by `grep -q \"descendant\" AGENTS.md` exiting 0 and\n      by reading the bullet against `transition_close.py:277-286`.\n- [x] The AGENTS.md bullet documents `rebar transition <id> in_progress closed --ref <sha>` as the\n      way to close a stacked story against its own commit without moving the worktree; verified by\n      `grep -q -- \"--ref\" AGENTS.md` exiting 0 (it matches nothing today).\n- [x] The land-before-close ordering is attributed to the `Verified +1` policy rule rather than to\n      the precheck; verified by the rewritten bullet naming `Verified +1` \u2014 `grep -c \"Verified +1\"\n      AGENTS.md` is one greater than its current value of 3.\n- [x] The NEVER-fast-forward-the-shared-main-checkout warning is preserved verbatim in both files;\n      verified by `grep -q \"uncommitted operator WIP\" AGENTS.md` and\n      `grep -q \"uncommitted operator WIP\" CONTRIBUTING.md` both exiting 0, and by\n      `git diff AGENTS.md CONTRIBUTING.md` showing those warning sentences unchanged.\n- [x] No source or test file is modified; verified by `git diff --name-only origin/main` listing\n      exactly `AGENTS.md` and `CONTRIBUTING.md`.\n- [x] The doc-reading tests still pass; verified by `pytest\n      tests/unit/test_codex_agent_guidance.py tests/unit/test_agents_serena_untyped_receiver.py\n      tests/unit/test_serena_grep_reminder_hook.py tests/unit/test_client_template_sync.py\n      tests/unit/test_check_dco_identity.py` exiting 0.\n- [x] `make lint` exits 0 and `make typecheck` exits 0.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "AGENTS.md misstates the close precheck: it requires a referencing commit in HEAD's history, not a MERGED one, and omits --ref"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -11147,6 +11161,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-05T03:32:40Z"
     },
+    "0fa4-a836-5f13-4a44": {
+      "created_at": "2026-08-06T19:00:52Z",
+      "jira_id": "4587335",
+      "jira_key": "REB-2451",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:00:56Z"
+    },
     "0fad-59f7-1605-4377": {
       "baseline": {
         "assignee": {
@@ -11562,6 +11583,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-04T15:36:32Z"
+    },
+    "10ae-aa24-3fdc-4f0b": {
+      "created_at": "2026-08-06T19:00:59Z",
+      "jira_id": "4587336",
+      "jira_key": "REB-2452",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:02Z"
     },
     "10e3-709e-b1ff-4343": {
       "baseline": {
@@ -17169,6 +17197,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-03T17:50:54Z"
     },
+    "18ae-27e9-b651-4b71": {
+      "created_at": "2026-08-06T19:01:03Z",
+      "jira_id": "4587337",
+      "jira_key": "REB-2453",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:08Z"
+    },
     "18ae-4f54-a85b-4ddb": {
       "baseline": {
         "assignee": null,
@@ -17242,6 +17277,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-30T20:44:32Z"
+    },
+    "1909-c1a7-9f20-440f": {
+      "created_at": "2026-08-06T19:01:09Z",
+      "jira_id": "4587338",
+      "jira_key": "REB-2454",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:14Z"
     },
     "1913-7f93-ab94-4577": {
       "baseline": {
@@ -17488,6 +17530,13 @@
       "peer_parent": "REB-1608",
       "state": "confirmed",
       "updated_at": "2026-07-28T00:12:26Z"
+    },
+    "196d-28c4-ef0f-445c": {
+      "created_at": "2026-08-06T19:01:16Z",
+      "jira_id": "4587339",
+      "jira_key": "REB-2455",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:20Z"
     },
     "1982-bf75-0f28-4e91": {
       "baseline": {
@@ -22407,7 +22456,7 @@
     "2127-348c-c41d-472e": {
       "baseline": {
         "assignee": null,
-        "description": "# Give Cloud the resilience and config-validation coverage DC gained\n\n## Context\n\nEpic e369 hardened the DC adapter against a real instance and produced a tier of coverage Cloud never had. Cloud's tests grew from INCIDENTS THAT HAPPENED; DC's grew from CONFIGURATIONS THAT DIFFER. The second kind generalises, and Cloud does not have it.\n\nThis story is the Cloud half of the parity work. It is lower priority than [rebar:0fad-59f7-1605-4377] (Cloud's unpaginated whole-project readers) because Cloud is the mature, live-exercised path \u2014 but each item below is a real asymmetry, not a symmetry exercise.\n\n## The gaps, with what DC has for comparison\n\n**1. No per-member 429 sweep.** DC's `test_dc_rate_limit_retry_heldout.py` walks EVERY mutating transport member and asserts each fails on the first 429 \u2014 because retrying a mutation on an HTTP error is the duplicate-issue class [rebar:21fc-51d7-90ca-4a03] fixed, and an enumeration is what stops a later-added mutation inheriting a retry by omission. Cloud has `test_retry_httperror.py` (5 tests) and one 429 path in `state/test_acli_subprocess_timeout.py:352-368`, neither of which sweeps the member set.\n\n**DC's property does NOT transfer uniformly, and assuming it does is the main risk in this item.** Cloud has no single choke point; its mutations traverse FOUR distinct 429 behaviours across two levels, all verified in the tree. Two are transport-level and DELIBERATELY OPPOSITE:\n\n* **direct REST** (`AcliRestMixin._rest_urlopen_with_retry`) \u2014 \"Does NOT retry on\n  `urllib.error.HTTPError` (4xx / 5xx)\" (`adapters/jira/acli_rest.py:50-52`). A 429 arrives as\n  `urllib.error.HTTPError`. Here DC's property holds verbatim: exactly ONE attempt.\n* **ACLI subprocess** (`acli_subprocess._run_acli`) \u2014 **already RETRIES a 429**, on purpose, via\n  `_rate_limit_backoff` honouring `Retry-After`; `test_run_acli_429_retries_with_rate_limit_backoff`\n  (`state/test_acli_subprocess_timeout.py:369`) asserts the call SUCCEEDS on retry. A 429 here is an\n  exit code plus `429` in stderr, not an HTTP exception.\n\n\u2026and ABOVE both sits the reconciler's dispatch level, which is the part most likely to be missed \u2014 and it is itself SPLIT IN TWO:\n\n* **the retrying dispatch wrapper** \u2014 `dispatch_one._call_with_retry`\n  (`dispatch_one.py:113-186`) catches `urllib.error.HTTPError` and, when `exc.code == 429`, records\n  `Retry-After` and RETRIES (`dispatch_one.py:151-160`). So a REST mutation that makes exactly one\n  attempt when its transport method is called DIRECTLY is nevertheless retried when reached the way\n  production reaches it.\n* **the explicitly NON-retrying apply phases** \u2014 `dispatch_apply_phases`, whose module docstring\n  states it owns \"the phases that do NOT funnel their Jira writes through\n  `dispatch_one._call_with_retry`\". These include real mutations:\n  `_update_one_apply_reporter` (`dispatch_apply_phases.py:91`) and\n  `_update_one_dispatch_comments` (`:142`, the single-attempt comment dispatch). A 429 here is a\n  FOURTH behaviour \u2014 neither the subprocess backoff nor the dispatch-wrapper retry applies \u2014 and\n  existing coverage (`test_comment_single_attempt.py`) pins attempt count for ONE member, not a\n  sweep.\n\nSo \"every mutating member fails on the first 429\" is TRUE for a raw REST transport method called directly, TRUE again for the non-retrying `dispatch_apply_phases` mutations, and FALSE for both the subprocess seam and anything routed through the retrying dispatch wrapper. **An attempt-count assertion is therefore meaningless unless it names the BOUNDARY it measures at.** Writing the DC assertion across all four would either fail immediately or pressure someone into deleting an intentional, tested backoff. This story must establish the split FIRST and assert a per-layer property \u2014 and it must not fold in a behaviour change (below).\n\n**The two retries named above are KNOWN and DELIBERATE \u2014 they are not the bug trigger.** Both `_run_acli`'s rate-limit backoff and `_call_with_retry`'s 429 branch are already implemented, tested and documented, so \"a mutation is retried on a 429\" is not by itself a finding; the enumeration will hit them by construction. The bug-filing trigger is NARROWER: a mutating member retried on a 429 at a layer where that retry is NOT already explicitly tested and documented \u2014 an UNDOCUMENTED or newly-discovered retry path. That is the [rebar:21fc-51d7-90ca-4a03] duplicate class. If one is found, file a linked bug with the evidence and do NOT \"fix\" it inside this test story. Separately, if the enumeration shows a KNOWN retry applying to a mutation in a way nobody has evaluated for duplicate-write safety, record that assessment on this ticket \u2014 as a finding, not as a code change.\n\n**2. No config-validation tier.** DC asserts a non-HTTPS base URL is rejected, that the insecure override warns, that malformed config propagates, and that a missing credential fails loudly rather than going anonymous (`test_jira_dc_config_settings.py`, `test_dc_pat_required_heldout.py` \u2014 the latter exists because bug cd78 was exactly a silent fall-back to ANONYMOUS access). Cloud has no equivalent. Whether Cloud CAN go anonymous is itself unestablished and worth answering.\n\n**3. The probe's resolved-status set is not runtime-configurable.** `adapters/jira/probe.py:39` pins `frozenset({\"Resolved\",\"Done\",\"Cancelled\"})`; DC threads `resolved_statuses` from settings and tests it. Cloud's `probe_remote` also re-resolves env itself rather than using the transport's configured session.\n\n**\"Is it deliberate?\" is already answered \u2014 do NOT re-open it.** `probe.py`'s module docstring (`:20-25`) states that J2 moved the pure classifier to `adapters/jira_family/probe.py` taking the status set as a PARAMETER, and that `RESOLVED_STATUS_NAMES` \"is Cloud/DIG's *configured value* (a self-hosted Data Center workflow can name its resolved states anything), so it stays defined here\". So it is documented as deliberate at the definition site, and an AC satisfied by \"document it\" would be satisfied by doing nothing. The remaining OPEN question is narrower and is the only one this item answers: **does a Cloud deployment whose workflow uses non-standard resolved-status names need a runtime config hook** (as DC has), or is the per-deployment constant genuinely sufficient? Record THAT decision with its rationale; if a hook is needed, file it as its own ticket.\n\n**4. `search_user_by_email` degradation is unasserted on DC** (the mirror-image item, kept here so the pair is not split). `outbound_assignee.py:33-37` resolves the user-search method by NAME STRING across three aliases; DC provides none of them, so `_bootstrap_account_id_via_user_search` returns `None` and the path degrades to string matching. That degradation is probably correct \u2014 DC has no accountId concept \u2014 but nothing asserts it, so an accidental rename on the Cloud side would look like the same silence.\n\n## Approach\n\nTake these in the order above; 1 and 2 carry the risk, 3 is an investigation that may produce a ticket rather than a test, 4 is a one-test pin.\n\n**Port the PROPERTY, not the test \u2014 and note the property is PER-LAYER.** Cloud's retry lives in a different place from DC's, so a copied test would assert the wrong seam. What must survive the port is the ENUMERATION \u2014 that every mutating member is named explicitly, because an ellipsis is how the next mutation inherits a retry.\n\n**Step 0 for item 1, before any test is written:** enumerate every mutating member of Cloud's transport and classify each on BOTH axes, by reading bodies rather than inferring from names:\n\n1. **transport seam** \u2014 one of THREE: ACLI subprocess (`_run_acli`); pooled direct REST\n   (`_rest_urlopen_with_retry` / `_direct_rest_post_raw` / `_direct_rest_put_raw`); or **bare\n   `urllib.request.urlopen`**, which bypasses `_rest_urlopen_with_retry` entirely and therefore does\n   not even inherit its transient-fault retry \u2014 `acli_cli_ops.update_priority`\n   (`acli_cli_ops.py:396`, urlopen at `:437`) is a confirmed instance, reached in production because\n   `AcliClient.update_issue` delegates to the free function `update_issue` (`acli.py:374`), which\n   calls `update_priority` when `priority` is among the changed fields (`acli.py:180`). A member with\n   more than one leg (e.g. a REST leg and a subprocess leg) is called out as such.\n2. **dispatch level** \u2014 which of THREE the reconciler uses: the retrying wrapper\n   `dispatch_one._call_with_retry` (`dispatch_one.py:113-186`), which adds a 429 retry ON TOP of\n   whatever the seam does; the explicitly non-retrying apply phases in `dispatch_apply_phases`\n   (`_update_one_apply_reporter:91`, `_update_one_dispatch_comments:142`); or no dispatch wrapper at\n   all. Determine this by reading the call site, since the module split is by RETRY POLICY, so the\n   answer is not inferable from the member's own body.\n\n**Completeness check for the table, run and recorded alongside it** \u2014 the table gates the whole item, so its coverage must be demonstrated, not asserted. Enumerate the candidate surface with a concrete command and account for EVERY name it returns:\n\n    git grep -nE \"^(    )?def [_a-z]\" -- \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_graph.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py\n\nThree things about that pattern are deliberate, and each one is a way the table can look complete while omitting a writer:\n\n* it matches BOTH indented class methods AND module-level free functions;\n* it includes `_`-PREFIXED names \u2014 `acli_graph._add_label_impl:83` and `_remove_label_impl:143` are\n  mutating, as are the `_direct_rest_*` helpers in `acli_rest.py`, and a `def [a-z]` pattern would\n  emit none of them, so the \"every name it returns is classified\" rule would be satisfied vacuously;\n* `acli_cli_ops.py` is in the file list, because `AcliClient` delegates real mutations to free\n  functions there (`create_issue:147`, `update_priority:396`, `add_comment:469`).\n\nPaste that raw output on the ticket next to the table. Every name in it is either classified in the table or explicitly marked NON-MUTATING with a one-line reason \u2014 no name may be silently absent. Cross-check the mutating set against DC's enumerated list in `test_dc_rate_limit_retry_heldout.py` and record any member DC sweeps that Cloud's table lacks, or vice versa, with the reason.\n\nThe table decides, per member, which property is asserted and at which boundary it is observed \u2014 and a member can legitimately have DIFFERENT correct answers at the two levels (one attempt raw, retried when dispatch-wrapped).\n\n## Scope\n\n- `tests/unit/rebar_reconciler/` \u2014 Cloud 429 sweep, Cloud config-validation tests, a DC\n  user-search-degradation pin.\n- an investigation note (or a linked bug) on the Cloud probe's hardcoded resolved statuses.\n- the per-member seam classification table for item 1 (recorded on the ticket, not in code).\n- No production change intended. Items 1 and 3 may each produce a linked BUG \u2014 item 1 only if a\n  mutating member is retried on a 429 at a layer where that retry is NOT already tested and\n  documented (the two known deliberate retries do not count), item 3 if the hardcoded\n  resolved-status set is an accident \u2014 and in both cases the fix is its own ticket, never folded in\n  here.\n\n## Testing\n\nThe 429 sweep must assert the ATTEMPT COUNT per member, not merely that an exception escaped \u2014 an implementation that retried and then re-raised satisfies a raises-only assertion having issued the write twice. This is the same correction being applied to DC's own sweep in [rebar:2944-dd3f-e982-4359]; do not copy that mistake forward.\n\n**The instrument differs per seam, and a single patch point covers only half the members** \u2014 a sweep that patches `urllib.request.urlopen` is blind to subprocess mutations, and one that patches `acli_subprocess._run_acli` is blind to REST mutations, while either LOOKS complete because every member still raises. So:\n\n* POOLED REST-seam members, called DIRECTLY on the transport (not through the dispatch wrapper) \u2014\n  observe attempts at the urlopen boundary; inject a 429 as `urllib.error.HTTPError`; assert EXACTLY\n  ONE attempt (no retry), matching `acli_rest.py:50-52`.\n* BARE-`urlopen` members \u2014 `acli_cli_ops.update_priority` (`:396`, urlopen at `:437`) bypasses\n  `_rest_urlopen_with_retry`, so it has no retry of its own: assert EXACTLY ONE attempt there too.\n\n  **One patch point covers both, and per-module patching is NOT a real isolation mechanism.** Both\n  `acli_rest.py` (`:23`) and `acli_cli_ops.py` (`:24`) do `import urllib.request` \u2014 a MODULE-object\n  binding \u2014 so both resolve `urlopen` at call time through the same shared `urllib.request` object.\n  Patching it once affects both; `mutate/test_acli_cross_mixin_binding.py:160` already relies on\n  exactly that, calling it \"the process-wide `urllib.request.urlopen` (a shared singleton)\". So\n  patch it once and distinguish the seams by WHICH MEMBER was invoked and what the captured request\n  looks like \u2014 not by which module the patch was applied through. Coverage of both seams must\n  therefore be proven by ENUMERATION (every member in the table has a case) rather than by any\n  assumed namespace separation.\n* the DISPATCH-WRAPPED path \u2014 the same members reached through `dispatch_one._call_with_retry`\n  DO retry a 429 by design (`dispatch_one.py:151-160`). Assert the retry is bounded and honours\n  `Retry-After`; do NOT assert one attempt here. This is the layer where \"is a MUTATION being\n  retried on a 429?\" is actually decided, so it is the layer the bug-filing trigger below applies to.\n* subprocess-seam members \u2014 observe attempts at the `_run_acli`/`Popen` boundary; inject a 429 as\n  the exit-code + `429`-in-stderr shape the existing test uses; assert the OBSERVED, INTENDED\n  behaviour (a bounded retry honouring `Retry-After`, per\n  `state/test_acli_subprocess_timeout.py:369`) rather than one attempt \u2014 and record whether that\n  retry applies to a MUTATION, which is the bug-filing trigger above.\n\nEach seam's sweep must be MUTATION-CHECKED at its own instrument: make one member issue an extra attempt at that boundary and confirm THAT seam's sweep goes red \u2014 proving the sweep is not blind to the half it is supposed to cover.\n\n## Acceptance criteria\n\n- [ ] every MUTATING Cloud transport member is enumerated explicitly \u2014 no ellipsis, no sampling \u2014\n      and classified on BOTH axes: transport seam (ACLI subprocess / pooled direct REST / bare\n      `urllib.request.urlopen`) and dispatch\n      level (retrying `dispatch_one._call_with_retry`, the explicitly NON-retrying\n      `dispatch_apply_phases` phases, or no wrapper). The table lands as a REPO ARTIFACT \u2014 the sweep\n      test module's own enumeration plus a header comment carrying the per-member classification,\n      which is where a reviewer will look \u2014 and is mirrored onto this ticket\n- [ ] the table's COMPLETENESS is demonstrated, not asserted: the enumeration command from Step 0 is\n      run, its raw output recorded beside the table, and every name it returns is either classified\n      or marked NON-MUTATING with a reason \u2014 plus the DC cross-check for members present on one side\n      and missing on the other\n- [ ] each POOLED-REST and each BARE-`urlopen` mutating member, invoked DIRECTLY on the transport, is\n      asserted to make EXACTLY ONE attempt under a 429, observed at the shared process-wide\n      `urllib.request.urlopen`, with one case PER MEMBER from the table \u2014 `acli_cli_ops.update_priority`\n      explicitly among them\n- [ ] the DISPATCH-WRAPPED path is covered separately: reached through\n      `dispatch_one._call_with_retry`, a 429 IS retried by design (`dispatch_one.py:151-160`), so the\n      assertion there is a BOUNDED retry honouring `Retry-After` \u2014 not one attempt\n- [ ] each subprocess-seam mutating member is asserted against its ACTUAL intended 429 behaviour \u2014\n      the bounded `Retry-After` backoff in `_run_acli` \u2014 observed at the `_run_acli` boundary. This\n      criterion is NOT satisfied by asserting one attempt there, because\n      `test_run_acli_429_retries_with_rate_limit_backoff` proves the retry is deliberate\n- [ ] mutations reached through the NON-retrying `dispatch_apply_phases` path\n      (`_update_one_apply_reporter`, `_update_one_dispatch_comments`) are asserted to make exactly\n      one attempt under a 429 \u2014 extending `test_comment_single_attempt.py`'s single-member pin to\n      the sweep\n- [ ] if a MUTATING member is retried on a 429 at a layer where that retry is NOT already tested and\n      documented, a linked bug is filed with the evidence. The two KNOWN deliberate retries\n      (`_run_acli`'s rate-limit backoff, `_call_with_retry`'s 429 branch) do NOT by themselves\n      trigger a bug; where one applies to a mutation, the duplicate-write assessment is RECORDED\n      here instead. This story changes NO retry behaviour either way\n- [ ] Cloud rejects a non-HTTPS base URL, or the test records that it deliberately does not\n- [ ] Cloud's behaviour on a MISSING credential is asserted: it must fail loudly, or the test pins\n      that it does not and a bug is filed (this is bug cd78's shape on the other adapter)\n- [ ] the OPEN question on the Cloud probe's resolved-status set is answered: whether a Cloud\n      deployment using non-standard resolved-status names needs a runtime config hook as DC has, or\n      whether the per-deployment constant suffices. The answer lands as a REPO ARTIFACT, not only a\n      ticket comment \u2014 a comment at `RESOLVED_STATUS_NAMES` in `adapters/jira/probe.py` recording the\n      decision and citing this ticket id (plus the follow-up ticket id if a hook is needed) \u2014 so a\n      reviewer can find it without the tracker. Re-documenting it as merely \"deliberate\" does NOT\n      satisfy this: `probe.py:20-25` already says so, and an AC already true on an unmodified tree is\n      not a criterion\n- [ ] a test pins that DC exposes none of `_USER_SEARCH_METHODS` and that the bootstrap degrades to\n      the string-match path rather than raising\n- [ ] each new test is MUTATION-CHECKED. \"Mutation-checked\" here means a CONCRETE MANUAL mutation,\n      not a mutation-testing tool: for each new test, apply the named perturbation below, run that\n      test module, record it RED with its pass/fail counts, revert, record it GREEN again. Both\n      verdicts go in a REPO-VISIBLE place \u2014 the commit/Gerrit change description of the change that\n      adds the tests, listing per test the mutation applied and the RED/GREEN pass-fail counts \u2014 as\n      well as on this ticket, so the evidence is reviewable from the change itself and survives\n      independently of the tracker. The named mutations are: for a REST-seam sweep, make one member retry\n      once at the urlopen boundary (the `== 1` attempt assertion must go red); for a subprocess-seam\n      sweep, SUPPRESS the retry outright \u2014 cap `_run_acli`'s attempt loop at one, or make it re-raise\n      on a 429 exit without looping \u2014 so the ATTEMPT-COUNT assertion goes red. Note what does NOT\n      work: making `_rate_limit_backoff` return `None` does not remove the retry at all, because\n      `acli_subprocess.py:429` is\n      `_backoff_sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))` \u2014 a `None` merely\n      swaps `Retry-After` for a uniform exponential delay and the call is still retried;\n      for the non-HTTPS-URL test, FIRST establish whether Cloud has a scheme rejection at all \u2014\n      `_validate_reconciler_tls` (`_config_schema.py:78`) is invoked only from\n      `ReconcilerConfig.__post_init__` (`:427`), and Cloud's `AcliClient` / settings resolution has\n      no scheme check of its own, so the likely answer is that Cloud does NOT reject `http://`. If it\n      DOES reject, disable that rejection and confirm the test goes RED. If it does NOT, the test is\n      absence-documenting, and its mutation check is the inverse: ADD a scheme assertion to the\n      production path, confirm the absence-documenting test goes RED, then revert \u2014 record which of\n      the two cases applied. Do NOT hunt for a non-existent hook, and do NOT add one permanently\n      (a production change, out of scope); for the missing-credential test, make\n      the production path proceed WITHOUT raising when the credential is absent (the cd78\n      anonymous-fallback shape) and confirm the test goes RED; for the `_USER_SEARCH_METHODS`\n      degradation pin, add one of the three alias names to the DC stub and confirm the pin goes RED.\n      Every  \u2026 [truncated by reconciler]",
+        "description": "# Give Cloud the resilience and config-validation coverage DC gained\n\n## Context\n\nEpic e369 hardened the DC adapter against a real instance and produced a tier of coverage Cloud never had. Cloud's tests grew from INCIDENTS THAT HAPPENED; DC's grew from CONFIGURATIONS THAT DIFFER. The second kind generalises, and Cloud does not have it.\n\nThis story is the Cloud half of the parity work. It is lower priority than [rebar:0fad-59f7-1605-4377] (Cloud's unpaginated whole-project readers) because Cloud is the mature, live-exercised path \u2014 but each item below is a real asymmetry, not a symmetry exercise.\n\n## The gaps, with what DC has for comparison\n\n**1. No per-member 429 sweep.** DC's `test_dc_rate_limit_retry_heldout.py` walks EVERY mutating transport member and asserts each fails on the first 429 \u2014 because retrying a mutation on an HTTP error is the duplicate-issue class [rebar:21fc-51d7-90ca-4a03] fixed, and an enumeration is what stops a later-added mutation inheriting a retry by omission. Cloud has `test_retry_httperror.py` (5 tests) and one 429 path in `state/test_acli_subprocess_timeout.py:352-368`, neither of which sweeps the member set.\n\n**DC's property does NOT transfer uniformly, and assuming it does is the main risk in this item.** Cloud has no single choke point; its mutations traverse FOUR distinct 429 behaviours across two levels, all verified in the tree. Two are transport-level and DELIBERATELY OPPOSITE:\n\n* **direct REST** (`AcliRestMixin._rest_urlopen_with_retry`) \u2014 \"Does NOT retry on\n  `urllib.error.HTTPError` (4xx / 5xx)\" (`adapters/jira/acli_rest.py:50-52`). A 429 arrives as\n  `urllib.error.HTTPError`. Here DC's property holds verbatim: exactly ONE attempt.\n* **ACLI subprocess** (`acli_subprocess._run_acli`) \u2014 **already RETRIES a 429**, on purpose, via\n  `_rate_limit_backoff` honouring `Retry-After`; `test_run_acli_429_retries_with_rate_limit_backoff`\n  (`state/test_acli_subprocess_timeout.py:369`) asserts the call SUCCEEDS on retry. A 429 here is an\n  exit code plus `429` in stderr, not an HTTP exception.\n\n\u2026and ABOVE both sits the reconciler's dispatch level, which is the part most likely to be missed \u2014 and it is itself SPLIT IN TWO:\n\n* **the retrying dispatch wrapper** \u2014 `dispatch_one._call_with_retry`\n  (`dispatch_one.py:71`) catches `urllib.error.HTTPError` and, when `exc.code == 429`, records\n  `Retry-After` and RETRIES (`dispatch_one.py:115-118`). So a REST mutation that makes exactly one\n  attempt when its transport method is called DIRECTLY is nevertheless retried when reached the way\n  production reaches it.\n* **the explicitly NON-retrying apply phases** \u2014 `dispatch_apply_phases`, whose module docstring\n  states it owns \"the phases that do NOT funnel their Jira writes through\n  `dispatch_one._call_with_retry`\". These include real mutations:\n  `_update_one_apply_reporter` (`dispatch_apply_phases.py:96`) and\n  `_update_one_dispatch_comments` (`:147`, the single-attempt comment dispatch). A 429 here is a\n  FOURTH behaviour \u2014 neither the subprocess backoff nor the dispatch-wrapper retry applies \u2014 and\n  existing coverage (`test_comment_single_attempt.py`) pins attempt count for ONE member, not a\n  sweep.\n\nSo \"every mutating member fails on the first 429\" is TRUE for a raw REST transport method called directly, TRUE again for the non-retrying `dispatch_apply_phases` mutations, and FALSE for both the subprocess seam and anything routed through the retrying dispatch wrapper. **An attempt-count assertion is therefore meaningless unless it names the BOUNDARY it measures at.** Writing the DC assertion across all four would either fail immediately or pressure someone into deleting an intentional, tested backoff. This story must establish the split FIRST and assert a per-layer property \u2014 and it must not fold in a behaviour change (below).\n\n**The two retries named above are KNOWN and DELIBERATE \u2014 they are not the bug trigger.** Both `_run_acli`'s rate-limit backoff and `_call_with_retry`'s 429 branch are already implemented, tested and documented, so \"a mutation is retried on a 429\" is not by itself a finding; the enumeration will hit them by construction. The bug-filing trigger is NARROWER: a mutating member retried on a 429 at a layer where that retry is NOT already explicitly tested and documented \u2014 an UNDOCUMENTED or newly-discovered retry path. That is the [rebar:21fc-51d7-90ca-4a03] duplicate class. If one is found, file a linked bug with the evidence and do NOT \"fix\" it inside this test story. Separately, if the enumeration shows a KNOWN retry applying to a mutation in a way nobody has evaluated for duplicate-write safety, record that assessment on this ticket \u2014 as a finding, not as a code change.\n\n**2. No config-validation tier.** DC asserts a non-HTTPS base URL is rejected, that the insecure override warns, that malformed config propagates, and that a missing credential fails loudly rather than going anonymous (`test_jira_dc_config_settings.py`, `test_dc_pat_required_heldout.py` \u2014 the latter exists because bug cd78 was exactly a silent fall-back to ANONYMOUS access). Cloud has no equivalent. Whether Cloud CAN go anonymous is itself unestablished and worth answering.\n\n**3. The probe's resolved-status set is not runtime-configurable.** `adapters/jira/probe.py:39` pins `frozenset({\"Resolved\",\"Done\",\"Cancelled\"})`; DC threads `resolved_statuses` from settings and tests it. Cloud's `probe_remote` also re-resolves env itself rather than using the transport's configured session.\n\n**\"Is it deliberate?\" is already answered \u2014 do NOT re-open it.** `probe.py`'s module docstring (`:20-25`) states that J2 moved the pure classifier to `adapters/jira_family/probe.py` taking the status set as a PARAMETER, and that `RESOLVED_STATUS_NAMES` \"is Cloud/DIG's *configured value* (a self-hosted Data Center workflow can name its resolved states anything), so it stays defined here\". So it is documented as deliberate at the definition site, and an AC satisfied by \"document it\" would be satisfied by doing nothing. The remaining OPEN question is narrower and is the only one this item answers: **does a Cloud deployment whose workflow uses non-standard resolved-status names need a runtime config hook** (as DC has), or is the per-deployment constant genuinely sufficient? Record THAT decision with its rationale; if a hook is needed, file it as its own ticket.\n\n**4. `search_user_by_email` degradation is unasserted on DC** (the mirror-image item, kept here so the pair is not split). `outbound_assignee.py:33-37` resolves the user-search method by NAME STRING across three aliases; DC provides none of them, so `_bootstrap_account_id_via_user_search` returns `None` and the path degrades to string matching. That degradation is probably correct \u2014 DC has no accountId concept \u2014 but nothing asserts it, so an accidental rename on the Cloud side would look like the same silence.\n\n## Approach\n\nTake these in the order above; 1 and 2 carry the risk, 3 is an investigation that may produce a ticket rather than a test, 4 is a one-test pin.\n\n**Port the PROPERTY, not the test \u2014 and note the property is PER-LAYER.** Cloud's retry lives in a different place from DC's, so a copied test would assert the wrong seam. What must survive the port is the ENUMERATION \u2014 that every mutating member is named explicitly, because an ellipsis is how the next mutation inherits a retry.\n\n**Step 0 for item 1, before any test is written:** enumerate every mutating member of Cloud's transport and classify each on BOTH axes, by reading bodies rather than inferring from names:\n\n1. **transport seam** \u2014 one of THREE: ACLI subprocess (`_run_acli`); pooled direct REST\n   (`_rest_urlopen_with_retry` / `_direct_rest_post_raw` / `_direct_rest_put_raw`); or **bare\n   `urllib.request.urlopen`**, which bypasses `_rest_urlopen_with_retry` entirely and therefore does\n   not even inherit its transient-fault retry \u2014 `acli_cli_ops.update_priority`\n   (`acli_cli_ops.py:396`, urlopen at `:437`) is a confirmed instance, reached in production because\n   `AcliClient.update_issue` delegates to the free function `update_issue` (`acli.py:374`), which\n   calls `update_priority` when `priority` is among the changed fields (`acli.py:180`). A member with\n   more than one leg (e.g. a REST leg and a subprocess leg) is called out as such.\n2. **dispatch level** \u2014 which of THREE the reconciler uses: the retrying wrapper\n   `dispatch_one._call_with_retry` (`dispatch_one.py:71`), which adds a 429 retry ON TOP of\n   whatever the seam does; the explicitly non-retrying apply phases in `dispatch_apply_phases`\n   (`_update_one_apply_reporter:96`, `_update_one_dispatch_comments:147`); or no dispatch wrapper at\n   all. Determine this by reading the call site, since the module split is by RETRY POLICY, so the\n   answer is not inferable from the member's own body.\n\n**Completeness check for the table, run and recorded alongside it** \u2014 the table gates the whole item, so its coverage must be demonstrated, not asserted. Enumerate the candidate surface with a concrete command and account for EVERY name it returns:\n\n    git grep -nE \"^(    )?def [_a-z]\" -- \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_graph.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py \\\n      src/rebar/_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py\n\nThree things about that pattern are deliberate, and each one is a way the table can look complete while omitting a writer:\n\n* it matches BOTH indented class methods AND module-level free functions;\n* it includes `_`-PREFIXED names \u2014 `acli_graph._add_label_impl:144` and `_remove_label_impl:204` are\n  mutating, as are the `_direct_rest_*` helpers in `acli_rest.py`, and a `def [a-z]` pattern would\n  emit none of them, so the \"every name it returns is classified\" rule would be satisfied vacuously;\n* `acli_cli_ops.py` is in the file list, because `AcliClient` delegates real mutations to free\n  functions there (`create_issue:147`, `update_priority:396`, `add_comment:469`).\n\nRecord that raw output as a REPO ARTIFACT beside the table (in the sweep module's header comment, where the table lives) and mirror it onto the ticket. Every name in it is either classified in the table or explicitly marked NON-MUTATING with a one-line reason \u2014 no name may be silently absent. Cross-check the mutating set against DC's enumerated list in `test_dc_rate_limit_retry_heldout.py` and record any member DC sweeps that Cloud's table lacks, or vice versa, with the reason.\n\nThe table decides, per member, which property is asserted and at which boundary it is observed \u2014 and a member can legitimately have DIFFERENT correct answers at the two levels (one attempt raw, retried when dispatch-wrapped).\n\n## Scope\n\n- `tests/unit/rebar_reconciler/` \u2014 Cloud 429 sweep, Cloud config-validation tests, a DC\n  user-search-degradation pin.\n- an investigation note (or a linked bug) on the Cloud probe's hardcoded resolved statuses.\n- the per-member seam classification table for item 1 (recorded on the ticket, not in code).\n- No production change intended. Items 1 and 3 may each produce a linked BUG \u2014 item 1 only if a\n  mutating member is retried on a 429 at a layer where that retry is NOT already tested and\n  documented (the two known deliberate retries do not count), item 3 if the hardcoded\n  resolved-status set is an accident \u2014 and in both cases the fix is its own ticket, never folded in\n  here.\n\n## Testing\n\nThe 429 sweep must assert the ATTEMPT COUNT per member, not merely that an exception escaped \u2014 an implementation that retried and then re-raised satisfies a raises-only assertion having issued the write twice. This is the same correction being applied to DC's own sweep in [rebar:2944-dd3f-e982-4359]; do not copy that mistake forward.\n\n**The instrument differs per seam, and a single patch point covers only half the members** \u2014 a sweep that patches `urllib.request.urlopen` is blind to subprocess mutations, and one that patches `acli_subprocess._run_acli` is blind to REST mutations, while either LOOKS complete because every member still raises. So:\n\n* POOLED REST-seam members, called DIRECTLY on the transport (not through the dispatch wrapper) \u2014\n  observe attempts at the urlopen boundary; inject a 429 as `urllib.error.HTTPError`; assert EXACTLY\n  ONE attempt (no retry), matching `acli_rest.py:50-52`.\n* BARE-`urlopen` members \u2014 `acli_cli_ops.update_priority` (`:396`, urlopen at `:437`) bypasses\n  `_rest_urlopen_with_retry`, so it has no retry of its own: assert EXACTLY ONE attempt there too.\n\n  **One patch point covers both, and per-module patching is NOT a real isolation mechanism.** Both\n  `acli_rest.py` (`:23`) and `acli_cli_ops.py` (`:24`) do `import urllib.request` \u2014 a MODULE-object\n  binding \u2014 so both resolve `urlopen` at call time through the same shared `urllib.request` object.\n  Patching it once affects both; `mutate/test_acli_cross_mixin_binding.py:160` already relies on\n  exactly that, calling it \"the process-wide `urllib.request.urlopen` (a shared singleton)\". So\n  patch it once and distinguish the seams by WHICH MEMBER was invoked and what the captured request\n  looks like \u2014 not by which module the patch was applied through. Coverage of both seams must\n  therefore be proven by ENUMERATION (every member in the table has a case) rather than by any\n  assumed namespace separation.\n* the DISPATCH-WRAPPED path \u2014 the same members reached through `dispatch_one._call_with_retry`\n  DO retry a 429 by design (`dispatch_one.py:115-118`). Assert the retry is bounded and honours\n  `Retry-After`; do NOT assert one attempt here. This is the layer where \"is a MUTATION being\n  retried on a 429?\" is actually decided, so it is the layer the bug-filing trigger below applies to.\n* subprocess-seam members \u2014 observe attempts at the `_run_acli`/`Popen` boundary; inject a 429 as\n  the exit-code + `429`-in-stderr shape the existing test uses; assert the OBSERVED, INTENDED\n  behaviour (a bounded retry honouring `Retry-After`, per\n  `state/test_acli_subprocess_timeout.py:369`) rather than one attempt \u2014 and record whether that\n  retry applies to a MUTATION, which is the bug-filing trigger above.\n\nEach seam's sweep must be MUTATION-CHECKED at its own instrument: make one member issue an extra attempt at that boundary and confirm THAT seam's sweep goes red \u2014 proving the sweep is not blind to the half it is supposed to cover.\n\n## Acceptance criteria\n\n- [ ] every MUTATING Cloud transport member is enumerated explicitly \u2014 no ellipsis, no sampling \u2014\n      and classified on BOTH axes: transport seam (ACLI subprocess / pooled direct REST / bare\n      `urllib.request.urlopen`) and dispatch\n      level (retrying `dispatch_one._call_with_retry`, the explicitly NON-retrying\n      `dispatch_apply_phases` phases, or no wrapper). The table ALSO carries, for every member that\n      reaches a mutation through a KNOWN deliberate retry (`dispatch_one._call_with_retry` or\n      `_run_acli`'s rate-limit backoff), a \"Duplicate-write safe? [reason]\" column recording the\n      duplicate-write assessment for that member \u2014 so the assessment is a repo artifact, not a\n      tracker-only note. The table lands as a REPO ARTIFACT \u2014 the sweep test module's own enumeration\n      plus a header comment carrying the per-member classification and that duplicate-write-safety\n      column, which is where a reviewer will look \u2014 and is mirrored onto this ticket\n- [ ] the table's COMPLETENESS is demonstrated, not asserted: the enumeration command from Step 0 is\n      run, its raw output recorded beside the table, and every name it returns is either classified\n      or marked NON-MUTATING with a reason \u2014 plus the DC cross-check for members present on one side\n      and missing on the other\n- [ ] each POOLED-REST and each BARE-`urlopen` mutating member, invoked DIRECTLY on the transport, is\n      asserted to make EXACTLY ONE attempt under a 429, observed at the shared process-wide\n      `urllib.request.urlopen`, with one case PER MEMBER from the table \u2014 `acli_cli_ops.update_priority`\n      explicitly among them\n- [ ] the DISPATCH-WRAPPED path is covered separately: reached through\n      `dispatch_one._call_with_retry`, a 429 IS retried by design (`dispatch_one.py:115-118`), so the\n      assertion there is a BOUNDED retry honouring `Retry-After` \u2014 not one attempt\n- [ ] each subprocess-seam mutating member is asserted against its ACTUAL intended 429 behaviour \u2014\n      the bounded `Retry-After` backoff in `_run_acli` \u2014 observed at the `_run_acli` boundary. This\n      criterion is NOT satisfied by asserting one attempt there, because\n      `test_run_acli_429_retries_with_rate_limit_backoff` proves the retry is deliberate\n- [ ] mutations reached through the NON-retrying `dispatch_apply_phases` path\n      (`_update_one_apply_reporter`, `_update_one_dispatch_comments`) are asserted to make exactly\n      one attempt under a 429 \u2014 extending `test_comment_single_attempt.py`'s single-member pin to\n      the sweep\n- [ ] if a MUTATING member is retried on a 429 at a layer where that retry is NOT already tested and\n      documented, a linked bug is filed with the evidence. The two KNOWN deliberate retries\n      (`_run_acli`'s rate-limit backoff, `_call_with_retry`'s 429 branch) do NOT by themselves\n      trigger a bug; where one applies to a mutation, the duplicate-write assessment is RECORDED in\n      the sweep module's \"Duplicate-write safe? [reason]\" table column (the authoritative repo\n      artifact) and mirrored onto this ticket \u2014 never ticket-only. This story changes NO retry\n      behaviour either way\n- [ ] Cloud rejects a non-HTTPS base URL, or the test records that it deliberately does not\n- [ ] Cloud's behaviour on a MISSING credential is asserted: it must fail loudly, or the test pins\n      that it does not and a bug is filed (this is bug cd78's shape on the other adapter)\n- [ ] the OPEN question on the Cloud probe's resolved-status set is answered: whether a Cloud\n      deployment using non-standard resolved-status names needs a runtime config hook as DC has, or\n      whether the per-deployment constant suffices. The DECIDING CRITERION is whether a Cloud\n      deployment can rename its resolved-status workflow states WITHOUT a rebar code change: if\n      `RESOLVED_STATUS_NAMES` is compiled into the adapter and no per-tenant override path exists, a\n      deployment with non-standard names is mis-probed and a runtime hook is warranted (file it);\n      if such names cannot occur on Cloud (a documented workflow constraint) the constant suffices.\n      The answer lands as a REPO ARTIFACT, not only a ticket comment \u2014 a comment at `RESOLVED_STATUS_NAMES` in `adapters/jira/probe.py` recording the\n      decision and citing this ticket id (plus the follow-up ticket id if a hook is needed) \u2014 so a\n      reviewer can find it without the tracker. Re-documenting it as merely \"deliberate\" does NOT\n      satisfy this: `probe.py:20-25` already says so, and an AC already true on an unmodified tree is\n      not a criterion\n- [ ] a test pins that DC exposes none of `_USER_SEARCH_METHODS` and that the bootstrap degrades to\n      the string-match path rather than raising\n- [ ] each new test is MUTATION-CHECKED. \"Mutation-checked\" here means a CONCRETE MANUAL mutation,\n      not a mutation-testing tool: for each new test, apply the named perturbation below, run that\n      test module, record it RED with its pass/fail counts, revert, record it GREEN again. Both\n      verdicts go in a REPO-VISIBLE place \u2014 the commit/Gerrit change description of the change that\n      adds the tests, listing per test the mutation applied and the RED/GREEN pass-fail counts \u2014 as\n      well as on this ticket, so the evidence is reviewable from the change itself and survives\n      independently of the tracker. The named mutations are: for a REST-seam sweep, make one member retry\n      once at the urlopen boundary (the `== 1` attempt assertion must go red); for a subprocess-seam\n      sweep, SUPPRESS the retry outright \u2014 cap `_run_acli`'s attempt loop at one, or make it re-raise\n      on a 429 exit without looping \u2014 so the ATTEMPT-COUNT assertion goes red. Note what does NOT\n      work: making `_rate_limit_backoff` return `None` does not remove the retry at all, because\n      `acli_subprocess.py:429` is\n      `_backoff_sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))` \u2014 a `None` merely\n      swaps `Retry-After` for a uniform exponential delay and the call is still retried;\n      for the non-HTTPS-URL test, FIRST establish whether Cloud has a scheme rejection at all \u2014\n      `_validate_reconci \u2026 [truncated by reconciler]",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Cloud resilience + config-validation coverage, matching DC's"
@@ -22450,6 +22499,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-16T19:43:19Z"
     },
+    "215f-92ab-9780-443d": {
+      "created_at": "2026-08-06T19:01:21Z",
+      "jira_id": "4587340",
+      "jira_key": "REB-2456",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:26Z"
+    },
     "218b-c668-f21b-440c": {
       "baseline": {
         "assignee": {
@@ -22478,6 +22534,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-12T03:14:05Z"
+    },
+    "218e-0ec1-385d-493a": {
+      "created_at": "2026-08-06T19:01:27Z",
+      "jira_id": "4587341",
+      "jira_key": "REB-2457",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:31Z"
     },
     "21ca-cdb4-671c-460c": {
       "baseline": {
@@ -23913,6 +23976,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:58:37Z"
     },
+    "2391-a941-69ff-4645": {
+      "created_at": "2026-08-06T19:01:32Z",
+      "jira_id": "4587342",
+      "jira_key": "REB-2458",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:36Z"
+    },
     "23d2-e0f3-6588-4fe9": {
       "baseline": {
         "assignee": null,
@@ -24664,6 +24734,13 @@
       "peer_parent": "REB-1042",
       "state": "confirmed",
       "updated_at": "2026-07-12T18:41:47Z"
+    },
+    "24f7-1955-bcd8-4f29": {
+      "created_at": "2026-08-06T19:01:37Z",
+      "jira_id": "4587343",
+      "jira_key": "REB-2459",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:41Z"
     },
     "2529-bb55-586d-4785": {
       "baseline": {
@@ -28984,6 +29061,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-11T15:57:17Z"
     },
+    "2876-7958-8dee-4882": {
+      "created_at": "2026-08-06T19:01:42Z",
+      "jira_id": "4587344",
+      "jira_key": "REB-2460",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:46Z"
+    },
     "28a6-d9b1-f0f3-4988": {
       "baseline": {
         "assignee": null,
@@ -29977,6 +30061,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-02T03:52:26Z"
     },
+    "2948-48e5-666f-4677": {
+      "created_at": "2026-08-06T19:01:47Z",
+      "jira_id": "4587345",
+      "jira_key": "REB-2461",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:51Z"
+    },
     "295a-fa40-9b67-4e7a": {
       "baseline": {
         "assignee": null,
@@ -30419,6 +30510,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-22T20:41:04Z"
     },
+    "2a76-c9d9-4e8a-471b": {
+      "created_at": "2026-08-06T19:01:52Z",
+      "jira_id": "4587346",
+      "jira_key": "REB-2462",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:01:55Z"
+    },
     "2aa6-726a-ea56-4d6c": {
       "baseline": {
         "assignee": null,
@@ -30798,6 +30896,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-29T19:27:27Z"
     },
+    "2be7-80d6-208a-4737": {
+      "created_at": "2026-08-06T19:01:57Z",
+      "jira_id": "4587347",
+      "jira_key": "REB-2463",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:00Z"
+    },
     "2c14-fa5f-1228-4e02": {
       "baseline": {
         "assignee": null,
@@ -31165,6 +31270,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T14:56:46Z"
     },
+    "2c58-e710-275e-4ff7": {
+      "created_at": "2026-08-06T19:02:05Z",
+      "jira_id": "4587348",
+      "jira_key": "REB-2464",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:09Z"
+    },
     "2c7a-7157-db99-4659": {
       "baseline": {
         "assignee": null,
@@ -31194,6 +31306,13 @@
       "peer_parent": "REB-1715",
       "state": "confirmed",
       "updated_at": "2026-07-30T04:09:43Z"
+    },
+    "2c93-ce1c-127e-4d58": {
+      "created_at": "2026-08-06T19:02:15Z",
+      "jira_id": "4587349",
+      "jira_key": "REB-2465",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:19Z"
     },
     "2ca9-2cec-10ae-424e": {
       "baseline": {
@@ -33407,6 +33526,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-11T02:22:18Z"
     },
+    "2fd6-e993-8e20-4caf": {
+      "created_at": "2026-08-06T19:02:21Z",
+      "jira_id": "4587350",
+      "jira_key": "REB-2466",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:26Z"
+    },
     "3003-774d-23dc-4697": {
       "baseline": {
         "assignee": null,
@@ -33804,6 +33930,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-31T05:50:35Z"
+    },
+    "30b0-0004-744b-463e": {
+      "created_at": "2026-08-06T19:02:28Z",
+      "jira_id": "4587351",
+      "jira_key": "REB-2467",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:32Z"
     },
     "30b3-b001-4ee2-43d2": {
       "baseline": {
@@ -38438,6 +38571,20 @@
       "state": "confirmed",
       "updated_at": "2026-07-08T00:37:37Z"
     },
+    "34b5-ad7d-b983-47f9": {
+      "created_at": "2026-08-06T19:02:33Z",
+      "jira_id": "4587352",
+      "jira_key": "REB-2468",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:38Z"
+    },
+    "34c2-8c41-1a12-4254": {
+      "created_at": "2026-08-06T19:02:39Z",
+      "jira_id": "4587353",
+      "jira_key": "REB-2469",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:44Z"
+    },
     "34c9-8b89-e066-4b09": {
       "baseline": {
         "assignee": null,
@@ -38496,6 +38643,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-30T01:57:32Z"
+    },
+    "354d-c85d-6689-4302": {
+      "created_at": "2026-08-06T19:02:49Z",
+      "jira_id": "4587354",
+      "jira_key": "REB-2470",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:53Z"
     },
     "3575-c189-22ce-4166": {
       "baseline": {
@@ -40373,6 +40527,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-22T20:05:49Z"
+    },
+    "3787-9749-f8a6-41bb": {
+      "created_at": "2026-08-06T19:02:54Z",
+      "jira_id": "4587355",
+      "jira_key": "REB-2471",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:02:58Z"
     },
     "37c7-b10c-1f5e-42fc": {
       "baseline": {
@@ -50098,6 +50259,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-28T04:25:53Z"
     },
+    "4136-a38d-7b33-4b9d": {
+      "created_at": "2026-08-06T19:02:59Z",
+      "jira_id": "4587356",
+      "jira_key": "REB-2472",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:03Z"
+    },
     "4143-9afe-6479-4244": {
       "baseline": {
         "assignee": null,
@@ -52791,6 +52959,13 @@
       "peer_parent": "REB-1052",
       "state": "confirmed",
       "updated_at": "2026-07-12T19:38:33Z"
+    },
+    "43ea-3d5a-078f-4fe3": {
+      "created_at": "2026-08-06T19:03:03Z",
+      "jira_id": "4587357",
+      "jira_key": "REB-2473",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:07Z"
     },
     "4419-1c85-1d9e-422c": {
       "baseline": {
@@ -56140,6 +56315,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:23Z"
     },
+    "46a2-9c1a-d855-4706": {
+      "created_at": "2026-08-06T19:03:12Z",
+      "jira_id": "4587358",
+      "jira_key": "REB-2474",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:15Z"
+    },
     "46f0-4e09-b8ed-4a4e": {
       "baseline": {
         "assignee": {
@@ -58803,6 +58985,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-05T17:05:55Z"
     },
+    "4a6d-5bbc-44f4-4a56": {
+      "created_at": "2026-08-06T19:03:18Z",
+      "jira_id": "4587359",
+      "jira_key": "REB-2475",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:22Z"
+    },
     "4a7e-0094-91e7-4413": {
       "baseline": {
         "assignee": null,
@@ -60598,6 +60787,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-17T05:05:03Z"
     },
+    "4c2b-7b86-913e-40ee": {
+      "created_at": "2026-08-06T19:03:23Z",
+      "jira_id": "4587360",
+      "jira_key": "REB-2476",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:27Z"
+    },
     "4c34-cdbd-29cf-4556": {
       "baseline": {
         "assignee": null,
@@ -60871,6 +61067,13 @@
       "peer_parent": "REB-1173",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:44:32Z"
+    },
+    "4ca2-97b4-51fb-41c9": {
+      "created_at": "2026-08-06T19:03:28Z",
+      "jira_id": "4587361",
+      "jira_key": "REB-2477",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:32Z"
     },
     "4cb9-d88b-d891-42ad": {
       "baseline": {
@@ -64705,6 +64908,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-06T01:21:56Z"
     },
+    "502b-5372-81dd-4740": {
+      "created_at": "2026-08-06T19:03:36Z",
+      "jira_id": "4587362",
+      "jira_key": "REB-2478",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:39Z"
+    },
     "5055-26a9-a0c7-4683": {
       "baseline": {
         "assignee": null,
@@ -67466,6 +67676,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-03T22:14:10Z"
     },
+    "531b-a5a7-91a2-4e4c": {
+      "created_at": "2026-08-06T19:03:42Z",
+      "jira_id": "4587363",
+      "jira_key": "REB-2479",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:46Z"
+    },
     "5342-568c-b881-4b2a": {
       "baseline": {
         "assignee": null,
@@ -68921,6 +69138,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:44Z"
     },
+    "561e-e186-a902-461c": {
+      "created_at": "2026-08-06T19:03:48Z",
+      "jira_id": "4587364",
+      "jira_key": "REB-2480",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:03:53Z"
+    },
     "562f-fed4-231d-4dac": {
       "baseline": {
         "assignee": null,
@@ -69039,6 +69263,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:45Z"
+    },
+    "5796-d1f8-870f-4dc1": {
+      "created_at": "2026-08-06T19:04:08Z",
+      "jira_id": "4587365",
+      "jira_key": "REB-2481",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:12Z"
     },
     "57d6-9fdf-d67c-4e6c": {
       "baseline": {
@@ -70323,6 +70554,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-17T19:35:14Z"
+    },
+    "58b6-6af1-f975-4820": {
+      "created_at": "2026-08-06T19:04:13Z",
+      "jira_id": "4587366",
+      "jira_key": "REB-2482",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:17Z"
     },
     "58ef-91fa-20c1-4f29": {
       "baseline": {
@@ -73867,6 +74105,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-12T19:38:38Z"
     },
+    "5e53-234f-5c65-477d": {
+      "created_at": "2026-08-06T19:04:18Z",
+      "jira_id": "4587367",
+      "jira_key": "REB-2483",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:22Z"
+    },
     "5e55-9bfa-ac57-4a6a": {
       "baseline": {
         "assignee": {
@@ -75894,6 +76139,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:00:06Z"
     },
+    "6067-fcbd-622b-4c64": {
+      "created_at": "2026-08-06T19:04:24Z",
+      "jira_id": "4587368",
+      "jira_key": "REB-2484",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:28Z"
+    },
     "60a0-3aee-98e8-4094": {
       "baseline": {
         "assignee": null,
@@ -76745,6 +76997,13 @@
       "jira_key": "REB-783",
       "state": "confirmed",
       "updated_at": "2026-07-08T00:30:16Z"
+    },
+    "6117-fcb7-d680-4b2f": {
+      "created_at": "2026-08-06T19:04:29Z",
+      "jira_id": "4587369",
+      "jira_key": "REB-2485",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:33Z"
     },
     "611f-d37e-d3af-4ebc": {
       "baseline": {
@@ -77700,6 +77959,13 @@
       "jira_key": "REB-720",
       "state": "confirmed",
       "updated_at": "2026-07-06T23:03:24Z"
+    },
+    "6194-8815-8ebb-42d0": {
+      "created_at": "2026-08-06T19:04:37Z",
+      "jira_id": "4587370",
+      "jira_key": "REB-2486",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:41Z"
     },
     "61d8-ff23-8ee0-4289": {
       "baseline": {
@@ -83354,6 +83620,20 @@
       "state": "confirmed",
       "updated_at": "2026-07-16T19:45:18Z"
     },
+    "6a74-f464-4ce1-4b79": {
+      "created_at": "2026-08-06T19:04:42Z",
+      "jira_id": "4587371",
+      "jira_key": "REB-2487",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:46Z"
+    },
+    "6a81-8ecd-0cd6-41cd": {
+      "created_at": "2026-08-06T19:04:47Z",
+      "jira_id": "4587372",
+      "jira_key": "REB-2488",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:52Z"
+    },
     "6a89-1165-ea58-4be3": {
       "baseline": {
         "assignee": {
@@ -83411,6 +83691,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-07-31T03:58:11Z"
+    },
+    "6a97-9e4b-10e2-45c9": {
+      "created_at": "2026-08-06T19:04:54Z",
+      "jira_id": "4587373",
+      "jira_key": "REB-2489",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:04:57Z"
     },
     "6a9a-910a-6938-4695": {
       "baseline": {
@@ -86745,6 +87032,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T21:05:00Z"
     },
+    "6e70-3d3c-55da-4930": {
+      "created_at": "2026-08-06T19:04:59Z",
+      "jira_id": "4587374",
+      "jira_key": "REB-2490",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:03Z"
+    },
     "6e88-91c2-2f45-48c1": {
       "baseline": {
         "assignee": null,
@@ -86997,6 +87291,13 @@
       "jira_key": "REB-179",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:02:26Z"
+    },
+    "6ec8-24c7-182b-40d0": {
+      "created_at": "2026-08-06T19:05:09Z",
+      "jira_id": "4587375",
+      "jira_key": "REB-2491",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:13Z"
     },
     "6eca-183e-1cd2-4fb9": {
       "baseline": {
@@ -88290,6 +88591,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-27T16:47:39Z"
     },
+    "7084-4e33-e698-42dd": {
+      "created_at": "2026-08-06T19:05:14Z",
+      "jira_id": "4587376",
+      "jira_key": "REB-2492",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:17Z"
+    },
     "708d-0767-1a51-4928": {
       "baseline": {
         "assignee": null,
@@ -88304,6 +88612,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-03T23:40:52Z"
+    },
+    "70bc-ab05-6d4c-45a0": {
+      "created_at": "2026-08-06T19:05:19Z",
+      "jira_id": "4587377",
+      "jira_key": "REB-2493",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:23Z"
     },
     "70c7-8745-2be8-4e5c": {
       "baseline": {
@@ -88967,6 +89282,13 @@
       "peer_parent": "REB-2089",
       "state": "confirmed",
       "updated_at": "2026-08-02T03:16:17Z"
+    },
+    "738a-376e-4829-42ca": {
+      "created_at": "2026-08-06T19:05:27Z",
+      "jira_id": "4587378",
+      "jira_key": "REB-2494",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:31Z"
     },
     "73cb-2716-bde1-4655": {
       "baseline": {
@@ -89942,6 +90264,13 @@
       "peer_parent": "REB-1608",
       "state": "confirmed",
       "updated_at": "2026-07-28T00:12:28Z"
+    },
+    "74a3-1213-9898-4195": {
+      "created_at": "2026-08-06T19:05:34Z",
+      "jira_id": "4587379",
+      "jira_key": "REB-2495",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:38Z"
     },
     "74a8-86fe-9b76-4b07": {
       "baseline": {
@@ -93871,6 +94200,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-02T03:16:21Z"
     },
+    "78f4-8cc7-bc8c-4ac2": {
+      "created_at": "2026-08-06T19:05:41Z",
+      "jira_id": "4587380",
+      "jira_key": "REB-2496",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:45Z"
+    },
     "790c-a7a3-120a-42c8": {
       "baseline": {
         "assignee": null,
@@ -97632,6 +97968,13 @@
       "peer_parent": "REB-1715",
       "state": "confirmed",
       "updated_at": "2026-07-30T04:10:06Z"
+    },
+    "7e90-233b-3ee9-4f14": {
+      "created_at": "2026-08-06T19:05:45Z",
+      "jira_id": "4587381",
+      "jira_key": "REB-2497",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:50Z"
     },
     "7ed9-ae31-a01e-44a9": {
       "baseline": {
@@ -102283,6 +102626,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-06T01:22:20Z"
     },
+    "81d5-7914-8a3c-411c": {
+      "created_at": "2026-08-06T19:05:52Z",
+      "jira_id": "4587382",
+      "jira_key": "REB-2498",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:05:56Z"
+    },
     "81e2-ad5e-bfe2-4653": {
       "baseline": {
         "assignee": {
@@ -103684,6 +104034,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-11T15:57:54Z"
     },
+    "8390-32f7-e4b8-48a1": {
+      "created_at": "2026-08-06T19:05:57Z",
+      "jira_id": "4587383",
+      "jira_key": "REB-2499",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:03Z"
+    },
     "839b-f6d2-7e1a-4051": {
       "baseline": {
         "assignee": {
@@ -105024,6 +105381,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-01T21:37:08Z"
     },
+    "858c-786a-13be-4332": {
+      "created_at": "2026-08-06T19:06:07Z",
+      "jira_id": "4587384",
+      "jira_key": "REB-2500",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:11Z"
+    },
     "85a6-2fea-e2c9-4819": {
       "baseline": {
         "assignee": null,
@@ -105549,6 +105913,20 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-18T23:33:04Z"
+    },
+    "86c8-4b91-5257-4cca": {
+      "created_at": "2026-08-06T19:06:12Z",
+      "jira_id": "4587385",
+      "jira_key": "REB-2501",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:16Z"
+    },
+    "8705-5c65-c1b6-42de": {
+      "created_at": "2026-08-06T19:06:17Z",
+      "jira_id": "4587386",
+      "jira_key": "REB-2502",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:21Z"
     },
     "8784-c2d7-c395-4478": {
       "baseline": {
@@ -108272,6 +108650,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-10T03:12:22Z"
     },
+    "895c-3eb2-043a-4de1": {
+      "created_at": "2026-08-06T19:06:24Z",
+      "jira_id": "4587387",
+      "jira_key": "REB-2503",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:29Z"
+    },
     "897f-afbe-b6b4-4767": {
       "baseline": {
         "assignee": null,
@@ -108897,6 +109282,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-17T20:07:04Z"
     },
+    "8a5e-b88e-0c3e-4544": {
+      "created_at": "2026-08-06T19:06:41Z",
+      "jira_id": "4587388",
+      "jira_key": "REB-2504",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:46Z"
+    },
     "8b50-6933-eef5-4d75": {
       "baseline": {
         "assignee": null,
@@ -109106,6 +109498,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:45:57Z"
+    },
+    "8b97-a0ca-82a4-4d4e": {
+      "created_at": "2026-08-06T19:06:49Z",
+      "jira_id": "4587389",
+      "jira_key": "REB-2505",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:53Z"
     },
     "8bc5-9c76-95f3-465e": {
       "baseline": {
@@ -112310,6 +112709,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-28T04:26:02Z"
     },
+    "8eb3-1f20-f395-4ea5": {
+      "created_at": "2026-08-06T19:06:55Z",
+      "jira_id": "4587390",
+      "jira_key": "REB-2506",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:06:59Z"
+    },
     "8ed5-9c7d-cb86-42c8": {
       "baseline": {
         "assignee": {
@@ -114378,6 +114784,13 @@
       "jira_key": "REB-725",
       "state": "confirmed",
       "updated_at": "2026-07-06T23:03:48Z"
+    },
+    "9100-9ee3-7f83-4b86": {
+      "created_at": "2026-08-06T19:07:00Z",
+      "jira_id": "4587391",
+      "jira_key": "REB-2507",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:04Z"
     },
     "9109-2ad9-2477-4cf6": {
       "baseline": {
@@ -117079,6 +117492,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-22T22:30:03Z"
     },
+    "941b-f049-5f29-4410": {
+      "created_at": "2026-08-06T19:07:06Z",
+      "jira_id": "4587392",
+      "jira_key": "REB-2508",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:11Z"
+    },
     "943f-8303-829b-443a": {
       "baseline": {
         "assignee": null,
@@ -117702,6 +118122,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:08:27Z"
     },
+    "94a3-1323-3497-4f59": {
+      "created_at": "2026-08-06T19:07:20Z",
+      "jira_id": "4587393",
+      "jira_key": "REB-2509",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:25Z"
+    },
     "94a3-8bb2-5d4a-442b": {
       "baseline": {
         "assignee": null,
@@ -117948,6 +118375,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-30T23:00:04Z"
+    },
+    "94bc-a0b4-bc37-47b2": {
+      "created_at": "2026-08-06T19:07:28Z",
+      "jira_id": "4587394",
+      "jira_key": "REB-2510",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:32Z"
     },
     "94c4-c391-3fed-4773": {
       "baseline": {
@@ -120707,6 +121141,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-09T00:52:30Z"
     },
+    "9790-cafa-dffa-462e": {
+      "created_at": "2026-08-06T19:07:33Z",
+      "jira_id": "4587395",
+      "jira_key": "REB-2511",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:38Z"
+    },
     "97e7-cf42-5c00-462c": {
       "baseline": {
         "assignee": null,
@@ -121052,6 +121493,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-27T07:01:45Z"
+    },
+    "98df-3528-9b1f-405a": {
+      "created_at": "2026-08-06T19:07:44Z",
+      "jira_id": "4587396",
+      "jira_key": "REB-2512",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:48Z"
     },
     "98ff-d3b8-d2f7-4a86": {
       "baseline": {
@@ -122043,6 +122491,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-27T17:41:51Z"
+    },
+    "9a46-1c90-5dd9-44e1": {
+      "created_at": "2026-08-06T19:07:54Z",
+      "jira_id": "4587397",
+      "jira_key": "REB-2513",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:07:59Z"
     },
     "9a5a-d9ea-47c1-4e6a": {
       "baseline": {
@@ -123096,6 +123551,13 @@
       "jira_key": "REB-776",
       "state": "confirmed",
       "updated_at": "2026-07-07T20:57:35Z"
+    },
+    "9b71-55b3-1bd1-4a97": {
+      "created_at": "2026-08-06T19:08:03Z",
+      "jira_id": "4587398",
+      "jira_key": "REB-2514",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:07Z"
     },
     "9b94-af9e-4acf-4dff": {
       "baseline": {
@@ -125402,6 +125864,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-12T18:41:57Z"
     },
+    "9f26-66c2-14af-4223": {
+      "created_at": "2026-08-06T19:08:09Z",
+      "jira_id": "4587399",
+      "jira_key": "REB-2515",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:14Z"
+    },
     "9f2a-48aa-402f-4720": {
       "baseline": {
         "assignee": null,
@@ -125931,6 +126400,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-28T15:35:29Z"
+    },
+    "a092-fe0f-8f6a-4ed1": {
+      "created_at": "2026-08-06T19:08:22Z",
+      "jira_id": "4587400",
+      "jira_key": "REB-2516",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:26Z"
     },
     "a0d0-7098-ea0e-4327": {
       "baseline": {
@@ -129735,6 +130211,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:10:42Z"
     },
+    "a371-fb42-32c5-48bd": {
+      "created_at": "2026-08-06T19:08:28Z",
+      "jira_id": "4587401",
+      "jira_key": "REB-2517",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:32Z"
+    },
     "a374-849c-c8f2-4234": {
       "baseline": {
         "assignee": null,
@@ -129837,6 +130320,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-02T21:10:49Z"
+    },
+    "a40f-25e4-885c-4cca": {
+      "created_at": "2026-08-06T19:08:33Z",
+      "jira_id": "4587402",
+      "jira_key": "REB-2518",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:38Z"
     },
     "a41f-3153-9292-4e76": {
       "baseline": {
@@ -130351,6 +130841,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-28T06:08:34Z"
     },
+    "a4bd-4ca8-c44f-49bb": {
+      "created_at": "2026-08-06T19:08:43Z",
+      "jira_id": "4587403",
+      "jira_key": "REB-2519",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:47Z"
+    },
     "a532-4e67-562c-4893": {
       "baseline": {
         "assignee": {
@@ -130425,6 +130922,13 @@
       "jira_key": "REB-261",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:10:48Z"
+    },
+    "a573-00ea-2bf6-4eb1": {
+      "created_at": "2026-08-06T19:08:48Z",
+      "jira_id": "4587404",
+      "jira_key": "REB-2520",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:08:52Z"
     },
     "a574-7193-6a5b-48e9": {
       "baseline": {
@@ -130926,6 +131430,13 @@
       "jira_key": "REB-726",
       "state": "confirmed",
       "updated_at": "2026-07-06T23:03:53Z"
+    },
+    "a5f5-1059-cc11-4af6": {
+      "created_at": "2026-08-06T19:08:57Z",
+      "jira_id": "4587405",
+      "jira_key": "REB-2521",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:00Z"
     },
     "a606-7145-427a-4591": {
       "baseline": {
@@ -134058,6 +134569,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-12T20:10:20Z"
     },
+    "a9bd-6641-e603-42bc": {
+      "created_at": "2026-08-06T19:09:01Z",
+      "jira_id": "4587406",
+      "jira_key": "REB-2522",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:05Z"
+    },
     "a9d0-ec78-f55e-4e67": {
       "baseline": {
         "assignee": null,
@@ -134101,6 +134619,13 @@
       "peer_parent": "REB-1398",
       "state": "confirmed",
       "updated_at": "2026-07-20T03:21:51Z"
+    },
+    "a9dd-bbc7-f549-4fc2": {
+      "created_at": "2026-08-06T19:09:08Z",
+      "jira_id": "4587407",
+      "jira_key": "REB-2523",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:12Z"
     },
     "a9e3-580c-409c-4eee": {
       "baseline": {
@@ -134382,6 +134907,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-07-25T20:16:57Z"
+    },
+    "ab54-f19f-d5bd-422c": {
+      "created_at": "2026-08-06T19:09:13Z",
+      "jira_id": "4587408",
+      "jira_key": "REB-2524",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:17Z"
     },
     "ab58-9a6e-296e-4c94": {
       "baseline": {
@@ -136026,6 +136558,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T20:54:52Z"
     },
+    "ad85-e5e3-be8d-4be5": {
+      "created_at": "2026-08-06T19:09:19Z",
+      "jira_id": "4587409",
+      "jira_key": "REB-2525",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:23Z"
+    },
     "ad9f-45f1-339f-4346": {
       "baseline": {
         "assignee": null,
@@ -136736,6 +137275,13 @@
       "peer_parent": "REB-1654",
       "state": "confirmed",
       "updated_at": "2026-07-30T01:02:32Z"
+    },
+    "aec1-76e7-bb95-4c86": {
+      "created_at": "2026-08-06T19:09:25Z",
+      "jira_id": "4587410",
+      "jira_key": "REB-2526",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:30Z"
     },
     "af11-ac5f-4e86-4d1d": {
       "baseline": {
@@ -146163,6 +146709,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-14T00:00:48Z"
     },
+    "bd4c-78be-c37c-4ad0": {
+      "created_at": "2026-08-06T19:09:37Z",
+      "jira_id": "4587411",
+      "jira_key": "REB-2527",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:44Z"
+    },
     "bd70-494f-d5c5-4d1b": {
       "baseline": {
         "assignee": null,
@@ -146267,6 +146820,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:14:08Z"
+    },
+    "bdb8-0646-9e13-4bfb": {
+      "created_at": "2026-08-06T19:09:45Z",
+      "jira_id": "4587412",
+      "jira_key": "REB-2528",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:50Z"
     },
     "bdbe-be66-ff34-48dd": {
       "baseline": {
@@ -146525,6 +147085,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-03T04:17:19Z"
+    },
+    "bf31-fd55-d28d-4b7a": {
+      "created_at": "2026-08-06T19:09:51Z",
+      "jira_id": "4587413",
+      "jira_key": "REB-2529",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:09:57Z"
     },
     "bf50-2131-271b-4fdc": {
       "baseline": {
@@ -151254,6 +151821,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-18T23:33:24Z"
     },
+    "c5b3-1b8a-08dd-40af": {
+      "created_at": "2026-08-06T19:10:05Z",
+      "jira_id": "4587414",
+      "jira_key": "REB-2530",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:10:17Z"
+    },
     "c622-8877-f677-4535": {
       "baseline": {
         "assignee": {
@@ -152104,6 +152678,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-27T04:48:46Z"
+    },
+    "c827-2a23-cd00-473e": {
+      "created_at": "2026-08-06T19:10:23Z",
+      "jira_id": "4587415",
+      "jira_key": "REB-2531",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:10:28Z"
     },
     "c82d-8426-c48d-4a42": {
       "baseline": {
@@ -156127,6 +156708,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-08T00:30:28Z"
     },
+    "ccf6-a065-b1d6-4cf1": {
+      "created_at": "2026-08-06T19:10:38Z",
+      "jira_id": "4587416",
+      "jira_key": "REB-2532",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:10:42Z"
+    },
     "cd73-6b68-3806-4bf8": {
       "baseline": {
         "assignee": null,
@@ -156629,6 +157217,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-13T18:24:42Z"
+    },
+    "ce14-01c6-a26f-4096": {
+      "created_at": "2026-08-06T19:10:43Z",
+      "jira_id": "4587417",
+      "jira_key": "REB-2533",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:10:47Z"
     },
     "ce4c-f963-363b-44b6": {
       "baseline": {
@@ -160268,6 +160863,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-14T00:00:56Z"
     },
+    "d0f3-2262-4f33-4ebf": {
+      "created_at": "2026-08-06T19:10:49Z",
+      "jira_id": "4587418",
+      "jira_key": "REB-2534",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:10:53Z"
+    },
     "d0fb-7404-0665-4a65": {
       "baseline": {
         "assignee": null,
@@ -160578,6 +161180,13 @@
       "peer_parent": "REB-1222",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:47:49Z"
+    },
+    "d166-036c-238c-4b39": {
+      "created_at": "2026-08-06T19:10:59Z",
+      "jira_id": "4587419",
+      "jira_key": "REB-2535",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:03Z"
     },
     "d195-aeb8-2400-484b": {
       "baseline": {
@@ -167774,6 +168383,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-02T17:34:43Z"
     },
+    "df3a-5a7a-01e5-43f6": {
+      "created_at": "2026-08-06T19:11:04Z",
+      "jira_id": "4587420",
+      "jira_key": "REB-2536",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:09Z"
+    },
     "df42-5932-6178-4376": {
       "baseline": {
         "assignee": null,
@@ -167818,6 +168434,13 @@
       "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-07-11T15:58:37Z"
+    },
+    "df94-66ba-dbf8-4ac1": {
+      "created_at": "2026-08-06T19:11:16Z",
+      "jira_id": "4587421",
+      "jira_key": "REB-2537",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:19Z"
     },
     "df9b-663a-98ed-4dc4": {
       "baseline": {
@@ -168572,6 +169195,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-19T02:01:06Z"
+    },
+    "dfe3-7ea0-44f4-430b": {
+      "created_at": "2026-08-06T19:11:21Z",
+      "jira_id": "4587422",
+      "jira_key": "REB-2538",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:25Z"
     },
     "e050-f81b-3872-429f": {
       "baseline": {
@@ -169841,6 +170471,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-11T02:23:38Z"
     },
+    "e1b1-859e-a7b4-48f2": {
+      "created_at": "2026-08-06T19:11:28Z",
+      "jira_id": "4587423",
+      "jira_key": "REB-2539",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:32Z"
+    },
     "e1f2-0bcc-dbe7-4750": {
       "baseline": {
         "assignee": {
@@ -170819,6 +171456,20 @@
       "state": "confirmed",
       "updated_at": "2026-06-29T17:29:29Z"
     },
+    "e34a-1d0c-0daa-4f2c": {
+      "created_at": "2026-08-06T19:11:33Z",
+      "jira_id": "4587424",
+      "jira_key": "REB-2540",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:37Z"
+    },
+    "e351-537e-a9ca-4669": {
+      "created_at": "2026-08-06T19:11:40Z",
+      "jira_id": "4587425",
+      "jira_key": "REB-2541",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:44Z"
+    },
     "e369-a449-4773-48fb": {
       "baseline": {
         "assignee": {
@@ -170838,7 +171489,7 @@
         },
         "description": "# Jira Server / Data Center support via a Jira-family seam (not a forked second adapter)\n\n## Context / Problem\n\nCMS and similar federal clients run **self-hosted Jira Data Center**, which rebar cannot reconcile against. DC differs from Cloud on three axes: REST v2 with wiki-markup/plain-text bodies instead of v3 + ADF, Personal Access Token bearer auth instead of the ACLI subprocess, and name-based user identity instead of `accountId`.\n\nGitHub PR #120 proposed a second adapter package for this. It rides ADR 0035's `Backend` port correctly, but it reaches into `adapters/jira/` privates (`_map_local_to_jira_fields`, `_LOCAL_TO_JIRA_STATUS`, `_LOCAL_TO_JIRA_PRIORITY`, `_sanitize_label`, `_RELATION_TO_JIRA_LINK`, `classify_probe_response`) and forks `map_fields_to_remote` as a verbatim copy of `adapters/jira/backend.py:42-72` with one line changed. That creates a de facto \"Jira family\" layer with no contract: `adapters/jira/` becomes simultaneously a concrete backend and a shared library, with nothing pinning what is shared and nothing stopping a Cloud change from breaking DC.\n\n## Approach\n\nMake the Jira family an **explicit sub-seam** rather than an accident, in an order that never puts the live-validated Cloud path at risk.\n\n1. **Freeze Cloud first.** Extend the existing held-out characterization tests\n   (`tests/unit/rebar_reconciler/test_backend_characterization.py`) to pin the current outputs of every unit\n   about to move, so any behavior change during extraction fails a pinned oracle.\n2. **Extract a `adapters/jira_family/` shared layer** \u2014 and re-point the Cloud adapter at it. Cloud's ACLI\n   transport is not touched at all.\n\n   **Only non-location-pinned symbols may physically move.** ADR 0035 \u00a7(a) pins `adf.py`,\n   `outbound_fields.py`, and `comment_limits.py` as **Jira-coupled *and* location-pinned**: they are loaded by\n   filename relative to `_PACKAGE_DIR` (via `_loader.lazy_load(` / `_load_sibling_keyed(` /\n   `spec_from_file_location(`), so physically moving them breaks the dynamic loader unless the loader is taught\n   the new sub-package in the same change \u2014 deferred to ADR 0035's Phase 2, explicitly **out of scope here**.\n   **Location-pinned means \"cannot change path\" \u2014 NOT \"cannot be edited.\"** Editing a pinned module's\n   *contents* (e.g. replacing a dict literal with an import) is safe and is how the pinned units get\n   single-sourced; only *relocating* the file breaks the loader.\n\n   **Move by SYMBOL, not by file.** `adapters/jira/jira_fields.py` cannot relocate wholesale: it imports\n   `fit_text_to_adf_limit` from the pinned `adf.py` (used by `_sanitize_description`) and\n   `truncate_comment_body` / `_JIRA_COMMENT_MAX_CHARS` from the pinned `comment_limits.py` (used by\n   `_sanitize_comment`). Moving the whole file would point `jira_family/` at `adapters/jira/` \u2014 the exact\n   dependency inversion the import contract in \u00a76 forbids. So the file is split by symbol, and the two coupled\n   sanitizers are **parameterized by the contracts this epic already introduces** rather than importing a\n   vendor module: `_sanitize_description` takes the `RichTextCodec` (its `fit_text_to_adf_limit` call *is* the\n   rich-text seam), and comment truncation takes the vendor's comment-limit/truncation contract. Cloud\n   constructs those contract objects in `adapters/jira/` from its pinned `adf.py` / `comment_limits.py`; DC\n   constructs wiki-markup/plain-text equivalents. `jira_family/` imports neither.\n\n   Concretely, of the six symbols PR #120 reached for:\n   - **Movable to `jira_family/` in this epic:** `_sanitize_label`, `_sanitize_summary`, `InvalidLabelError`,\n     and `_RELATION_TO_JIRA_LINK` (all in `adapters/jira/jira_fields.py`, not location-pinned and not\n     ADF/limit-coupled), `classify_probe_response` (`adapters/jira/probe.py`, not location-pinned), and the new\n     `RichTextCodec` / `UserIdentityModel` contract objects.\n   - **Moves to `jira_family/` only in contract-parameterized form:** `_sanitize_description` and\n     `_sanitize_comment` \u2014 same observable behavior, but the ADF/limit dependency arrives as an injected\n     contract instead of a direct import of a pinned module.\n\n   - **Stays put (path-wise):** `_map_local_to_jira_fields` in the pinned `adapters/jira/outbound_fields.py`,\n     and the ADF encoder in the pinned `adapters/jira/adf.py`. These are shared **by dependency-inverting\n     instead of moving**: the pinned module is parameterized by the `jira_family` contracts (it imports *from*\n     `jira_family/`, never the reverse), so DC reuses one implementation without any file relocating and\n     without the loader changing. Any story that would *move* a pinned file must instead stop and record the\n     blocker.\n\n   One more unit needs parameterizing rather than sharing verbatim: `classify_probe_response` hardcodes\n   `RESOLVED_STATUS_NAMES = frozenset({\"Resolved\", \"Done\", \"Cancelled\"})`. Those are Cloud/DIG workflow state\n   names; a self-hosted DC workflow can name its resolved states anything. So the classifier moves to\n   `jira_family/` taking the resolved-status set **as a parameter**, with Cloud passing today's frozenset\n   (pinned unchanged by J1's oracle) and DC passing its own configured set. Sharing it with the Cloud names\n   baked in would silently misclassify a DC issue as `PRESENT_FILTERED` when it is in fact resolved.\n   The DC set is **operator-configured** via a `reconciler.resolved_statuses` config key (a list of workflow\n   state names), defaulting to the same `{Resolved, Done, Cancelled}` when unset so an operator whose workflow\n   uses the conventional names configures nothing. Cloud continues to pass its own frozenset, so Cloud is not\n   made configurable by this change.\n\n   **The value maps are a special case \u2014 they are ALREADY duplicated, and this epic must not preserve the\n   duplication.** There are today **three** independently-referenced copies of the local\u2192Jira status map (and\n   two of the priority map):\n   - `adapters/jira/jira_fields.py`: `_LOCAL_STATUS_TO_JIRA` / `_LOCAL_PRIORITY_TO_JIRA` \u2014 read **only** by the\n     ACLI transport (`acli.py:69-70,143,171`; `acli_cli_ops.py:34,343,354`).\n   - `adapters/jira/outbound_fields.py` (pinned): `_LOCAL_TO_JIRA_STATUS` / `_LOCAL_TO_JIRA_PRIORITY` \u2014 read by\n     the `Backend` port via `backend.py`'s `map_fields_to_remote`.\n   - `rebar_reconciler/config.py:37`: `local_to_jira_status` \u2014 the engine-level config copy.\n\n   They have **already drifted**: `outbound_fields` and `config.py` both carry a `\"deleted\": \"Done\"` entry the\n   `jira_fields` copy lacks. So simply moving the `jira_fields` copy to `jira_family/` would leave Cloud's\n   backend still reading a second copy \u2014 the exact \"two places\" the epic exists to eliminate. This epic\n   consolidates the two `adapters/` copies; `config.py`'s is folded in by bug `fe15` (its call sites are\n   engine-level config, a wider blast radius than this epic's seam).\n\n   **Resolution: `adapters/jira_family/` holds the ONE definition of each value map. Both current copies are\n   deleted and replaced by imports from it** \u2014 `jira_fields.py` (whose map literals move out, the file itself\n   staying put for its ADF/limit-coupled sanitizers) and `outbound_fields.py` (pinned, so it stays at its path\n   but its dict literals become an import). After this,\n   grep finds exactly one dict literal per map, reachable from the ACLI transport, the Cloud backend port, and\n   the DC backend alike.\n\n   The `deleted`-key drift **must be decided in J2**, because a single unified dict cannot preserve two\n   callers that currently disagree. J2 adopts `\"deleted\": \"Done\"` \u2014 the value **two of the three** existing\n   copies already use (`outbound_fields._LOCAL_TO_JIRA_STATUS` and `config.py:37`'s `local_to_jira_status`).\n   The ACLI-side omission produces `\"Deleted\"` via a `.title()` fallback, which is not a state in the live DIG\n   workflow, so Jira would reject that transition: a latent bug, not behavior to preserve. This is the one\n   declared observable change in an otherwise behavior-preserving extraction, pinned by its own test. Bug\n   `fe15-3bc4-ed70-4b61` (`controlled-ornate-honeybee`) keeps the remainder: the missing ACLI-side\n   characterization pins and folding `config.py`'s third copy into the single definition.\n3. **Pin the two real axes of variation as contracts**: a `RichTextCodec` (ADF for Cloud, wiki/plain text for\n   DC) and a `UserIdentityModel` (`accountId` for Cloud, `name` for DC). Cloud is parameterized by its existing\n   behavior; DC is a different configuration, not a fork.\n4. **DC transport builds on the maintained `pycontribs/jira` library**, gated behind a `[jira-datacenter]`\n   extra and imported lazily, so the engine's `dependencies = []` contract and the battle-tested Cloud path are\n   both untouched.\n5. **Verify against a real Jira.** Atlassian stopped issuing DC trial licenses on 30 March 2026, so the oracle\n   is the Jira 8.17.1 test instance the pycontribs/jira project uses, reachable at\n   `http://localhost:2990/jira` \u2014 the same substrate that project validates itself against.\n\n   **It is BUILT, not pulled \u2014 corrected against the registry.** An earlier version of this step said to\n   `docker run -dit -p 2990:2990 pycontribs/jira-test-image:8.17.1` and called it a pinned *pullable* image.\n   That is false: `docker pull` returns \"repository does not exist\", the Docker Hub API returns\n   `object not found`, and the `pycontribs` namespace publishes only seven OS base images. The tag is a LOCAL\n   BUILD NAME \u2014 pycontribs/jira ships `docker/jira-test-image/Dockerfile` and its README's own instruction is\n   `docker build -t pycontribs/jira-test-image:8.17.1 docker/jira-test-image`. Its base,\n   `addono/jira-software-standalone`, IS pullable and the digest pycontribs pins resolves. J5\n   [rebar:c97f-90ae-4976-47c7] therefore vendors a small Dockerfile pinned to that base digest; the mechanism\n   and its three load-bearing details (`-DskipAllPrompts=true`, the TTY requirement, 8.x-only) live there.\n\n   Two consequences worth recording at epic level because they shape what this oracle can promise: the image\n   does NOT contain Jira \u2014 `atlas-run` downloads it from `maven.atlassian.com` at first start, so egress to\n   Atlassian is a hard runtime dependency and **pinning the image digest does not pin Jira itself** \u2014 and the\n   base is `linux/amd64`, so an arm64 runner emulates it and starts far slower than upstream's quoted 3-5\n   minutes. Jira 8.17.1 is \u2265 8.14, the release that introduced Personal Access Tokens, so PAT\n   bearer auth is exercised for real. J5 [rebar:c97f-90ae-4976-47c7] owns the harness and records the\n   version-drift limitation (8.17.1 is older than a client such as CMS is likely running, so it proves REST v2\n   protocol semantics, not deployment-specific workflow/field/permission behavior \u2014 tracked separately as\n   `9895-ac7d-4276-4f08`).\n6. **Keep the new boundary structurally enforced, not conventional.** The drift this epic exists to prevent can\n   recur the moment a contributor adds Cloud-specific logic to the shared layer. So the seam ships with a\n   machine-checked import contract (an `import-linter` contract in `pyproject.toml`, or an equivalent CI grep\n   check): only `adapters/jira/` and `adapters/jira_datacenter/` may import `adapters/jira_family/`, and\n   `jira_family/` may import neither of them.\n7. **Security posture for the DC connection.** Self-hosted DC is frequently served over plain HTTP inside\n   corporate networks, which would put ticket bodies and the PAT on the wire in cleartext. The DC backend\n   therefore **requires `https`** for `reconciler.base_url` and rejects a non-TLS URL unless an explicit\n   `allow_insecure = true` override is set (which logs a warning). Operator docs state the least-privilege\n   expectation: a **dedicated service account** whose PAT is scoped to only the projects rebar reconciles\n   (Browse Projects / Create Issues / Edit Issues / Add Comments / Link Issues on those projects), never an\n   admin-level token.\n\n   **The PAT is env-only, never file-config.** Like Cloud's `JIRA_API_TOKEN`, the DC PAT is read from a\n   `JIRA_PAT` environment variable and is NOT accepted from `[tool.rebar.jira]` in a committed config file, so\n   the credential cannot be checked into a repo by accident. The DC transport never logs the token, and a\n   missing `JIRA_PAT` raises a config error naming the variable rather than falling back to anonymous access.\n\n   **Certificate verification stays ON.** Self-hosted DC commonly presents a self-signed or internal-CA\n   certificate, and the tempting fix \u2014 disabling verification \u2014 turns the `https` requirement into theatre. So\n   the DC transport never sets `verify=False`: an operator with an internal CA points rebar at their CA bundle\n   (a `ca_bundle` config key / the standard `REQUESTS_CA_BUNDLE` env var honoured by the underlying client), and\n   a verification failure surfaces as a clear error naming the CA-bundle setting rather than being silently\n   downgraded. `allow_insecure` governs the URL *scheme* only; it does NOT relax certificate checking.\n\n   **The J5 harness is the intended `allow_insecure` case, not an exception to it.** The Dockerized Jira serves\n   plain `http://localhost:2990/jira`, so every live test against it sets `allow_insecure = true` explicitly and\n   asserts the warning is emitted. That is deliberate: it means the loopback-only test path exercises the\n   override rather than bypassing the validator, and the validator's reject-by-default branch is covered by a\n   unit test with a non-loopback `http://` URL. The override is **not** narrowed to loopback \u2014 an operator on a\n   private network is a real use case \u2014 but the warning text names the cleartext risk.\n\n**Provenance decision.** DC and Cloud share the single `jira` creation channel, `jira-` local-id prefix, and `jira_key` binding; deployments are disambiguated by the `RemoteRef.instance` field that ADR 0035 \u00a7(d) already defines for exactly this. They are the same vendor. Generalizing the store vocabulary is epic `be74`'s work, where a genuinely different vendor (GitHub) makes it necessary; doing it here would mean a store migration for no user-visible benefit.\n\n**Alternative rejected: PR #120's separate adapter package.** Two copies of the field maps and sanitizers drift, and cross-adapter private imports are a dependency direction ADR 0035 never sanctioned.\n\n**Alternative rejected: a hand-rolled stdlib REST client.** PR #120's client is competent, but pycontribs/jira already absorbs DC-vs-Cloud auth, pagination, and payload quirks that thousands of users have found. Confining it to an opt-in extra keeps the cost off every rebar install.\n\n**Alternative rejected: `atlassian-python-api`.** It was surveyed in ADR 0004 and does support DC with PAT auth, but `pycontribs/jira` is the better fit here for two reasons: it ships the Dockerized-Jira-SDK test harness pattern this epic adopts as its verification oracle (its own `tests/conftest.py`), and its `JIRA(server=\u2026, token_auth=\u2026)` surface covers DC-vs-Cloud divergence behind one client object. Either would work; picking one and confining it to an opt-in extra is what matters.\n\n**Alternative rejected: generalizing `jira_key` / the `jira-` prefix / the channel vocabulary now.** That is epic `be74`'s spine and touches 50+ binding-store sites; pulling it forward delays the CMS delivery for no behavioral gain.\n\n**Alternative rejected: moving the location-pinned modules now.** Relocating `outbound_fields.py` / `adf.py` into `jira_family/` would be the tidier file layout, but it requires teaching the dynamic loader the new sub-package and re-targeting every `mock.patch(\"rebar_reconciler.<mod>.<attr>\")` site in the suite (ADR 0035 \u00a7(a)\u2013(b)). That is ADR 0035's Phase 2; doing it here would couple a live-Cloud-risking refactor to a delivery epic for no DC-visible benefit. Dependency inversion gets the same single-implementation guarantee at a fraction of the risk.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_family/` (new), `adapters/jira/`, `adapters/jira_datacenter/` (new).\n- `src/rebar/_config_schema.py` \u2014 widen `reconciler.backend` (**owned by J7**), add the TLS/`allow_insecure`\n  validator and the `ca_bundle` + `resolved_statuses` keys (**owned by J6**). Split deliberately: J6 lands the\n  DC connection settings with the transport that consumes them; J7 lands the backend-choice widening with the\n  assembly that makes the choice valid.\n- `pyproject.toml` \u2014 `[jira-datacenter]` extra, and the import contract.\n- `tests/unit/rebar_reconciler/test_backend_characterization.py`, `test_backend_contract.py`.\n- A new ADR amending ADR 0035.\n- **Out of scope:** relocating any location-pinned module (`adf.py`, `outbound_fields.py`,\n  `comment_limits.py`) or touching `_loader.py` \u2014 ADR 0035 Phase 2 owns that.\n\n## Acceptance Criteria\n\n- [x] every child story is closed and its change is `Verified +1` on Gerrit\n- [x] `test_backend_contract.py`'s backend fixture includes `jira-datacenter` and the suite passes for it\n- [x] an ADR records the Jira-family sub-seam, the shared `jira` provenance identity, and the DC EOL horizon\n- [ ] [operator-attested] rebar reconciles bidirectionally against the Dockerized Jira SDK instance at\n      `localhost:2990`, selected by `reconciler.backend = \"jira-datacenter\"` with `reconciler.base_url`\n      pointing at that instance: at least one issue created in DC appears in the local store after an inbound\n      pass, and one local edit appears on the DC issue after an outbound pass, with zero unhandled exceptions\n      in the reconcile log\n- [x] No SHARED mapping logic exists in two places, and each VARYING unit has exactly one shared CONTRACT:\n      (a) the field/value maps, the label sanitizer, the link-relation vocabulary, and the probe classifier\n      each have exactly one implementation in `adapters/jira_family/`, imported by both backends (or, for\n      the location-pinned modules, consumed parameterized by a `jira_family` contract); and (b) the\n      rich-text codec and the user-identity model each have exactly one shared CONTRACT in\n      `adapters/jira_family/` with one implementation PER DEPLOYMENT. `adapters/jira_datacenter/` defines no\n      copy of any unit in (a). Cross-imports between `adapters/jira/` and `adapters/jira_datacenter/` are\n      forbidden and machine-checked, failing CI on a violation.\n      **AMENDED \u2014 the original wording required \"exactly one implementation reachable by both backends\" for\n      ALL SIX units including the codec and the identity model. That prescribes an outcome that would be\n      WRONG if achieved:** Cloud is ADF and DC is wiki/plain text; Cloud identifies users by `accountId`\n      and DC by `name`. Two implementations of one pinned contract IS the correct design\n      (`jira_family/rich_text.py:36 RichTextCodec` \u2192 `WikiTextCodec` / `AdfCodec`;\n      `jira_family/identity_model.py:42 UserIdentityModel` \u2192 `NameIdentity` / `AccountIdIdentity`). Two\n      further corrections folded in, both recorded in this epic's AC-verification comment: the create-path\n      field map legitimately exists twice (`jira_datacenter/backend.py:53 _map_local_to_dc_fields`, because\n      Cloud's version lazy-loads the location-pinned `adf.py` BY FILE PATH \u2014 a coupling DC must not carry),\n      so the \"defines none of its own\" clause is scoped to the units in (a); and the enforcement clause is\n      narrowed to what the checker actually does \u2014 it forbids cross-IMPORTS and pins one dict literal per\n      value map, but cannot prevent a re-DEFINITION, so four of the six units rest on convention plus\n      review. The substance was verified: cross-imports are empty on `gerrit/main`, the boundary checker\n      fires on 11 forbidden edges and stays silent on 4 permitted ones, and the value-map single-sourcing\n      is asserted by object IDENTITY (`... is LOCAL_STATUS_TO_JIRA`), not equality\n- [x] The Cloud adapter's observable behavior is unchanged: characterization oracles pinning every unit that\n      moves or is re-pointed were committed **before** the extraction change was pushed for review (the oracle\n      change's Gerrit number recorded on the extraction story), and the full oracle set passes against the\n      post-extraction Cloud adapter\n- [x] `JiraDataCenterBackend` is exerci \u2026 [truncated by reconciler]",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Jira Server / Data Center support via a Jira-family seam (not a forked second adapter)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -179662,6 +180313,20 @@
       "state": "confirmed",
       "updated_at": "2026-07-09T20:31:00Z"
     },
+    "ed5e-f176-3aea-41fd": {
+      "created_at": "2026-08-06T19:11:45Z",
+      "jira_id": "4587426",
+      "jira_key": "REB-2542",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:49Z"
+    },
+    "ed6d-5448-4ff6-4b8a": {
+      "created_at": "2026-08-06T19:11:51Z",
+      "jira_id": "4587427",
+      "jira_key": "REB-2543",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:11:55Z"
+    },
     "ed82-08f3-a693-425f": {
       "baseline": {
         "assignee": {
@@ -183643,6 +184308,13 @@
       "jira_key": "REB-471",
       "state": "confirmed",
       "updated_at": "2026-06-27T11:53:17Z"
+    },
+    "f020-0960-2c42-4d61": {
+      "created_at": "2026-08-06T19:11:58Z",
+      "jira_id": "4587428",
+      "jira_key": "REB-2544",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:12:04Z"
     },
     "f026-e60b-fbd4-488e": {
       "baseline": {
@@ -189216,6 +189888,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T01:02:34Z"
     },
+    "f7f0-8b56-8b6d-4d54": {
+      "created_at": "2026-08-06T19:12:09Z",
+      "jira_id": "4587429",
+      "jira_key": "REB-2545",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:12:14Z"
+    },
     "f803-63ea-816b-479a": {
       "baseline": {
         "assignee": null,
@@ -192973,6 +193652,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:25:25Z"
     },
+    "fd30-a088-cbbc-4dbd": {
+      "created_at": "2026-08-06T19:12:19Z",
+      "jira_id": "4587430",
+      "jira_key": "REB-2546",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:12:22Z"
+    },
     "fd71-a0a0-d9b0-4769": {
       "baseline": {
         "assignee": null,
@@ -193016,6 +193702,13 @@
       "peer_parent": "REB-100",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:25:32Z"
+    },
+    "fd84-92b4-01ba-4911": {
+      "created_at": "2026-08-06T19:12:25Z",
+      "jira_id": "4587431",
+      "jira_key": "REB-2547",
+      "state": "confirmed",
+      "updated_at": "2026-08-06T19:12:29Z"
     },
     "fd84-ba00-ba00-4f73": {
       "baseline": {
@@ -196453,17 +197146,116 @@
     "REB-242": "96fe-14c6-4c35-4936",
     "REB-243": "9706-052e-6416-4ad9",
     "REB-244": "97e7-cf42-5c00-462c",
+    "REB-2449": "03ef-6fb5-158b-4abd",
     "REB-245": "983e-6a43-41e5-4f20",
+    "REB-2450": "0ba2-15e6-d8a6-4a2a",
+    "REB-2451": "0fa4-a836-5f13-4a44",
+    "REB-2452": "10ae-aa24-3fdc-4f0b",
+    "REB-2453": "18ae-27e9-b651-4b71",
+    "REB-2454": "1909-c1a7-9f20-440f",
+    "REB-2455": "196d-28c4-ef0f-445c",
+    "REB-2456": "215f-92ab-9780-443d",
+    "REB-2457": "218e-0ec1-385d-493a",
+    "REB-2458": "2391-a941-69ff-4645",
+    "REB-2459": "24f7-1955-bcd8-4f29",
     "REB-246": "998e-b3c4-a6d4-4d14",
+    "REB-2460": "2876-7958-8dee-4882",
+    "REB-2461": "2948-48e5-666f-4677",
+    "REB-2462": "2a76-c9d9-4e8a-471b",
+    "REB-2463": "2be7-80d6-208a-4737",
+    "REB-2464": "2c58-e710-275e-4ff7",
+    "REB-2465": "2c93-ce1c-127e-4d58",
+    "REB-2466": "2fd6-e993-8e20-4caf",
+    "REB-2467": "30b0-0004-744b-463e",
+    "REB-2468": "34b5-ad7d-b983-47f9",
+    "REB-2469": "34c2-8c41-1a12-4254",
     "REB-247": "9994-a076-442e-4bb4",
+    "REB-2470": "354d-c85d-6689-4302",
+    "REB-2471": "3787-9749-f8a6-41bb",
+    "REB-2472": "4136-a38d-7b33-4b9d",
+    "REB-2473": "43ea-3d5a-078f-4fe3",
+    "REB-2474": "46a2-9c1a-d855-4706",
+    "REB-2475": "4a6d-5bbc-44f4-4a56",
+    "REB-2476": "4c2b-7b86-913e-40ee",
+    "REB-2477": "4ca2-97b4-51fb-41c9",
+    "REB-2478": "502b-5372-81dd-4740",
+    "REB-2479": "531b-a5a7-91a2-4e4c",
     "REB-248": "9b26-b853-ca23-4d07",
+    "REB-2480": "561e-e186-a902-461c",
+    "REB-2481": "5796-d1f8-870f-4dc1",
+    "REB-2482": "58b6-6af1-f975-4820",
+    "REB-2483": "5e53-234f-5c65-477d",
+    "REB-2484": "6067-fcbd-622b-4c64",
+    "REB-2485": "6117-fcb7-d680-4b2f",
+    "REB-2486": "6194-8815-8ebb-42d0",
+    "REB-2487": "6a74-f464-4ce1-4b79",
+    "REB-2488": "6a81-8ecd-0cd6-41cd",
+    "REB-2489": "6a97-9e4b-10e2-45c9",
     "REB-249": "9bd5-4239-33da-47c5",
+    "REB-2490": "6e70-3d3c-55da-4930",
+    "REB-2491": "6ec8-24c7-182b-40d0",
+    "REB-2492": "7084-4e33-e698-42dd",
+    "REB-2493": "70bc-ab05-6d4c-45a0",
+    "REB-2494": "738a-376e-4829-42ca",
+    "REB-2495": "74a3-1213-9898-4195",
+    "REB-2496": "78f4-8cc7-bc8c-4ac2",
+    "REB-2497": "7e90-233b-3ee9-4f14",
+    "REB-2498": "81d5-7914-8a3c-411c",
+    "REB-2499": "8390-32f7-e4b8-48a1",
     "REB-25": "0ec1-bb62-2fd8-4350",
     "REB-250": "9d7c-081b-28ab-48d3",
+    "REB-2500": "858c-786a-13be-4332",
+    "REB-2501": "86c8-4b91-5257-4cca",
+    "REB-2502": "8705-5c65-c1b6-42de",
+    "REB-2503": "895c-3eb2-043a-4de1",
+    "REB-2504": "8a5e-b88e-0c3e-4544",
+    "REB-2505": "8b97-a0ca-82a4-4d4e",
+    "REB-2506": "8eb3-1f20-f395-4ea5",
+    "REB-2507": "9100-9ee3-7f83-4b86",
+    "REB-2508": "941b-f049-5f29-4410",
+    "REB-2509": "94a3-1323-3497-4f59",
     "REB-251": "9da1-cb98-2e94-4f2b",
+    "REB-2510": "94bc-a0b4-bc37-47b2",
+    "REB-2511": "9790-cafa-dffa-462e",
+    "REB-2512": "98df-3528-9b1f-405a",
+    "REB-2513": "9a46-1c90-5dd9-44e1",
+    "REB-2514": "9b71-55b3-1bd1-4a97",
+    "REB-2515": "9f26-66c2-14af-4223",
+    "REB-2516": "a092-fe0f-8f6a-4ed1",
+    "REB-2517": "a371-fb42-32c5-48bd",
+    "REB-2518": "a40f-25e4-885c-4cca",
+    "REB-2519": "a4bd-4ca8-c44f-49bb",
     "REB-252": "9ddf-ae0a-9f69-44c2",
+    "REB-2520": "a573-00ea-2bf6-4eb1",
+    "REB-2521": "a5f5-1059-cc11-4af6",
+    "REB-2522": "a9bd-6641-e603-42bc",
+    "REB-2523": "a9dd-bbc7-f549-4fc2",
+    "REB-2524": "ab54-f19f-d5bd-422c",
+    "REB-2525": "ad85-e5e3-be8d-4be5",
+    "REB-2526": "aec1-76e7-bb95-4c86",
+    "REB-2527": "bd4c-78be-c37c-4ad0",
+    "REB-2528": "bdb8-0646-9e13-4bfb",
+    "REB-2529": "bf31-fd55-d28d-4b7a",
     "REB-253": "9df3-b461-9a06-49c0",
+    "REB-2530": "c5b3-1b8a-08dd-40af",
+    "REB-2531": "c827-2a23-cd00-473e",
+    "REB-2532": "ccf6-a065-b1d6-4cf1",
+    "REB-2533": "ce14-01c6-a26f-4096",
+    "REB-2534": "d0f3-2262-4f33-4ebf",
+    "REB-2535": "d166-036c-238c-4b39",
+    "REB-2536": "df3a-5a7a-01e5-43f6",
+    "REB-2537": "df94-66ba-dbf8-4ac1",
+    "REB-2538": "dfe3-7ea0-44f4-430b",
+    "REB-2539": "e1b1-859e-a7b4-48f2",
     "REB-254": "9e9e-3481-f08e-4c2c",
+    "REB-2540": "e34a-1d0c-0daa-4f2c",
+    "REB-2541": "e351-537e-a9ca-4669",
+    "REB-2542": "ed5e-f176-3aea-41fd",
+    "REB-2543": "ed6d-5448-4ff6-4b8a",
+    "REB-2544": "f020-0960-2c42-4d61",
+    "REB-2545": "f7f0-8b56-8b6d-4d54",
+    "REB-2546": "fd30-a088-cbbc-4dbd",
+    "REB-2547": "fd84-92b4-01ba-4911",
     "REB-255": "9f5b-f0cd-5031-45de",
     "REB-256": "9f84-bc2c-6f8b-4b09",
     "REB-257": "a240-d692-a86f-411c",
