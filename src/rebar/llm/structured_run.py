@@ -30,6 +30,7 @@ from rebar.llm.errors import (
     LLMConfigError,
     LLMError,
     LLMUnavailableError,
+    RunawayToolLoopError,
     StructuredOutputError,
     UnretryableOutputError,
 )
@@ -63,8 +64,12 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
     the contract — see the ADR and the module-level test):
 
     1. ``UsageLimitExceeded`` — rebar's own step-budget stop, not a provider outage.
-    2. ``LLMError`` — already typed; enrich in place and re-raise the SAME object.
-    3. anything else — try the sampling-parameter-rejection translation FIRST (a provider
+    2. ``RunawayToolLoopError`` — the in-flight loop breaker (bug c827); rebar aborting
+       its own repeating run. A special case BEFORE the broad ``LLMError`` arm, whose
+       blanket diagnostic overwrite would lose the guard's raise-time repetition keys —
+       and never the provider-outage sweep.
+    3. ``LLMError`` — already typed; enrich in place and re-raise the SAME object.
+    4. anything else — try the sampling-parameter-rejection translation FIRST (a provider
        rejecting e.g. ``temperature`` must fail loudly/actionably, not be swept into the
        broad provider-outage bucket below); only if that returns ``None`` does the generic
        ``LLMUnavailableError`` path run.
@@ -99,6 +104,26 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
         )
         budget_err.diagnostic = budget_diag  # type: ignore[attr-defined]
         raise budget_err from exc
+    if isinstance(exc, RunawayToolLoopError):
+        # Merge the run-shape counters (requests/limits/tokens) UNDER the guard's
+        # raise-time keys: those are the ground truth of what tripped, so they win on
+        # conflict over the message-derived recomputation.
+        merged: dict[str, Any] = {
+            **usage_log.failure_usage(
+                run_messages, request_limit=ctx.req_limit, tool_calls_limit=tool_calls_limit
+            ),
+            **exc.diagnostic,
+        }
+        exc.diagnostic = merged
+        logger.warning(
+            "llm call [%s] mode=%s model=%s aborted a runaway tool-call loop in %.1fs %s",
+            ctx.call_label,
+            ctx.execution_mode,
+            ctx.ran_model,
+            time.monotonic() - ctx.started_at,
+            usage_log.format_repetition(merged),
+        )
+        raise exc
     if isinstance(exc, LLMError):
         # Preserve the typed failure while attaching bounded counters from
         # the failed run (no prompt/tool content).

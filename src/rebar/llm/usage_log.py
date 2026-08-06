@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -239,23 +239,32 @@ def shape_only(shape: dict) -> dict[str, Any]:
     return {field: shape[field] for field in _SHAPE_FIELDS if field in shape}
 
 
-def _tool_signature(part: object) -> str:
-    """``tool_name:args_digest`` — identity WITHOUT the argument content.
+def tool_call_signature(name: str, args: object) -> str:
+    """``tool_name:args_digest`` for one ``(name, args)`` pair — identity WITHOUT the
+    argument content.
 
-    Falls back to the tool name alone when the arguments cannot be canonicalized, so a
-    surprising arg shape degrades the signal rather than raising inside a failure path.
+    The ONE canonicalization shared by the post-hoc message reduction
+    (:func:`_tool_signature`) and the in-flight runaway guard (``agent_call``), so the
+    two can never drift into hashing the same call differently. Falls back to
+    ``str(args)`` when the arguments cannot be canonicalized, so a surprising arg shape
+    degrades the signal rather than raising inside a live tool call or a failure path.
     """
 
     import hashlib
 
-    name = str(getattr(part, "tool_name", "") or "?")
-    raw = getattr(part, "args", None)
     try:
-        canonical = json.dumps(raw, sort_keys=True, default=str) if raw is not None else ""
+        canonical = json.dumps(args, sort_keys=True, default=str) if args is not None else ""
     except (TypeError, ValueError):
-        canonical = str(raw)
+        canonical = str(args)
     digest = hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()[:8]
     return f"{name}:{digest}"
+
+
+def _tool_signature(part: object) -> str:
+    """:func:`tool_call_signature` for a pydantic-ai ``ToolCallPart``-shaped object."""
+
+    name = str(getattr(part, "tool_name", "") or "?")
+    return tool_call_signature(name, getattr(part, "args", None))
 
 
 #: Minimum sample size (trailing tool calls) before loop accusation is valid.
@@ -263,6 +272,21 @@ REPETITION_WINDOW = 24
 
 #: Trip threshold: distinct_ratio_window at or below this reads as a loop.
 REPETITION_TRIP_RATIO = 0.50
+
+
+def window_distinct_ratio(signatures: Sequence[str]) -> float | None:
+    """Set cardinality of the trailing :data:`REPETITION_WINDOW` signatures over the
+    window size, rounded to 3 decimals — the order-insensitive loop signal that catches
+    every cycle length. ``None`` when the sample is shorter than the window, so short
+    runs are never accused. The SINGLE source of the trip predicate's ratio: both the
+    post-hoc :func:`_repetition_summary` and the in-flight runaway guard
+    (``agent_call``) call this function. :data:`REPETITION_WINDOW` is read at CALL time
+    (a module-global lookup), so tests can shrink the window via monkeypatch.
+    """
+
+    if len(signatures) < REPETITION_WINDOW:
+        return None
+    return round(len(set(signatures[-REPETITION_WINDOW:])) / REPETITION_WINDOW, 3)
 
 
 def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
@@ -295,9 +319,7 @@ def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
         current = current + 1 if sig == previous else 1
         longest = max(longest, current)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
-    window_ratio: float | None = None
-    if len(signatures) >= REPETITION_WINDOW:
-        window_ratio = round(len(set(signatures[-REPETITION_WINDOW:])) / REPETITION_WINDOW, 3)
+    window_ratio = window_distinct_ratio(signatures)
     return {
         "tool_calls_distinct": len(counts),
         "max_consecutive_repeat": longest,

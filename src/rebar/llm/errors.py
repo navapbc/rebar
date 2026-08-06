@@ -40,6 +40,22 @@ class LLMBudgetExhaustedError(LLMRunnerError):
     ``except LLMRunnerError`` / ``except LLMError`` handler still catches it."""
 
 
+class RunawayToolLoopError(LLMRunnerError):
+    """A detected repeating tool-call cycle (one signature or a k-cycle dominating the
+    trailing window), aborted MID-RUN so bounded recovery can still land a verdict —
+    rebar stopping itself on the repetition signal, not a provider failure or an output
+    defect. A strict :class:`LLMRunnerError` subclass and deliberately NOT an
+    :class:`LLMUnavailableError`: nothing is wrong with the provider, so it must never
+    surface as "the LLM provider call failed". Carries a ``diagnostic`` dict like its
+    siblings — bounded counters and hashed tool-call signatures only, never prompts,
+    tool arguments/results, or model text, so callers may persist it in a gate-error
+    sidecar."""
+
+    def __init__(self, message: str, *, diagnostic: dict | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic = dict(diagnostic or {})
+
+
 class StructuredOutputError(LLMRunnerError):
     """The agent produced no validated structured findings (see #36349) — an empty
     review must never be reported as a clean one, so this is a hard failure."""

@@ -22,6 +22,7 @@ from rebar.llm.errors import (
     LLMBudgetExhaustedError,
     LLMError,
     LLMRunnerError,
+    RunawayToolLoopError,
     UnretryableOutputError,
 )
 from rebar.llm.prompting import prompts
@@ -471,6 +472,11 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         try:
             return self._primary.run(ctx)
         except LLMBudgetExhaustedError as primary_exc:
+            return self._recover(ctx, primary_exc)
+        except RunawayToolLoopError as primary_exc:
+            # The loop breaker (bug c827) aborted a repeating primary run mid-flight —
+            # the same recovery contract as a budget stop: bounded per-criterion
+            # evidence in fresh histories, then a tool-free finalizer.
             return self._recover(ctx, primary_exc)
         except UnretryableOutputError as primary_exc:
             if not _is_token_exhaustion(primary_exc):

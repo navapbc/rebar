@@ -65,6 +65,62 @@ def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
     return [_SteeringToolset(wrapped=ts, limit=limit) for ts in all_toolsets]
 
 
+def _runaway_guard_toolsets(tools: list, toolsets: list) -> list:
+    """Wrap every toolset (function tools moved into one first, unless the steering
+    boundary already moved them) with the runaway loop breaker (bug c827): ONE shared
+    signature sequence + per-step memo observes every tool call across ALL toolsets, and
+    when the trailing window's distinct ratio falls to ``usage_log.REPETITION_TRIP_RATIO``
+    the run is aborted with :class:`~rebar.llm.errors.RunawayToolLoopError` BEFORE the
+    repeated call executes — so bounded recovery can land a verdict instead of the
+    UsageLimits budget killing the run with none. Wrapping only: tool DEFINITIONS stay
+    advertised for the whole run (the provider-protocol requirement above — an empty tool
+    surface over a toolUse history is a Bedrock/Anthropic 400)."""
+    from dataclasses import dataclass
+
+    from pydantic_ai.toolsets import FunctionToolset, WrapperToolset
+
+    from rebar.llm.errors import RunawayToolLoopError
+
+    signatures: list[str] = []
+    checked_steps: set[int] = set()
+
+    @dataclass
+    class _RunawayGuardToolset(WrapperToolset):
+        async def call_tool(self, name, tool_args, ctx, tool):
+            signatures.append(usage_log.tool_call_signature(name, tool_args))
+            # At most ONE window computation per run_step (the pinned cost contract): a
+            # parallel batch shares one step number, so only its first-observed call pays
+            # the O(window) ratio; every other call in the batch is a plain append. The
+            # signature list keys detection on TOOL CALLS, not steps — at 3 calls/request
+            # the window fills in 8 requests, not 24.
+            step = ctx.run_step
+            if step not in checked_steps:
+                checked_steps.add(step)
+                ratio = usage_log.window_distinct_ratio(signatures)
+                if ratio is not None and ratio <= usage_log.REPETITION_TRIP_RATIO:
+                    diagnostic = {
+                        **usage_log._repetition_summary(signatures),
+                        "tool_calls": len(signatures),
+                    }
+                    top = diagnostic["top_repeated_tool_calls"]
+                    raise RunawayToolLoopError(
+                        "runaway tool-call loop detected: "
+                        f"{len(set(signatures[-usage_log.REPETITION_WINDOW :]))} distinct "
+                        f"tool-call signature(s) in the last {usage_log.REPETITION_WINDOW} "
+                        f"tool calls (distinct ratio {ratio} <= trip threshold "
+                        f"{usage_log.REPETITION_TRIP_RATIO}; most repeated: {top[:1]}). "
+                        "The agent is repeating the same tool calls, so the run was "
+                        "aborted before executing the repeated call — bounded recovery "
+                        "can now land a verdict instead of the step budget burning out "
+                        "on the loop.",
+                        diagnostic=diagnostic,
+                    )
+            return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+
+    all_toolsets = [FunctionToolset(tools), *toolsets] if tools else list(toolsets)
+    return [_RunawayGuardToolset(wrapped=ts) for ts in all_toolsets]
+
+
 def build_agent_kwargs(
     cfg: LLMConfig,
     req: RunRequest,
@@ -99,6 +155,13 @@ def build_agent_kwargs(
         # gathered. Intentionally not a forced tool.
         limit = max(0, int(req.tool_step_limit))
         toolsets = _steering_toolsets(tools, toolsets, limit)
+        tools = []
+    if tools or toolsets:
+        # Runaway loop breaker (bug c827), armed for EVERY Agent call with a tool surface
+        # — not only step-limited ones — and put OUTERMOST so it also observes steered
+        # calls. Wrapping only; tool definitions stay advertised. An empty surface
+        # (single_turn) stays byte-identical: no wrapper, no guard.
+        toolsets = _runaway_guard_toolsets(tools, toolsets)
         tools = []
 
     kwargs: dict[str, Any] = {
