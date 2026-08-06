@@ -57,7 +57,7 @@ class _BudgetExhaustingRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         err = LLMBudgetExhaustedError("agent exceeded its step budget")
         err.diagnostic = {
@@ -96,7 +96,7 @@ def test_prelude_rebar_error_stays_typed_not_raw(monkeypatch) -> None:
 
 
 def test_prelude_failure_preserves_primary_aggregate_diagnostic(monkeypatch) -> None:
-    step, raised = _run_with_broken_prelude(monkeypatch)
+    step, _raised = _run_with_broken_prelude(monkeypatch)
 
     diagnostic = step.failure_diagnostic
     assert isinstance(diagnostic, dict) and diagnostic, (

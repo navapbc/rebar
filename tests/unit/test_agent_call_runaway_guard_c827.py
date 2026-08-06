@@ -19,21 +19,21 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
-from pydantic_ai.models.function import AgentInfo, FunctionModel  # noqa: E402
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from rebar.llm import usage_log  # noqa: E402
-from rebar.llm.config import LLMConfig  # noqa: E402
-from rebar.llm.errors import (  # noqa: E402
+from rebar.llm import usage_log
+from rebar.llm.config import LLMConfig
+from rebar.llm.errors import (
     CompletionRecoveryError,
     LLMRunnerError,
     LLMUnavailableError,
     RunawayToolLoopError,
     UnretryableOutputError,
 )
-from rebar.llm.runner import PydanticAIRunner, RunRequest  # noqa: E402
-from rebar.llm.workflow.completion_recovery import CompletionAgentStep  # noqa: E402
-from rebar.llm.workflow.executor import StepContext  # noqa: E402
+from rebar.llm.runner import PydanticAIRunner, RunRequest
+from rebar.llm.workflow.completion_recovery import CompletionAgentStep
+from rebar.llm.workflow.executor import StepContext
 
 pytestmark = pytest.mark.unit
 
@@ -208,6 +208,20 @@ def test_healthy_full_profile_is_never_aborted():
     assert counter["n"] == 41, "a high-novelty run must land naturally, never be aborted"
 
 
+def test_healthy_run_past_flat_landing_threshold_is_never_aborted():
+    """No new workload ceiling: a high-novelty run larger than the previous flat-landing
+    threshold (239 requests) lands naturally instead of being aborted for size."""
+    counter = {"n": 0}
+    cfg = _cfg(max_iterations=600)  # request_limit = 300 > 239
+
+    result = PydanticAIRunner(cfg, model_override=_healthy_model(counter, land_after=250)).run(
+        _req(cfg)
+    )
+
+    assert result["text"] == "landed"
+    assert counter["n"] == 251, "the run must land past 239 requests, never be aborted"
+
+
 def test_trip_threshold_is_read_from_usage_log_at_call_time(monkeypatch):
     """Single-sourcing pin: raising the shared constant makes the healthy profile trip,
     so the guard cannot be reading a private literal."""
@@ -341,7 +355,7 @@ class _RunawayThenRecoverRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         if len(self.requests) == 1:
             err = RunawayToolLoopError("runaway tool-call loop detected")
@@ -363,7 +377,7 @@ class _RunawayThenRecoverRunner:
 
 
 class _RunawayThenTruncateRunner(_RunawayThenRecoverRunner):
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         if not self.requests:
             return super().run(req)
         self.requests.append(req)
