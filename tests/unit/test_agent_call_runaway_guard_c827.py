@@ -208,6 +208,20 @@ def test_healthy_full_profile_is_never_aborted():
     assert counter["n"] == 41, "a high-novelty run must land naturally, never be aborted"
 
 
+def test_healthy_run_past_flat_landing_threshold_is_never_aborted():
+    """No new workload ceiling: a high-novelty run larger than the previous flat-landing
+    threshold (239 requests) lands naturally instead of being aborted for size."""
+    counter = {"n": 0}
+    cfg = _cfg(max_iterations=600)  # request_limit = 300 > 239
+
+    result = PydanticAIRunner(cfg, model_override=_healthy_model(counter, land_after=250)).run(
+        _req(cfg)
+    )
+
+    assert result["text"] == "landed"
+    assert counter["n"] == 251, "the run must land past 239 requests, never be aborted"
+
+
 def test_trip_threshold_is_read_from_usage_log_at_call_time(monkeypatch):
     """Single-sourcing pin: raising the shared constant makes the healthy profile trip,
     so the guard cannot be reading a private literal."""
