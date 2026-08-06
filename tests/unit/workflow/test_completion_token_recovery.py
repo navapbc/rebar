@@ -284,15 +284,20 @@ def test_unbounded_criteria_fail_before_any_recovery_call(monkeypatch, ticket) -
 
 
 def test_unbounded_ticket_context_fails_before_any_recovery_call(monkeypatch) -> None:
+    from rebar.llm.workflow import completion_recovery as _cr
+
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *args, **kwargs: _ticket())
     runner = _RecoverableRunner()
+    cfg = LLMConfig(runner="fake")
     step = CompletionAgentStep(
         runner=runner,
         repo_root=None,
-        config=LLMConfig(runner="fake"),
+        config=cfg,
     )
     ctx = _ctx()
-    ctx.inputs["context"] = "x" * 100_001
+    # Breach the step's window-derived physical ceiling by one char (the flat 100,000 bound
+    # was retired by bug 8eb3), so the oversize refusal still fires before any recovery call.
+    ctx.inputs["context"] = "x" * (_cr.physical_context_ceiling(cfg.model) + 1)
 
     with pytest.raises(CompletionRecoveryError, match=r"context.*bound"):
         step.run(ctx)

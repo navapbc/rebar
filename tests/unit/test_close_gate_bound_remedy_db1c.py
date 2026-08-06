@@ -47,6 +47,7 @@ from rebar._commands import gates as _gates
 from rebar._commands import transition_close as _tc
 from rebar._commands._seam import CommandError
 from rebar._engine_support import field_reads as _fr
+from rebar.llm.config import VERIFIER_DEFAULT_MODEL
 from rebar.llm.errors import CompletionRecoveryError
 
 pytestmark = pytest.mark.unit
@@ -57,11 +58,17 @@ pytestmark = pytest.mark.unit
 _TICKET_2932_CHARS = 41_595
 
 
-def _bound_error() -> CompletionRecoveryError:
-    """The exact exception `_validate_recovery_inputs` raises on a context breach."""
+def _context_ceiling() -> int:
+    """The physical context ceiling for the default verifier model (bug 8eb3 retired the
+    flat `_MAX_CONTEXT_CHARS`; the bound is now window-derived)."""
     from rebar.llm.workflow import completion_recovery as _cr
 
-    limit = _cr._MAX_CONTEXT_CHARS
+    return _cr.physical_context_ceiling(VERIFIER_DEFAULT_MODEL)
+
+
+def _bound_error() -> CompletionRecoveryError:
+    """The exact exception `_validate_recovery_inputs` raises on a context breach."""
+    limit = _context_ceiling()
     return CompletionRecoveryError(
         "completion recovery context bound exceeded",
         diagnostic={
@@ -146,16 +153,13 @@ def test_the_size_diagnosis_survives_the_new_remedy(monkeypatch) -> None:
     reports the measured size and the limit; re-asserted here so rewriting the sentence
     cannot silently regress it.
     """
-    from rebar.llm.workflow import completion_recovery as _cr
-
     message = _close_message(monkeypatch, _bound_error())
 
-    assert f"{_cr._MAX_CONTEXT_CHARS + 1:,}" in message, (
+    limit = _context_ceiling()
+    assert f"{limit + 1:,}" in message, (
         f"the measured context size must survive the rewrite. Got: {message}"
     )
-    assert f"{_cr._MAX_CONTEXT_CHARS:,}" in message, (
-        f"the limit must survive the rewrite. Got: {message}"
-    )
+    assert f"{limit:,}" in message, f"the limit must survive the rewrite. Got: {message}"
 
 
 def test_the_remedy_points_at_a_lever_the_operator_can_actually_pull(monkeypatch) -> None:
@@ -181,9 +185,10 @@ def test_a_real_ticket_sized_like_2932_is_no_longer_refused() -> None:
     cap. That cap is now 100,000. If a future change lowers it back under this size the
     original defect returns, and the remedy wording above becomes load-bearing again.
     """
-    from rebar.llm.workflow import completion_recovery as _cr
+    from rebar.llm.workflow import completion_recovery as _cr  # noqa: F401
 
-    assert _TICKET_2932_CHARS <= _cr._MAX_CONTEXT_CHARS, (
+    ceiling = _context_ceiling()
+    assert _TICKET_2932_CHARS <= ceiling, (
         f"ticket 2932 ({_TICKET_2932_CHARS:,} chars) would be refused again by a context "
-        f"budget of {_cr._MAX_CONTEXT_CHARS:,}; db1c's original failure has regressed"
+        f"budget of {ceiling:,}; db1c's original failure has regressed"
     )

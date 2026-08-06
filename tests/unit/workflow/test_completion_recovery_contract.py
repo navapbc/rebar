@@ -68,7 +68,7 @@ def test_authored_bug_core_is_not_appended_twice_at_criteria_bound() -> None:
 
     assert criteria == authored
     assert criteria.count(core) == 1
-    _validate_recovery_inputs(criteria, "")
+    _validate_recovery_inputs(criteria, "", None)
 
 
 def test_acceptance_criteria_stay_ordered_deduped_and_accept_all_met() -> None:
