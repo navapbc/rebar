@@ -27,7 +27,7 @@ def _publish_artifact_emit_error_metric() -> None:
     :func:`_publish_voter_error_metric`. The journald marker + the host probe is the reliable
     path; in-container boto3 may not reach IMDS, so any failure is swallowed."""
     try:
-        import boto3  # noqa: PLC0415 — optional, lazy: only on a best-effort error path
+        import boto3
 
         boto3.client("cloudwatch").put_metric_data(
             Namespace="rebar/host",
@@ -138,7 +138,7 @@ def emit_code_review_artifact(
                 try:
                     rebar.link(artifact_id, resolved, "relates_to", repo_root=repo_root)
                     linked += 1
-                except Exception:  # noqa: BLE001 — one failed link never aborts the rest
+                except Exception:
                     logger.warning(
                         "code_review artifact %s: relates_to link to %s failed",
                         artifact_id,
@@ -157,7 +157,7 @@ def emit_code_review_artifact(
             "code_review artifact %s: linked %d/%d trailer refs", artifact_id, linked, len(refs)
         )
         return artifact_id
-    except Exception as exc:  # noqa: BLE001 — artifact emission is best-effort; never fail the vote
+    except Exception as exc:
         # NON-silent (bug desirous-judicial-hogget / d220): a write-dead tickets store — e.g. a
         # fresh single-branch clone missing `.env-id` (converged by
         # infra/scripts/reviewbot-ensure-tickets.sh) — otherwise makes emission a SILENT no-op.

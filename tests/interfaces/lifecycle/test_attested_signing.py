@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import rebar
-import rebar.llm  # noqa: F401 — ensures rebar.llm is importable for monkeypatch
+import rebar.llm
 from rebar import signing
 
 

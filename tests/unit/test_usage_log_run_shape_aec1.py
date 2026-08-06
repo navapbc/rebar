@@ -29,13 +29,13 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
-from pydantic_ai.models.function import AgentInfo, FunctionModel  # noqa: E402
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from rebar.llm import usage_log  # noqa: E402
-from rebar.llm.config import LLMConfig, gate_session  # noqa: E402
-from rebar.llm.errors import LLMError  # noqa: E402
-from rebar.llm.runner import PydanticAIRunner, RunRequest  # noqa: E402
+from rebar.llm import usage_log
+from rebar.llm.config import LLMConfig, gate_session
+from rebar.llm.errors import LLMError
+from rebar.llm.runner import PydanticAIRunner, RunRequest
 
 pytestmark = pytest.mark.unit
 

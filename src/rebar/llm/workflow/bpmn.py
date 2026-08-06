@@ -481,7 +481,7 @@ def _emit_di(defs, proc_id, boxes, expanded, edges) -> None:
     )
 
     def n(v: float) -> str:
-        return str(int(round(v)))
+        return str(round(v))
 
     for sid, (x, y, w, h) in boxes.items():
         attrs = {"id": f"di_{sid}", "bpmnElement": sid}

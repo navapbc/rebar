@@ -82,7 +82,7 @@ def emit_gate_error(
             diagnostic=diagnostic,
         )
         append_event(ticket_id, event_type, payload, tracker, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged, never changes the gate outcome
+    except Exception:
         logger.warning("gate_error sidecar emit failed; continuing", exc_info=True)
         return False
     return True

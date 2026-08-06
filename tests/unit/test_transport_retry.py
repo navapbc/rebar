@@ -96,7 +96,7 @@ def test_429_with_retry_after_retries_below_the_sdk(base_url):
             lambda: httpx.Response(200, json=_ok_body("HEALED")),
         ]
     )
-    model, http_client = _build_retrying_anthropic_model(
+    model, _http_client = _build_retrying_anthropic_model(
         "claude-sonnet-4-6", base_url=base_url, cfg=_cfg(), _wrapped_transport=transport
     )
     out = _run(model)

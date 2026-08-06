@@ -17,12 +17,12 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
-from pydantic_ai.models.function import AgentInfo, FunctionModel  # noqa: E402
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from rebar.llm.config import LLMConfig  # noqa: E402
-from rebar.llm.errors import LLMRunnerError, UnretryableOutputError  # noqa: E402
-from rebar.llm.runner import PydanticAIRunner, RunRequest  # noqa: E402
+from rebar.llm.config import LLMConfig
+from rebar.llm.errors import LLMRunnerError, UnretryableOutputError
+from rebar.llm.runner import PydanticAIRunner, RunRequest
 
 
 def test_pydantic_runner_honours_max_iterations_budget():

@@ -205,7 +205,7 @@ def snapshot_at_ref(
             raise
         _chmod_readonly(dest)
         return dest
-    except BaseException:  # noqa: BLE001 — child-reap cleanup on ANY exit (incl. KeyboardInterrupt/SystemExit), then re-raise — never swallowed
+    except BaseException:
         # Reap the child rather than leaving a zombie / leaking its pipe FDs: kill
         # if still running, then always wait() and close the stdio pipes.
         if proc is not None:

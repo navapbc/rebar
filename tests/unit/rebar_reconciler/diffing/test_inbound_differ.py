@@ -277,7 +277,7 @@ def test_assignee_dict_genuine_change_still_emitted(
         }
     }
 
-    result, suppressed = inbound_differ.compute_inbound_mutations(
+    result, _suppressed = inbound_differ.compute_inbound_mutations(
         jira_snapshot=jira_snapshot,
         binding_store=store,
         local_tickets_by_id=local_tickets,
@@ -539,7 +539,7 @@ def test_jira_truncated_description_not_pulled_back(
     store = StubBindingStore({"PROJ-900": "local-900"})
     local_tickets = {"local-900": _local_ticket(_OVERSIZE_DESC)}
 
-    result, suppressed = inbound_differ.compute_inbound_mutations(
+    result, _suppressed = inbound_differ.compute_inbound_mutations(
         jira_snapshot=_jira_snapshot(landed),
         binding_store=store,
         local_tickets_by_id=local_tickets,

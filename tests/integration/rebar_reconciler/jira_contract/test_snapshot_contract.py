@@ -104,7 +104,7 @@ def test_fetch_snapshot_conforms_to_schema(produced_snapshot) -> None:
     for key, entry in produced_snapshot.items():
         try:
             _snapshot_schema.validate_snapshot_entry(entry)
-        except jsonschema.ValidationError as exc:  # noqa: PERF203 — per-entry context
+        except jsonschema.ValidationError as exc:
             pytest.fail(f"{key} violates the snapshot-entry schema: {exc.message}")
 
 

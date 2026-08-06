@@ -208,7 +208,7 @@ def pass2_completion(
     )
     try:
         raw = runner.run(req).get("completions", []) or []
-    except Exception:  # noqa: BLE001 — DEGRADE: any sub-call failure → {} (the floor drops nothing)
+    except Exception:
         logger.warning(
             "completion sub-call failed; classifying nothing (the floor drops nothing)",
             exc_info=True,

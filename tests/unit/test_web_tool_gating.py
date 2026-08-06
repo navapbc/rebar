@@ -18,6 +18,7 @@ import inspect
 import json
 from importlib import resources
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -205,7 +206,7 @@ class _CaptureAgent:
     records the construction kwargs and returns a canned text result — no model,
     no network."""
 
-    captured: list[dict] = []
+    captured: ClassVar[list[dict]] = []
 
     def __init__(self, model, **kwargs):
         _CaptureAgent.captured.append({"model": model, "kwargs": kwargs})

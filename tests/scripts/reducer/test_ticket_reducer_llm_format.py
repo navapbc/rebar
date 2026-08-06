@@ -48,7 +48,7 @@ def test_to_llm_importable_from_package() -> None:
     RED: ticket_reducer/llm_format.py does not exist yet; the import will raise
     ModuleNotFoundError until the module is created.
     """
-    from rebar.reducer.llm_format import to_llm  # noqa: PLC0415 — intentional RED import
+    from rebar.reducer.llm_format import to_llm
 
     assert callable(to_llm), "to_llm imported from rebar.reducer.llm_format must be callable"
 
@@ -80,7 +80,7 @@ def test_to_llm_key_mapping_via_package() -> None:
 
     RED: ticket_reducer/llm_format.py does not exist yet.
     """
-    from rebar.reducer.llm_format import to_llm  # noqa: PLC0415
+    from rebar.reducer.llm_format import to_llm
 
     state = {
         "ticket_id": "abc-123",
@@ -128,7 +128,7 @@ def test_to_llm_omits_none_via_package() -> None:
 
     RED: ticket_reducer/llm_format.py does not exist yet.
     """
-    from rebar.reducer.llm_format import to_llm  # noqa: PLC0415
+    from rebar.reducer.llm_format import to_llm
 
     state = {
         "ticket_id": "dso-001",
@@ -185,12 +185,12 @@ def test_to_llm_importable_from_top_level_package() -> None:
     RED: ticket_reducer/__init__.py does not yet re-export to_llm; the import
     will raise ImportError until __init__.py is updated.
     """
-    from rebar.reducer import to_llm  # noqa: PLC0415 — intentional RED import
+    from rebar.reducer import to_llm
 
     assert callable(to_llm), "to_llm imported from rebar.reducer (top-level) must be callable"
 
     # Smoke-check: verify it is the same function as the one from the sub-module
-    from rebar.reducer.llm_format import to_llm as to_llm_direct  # noqa: PLC0415
+    from rebar.reducer.llm_format import to_llm as to_llm_direct
 
     assert to_llm is to_llm_direct, (
         "ticket_reducer.to_llm must be the same object as "

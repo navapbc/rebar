@@ -136,7 +136,7 @@ def _update_one_filter_fields(fields, mutation) -> dict:
     """Phase: log + strip fields ACLI's edit endpoint rejects, return the allowlisted set."""
     _stripped = {k: v for k, v in fields.items() if k not in _OUTBOUND_BATCH_ALLOWLIST}
     if _stripped:
-        print(  # noqa: T201
+        print(
             f"update_one: dropping fields not accepted by ACLI edit "
             f"for {mutation.get('key')}: {sorted(_stripped.keys())}",
             file=sys.stderr,
@@ -170,7 +170,7 @@ def _update_one_dispatch_comments(
                 # comment sub-mutation failed.
                 if comment_errors is not None:
                     comment_errors.append(f"add_comment failed: {exc!s}")
-                print(  # noqa: T201
+                print(
                     f"update_one: add_comment failed for {issue_key}: {exc!r}",
                     file=sys.stderr,
                 )

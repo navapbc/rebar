@@ -181,7 +181,7 @@ def parse_workflow(text: str, *, source: str = "<workflow>") -> dict[str, Any]:
             source=source,
         )
     try:
-        doc = yaml.load(text, Loader=_loader_cls())  # noqa: S506 - hardened SafeLoader subclass
+        doc = yaml.load(text, Loader=_loader_cls())
     except WorkflowParseError as exc:
         # Re-stamp the source onto an error raised mid-compose (where it is unknown).
         raise WorkflowParseError(

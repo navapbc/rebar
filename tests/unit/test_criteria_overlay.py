@@ -114,7 +114,7 @@ def test_retune_builtin_merges_over_packaged(tmp_path):
 # ── load-time validation (located errors) ───────────────────────────────────────
 def test_netnew_unprefixed_id_rejected(tmp_path):
     root = _make_repo(tmp_path, overlay={"plan_review": {"myrule": _ROUTING}, "activate": []})
-    with pytest.raises(registry.RegistryError, match="must be 'project.<name>'-prefixed"):
+    with pytest.raises(registry.RegistryError, match=r"must be 'project.<name>'-prefixed"):
         registry.effective_routing(root)
 
 
@@ -132,13 +132,13 @@ def test_project_id_colliding_with_builtin_rejected(tmp_path, monkeypatch):
 
 def test_activated_without_routing_rejected(tmp_path):
     root = _make_repo(tmp_path, overlay={"plan_review": {}, "activate": ["project.ghost"]})
-    with pytest.raises(registry.RegistryError, match="has no.*routing entry"):
+    with pytest.raises(registry.RegistryError, match=r"has no.*routing entry"):
         registry.effective_criteria(root)
 
 
 def test_activate_of_non_project_id_rejected(tmp_path):
     root = _make_repo(tmp_path, overlay={"plan_review": {}, "activate": ["totally-made-up"]})
-    with pytest.raises(registry.RegistryError, match="must be a 'project.<name>'"):
+    with pytest.raises(registry.RegistryError, match=r"must be a 'project.<name>'"):
         registry.effective_criteria(root)
 
 
@@ -162,7 +162,7 @@ def test_legacy_levels_rejected_with_migration_hint(tmp_path):
     # ticket-type `levels` vocabulary must fail loudly, not be silently ignored.
     bad = {**_ROUTING, "applies_at": {"levels": ["task"]}}
     root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": bad}, "activate": []})
-    with pytest.raises(registry.RegistryError, match="no longer supported.*scope"):
+    with pytest.raises(registry.RegistryError, match=r"no longer supported.*scope"):
         registry.effective_routing(root)
 
 
@@ -203,7 +203,7 @@ def test_activated_missing_prompt_fails_loud(tmp_path):
         prompts={},  # no prompt file authored for project.no-prompt
     )
     assert "project.no-prompt" in registry.effective_criteria(root)  # activated + routed
-    with pytest.raises(registry.RegistryError, match="project.no-prompt"):
+    with pytest.raises(registry.RegistryError, match=r"project.no-prompt"):
         registry.load_criteria(root)
 
 
@@ -228,7 +228,7 @@ def test_route_criteria_fans_in_activated_project_criterion(tmp_path):
         description="## Acceptance Criteria\n- [ ] do the thing\n" + "x" * 200,
         repo_root=root,
     )
-    single, agent = route_criteria(ctx)
+    single, _agent = route_criteria(ctx)
     assert "project.no-print" in {c["id"] for c in single}
     # ...and the runner's project fan-in picks exactly the project subset (built-ins excluded)
     proj_single, proj_agent = production_batch_runner._project_criteria(ctx, exclude=set())

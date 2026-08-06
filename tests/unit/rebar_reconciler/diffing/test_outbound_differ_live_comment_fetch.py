@@ -210,7 +210,7 @@ def test_no_comment_field_client_returns_subset_emits_missing_only(
     jira_key = "DIG-5302"
     existing_in_jira = ["Investigation note", "Fix plan"]
     new_local_body = "Brand new comment"
-    local_bodies = existing_in_jira + [new_local_body]
+    local_bodies = [*existing_in_jira, new_local_body]
 
     ticket = _make_ticket_with_comments("local-live-2", local_bodies)
     store = StubBindingStore({"local-live-2": jira_key})

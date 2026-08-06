@@ -138,7 +138,7 @@ def test_apply_success_after_retry(tmp_path, applier, concurrency):
 
     call_count = {"n": 0}
 
-    def fake_rebase_retry(repo_root, write_fn, *, max_attempts=3):  # noqa: ARG001
+    def fake_rebase_retry(repo_root, write_fn, *, max_attempts=3):
         call_count["n"] += 1
         # Always returns success (internal retry logic is inside rebase_retry itself)
         return ok_result

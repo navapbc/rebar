@@ -104,7 +104,7 @@ class _SameTokenTwiceClient:
         # Always return a full page so length-based termination never trips.
         page = [_make_issue(start_at + i) for i in range(max_results)]
         # The same-token-twice marker — same token on every call.
-        self.next_page_token = "stuck-cursor-abc"  # noqa: F841 — intentional
+        self.next_page_token = "stuck-cursor-abc"
         return page
 
 

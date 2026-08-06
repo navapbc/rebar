@@ -72,7 +72,7 @@ class _FakeItem:
         self.module = module
         self.markers: list = []
 
-    def add_marker(self, marker) -> None:  # noqa: ANN001 — pytest.MarkDecorator
+    def add_marker(self, marker) -> None:
         self.markers.append(marker)
 
 

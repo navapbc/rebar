@@ -36,16 +36,16 @@ from rebar._store import fsutil
 from rebar._store.gitutil import run_git
 
 __all__ = [
-    "CURRENT_FORMAT_VERSION",
-    "KNOWN_FORMAT_VERSIONS",
-    "KNOWN_CAPABILITIES",
     "COMPAT_FILENAME",
+    "CURRENT_FORMAT_VERSION",
+    "KNOWN_CAPABILITIES",
+    "KNOWN_FORMAT_VERSIONS",
     "StoreIncompatibleError",
     "check_store_compat",
+    "describe_store_compat",
     "store_epoch_merge_target",
     "store_epoch_problem",
     "write_compat_record",
-    "describe_store_compat",
 ]
 
 # The store format this v1.0 rebar writes and reads. ``0`` is the implicit legacy

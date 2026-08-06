@@ -12,4 +12,4 @@ from __future__ import annotations
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.jobs import VALID_KINDS, new_record, run_job
 
-__all__ = ["OpcertServiceConfig", "VALID_KINDS", "new_record", "run_job"]
+__all__ = ["VALID_KINDS", "OpcertServiceConfig", "new_record", "run_job"]

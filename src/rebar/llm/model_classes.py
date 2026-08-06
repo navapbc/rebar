@@ -452,5 +452,5 @@ def entered_fallback_model(model: Any) -> Iterator[Any]:
     finally:
         try:
             loop.run_until_complete(model.__aexit__(None, None, None))
-        except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
+        except Exception:
             logger.warning("llm fallback chain teardown failed", exc_info=True)

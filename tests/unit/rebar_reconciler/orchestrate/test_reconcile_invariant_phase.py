@@ -50,7 +50,7 @@ def _load_reconcile() -> ModuleType:
 def _make_stub_fetcher(snapshot: dict) -> ModuleType:
     stub = types.ModuleType("reconcile_fetcher")
 
-    def _fetch(pid, repo_root):  # noqa: ANN001
+    def _fetch(pid, repo_root):
         out_dir = repo_root / "bridge_state" / "snapshots"
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{pid}.json"
@@ -64,7 +64,7 @@ def _make_stub_fetcher(snapshot: dict) -> ModuleType:
 def _make_stub_applier() -> ModuleType:
     stub = types.ModuleType("reconcile_applier")
 
-    def _apply(mutations, pass_id, repo_root, **kwargs):  # noqa: ANN001
+    def _apply(mutations, pass_id, repo_root, **kwargs):
         # Bug 85a1: reconcile_once now passes binding_store= (and may add
         # more kwargs in the future); accept and ignore for stub purposes.
         manifest = repo_root / "bridge_state" / "manifests" / f"{pass_id}.json"
@@ -115,7 +115,7 @@ def _install_stubs(*, fetcher, differ, applier, health, invariants) -> None:
 
 
 def _cleanup_stubs() -> None:
-    for key in _RECONCILE_COLLAB_KEYS + ("reconcile",):
+    for key in (*_RECONCILE_COLLAB_KEYS, "reconcile"):
         sys.modules.pop(key, None)
 
 

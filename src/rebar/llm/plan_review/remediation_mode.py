@@ -123,7 +123,7 @@ def remediation_mode_candidate(
             reasons["within_window"] = (
                 0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
             )
-    except Exception:  # noqa: BLE001 — fail-safe: any read error → not eligible → full review, never crash
+    except Exception:
         logger.warning(
             "remediation-mode candidate check failed; treating as not eligible", exc_info=True
         )
@@ -176,7 +176,7 @@ def _sidecar_branch_decision(
             reasons["within_window"] = (
                 0 <= (current_ns - last_ts) <= window_minutes * 60 * 1_000_000_000
             )
-    except Exception:  # noqa: BLE001 — fail-safe: any read error → not eligible → full review, never crash
+    except Exception:
         logger.warning("remediation sidecar-branch check failed; not eligible", exc_info=True)
         return {"eligible": False, "reasons": reasons, "baseline": "sidecar"}
     return {"eligible": all(reasons.values()), "reasons": reasons, "baseline": "sidecar"}

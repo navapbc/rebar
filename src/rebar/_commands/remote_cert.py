@@ -176,5 +176,5 @@ def _sigv4_request(base_url: str, method: str, path: str, *, body: bytes | None 
     http_req = urllib.request.Request(
         url, data=body, method=method, headers=dict(aws_req.headers.items())
     )
-    with urllib.request.urlopen(http_req, timeout=30) as resp:  # noqa: S310 — configured https URL
+    with urllib.request.urlopen(http_req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))

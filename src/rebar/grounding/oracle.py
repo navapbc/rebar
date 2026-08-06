@@ -388,13 +388,13 @@ def _safe(fn: Any) -> Any:
 
 
 __all__ = [
+    "BACKENDS",
     "DIMENSIONS",
     "DIMENSIONS_VERSION",
     "REFERENCE_KINDS",
-    "BACKENDS",
+    "applies",
+    "contract",
     "is_known_dimension",
     "refute_absence",
-    "applies",
     "scan",
-    "contract",
 ]

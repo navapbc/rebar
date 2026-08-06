@@ -83,7 +83,7 @@ def _material_delta(payload: dict[str, Any], ticket_id: str, repo_root) -> str:
             current = _current_components(ticket_id, repo_root)
             if signed and current is not None:
                 return describe_delta(signed, current) or "no material component differs"
-    except Exception:  # noqa: BLE001 — a diagnostic clause must never mask the real refusal
+    except Exception:
         logger.warning("could not diff recorded material for %s", ticket_id, exc_info=True)
     return (
         "the changed component cannot be named: this review predates per-component fingerprinting"
@@ -332,7 +332,7 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
                 None, gate_source.SOURCE_ATTESTED, repo_root, fetch=False
             )
             session: contextlib.AbstractContextManager = gate_source.gate_read_root(handle)
-        except Exception:  # noqa: BLE001 — snapshot unavailable: fall through; the sign seam's
+        except Exception:
             # no-null-pin invariant then refuses an unattested basis with a clear reason
             # (surfaced by the structured-refusal handler below), instead of resign dying
             # on ref resolution with a different, less actionable error.
@@ -348,7 +348,7 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
                 children=children,
                 repo_root=repo_root,
             )
-    except Exception as exc:  # noqa: BLE001 — public recovery path returns structured refusal
+    except Exception as exc:
         # Relation failures are an unsigned, retry-after-repair gate outcome, not
         # an opaque signing failure.  Keep the public no-throw recovery contract
         # while preserving the stable reason/reference fields used by CLI/MCP.

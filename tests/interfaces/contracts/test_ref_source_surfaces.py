@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 import rebar
-import rebar.llm  # noqa: F401
+import rebar.llm
 from rebar._cli import _llm_commands as cli
 
 # The pinned one-to-one CLI<->MCP mapping (the five code-reading operations). Only the

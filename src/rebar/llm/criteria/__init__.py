@@ -46,10 +46,10 @@ __all__ = [
     "RepoRootMismatchError",
     "build_descriptor",
     "check_repo_root_agreement",
-    "threshold_for",
     "clear_caches",
     "disabled_builtins",
     "effective_criteria",
     "effective_routing",
     "register_gate",
+    "threshold_for",
 ]

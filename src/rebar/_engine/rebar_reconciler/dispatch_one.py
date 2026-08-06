@@ -264,7 +264,7 @@ def create_one(
         try:
             binding_store.bind_pending(local_id)
             binding_store.save()
-        except Exception as persist_err:  # noqa: BLE001 — persist floor -> item-scoped signal
+        except Exception as persist_err:
             raise BindingPersistError(
                 f"write-ahead bind_pending persist failed for {local_id!r}; "
                 f"create skipped: {persist_err!r}"
@@ -293,7 +293,7 @@ def create_one(
                     if _record_id is not None:
                         _record_id(local_id, result.get("id", ""))
                     binding_store.save()
-                except Exception as persist_err:  # noqa: BLE001 — persist floor: translate to the item-scoped signal
+                except Exception as persist_err:
                     raise BindingPersistError(
                         f"write-ahead record_pending_key persist failed for "
                         f"{local_id!r} (key {jira_key!r}): {persist_err!r}"
@@ -307,7 +307,7 @@ def create_one(
             _call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)
             if binding_store is not None and local_id:
                 binding_store.bind_confirm(local_id, jira_key)
-        except Exception as write_err:  # noqa: BLE001 — RETAIN the issue + write a failure alert, then re-raise the original write_err (never masked)
+        except Exception as write_err:
             # DO NOT DELETE THE CREATED ISSUE (bug 387d). This used to call
             # `client.delete_issue(jira_key)`, destroying a successfully-created issue
             # because LABELLING it failed — inverting the cost, since a
@@ -396,7 +396,7 @@ def create_one(
                 try:
                     _call_with_retry(client.add_label, jira_key, label_name)
                 except Exception as exc:  # noqa: BLE001 — best-effort label add; non-fatal, logged to stderr
-                    print(  # noqa: T201
+                    print(
                         f"create_one: add_label failed for {jira_key} "
                         f"label={label_name!r}: {exc!r}",
                         file=sys.stderr,
@@ -422,7 +422,7 @@ def create_one(
                     # CREATE whose comment sub-mutation failed. Mirrors update_one.
                     if comment_errors is not None:
                         comment_errors.append(f"add_comment failed: {exc!s}")
-                    print(  # noqa: T201
+                    print(
                         f"create_one: add_comment failed for {jira_key}: {exc!r}",
                         file=sys.stderr,
                     )
@@ -681,7 +681,7 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
                     _call_with_retry(client.remove_label, issue_key, label_name)
                 _labels_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort label op; non-fatal, logged to stderr
-                print(  # noqa: T201
+                print(
                     f"update_one: label {action} failed for {issue_key} "
                     f"label={label_name!r}: {exc!r}",
                     file=sys.stderr,
@@ -712,7 +712,7 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
             existing_links = _index_existing_links(client.get_issue_links(issue_key))
         except Exception as exc:  # noqa: BLE001 — dedup probe is best-effort; proceed without it
             existing_links = None
-            print(  # noqa: T201
+            print(
                 f"update_one: get_issue_links probe failed for {issue_key}: {exc!r}",
                 file=sys.stderr,
             )
@@ -732,7 +732,7 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
                 _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
                 _links_applied += 1
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
-                print(  # noqa: T201
+                print(
                     f"update_one: set_relationship failed for {frm} -> {to} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
@@ -749,7 +749,7 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
             link_objs = client.get_issue_links(issue_key)
         except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
             link_objs = None
-            print(  # noqa: T201
+            print(
                 f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
                 file=sys.stderr,
             )
@@ -778,7 +778,7 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
                     # pass — so treat as non-fatal and don't unwind the pass.
                     _links_applied += 1
                 except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
-                    print(  # noqa: T201
+                    print(
                         f"update_one: delete_issue_link failed for {issue_key} -> "
                         f"{to_key} ({link_type}): {exc!r}",
                         file=sys.stderr,

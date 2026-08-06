@@ -192,7 +192,7 @@ def screen_candidates(
             # fan-out alike; pool.map surfaces the first worker exception) so the close
             # gate's fail-closed handler blocks the close and names the provider failure.
             raise
-        except Exception:  # noqa: BLE001 — non-systemic failure degrades open per candidate
+        except Exception:
             logger.warning(
                 "epic bug screen call failed for %s; degrading to C (unrelated)",
                 bug.get("ticket_id"),
@@ -291,7 +291,7 @@ def run_screen(
         }
     except LLMUnavailableError:
         raise  # bug 1019: a systemic provider error fails the close CLOSED, never degrades
-    except Exception:  # noqa: BLE001 — advisory tier: a non-systemic failure must never block a close
+    except Exception:
         logger.warning("epic bug screen failed for %s; degrading open (skipped)", epic_id)
         logger.debug("epic bug screen failure detail", exc_info=True)
         return {"block": "", "tally": [], "overflow": 0}

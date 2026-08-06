@@ -26,7 +26,7 @@ class _EscalatingRunner:
     def __init__(self) -> None:
         self.models_seen: list[str] = []
 
-    def run(self, req):  # noqa: ANN001 - RunRequest
+    def run(self, req):
         model = req.config.model
         self.models_seen.append(model)
         if model == "low":

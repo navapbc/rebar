@@ -101,7 +101,7 @@ def _release_after_first_fail(lock: Path, attempts: list) -> Callable[[int, obje
     NEXT attempt succeeds. The lock is never released before the first failure is confirmed."""
     released = {"done": False}
 
-    def _probe(n: int, result) -> None:  # noqa: ANN001
+    def _probe(n: int, result) -> None:
         is_lock = gitutil._is_index_lock_error(result.stderr or result.stdout or "")
         attempts.append((n, result.returncode, is_lock))
         if not released["done"] and result.returncode != 0 and is_lock and lock.exists():

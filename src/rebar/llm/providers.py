@@ -180,7 +180,7 @@ class ProviderSession:
             f"unknown provider {provider_name!r}; registered providers: {sorted(self._builders)}"
         )
 
-    def _build_anthropic(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
+    def _build_anthropic(self, provider_name: str) -> Any:
         """Verbatim relocation of the inline ``resolved.startswith("anthropic")``
         branch that used to live in ``runner.run()`` (story arcticduck / hoopoe):
         the retrying transport and the SDK ``max_retries=0`` guard are still owned by
@@ -223,7 +223,7 @@ class ProviderSession:
         self._closeables.append(client)
         return model.provider
 
-    def _build_bedrock(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
+    def _build_bedrock(self, provider_name: str) -> Any:
         """One-line delegation to the ``bedrock_model`` leaf builder (story S3/2932) — the
         construction logic lives THERE, not here: this file budgets itself well under the
         module-size cap (story S3/2932 held it at ~289 lines), so only the registry entry —
@@ -232,7 +232,7 @@ class ProviderSession:
 
         return build_bedrock_provider(self._cfg)
 
-    def _build_openai(self, provider_name: str) -> Any:  # noqa: ARG002 — hook signature
+    def _build_openai(self, provider_name: str) -> Any:
         """Build an OpenAI-COMPATIBLE provider for ``cfg.base_url`` (story S4) — the seam
         that makes the ``docs/llm-framework.md`` local-server recipe (LMStudio/Ollama/vLLM/a
         LiteLLM proxy) real instead of a documented-but-refused promise. Sends a placeholder
@@ -317,7 +317,7 @@ class ProviderSession:
         for client in self._closeables:
             try:
                 asyncio.run(client.aclose())
-            except Exception:  # noqa: BLE001 — teardown is best-effort; log, never raise
+            except Exception:
                 logger.warning("llm transport client aclose failed on teardown", exc_info=True)
 
     def __enter__(self) -> ProviderSession:

@@ -55,7 +55,7 @@ def _wheel_commit(outdir: Path) -> str | None:
     with zipfile.ZipFile(wheels[0]) as zf:
         name = next(n for n in zf.namelist() if n.endswith("rebar/_build_info.py"))
         ns: dict = {}
-        exec(zf.read(name).decode(), ns)  # noqa: S102 - reading our own generated module
+        exec(zf.read(name).decode(), ns)
         return ns.get("COMMIT")
 
 

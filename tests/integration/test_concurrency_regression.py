@@ -449,7 +449,7 @@ def test_hlc_skewed_clock_edit_causality_convergence(two_clones):
     still win on both clones — because next_tick witnesses A's event prefix and
     ticks strictly above it. Under raw time_ns() B's small timestamp would lose
     (the clobber); the HLC flips it to the causally-correct winner."""
-    remote, repo_a, repo_b, seed = two_clones
+    _remote, repo_a, repo_b, seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
     # A (fast clock) edits the shared title, and its write auto-pushes to origin.
@@ -488,7 +488,7 @@ def test_hlc_skewed_clock_edit_causality_convergence(two_clones):
 def test_failed_push_never_drops_local_commit(two_clones):
     """A push to an unreachable remote must not discard the local-only commit,
     and a subsequent sync must still preserve it (WS3 no-data-loss)."""
-    remote, repo_a, repo_b, seed = two_clones
+    remote, repo_a, _repo_b, _seed = two_clones
     tracker_a = _tracker(repo_a)
 
     # Point origin at a non-existent remote so every push fails.
@@ -516,7 +516,7 @@ def _seed_dir_files(tracker: Path, ticket_id: str, suffix: str) -> list[Path]:
 def test_compaction_horizon_keeps_young_events_live(two_clones):
     """RC2b Option 3: with a horizon larger than every event's age, nothing is folded
     — recent 'hot-edge' events stay live ``.json`` (no SNAPSHOT, no ``.retired``)."""
-    remote, repo_a, _repo_b, seed = two_clones
+    _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     _remote_remove(tracker_a)
 
@@ -542,7 +542,7 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
 
     RED before the rebuild path (the orphan stays dropped); GREEN after.
     """
-    remote, repo_a, repo_b, seed = two_clones
+    _remote, repo_a, repo_b, seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
     _remote_remove(tracker_a)
@@ -588,7 +588,7 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
     pre-tag restores the pre-repair tree."""
     from rebar.reducer import reduce_ticket
 
-    remote, repo_a, _repo_b, seed = two_clones
+    _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     seed_dir = tracker_a / seed
 
@@ -792,7 +792,7 @@ def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clone
     resolves by re-retiring it. RED on the pre-b306 delete behavior (the resurrected
     file would be an un-recoverable orphan); GREEN now.
     """
-    remote, repo_a, _repo_b, seed = two_clones
+    _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     seed_dir = tracker_a / seed
 
@@ -827,7 +827,7 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     from rebar._commands.compact import rebuild_snapshot_from_full_log
     from rebar.reducer import reduce_ticket
 
-    remote, repo_a, _repo_b, seed = two_clones
+    _remote, repo_a, _repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
     seed_dir = tracker_a / seed
 
@@ -875,7 +875,7 @@ def test_push_retry_merge_under_lock_preserves_events(two_clones):
     """A write on B that triggers a non-fast-forward push-retry merge (now taken under the
     write lock) must succeed without a spurious StoreError and lose no events — B's write,
     a second B write, and A's already-pushed write all survive (audit reliability #2, e699)."""
-    remote, repo_a, repo_b, seed = two_clones
+    _remote, repo_a, repo_b, seed = two_clones
     tracker_b = _tracker(repo_b)
 
     # Prime B's read-side sync marker so B writes against a STALE base (does not first
@@ -906,7 +906,7 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     """Two clones claim the same open ticket. The loser (lower-HLC assignee) is told it
     lost (exit 10) once its push merges the winner's claim, and the resolved STATUS fork
     is surfaced via fsck + show (audit reliability #1, story 3003)."""
-    remote, repo_a, repo_b, seed = two_clones
+    _remote, repo_a, repo_b, seed = two_clones
     tracker_a = _tracker(repo_a)
 
     # Prime B's read-side sync marker (fresh) so B does NOT re-fetch on its next op — B's
@@ -995,7 +995,7 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
     monotonic HLC floor (see module note) forbids a genuinely far-past event on ``seed``
     (its CREATE is at real current time); the far-past band is what makes the snapshot ts
     provably below the concurrent append."""
-    remote, repo_a, repo_b, _seed = two_clones
+    _remote, repo_a, repo_b, _seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
     # A builds a far-past ticket: CREATE + two comments at ~1970 (REBAR_HLC=0 makes the
@@ -1080,7 +1080,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     skip silently drops (RED). ``fsck --repair-snapshots`` rebuilds the snapshot from the
     full log and folds the orphan back in (GREEN); both clones then hold byte-identical
     replayed state including B's specific comment."""
-    remote, repo_a, repo_b, seed = two_clones
+    _remote, repo_a, repo_b, seed = two_clones
     tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
 
     # A compacts seed with a far-future SNAPSHOT ts (horizon 0 → fold everything; the

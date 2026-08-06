@@ -182,7 +182,7 @@ def verified_material_components(
         if material_fingerprint(ctx) != expected_composite:
             return None
         return material_components(ctx)
-    except Exception:  # noqa: BLE001 — a diagnostic aid must never break signing
+    except Exception:
         logger.warning("could not derive material components", exc_info=True)
         return None
 
@@ -220,7 +220,7 @@ def _current_components(ticket_id: str, repo_root) -> dict[str, tuple[str, int]]
 
     try:
         ctx = current_plan_context(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — explaining a failure must never raise a second one
+    except Exception:
         logger.warning("could not read current material for %s", ticket_id, exc_info=True)
         return None
     return None if ctx is None else material_components(ctx)

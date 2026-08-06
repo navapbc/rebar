@@ -66,6 +66,6 @@ def region_for_finding(
         if current == attest._ABSENT_HASH or prior == attest._ABSENT_HASH:
             return REGION_UNKNOWN
         return REGION_UNCHANGED if current == prior else REGION_CHANGED
-    except Exception:  # noqa: BLE001 — fail-safe: any error → UNKNOWN (raise), never a spurious drop
+    except Exception:
         logger.warning("region detection failed; treating region as UNKNOWN (raise)", exc_info=True)
         return REGION_UNKNOWN

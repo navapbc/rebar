@@ -596,7 +596,7 @@ def test_review_fails_loud_when_deps_unavailable(rebar_repo: Path) -> None:
         def preflight(self):
             raise LLMConfigError("the 'agents' extra is missing — install nava-rebar[agents]")
 
-        def run(self, req):  # noqa: ANN001
+        def run(self, req):
             raise AssertionError("run must not be reached when preflight fails")
 
     _commit(rebar_repo)
@@ -619,7 +619,7 @@ def test_review_fails_loud_when_key_unavailable_at_runtime(rebar_repo: Path) -> 
         def preflight(self):
             return None  # deps fine
 
-        def run(self, req):  # noqa: ANN001
+        def run(self, req):
             raise LLMUnavailableError("the LLM provider call failed: OPENAI_API_KEY not set")
 
     _commit(rebar_repo)
@@ -640,7 +640,7 @@ def test_workflow_surfaces_unavailable_llm_as_failed_step(rebar_repo: Path) -> N
     from rebar.llm.workflow import executor as _wf
 
     class _NoKeyAgent(_wf.AgentStepRunner):
-        def run(self, ctx):  # noqa: ANN001
+        def run(self, ctx):
             raise LLMUnavailableError("the LLM provider call failed: ANTHROPIC_API_KEY not set")
 
     doc = {
@@ -785,7 +785,7 @@ def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
     assert best < 0.005, f"drift step too slow ({best * 1000:.2f}ms over 30 files)"
 
 
-def _timed(fn) -> float:  # noqa: ANN001
+def _timed(fn) -> float:
     import time
 
     t0 = time.perf_counter()
@@ -1603,7 +1603,7 @@ def test_never_sign_guard_table(rebar_repo: Path) -> None:
     _enable(rebar_repo)
 
     class _Outage(FakeRunner):
-        def run(self, request):  # noqa: ARG002 — signature fixed by the Runner seam
+        def run(self, request):
             raise LLMUnavailableError("the LLM provider call failed: ANTHROPIC_API_KEY not set")
 
     cases = []

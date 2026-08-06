@@ -303,7 +303,7 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
                 envelope.payload,
                 [{"keyid": s.keyid, "sig": s.sig} for s in envelope.signatures],
             )
-        except Exception:  # noqa: BLE001 — a signing failure never breaks the write; the merge-gate flags it
+        except Exception:
             logger.warning(
                 "authorship: could not sign event %s for %s — writing unsigned",
                 event.get("uuid"),

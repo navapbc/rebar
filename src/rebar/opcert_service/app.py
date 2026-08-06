@@ -97,7 +97,7 @@ async def _worker(app: FastAPI) -> None:
                         "message": f"job exceeded the {cfg.job_timeout_seconds}s per-run timeout",
                     },
                 )
-        except Exception as exc:  # noqa: BLE001 — a bad job must not kill the worker
+        except Exception as exc:
             logger.exception("opcert-service worker: run_job raised")
             if rec is not None:
                 rec.update(

@@ -435,7 +435,7 @@ def test_unmappable_element_is_a_loud_error_not_a_silent_drop():
         '<bpmn:userTask id="human" name="approve"/>'  # foreign to the rebar IR
         "</bpmn:process></bpmn:definitions>"
     )
-    with pytest.raises(ValueError, match="userTask.*does not map"):
+    with pytest.raises(ValueError, match=r"userTask.*does not map"):
         bpmn.bpmn_to_ir(xml)
 
 

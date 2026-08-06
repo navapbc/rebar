@@ -314,7 +314,7 @@ def push_after_commit(tracker: str | os.PathLike) -> None:
 
         canonical = _lock.canonical_tracker(str(tracker))
         push_tickets_branch(canonical)
-    except Exception:  # noqa: BLE001 — best-effort async push; broad-but-logged, fsck surfaces PUSH_PENDING
+    except Exception:
         logger.warning(
             "best-effort tickets-branch push failed; PUSH_PENDING will surface via fsck",
             exc_info=True,

@@ -9,6 +9,7 @@ tests/interfaces/test_plan_review_gate.py.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import replace
 from pathlib import Path
 
@@ -218,7 +219,7 @@ def test_p8_passes_for_normal_plan() -> None:
 
 def test_det_floor_fails_open_on_check_error(monkeypatch) -> None:
     # A broken check abstains, never aborts the floor or blocks.
-    def boom(ctx):  # noqa: ANN001
+    def boom(ctx):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(det_floor, "DET_CHECKS", (det_floor.p1_readiness_shape, boom))
@@ -569,7 +570,7 @@ def test_is_mechanical_leaf_keys_on_leaf_not_type() -> None:
 def test_chunk_by_facet_packs_and_never_empty_for_input() -> None:
     crits = [c for c in registry.load_criteria() if registry.exec_tier(c) != "AGENT"]
     chunks = registry.chunk_by_facet(crits, model="claude-sonnet-4-6", ticket_size="moderate")
-    assert chunks and all(2 <= len(ch) <= 6 for ch in chunks[:-1] + [chunks[-1] or [None, None]])
+    assert chunks and all(2 <= len(ch) <= 6 for ch in [*chunks[:-1], chunks[-1] or [None, None]])
     # every criterion appears exactly once
     flat = [c["id"] for ch in chunks for c in ch]
     assert sorted(flat) == sorted(c["id"] for c in crits)
@@ -1237,7 +1238,7 @@ class _ModelRecordingRunner:
     def preflight(self) -> None:
         pass
 
-    def run(self, req):  # noqa: ANN001, ANN202 - RunRequest
+    def run(self, req):
         self.models_seen.append(req.config.model)
         raise Exception("prompt is too long")
 
@@ -1339,7 +1340,7 @@ def test_escalation_rung_windows_are_strictly_increasing() -> None:
         rungs = sizing.escalation_rungs(start)
         windows = [_rung_window(r) for r in rungs]
         assert all(w is not None for w in windows), (start, rungs)
-        assert all(a < b for a, b in zip(windows, windows[1:], strict=False)), (start, rungs)
+        assert all(a < b for a, b in itertools.pairwise(windows)), (start, rungs)
 
 
 def test_size_ladder_sonnet_primary_never_pays_for_the_no_op_opus_retry() -> None:

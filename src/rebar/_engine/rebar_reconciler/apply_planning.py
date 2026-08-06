@@ -111,7 +111,7 @@ class _SuppressionIndex:
     is also O(1). Replaces the prior per-apply closures over module-level sets.
     """
 
-    __slots__ = ("suppressed_targets", "suppressed_pairs")
+    __slots__ = ("suppressed_pairs", "suppressed_targets")
 
     def __init__(self) -> None:
         self.suppressed_targets: set[str] = set()
@@ -253,7 +253,7 @@ def _emit_mode_manifest(
         with os.fdopen(fd, "w") as tmp_f:
             json.dump(rendered_with_meta, tmp_f, indent=2)
         os.replace(tmp_path, str(manifest_path))
-    except BaseException:  # noqa: BLE001 — manifest atomic-write cleanup on ANY exit (incl. KeyboardInterrupt/SystemExit): unlink the temp then re-raise — never swallowed
+    except BaseException:
         # Clean up the temp file on any failure.
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)

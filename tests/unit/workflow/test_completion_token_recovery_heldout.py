@@ -50,7 +50,7 @@ class _RecoveryRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, request):  # noqa: ANN001, ANN201
+    def run(self, request):
         self.calls.append(request)
         if request.execution_mode == "agentic":
             self.agentic_calls += 1

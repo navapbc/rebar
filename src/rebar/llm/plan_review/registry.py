@@ -362,7 +362,7 @@ def _load_criteria_cached(rr: str, _overlay_sig: str) -> tuple[dict[str, Any], .
             out.append(_descriptor_from_prompt(cid, repo_root=rr_arg, routing_index=routing_map))
         except RegistryError:
             raise
-        except Exception as exc:  # noqa: BLE001 — translate ANY prompt-load failure into a RegistryError (re-raised, never swallowed)
+        except Exception as exc:
             raise RegistryError(
                 f"cannot load criterion prompt for {cid!r} from the prompt library: {exc}"
             ) from exc
@@ -684,7 +684,7 @@ def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -
     Raises :class:`ExplainError` with a ``kind`` of ``malformed-registry`` / ``unknown-id``."""
     try:
         by_id = {c["id"]: c for c in load_criteria(repo_root=repo_root_path)}
-    except Exception as exc:  # noqa: BLE001 — any registry-load failure is the malformed-registry state
+    except Exception as exc:
         raise ExplainError("malformed-registry", f"criteria registry is malformed: {exc}") from exc
     criterion = by_id.get(criterion_id)
     if criterion is None:

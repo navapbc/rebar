@@ -341,7 +341,7 @@ class _AlwaysContextLimitRunner:
     def __init__(self) -> None:
         self.models_seen: list[str | None] = []
 
-    def run(self, req):  # noqa: ANN001, ANN202 - RunRequest
+    def run(self, req):
         self.models_seen.append(req.config.model)
         raise Exception("prompt is too long")
 

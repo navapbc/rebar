@@ -493,7 +493,7 @@ def emit_baseline_cold_start(binding_store: Any, local_id: str, raw_baseline: An
     concurrent remote edit could be lost until the baseline populates."""
     if raw_baseline is None and binding_store is not None and local_id:
         if not binding_store.is_pending(local_id):
-            print(  # noqa: T201 — operator-facing RECON: cold-start diagnostic on stderr
+            print(
                 f"RECON: baseline_cold_start local_id={local_id}",
                 file=sys.stderr,
                 flush=True,

@@ -233,7 +233,7 @@ def _pai_structured(
             # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
             structured.check_response(run_result.response)
             return run_result.output, _extract_usage(run_result)
-        except Exception as exc:  # noqa: BLE001 — narrowed immediately by the translator below
+        except Exception as exc:
             from rebar.llm.failure import translate_schema_complexity_rejection
 
             ran_model = getattr(model, "model_name", None) or str(model)

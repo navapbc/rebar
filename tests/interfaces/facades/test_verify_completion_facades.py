@@ -236,7 +236,7 @@ def test_mcp_verify_completion_gated_off_by_default(rebar_repo: Path, monkeypatc
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
     assert "verify_completion" in tools
     tid = _seed(rebar_repo)
-    with pytest.raises(Exception) as exc:  # noqa: B017 — FastMCP wraps the ValueError
+    with pytest.raises(Exception) as exc:
         _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": tid})))
     assert "disabled" in str(exc.value).lower(), str(exc.value)
 
@@ -328,7 +328,7 @@ def test_mcp_close_gate_fail_closed_errors(rebar_repo: Path, monkeypatch) -> Non
     monkeypatch.setattr(rebar.llm, "verify_completion", _fail)
     srv = _build_mcp()
     tid = _seed_in_progress(rebar_repo)
-    with pytest.raises(Exception) as exc:  # noqa: B017 — FastMCP wraps the engine error
+    with pytest.raises(Exception) as exc:
         _unwrap(
             asyncio.run(
                 srv.call_tool(

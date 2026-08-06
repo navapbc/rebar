@@ -33,7 +33,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import _git_floor  # noqa: E402
+import _git_floor
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = REPO_ROOT / "tests"

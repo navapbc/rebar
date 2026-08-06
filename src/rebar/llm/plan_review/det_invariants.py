@@ -52,7 +52,7 @@ def _det_project_criteria(repo_root: str | None) -> list[tuple[str, dict[str, An
     try:
         routing = registry.effective_routing(repo_root)
         active = registry.effective_criteria(repo_root)
-    except Exception:  # noqa: BLE001 — a malformed overlay must not abort the floor; log + skip
+    except Exception:
         logger.warning("could not resolve project DET criteria; skipping", exc_info=True)
         return []
     out: list[tuple[str, dict[str, Any]]] = []
@@ -213,7 +213,7 @@ def run_project_det_checks(ctx: PlanContext) -> list[DetResult]:
     for cid, entry in _det_project_criteria(ctx.repo_root):
         try:
             results.append(_run_one(cid, entry, ctx))
-        except Exception as exc:  # noqa: BLE001 — fail-open: a broken project check abstains, logged with traceback
+        except Exception as exc:
             logger.warning("project DET check %s raised; abstaining", cid, exc_info=True)
             results.append(
                 DetResult(

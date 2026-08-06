@@ -145,7 +145,7 @@ def test_key_not_valid_at_era_for_revoked_key(tmp_path: Path, monkeypatch) -> No
 @_ssh
 def test_forged_signature_is_bad_signature(tmp_path: Path, monkeypatch) -> None:
     repo = _init(tmp_path, monkeypatch, "forged")
-    priv, pub = _keypair(tmp_path, "author")
+    _priv, pub = _keypair(tmp_path, "author")
     priv_m, _pub_m = _keypair(tmp_path, "mallory")
     ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))
 
@@ -192,7 +192,7 @@ def test_forged_signature_bad_after_compaction(tmp_path: Path, monkeypatch) -> N
     """A forged signed event compacted into the SNAPSHOT ledger is recorded with a null
     signer_pubkey and still classified bad-signature from the ledger alone."""
     repo = _init(tmp_path, monkeypatch, "forgedcompact")
-    priv, pub = _keypair(tmp_path, "author")
+    _priv, pub = _keypair(tmp_path, "author")
     priv_m, _pub_m = _keypair(tmp_path, "mallory")
     ident = rebar.create_identity("Ada", "ada@example.com", keys=[pub], repo_root=str(repo))
 

@@ -137,7 +137,7 @@ def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> 
         "scan_epics_for_spec": lambda: rebar.llm.scan_epics_for_spec("the spec", repo_root=r),
         "verify_completion": lambda: rebar.llm.verify_completion(epic, repo_root=r),
     }
-    import rebar.llm  # noqa: F401 — populate the rebar.llm attribute namespace
+    import rebar.llm
 
     if op in _FAIL_SAFE:  # review_code: fail-safe — returns a valid result, never raises (WS4)
         result = calls[op]()
@@ -267,7 +267,7 @@ def test_mcp_operations_registered_and_gated_off_by_default(
     }
     for name, args in gated.items():
         assert name in tools, f"{name} not registered"
-        with pytest.raises(Exception) as exc:  # noqa: B017 — FastMCP wraps the ValueError
+        with pytest.raises(Exception) as exc:
             _unwrap(asyncio.run(srv.call_tool(name, args)))
         # Prove it errored *because it is gated*, not for some unrelated reason.
         assert "disabled" in str(exc.value).lower(), str(exc.value)
@@ -304,7 +304,7 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
         "scan_spec": {"spec_text": "the spec"},
     }
     for name, args in forced.items():
-        with pytest.raises(Exception) as exc:  # noqa: B017
+        with pytest.raises(Exception) as exc:
             _unwrap(asyncio.run(srv.call_tool(name, args)))
         # Prove it degraded *because the extra is absent*, not because it is gated
         # (the gate is open here) or for some unrelated reason.

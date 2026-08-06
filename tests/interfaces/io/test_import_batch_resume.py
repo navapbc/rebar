@@ -122,7 +122,7 @@ def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(subprocess, "run", dead_run)
-    with pytest.raises(Exception) as ei:  # noqa: B017 — asserting the message shape, any type
+    with pytest.raises(Exception) as ei:
         _commit_count(dst)
     msg = str(ei.value)
     assert "invalid literal for int" not in msg, f"still the opaque int('') crash: {msg!r}"

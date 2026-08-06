@@ -29,7 +29,7 @@ class _OutageRunner:
     def preflight(self) -> None:
         raise LLMUnavailableError("simulated systemic provider outage")
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         raise LLMUnavailableError("simulated systemic provider outage")
 
 
@@ -41,7 +41,7 @@ class _BrokenRunner:
     def preflight(self) -> None:
         raise RuntimeError("a plain bug, not an infra outage")
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         raise RuntimeError("a plain bug, not an infra outage")
 
 

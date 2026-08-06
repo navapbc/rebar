@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from rebar._snapshot import start_background_janitor
 
         _janitor_thread, janitor_stop = start_background_janitor()
-    except Exception:  # noqa: BLE001 — a janitor failure must not take down the receiver
+    except Exception:
         logger.exception("review-bot: snapshot janitor failed to start (non-fatal)")
     try:
         yield
@@ -215,7 +215,7 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
                 review_timeout,
                 change_id,
             )
-        except Exception:  # noqa: BLE001 — a single bad event must not kill the worker
+        except Exception:
             logger.exception("review-bot worker: review_and_vote raised")
         finally:
             queue.task_done()

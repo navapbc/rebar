@@ -96,7 +96,7 @@ def test_the_old_documented_path_targets_the_shared_precommit_slot(
     MAIN checkout's shared hook file — the very file pre-commit's wrapper occupies. Any
     ``curl -o`` at that path is therefore a host-wide clobber, not a per-worktree install.
     """
-    main, worktree, hooks = checkout_with_worktree
+    _main, worktree, hooks = checkout_with_worktree
 
     resolved = Path(_git("rev-parse", "--git-path", "hooks/commit-msg", cwd=worktree).strip())
     if not resolved.is_absolute():
@@ -169,7 +169,7 @@ def test_installer_is_idempotent(
 ) -> None:
     """``make hooks`` runs on every ``make install``, so a second install must be a no-op
     rather than a re-download that could land in a different slot."""
-    main, worktree, hooks = checkout_with_worktree
+    _main, worktree, hooks = checkout_with_worktree
     source = tmp_path / "gerrit-commit-msg"
     _write_hook(source, FAKE_GERRIT_HOOK)
     env = dict(os.environ, REBAR_GERRIT_HOOK_SOURCE=str(source))
@@ -191,7 +191,7 @@ def test_installer_refuses_to_clobber_an_unrecognized_commit_msg_hook(
 ) -> None:
     """AC4: the unsafe overwrite must be LOUD. A third-party ``commit-msg`` hook that is
     neither a pre-commit wrapper nor a Change-Id stamper is refused, not replaced."""
-    main, worktree, hooks = checkout_with_worktree
+    _main, worktree, hooks = checkout_with_worktree
     _write_hook(hooks / "commit-msg", "#!/bin/sh\necho someone-elses-hook\n")
     source = tmp_path / "gerrit-commit-msg"
     _write_hook(source, FAKE_GERRIT_HOOK)

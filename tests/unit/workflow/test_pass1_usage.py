@@ -218,7 +218,7 @@ def test_container_pairings_append_usage_records() -> None:
     )
     container = [registry.by_id()["G3"], registry.by_id()["G4"]]
     cov: dict = {}
-    findings, calls = pass1._run_container(ctx, _cfg(), UsageStubRunner(), container, cov)
+    _findings, calls = pass1._run_container(ctx, _cfg(), UsageStubRunner(), container, cov)
     # Small children pack into one bin → ONE completed pairing → ONE call record
     # carrying the container criteria; its usage is read from pairing_record["usage"].
     assert len(calls) == cov["container"]["pairings_evaluated"] == 1

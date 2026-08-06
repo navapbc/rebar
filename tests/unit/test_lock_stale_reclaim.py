@@ -91,7 +91,7 @@ def test_acquire_does_not_reclaim_foreign_host_owner(tmp_path):
 def _raise_errno(err: int):
     """A fake ``fcntl.flock`` that always raises ``OSError(err, …)``."""
 
-    def _flock(fd, op):  # noqa: ANN001
+    def _flock(fd, op):
         raise OSError(err, os.strerror(err))
 
     return _flock
@@ -134,7 +134,7 @@ def test_acquire_fcntl_closes_fd_on_timeout(tmp_path, monkeypatch):
     closed: list[int] = []
     real_close = _lock.os.close
 
-    def _spy_close(fd):  # noqa: ANN001
+    def _spy_close(fd):
         closed.append(fd)
         real_close(fd)
 
@@ -151,7 +151,7 @@ def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
     closed: list[int] = []
     real_close = _lock.os.close
 
-    def _spy_close(fd):  # noqa: ANN001
+    def _spy_close(fd):
         closed.append(fd)
         real_close(fd)
 

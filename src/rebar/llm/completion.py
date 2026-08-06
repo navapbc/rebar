@@ -115,7 +115,7 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
 
     try:
         children = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
-    except Exception as exc:  # noqa: BLE001 — WITHHOLD certification on a read error; logged below
+    except Exception as exc:
         logger.warning(
             "child-closure enumeration failed for %s; withholding certification "
             "(the parent may still close on its own criteria, but UNSIGNED) rather than "

@@ -41,7 +41,7 @@ def lock_mod() -> ModuleType:
 
 def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-C", str(repo)] + args, capture_output=True, text=True, check=True
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     )
 
 

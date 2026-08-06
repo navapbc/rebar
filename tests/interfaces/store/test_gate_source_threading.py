@@ -209,7 +209,7 @@ def test_context_code_root_reroots_deep_from_env(tmp_path, monkeypatch):
 # the gate tolerates an absent/being-GC'd snapshot by re-materializing (ENOENT -> miss)
 # --------------------------------------------------------------------------------------
 def test_gate_rematerializes_absent_snapshot(repo_with_origin, gate_tmpdir):
-    repo, main_sha = repo_with_origin
+    repo, _main_sha = repo_with_origin
     h1 = gate_source.resolve_gate_handle("origin/main", "attested", str(repo))
     assert h1.path.is_dir()
     # Simulate the janitor having evicted the entry between gate runs.

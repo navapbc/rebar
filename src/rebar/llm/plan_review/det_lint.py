@@ -137,7 +137,7 @@ def _find_cycle(edges: dict[str, set[str]]) -> list[str] | None:
         stack.append(n)
         for m in sorted(edges.get(n, ())):
             if color.get(m, WHITE) == GRAY:
-                return stack[stack.index(m) :] + [m]
+                return [*stack[stack.index(m) :], m]
             if color.get(m, WHITE) == WHITE:
                 got = visit(m)
                 if got:
@@ -274,7 +274,7 @@ def p9_file_impact_coverage(ctx: PlanContext) -> DetResult:
     from .det_floor import DetResult  # lazy: det_floor imports this module at load
     from .manifest import _normalized_child_impact
 
-    own_scope, own_paths = _normalized_child_impact(ctx.state)
+    own_scope, _own_paths = _normalized_child_impact(ctx.state)
     fi = ctx.state.get("file_impact") or []
     if ctx.children:
         # ``none`` is an explicit neutral declaration. Only an undeclared live child makes

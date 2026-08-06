@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 
 import rebar
-import rebar.llm  # noqa: F401
+import rebar.llm
 from rebar.llm import gate_source
 from rebar.llm.plan_review import attest
 

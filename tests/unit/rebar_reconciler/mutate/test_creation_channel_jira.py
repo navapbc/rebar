@@ -155,7 +155,7 @@ def test_inbound_recorded_jira_create(applier, mut_mod, fixture_repo):
 
 def test_inbound_recorded_placeholder_identity_is_jira(applier, mut_mod, fixture_repo):
     assignee = {"accountId": "acct-xyz-789", "displayName": "Jira User"}
-    tracker, _ = _inbound_create(applier, mut_mod, fixture_repo, assignee=assignee)
+    _tracker, _ = _inbound_create(applier, mut_mod, fixture_repo, assignee=assignee)
     idents = [
         t
         for t in rebar.list_tickets(ticket_type="identity", repo_root=str(fixture_repo))

@@ -211,7 +211,7 @@ def test_validate_assignee_exists_returns_the_dc_username(monkeypatch) -> None:
         """Exact match on `name`, with an accountId also present on the record —
         so a transport that reached for the Cloud-shaped field would be visible."""
 
-        def search_users(self, user=None, maxResults=50, **kw):  # noqa: N803
+        def search_users(self, user=None, maxResults=50, **kw):
             return [
                 {"name": "dcuser-other", "emailAddress": "o@x", "displayName": "Other"},
                 {

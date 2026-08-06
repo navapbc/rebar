@@ -13,7 +13,7 @@ import pytest
 
 from rebar import schemas
 from rebar.llm.workflow import lint as L
-from rebar.llm.workflow import steps  # noqa: F401 - registers the built-in contracts
+from rebar.llm.workflow import steps
 from rebar.llm.workflow.editor import resolve_contracts, step_contract_view
 from rebar.llm.workflow.executor import STEP_CONTRACTS, STEP_REGISTRY, contract_for
 from rebar.llm.workflow.lint_refs import ENGINE_INJECTED_INPUTS

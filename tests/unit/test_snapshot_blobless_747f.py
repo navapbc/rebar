@@ -190,7 +190,7 @@ def test_blobs_arrive_in_one_rpc_not_one_per_file(blobless_clone, monkeypatch):
     fetches: list[list[str]] = []
     real_run = subprocess.run
 
-    def counting_run(argv, *a, **kw):  # noqa: ANN001, ANN002, ANN003
+    def counting_run(argv, *a, **kw):
         if isinstance(argv, list) and "fetch" in argv:
             fetches.append(list(argv))
         return real_run(argv, *a, **kw)
@@ -222,7 +222,7 @@ def test_materialize_tree_disables_interactive_credential_prompt(tmp_path, monke
     seen: list[dict[str, str]] = []
     real_git = rs.git_run
 
-    def spy(repo_root, *args, env=None):  # noqa: ANN001, ANN002, ANN003
+    def spy(repo_root, *args, env=None):
         if env is not None:
             seen.append(env)
         return real_git(repo_root, *args, env=env)

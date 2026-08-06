@@ -140,7 +140,7 @@ def judge_one(
             execution_mode="single_turn",
         )
         return _verdict(get_runner(cfg, override=runner).run(req))
-    except Exception:  # noqa: BLE001 — a judge failure is an abstain, never blocks the caller
+    except Exception:
         logger.warning("overlap judge call failed; treating as abstain", exc_info=True)
         return dict(_ABSTAIN)
 
@@ -196,7 +196,7 @@ def judge_batch(
                 continue
             seen.add(cid)
             verdicts[cid] = _verdict(entry)
-    except Exception:  # noqa: BLE001 — a judge failure is an abstain, never blocks the caller
+    except Exception:
         logger.warning("overlap judge batch call failed; treating as abstain", exc_info=True)
     return verdicts
 

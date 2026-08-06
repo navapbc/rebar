@@ -82,7 +82,7 @@ def plan_review_health(ticket: dict, *, repo_root=None) -> dict[str, Any]:
         if isinstance(health, dict):
             return dict(health)
         return unavailable_plan_review_health()
-    except Exception:  # noqa: BLE001 -- observability must not break detailed reads
+    except Exception:
         logger.warning("plan-review health read failed; rendering unavailable", exc_info=True)
         return unavailable_plan_review_health()
 
@@ -105,7 +105,7 @@ def _completion_attestation(ticket_id: str, *, repo_root=None) -> dict | None:
         if str(rec.get("verdict") or "") == "unsigned":
             return None
         return rec
-    except Exception:  # noqa: BLE001 — best-effort attestation read; never fails the aggregate
+    except Exception:
         logger.warning("completion attestation read failed; treating as unsigned", exc_info=True)
         return None
 
@@ -121,7 +121,7 @@ def _completion_sidecar_record(ticket_id: str, *, repo_root=None) -> dict | None
         if rec is not None:
             return rec
         return completion_sidecar.latest_fail_verdict(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort sidecar read; never fails the aggregate
+    except Exception:
         logger.warning("completion sidecar read failed; treating as none", exc_info=True)
         return None
 
@@ -180,7 +180,7 @@ def _related_code_reviews(ticket_id: str, *, repo_root=None) -> list[dict]:
                     }
                 )
         return out
-    except Exception:  # noqa: BLE001 — best-effort resolution; never fails the aggregate
+    except Exception:
         logger.warning("related code-review resolution failed; returning none", exc_info=True)
         return []
 
@@ -228,6 +228,6 @@ def rebar_show(ticket_id: str, *, repo_root=None) -> dict:
         # show_ticket returns a TicketState (a TypedDict); dict(...) normalizes to the
         # plain-dict the AuditTrail contract declares for ``ticket``.
         return dict(rebar.show_ticket(ticket_id, repo_root=repo_root))
-    except Exception:  # noqa: BLE001 — best-effort; a show failure must not sink the whole trail
+    except Exception:
         logger.warning("show_ticket failed in audit_trail; returning stub", exc_info=True)
         return {"ticket_id": ticket_id}

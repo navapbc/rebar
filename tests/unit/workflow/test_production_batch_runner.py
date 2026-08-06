@@ -50,10 +50,10 @@ def _stub_reads(monkeypatch):
 
     state = _state()
 
-    def _show(ticket_id, *, repo_root=None):  # noqa: ANN001
+    def _show(ticket_id, *, repo_root=None):
         return dict(state)
 
-    def _list(*, parent=None, repo_root=None):  # noqa: ANN001
+    def _list(*, parent=None, repo_root=None):
         return []
 
     monkeypatch.setattr("rebar._reads.show_ticket", _show)
@@ -227,7 +227,7 @@ def test_resolve_criteria_excludes_isf_and_dedupes():
 _IDS_RE = re.compile(r"\(ids: ([^)]*)\)")
 
 
-def _chunk_ids(req) -> list[str]:  # noqa: ANN001
+def _chunk_ids(req) -> list[str]:
     """The criterion ids in a Pass-1 finder request, parsed from the rubric header
     ``pass1_chunk`` writes (``(ids: E2, F1, …)``). Lets a fake runner branch on REQUEST
     CONTENT (the chunk size) rather than call ORDER — so its behaviour is deterministic
@@ -248,7 +248,7 @@ class _BatchContextLimitRunner:
     def preflight(self) -> None:  # pragma: no cover - trivial
         pass
 
-    def run(self, req) -> dict:  # noqa: ANN001
+    def run(self, req) -> dict:
         ids = _chunk_ids(req)
         if len(ids) > 1:
             raise RuntimeError("prompt is too long: exceeds the maximum context window")
@@ -266,7 +266,7 @@ class _AllContextLimitRunner:
     def preflight(self) -> None:  # pragma: no cover - trivial
         pass
 
-    def run(self, req) -> dict:  # noqa: ANN001
+    def run(self, req) -> dict:
         raise RuntimeError("maximum context length exceeded")
 
 
@@ -389,7 +389,7 @@ def test_focused_runner_consumes_preloaded_relation_snapshot_without_store_rerea
     prerequisite_id = "dcba-0000-0000-0002"
     reads: list[str] = []
 
-    def _show(ticket_id, *, repo_root=None):  # noqa: ANN001
+    def _show(ticket_id, *, repo_root=None):
         reads.append(ticket_id)
         if ticket_id != _TARGET:
             raise AssertionError("focused runner reread a prerequisite from the store")

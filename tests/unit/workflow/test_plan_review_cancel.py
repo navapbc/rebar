@@ -171,7 +171,7 @@ def test_own_material_change_cancels_at_post_finders_seam(monkeypatch):
     )
     agent = _CannedAgent()
     with generation.cancel_scope(_TARGET, "BASELINE", repo_root=None) as scope:
-        rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
+        _rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
     assert scope.event.is_set(), "the probe must set the cancel event"
     assert scope.seam == "post-finders"
     assert res.status == "failed"
@@ -191,7 +191,7 @@ def test_own_material_change_cancels_at_post_decide_seam(monkeypatch):
     )
     agent = _CannedAgent()
     with generation.cancel_scope(_TARGET, "BASELINE", repo_root=None) as scope:
-        rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
+        _rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
     assert scope.event.is_set()
     assert scope.seam == "post-decide"
     assert res.status == "failed"
@@ -211,7 +211,7 @@ def test_unrelated_store_write_does_not_cancel_d70a_guard(monkeypatch):
     )
     agent = _CannedAgent()
     with generation.cancel_scope(_TARGET, "BASELINE", repo_root=None) as scope:
-        rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
+        _rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
     assert not scope.event.is_set()
     assert res.status == "succeeded", res.error
     assert any(p and p.startswith("plan-review-verifier") for p in agent.prompts_seen)
@@ -224,7 +224,7 @@ def test_probe_read_error_fails_open_never_cancels(monkeypatch):
     monkeypatch.setattr(attest, "current_material_fingerprint", lambda tid, repo_root=None: None)
     agent = _CannedAgent()
     with generation.cancel_scope(_TARGET, "BASELINE", repo_root=None) as scope:
-        rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
+        _rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
     assert not scope.event.is_set()
     assert res.status == "succeeded", res.error
 
@@ -234,7 +234,7 @@ def test_no_active_scope_leaves_run_untouched(monkeypatch):
     and the run is byte-identical to today's."""
     state = _state()
     agent = _CannedAgent()
-    rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
+    _rec, res = _run(monkeypatch, state, finder=_finder(), agent=agent)
     assert res.status == "succeeded", res.error
 
 

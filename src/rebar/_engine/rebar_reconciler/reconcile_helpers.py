@@ -156,7 +156,7 @@ def preflight_status_mapping(mutations) -> None:
             # references; the empty-mapping kill-switch and the inbound-skip above
             # are preserved. (Message framing per c672-5111-8201-4fa7: the value may
             # originate on the Jira side, so it is not necessarily a local status.)
-            print(  # noqa: T201
+            print(
                 f"reconcile: preflight — status {status!r} is not mapped in "
                 f"local_to_jira_status (neither a local-status key nor a Jira "
                 f"workflow status value; target={target}); NOT aborting the pass "
@@ -241,7 +241,7 @@ def _commit_binding_store_snapshot(
         )
         return True
     except Exception as exc:  # noqa: BLE001 — fail-open: return False, log + alert, FS copy persists
-        print(  # noqa: T201
+        print(
             f"reconcile: binding-store commit to tickets branch failed "
             f"({exc!r}); bindings saved to filesystem only — "
             f"GHA commit-back will persist them on next run.",
@@ -270,7 +270,7 @@ def _commit_binding_store_snapshot(
                     repo_root,
                 )
         except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert write; must not mask commit failure
-            print(  # noqa: T201
+            print(
                 f"ERROR: alert_store write also failed ({_alert_exc}); "
                 f"binding-commit failure not persisted to bridge_alerts.",
                 file=sys.stderr,
@@ -301,7 +301,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
 
     cli = Path(in_process_cli())
     if not cli.exists():
-        print(  # noqa: T201
+        print(
             "reconcile: ticket CLI not found — local_tickets=[]",
             file=sys.stderr,
         )
@@ -324,14 +324,14 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
             env=_env,
         )
         if result.returncode != 0:
-            print(  # noqa: T201
+            print(
                 f"reconcile: ticket CLI exited {result.returncode} — local_tickets=[]",
                 file=sys.stderr,
             )
             return []
         return json.loads(result.stdout)
     except Exception as exc:  # noqa: BLE001 — fail-open: log and return empty local_tickets list
-        print(  # noqa: T201
+        print(
             f"reconcile: ticket CLI failed ({exc}) — local_tickets=[]",
             file=sys.stderr,
         )
@@ -410,7 +410,7 @@ class _NoOpSyncLogger:
     pass produces no ``sync-log-<pass>.jsonl`` file.
     """
 
-    def log(self, *args, **kwargs) -> None:  # noqa: D401
+    def log(self, *args, **kwargs) -> None:
         return None
 
     def close(self) -> None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -190,7 +191,7 @@ def test_det_criterion_absent_from_llm_batch(tmp_path, monkeypatch):
     monkeypatch.setattr("rebar._reads.list_tickets", lambda **k: [])
 
     class _SC:
-        inputs = {"target_ticket": ctx.ticket_id, "ticket_id": ctx.ticket_id}
+        inputs: ClassVar[dict] = {"target_ticket": ctx.ticket_id, "ticket_id": ctx.ticket_id}
         repo_root = root
 
     out = workflow_ops.plan_review_assemble_criteria(_SC())

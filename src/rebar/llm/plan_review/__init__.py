@@ -35,11 +35,11 @@ from .resign import resign_plan_review
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "review_plan",
-    "resign_plan_review",
     "claim_gate_check",
     "plan_review_status",
     "registry_coverage",
+    "resign_plan_review",
+    "review_plan",
 ]
 
 
@@ -187,7 +187,7 @@ def _score_floor_novelty(
             window_tokens=100_000,
             est_tokens=lambda s: len(s) // 4 + 1,
         )
-    except Exception:  # noqa: BLE001 — fail-safe: a broken novelty signal yields NO drops (never suppresses)
+    except Exception:
         logger.warning("rising-floor novelty scoring failed; running un-floored", exc_info=True)
         return {}
 
@@ -315,7 +315,7 @@ def _classify_completion(
             findings=advisory,
             delivered_manifest=manifest,
         )
-    except Exception:  # noqa: BLE001 — fail-safe: a broken completion signal yields NO drops
+    except Exception:
         logger.warning("completion floor classification failed; running un-floored", exc_info=True)
         return {}
 
@@ -381,7 +381,7 @@ def _maybe_apply_completion_floor(
         return
     try:
         manifest = orchestrator.delivered_children_manifest(ticket_id, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — fail-safe: manifest build failed → no drops
+    except Exception:
         logger.warning("delivered-children manifest failed; running un-floored", exc_info=True)
         return
     delivered_ids = frozenset(m["ticket_id"] for m in manifest if m.get("ticket_id"))
@@ -723,7 +723,7 @@ def _run_plan_review(
                 "key_id": sig.get("key_id"),
                 "head_sha": sig.get("head_sha"),
             }
-        except Exception as exc:  # noqa: BLE001 — surface, don't crash: a missing key is a real signal; broad-but-logged + recorded in-band
+        except Exception as exc:
             # Don't crash the review on a signing failure, but record it in-band AND on
             # the logger (a missing/broken signing key is operator-actionable).
             logger.warning("attestation signing failed; verdict unsigned", exc_info=True)

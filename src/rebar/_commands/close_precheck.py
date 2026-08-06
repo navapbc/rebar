@@ -324,7 +324,7 @@ def _completion_precheck(
         result.setdefault("ticket_id", resolved_id)
         try:
             completion_sidecar.emit(result, material=None, repo_root=repo_root)
-        except Exception:  # noqa: BLE001 — defense-in-depth: persistence is best-effort observability and must NEVER mask the FAIL, even if emit itself raises
+        except Exception:
             logger.warning("completion FAIL sidecar emit raised; still blocking", exc_info=True)
         raise CommandError(message, returncode=1)
     # PASS: persist the lossless PASS record to the durable, queryable sidecar (story e7e0)
@@ -338,7 +338,7 @@ def _completion_precheck(
     result.setdefault("ticket_id", resolved_id)
     try:
         completion_sidecar.emit(result, material=None, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort observability sidecar; must never affect the close
+    except Exception:
         logger.warning("completion PASS sidecar emit raised; close proceeds", exc_info=True)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local

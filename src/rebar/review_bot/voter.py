@@ -138,7 +138,7 @@ def _publish_voter_error_metric() -> None:
     IMDS hop limit can preclude it), so any ImportError / boto / credential / network
     failure is silently swallowed and we rely on the journald marker above."""
     try:
-        import boto3  # noqa: PLC0415 — optional, lazy: only on a fail-closed error path
+        import boto3
 
         boto3.client("cloudwatch").put_metric_data(
             Namespace="rebar/host",
@@ -163,7 +163,7 @@ def _publish_merge_change_error_metric(reason: str) -> None:
     (observability.sh) is the reliable path; in-container boto3 may not reach IMDS, so any
     failure is swallowed."""
     try:
-        import boto3  # noqa: PLC0415 — optional, lazy: only on a fail-closed error path
+        import boto3
 
         boto3.client("cloudwatch").put_metric_data(
             Namespace="rebar/host",
@@ -227,7 +227,7 @@ def _publish_token_usage_metrics(metrics: dict[str, Any]) -> None:
     if all(entry["Value"] == 0 for entry in data):
         return  # no token data recorded for this review — nothing to publish
     try:
-        import boto3  # noqa: PLC0415 — optional, lazy: only when a review actually recorded usage
+        import boto3
 
         boto3.client("cloudwatch").put_metric_data(Namespace="rebar/host", MetricData=data)
     except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
@@ -251,7 +251,7 @@ def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) ->
         logger.info(line)
         print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
         _publish_token_usage_metrics(metrics)
-    except Exception:  # noqa: BLE001 — observability must never fail an already-cast vote
+    except Exception:
         logger.warning("token-usage emission failed; continuing", exc_info=True)
 
 
@@ -286,7 +286,7 @@ def _assemble_merge_diff(
     conflict files the auto-merge had, how many diffs were fetched before the cap, whether the
     auto-merge delta was empty (a clean merge), whether the REST fan-out was truncated by the
     char cap, and the assembled context size."""
-    from rebar.llm.code_review.assemble import (  # noqa: PLC0415 — lazy (mirror adapter)
+    from rebar.llm.code_review.assemble import (
         DIFF_CHAR_CAP,
         assemble_merge_change_context,
     )

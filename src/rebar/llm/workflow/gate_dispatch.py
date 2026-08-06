@@ -555,6 +555,6 @@ def produce_completion_verdict(
 
 __all__ = [
     "CodeReviewRequest",
-    "produce_plan_review_verdict",
     "produce_completion_verdict",
+    "produce_plan_review_verdict",
 ]

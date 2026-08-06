@@ -371,7 +371,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
 
     try:
         write_marker(ticket_dir)
-    except Exception:  # noqa: BLE001 — best-effort tombstone marker write; broad-but-logged, delete still proceeds
+    except Exception:
         logger.warning(
             "could not write tombstone marker for %s; continuing", ticket_id, exc_info=True
         )

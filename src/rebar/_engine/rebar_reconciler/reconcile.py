@@ -229,7 +229,7 @@ def _load_snapshots(ctx: _PassContext) -> None:
         filter_count=len(filter_local_ids) if filter_local_ids else 0,
     )
     if filter_local_ids:
-        print(  # noqa: T201
+        print(
             f"FILTERED PASS: scope restricted to {len(filter_local_ids)} "
             f"local IDs — not a production reconciliation."
         )
@@ -322,7 +322,7 @@ def _handle_corrupt_snapshot(
     # tickets branch may be in a partially-merged state that makes curr
     # state unknown too.  Abort the pass with a loud ERROR and alert.
     _alert_key = f"corrupt_prev_snapshot:{pass_id}"
-    print(  # noqa: T201
+    print(
         f"ERROR: prev_snapshot.json is corrupt or contains git conflict "
         f"markers and cannot be parsed. Aborting reconcile pass "
         f"'{pass_id}' to prevent emitting mutations against unknown "
@@ -349,7 +349,7 @@ def _handle_corrupt_snapshot(
             repo_root,
         )
     except Exception as _alert_exc:  # noqa: BLE001 — best-effort alert; original corruption still raises
-        print(  # noqa: T201
+        print(
             f"ERROR: alert_store write also failed ({_alert_exc}); "
             f"corruption event not persisted to bridge_alerts.",
             file=sys.stderr,
@@ -398,7 +398,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
     if filter_local_ids:
         target_set = _build_filter_target_set(filter_local_ids, binding_store)
         mutations = [m for m in mutations if _mutation_matches_filter(m, target_set)]
-        print(  # noqa: T201
+        print(
             f"filter: {unfiltered_count} mutations computed, "
             f"{len(mutations)} match filter ({len(filter_local_ids)} local IDs, "
             f"{len(target_set)} target keys)",
@@ -458,7 +458,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 persist=persist,
                 **_abort_kw,
             )
-    except BaseException as exc:  # noqa: BLE001 — must re-raise after recording
+    except BaseException as exc:
         apply_exc = exc
         raise
     finally:
@@ -594,7 +594,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         try:
             _advance_baselines(binding_store, ctx.curr_snapshot)
         except Exception as exc:  # noqa: BLE001 — baseline advance is best-effort; never break sync
-            print(  # noqa: T201
+            print(
                 f"reconcile: baseline advance failed ({exc})",
                 file=sys.stderr,
             )
@@ -616,7 +616,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 # test_commit_binding_store_failure.py pins). The helper already
                 # logged the error and filed the alert. Do NOT abort the pass —
                 # commit failure must never break sync.
-                print(  # noqa: T201
+                print(
                     "ERROR: reconcile: binding-store commit to tickets branch failed; "
                     "bindings are at risk of clobber on the next 'git merge origin/tickets'. "
                     "The current pass will complete normally. Check git state in "
@@ -625,7 +625,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                     file=sys.stderr,
                 )
         except Exception as exc:  # noqa: BLE001 — fail-open: save failure must never break sync, log only
-            print(  # noqa: T201
+            print(
                 f"reconcile: binding store save failed ({exc})",
                 file=sys.stderr,
             )
@@ -691,7 +691,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 mutations_applied = sum(1 for o in outcomes if not o.get("error"))
                 mutation_failures = sum(1 for o in outcomes if o.get("error"))
         except Exception as exc:  # noqa: BLE001 — fail-open: fall back to computed count, log only
-            print(  # noqa: T201
+            print(
                 f"reconcile: manifest tally read failed ({exc}) — falling back to computed count",
                 file=sys.stderr,
             )

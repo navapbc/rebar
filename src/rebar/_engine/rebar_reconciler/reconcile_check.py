@@ -53,7 +53,7 @@ except ImportError:  # standalone load without package context
 # helper 625b's outbound differ already established — reuse it rather than
 # reimplement it. ``outbound_field_diff`` is core (imports nothing from
 # ``adapters.jira``), so this is a normal package import, not a by-path load.
-from rebar_reconciler.outbound_field_diff import _assignee_matches  # noqa: E402
+from rebar_reconciler.outbound_field_diff import _assignee_matches
 
 
 def _load_sibling(module_name: str, file_name: str) -> ModuleType:

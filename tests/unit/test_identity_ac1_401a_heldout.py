@@ -59,7 +59,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_create_rejects_all_private_key_headers(store: Path, private_key: str) -> None:
     """Every private-key header (RSA/EC/DSA/OPENSSH/PKCS8/ENCRYPTED, case-insensitive) is
     refused on the CREATE path."""
-    with pytest.raises(Exception):  # noqa: B017,PT011 — must reject private-key material
+    with pytest.raises(Exception):  # noqa: B017 — must reject private-key material
         rebar.create_identity("M", "m@example.com", keys=[private_key], repo_root=str(store))
 
 
@@ -68,7 +68,7 @@ def test_add_identity_key_rejects_private_key(store: Path) -> None:
     ident = rebar.create_identity("Ada", "ada@example.com", repo_root=str(store))
     tdir = Path(tracker_dir(str(store))) / ident
     before = len(list(tdir.glob("*.json")))
-    with pytest.raises(Exception):  # noqa: B017,PT011 — private-key material must be refused
+    with pytest.raises(Exception):  # noqa: B017 — private-key material must be refused
         rebar.add_identity_key(ident, _fake_priv("RSA"), repo_root=str(store))
     after = len(list(tdir.glob("*.json")))
     assert after == before, "a rejected KEY_ADD must append no event"

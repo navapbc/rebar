@@ -74,7 +74,7 @@ def _registered_ops_from_a_clean_interpreter() -> set[str]:
     """
     code = (
         "import json;"
-        "from rebar.llm.workflow import steps;"  # noqa: F401 - the registration entry point
+        "from rebar.llm.workflow import steps;"
         "from rebar.llm.workflow.executor import STEP_REGISTRY;"
         "print(json.dumps(sorted(k for k in STEP_REGISTRY if k.startswith('plan_review'))))"
     )

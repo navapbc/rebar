@@ -81,7 +81,7 @@ from rebar_reconciler.outbound_labels import (  # noqa: F401
 
 # The link-diff cluster lives in outbound_links.py (split for module size); ticket
 # eefd made it compare in canonical shape via an injected SupportsLinks capability.
-from rebar_reconciler.outbound_links import _diff_links  # noqa: F401
+from rebar_reconciler.outbound_links import _diff_links
 
 
 def _rebar_env(name: str, default: str | None = None) -> str | None:
@@ -638,7 +638,7 @@ def _compute_outbound_update_mutation(
         if fields is _TRANSPORT_ERROR:
             # Non-404 HTTPError / URLError / timeout — transient.
             # Emit nothing, warn, defer; counter untouched.
-            print(  # noqa: T201
+            print(
                 f"WARNING: outbound_differ: direct GET for bound-but-absent "
                 f"{jira_key!r} failed (transport error). Deferring this "
                 f"key's sync to a later pass (no mutation emitted).",
@@ -706,7 +706,7 @@ def _compute_outbound_update_mutation(
         # sensitive) whenever a bound key gets an outbound UPDATE carrying field diffs,
         # so a re-emitting (non-converging) field is visible in CI logs. Comment-/label-
         # only updates carry no field diff, so the breadcrumb is skipped.
-        print(  # noqa: T201
+        print(
             f"RECON: outbound_update key={jira_key} "
             f"changed=[{','.join(sorted(fields))}] "
             f"comments={len(comment_mutations)} "

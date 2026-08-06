@@ -440,7 +440,7 @@ def test_a_deleted_issue_fails_by_key_AND_by_id_so_deletions_are_not_masked(
     dc_transport._client.issue(key).delete()
 
     for handle, what in ((key, "key"), (numeric_id, "numeric id")):
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011 — library error type varies
+        with pytest.raises(Exception) as excinfo:
             dc_transport.get_issue_by_rest(handle)
         assert "404" in str(excinfo.value) or "does not exist" in str(excinfo.value).lower(), (
             f"a deleted issue must not resolve by {what}; got {excinfo.value!r}"

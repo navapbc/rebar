@@ -288,7 +288,7 @@ def test_mcp_toolsets_empty_and_malformed():
     assert pai_tools.mcp_toolsets({}) == []
     from rebar.llm.errors import LLMRunnerError
 
-    with pytest.raises(LLMRunnerError, match="command|url"):
+    with pytest.raises(LLMRunnerError, match=r"command|url"):
         pai_tools.mcp_toolsets({"srv": {}})
 
 

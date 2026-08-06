@@ -31,23 +31,23 @@ _reduce_ticket = reduce_ticket
 _reducer = _loader.reducer
 
 __all__ = [
-    "build_dep_graph",
-    "check_cycle_at_level",
-    "check_would_create_cycle",
-    "resolve_hierarchy_link",
-    "compute_archive_eligible",
     "CyclicDependencyError",
-    "add_dependency",
-    "remove_dependency",
-    "reduce_ticket",
-    "_is_active_link",
-    "_find_direct_blockers",
-    "_compute_dep_graph",
     # Submodules imported eagerly so ``rebar.graph._graph`` / ``._links`` / etc.
     # resolve as attributes for callers and test patches.
     "_blockers",
     "_cache",
+    "_compute_dep_graph",
+    "_find_direct_blockers",
     "_graph",
     "_hierarchy",
+    "_is_active_link",
     "_links",
+    "add_dependency",
+    "build_dep_graph",
+    "check_cycle_at_level",
+    "check_would_create_cycle",
+    "compute_archive_eligible",
+    "reduce_ticket",
+    "remove_dependency",
+    "resolve_hierarchy_link",
 ]

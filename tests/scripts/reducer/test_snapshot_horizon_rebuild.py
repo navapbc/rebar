@@ -87,10 +87,10 @@ def test_reduce_determinism_under_shuffled_listdir(
 
     real_listdir = os.listdir
 
-    def _forward(path):  # noqa: ANN001
+    def _forward(path):
         return list(real_listdir(path))
 
-    def _reversed(path):  # noqa: ANN001
+    def _reversed(path):
         return list(reversed(real_listdir(path)))
 
     monkeypatch.setattr(_cache_mod.os, "listdir", _forward)

@@ -21,7 +21,7 @@ from contextlib import contextmanager
 import rebar
 from rebar.llm.runner import Runner
 
-__all__ = ["run_case", "case_store"]
+__all__ = ["case_store", "run_case"]
 
 
 # raw-git-ok: disposable sandbox repo, not the tracker

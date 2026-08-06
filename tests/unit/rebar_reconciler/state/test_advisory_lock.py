@@ -59,7 +59,7 @@ def mode_mod() -> ModuleType:
 
 def _git(args: list[str], repo: Path, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-C", str(repo)] + args, capture_output=True, text=True, check=True, **kwargs
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True, **kwargs
     )
 
 

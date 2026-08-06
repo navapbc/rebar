@@ -149,7 +149,7 @@ def drift_floor_candidate(
 
         if reasons["code_drifted"]:
             drifted_files = _drifted_paths(signed_sha, current_sha, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — fail-safe: any read error → not eligible → full review
+    except Exception:
         logger.warning(
             "drift-floor candidate check failed; treating as not eligible", exc_info=True
         )

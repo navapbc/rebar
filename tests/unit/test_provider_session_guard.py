@@ -18,6 +18,8 @@ through the real ``PydanticAIRunner.run()``, not by inspecting how the guard is 
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -41,7 +43,7 @@ class _RecordingSession:
     Deliberately implements the SAME surface as the real object (providers.py), including
     ``__enter__``/``__exit__``, so this stub cannot be the reason a `with` works."""
 
-    instances: list[_RecordingSession] = []
+    instances: ClassVar[list[_RecordingSession]] = []
 
     def __init__(self, _cfg):
         self.closes = 0

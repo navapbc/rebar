@@ -212,7 +212,7 @@ def _assess_contradictions(
             execution_mode="single_turn",
         )
         return runner_sel.run(req).get("pairs", []) or []
-    except Exception:  # noqa: BLE001 — fail-safe: any sub-call failure → [] (drop nothing)
+    except Exception:
         logger.warning("contradiction sub-call failed; cross-checking nothing", exc_info=True)
         return []
 
@@ -351,7 +351,7 @@ def _assess_comment_trail(
             execution_mode="single_turn",
         )
         raw = runner_sel.run(req).get("assessments", []) or []
-    except Exception:  # noqa: BLE001 — fail-safe: any sub-call failure → {} (drop nothing)
+    except Exception:
         logger.warning("comment-trail sub-call failed; consulting nothing", exc_info=True)
         return {}
     by_index: dict[int, dict[str, Any]] = {}

@@ -272,10 +272,10 @@ def lint_passes(findings: list[LintFinding]) -> bool:
 
 __all__ = [
     "LintFinding",
-    "lint_workflow",
     "lint_document",
-    "secret_scan",
-    "lint_prompt_refs",
     "lint_passes",
+    "lint_prompt_refs",
+    "lint_workflow",
+    "secret_scan",
     "step_kind",
 ]

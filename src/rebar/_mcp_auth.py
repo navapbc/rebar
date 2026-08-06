@@ -40,12 +40,12 @@ from mcp.server.auth.provider import AccessToken
 logger = logging.getLogger("rebar.mcp.auth")
 
 __all__ = [
+    "PROXY_IDENTITY",
     "AuthConfigError",
     "CompositeTokenVerifier",
     "IntrospectionError",
     "IntrospectionTokenVerifier",
     "JWKSTokenVerifier",
-    "PROXY_IDENTITY",
     "ProxyAuthMiddleware",
     "ProxyTokenVerifier",
     "StaticBearerVerifier",
@@ -590,7 +590,7 @@ def load_custom_verifier(import_path: str):
         module = importlib.import_module(module_path)
         factory = getattr(module, factory_attr)
         verifier = factory()
-    except Exception as exc:  # noqa: BLE001 — any load failure is a fail-closed startup error
+    except Exception as exc:
         raise AuthConfigError(
             f"mcp.auth_custom_import {redact(import_path)!r} could not be loaded: "
             f"{redact(str(exc))}"

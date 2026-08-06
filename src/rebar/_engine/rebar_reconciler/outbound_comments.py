@@ -324,7 +324,7 @@ def _diff_comments(
                 if isinstance(fetched, list):
                     jira_comments = fetched
             except Exception as exc:  # noqa: BLE001 — fail-open to the truncated subset (bug 4292)
-                print(  # noqa: T201
+                print(
                     f"WARNING: outbound_differ: live comment re-fetch for {jira_key!r} "
                     f"failed ({exc!r}); using the truncated snapshot set (may re-post).",
                     file=sys.stderr,
@@ -339,7 +339,7 @@ def _diff_comments(
         if client is None:
             # No client provided. We cannot know the Jira comment state.
             # Emit a warning and skip comment mutations to avoid blind duplicates.
-            print(  # noqa: T201
+            print(
                 f"WARNING: outbound_differ: snapshot for {jira_key!r} lacks "
                 f"'comment' field (live search shape) and no client was provided. "
                 f"Skipping comment mutations to avoid blind duplicate adds. "
@@ -359,7 +359,7 @@ def _diff_comments(
             # Live fetch failed. Skip comment mutations entirely for this ticket.
             # Never emit blind adds when comment state is unknown (bug 4292 safety
             # invariant). Emit a loud warning + log to stderr.
-            print(  # noqa: T201
+            print(
                 f"WARNING: outbound_differ: live comment fetch for {jira_key!r} "
                 f"failed ({exc!r}). Skipping comment mutations for this ticket "
                 f"to avoid emitting duplicate adds against unknown Jira state. "

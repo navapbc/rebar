@@ -78,8 +78,8 @@ def test_watermark_evicts_lru_skips_grace(store, repo):
     cfg = janitor.JanitorConfig(
         free_watermark_bytes=2 * 1024**3, grace_seconds=100, max_age_seconds=10**9
     )
-    sha_old, old = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
-    sha_recent, recent = _populate(repo, store, "b.txt", "y" * 50, mtime=now - 1)
+    _sha_old, old = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+    _sha_recent, recent = _populate(repo, store, "b.txt", "y" * 50, mtime=now - 1)
 
     # Inject disk pressure (free=0 < watermark): the LRU/old entry is evicted, the
     # recently-touched one is protected by the grace window.
@@ -145,7 +145,7 @@ def test_max_age_cold_trim(store, repo):
 # AC3 — startup sweep clears tmp/* + trash/* and reconciles byte total via a full walk
 # --------------------------------------------------------------------------------------
 def test_startup_sweep_clears_and_reconciles(store, repo):
-    sha, entry = _populate(repo, store, "a.txt", "x" * 123)
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 123)
     # Plant crash debris + corrupt the byte total.
     (store / "tmp" / "leftover").mkdir(parents=True)
     (store / "trash" / "straggler").mkdir(parents=True)
@@ -204,7 +204,7 @@ def test_trash_straggler_redrained(store, repo):
 # --------------------------------------------------------------------------------------
 def test_eviction_rename_to_trash_open_reader_survives(store, repo):
     now = time.time()
-    sha, entry = _populate(repo, store, "f.txt", "content\n", mtime=now - 5000)
+    _sha, entry = _populate(repo, store, "f.txt", "content\n", mtime=now - 5000)
     with open(entry / "f.txt", "rb") as fh:
         cfg = janitor.JanitorConfig(
             free_watermark_bytes=2 * 1024**3, grace_seconds=10, max_age_seconds=10**9
@@ -290,7 +290,7 @@ def test_janitor_config_reads_snapshot_toml_table(tmp_path, monkeypatch):
 
 def test_reverify_period_skips_recently_verified(store, repo, monkeypatch):
     # With a long reverify period, an entry verified this pass is not re-walked next pass.
-    sha, entry = _populate(repo, store, "f.txt", "v\n")
+    _sha, _entry = _populate(repo, store, "f.txt", "v\n")
     cfg = janitor.JanitorConfig(
         free_watermark_bytes=1, grace_seconds=1, max_age_seconds=10**9, reverify_seconds=10**6
     )

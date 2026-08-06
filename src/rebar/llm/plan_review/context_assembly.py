@@ -135,7 +135,7 @@ def _assemble_context_uncached(
             listed = _reads.list_tickets(parent=canonical, repo_root=repo_root) or []
             enumerated = True
             break
-        except Exception:  # noqa: BLE001 — children enumeration degrades P5/P8 if it fails; broad-but-logged below, review continues
+        except Exception:
             if attempt + 1 < _RETRY_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_S)
                 continue

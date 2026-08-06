@@ -71,5 +71,5 @@ def test_resolve_assignee_returns_three_tuple() -> None:
     resolve, so it is a non-authoritative result (no live account search needed)."""
     result = _backend().outbound.resolve_assignee("", None)
     assert isinstance(result, tuple) and len(result) == 3
-    value, authoritative, is_account_id = result
+    _value, authoritative, _is_account_id = result
     assert authoritative is False  # empty local -> not authoritative

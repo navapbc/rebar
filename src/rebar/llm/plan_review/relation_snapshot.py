@@ -350,7 +350,7 @@ def current_material_fingerprint_impl(
         if ctx is None:
             return None
         return material_fingerprint(ctx, normalize_checkboxes=normalize_checkboxes)
-    except Exception:  # noqa: BLE001 — fingerprint computation best-effort; broad-but-logged below, caller treats material as unknown
+    except Exception:
         # Cannot compute the current fingerprint → caller treats material as unknown
         # (the gate fails closed / re-review). Log so the cause is observable.
         logger.warning("could not compute material fingerprint for %s", ticket_id, exc_info=True)

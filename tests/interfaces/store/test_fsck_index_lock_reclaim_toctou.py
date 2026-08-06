@@ -70,7 +70,7 @@ def test_fsck_check3_does_not_clobber_fresh_lock_replaced_midflight(rebar_repo: 
     # fixed Check 3 never calls getmtime, so this hook is inert there.
     _real_getmtime = os.path.getmtime
 
-    def _getmtime_then_swap(path):  # noqa: ANN001
+    def _getmtime_then_swap(path):
         result = _real_getmtime(path)
         try:
             same = os.path.samefile(path, lock_file) if os.path.exists(path) else False

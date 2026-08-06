@@ -37,7 +37,7 @@ _MANUAL_AWAITING_USER_TAG = "manual:awaiting_user"
 
 # ───────────────────────────── candidate model ───────────────────────────────
 class _Candidate:
-    __slots__ = ("id", "title", "priority", "itype", "status", "files", "files_read")
+    __slots__ = ("files", "files_read", "id", "itype", "priority", "status", "title")
 
     def __init__(self, raw: dict) -> None:
         self.id = raw.get("id", "")
@@ -69,16 +69,16 @@ class NextBatchResult:
     """Everything both renderings (text/json) and the conflict matrix need."""
 
     __slots__ = (
-        "epic_id",
-        "epic_title",
         "batch",
         "candidates",
-        "skipped_overlap",
+        "epic_id",
+        "epic_title",
         "skipped_blocked_story",
         "skipped_design_awaiting",
-        "skipped_manual_awaiting",
         "skipped_in_progress",
+        "skipped_manual_awaiting",
         "skipped_needs_planning",
+        "skipped_overlap",
     )
 
     epic_id: str

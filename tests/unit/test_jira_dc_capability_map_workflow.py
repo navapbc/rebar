@@ -135,7 +135,7 @@ def _run_map_script(*args: str, cwd: Path | None = None) -> subprocess.Completed
     covers only ``src`` and ``tests``, so nothing else in the local gate would catch a
     breakage in this file before a billable live run hit it.
     """
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(
         [sys.executable, str(_MAP_SCRIPT), *args],
         capture_output=True,
         text=True,

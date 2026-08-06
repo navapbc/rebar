@@ -106,7 +106,7 @@ def test_run_against_nonexistent_ticket_fails_fast_and_writes_nothing(rebar_repo
     tracker = rebar_repo / ".tickets-tracker"
     doc = _wf([{"id": "a", "uses": "echo", "with": {"v": "x"}}])
 
-    with pytest.raises(Exception) as exc:  # noqa: PT011 — the seam raises CommandError
+    with pytest.raises(Exception) as exc:
         ex.run_workflow(
             doc,
             run_id="GHOST",

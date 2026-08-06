@@ -222,7 +222,7 @@ def classify_plan_review_attestation(
             "verdict": str(validity.get("verdict") or "error"),
             "reason": str(validity.get("reason") or ""),
         }
-    except Exception as exc:  # noqa: BLE001 — infra fail-open: never raise into the review
+    except Exception as exc:
         logger.warning("bugfix-size attestation classification failed", exc_info=True)
         return {"verdict": "error", "reason": f"classification failed: {exc}"}
 
@@ -270,7 +270,7 @@ def apply_bugfix_size_gate(
         classification = classify_plan_review_attestation(
             ticket_id, repo_root=repo_root, state=state
         )
-    except Exception as exc:  # noqa: BLE001 — infra fail-open: never fail the review
+    except Exception as exc:
         logger.warning("bugfix-size gate degraded to advisory", exc_info=True)
         try:
             non_test = count_non_test_diff_lines(diff_text or "")

@@ -260,7 +260,7 @@ class BindingStore:
                 json.dump({"version": 1, "retired": entries}, f, indent=2, sort_keys=True)
                 f.write("\n")
             os.replace(tmp, str(self._retired_path))
-        except BaseException:  # noqa: BLE001 — retired-store atomic-write cleanup on ANY exit (incl. interrupts): unlink the temp then re-raise — never swallowed
+        except BaseException:
             try:
                 os.unlink(tmp)
             except OSError:
@@ -305,7 +305,7 @@ class BindingStore:
                 json.dump(self._data, f, indent=2, sort_keys=True)
                 f.write("\n")
             os.replace(tmp, str(self._path))
-        except BaseException:  # noqa: BLE001 — binding-store atomic-write cleanup on ANY exit (incl. interrupts): unlink the temp then re-raise — never swallowed
+        except BaseException:
             # Clean up temp file on any failure
             try:
                 os.unlink(tmp)

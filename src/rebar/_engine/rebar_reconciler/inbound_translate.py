@@ -311,7 +311,7 @@ def _load_ticket_reducer():
     global _TICKET_REDUCER_MODULE
     if _TICKET_REDUCER_MODULE is not None:
         return _TICKET_REDUCER_MODULE
-    import rebar.reducer as _tr  # noqa: PLC0415 — lazy import by design
+    import rebar.reducer as _tr
 
     _TICKET_REDUCER_MODULE = _tr
     return _tr

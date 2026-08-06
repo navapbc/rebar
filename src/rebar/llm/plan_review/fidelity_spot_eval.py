@@ -475,16 +475,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
-    "RELOCATED_PROMPTS",
-    "relocation_spot_eval",
-    "packing_spot_eval",
     "PREREQUISITE_PACKING_SCENARIOS",
+    "RELOCATED_PROMPTS",
+    "load_recorded_results",
+    "main",
+    "packing_spot_eval",
     "prerequisite_corpus_digest",
     "prerequisite_packing_spot_eval",
-    "main",
     "record_results",
-    "load_recorded_results",
     "recorded_results_path",
+    "relocation_spot_eval",
 ]
 
 

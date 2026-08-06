@@ -499,7 +499,7 @@ class LockHandle:
     release explicitly rather than via a ``with`` block. :func:`write_lock` wraps it.
     """
 
-    __slots__ = ("_fd", "_lock_dir", "_have_mkdir", "_released")
+    __slots__ = ("_fd", "_have_mkdir", "_lock_dir", "_released")
 
     def __init__(self, fd: int, lock_dir: str, have_mkdir: bool) -> None:
         self._fd = fd

@@ -112,7 +112,7 @@ def _load_outbound_differ():
     # same name (which lacks _loader.py etc.). Extend that package's __path__ with the
     # engine dir so outbound_differ's own ``from rebar_reconciler.<x> import ...`` fall
     # through to the real engine modules — the pattern the reconciler conftest uses.
-    import rebar_reconciler  # noqa: PLC0415 — path is only valid after the insert above
+    import rebar_reconciler
 
     engine_pkg = str(engine_dir / "rebar_reconciler")
     if engine_pkg not in rebar_reconciler.__path__:

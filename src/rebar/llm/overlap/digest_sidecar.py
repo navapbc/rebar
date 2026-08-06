@@ -109,7 +109,7 @@ def emit(
         payload = build_payload(digest, state, model=model)
         tracker = _tracker(None, repo_root)
         append_event(ticket_id, EVENT_TYPE, payload, Path(tracker), repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort sidecar; broad-but-logged, never fails the caller
+    except Exception:
         logger.warning("TICKET_DIGEST sidecar emit failed; continuing", exc_info=True)
         return False
     return True
@@ -143,7 +143,7 @@ def latest_ticket_digest(
         return None
     except FileNotFoundError:
         return None
-    except Exception:  # noqa: BLE001 — best-effort reader; broad-but-logged, never raises
+    except Exception:
         logger.warning("TICKET_DIGEST sidecar read failed; treating as absent", exc_info=True)
         return None
 
@@ -184,7 +184,7 @@ def freshness(
             and payload.get("model") == _active_model(repo_root)
             and payload.get("digest_hash_version") == DIGEST_HASH_VERSION
         )
-    except Exception:  # noqa: BLE001 — unreadable current state → fail-closed (not fresh)
+    except Exception:
         logger.warning("TICKET_DIGEST freshness check failed; treating as stale", exc_info=True)
         return "present-stale"
     return "present-fresh" if fresh else "present-stale"

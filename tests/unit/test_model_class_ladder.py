@@ -99,7 +99,7 @@ class _RecordingAgentRunner:
     def __init__(self) -> None:
         self.steps: list[dict[str, Any]] = []
 
-    def run(self, ctx):  # noqa: ANN001 — StepContext, kept duck-typed
+    def run(self, ctx):
         self.steps.append(dict(ctx.step))
         from types import SimpleNamespace
 
@@ -133,7 +133,7 @@ def _production_entry_model(monkeypatch, ladder: tuple[str, ...]) -> str:
 
     captured: dict[str, str] = {}
 
-    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):  # noqa: ANN001
+    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):
         captured["model"] = cfg.model
         return []
 
@@ -414,7 +414,7 @@ def _recording_pass1_chunk(monkeypatch, *, fail_all: bool = False) -> list[tuple
     ``cfg.model`` each attempt was dispatched with."""
     observed: list[tuple[str, tuple]] = []
 
-    def _stub(runner, cfg, *, plan, chunk, agentic=False, extra_context=""):  # noqa: ANN001
+    def _stub(runner, cfg, *, plan, chunk, agentic=False, extra_context=""):
         observed.append((cfg.model, tuple(c["id"] for c in chunk)))
         if fail_all or len(chunk) > 1:
             raise RuntimeError("prompt is too long")

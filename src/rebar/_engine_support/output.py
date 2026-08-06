@@ -42,8 +42,8 @@ __all__ = [
     "OutputFormatError",
     "allowed_for",
     "default_for",
-    "parse_output",
     "error_envelope",
+    "parse_output",
 ]
 
 # profile -> (default, allowed-tuple). The default is what an absent flag means.

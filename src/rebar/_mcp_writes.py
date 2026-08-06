@@ -369,7 +369,7 @@ def register_write_tools(mcp, ctx) -> None:
                     _wf_exec.TicketEventRecorder(ticket_id).run_finished(
                         {"run_id": run_id, "status": "failed", "error": str(exc)}
                     )
-                except Exception:  # noqa: BLE001 — the failure-recording path must not mask the original run error
+                except Exception:
                     # Don't let a failure in the error-reporting path hide the
                     # original run failure: log BOTH (the recorder error with its
                     # traceback, and the original run error it was trying to record).

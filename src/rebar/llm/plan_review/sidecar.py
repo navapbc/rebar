@@ -85,7 +85,7 @@ def emit(
             source=source,
         )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
-    except Exception:  # noqa: BLE001 — best-effort observability sidecar; broad-but-logged below, never fails the review
+    except Exception:
         # Observability floor: the sidecar is best-effort observability — a failed emit
         # must never fail the review, but the failure itself is a real signal worth a
         # stderr diagnostic (broad-but-logged; see rebar._logging).
@@ -125,7 +125,7 @@ def prune(ticket_id: str, *, keep: int = RETAIN_PER_TICKET, repo_root=None) -> i
         # a raw git rm + whole-index commit here races normal store writes.
         delete_events(tracker, rels, f"prune: REVIEW_RESULT sidecar for {rid} (retain {keep})")
         return len(old)
-    except Exception:  # noqa: BLE001 — best-effort retention prune; broad-but-logged below, never fails the review
+    except Exception:
         # Best-effort retention; a failed prune never fails the review (sidecars are
         # reducer-ignored, so removing old ones is safe). Log the failure (floor).
         logger.warning("REVIEW_RESULT sidecar prune failed; continuing", exc_info=True)
@@ -184,7 +184,7 @@ def latest_review_result(ticket_id: str, *, repo_root=None) -> dict[str, Any] | 
         return None
     except FileNotFoundError:
         return None  # ticket dir absent → no prior review (common first-review case)
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "REVIEW_RESULT sidecar read failed; treating as no prior review", exc_info=True
         )
@@ -241,7 +241,7 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
         return out
     except FileNotFoundError:
         return []  # ticket dir absent → no retained history
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "REVIEW_RESULT sidecar history read failed; treating as no history", exc_info=True
         )
@@ -275,7 +275,7 @@ def latest_review_timestamp(ticket_id: str, *, repo_root=None) -> int | None:
         return int(prefix)
     except FileNotFoundError:
         return None
-    except Exception:  # noqa: BLE001 — best-effort observability reader; broad-but-logged, never raises
+    except Exception:
         logger.warning(
             "REVIEW_RESULT sidecar timestamp read failed; treating as none", exc_info=True
         )
@@ -394,7 +394,7 @@ def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
             }
             for f in eligible[:RECALL_CAP]
         ]
-    except Exception:  # noqa: BLE001 — best-effort recall reader; broad-but-logged, never fails the review
+    except Exception:
         logger.warning(
             "prior_concerns recall read failed; treating as no prior concerns", exc_info=True
         )

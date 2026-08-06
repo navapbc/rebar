@@ -584,7 +584,7 @@ def _run_branch(rc, step, sid, frame_key, prefixes, bindings, iteration) -> None
     _commit_state(rc, frame_key, {"taken": arm}, "succeeded")
     arm_steps = branch.get(arm)
     if isinstance(arm_steps, list):
-        child = (f"{prefixes[0]}{sid}@{arm}/",) + prefixes
+        child = (f"{prefixes[0]}{sid}@{arm}/", *prefixes)
         _execute_frame(rc, arm_steps, child, bindings, iteration)
     if not rc.failed:
         _maybe_record_control(rc, sid, frame_key, iteration, "branch", {"taken": arm})
@@ -599,7 +599,7 @@ def _loop_should_run(rc, loop, sid, i, cur, prefixes, bindings, var) -> bool:
         return True
     cond_prefixes, cond_bindings = prefixes, bindings
     if i > 0:
-        cond_prefixes = (f"{cur}{sid}#{i - 1}/",) + prefixes
+        cond_prefixes = (f"{cur}{sid}#{i - 1}/", *prefixes)
         cond_bindings = {**bindings, f"loop.{var}": i - 1}
     expr = loop.get("while") if has_while else loop.get("until")
     try:
@@ -643,7 +643,7 @@ def _run_loop(rc, step, sid, frame_key, cur, prefixes, bindings, iteration) -> N
             if not _loop_should_run(rc, loop, sid, i, cur, prefixes, bindings, var):
                 hit_cap = False
                 break
-            child = (f"{cur}{sid}#{i}/",) + prefixes
+            child = (f"{cur}{sid}#{i}/", *prefixes)
             _execute_frame(rc, loop.get("body") or [], child, {**bindings, f"loop.{var}": i}, i)
             if rc.failed:
                 return
@@ -670,7 +670,7 @@ def _map_iteration(rc, body, cur, sid, prefixes, bindings, as_name, index_var, j
     runs sequentially within the iteration; iterations are independent (distinct
     frame keys, no cross-iteration ``needs``), which is what makes bounded concurrency
     safe and replay order-independent. Shared by the serial and concurrent paths."""
-    child = (f"{cur}{sid}#{j}/",) + prefixes
+    child = (f"{cur}{sid}#{j}/", *prefixes)
     child_bindings = {**bindings, f"map.{as_name}": item}
     if isinstance(index_var, str):
         child_bindings[f"map.{index_var}"] = j

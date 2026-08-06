@@ -57,11 +57,11 @@ from rebar.llm.plan_review.fidelity_spot_eval import (
 
 __all__ = [
     "AGENTIC_SOLVERS",
-    "POLARITY_FREE_SOLVERS",
     "AUTH_VALIDATION",
     "CLASS_SLOTS",
     "DEFAULT_EPOCHS",
     "GENERIC",
+    "POLARITY_FREE_SOLVERS",
     "SAMPLING_PARAMETER",
     "ArmOutcome",
     "CorpusItem",

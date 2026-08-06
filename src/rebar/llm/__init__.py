@@ -77,49 +77,49 @@ from rebar.llm.runner import (
 from rebar.llm.spec_scan import scan_epics_for_spec
 
 __all__ = [
-    # operations
-    "review_ticket",
-    "review_code",
-    "scan_epics_for_spec",
-    "verify_completion",
-    "enrich",
-    "review_plan",
-    "resign_plan_review",
-    "claim_gate_check",
-    "plan_review_status",
-    "select_reviewers",
-    "aggregate_findings",
+    "CompletionRecoveryError",
+    "FakeRunner",
+    "InvalidPromptIdError",
     # config / diagnostics
     "LLMConfig",
-    "available_backends",
-    "agents_extra_installed",
-    # findings contract helpers
-    "build_result",
-    "normalize_finding",
-    "validate_result",
-    # runner seam (custom ops / tests)
-    "Runner",
-    "RunRequest",
-    "FakeRunner",
-    "get_runner",
-    # prompt / reviewer registry
-    "Prompt",
-    "Reviewer",
-    "get_prompt",
-    "load_catalog",
-    # prompt-library authoring (write + structured enumerate; story B-DM)
-    "enumerate_library",
-    "enumerate_criteria",
-    "create_prompt",
-    "update_prompt",
-    "LibraryWriteError",
-    "InvalidPromptIdError",
-    "PromptExistsError",
+    "LLMConfigError",
     # exceptions
     "LLMError",
-    "LLMConfigError",
-    "LLMUnavailableError",
     "LLMRunnerError",
-    "CompletionRecoveryError",
+    "LLMUnavailableError",
+    "LibraryWriteError",
+    # prompt / reviewer registry
+    "Prompt",
+    "PromptExistsError",
+    "Reviewer",
+    "RunRequest",
+    # runner seam (custom ops / tests)
+    "Runner",
     "StructuredOutputError",
+    "agents_extra_installed",
+    "aggregate_findings",
+    "available_backends",
+    # findings contract helpers
+    "build_result",
+    "claim_gate_check",
+    "create_prompt",
+    "enrich",
+    "enumerate_criteria",
+    # prompt-library authoring (write + structured enumerate; story B-DM)
+    "enumerate_library",
+    "get_prompt",
+    "get_runner",
+    "load_catalog",
+    "normalize_finding",
+    "plan_review_status",
+    "resign_plan_review",
+    "review_code",
+    "review_plan",
+    # operations
+    "review_ticket",
+    "scan_epics_for_spec",
+    "select_reviewers",
+    "update_prompt",
+    "validate_result",
+    "verify_completion",
 ]

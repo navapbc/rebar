@@ -139,7 +139,7 @@ def is_t2_territory(reference: Mapping[str, Any]) -> bool:
 
 __all__ = [
     "T2_BACKENDS",
-    "refute_semantic",
     "available_backends",
     "is_t2_territory",
+    "refute_semantic",
 ]

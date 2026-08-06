@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
+from typing import ClassVar
 
 import pytest
 
@@ -129,7 +130,7 @@ class _RecordingAgentRunner:
         self.seen[ctx.step["prompt"]] = ctx.inputs.get("ticket_context")
 
         class _R:
-            outputs = {"findings": []}
+            outputs: ClassVar[dict] = {"findings": []}
 
         return _R()
 

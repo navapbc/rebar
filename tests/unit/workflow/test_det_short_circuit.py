@@ -82,7 +82,7 @@ def test_short_circuit_verdict_carries_every_det_blocking_finding(monkeypatch):
 
 def test_det_passing_plan_still_runs_llm_passes(monkeypatch):
     """A plan that clears the DET floor runs the LLM tier exactly as before."""
-    finder, canned, verdict = _run_short_circuit(monkeypatch, _state(description=_GOOD_AC))
+    finder, _canned, verdict = _run_short_circuit(monkeypatch, _state(description=_GOOD_AC))
     assert finder.calls > 0, "a DET-passing plan must still reach the Pass-1 finder"
     assert verdict is not None
     assert verdict["verdict"] == "PASS"

@@ -79,7 +79,7 @@ class _RecoverableRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
@@ -141,7 +141,7 @@ class _SimpleRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         return {"verdict": "PASS", "findings": [], "criteria": []}
 
@@ -159,7 +159,7 @@ def test_simple_completion_keeps_one_call_fast_path() -> None:
 
 
 class _ExhaustedRunner(_RecoverableRunner):
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         raise UnretryableOutputError("finish_reason=length")
 
@@ -185,7 +185,7 @@ def test_recovery_exhaustion_stays_typed_and_actionable(monkeypatch) -> None:
 
 
 class _RefusalRunner(_RecoverableRunner):
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         raise UnretryableOutputError("the model refused to answer")
 
@@ -213,7 +213,7 @@ class _ContradictoryFinalizerRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
@@ -294,14 +294,14 @@ def test_unbounded_ticket_context_fails_before_any_recovery_call(monkeypatch) ->
     ctx = _ctx()
     ctx.inputs["context"] = "x" * 100_001
 
-    with pytest.raises(CompletionRecoveryError, match="context.*bound"):
+    with pytest.raises(CompletionRecoveryError, match=r"context.*bound"):
         step.run(ctx)
 
     assert len(runner.requests) == 1
 
 
 class _MetadataLengthRunner(_RecoverableRunner):
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         if not self.requests:
             self.requests.append(req)
             exc = UnretryableOutputError("provider stopped")
@@ -332,7 +332,7 @@ class _ContextRefusalRunner:
     def preflight(self) -> None:
         return None
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         self.requests.append(req)
         raise UnretryableOutputError("refused because context policy was triggered")
 
@@ -364,7 +364,7 @@ def test_non_length_error_containing_context_does_not_enter_recovery() -> None:
 class _BudgetExhaustedRunner(_RecoverableRunner):
     """The aggregate (first) call trips the step budget instead of truncating."""
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         if not self.requests:
             from rebar.llm.errors import LLMBudgetExhaustedError
 
@@ -406,7 +406,7 @@ class _PlainRunnerErrorRunner(_RecoverableRunner):
     """Raises a BARE LLMRunnerError whose message is byte-identical to the budget one —
     the discriminator between a typed catch and message sniffing."""
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         from rebar.llm.errors import LLMRunnerError
 
         self.requests.append(req)
@@ -469,7 +469,7 @@ def test_budget_recovery_still_fails_closed_without_criteria(monkeypatch) -> Non
 class _BudgetThenEvidenceFailureRunner(_BudgetExhaustedRunner):
     """Budget stop on the aggregate call, then every evidence run truncates."""
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         if self.requests:
             self.requests.append(req)
             raise UnretryableOutputError("finish_reason=length")
@@ -503,7 +503,7 @@ class _LoopingBudgetRunner(_RecoverableRunner):
     """Budget stop whose diagnostic carries the full repetition summary, then
     every recovery call truncates — the 8b97 'computed then dropped' shape."""
 
-    def run(self, req):  # noqa: ANN001, ANN201
+    def run(self, req):
         if not self.requests:
             from rebar.llm.errors import LLMBudgetExhaustedError
 

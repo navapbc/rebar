@@ -105,7 +105,7 @@ class GerritClient:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — fixed base URL
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 return resp.status, resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace") if exc.fp else ""
@@ -327,7 +327,7 @@ class GerritClient:
         path = "/a/plugins/events-log/events/"
         if since:
             path += "?t1=" + urllib.parse.quote(str(since), safe="")
-        status, text = self._request("GET", path)
+        _status, text = self._request("GET", path)
         events: list[dict] = []
         for line in _strip_xssi(text).splitlines():
             line = line.strip()
@@ -394,7 +394,6 @@ class GerritClient:
                 timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
-                # fmt: off
                 [
                     "git",
                     "-C",
@@ -406,7 +405,6 @@ class GerritClient:
                     "origin",
                     "refs/heads/tickets:refs/remotes/origin/tickets",
                 ],
-                # fmt: on
                 check=True,
                 capture_output=True,
                 text=True,

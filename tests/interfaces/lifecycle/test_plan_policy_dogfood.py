@@ -47,8 +47,7 @@ class _PassRunner(FakeRunner):
                 ]
             }
         elif req.output_schema == "plan_review_verification":
-            indexes = [int(value) for value in re.findall(r"finding index (\d+)", req.instructions)]
-            payload = {"verifications": [] if not indexes else []}
+            payload = {"verifications": []}
         elif req.output_schema == "plan_review_coach":
             payload = {"notes": []}
         else:

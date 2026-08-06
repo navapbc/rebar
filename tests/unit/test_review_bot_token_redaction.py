@@ -106,9 +106,9 @@ def test_rerun_authenticates_via_header_and_token_never_logged(monkeypatch, capl
 
     RED before option (a): the operator recipe put the token in the URL, so a driven
     request logged it."""
-    app_module, client = _app_and_client(monkeypatch)
+    _app_module, client = _app_and_client(monkeypatch)
 
-    def fake_get_change_event(self, change):  # noqa: ANN001
+    def fake_get_change_event(self, change):
         return {
             "change": {"id": "proj~main~I123", "project": "rebar"},
             "patchSet": {"revision": "deadbeef"},
@@ -135,7 +135,7 @@ def test_rerun_authenticates_via_header_and_token_never_logged(monkeypatch, capl
 
 def test_rerun_rejects_missing_and_wrong_token(monkeypatch):
     """Auth is unchanged in strength: no token / wrong token → 401 on both transports."""
-    app_module, client = _app_and_client(monkeypatch)
+    _app_module, client = _app_and_client(monkeypatch)
     assert client.post("/rerun", json={"change": "1"}).status_code == 401
     assert (
         client.post("/rerun", headers={"X-Rebar-Token": "wrong"}, json={"change": "1"}).status_code
@@ -146,7 +146,7 @@ def test_rerun_rejects_missing_and_wrong_token(monkeypatch):
 def test_webhook_authenticates_via_header(monkeypatch):
     """/webhook also accepts the header form (Gerrit's webhooks plugin can send a header),
     so the inbound path can be moved off the query string too."""
-    app_module, client = _app_and_client(monkeypatch)
+    _app_module, client = _app_and_client(monkeypatch)
     resp = client.post(
         "/webhook",
         headers={"X-Rebar-Token": SENTINEL},
@@ -160,7 +160,7 @@ def test_webhook_still_accepts_query_token_for_backward_compat(monkeypatch):
     """Backward-compat: until Gerrit's webhooks.config is re-pushed to send the header, the
     live query-string path must keep authenticating — the redaction filter (option c) is
     what protects that value in the log, not rejection."""
-    app_module, client = _app_and_client(monkeypatch)
+    _app_module, client = _app_and_client(monkeypatch)
     resp = client.post(
         f"/webhook?token={SENTINEL}",
         json={"type": "patchset-created"},

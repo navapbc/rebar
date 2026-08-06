@@ -161,7 +161,7 @@ def test_classifier_survives_a_sanitizer_failure(monkeypatch):
 
 # ── Totality ──────────────────────────────────────────────────────────────────
 class _StrExplodes(Exception):
-    def __str__(self) -> str:  # noqa: D105
+    def __str__(self) -> str:
         raise ValueError("str() itself raises")
 
 

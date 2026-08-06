@@ -19,6 +19,7 @@ path and ``make test`` are byte-unchanged. :func:`_resolve_sink` owns that prece
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
@@ -315,7 +316,7 @@ def _repetition_summary(signatures: list[str], *, top: int = 5) -> dict:
     for sig in signatures:
         counts[sig] = counts.get(sig, 0) + 1
     longest = current = 1
-    for previous, sig in zip(signatures, signatures[1:], strict=False):
+    for previous, sig in itertools.pairwise(signatures):
         current = current + 1 if sig == previous else 1
         longest = max(longest, current)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]

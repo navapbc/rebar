@@ -130,7 +130,7 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
 
     try:
         listed = _reads.list_tickets(parent=container_id, repo_root=repo_root) or []
-    except Exception:  # noqa: BLE001 — fail-safe: no manifest (the floor drops nothing), logged
+    except Exception:
         logger.warning(
             "could not list children of %s for the delivered manifest", container_id, exc_info=True
         )
@@ -585,7 +585,7 @@ def drift_refresh(
             repo_root=repo_root,
             probe_criteria=list(_PROBE_CRITERIA),
         )
-    except Exception:  # noqa: BLE001 — probe unavailable → FULL re-review (fail-safe)
+    except Exception:
         logger.warning("drift-probe failed; falling back to a full re-review", exc_info=True)
         return None
 

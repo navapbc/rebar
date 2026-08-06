@@ -73,7 +73,7 @@ def _resolve_or_create_session_artifact(
             artifact_id = str(created["id"] if isinstance(created, dict) else created)
         _link_session_artifact(artifact_id, head=head, repo_root=repo_root)
         return artifact_id
-    except Exception:  # noqa: BLE001 — best-effort local memory; never fails the review
+    except Exception:
         logger.warning("local session code_review artifact resolve/create failed", exc_info=True)
         return None
 
@@ -105,7 +105,7 @@ def _link_session_artifact(artifact_id: str, *, head: str = "HEAD", repo_root: A
             if resolved:
                 rebar.link(artifact_id, resolved, "relates_to", repo_root=repo_root)
                 return
-    except Exception:  # noqa: BLE001 — the relates_to link is optional; never fails the review
+    except Exception:
         logger.warning("session artifact relates_to link skipped", exc_info=True)
 
 

@@ -117,7 +117,7 @@ def test_unsigned_non_genesis_key_add_refused(store: Path, tmp_path: Path) -> No
     _p2, pub2 = _keypair(tmp_path, "k2")
     ident = rebar.create_identity("Ada", "ada@example.com", repo_root=str(store))
     rebar.add_identity_key(ident, pub1, signature=None, repo_root=str(store))  # genesis OK
-    with pytest.raises(Exception):  # noqa: B017,PT011 — non-genesis add w/o signature must be refused
+    with pytest.raises(Exception):  # noqa: B017 — non-genesis add w/o signature must be refused
         rebar.add_identity_key(ident, pub2, signature=None, repo_root=str(store))
 
 

@@ -159,7 +159,7 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
                 ds.emit(result["digest"], tid, model=cfg.model, repo_root=repo_root)
                 _queue.mark_done(tid, repo_root=repo_root)
                 processed += 1
-            except Exception:  # noqa: BLE001 — per-item best-effort; failed item re-picked after lease
+            except Exception:
                 logger.warning(
                     "enrich drain: enrich(%s) failed; will retry after lease", tid, exc_info=True
                 )
@@ -209,7 +209,7 @@ def _spawn_detached_drain(tracker: str) -> None:
             stderr=log_fh,
             **_detach_kwargs(),
         )
-    except Exception:  # noqa: BLE001 — detach is best-effort; a spawn failure never fails the parent
+    except Exception:
         logger.warning("enrich drain detach failed; continuing", exc_info=True)
 
 
@@ -255,7 +255,7 @@ def maybe_drain(tracker: str, *, repo_root=None) -> None:
             drain(tracker, repo_root=repo_root)  # synchronous inline (tests/CI)
         else:  # async
             _spawn_detached_drain(tracker)
-    except Exception:  # noqa: BLE001 — a drain concern must NEVER fail the triggering write
+    except Exception:
         logger.warning("maybe_drain failed; continuing", exc_info=True)
 
 

@@ -380,7 +380,7 @@ def _linked_session_log(
                 continue
             if log.get("ticket_type") == "session_log":
                 bodies.append(f"# {log.get('title', '')}\n{log.get('description', '')}")
-    except Exception:  # noqa: BLE001 — ISF is supporting context, not the plan; broad-but-logged below, ISF skipped
+    except Exception:
         # ISF is supporting context, not the plan — any read error skips it, but log
         # the failure so a silently-missing ISF context is observable.
         logger.warning("ISF session-log gather failed; skipping ISF", exc_info=True)
@@ -399,7 +399,7 @@ def _linked_session_log(
         if usage_records is not None:
             usage_records.append(sizing.usage_record(["ISF"], usage))
         return (summary, True)
-    except Exception:  # noqa: BLE001 — ISF summarization is best-effort; broad-but-logged below, ISF skipped
+    except Exception:
         # Summarization failure → ISF runs without the oversized log; log it (floor).
         logger.warning("ISF summarization failed; skipping ISF", exc_info=True)
         return (None, False)
@@ -586,7 +586,7 @@ def run_pass1(
                 # the whole tier — surface it, never silently drop (fuel-posse-ball). The
                 # run_review caller turns this into an INDETERMINATE, unsigned verdict.
                 raise
-            except Exception:  # noqa: BLE001 — a NON-systemic per-chunk failure: drop its findings, never aborts
+            except Exception:
                 coverage["chunk_errors"] = coverage.get("chunk_errors", 0) + 1
                 logger.warning(
                     "a plan-review chunk failed (non-systemic); findings dropped", exc_info=True
@@ -622,7 +622,7 @@ def run_pass1(
             )
             findings.extend(isf_findings)
             call_records.append(sizing.usage_record(["ISF"], isf_usage))
-        except Exception as exc:  # noqa: BLE001 — ISF pass is best-effort; broad-but-logged + recorded in coverage, never blocks the verdict
+        except Exception as exc:
             # ISF (in-session-failure) pass is best-effort; record in-band + log (floor).
             logger.warning("ISF pass failed; verdict emitted without ISF findings", exc_info=True)
             coverage["isf"]["error"] = str(exc)

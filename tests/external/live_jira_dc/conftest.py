@@ -326,7 +326,7 @@ def _sweep_leaked_harness_tokens() -> list[str]:
         if status in (200, 204, 404):
             swept.append(name)
         else:
-            print(  # noqa: T201 — visible in the CI job log, where this is diagnosed
+            print(
                 f"[jira-dc-harness] could not reclaim leftover PAT {name!r}: {status} {body!r}",
                 file=sys.stderr,
             )
@@ -364,7 +364,7 @@ def _jira_dc_harness_ready() -> None:
     # from poisoning the next one.
     swept = _sweep_leaked_harness_tokens()
     if swept:
-        print(  # noqa: T201 — visible in the CI job log
+        print(
             f"[jira-dc-harness] reclaimed {len(swept)} leftover PAT(s) from an "
             f"interrupted run: {sorted(swept)}",
             file=sys.stderr,
@@ -586,7 +586,7 @@ def _assert_project_capabilities(key: str) -> None:
     # `-rA` (see .github/workflows/external-integration.yml), which keeps captured stdout of
     # PASSING tests in the log; under plain `-q` this line would be written where nobody can
     # read it. The probe emits the same sentence through its own logger.
-    print(  # noqa: T201 — visible in the CI job log, which is where this is read
+    print(
         f"[941b-field-readiness] project {key}: "
         + jira_dc_field_readiness.ready_message(readiness, base_url=_BASE)
     )

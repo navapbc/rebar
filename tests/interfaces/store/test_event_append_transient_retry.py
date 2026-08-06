@@ -88,7 +88,7 @@ def _fail_first_add(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
     real_run = event_append.subprocess.run
     state = {"adds": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         is_add = isinstance(cmd, list) and "add" in cmd
         if is_add:
             state["adds"] += 1
@@ -157,7 +157,7 @@ def test_nontransient_add_failure_still_fails_immediately(
     real_run = event_append.subprocess.run
     state = {"adds": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         if isinstance(cmd, list) and "add" in cmd:
             state["adds"] += 1
             return subprocess.CompletedProcess(
@@ -187,7 +187,7 @@ def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
     real_run = event_append.subprocess.run
     state = {"commits": 0}
 
-    def fake_run(cmd, *a, **kw):  # noqa: ANN001
+    def fake_run(cmd, *a, **kw):
         if isinstance(cmd, list) and "commit" in cmd:
             state["commits"] += 1
             if state["commits"] == 1:
@@ -305,7 +305,7 @@ def test_own_vanished_object_is_regenerated(
     real_add = event_append._git_add
     state = {"n": 0}
 
-    def vanishing_add(trk, relpaths, **kw):  # noqa: ANN001,ANN003
+    def vanishing_add(trk, relpaths, **kw):
         res = real_add(trk, relpaths, **kw)
         state["n"] += 1
         if state["n"] == 1:  # vanish ONLY on the first add; the recovery re-add must succeed
