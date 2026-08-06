@@ -135,7 +135,7 @@ require_authenticated = false
 # tracking-ticket writes); only NEW writes after this anchor are enforced. With the scope +
 # ledger fixes above this makes the pre-merge whole-store gate report 0 enforced-not-verified.
 # Env override: REBAR_IDENTITY_ENFORCE_SINCE.
-enforce_since = "0cf8c03530d379991933740d9e4d1fa46ce4484a"
+enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 
 # ── LLM provider: this project DEFAULTS TO AWS BEDROCK ────────────────────────────
 #
