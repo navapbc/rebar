@@ -489,16 +489,23 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         primary_exc: LLMRunnerError,
     ) -> _ex.StepResult:
         from rebar import _reads
+        from rebar._errors import RebarError
 
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
-        ticket = _reads.show_ticket(ticket_id, repo_root=ctx.repo_root)
-        runner = get_runner(self._config, override=self._runner_override)
-        ticket_context = str(ctx.inputs.get("context") or ctx.inputs.get("ticket_context") or "")
         expected: list[str] = []
         evidence: list[dict[str, str]] = []
         recovery_started = False
 
         try:
+            # The prelude reads are INSIDE the diagnostic-capturing try (bug 215f): a
+            # RebarError here (missing id, store fails to reduce) must land in the
+            # stage="preflight" arm below, which preserves the primary run's diagnostic
+            # and emits the sidecar — not escape raw and discard both.
+            ticket = _reads.show_ticket(ticket_id, repo_root=ctx.repo_root)
+            runner = get_runner(self._config, override=self._runner_override)
+            ticket_context = str(
+                ctx.inputs.get("context") or ctx.inputs.get("ticket_context") or ""
+            )
             expected = explicit_completion_criteria(ticket)
             _validate_recovery_inputs(expected, ticket_context)
             recovery_started = True
@@ -573,7 +580,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             )
             _validate_coverage(result, expected)
             return _ex.StepResult(outputs=result)
-        except LLMError as recovery_exc:
+        except (LLMError, RebarError) as recovery_exc:
             if not recovery_started:
                 stage = "preflight"
             else:
@@ -595,6 +602,12 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             self.failure_diagnostic = diagnostic
             if isinstance(recovery_exc, CompletionRecoveryError):
                 message = str(recovery_exc)
+            elif not recovery_started:
+                message = (
+                    f"completion recovery preflight failed before any evidence run: "
+                    f"{recovery_exc}. The primary failure's diagnostic is preserved in "
+                    "the gate_error_v1 record."
+                )
             else:
                 message = (
                     "completion verifier exhausted its aggregate history and bounded "
