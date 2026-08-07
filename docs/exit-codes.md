@@ -18,15 +18,24 @@ to an emitted code are contract changes and must be called out in release notes.
 | `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `clarity-check` (see the gate note below). The plan-review gate's **INDETERMINATE** verdict also exits `2` — either from a non-retryable LLM degrade **or** from the deliberate **not-claimable fast-fail** (`review-plan` refusing a ticket that can't be claimed yet — a `ticket-not-claimable` finding with `coverage.llm_ran=false`; **no LLM ran**). Predates and is unchanged by exit 11. |
 | `10` | concurrency mismatch | Optimistic-concurrency rejection: a state-dependent op (`transition`/`claim`/`reopen`) re-read the ticket under lock and the actual status no longer matched the expected one. **Normal under parallelism** — re-read and pick another, never force. Emitted by `_commands/txn.py` (`ConcurrencyMismatch`). |
 | `11` | transient — retry | An LLM gate (`review-plan` / `review-code` / `verify-completion` / the `close` completion gate) degraded on a **systemic, retryable** LLM failure (rate-limit / connection blip — the classifier's `WAIT_AND_RETRY` / `RETRY_NOW` disposition). The verdict is unsigned; **re-run after the backoff window** rather than treating it as a real BLOCK/FAIL. Distinct from `2` (INDETERMINATE, non-retryable) so a driving agent can auto-retry only the genuinely transient case. Additive (2026-07 window) — see "Recorded decisions". |
+| `3`  | stale-rebase sentinel / poor health | Two emitters: (a) `fsck-recover --detect-only` found a paused rebase or merge in the tracker git worktree and exited without attempting recovery (`src/rebar/_commands/fsck_recover.py` — the `detect_only=True` branch); (b) `validate`'s health-severity bucket when the score is 2/5 — poor, significant issues (`exit == 5 - score`; `src/rebar/_engine_support/validate.py:393`). |
+| `4`  | critical health | `validate`'s health-severity bucket when the repo-health score is 1/5 — critical, immediate action needed (`src/rebar/_engine_support/validate.py:393`). Not emitted by any other command. |
+| `12` | review attestation stale or absent | `review-plan --status` found the ticket's plan-review attestation is not current — the plan changed since the last review, the attestation was never written, or the verified-at SHA is no longer reachable. Exit 0 means current; 12 means a fresh `rebar review-plan` is needed before `claim` will pass the gate (`src/rebar/_cli/_llm_commands.py` — `return 0 if status["ok"] else 12`). |
+| `75` | rebase / merge guard | A write was attempted while the tracker git worktree is in a paused rebase or merge state. The write is refused — run `rebar fsck-recover` to drain the stale rebase before retrying. Emitted by `RebaseGuard` (`src/rebar/_store/lock.py` — `returncode = 75`), surfaced to the process as a `CommandError` via `src/rebar/_commands/_seam.py`. |
+| `78` | store schema incompatible | The tracker store was written by a newer rebar that this version cannot safely read or write (`StoreIncompatibleError`). Upgrade this rebar installation. Emitted by `src/rebar/_store/compat.py` (`returncode = 78`), surfaced the same way as 75. |
+
+> **Forward compatibility:** a client or agent encountering an **unknown or unlisted non-zero exit code MUST treat it as a failure**; new codes may be added in future breaking-change windows.
 
 ### Cross-cutting rules
 
-- **Unknown option → `2` (structured reads only).** `rebar list --bogus`,
+- **Unknown option → `2` (structured reads + a few additional commands).** `rebar list --bogus`,
   `rebar show <id> --bogus`, `rebar ready --bogus`, `rebar search q --bogus`,
   `rebar deps <id> --bogus` all exit `2`. (`show`/`list` historically returned
   `1` here; aligned to `2` in the 2026-06-09 window — see "Recorded decisions"
-  below.) **This is the full set of commands that validate options today** — see
-  "Unknown-option handling" for the scope and the known gap on other commands.
+  below.) The five structured reads are the **contracted, pinned** set for option-validation
+  — `metrics`, `doctor`, `fsck`, and `composer`/`create` also exit `2` on an unknown option
+  today but are not yet pinned by the test suite. See "Unknown-option handling" for the full
+  scope note.
 - **Missing required positional → `1`.** `rebar show` (no id), `rebar create`
   (no type/title), `rebar link a b` (no relation), `rebar deps` (no id) → `1`.
   A missing *positional* is a runtime error (1); a malformed *option* on a
@@ -49,15 +58,21 @@ to an emitted code are contract changes and must be called out in release notes.
 
 ### Unknown-option handling (scope + known gap)
 
-Only the five **structured read commands** validate their options and exit `2`
-on an unrecognized `--option`: `show`, `list`, `deps`, `ready`, `search` (all
-route through `_engine_support/reads_cli.py`; option parsing lives in
+The five **structured read commands** are the contracted, pinned set that
+validate their options and exit `2` on an unrecognized `--option`: `show`,
+`list`, `deps`, `ready`, `search` (all route through
+`_engine_support/reads_cli.py`; option parsing lives in
 `_engine_support/output.py::parse_output`). These are pinned by
 `test_exit_codes.py::test_unknown_option_exits_2`.
 
+Several additional commands also exit `2` on an unknown option today —
+notably `metrics`, `doctor`, `fsck`, and the composer family (`create`,
+`edit`) — but they are **not yet pinned** by the test suite and therefore
+represent a larger validated (but uncontracted) set.
+
 Other subcommands do **not** uniformly validate options: most mutation commands
 either silently ignore an unknown `--option` (e.g. `comment`, `tag`, `claim`,
-`check-ac` → exit `0`) or fail incidentally (e.g. `archive`, `edit`, `create` →
+`check-ac` → exit `0`) or fail incidentally (e.g. `archive`, `unlink` →
 exit `1`). Standardizing option validation across the mutation commands is a
 **known gap deliberately left out of this freeze** (sub-effort (a) scoped the
 contract + the structured-read alignment; a broader option-parsing sweep is
@@ -89,7 +104,7 @@ guarantee `2`).
 | `exists` | 0 | 1 | — | **by design**: 0=exists, 1=not-found (presence probe) |
 | `format` | 0 | 0 | — | tolerant read: unknown id renders empty, still 0 |
 | `fsck` | 0 | — | — | no ticket id |
-| `fsck-recover` | 0 | — | — | no ticket id |
+| `fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
 | `get-file-impact` | 0 | 1 | — | |
 | `get-verify-commands` | 0 | 1 | — | |
 | `init` | 0 | — | — | idempotent |
@@ -113,6 +128,40 @@ guarantee `2`).
 | `unlink` | 0 | 1 | — | |
 | `untag` | 0 | 1 | — | removing an absent tag is still 0 |
 | `validate` | **0-4** | — | — | **exception**: exit is a health-severity bucket, not the standard contract; takes **no** ticket id (passing one → 1) |
+| `audit` | 0 | — | — | no ticket id; `audit show <ticket>` reads the audit trail; unknown subcommand or bad option → 2; `audit serve` with missing `[ui]` extra → 1 |
+| `bridge-probe` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
+| `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
+| `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; empty or missing id → 2; unknown criterion → 1 |
+| `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
+| `enrich` | 0 | — | — | no ticket id; cross-ticket overlap drain; always 0 on a clean run |
+| `explain` | 0 | — | — | no ticket id; `explain <criterion-id\|guide>`; unknown id or guide name → 1 |
+| `export` | 0 | — | — | no ticket id; NDJSON ticket export; bad args → 2 |
+| `grounding-info` | 0 | — | — | no ticket id; static code-grounding contract info; unexpected args → 1; bad `--output` → 2 |
+| `idea` | 0 | 1 | — | promotes an `idea` ticket to `open`; bad args → 2 |
+| `identity` | 0 | — | — | no ticket id; shows or configures operator identity; no args → 1; error → 1 |
+| `import` | 0 | — | — | no ticket id; NDJSON ticket import; bad args → 2 |
+| `jira-onboard` | 0 | — | — | no ticket id; interactive Jira config wizard; error or user abort → 1 |
+| `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
+| `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |
+| `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |
+| `reconcile` | 0 | — | — | no ticket id; subprocess passthrough to rebar_reconciler; exits with the reconciler's own code |
+| `remote-cert` | 0 | — | — | no ticket id; trusted op-cert gate service client; bad args → 2; error → 1 |
+| `review` | 0 | 1 | — | **DEPRECATED** shim forwarding to `review-plan` (with `--no-sign`); PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
+| `review-code` | 0 | — | — | no ticket id; PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
+| `review-plan` | 0 | 1 | — | PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11; `--status`: 0 = current, 12 = stale/absent |
+| `scan-spec` | 0 | — | — | no ticket id; `--spec-file` read error or LLMError → 1 |
+| `session-log` | 0 | 1 | — | appends or reads session log events; error → 1 |
+| `session-logs` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
+| `sign` | 0 | 1 | — | signs the ticket's current event manifest; bad args → 2 |
+| `sign-review` | 0 | 1 | — | cheap re-sign of an existing PASS verdict (no LLM); refused when sidecar absent, non-PASS, or plan changed → 1 |
+| `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |
+| `verify-authorship` | 0 | — | — | back-compat alias for `verify-identity`; same codes: 0 = verified, 1 = not-verified, 2 = bad args |
+| `verify-commit-ticket` | 0 | — | — | no ticket id; 0 = commit has a valid rebar-ticket trailer, 1 = missing or invalid, 2 = bad args |
+| `verify-completion` | 0 | 1 | — | PASS → 0, FAIL → 1, retryable degrade → 11 (shape B — raised `LLMError`) |
+| `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |
+| `verify-opcert` | 0 | — | — | no ticket id; 0 = op-cert valid, 1 = invalid or not found, 2 = bad args |
+| `verify-signature` | 0 | — | — | no ticket id; 0 = HMAC signature verified, 1 = not-verified or missing key, 2 = bad args |
+| `workflow` | 0 | — | — | no ticket id; `run` → 0 = succeeded, 1 = not-succeeded; `validate` → 0 = valid, 1 = invalid; other errors → 1 |
 
 (The meta `help` arm and `rebar` with no subcommand are excluded: `help` exits 0,
 a missing/unknown subcommand prints the overview and exits 1.)
