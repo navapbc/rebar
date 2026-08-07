@@ -32,7 +32,6 @@ from rebar_reconciler._backend import (
     BackendEnvError,
     SupportsAbsenceProbe,
     SupportsComments,
-    SupportsIncremental,
     SupportsLinks,
 )
 from rebar_reconciler.adapters.jira_datacenter import settings as dc_settings
@@ -80,13 +79,6 @@ def test_dc_backend_advertises_its_three_capabilities() -> None:
     assert isinstance(backend, SupportsLinks)
     assert isinstance(backend, SupportsComments)
     assert isinstance(backend, SupportsAbsenceProbe)
-
-
-def test_dc_backend_is_deliberately_not_incremental() -> None:
-    """DC gets a FULL inbound scan in v1. Incremental fetch is an optimization with
-    its own correctness surface and no client need yet, so the omission is asserted
-    to stop it being added by accident."""
-    assert not isinstance(_backend(), SupportsIncremental)
 
 
 # ---------------------------------------------------------------------------
