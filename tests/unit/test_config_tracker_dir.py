@@ -81,17 +81,24 @@ def test_reads_tracker_dir_honors_canonical(
 def test_reads_tracker_dir_validation_gate_rejects_non_git_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """A supplied root that is NOT a git work tree must still sys.exit(1) with the
-    historical message — the precondition reads.tracker_dir adds on top of the shared
-    dir-name resolution (preserved when the duplicate was unified into config)."""
+    """A supplied root that is NOT a git work tree must be REFUSED with the historical
+    message — the precondition reads.tracker_dir adds on top of the shared dir-name
+    resolution (preserved when the duplicate was unified into config).
+
+    The refusal is a raised ``TrackerRootError``, not ``sys.exit(1)`` (bug 176d): this
+    helper is reached from the library gate surface and thence from MCP, where a
+    ``SystemExit`` (a ``BaseException``) sails past FastMCP's ``except Exception`` and
+    kills the server process. The CLI maps the error back to exit 1 with the same
+    stderr line, so the user-visible contract is unchanged.
+    """
     from rebar._engine_support import reads
+    from rebar._errors import TrackerRootError
 
     non_git = tmp_path / "plain"  # a real dir, but no `git init`
     non_git.mkdir()
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(TrackerRootError) as exc:
         reads.tracker_dir(repo_root=str(non_git))
-    assert exc.value.code == 1
-    assert "not inside a git repository" in capsys.readouterr().err
+    assert "not inside a git repository" in str(exc.value)
 
 
 def test_reads_tracker_dir_passes_gate_for_real_git_root(
