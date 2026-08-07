@@ -62,18 +62,67 @@ def normalize_checkbox_state(description: str) -> str:
     return _CHECKBOX_STATE_RE.sub(r"\g<1> \g<2>", description)
 
 
-def material_basis(ctx: PlanContext, *, normalize_checkboxes: bool = True) -> dict[str, Any]:
+def normalize_insignificant_whitespace(description: str) -> str:
+    """Erase whitespace that carries no plan substance, so a cosmetic edit cannot stale a
+    signed review (bug 2be7 — ``rebar edit --description="$(cat file)"`` strips the trailing
+    newline via shell command substitution and the gate reported ``stale-material``).
+
+    Normalized out, and ONLY these: line-ending form (CRLF/CR -> LF), whitespace at the END
+    of a line (so a whitespace-only separator line equals an empty one), and blank lines at
+    the DOCUMENT boundary. Everything else stays material — LEADING indentation is preserved
+    because it restructures markdown list nesting, whitespace between two non-whitespace
+    characters is preserved, and an interior blank line is never removed.
+    """
+    text = description.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
+def canonical_description(
+    description: str, *, normalize_checkboxes: bool = True, normalize_whitespace: bool | None = None
+) -> str:
+    """Every canonicalization the fingerprint applies to the description, in one place.
+
+    ``normalize_whitespace`` defaults to ``normalize_checkboxes`` so the single legacy
+    switch turns BOTH off at once; pass it explicitly to reproduce an intermediate
+    algorithm generation (checkbox-only, i.e. post-330c / pre-2be7)."""
+    if normalize_whitespace is None:
+        normalize_whitespace = normalize_checkboxes
+    if normalize_whitespace:
+        description = normalize_insignificant_whitespace(description)
+    if normalize_checkboxes:
+        description = normalize_checkbox_state(description)
+    return description
+
+
+def material_basis(
+    ctx: PlanContext, *, normalize_checkboxes: bool = True, normalize_whitespace: bool | None = None
+) -> dict[str, Any]:
     """The ordered mapping the composite fingerprint hashes.
 
     Single-sourced here so :func:`pass1.material_fingerprint` and :func:`material_components`
     can never disagree about what "material" means — a divergence would let the explainer
     name a component the gate did not actually decide on.
+
+    ``normalize_checkboxes`` selects the pre-330c LEGACY algorithm and so governs BOTH
+    description canonicalizations: when False the RAW description is hashed — neither
+    checkbox state (:func:`normalize_checkbox_state`) nor insignificant whitespace
+    (:func:`normalize_insignificant_whitespace`) is normalized away. The flag keeps its
+    historical name because the repo documents it as the legacy-algorithm switch;
+    ``normalize_whitespace`` overrides only the whitespace half, which the grandfather
+    fallback uses to recompute the intermediate (checkbox-only) generation.
     """
     basis: dict[str, Any] = {
         "ticket_id": ctx.ticket_id,
-        "description": normalize_checkbox_state(ctx.description)
-        if normalize_checkboxes
-        else ctx.description,
+        "description": canonical_description(
+            ctx.description,
+            normalize_checkboxes=normalize_checkboxes,
+            normalize_whitespace=normalize_whitespace,
+        ),
         "file_impact": ctx.state.get("file_impact") or [],
         "children": sorted(c.get("ticket_id", "") for c in ctx.children),
     }

@@ -646,18 +646,28 @@ def _legacy_material_ok(signed: str, ticket_id: str, repo_root) -> bool:
     """Grandfather for pre-normalization attestations (bug 96d1): manifests signed before
     checkbox-state normalization hashed the RAW description (every completion manifest
     embeds ``[x]`` — the close gate requires checked boxes), so the normalized recompute
-    can never match them. A signed hash that byte-exactly matches the LEGACY recomputation
+    can never match them. A signed hash that byte-exactly matches a LEGACY recomputation
     of the CURRENT material proves nothing changed — not even box state — so it is not a
-    material edit. Strictly narrower than the normalized check: a real edit matches neither."""
+    material edit. Strictly narrower than the normalized check: a real edit matches none.
+
+    Both superseded generations are tried: pre-330c (raw description) and the intermediate
+    post-330c/pre-2be7 one (checkbox-normalized, whitespace raw). Without the second, a
+    pre-330c attestation signed over UNTICKED boxes would stop surviving a tick once
+    whitespace canonicalization landed, silently regressing bug 94a3 observation 1."""
     try:
         from .relation_snapshot import current_material_fingerprint_impl
 
-        legacy = current_material_fingerprint_impl(
-            ticket_id, repo_root=repo_root, normalize_checkboxes=False
-        )
+        candidates = [
+            current_material_fingerprint_impl(
+                ticket_id, repo_root=repo_root, normalize_checkboxes=False
+            ),
+            current_material_fingerprint_impl(
+                ticket_id, repo_root=repo_root, normalize_whitespace=False
+            ),
+        ]
     except Exception:  # noqa: BLE001 — best-effort fallback; an uncomputable legacy hash is simply no match
         return False
-    return legacy is not None and legacy == signed
+    return any(c is not None and c == signed for c in candidates)
 
 
 # Backward-compatible claim-gate/delivery re-exports (after their helper dependencies).

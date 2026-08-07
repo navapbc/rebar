@@ -343,14 +343,20 @@ def test_missing_attestation_still_unsigned() -> None:
 
 
 def test_current_material_fingerprint_is_unaffected_by_component_hashing(monkeypatch) -> None:
-    """The composite must be byte-identical to the pre-change algorithm."""
+    """The composite must be byte-identical to hashing the basis directly — component
+    hashing never moved it. (The description enters the basis canonicalized: checkbox
+    state, change 330c; insignificant whitespace, bug 2be7.)"""
     import hashlib
     import json
 
     ctx = _ctx(file_impact=[{"path": "a.py"}], children=("c1-1111-2222-3333",))
     basis = {
         "ticket_id": ctx.ticket_id,
-        "description": _UNTICKED,
+        # Spelled out rather than routed through the production canonicalizer, so this
+        # oracle stays independent of the code under test: `_UNTICKED` has no trailing
+        # per-line whitespace and no ticked boxes, so its canonical form differs only by
+        # the stripped trailing newline.
+        "description": _UNTICKED.rstrip("\n"),
         "file_impact": [{"path": "a.py"}],
         "children": ["c1-1111-2222-3333"],
     }

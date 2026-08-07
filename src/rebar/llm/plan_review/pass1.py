@@ -736,24 +736,36 @@ def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def material_fingerprint(ctx: PlanContext, *, normalize_checkboxes: bool = True) -> str:
+def material_fingerprint(
+    ctx: PlanContext, *, normalize_checkboxes: bool = True, normalize_whitespace: bool | None = None
+) -> str:
     """A hash of the ticket's MATERIAL plan content (description / AC / file_impact /
     decomposition) — bound into the attestation so a material edit invalidates the
     signature. Tags/comments/links/assignee are NOT material (excluded), and neither
-    is AC checkbox STATE (normalized away — see :func:`material_diff.normalize_checkbox_state`).
+    is AC checkbox STATE (normalized away — see :func:`material_diff.normalize_checkbox_state`)
+    nor insignificant whitespace — trailing whitespace on a line, blank lines at the document
+    boundary, and line-ending form (see :func:`material_diff.normalize_insignificant_whitespace`,
+    bug 2be7).
 
     ``normalize_checkboxes=False`` reproduces the PRE-normalization (pre-330c) algorithm
-    that hashed the raw description. Validity-on-read uses it as a grandfather fallback
+    that hashed the raw description with NO canonicalization at all — neither checkbox state
+    nor whitespace. Validity-on-read uses it as a grandfather fallback
     (bug 96d1): a signed hash that byte-exactly matches the legacy recomputation proves
     the material is unchanged — not even box state moved — so a pre-330c attestation over
     an unedited ticket is not spuriously invalidated as stale-material.
 
     The BASIS itself lives in :func:`material_diff.material_basis`, which also hashes each
     key separately so a staleness message can name WHICH component moved (bug 94a3). One
-    definition of "material" keeps the composite and the per-component view in agreement.
+    definition of "material" keeps the composite and the per-component view in agreement;
+    ``normalize_whitespace`` (default: follow ``normalize_checkboxes``) reproduces the
+    intermediate post-330c/pre-2be7 generation for the same grandfather fallback.
     """
     from .material_diff import material_basis
 
-    basis = material_basis(ctx, normalize_checkboxes=normalize_checkboxes)
+    basis = material_basis(
+        ctx,
+        normalize_checkboxes=normalize_checkboxes,
+        normalize_whitespace=normalize_whitespace,
+    )
     blob = json.dumps(basis, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]

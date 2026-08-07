@@ -333,13 +333,18 @@ def current_plan_context(ticket_id: str, *, repo_root=None) -> Any:
 
 
 def current_material_fingerprint_impl(
-    ticket_id: str, *, repo_root=None, normalize_checkboxes: bool = True
+    ticket_id: str,
+    *,
+    repo_root=None,
+    normalize_checkboxes: bool = True,
+    normalize_whitespace: bool | None = None,
 ) -> str | None:
     """Recompute the ticket's material fingerprint from a LIGHT read (the ticket + its
     child ids only — no full child fetch, no LLM), matching
     :func:`pass1.material_fingerprint`. Returns None for a deleted target or on any read
     error. ``normalize_checkboxes=False`` recomputes under the PRE-normalization
-    (pre-330c) algorithm — the validity-on-read grandfather basis (bug 96d1).
+    (pre-330c) algorithm — the raw description, with neither checkbox-state nor
+    whitespace canonicalization — the validity-on-read grandfather basis (bug 96d1).
 
     (Body moved here from ``attest.current_material_fingerprint`` — which now delegates —
     because its one non-trivial dependency, :func:`live_material_children`, lives here.)"""
@@ -349,7 +354,11 @@ def current_material_fingerprint_impl(
         ctx = current_plan_context(ticket_id, repo_root=repo_root)
         if ctx is None:
             return None
-        return material_fingerprint(ctx, normalize_checkboxes=normalize_checkboxes)
+        return material_fingerprint(
+            ctx,
+            normalize_checkboxes=normalize_checkboxes,
+            normalize_whitespace=normalize_whitespace,
+        )
     except Exception:
         # Cannot compute the current fingerprint → caller treats material as unknown
         # (the gate fails closed / re-review). Log so the cause is observable.

@@ -471,7 +471,12 @@ open→in_progress`) verifies, in order:
    assignee are *not* material and do not invalidate. Neither is AC **checkbox
    state**: `- [ ]` vs `- [x]` — either bullet (`-`/`*`), either case — is
    normalized to `[ ]` before the fingerprint is hashed (change 330c), so flipping
-   boxes never stales an attestation; only edits to an item's TEXT do.)
+   boxes never stales an attestation; only edits to an item's TEXT do. Neither is
+   **insignificant whitespace**: line-ending form (CRLF/CR vs LF), whitespace at the
+   end of a line, and blank lines at the start/end of the description are normalized
+   out too (bug 2be7), so a stripped or added trailing newline never stales an
+   attestation. LEADING indentation *is* material — it restructures markdown list
+   nesting — as is any interior whitespace change.)
 5. it **post-dates the latest reopen** — reactivating a ticket (`closed → open`,
    recorded as `state["last_reopened_at"]`) invalidates an attestation signed before it.
 
@@ -494,7 +499,9 @@ back-compat mirror of the most-recent one).
 require-all-ticked rule and the claim gate's material binding cannot contradict each other.
 Adding *evidence prose* next to a ticked box **is** an edit to `description`, and that does
 invalidate — which is why three agents once reported three different answers to the same
-question (bug 94a3).
+question (bug 94a3). Re-saving a description whose only difference is insignificant
+whitespace (a stripped/added trailing newline, trailing spaces, CRLF) is likewise safe —
+it is normalized out before hashing (bug 2be7).
 
 They could not tell the cases apart because every staleness message recited a fixed list —
 "description/AC/file_impact/children" — that named an input the fingerprint does not even
