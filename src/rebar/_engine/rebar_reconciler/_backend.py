@@ -15,8 +15,7 @@ The design (ADR 0035 §(d)):
   Protocols** (:class:`TicketTransport`, :class:`OutboundMapper`,
   :class:`InboundMapper`, :class:`FieldSanitizer`, :class:`IdentityConvention`)
   plus zero or more **opt-in capability Protocols**
-  (:class:`SupportsLinks`, :class:`SupportsComments`,
-  :class:`SupportsIncremental`).
+  (:class:`SupportsLinks`, :class:`SupportsComments`).
 * Callers detect a capability by an ``isinstance``-guarded check against the
   backend (behavioural, not structural introspection); the capability Protocols
   are therefore ``@runtime_checkable``.
@@ -539,17 +538,6 @@ class SupportsComments(Protocol):
     def add_comment(self, remote_id: str, body: str) -> dict[str, Any]: ...
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]: ...
-
-
-@runtime_checkable
-class SupportsIncremental(Protocol):
-    """A backend that can fetch only items changed since a watermark.
-
-    Core uses an incremental fetch only when ``isinstance(backend,
-    SupportsIncremental)``; otherwise it falls back to a full scan.
-    """
-
-    def search_incremental(self, project_key: str, since: str) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

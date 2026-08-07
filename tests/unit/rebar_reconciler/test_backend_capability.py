@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from rebar_reconciler._backend import (
     SupportsComments,
-    SupportsIncremental,
     SupportsLinks,
 )
 from rebar_reconciler.adapters.jira.backend import JiraBackend
@@ -63,7 +62,3 @@ def test_comment_capability_delegates_to_transport():
     assert isinstance(jb, SupportsComments)
     jb.add_comment("DIG-1", "hello")
     assert any(c[0] == "add_comment" for c in t.calls)
-
-
-def test_backends_without_incremental_are_detected():
-    assert not isinstance(FakeBackend(), SupportsIncremental)
