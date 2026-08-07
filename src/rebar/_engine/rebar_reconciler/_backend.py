@@ -31,6 +31,7 @@ the port is S4, config-driven selection is S3.
 from __future__ import annotations
 
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -397,12 +398,27 @@ class OutboundMapper(Protocol):
         ...
 
     def resolve_assignee(
-        self, local_value: str, remote_identity: dict[str, Any] | None
+        self,
+        local_value: str,
+        remote_identity: dict[str, Any] | None,
+        *,
+        assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> tuple[Any, bool, bool]:
         """Resolve a local assignee against the remote identity, returning
         ``(value, authoritative, is_account_id)`` (ticket 625b). Encapsulates the
         3-state account-resolution fast-path (converged / desired-unassigned /
-        accountId) the core diff consults before emitting an assignee change."""
+        accountId) the core diff consults before emitting an assignee change.
+
+        ``assignee_resolver`` is the LIVE account search, bound by the caller to the
+        current remote key: ``local_value -> (account|None, authoritative, is_account_id)``.
+        It is a declared parameter rather than an attribute the implementation discovers
+        by ``getattr`` (ticket 65d7) — the side-channel form failed silently, was invisible
+        to the type checker, and let PR #120 ship a backend whose whole authoritative
+        branch was dead code.
+
+        ``None`` (the default) means "no live account search on this path" and keeps its
+        long-standing meaning: the permissive, non-authoritative string match. That is now
+        a default the caller CHOOSES, not the residue of an injection that did not happen."""
         ...
 
 
