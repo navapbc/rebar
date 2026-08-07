@@ -10,6 +10,28 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — `rebar transition --force-close=<reason>` is now `rebar transition
+  --force[=<reason>]`.** `transition` previously carried two different force flags — a
+  valueless `--force` that bypassed the start-work (plan-review) gate and a separate
+  `--force-close=<reason>` that bypassed the completion-verification / signature gate on a
+  close — while `claim` spelled its single escape hatch `--force[=<reason>]`. They are now
+  one flag, spelled the same as `claim`'s, that bypasses whichever gate the transition
+  would hit: the start-work gate on `open -> in_progress`, the close gate on `-> closed`.
+  A bare `--force` on a close records `(no reason given)`, matching `claim`.
+
+  This is a **clean break with no deprecation alias**: `--force-close` now exits non-zero
+  with an error naming `--force`, so a stale caller fails loudly instead of silently
+  closing through the gate it meant to bypass. Update any script or automation that passes
+  `--force-close`; there is no compatibility shim to fall back on. To back the change out
+  entirely, revert the rename commit.
+
+  Unchanged: `--force --reason="x"` on `open -> in_progress` still records `x` as the audit
+  note, the library kwarg `rebar.transition(..., force_close=...)` keeps its name, the
+  unresolved-children close guard remains unbypassable, and no force bypass is exposed over
+  MCP.
+
 ## [0.11.0] - 2026-08-06
 
 A feature release centered on first-class Amazon Bedrock support, a substantially

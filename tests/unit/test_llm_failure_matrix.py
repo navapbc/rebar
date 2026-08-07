@@ -483,7 +483,7 @@ def test_disabled_code_review_never_invokes_runner():
     assert out["findings"] == []  # inert result, no LLM ran
 
 
-# ── Guard: --force / --force-close SKIP the plan-review / completion gates (no LLM) ─
+# ── Guard: --force SKIPS the plan-review / completion gates (no LLM) ────────────
 def test_force_claim_skips_plan_review_gate(monkeypatch):
     """CURRENT(gates.py:120): with the plan-review claim gate ENABLED, a non-empty
     ``force_reason`` (the ``claim --force="<reason>"`` bypass) short-circuits and returns
@@ -516,10 +516,10 @@ def test_force_claim_skips_plan_review_gate(monkeypatch):
 
 def test_force_close_skips_completion_gate(monkeypatch):
     """CURRENT(transition_close.py:114): with the completion-verification close gate ENABLED,
-    a non-empty ``force_close`` (the ``--force-close="<reason>"`` bypass) short-circuits and
+    a non-empty ``force_close`` (the ``--force="<reason>"`` bypass) short-circuits and
     returns None BEFORE the billable ``verify_completion`` LLM call — proving the model is
-    NEVER invoked on the --force-close path. A non-force close DOES reach ``verify_completion``
-    (positive control), so the skip is attributable to --force-close."""
+    NEVER invoked on the --force path. A non-force close DOES reach ``verify_completion``
+    (positive control), so the skip is attributable to --force."""
     from rebar._commands import gates as _gates
     from rebar._commands import transition_close as _tc
 
@@ -549,19 +549,19 @@ def test_force_close_skips_completion_gate(monkeypatch):
 
     monkeypatch.setattr(completion_sidecar, "emit", _record_completion_sidecar)
 
-    # --force-close path: returns None WITHOUT ever calling verify_completion.
+    # --force path: returns None WITHOUT ever calling verify_completion.
     assert (
         _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="approved")
         is None
     )
-    assert calls == [], "verify_completion MUST NOT run on the --force-close path"
-    assert emitted == [], "--force-close MUST NOT emit a completion sidecar"
+    assert calls == [], "verify_completion MUST NOT run on the --force path"
+    assert emitted == [], "--force MUST NOT emit a completion sidecar"
 
-    # Positive control: without --force-close the same enabled gate DOES invoke the LLM verify.
+    # Positive control: without --force the same enabled gate DOES invoke the LLM verify.
     assert (
         _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="") is None
     )
-    assert calls == ["rec-0000"], "verify_completion must run when --force-close is absent"
+    assert calls == ["rec-0000"], "verify_completion must run when --force is absent"
     assert emitted == [
         ({"verdict": "PASS", "source": "local", "ticket_id": "rec-0000"}, None, None)
     ]

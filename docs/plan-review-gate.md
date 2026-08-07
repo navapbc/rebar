@@ -931,7 +931,7 @@ Typical verdicts include `unsigned`, `stale-reopened`, `stale-material`,
 or signature failure is fail-closed as `unavailable` and emits the structured warning event
 `plan_review_close_gate_unavailable`.
 
-A non-empty `--force-close` reason bypasses this and completion verification while retaining its
+A non-empty `--force` reason bypasses this and completion verification while retaining its
 audit comment. Closing `idea → closed` also bypasses the plan gate because it is a rejection,
 not delivery. Neither bypass relaxes the structural child-closure invariant.
 
@@ -942,7 +942,7 @@ ticket's `## Acceptance Criteria` section contains any unchecked `- [ ]` item, t
 fails immediately (exit 1) **without making any LLM call**. Items whose text begins with the
 `[operator-attested]` tag (ADR-0043) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
 from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
-a gate-level bypass is warranted, pass `--force-close="<reason>"`. Checking boxes to satisfy
+a gate-level bypass is warranted, pass `--force="<reason>"`. Checking boxes to satisfy
 this precheck is attestation-safe: checkbox state is normalized out of the material
 fingerprint (330c; the single normalization seam covers both the plan-review claim gate and
 the completion-verifier staleness check), so the flips do not invalidate a signed plan review.
@@ -1033,7 +1033,7 @@ escapes). Closing an **epic** therefore adds three stages, cheapest-first (ticke
 
 The screen **degrades open**: any failure (model down, malformed output — normalized to the
 non-surfacing `C` — or a store read error) logs and skips; only the deterministic floor is a
-hard tier, and `--force-close` remains the operator escape hatch. The full per-bug tally +
+hard tier, and `--force` remains the operator escape hatch. The full per-bug tally +
 overflow count lands on the completion sidecar (`epic_bug_screen_v1`) for audit and live
 false-negative calibration.
 
@@ -1063,7 +1063,7 @@ work moved a file they name, or the fix itself made them describe something that
 exists. **Edit the ticket so its criteria are accurate, re-run `rebar review-plan <id>` to
 re-pass the plan gate, then close against the corrected criteria.**
 
-Do not reach for `--force-close`, and do not point `--ref` at an older commit where the stale
+Do not reach for `--force`, and do not point `--ref` at an older commit where the stale
 criteria still happened to hold. Both can produce a close, but both leave **inaccurate state**
 in the ticket system: the ticket goes on asserting something untrue of the codebase, and the
 ticket store is the shared, durable record every other agent reads. A close that passed only

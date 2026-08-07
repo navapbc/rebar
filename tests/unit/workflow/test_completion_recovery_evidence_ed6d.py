@@ -3,7 +3,7 @@
 The per-criterion evidence loop treated ONE criterion's budget exhaustion as fatal to the
 whole aggregate — a single `LLMBudgetExhaustedError` propagating out of the loop discarded
 every criterion's evidence already gathered and failed recovery, offering only the
-`--force-close` exhaustion-is-not-a-verdict trap. But the per-criterion bound is a
+`--force` exhaustion-is-not-a-verdict trap. But the per-criterion bound is a
 per-criterion safeguard: partial evidence must be preserved, not discarded.
 
 The fix catches `LLMBudgetExhaustedError`, `RunawayToolLoopError`, and token-exhaustion

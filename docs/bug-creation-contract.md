@@ -110,7 +110,7 @@ See `_heartbeat_description` / `_drift_description` in
 `scripts/canary_bridge.py` for the shape.
 
 **Auto-close divergence:** the two canary filers auto-close their ticket when
-the condition recovers (`transition … --force-close=…`), because a
+the condition recovers (`transition … --force=…`), because a
 bot-observed recovery is the ticket's entire acceptance criterion. The
 conflict filer does NOT auto-close — resolving a reconciler conflict requires
 human/agent adjudication, so its tickets close through the normal gated flow.

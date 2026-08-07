@@ -585,7 +585,7 @@ The full key set, the `REBAR_<KEY>` env names, and deprecation aliases are in
 When the close gate is enabled, closing a story/epic requires a **certified
 signature made at the current HEAD** — sign a manifest of verified steps
 (`rebar sign <id> '[...]'`) then `rebar transition <id> closed`; re-sign if HEAD
-moved, or bypass with `--force-close=<reason>`.
+moved, or bypass with `--force=<reason>`.
 
 rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
 store defaults to `<repo>/.rebar/scratch/` (override with `scratch.base_dir` /

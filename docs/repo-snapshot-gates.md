@@ -107,7 +107,7 @@ non-repudiation, no public verifiability, and no transparency log**. The pin is 
 **in-toto v1 Statement** subject (`{name: <ticket_id>, digest: {sha1: <verified_at_sha>}}` +
 `predicateType`) so a future move to a DSSE / asymmetric-key / transparency-log envelope is an
 *envelope swap*, not a data-shape rewrite. A ticket **closed without a signature** is the
-durable signal that validation was not attested (a `--force-close`, or a `local`-mode verify).
+durable signal that validation was not attested (a `--force`, or a `local`-mode verify).
 
 ## Adding a new agentic operation (the safeguard)
 

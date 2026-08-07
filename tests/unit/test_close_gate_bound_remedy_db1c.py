@@ -167,7 +167,7 @@ def test_the_remedy_points_at_a_lever_the_operator_can_actually_pull(monkeypatch
 
     A message that only says "this is too big" and names no next step trades a wrong
     remedy for no remedy. The sidecar diagnostic is the surface `docs/llm-framework.md`
-    already directs the operator to, and `--force-close` is the sanctioned operator
+    already directs the operator to, and `--force` is the sanctioned operator
     judgement call; at least one real next step must be named.
     """
     message = _close_message(monkeypatch, _bound_error())

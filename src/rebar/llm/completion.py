@@ -75,7 +75,7 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too low and trips the recursion cap
 # mid-verification (→ a false fail-closed block at the gate). Use a generous verification FLOOR;
 # an operator who explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Very large tickets
-# (e.g. a whole framework epic) may still need it raised further, or --force-close. (Doubled
+# (e.g. a whole framework epic) may still need it raised further, or --force. (Doubled
 # from 120→240 after a substantive story tripped the cap, then 240→480 after an 11-child
 # framework epic tripped 240 at the close gate. Per-run step usage is now logged by the
 # runner — `llm call [completion-verifier] … steps=N/limit` — so the next resize can be sized

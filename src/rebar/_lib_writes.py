@@ -355,7 +355,7 @@ def transition(
     remains non-closed.
 
     ``force_close="<reason>"`` is the library counterpart of the CLI
-    ``--force-close``: when closing a work ticket under the completion-verification
+    ``--force``: when closing a work ticket under the completion-verification
     close gate (``verify.require_completion_verification_for_close``), it closes
     WITHOUT running the verifier or signing, leaving the ticket
     closed-without-signature (the durable "validation did not pass" signal). It is

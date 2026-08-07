@@ -5,7 +5,7 @@
 [verify]
 # Run the LLM completion-verifier when a client closes a work ticket: a FAIL verdict
 # (or an unavailable LLM) blocks the close (fail-closed); on PASS the verdict is signed
-# onto the ticket. `--force-close="<reason>"` closes without verifying or signing, so a
+# onto the ticket. `--force="<reason>"` closes without verifying or signing, so a
 # closed-without-signature ticket is the durable signal that validation did not pass.
 # This is an ALTERNATIVE to require_signature_for_close (do not enable both).
 # Requires the `nava-rebar[agents]` extra + a model API key (e.g. ANTHROPIC_API_KEY).

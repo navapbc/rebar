@@ -8,6 +8,21 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `transition --force-close` renamed to `transition --force` (breaking, no alias)
+
+`rebar transition` now has ONE escape hatch, `--force[=<reason>]`, spelled exactly as
+`rebar claim --force[=<reason>]`. It bypasses whichever gate the transition would hit —
+the start-work (plan-review) gate on `open -> in_progress`, the completion-verification /
+signature gate on `-> closed`. A bare `--force` on a close records `(no reason given)`.
+
+The former `--force-close=<reason>` is **removed with no deprecation alias** and is now
+explicitly rejected with a non-zero exit and an error naming `--force`. Agents and scripts
+that still emit `--force-close` will fail loudly rather than silently closing through the
+gate. Update stored agent instructions and automation accordingly.
+
+The library kwarg `rebar.transition(..., force_close=...)` is unchanged, and no force
+bypass is exposed over MCP (unchanged).
+
 ## Project policy cutover — plan-review material pins and close reviews
 
 The tracked `rebar.toml` for this project now enables

@@ -153,7 +153,7 @@ class VerifyConfig:
     enforce_plan_material_pins: bool = False
     # Opt-in completion-verification close gate: when true, closing a work ticket runs the
     # LLM completion-verifier (rebar.llm.verify_completion) and blocks on FAIL / unavailable
-    # LLM (fail-closed; --force-close bypasses without signing). On PASS the verdict is signed.
+    # LLM (fail-closed; --force bypasses without signing). On PASS the verdict is signed.
     # Default off.
     # read-via: _commands/gates.py gate_enabled string key
     require_completion_verification_for_close: bool = False

@@ -60,7 +60,7 @@ the environment that holds the key can certify its own attestations.
 - **Close gate.** The completion-verification close gate
   (`verify.require_completion_verification_for_close = true`) signs a PASS
   `completion-verifier` verdict onto the ticket at close (re-verify if HEAD moved, or
-  bypass with `--force-close=<reason>`). See the [Configuration](../README.md#configuration)
+  bypass with `--force=<reason>`). See the [Configuration](../README.md#configuration)
   section of the README.
 - **Attestation kinds.** A ticket holds a kind-keyed `attestations` map — independent
   records of different kinds (`plan-review` at claim, `completion-verifier` at close)
