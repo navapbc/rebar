@@ -131,6 +131,55 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
     )
 
 
+def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug 9f63 AC: 'not queued' must be distinguishable from 'queued behind N others'.
+
+    ``in_flight`` alone counts only reviews already RUNNING, so a change waiting behind a
+    backlog and a change whose webhook was dropped present identically — that ambiguity is
+    what led an agent to read a queued review as an outage and abandon correct work.
+    ``queue_depth`` is the missing half: with it, an operator can tell 'the bot never got
+    the event' (depth 0, no vote) from 'the bot has it, N ahead of you'.
+
+    Driven WITHOUT the lifespan on purpose: ``TestClient`` is used bare (not as a context
+    manager), so no background worker, reconciler or janitor starts. Entering the lifespan
+    would make this test's teardown run the shutdown drain, which awaits ``queue.join()``
+    under ``shutdown_drain_seconds()`` — a 1200-second window that has no business being
+    reachable from a test asserting one JSON field. What is under test is the handler's
+    contract over ``app.state.queue``, and that is exactly what this drives.
+
+    Requires the ``reviewbot`` extra (fastapi); skipped without it.
+    """
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot.app import app
+
+    monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    client = TestClient(app)
+
+    # No lifespan has run, so there may be no queue at all — the field must still be there.
+    monkeypatch.delattr(app.state, "queue", raising=False)
+    idle = client.get("/health").json()
+    assert idle["queue_depth"] == 0, (
+        f"with no queue yet, queue_depth must report 0, not be omitted\n{idle}"
+    )
+
+    backlog: asyncio.Queue = asyncio.Queue()
+    for n in range(3):
+        backlog.put_nowait({"type": "patchset-created", "_n": n})
+    monkeypatch.setattr(app.state, "queue", backlog, raising=False)
+    body = client.get("/health").json()
+
+    assert body["queue_depth"] == 3, (
+        f"/health must expose how many events are waiting to be reviewed\n{body}"
+    )
+    assert isinstance(body["queue_depth"], int) and not isinstance(body["queue_depth"], bool), (
+        f"queue_depth must be an integer, like in_flight\n{body}"
+    )
+    # The pre-existing contract is additive-only: autodeploy.sh reads these two keys.
+    assert body["status"] == "ok" and body["in_flight"] == 0
+
+
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
     """Same contract as the endpoint test above, asserted WITHOUT fastapi.
 
