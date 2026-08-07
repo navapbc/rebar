@@ -32,7 +32,7 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from rebar_reconciler._errors import (
     MAX_BACKOFF_S,
@@ -449,6 +449,7 @@ def update_one(
     client: TicketTransport,
     comment_errors: list[str] | None = None,
     subop_applied: dict[str, int] | None = None,
+    fields_synced: dict[str, Any] | None = None,
 ) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
@@ -478,7 +479,9 @@ def update_one(
     transient). Instead we post a comment recording the local status change
     so an operator can see the divergence in Jira, and emit a structured log
     record to stderr.
-    """
+
+    Bug e6e9: ``fields_synced`` collects the fields the scalar ``update_issue`` call
+    ACTUALLY landed — empty on every non-success arm."""
     fields = mutation.get("fields", {})
     if not isinstance(fields, dict):
         fields = {}
@@ -494,9 +497,11 @@ def update_one(
     _has_parent_op = _update_one_apply_parent(fields, issue_key, client, mutation.get("local_id"))
     _update_one_apply_reporter(fields, issue_key, client)
     fields = _update_one_filter_fields(fields, mutation)
-    result = _update_one_scalar_update(
+    result, _applied = _update_one_scalar_update(
         client, issue_key, fields, _has_parent_op, _attempted_status, _assignee_is_account_id
     )
+    if fields_synced is not None:
+        fields_synced.update(_applied)
 
     _labels_computed, _labels_applied = _update_one_dispatch_labels(mutation, client, issue_key)
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
@@ -617,7 +622,11 @@ def _update_one_scalar_update(
 
     ``assignee_is_account_id`` (264f) is forwarded to ``client.update_issue`` so that
     when the assignee is an already-resolved accountId (identity fast path) acli submits
-    it directly and skips the assignable search."""
+    it directly and skips the assignable search.
+
+    Returns ``(result, applied_fields)``; ``applied_fields`` (bug e6e9) is assigned on
+    exactly ONE line below, so it stays EMPTY unless ``client.update_issue`` completed.
+    Contract: ``apply_handlers.handle_update``; rationale: ``peer_state.merge_baseline``."""
     # When the only changed field was parent (the common reparent case), the
     # allowlisted set is now empty AND set_parent already did the work — skip
     # the otherwise-empty client.update_issue call so we don't issue a no-op
@@ -627,6 +636,7 @@ def _update_one_scalar_update(
     # update_issue is skipped here ONLY when a parent op was the reason the
     # field set is empty (label/comment dispatch below still runs).
     result: dict | None = None
+    applied: dict[str, Any] = {}
     _skip_empty_update = _has_parent_op and not fields
     if _skip_empty_update:
         pass  # parent handled via set_parent; no scalar fields to edit
@@ -637,6 +647,7 @@ def _update_one_scalar_update(
             # into stubs / the ACLI boundary).
             _extra = {"assignee_is_account_id": True} if assignee_is_account_id else {}
             result = _call_with_retry(client.update_issue, issue_key, **_extra, **fields)
+            applied = dict(fields)  # reached ONLY on a completed write
         except JiraAPIError as exc:
             if not _is_illegal_transition_400(exc):
                 raise
@@ -656,7 +667,7 @@ def _update_one_scalar_update(
             )
             print(log_entry, file=sys.stderr)
             result = None
-    return result
+    return result, applied
 
 
 def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:

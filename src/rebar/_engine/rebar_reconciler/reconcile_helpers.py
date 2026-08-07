@@ -19,6 +19,7 @@ re-exports these names for attribute-access and back-compat.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -505,3 +506,97 @@ def drop_snapshot_differ_local_state_emissions(mutations: list[Any]) -> list[Any
             continue
         kept.append(mutation)
     return kept
+
+
+def _accepts_synced_fields_out(fn: Any) -> bool:
+    """Whether ``fn`` will accept the ``synced_fields_out`` kwarg (bug e6e9).
+
+    True for the real ``applier.apply`` and any stub declaring ``**kwargs``; False for a
+    stub with a fixed narrower signature, which keeps its pre-e6e9 call shape. An
+    un-introspectable signature counts as NOT accepting it: a false positive raises
+    TypeError and takes down the pass, a false negative only leaves the baseline
+    advancing from the fetch as it does today.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "synced_fields_out" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _advance_baselines(
+    binding_store: Any,
+    curr_snapshot: Mapping[str, Any],
+    synced_fields: Mapping[str, Mapping[str, Any]] | None = None,
+) -> int:
+    """Advance every CONFIRMED binding's per-binding baseline to the LAST-SYNCED Jira state
+    (story d6bd — the always-on successor to the retired dual-write shadow). Only
+    confirmed bindings whose Jira key is in the current fetch window are advanced (an
+    out-of-window key has no fresh value this pass); ``set_baseline`` filters to the
+    mirrored fields. In-memory until the caller's ``save()`` persists them (ADR 0026).
+
+    Two sources with different freshness (bug e6e9), applied in order: ``curr_snapshot``
+    is the pass-START fetch, taken BEFORE the outbound apply, and is correct for every
+    field rebar did not write; ``synced_fields`` is what rebar's own writes CONFIRMEDLY
+    landed later in the SAME pass, so it is strictly fresher for those fields and is
+    overlaid on top. Advancing from the fetch alone is the defect ``peer_state.
+    merge_baseline`` documents, and ``synced_fields`` MUST carry only per-mutation
+    confirmed writes — never "the pass ran".
+
+    The overlay runs for a confirmed binding even when its key is OUT of the fetch window:
+    our own write is direct evidence about the peer and, unlike a fetch, cannot be missing.
+    """
+    advanced = 0
+    synced = synced_fields or {}
+    overlaid = 0
+    for local_id, entry in binding_store.all_bindings().items():
+        if entry.get("state") != "confirmed":
+            continue
+        jira_key = entry.get("jira_key")
+        if jira_key and jira_key in curr_snapshot:
+            binding_store.set_baseline(local_id, curr_snapshot[jira_key])
+            _advance_peer_parent(binding_store, local_id, curr_snapshot[jira_key])
+            advanced += 1
+        pushed = synced.get(local_id)
+        if pushed:
+            # getattr-guarded exactly as _advance_peer_parent guards set_peer_parent: a
+            # store predating this method (or an older test double) must degrade to the
+            # fetch-only advance, not raise mid-pass.
+            merge = getattr(binding_store, "merge_baseline", None)
+            if merge is not None:
+                merge(local_id, dict(pushed))
+                overlaid += 1
+    if synced:
+        # Observability for the DELIBERATE non-advance: a soft-failed mutation contributes
+        # nothing to `synced`, so comparing this against the pass's outbound_update lines
+        # separates "the write failed" from "there was nothing to push" (bug e6e9).
+        print(
+            f"RECON: baseline_overlay bindings={overlaid} pushed_bindings={len(synced)}",
+            file=sys.stderr,
+        )
+    return advanced
+
+
+def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, Any]) -> None:
+    """Record the peer parent OBSERVED for one binding — and ONLY if it was observed.
+
+    The evidence an inbound parent CLEAR requires (ticket 88d9). The observation test is
+    ``"parent" in entry``: key PRESENT means the parent map answered for this issue, and an
+    explicit ``None`` is then an authoritative "no parent". Key ABSENT is the whole unsafe set —
+    ``get_parent_map`` degraded to ``{}`` on a REST failure, a truncated page walk, a
+    cross-project issue — and MUST leave the prior observation untouched. Overwriting a good
+    history with a failed read is what would let the orphaning incident recur by a longer route,
+    so this is the load-bearing line, not a defensive nicety.
+
+    getattr-guarded so a store predating the field is a no-op rather than an AttributeError.
+    """
+    if "parent" not in entry:
+        return
+    setter = getattr(binding_store, "set_peer_parent", None)
+    if setter is None:
+        return
+    parent = entry.get("parent")
+    key = parent.get("key") if isinstance(parent, dict) else None
+    setter(local_id, key if isinstance(key, str) and key else None)

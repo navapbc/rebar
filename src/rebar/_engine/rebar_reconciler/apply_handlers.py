@@ -82,6 +82,11 @@ class BatchApplyContext:
     deferred_creates: list[dict] = field(default_factory=list)
     events_list: list[dict] = field(default_factory=list)
     rest_calls: int = 0
+    # Bug e6e9: local_id -> the vendor-shaped fields whose outbound write CONFIRMEDLY
+    # landed this pass. Consumed by reconcile._advance_baselines to advance the ADR-0026
+    # baseline to the last-SYNCED value instead of the pass-start fetch. Only a handler
+    # that saw its write complete may write here — see dispatch_one._update_one_scalar_update.
+    synced_fields: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -197,12 +202,18 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     # clean error=None.
     _comment_errors: list[str] = []
     _subop: dict[str, int] = {}
+    # Bug e6e9: filled by update_one ONLY if the scalar write completed. Every arm below
+    # that soft-fails the mutation returns before the record at the bottom, and the
+    # record_backstop_failure path never reaches this function's tail at all, so a
+    # mutation that did not land contributes nothing to the baseline advance.
+    _fields_synced: dict[str, Any] = {}
     try:
         result = update_one(
             mutation,
             ctx.client,
             comment_errors=_comment_errors,
             subop_applied=_subop,
+            fields_synced=_fields_synced,
         )
     except urllib.error.HTTPError as exc:
         # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound update against a
@@ -243,6 +254,13 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         outcome["error"] = f"assignee-unresolved: {exc!s}"
         return HandlerResult(outcome, soft_failed=True)
     outcome["result"] = result
+    # Bug e6e9: record what this mutation actually SYNCED, for the ADR-0026 baseline
+    # advance. Reached only past every soft-fail return above, and _fields_synced is
+    # itself empty unless client.update_issue completed — two independent gates, so
+    # "the pass ran" can never be mistaken for "the write landed".
+    _local_id = mutation.get("local_id")
+    if _local_id and _fields_synced:
+        ctx.synced_fields.setdefault(str(_local_id), {}).update(_fields_synced)
     # Bug 6afc-20ee-84e5-4dd5: surface swallowed comment failures. NON-fatal —
     # the scalar update above genuinely succeeded — so we record them in a
     # dedicated field rather than overwriting outcome["error"], mirroring the

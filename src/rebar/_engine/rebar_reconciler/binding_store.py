@@ -437,6 +437,9 @@ class BindingStore:
     def set_baseline(self, local_id: str, fields: dict[str, Any]) -> None:
         peer_state.set_baseline(self._data["bindings"], local_id, fields)
 
+    def merge_baseline(self, local_id: str, fields: dict[str, Any]) -> None:
+        return peer_state.merge_baseline(self._data["bindings"], local_id, fields)
+
     def get_peer_parent(self, local_id: str) -> str | None:
         return peer_state.get_peer_parent(self._data["bindings"], local_id)
 
