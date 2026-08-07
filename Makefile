@@ -194,6 +194,9 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py
 	python scripts/check_criteria_vocabulary.py
+	@# Agent Skills SKILL.md frontmatter (ticket db04): Copilot CLI silently drops a skill
+	@# whose frontmatter fails to parse or whose description exceeds 1024 chars, so gate it.
+	python scripts/check_skill_frontmatter.py
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor stays scoped to release.yml (widening the security audit is separate work);
 	@# actionlint below validates ALL workflows. zizmor is a cross-platform pip tool (in [dev]).

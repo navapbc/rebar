@@ -1,6 +1,18 @@
 ---
 name: rebar-janitor
-description: Principal-engineer codebase health pipeline — a deliberate pause-between-features to buy back optionality. Runs five phases: Discovery (one-concern-per-subagent fan-out over code debt, smells, architectural decay, separation of concerns, spent optionality, doc gaps, oversized units, AI-generated-code & security smells, and temporal decay — returns finding+evidence with NO severity), Verification (an independent blue-team pass that scores validity + impact, demands a reachable harm, and checks the project's own record for a prior decision), Remediation (blind parallel proposers on asymmetric evidence — community practice vs project record — with move-level convergence and a divergence research round), Approval (a Remediation Plan reviewed one item at a time, approve/refine/reject), and Ticketization (approved work filed as child tickets under a Janitor Cleanup epic). Never edits code — the plan and tickets are the deliverable. Use when the user wants a maintainability/tech-debt review, asks to "clean up" or "audit" a codebase, or invokes /rebar-janitor.
+description: >-
+  Principal-engineer codebase health pipeline, a deliberate pause between features to buy
+  back optionality. Runs five phases. Discovery, a one-concern-per-subagent fan-out over
+  code debt, smells, architectural decay, separation of concerns, spent optionality, doc
+  gaps, oversized units, AI-generated-code and security smells, and temporal decay,
+  returning finding plus evidence with NO severity. Verification, an independent blue-team
+  pass that scores validity and impact and demands a reachable harm. Remediation, blind
+  parallel proposers on asymmetric evidence (community practice vs project record) with
+  move-level convergence. Approval, a Remediation Plan reviewed one item at a time
+  (approve/refine/reject). Ticketization, approved work filed as child tickets under a
+  Janitor Cleanup epic. Never edits code; the plan and tickets are the deliverable. Use when
+  the user wants a maintainability or tech-debt review, asks to clean up or audit a
+  codebase, or invokes /rebar-janitor.
 ---
 
 # Codebase Health Pipeline — orchestrator
