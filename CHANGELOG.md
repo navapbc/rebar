@@ -8,6 +8,86 @@ Entries are generated from [Conventional Commits](https://www.conventionalcommit
 with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 [docs/release-notes.md](docs/release-notes.md).
 
+## [Unreleased]
+
+## [0.11.0] - 2026-08-06
+
+A feature release centered on first-class Amazon Bedrock support, a substantially
+more complete Jira Data Center backend, and stronger review, completion, and
+git-backed store reliability. This release also raises the Git floor to 2.38 and
+retires the deprecated single-pass `rebar review` operation.
+
+### Added
+
+- **First-class Amazon Bedrock provider** with provider-registry resolution,
+  per-model-class configuration and fallback chains, custom endpoints, prompt-cache
+  accounting, cost reporting, signed provider provenance, and a live parity harness.
+- **Jira Data Center backend maturity** across identities, rich text, comments,
+  labels, priorities, assignees, status transitions, links, Epic Link/sub-task
+  parentage, pagination, rate limits, and retry semantics, backed by Dockerized live
+  contract and capability-map CI.
+- **Project-defined review policy** for plan and code review, including criteria
+  routing, engine-layer enforcement, measurement provenance, phase-boundary checks,
+  acceptance-criteria satisfiability, and explicit no-file-impact declarations.
+- `rebar edit --review` and `rebar claim --review` shortcuts for the
+  edit/review/claim workflow.
+- `rebar doctor` as the supported link/store diagnostic surface, including safe
+  repair dry-runs and stale-channel repair.
+- Search matching by ticket ID, alias, and Jira key.
+- A `bug_trends` metrics lens covering five bug-health dimensions.
+- Provider-parity and structured-output measurement harnesses for live LLM
+  compatibility checks.
+
+### Changed
+
+- Plan review now fast-fails deterministic blocks, reviews only claimable work,
+  batches overlap checks, reuses cacheable prompt prefixes, and handles review-time
+  ticket edits and tool-call exhaustion more predictably.
+- LLM work is routed through explicit `trivial`, `standard`, and `frontier` model
+  classes; local development and the hosted review bot now use Bedrock by default.
+- Jira Cloud and Data Center share a typed backend contract with explicit capability
+  and exception boundaries instead of adapter-specific assumptions.
+- The git-backed ticket store now uses normalized bridge baselines, a rotation
+  sidecar, narrowed snapshots, and a fail-closed store epoch around the one-time
+  tickets-history reclaim.
+- Development installs are reproducible from the committed `uv.lock`.
+- The minimum supported Git version is now **2.38**.
+- The release smoke probe is Python-only; the transitional `probe-rebar.sh` shim was
+  removed.
+- The deprecated single-pass `rebar review` operation was retired in favor of
+  `review-plan`, `verify-completion`, and `review-code`.
+
+### Fixed
+
+- Jira Data Center labeling, TLS validation, credential failures, `Retry-After`
+  handling, stalled pagination, Epic Link clearing, sub-task reparenting, and
+  project-move behavior now fail explicitly and converge correctly.
+- Jira index lag no longer creates duplicate issues, and inbound/outbound parent,
+  assignee, link-deletion, status, and comment synchronization is more symmetric.
+- Ticket-store synchronization now tolerates local Git lock contention, uses explicit
+  refspecs, bounds network Git calls, detects stalled fetches, and classifies
+  SIGPIPE-affected push failures reliably.
+- Completion and close gates now reject unchecked acceptance criteria, fail closed
+  when epic bug screening fails, preserve actionable recovery diagnostics, and avoid
+  signing unpinned local-source reviews.
+- Completion verification now curbs repeated read-only evidence searches, and FAIL
+  remediation names the exact `[operator-attested]` tag required for external evidence.
+- Plan-review attestations survive intended registry transitions while still
+  invalidating on material type, dependency, or configuration changes.
+- LLM routing preserves the selected provider across escalation and recovery,
+  respects per-class endpoints, clamps token budgets to the active model, and avoids
+  empty verifier requests and incompatible structured-output grammars.
+- Code-health analyzers report unavailable data honestly instead of returning
+  synthetic zeroes.
+
+### Security
+
+- Resolved `PYSEC-2026-2132` through the locked Click override.
+- Jira Cloud URLs must use HTTPS, matching the Data Center transport policy.
+- Webhook and rerun tokens are no longer emitted in logs.
+- Release and Bedrock CI permissions, action pins, and publishing provenance checks
+  were tightened.
+
 ## [0.10.1] - 2026-07-24
 
 A maintenance release: plan-review and completion-close gate hardening, a set of
@@ -1265,7 +1345,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.10.1...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/navapbc/rebar/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/navapbc/rebar/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/navapbc/rebar/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/navapbc/rebar/compare/v0.9.0...v0.9.1
