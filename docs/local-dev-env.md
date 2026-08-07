@@ -32,10 +32,38 @@ consumers that must agree: `tests/conftest.py` (the suite preflight), the
 `tests/unit/test_git_version_floor.py` (which fails if any consumer drifts, and fails
 if a merge-tree regression ever acquires skip machinery).
 
+## Prerequisite — provision the venv on the Python CI tests
+
+**Create the venv with `make venv`, not `python3 -m venv`.** `make venv` asks uv for the
+interpreter version this project pins and **fails loudly** if it cannot get one, rather than
+silently building on whatever the host's ambient `python3` resolves to.
+
+That fallback was a real bug (a5f5). `make worktree` used to provision with `python3 -m venv`;
+on a machine whose `python3` had moved to 3.14 while CI tested 3.11–3.13, every worktree the
+repo's own one-command setup produced ran an interpreter CI never exercised — and because
+`requires-python` is only `>=3.11`, `uv sync --locked` accepted it without a word. The result
+is local failures CI cannot reproduce, which teaches everyone to discount local failures in
+general; and its mirror image, a change that breaks on 3.11 but passes on the developer's 3.14
+and only fails after push.
+
+The value is single-sourced in **`.github/python-version.txt`** and read by two consumers that
+must agree: the `venv` target in the `Makefile`, and `tests/unit/test_worktree_python_pin.py`,
+which fails if the pin ever leaves the CI matrix in `.github/workflows/_build-and-test.yml` or
+disagrees with the `actions/setup-python` pins. The full **tested** range is wider than the pin
+— the matrix runs 3.11, 3.12 and 3.13 on Linux — so any of those is a legitimate interpreter to
+develop on; the pin just picks the one a fresh venv gets by default, matching the version the
+lint/type-check lane runs.
+
+```sh
+make venv                    # .venv on the pinned interpreter (uv fetches it if needed)
+uv python install 3.12       # only if make venv reports it cannot find that version
+```
+
 ## TL;DR (canonical setup)
 
 ```sh
 # from the repo root
+make venv                                       # .venv on the CI-pinned Python (.github/python-version.txt)
 make install                                    # uv sync --locked (dev extra) + the pre-commit hook (the commit gate)
 source .venv/bin/activate
 export AWS_PROFILE=...                          # the LLM ops (review-plan, verify-completion) default to Bedrock
@@ -49,9 +77,9 @@ export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock
 
 > **Starting a NEW worktree? One command does the whole setup.** `make worktree name=<branch>`
 > creates a fresh worktree at `../<branch>` (override with `dir=<path>`) branched from a
-> freshly-fetched `origin/main`, then provisions its `.venv` and runs the canonical
-> `make install` above inside it — the one-command form of the manual "fresh worktree + local
-> venv" sequence this repo mandates. Then `cd ../<branch> && source .venv/bin/activate` and
+> freshly-fetched `origin/main`, then provisions its `.venv` on the **pinned** interpreter
+> (`make venv`, see above) and runs the canonical `make install` inside it — the one-command
+> form of the manual "fresh worktree + local venv" sequence this repo mandates. Then `cd ../<branch> && source .venv/bin/activate` and
 > export your provider credentials (AWS by default — see the note above).
 
 > **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
