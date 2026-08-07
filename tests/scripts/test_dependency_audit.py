@@ -427,6 +427,41 @@ def test_advisory_alert_closes_the_ticket_when_the_advisory_clears(mod: ModuleTy
     assert transitions[0][2:5] == ["abcd-0000-1111-2222", "open", "closed"]
 
 
+def test_advisory_alert_close_argv_is_accepted_by_the_real_transition_parser(
+    mod: ModuleType,
+) -> None:
+    """The auto-close argv must parse against the LIVE `transition` flag parser.
+
+    Asserting only the positional slots (as the test above did on its own) is what let a
+    retired flag spelling survive here: ticket 24f7 renamed `transition`'s close-gate escape
+    hatch, this script kept emitting the old name, and nothing in the suite compared the
+    emitted argv to the parser that has to accept it. The advisory canary is unattended and
+    this branch only runs when advisories clear, so the failure would have surfaced as a red
+    scheduled job, not as a test.
+
+    Parsing with the real `_parse_flags` — rather than matching the flag's spelling as a
+    string — means a future rename fails HERE, at the call site, whatever it is renamed to.
+    """
+    from rebar._commands.transition import _parse_flags
+
+    runner = FakeRunner(
+        {("rebar", "list"): (0, json.dumps([{"ticket_id": "abcd-0000-1111-2222"}]), "")}
+    )
+    env = {"BLOCKING": "false", "ADVISORY_IDS": "", "RUN_URL": ""}
+    assert mod.main(["advisory-alert"], runner=runner, environ=env, now_epoch=0) == 0
+
+    argv = _rebar_calls(runner, "transition")[0]
+    reason, force_reason, close_class, _caused_by, _ref = _parse_flags(argv[5:])
+
+    # The bug close needs a class, and the gate bypass needs a non-empty reason. A dropped
+    # or misspelled flag is silently skipped by this parser, so both must be asserted.
+    assert close_class == "env_integration"
+    assert force_reason, "the close-gate bypass must carry a reason"
+    assert reason, "the transition reason must survive alongside the force reason"
+    # 24f7 split these into INDEPENDENT slots; neither may swallow the other.
+    assert reason != force_reason
+
+
 def test_advisory_alert_refuses_to_file_a_hollow_ticket(mod: ModuleType) -> None:
     runner = FakeRunner({("rebar", "list"): (0, "[]", "")})
     env = {"BLOCKING": "true", "ADVISORY_IDS": "  ", "RUN_URL": ""}
