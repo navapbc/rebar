@@ -91477,9 +91477,17 @@
       "updated_at": "2026-07-18T18:19:18Z"
     },
     "c1fd-be12-44b7-4d31": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nUnder raised plan-review Pass-1 concurrency (worker cap 12+), a review run aborts with a non-deterministic `FileNotFoundError` on the ticket-tracker snapshot cache:\n\n```\nFileNotFoundError: [Errno 2] No such file or directory:\n'.../rebar-gate-snapshots/tickets-<sha>/.tickets-tracker/<id>/.cache.json.tmp'\n-> '.../.tickets-tracker/<id>/.cache.json'\n```\n\n## Where / mechanism\nThe atomic-rename cache write (`.cache.json.tmp` \u2192 `.cache.json`) in the gate-snapshot ticket-tracker cache is not safe under concurrent access. The Pass-1 finder fan-out (`src/rebar/llm/plan_review/pass1.py`) runs criterion finders in a `ThreadPoolExecutor`; at the default cap of 6 the race is not observed, but at 12 multiple finder threads read/write the same per-ticket `.cache.json` and one thread's temp file is unlinked/renamed out from under another \u2192 the rename source is missing.\n\n## How discovered\nObserved while experimenting with the Pass-1 worker cap as a wall-clock lever (bug 1e88). At cap=12 (Anthropic) the run failed here after ~947s; at the default cap=6 it does not reproduce. This is a latent concurrency-safety defect, not caused by the experiment \u2014 it just becomes reachable when the cap is raised.\n\n## Acceptance Criteria\n- [ ] The ticket-tracker snapshot cache write is concurrency-safe (per-process/per-thread temp filename, or a lock) so concurrent readers/writers cannot race the tmp\u2192final rename.\n- [ ] A regression test drives concurrent cache access (>=8 threads) against one ticket and asserts no `FileNotFoundError`.\n- [ ] Raising the Pass-1 worker cap does not surface this failure.\n\n## Notes\nBlocks safely raising the Pass-1 concurrency cap (a candidate wall-clock lever). On its own the cap raise gives no wall-clock benefit (see bug 1e88 L2/L3 \u2014 the finders are not the critical path), so this is not urgent for latency, but it is a real correctness hazard for any future concurrency increase.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Ticket-tracker snapshot cache tmp->final rename races under concurrent plan-review fan-out"
+      },
       "created_at": "2026-08-07T15:55:53Z",
       "jira_id": "4587555",
       "jira_key": "REB-2626",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T15:55:56Z"
     },
