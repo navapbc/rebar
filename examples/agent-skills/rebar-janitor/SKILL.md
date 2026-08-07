@@ -1,6 +1,6 @@
 ---
 name: rebar-janitor
-description: Principal-engineer codebase health pipeline — a deliberate pause-between-features to buy back optionality. Runs five phases: Discovery (one-concern-per-subagent fan-out over code debt, smells, architectural decay, separation of concerns, spent optionality, doc gaps, oversized units, AI-generated-code & security smells, and temporal decay — returns finding+evidence with NO severity), Verification (an independent blue-team pass that scores validity + impact and drops low-confidence / low-value findings), Remediation (blind parallel proposers with move-level convergence + an OSS-research tiebreak), Approval (a Remediation Plan reviewed one item at a time, approve/refine/reject), and Ticketization (approved work filed as child tickets under a Janitor Cleanup epic). Never edits code — the plan and tickets are the deliverable. Use when the user wants a maintainability/tech-debt review, asks to "clean up" or "audit" a codebase, or invokes /rebar-janitor.
+description: Principal-engineer codebase health pipeline — a deliberate pause-between-features to buy back optionality. Runs five phases: Discovery (one-concern-per-subagent fan-out over code debt, smells, architectural decay, separation of concerns, spent optionality, doc gaps, oversized units, AI-generated-code & security smells, and temporal decay — returns finding+evidence with NO severity), Verification (an independent blue-team pass that scores validity + impact, demands a reachable harm, and checks the project's own record for a prior decision), Remediation (blind parallel proposers on asymmetric evidence — community practice vs project record — with move-level convergence and a divergence research round), Approval (a Remediation Plan reviewed one item at a time, approve/refine/reject), and Ticketization (approved work filed as child tickets under a Janitor Cleanup epic). Never edits code — the plan and tickets are the deliverable. Use when the user wants a maintainability/tech-debt review, asks to "clean up" or "audit" a codebase, or invokes /rebar-janitor.
 ---
 
 # Codebase Health Pipeline — orchestrator
@@ -25,10 +25,11 @@ ratio, rising churn) — not just static snapshots. Weight detectors toward rece
 
 ```
 Phase 1 Discovery ─▶ Phase 2 Verification ─▶ Phase 3 Remediation ─▶ Phase 4 Approval ─▶ Phase 5 Ticketization
- (find+evidence,      (independent blue-team:   (2 blind parallel        (one item at a       (epic + child
-  NO severity)         validity + impact;        proposers; move-level     time; plain,         tickets with
-                       drop below floors)        convergence; OSS          positive; approve/   ACs; generic
-                                                 tiebreak)                 refine/reject)       tracker)
+ (find+evidence,      (independent blue-team:   (2 blind proposers,      (one item at a       (epic + child
+  NO severity)         validity + impact +       asymmetric evidence:     time; plain,         tickets with
+                       harm-reachable +          community vs project;    positive; approve/   ACs; generic
+                       prior-decision intent;    move-level convergence;  refine/reject)       tracker)
+                       drop below floors)        divergence → research)
 ```
 
 ## How to run — progressive disclosure
@@ -41,13 +42,13 @@ not load a later phase's file until you reach it — each phase file holds only 
 |---|---|---|
 | 1 — Discovery    | `phases/discovery.md`     | A pooled finding + evidence list (NO severity) |
 | 2 — Verification | `phases/verification.md`  | Scored survivors + a persisted audit record |
-| 3 — Remediation  | `phases/remediation.md`   | A Remediation Plan (converged / OSS-adopted / no-consensus items) |
+| 3 — Remediation  | `phases/remediation.md`   | A Remediation Plan (converged / research-resolved / no-consensus items) |
 | 4 — Approval     | `phases/approval.md`      | The approved / refined item set |
 | 5 — Ticketization| `phases/ticketization.md` | A Janitor Cleanup epic + child tickets |
 
 Scale ceremony to the request: a quick check can merge concerns into fewer Discovery agents and keep
 Remediation light; "thorough"/"comprehensive" warrants the full fan-out, the temporal pass, and the
-full convergence + OSS-tiebreak.
+full convergence + the divergence research round.
 
 ## Operating principles (cross-cutting — hold these across every phase)
 
@@ -66,9 +67,16 @@ full convergence + OSS-tiebreak.
 - **Spend risk wisely.** Any remediation is a change, and every change carries regression, review,
   and opportunity cost. Only findings that are both **real** (validity) and **materially worth it**
   (impact) survive to become work. Phase 2's floors encode this.
-- **Blind parallelism makes convergence mean something.** Where two subagents cross-check each other
-  (Verification is independent of Discovery; the two remediation proposers are blind to each other),
-  they must not see each other's output.
+- **Blind parallelism makes convergence mean something — but only across different evidence.**
+  Where two subagents cross-check each other (Verification is independent of Discovery; the two
+  remediation proposers are blind to each other), they must not see each other's output. Blindness
+  alone decorrelates *wording*, not *priors*: two agents reading identical evidence share their blind
+  spots, so their agreement measures prompt stability. Phase 3 therefore gives its proposers
+  **different questions and different evidence** — community practice vs the project's own record.
+- **The code says what it does; the record says why.** Discovery, Verification and Remediation all
+  read code. Without a deliberate check, nobody reads the tickets, ADRs and commit history — and the
+  pipeline audits a project while ignoring its memory. Phase 2's `prior_decision` check exists
+  because a finding can be entirely true and its obvious remediation still wrong.
 - **You may install and run read-only tools** (ast-grep, semgrep, cloc/tokei, git) to find problem
   areas. Document exactly what you ran.
 
@@ -95,8 +103,13 @@ the user where to put artifacts before writing.
 - Tune size thresholds to the language and codebase norms — a 400-line Go file ≠ a 400-line config.
   State the thresholds you used.
 - Prefer ast-grep/semgrep for structural patterns; use `rg` for text/comment scans.
-- The Phase-2 floors (`validity ≥ 0.75`, `impact ≥ 0.5`) and the Phase-3 convergence rule
-  (`same_approach` OR `same_end_state`) are fixed by design — this is a personal skill with no
-  post-launch tuning loop.
+- The Phase-2 floors (`validity ≥ 0.75`, `impact ≥ 0.5`), the `prior_decision` validity penalty
+  (`-0.10`), and the Phase-3 convergence rule (`same_approach` OR `same_end_state`) are fixed by
+  design — this is a personal skill with no post-launch tuning loop.
+- The convergence rule was re-examined against the 2025-26 multi-agent-conformity literature and
+  **kept**. That work measures agreement across *identical* inputs (sycophancy, peer pressure, modal
+  adoption); Phase 3's proposers are blind to each other AND hold different evidence bases, so their
+  agreement is triangulation rather than conformity. Do not "fix" this by citing that literature
+  without checking the input-decorrelation premise first.
 - This skill never edits code. It produces a verified audit record, an approved Remediation Plan, and
   tracked tickets; the edits happen later, when someone works a ticket.

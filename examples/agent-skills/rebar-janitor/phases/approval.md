@@ -9,8 +9,15 @@ For each item, write a short **situation → move → why it improves things**:
 
 - *the situation* — one sentence on what's costing us (finding + why it matters), with the citation.
 - *the move* — one sentence on what we'd do (the remediation), framed as the improvement it buys.
-- *provenance* — "both proposers agreed" / "adopted from OSS: `<projects>`" / "no consensus — pick
-  one:" then the alternatives.
+- *provenance* — "both proposers agreed" / "resolved by research: `<record cited>`" / "no consensus —
+  pick one:" then **both positions with their evidence and buckets**, never a synthesised winner.
+- *prior decision* — **whenever Phase 2 emitted a `prior_decision`, surface it here**: the ticket /
+  ADR / commit, what was decided, and — for a move that reverses it — what evidence has changed since.
+  The user decides whether the past decision still holds; the pipeline's job is to make sure they are
+  never asked to approve a reversal without knowing one is being proposed.
+
+Also flag any item Phase 2 reclassified as **`HARDENING`** rather than `DEFECT` (no reachable harm
+was demonstrated). These may still be worth doing — they must simply never be presented as bugs.
 
 Use positive framing for the directive. Do not dump the raw finding/evidence blob — distill it.
 
