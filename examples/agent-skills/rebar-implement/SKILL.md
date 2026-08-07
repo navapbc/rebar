@@ -3,14 +3,16 @@ name: rebar-implement
 description: >-
   Autonomously executes a decomposed rebar epic under strict TDD held-out discipline,
   landing each code change as a stacked review. Takes a rebar ticket id or alias, verifies
-  it has been decomposed into children (stops otherwise), creates a fresh worktree from
+  it is executable — either decomposed into children, or a single story/task leaf with a
+  recorded file impact (stops only if it is neither) — creates a fresh worktree from
   origin/main, claims the epic, then recurses the parent/child graph, claiming, completing,
   and closing each ticket down to the leaves. Every code leaf is built RED-first; the
   orchestrator authors the behavioral/contract tests (happy-path, edge, E2E) but hands the
   implementation subagent only the happy-path case, holding out edge and E2E to defeat
   change-detector tests and over-fitting, then runs the full suite. Each code leaf becomes a
   stacked change closed once it passes; parents close when their children do; the whole
-  stack lands on main once the epic closes. Landing defers to the project docs, defaulting
+  stack lands on main once the epic closes. A childless story/task with a file impact runs as
+  a single code leaf and lands as one change. Landing defers to the project docs, defaulting
   to the rebar/Gerrit flow. Use when the user wants to implement, execute, or work a
   decomposed epic or ticket tree, or invokes /rebar-implement.
 ---
@@ -69,65 +71,6 @@ but never skip the RED-before-code ordering or the claim/close bookkeeping.
   implementation handoffs, validations, pushes, closes, and any deviation — so the run is
   resumable at any point.
 
-## Model tiering (conserve tokens without weakening the oracle)
-
-Run the expensive judgment on a strong model and delegate bounded, verifiable execution to a
-cheaper one. This is safe here **only because you (the orchestrator) own the oracle the worker
-never sees** — keep it that way. Test-authoring (4b) and held-out validation (4e) are **never**
-routed to a cheaper tier; the tiering below applies only to the *implementer* subagent and to
-cheap-shaped discovery leaves.
-
-**Capability tiers, not product names.** This skill names *roles*; you map each to a concrete
-model in your harness. The two example columns drift across releases and are **not**
-authoritative — pick the current equivalent tier in your harness, and other harnesses map to
-their own three tiers.
-
-| Tier | Role | Claude Code (example) | Codex CLI (example) |
-|---|---|---|---|
-| **Strong / coordinator** | decomposition, oracle design, held-out validation, landing — *this is you* | Opus (session model) | GPT-5.5, or GPT-5.3-Codex for agentic coding |
-| **Standard / mid** | implement from a clear, test-pinned spec; multi-file integration | Sonnet | GPT-5.4 |
-| **Cheap / fast** | discovery, grep, symbol lookup, transcription-level edits | Haiku | GPT-5.4-mini |
-
-- **You stay on the strong tier for everything you do yourself:** Phase 0–3 driving, oracle
-  design (4a/4b), held-out validation + mutation/refactoring-litmus (4e), pre-flight (4f), and
-  landing (Phase 6).
-- **Name the tier on every dispatch.** In *both* harnesses an unset model **inherits the
-  orchestrator/session model** — the strong, expensive one — silently defeating this section.
-  - *Claude Code:* set `model:` in the subagent's `.claude/agents/*.md` frontmatter
-    (`opus`/`sonnet`/`haiku`, a full id, or `inherit`) or the model field on dispatch. Avoid the
-    session-wide `CLAUDE_CODE_SUBAGENT_MODEL` override — it also demotes the planner.
-  - *Codex CLI:* set the worker's model in its `.codex/agents/*.toml` (or the spawn config), and
-    bound fan-out with `max_threads` / `max_depth` in `config.toml`. (Codex auto-inherits the
-    whole `AGENTS.md` into every worker; that pushes against the curated-minimal context a cheap
-    worker needs to one-shot, so keep the leaf brief tight rather than leaning on inheritance.)
-- **Best-effort, hold-out-preserving fallback.** If your harness can't reliably pin a worker to a
-  cheaper tier (e.g. Codex per-subagent model selection has regressed in some builds and
-  task-level routing is still maturing), **dispatch the implementer as a normal *separate*
-  subagent with no model set — it inherits the strong tier, so hold-out is preserved and only the
-  savings are forgone.** Do **not** collapse to writing the leaf inline yourself: inline means the
-  oracle's author writes the implementation, which destroys the held-out separation the skill
-  rests on. Reserve orchestrator-*inline* for the two places hold-out is already deliberately
-  traded away — a genuinely tiny leaf that doesn't warrant a subagent, and the terminal escalation
-  rung after a real subagent has failed (4e). Hold-out is independent of the worker's *tier*, but
-  it depends on there being a *separate implementer*; any inline path forgoes hold-out and relies
-  on the mandatory 4e mutation + refactoring-litmus teeth-check as its compensating control.
-- **Tiering applies only when a subagent is already warranted** (per "don't manufacture subagents
-  a small leaf doesn't warrant"). It never mandates spawning one to book savings; a small leaf may
-  still be done inline on the strong tier.
-- **Never let two workers edit the same working tree concurrently.** The skill's per-leaf worktree
-  isolation already satisfies this for sequential work; only parallelize across worktrees when the
-  leaves are genuinely file-disjoint (Codex enforces the same rule via per-worker sandboxes).
-- **Log the tiering decisions** to the `session_log`, per code leaf: the tier chosen and why, each
-  held-out validation outcome, each escalation, and the subagent's reported attempt count —
-  *including on successful cheap-tier leaves*. The escalation state must survive context
-  compaction, and the session log is the only error-rate monitor a stateless-prose skill has; a
-  cheap leaf that passed but took many attempts is evidence a one-shot standard would have been
-  cheaper, and a pattern of that nudges similar future leaves to default up a tier.
-- **Where the savings live:** wide epics with many code leaves (N standard-tier implementations vs
-  N strong ones, at near-zero quality risk because validation is strong-tier-owned). Small trees
-  see little — the strong-tier orchestrator (oracle authoring, validation, landing) dominates this
-  skill's cost and cannot be cheapened, so don't expect whole-workflow 30–70% savings here.
-
 ## Discover the project's rules first (do this before anything else)
 
 This skill works across projects, so **do not assume rebar-repo specifics — discover them.**
@@ -161,22 +104,37 @@ landing method you're using in the session log at kickoff.
 
 ---
 
-# Phase 0 — Preflight gate (verify the epic is executable)
+# Phase 0 — Preflight gate (verify the ticket is executable)
 
-Resolve the input and confirm it is a decomposed epic. **Stop cleanly if it is not** — this
-skill executes an existing decomposition; it does not create one.
+Resolve the input and confirm it is executable — either a decomposed epic, or a single
+`story`/`task` leaf that carries a recorded file impact. **Stop cleanly if it is neither** —
+this skill executes existing work; it does not create a decomposition.
 
 1. **Resolve the id.** `rebar resolve <id_or_alias>` → canonical id. If it does not resolve,
    **stop**: report that the ticket does not exist.
 2. **Confirm it exists.** `rebar exists <id>` (exit 0). Read it: `rebar show <id>`.
-3. **Confirm it has children.** `rebar list-descendants <id>` (BFS, bucketed by type). If the
-   ticket has **no children**, **stop**: report that the ticket has not been decomposed, and
-   suggest `/rebar-brainstorm` or decomposition as the prerequisite. Do not invent children.
+3. **Confirm it is executable.** `rebar list-descendants <id>` (BFS, bucketed by type). Two
+   executable shapes:
+   - **It has children** → treat it as an epic/interior ticket and execute the whole tree
+     (the rest of this skill's default path).
+   - **It has no children but is a `story` or `task` whose file impact is recorded**
+     (`rebar get-file-impact <id>` returns a non-empty array) → this is a legitimate **single
+     code leaf**. Do **not** stop: execute it directly as one code-changing leaf (Phase 4),
+     land it as a single change, and close it (Phase 5). The file impact is the acceptance the
+     completion gate needs, and it stands in for the decomposition this skill would otherwise
+     require.
+
+   Otherwise — **no children and no recorded file impact** (or an `epic`/`idea` with no
+   children) — **stop**: report that the ticket has not been decomposed, and suggest
+   `/rebar-brainstorm` or decomposition (or, for a story/task, recording its file impact with
+   `rebar set-file-impact`) as the prerequisite. Do not invent children.
 4. **Read the shape of the tree.** `rebar deps <id>` and `rebar list-descendants <id>` together
    give you the parent/child hierarchy and any `blocks`/`depends_on` ordering among siblings.
-   Note which leaves are code-changing vs. non-code (docs, research, config, spikes).
+   Note which leaves are code-changing vs. non-code (docs, research, config, spikes). (For a
+   single-leaf run this is trivially the one ticket.)
 
-Only when the ticket exists **and** has children do you proceed. State the tree you're about to
+Only when the ticket exists **and** is executable — has children, or is a story/task leaf with
+a recorded file impact — do you proceed. State the tree (or the single leaf) you're about to
 execute (ticket count, depth, code vs. non-code leaves) before continuing.
 
 # Phase 1 — Environment (a fresh worktree from origin/main)
@@ -213,6 +171,11 @@ that genuinely improve the plan (and justify skipping the rest) — not a mandat
 still-`open` parent, running *that* parent's plan-review gate too — so earning the epic's
 attestation now avoids a surprise block when you claim its first leaf. Log the claim.
 
+> **Single-leaf run.** When Phase 0 resolved a childless story/task, "the epic" *is* that
+> leaf: claim it here, then execute it once as the code leaf in Phase 4 (there is no tree to
+> recurse and no stack to build). Phases 3, 5, and 6 collapse to that one change — skip the
+> per-child recursion and land the single change once its gates are green.
+
 # Phase 3 — Recurse the tree (depth-first, dependency-ordered)
 
 Complete the epic by walking its children. For each child: **claim it, complete it, close it** —
@@ -232,9 +195,8 @@ For each ticket, dispatch by kind:
   children, then close it once they're all closed (Phase 5).
 - **Non-code leaf** (docs, research, config-only, spike — no source change): claim it, do the
   work, record the outcome in the session log, and close it (Phase 5). Do **not** create a
-  review change for it. **Tier it (see Model tiering):** delegate research/discovery/grep-shaped
-  leaves to a **cheap/fast** subagent; keep judgment-heavy non-code work inline on the strong
-  tier. Don't run a pure "research" leaf on the strong orchestrator by omission.
+  review change for it. Delegate research/discovery/grep-shaped leaves to a subagent; keep
+  judgment-heavy non-code work inline.
 - **Code-changing leaf:** claim it, then run the **TDD held-out loop** (Phase 4), then land it
   as a stacked change and close it (Phases 4→5).
 
@@ -249,13 +211,11 @@ writes the code and never sees the full oracle.
 ### 4a. Derive the specification
 
 Before deriving it, work from **`test-design.md` in this skill's directory** (the shared
-test-design standard) for oracle design: the existing-coverage inventory, tier selection,
-oracle completeness, and the gating proof. Then, from the ticket's **acceptance criteria and
+test-design standard) for oracle design: the existing-coverage inventory, oracle
+completeness, and the gating proof. Then, from the ticket's **acceptance criteria and
 contracts** (and any interface/spec it cites), enumerate the intended behavior: the happy
 path, the edge/boundary/error cases, and the end-to-end behavior a user would observe. This
-enumeration is the test plan. (The existing-coverage *search* is cheap-shaped, but deciding
-*what to test* from it is strong-tier judgment — so keep 4a inline on the strong tier by
-explicit choice, not by omission.)
+enumeration is the test plan.
 
 **Surface-parity census.** When the change touches an operation reachable through **more than
 one parallel surface**, enumerate five slots — **CLI command / MCP-or-API tool / library facade
@@ -310,20 +270,17 @@ the behavior until the happy-path test(s) pass, self-verifying against those and
 scratch checks. It must not weaken tests or add capability beyond the ticket's scope. It never
 sees the edge or E2E tests.
 
-**Pick the tier (see Model tiering).** Default the implementer to the **standard/mid tier** — it
-implements *against a spec*, not by transcription. Drop to the **cheap/fast tier only** when the
-happy-path test fully pins the code and the change is 1–2 files (transcription-level). Name the
-tier explicitly on dispatch — an unset model inherits your strong session tier and erases the
-saving. Require the subagent to report its attempt count in its handoff.
+Require the subagent to report its attempt count in its handoff — a high count is early
+signal the test or the ticket is off.
 
 **Ship the constraints the oracle can't see.** The behavioral tests don't cover module-size or
-lint/format — those surface only at 4f/CI, and a cheaper model is the likely offender. So the
+lint/format — those surface only at 4f/CI. So the
 brief **must carry the project's binding structural/style constraints**: quote the project's
 *current* module-size limit from its docs (rebar single-sources the hard cap in
 `.github/module-size-limit.txt`; don't hardcode a number that can drift — target 200–500 LOC,
 split along existing call-graph seams) plus its lint/format rules. Constraints-in-brief is the
 default; reserve orchestrator-fixes-post-handoff for **trivial lint autofix only**, never
-module-size restructuring (which would put you back in the editor and erode the saving). On
+module-size restructuring (which would put you back in the editor). On
 Codex the `AGENTS.md` conventions are also inherited by every worker — restate them in the brief
 anyway: inheritance carries standing conventions, the brief carries the leaf-specific spec.
 
@@ -344,32 +301,27 @@ The subagent done, **you** restore the full test set and run it (happy + edge + 
   discipline: revert the relevant code, fix the test, re-confirm it RED for the right reason,
   then re-apply the code and confirm GREEN.
 
-### 4e-bis. Tier escalation — when a cheaper implementer isn't enough
+### 4e-bis. Escalation — when re-dispatch isn't enough
 
-Distinguish normal held-out iteration (do **not** escalate) from model-weakness signal
-(escalate a tier). Key on the **re-dispatch / validation-failure cycles you actually observe**,
-not the subagent's internal turn count (which you can't see).
+Distinguish normal held-out iteration (do **not** treat as failure) from a genuine block. Key
+on the **re-dispatch / validation-failure cycles you actually observe**, not the subagent's
+internal turn count (which you can't see).
 
-- **Do NOT escalate** on a first held-out **edge/E2E** failure — that is the oracle working as
-  intended (the implementer legitimately couldn't see the case). Describe the missing behavior
-  and re-dispatch on the **same** tier (4e).
-- **Do NOT escalate** on your own mutation / refactoring-litmus findings — a tautological test
-  caught by mutation, or a change-detector caught by the litmus, is a **test defect you fix**
-  (strong-tier test-authoring work), not an implementer failure. Escalation keys only on
+- **Do NOT treat as a block** a first held-out **edge/E2E** failure — that is the oracle working
+  as intended (the implementer legitimately couldn't see the case). Describe the missing
+  behavior and re-dispatch (4e).
+- **Do NOT treat as a block** your own mutation / refactoring-litmus findings — a tautological
+  test caught by mutation, or a change-detector caught by the litmus, is a **test defect you
+  fix** (test-authoring work), not an implementer failure. A genuine block keys only on
   **held-out behavioral tests going red against the implementation**.
-- **Escalate a tier when:**
+- **Take the leaf yourself when:**
   1. the implementer cannot make the **happy-path** test pass; or
   2. it fails **again after** you described the missing behavior; or
-  3. **[cheap tier]** a cheap-tier leaf's held-out behavioral validation fails even **once** —
-     the "fully-pins-the-code" premise is disproved; go straight to standard, don't burn a second
-     cheap cycle; or
-  4. **repeated pre-flight/structural failures** (lint, format, module-size) persist after a
-     corrective re-dispatch — model-weakness the behavioral oracle can't see. For a **cheap-tier**
-     leaf, a **first** structural failure against a limit the brief already named (e.g. blowing
-     the module-size cap) disproves the premise the same way → escalate immediately.
-- **Terminal rung.** standard→strong means **you take the leaf yourself** — as a *separate*
-  strong-tier subagent (hold-out preserved) or, only for a tiny leaf, inline. If the **strong
-  tier also can't make it pass, that is not a model problem** — the test or the ticket is likely
+  3. **repeated pre-flight/structural failures** (lint, format, module-size) persist after a
+     corrective re-dispatch — a weakness the behavioral oracle can't see.
+- **Terminal rung.** Taking the leaf yourself means dispatching it as a *separate* subagent
+  (hold-out preserved) or, only for a tiny leaf, inline. If it **still can't be made to pass,
+  that is not a model problem** — the test or the ticket is likely
   wrong: **stop and report blocked** (Reporting + session log). This skill is autonomous, so the
   blocked path is the substitute for a human-escalation rung.
 
@@ -418,7 +370,8 @@ comment accuracy) are fixed directly — do **not** manufacture change-detector 
 
 **Residual-gap disposition sweep (before the epic closes).** Walk the enumerable gap sources
 this run produced — the 4a census slots marked out-of-scope, the 4b cases you excluded from the
-test set, any 4e-bis escalation compromises (a leaf landed on a weaker validation than planned),
+test set, any 4e-bis escalation compromises (e.g. a leaf you took over inline, forgoing
+hold-out, or that landed on a weaker validation than planned),
 and 4g advisory findings you deferred — and give each item exactly one disposition: **filed**
 (a ticket, linked `discovered_from` its origin), **accepted** (+ one-line reason), or **fixed in
 scope** (+ where). "None" is a legitimate answer when the checklist sources are empty; an
@@ -473,7 +426,8 @@ Restate the outcome in your own message text (tool output isn't a completion sig
   "none").
 - **Handoff** — the session log id, so the trail is resumable.
 
-If you **stopped at preflight** (ticket missing or not decomposed), say so plainly and name the
+If you **stopped at preflight** (ticket missing, or neither decomposed nor an executable
+story/task leaf with a recorded file impact), say so plainly and name the
 prerequisite. If you're **blocked** (a gate you can't clear, a claim conflict, an approval you
 don't have), state the specific blocker and the current state — don't present a partial land as
 done.
