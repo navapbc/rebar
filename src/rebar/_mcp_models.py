@@ -30,8 +30,9 @@ try:
 
     class _Out(BaseModel):
         # Permissive base: extra fields allowed so the evolving event-sourced
-        # shapes never break a tool. Each model mirrors a src/rebar/schemas file;
-        # the cross-interface schema tests pin both to the canonical schema.
+        # shapes never break a tool. Each model corresponds to a src/rebar/schemas
+        # file; the drift gate ``python -m rebar.schemas.check_mcp_models --check``
+        # (CI-enforced) fails if a mirrored model under-declares a schema property.
         model_config = ConfigDict(extra="allow")
 
     class _HealthOut(_Out):
@@ -182,13 +183,13 @@ try:
         passed: bool | None = None
 
     class BridgeFsckOut(_Out):
-        # Mirrors src/rebar/schemas/bridge_fsck.schema.json.
         orphaned: list = []
         duplicates: list = []
         stale: list = []
+        binding_drift: dict = {}
 
     class SignResultOut(_Out):
-        # Mirrors src/rebar/schemas/sign_result.schema.json. Contract phase (story 8f1d): the
+        # Contract phase (story 8f1d): the
         # dual-shape window is closed — `sign_manifest` mints ONLY the op-cert record, so envelope/
         # principal are required and the legacy HMAC fields (signature/key_id) are retired
         # (kept nullable only so a reader tolerates a pre-contract record).
@@ -207,14 +208,13 @@ try:
         key_id: str | None = None
 
     class VerifySignatureResultOut(_Out):
-        # Mirrors src/rebar/schemas/verify_signature_result.schema.json.
         ticket_id: str
-        manifest: list[str] = []
+        manifest: list[str]
         step_count: int
-        algorithm: str | None = None
-        key_id: str | None = None
-        signed_at: int | None = None
-        head_sha: str | None = None
+        algorithm: str | None
+        key_id: str | None
+        signed_at: int | None
+        head_sha: str | None
         verified: bool
         verdict: str
         reason: str
@@ -229,8 +229,7 @@ try:
         version: str | None = None
 
     class GroundingInfoOut(_Out):
-        # Mirrors src/rebar/schemas/grounding_info.schema.json — the STATIC
-        # code-grounding oracle integration contract (epic 8f6c / S5).
+        # The STATIC code-grounding oracle integration contract (epic 8f6c / S5).
         dimensions_version: int
         dimensions: list[str] = []
         reference_kinds: list[str] = []
@@ -241,9 +240,9 @@ try:
         backends: list[GroundingBackendOut] = []
 
     class WorkflowRunOut(_Out):
-        # Mirrors src/rebar/schemas/workflow_run.schema.json — one permissive model
-        # for both get_workflow_status and get_workflow_result (extra=allow covers
-        # the fields each adds: steps vs outputs/terminal_output).
+        # One permissive model for both get_workflow_status and get_workflow_result
+        # (extra=allow covers the fields each adds: steps vs outputs/terminal_output;
+        # those per-call fields are the documented PERMISSIVE_OMISSIONS in the drift gate).
         run_id: str
         status: str
         ticket_id: str | None = None
