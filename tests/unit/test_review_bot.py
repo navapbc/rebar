@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import subprocess
 import time
 
 import pytest
@@ -1892,3 +1894,85 @@ def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
     # Next pass: still vote-less → re-driven (the attempts row did not suppress it).
     asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
     assert store.attempt_count("rebar~main~Igap", "rev-gap") == 2
+
+
+# ── tree↔vote binding (ticket da31-f9d1) ─────────────────────────────────────
+def _one_commit_repo(path, filename="f.txt") -> str:
+    """A real one-commit git repo at ``path``; returns its full HEAD sha."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True, capture_output=True)
+    (path / filename).write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(path), "add", filename], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "user.name=t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            filename,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    out = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip()
+
+
+class CloningGerrit(FakeGerrit):
+    """A ``FakeGerrit`` whose ``clone_change_ref`` materializes a REAL checkout at ``dest``.
+
+    It reproduces the shape of the production clone: the change tree is checked out FIRST, and
+    a second fetch (the tickets branch, which the real ``clone_change_ref`` pulls from the
+    mirror) then lands on top — so ``dest``'s ``FETCH_HEAD`` points at the TICKETS commit while
+    its ``HEAD`` stays on the change. Any tree↔vote binding that read ``FETCH_HEAD`` would
+    therefore mismatch here even though nothing is wrong."""
+
+    def __init__(self, change_repo, tickets_repo, **kwargs):
+        super().__init__(**kwargs)
+        self._change_repo = change_repo
+        self._tickets_repo = tickets_repo
+
+    def clone_change_ref(self, change_number, revision_ref, dest):
+        shutil.copytree(str(self._change_repo), dest, dirs_exist_ok=True)
+        subprocess.run(
+            ["git", "-C", dest, "fetch", "-q", str(self._tickets_repo), "HEAD"],
+            check=True,
+            capture_output=True,
+        )
+        return dest
+
+
+def test_voter_votes_when_the_cloned_tree_is_the_voted_revision(monkeypatch, tmp_path):
+    """Happy path for the tree↔vote binding: the tree the reviewer was handed IS the revision
+    the vote attaches to, so the review proceeds and the vote is cast exactly as before.
+
+    This is the false-mismatch guard the binding must not trip: the clone leaves a divergent
+    ``FETCH_HEAD`` behind (the tickets fetch), the change sha is a full 40-hex name, and the
+    review must still reach Gerrit."""
+    change_sha = _one_commit_repo(tmp_path / "change")
+    _one_commit_repo(tmp_path / "tickets", filename="tickets.txt")
+    _patch_review(monkeypatch, [])  # clean → PASS
+    g = CloningGerrit(tmp_path / "change", tmp_path / "tickets")
+    store = DedupStore(str(tmp_path / "v.db"))
+
+    res = asyncio.run(
+        voter.review_and_vote(
+            _event(revision=change_sha), config=_cfg(tmp_path), gerrit=g, dedup=store
+        )
+    )
+
+    assert res["status"] == "voted"
+    assert res["vote_value"] == 1
+    assert g.votes and g.votes[0][1] == change_sha and g.votes[0][2] == 1
