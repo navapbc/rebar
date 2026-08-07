@@ -106,7 +106,14 @@ def explicit_completion_criteria(ticket: dict[str, Any]) -> list[str]:
 
 
 def physical_context_ceiling(model: str | None) -> int:
-    """The max recovery context in chars: the resolved model's own window * 2 chars/token."""
+    """The max recovery context in chars: the resolved model's own window * 2 chars/token.
+
+    Story a9dd note: the completion gate now pre-loads the ticket's declared file_impact
+    contents + referencing-commit diffs into a ``<prefetched_file_contents>`` section that is
+    part of the assembled ``context`` string — so those prefetch bytes are ALREADY counted by
+    ``_validate_recovery_inputs``'s ceiling check below. ``gate_ops`` pre-trims that section to
+    THIS ceiling via ``completion_prefetch.fit_within_ceiling`` before assembling the context,
+    so an oversize prefetch is trimmed at the gate rather than tripping this validator here."""
     from rebar.llm.model_classes import own_window_tokens
 
     return own_window_tokens(model) * _CONTEXT_CHARS_PER_TOKEN

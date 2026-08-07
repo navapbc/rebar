@@ -139,9 +139,32 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     # overrode the close gate's graph=False and made an epic close re-verify every descendant,
     # blowing the step budget.
     from rebar.llm import operations
+    from rebar.llm.workflow.completion_prefetch import PrefetchSpec, fit_within_ceiling
 
     graph = bool(ctx.inputs.get("graph"))
-    context, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
+    # Story a9dd: pre-load the ticket's declared file_impact contents + referencing-commit
+    # diffs into a bounded <prefetched_file_contents> section so the verifier need not
+    # re-discover its declared files agentically. Assemble the BASE (prefetch=None) and the
+    # prefetch section SEPARATELY so the ceiling accounting is explicit at the gate: trim the
+    # section to the resolved model's physical context ceiling before concatenating (an
+    # oversize prefetch is TRIMMED, never allowed to overflow — see completion_prefetch and
+    # completion_recovery.physical_context_ceiling).
+    from rebar.llm.workflow import completion_prefetch
+
+    base, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)
+    # Prefetch is ON by default; REBAR_VERIFY_PREFETCH=0 disables it. This is the escape hatch
+    # the story-a9dd live A/B uses to capture a prefetch-DISABLED baseline on the SAME binary,
+    # ticket, and tool surface (config otherwise identical) before the prefetch run.
+    import os
+
+    if os.environ.get("REBAR_VERIFY_PREFETCH") == "0":
+        context = base
+    else:
+        spec = PrefetchSpec(ticket_id=str(tid), graph=graph)
+        section, _manifest = completion_prefetch.assemble_prefetch(spec, repo_root=ctx.repo_root)
+        model = resolve_gate_config(ctx.repo_root).model
+        fitted = fit_within_ceiling(base, section, model)
+        context = base + ("\n\n" + fitted if fitted else "")
     if is_epic:
         # Epic-close bug screen (4b54), stages 2-3: filter + haiku screen; A-verdicts land as
         # a compact evidence block INSIDE the fence (untrusted, like all ticket content). The
