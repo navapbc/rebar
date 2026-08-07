@@ -29,7 +29,13 @@ ACTIONLINT_VERSION := 1.7.12
 ACTIONLINT_SHA256_LINUX_AMD64 := 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 LOCAL_BIN := .tools/bin
 
-.PHONY: help install hooks worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+# Dev interpreter pin (bug a5f5). Single-sourced in .github/python-version.txt — the same
+# discipline as .github/git-version-floor.txt and .github/module-size-limit.txt — and held to
+# the CI matrix by tests/unit/test_worktree_python_pin.py, so dropping this version from CI
+# fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
+PYTHON_VERSION_FILE := .github/python-version.txt
+
+.PHONY: help install hooks venv worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -122,6 +128,32 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 		echo "         from a linked worktree that clobbers the SHARED pre-commit wrapper."; \
 	fi
 
+venv:  ## Create .venv on the CI-pinned interpreter ($(PYTHON_VERSION_FILE)). Fails loudly rather than using ambient python3.
+	@# Bug a5f5: this step used to be `python3 -m venv .venv`, inheriting whatever the host's
+	@# ambient python3 resolved to — 3.14.6 on the machine where the bug was found, while CI
+	@# tested 3.11/3.12/3.13. requires-python is only ">=3.11", so `uv sync --locked` accepted
+	@# the mismatch and it stayed silent. Every worktree made by `make worktree` therefore ran
+	@# an interpreter CI never exercises, producing local failures CI could not reproduce (and
+	@# hiding real ones behind "probably just my env").
+	@#
+	@# So: ask for the pinned version explicitly, and treat its absence as an ERROR. A silent
+	@# fallback to the ambient interpreter is exactly the defect, not a graceful degradation.
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "ERROR: 'uv' is required to provision a version-pinned venv."; \
+		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
+		exit 1; }
+	@python_version="$$(tr -d '[:space:]' < $(PYTHON_VERSION_FILE))"; \
+	echo "→ uv venv --python $$python_version .venv   (pinned by $(PYTHON_VERSION_FILE))"; \
+	uv venv --python "$$python_version" .venv || { \
+		echo ""; \
+		echo "ERROR: could not provision .venv on Python $$python_version."; \
+		echo "       That version is what CI tests ($(PYTHON_VERSION_FILE)); this host's"; \
+		echo "       ambient python3 is $$(python3 --version 2>&1 || echo 'not installed')."; \
+		echo "       Refusing to fall back to it — a venv on an untested interpreter yields"; \
+		echo "       local failures CI cannot reproduce, and masks the ones that matter."; \
+		echo "       Let uv fetch the right one:  uv python install $$python_version"; \
+		exit 1; }
+
 worktree:  ## Create a fresh worktree from origin/main + provision its venv & hooks. Usage: make worktree name=<branch> [dir=<path>]
 	@# One-command form of the manual setup the repo mandates (fresh worktree branched
 	@# from current origin/main, with its OWN local venv + the commit gate wired) — so
@@ -140,8 +172,8 @@ worktree:  ## Create a fresh worktree from origin/main + provision its venv & ho
 	git fetch origin; \
 	echo "→ git worktree add $$target_dir -b $(name) origin/main"; \
 	git worktree add "$$target_dir" -b "$(name)" origin/main; \
-	echo "→ provisioning $$target_dir/.venv (python3 -m venv) then canonical 'make install'"; \
-	( cd "$$target_dir" && python3 -m venv .venv && . .venv/bin/activate && $(MAKE) install ); \
+	echo "→ provisioning $$target_dir/.venv (pinned Python) then canonical 'make install'"; \
+	( cd "$$target_dir" && $(MAKE) venv && . .venv/bin/activate && $(MAKE) install ); \
 	echo ""; \
 	echo "✓ worktree ready: $$target_dir"; \
 	echo "  activate it with:  cd $$target_dir && source .venv/bin/activate"

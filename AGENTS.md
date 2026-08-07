@@ -27,8 +27,10 @@ command. A prior `source .venv/bin/activate` does not persist across separate Co
 calls, so prepend it explicitly, for example
 `env PATH="$PWD/.venv/bin:$PATH" make lint` and
 `env PATH="$PWD/.venv/bin:$PATH" make typecheck`. If `.venv` is absent, run the canonical
-bootstrap from `docs/local-dev-env.md` (`python3 -m venv .venv`, activate it, then
-`make install`), or create the worktree with `make worktree name=<branch>`, which provisions it.
+bootstrap from `docs/local-dev-env.md` (`make venv`, activate it, then `make install`), or
+create the worktree with `make worktree name=<branch>`, which provisions it. Use `make venv`
+rather than a bare `python3 -m venv` — it pins the interpreter to the version CI tests
+(`.github/python-version.txt`) instead of inheriting the host's ambient `python3`.
 Before reporting a lint/typecheck failure, rerun with the worktree `.venv/bin` first on `PATH`;
 ambient Ruff or a missing ambient mypy is an environment error, not repository evidence. This
 is the non-interactive Codex equivalent of the activated repo-venv shell used by Claude Code.
