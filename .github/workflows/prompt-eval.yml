@@ -8,7 +8,7 @@ name: Prompt Eval
 #     seed, snapshot), at_least(k) over explicit epochs, coverage, kappa/JUnit, the
 #     scorer registry, and the eval solver/run_eval aggregation — all via the unit tests.
 #     This is the only REQUIRED check and costs nothing.
-#   * LIVE (gated; needs the [agents,eval] extras + credentials) — actually runs each
+#   * LIVE (gated; needs the [agents] extra + credentials) — actually runs each
 #     dataset-bearing spec through run_eval (the reviewer's real op via the eval solver),
 #     emits JUnit, and reports pass/coverage. Deliberately OFF the PR critical path
 #     (manual dispatch + a weekly schedule), NON-BLOCKING (continue-on-error), and
@@ -49,7 +49,7 @@ jobs:
     uses: ./.github/workflows/_eval-discipline.yml
 
   eval-live:
-    name: eval live (gated — needs [agents,eval] + credentials)
+    name: eval live (gated — needs [agents] + credentials)
     # Manual dispatch or the weekly schedule ONLY, and only on the canonical repo —
     # forks/Dependabot get no secrets and must never reach this job.
     if: >-
@@ -65,11 +65,12 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           enable-cache: true
-      - name: Install with the agents + eval extras (from the committed lock)
-        # `eval` conflicts with `dev`/`bedrock` in [tool.uv] (the inspect-ai boto3 diamond,
-        # ticket ce5d) but agents+eval is a declared-compatible pair.
+      - name: Install with the agents extra (from the committed lock)
+        # The live run goes through rebar's own solver on the pydantic-ai runtime, so
+        # `agents` is the whole requirement. The former `--extra eval` installed only
+        # inspect-ai, which rebar never imported (ticket 9fb3 removed the extra).
         run: |
-          uv sync --locked --extra agents --extra eval
+          uv sync --locked --extra agents
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Run dataset-bearing prompt evals (live) → JUnit
         # Cost rails: cases run SEQUENTIALLY (run_eval has no model fan-out) under the

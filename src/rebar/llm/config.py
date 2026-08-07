@@ -748,8 +748,7 @@ def available_backends() -> dict:
         "anthropic_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
         "langfuse_configured": LangfuseConfig.from_env().enabled,
-        # Net-new extras (epic a88f / WS-J): detected via the core guard, no import.
-        "eval_extra": _extra_installed("eval"),
+        # Net-new extra (epic a88f / WS-J): detected via the core guard, no import.
         "tracing_extra": _extra_installed("tracing"),
     }
 

@@ -12,6 +12,20 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING — the `[eval]` extra is removed, and with it the unused `inspect-ai`
+  dependency.** rebar never imported `inspect_ai`: prompt evaluation
+  (`rebar prompt eval`, spec validation, grader discipline, coverage, JUnit) is
+  stdlib-only and needs no extra, and the *live* run goes through rebar's own solver
+  on the pydantic-ai runtime — the `[agents]` extra. The `[eval]` extra therefore
+  installed a dependency nothing used. `pip install 'nava-rebar[eval]'` now warns that
+  the extra does not exist and installs the base package; **install
+  `nava-rebar[agents]` instead** for live prompt evals. Dropping it also removes the
+  two `[tool.uv] conflicts` entries (`eval` vs `dev`, `eval` vs `bedrock`) that existed
+  to fork the resolution around inspect-ai's `boto3 < 1.40.62` diamond — so `dev` and
+  `bedrock` are now co-installable — and the `override-dependencies = ["click>=8.3.3"]`
+  entry that existed only to widen inspect-ai's stale `click < 8.2.2` cap. The lock now
+  reaches click 8.4.2 on its own and `pip-audit` is clean without any override.
+
 - **BREAKING — `rebar transition --force-close=<reason>` is now `rebar transition
   --force[=<reason>]`.** `transition` previously carried two different force flags — a
   valueless `--force` that bypassed the start-work (plan-review) gate and a separate

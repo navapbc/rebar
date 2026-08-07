@@ -8,7 +8,7 @@
 # eval, not by tests/ unit tests, because the judgment is the model's). It exercises the three
 # scenarios d4cf's AC names: a leaf that consistently NARROWS its parent PASSES (no finding); a leaf
 # that ADDS an out-of-parent-scope deliverable FIRES; a leaf that CONTRADICTS a parent AC FIRES.
-# Run offline shape-check: `rebar prompt eval plan-review-g7`. A live model run needs the [eval]
+# Run offline shape-check: `rebar prompt eval plan-review-g7`. A live model run needs the [agents]
 # extra + credentials (the gated, non-blocking semantic eval — see eval_specs/README.plan-review.md).
 prompt: plan-review-G7
 model: anthropic:claude-opus-4-8

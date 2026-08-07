@@ -5,7 +5,7 @@ in .github/workflows/optionality.yml):
 
   * RUNTIME — importing the workflow engine's LEAN runtime (DSL parse/lint/migrate,
     executor, scripted steps, render, run orchestration) must not pull the heavy
-    [agents]/[eval]/[tracing] stack into sys.modules, proving a scripted workflow
+    [agents]/[tracing] stack into sys.modules, proving a scripted workflow
     runs with no optional dependency. Run in a clean subprocess.
   * STATIC — no module under src/rebar imports the heavy stack at MODULE scope;
     every such import must be lazy (inside a function), so `import rebar` and the
@@ -32,7 +32,6 @@ _HEAVY = (
     "langfuse",
     "anthropic",
     "deepagents",
-    "inspect_ai",
     "opentelemetry",
     # [agents] extra — the provider-agnostic in-process runtime (story d6d1 cutover
     # dropped LangChain/LangGraph for pydantic-ai). `httpx` arrives transitively via
@@ -107,6 +106,6 @@ def test_no_core_module_imports_heavy_stack_at_module_scope() -> None:
                 if _is_heavy(n):
                     offenders.append(f"{py.relative_to(_SRC.parent)}: import {n}")
     assert not offenders, (
-        "heavy [agents]/[eval]/[tracing] imports must be LAZY (inside a function), "
+        "heavy [agents]/[tracing] imports must be LAZY (inside a function), "
         "not at module scope:\n" + "\n".join(offenders)
     )

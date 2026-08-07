@@ -3,7 +3,7 @@
 # from the DSO code-review incidents. The base reviewer runs over the WHOLE diff and emits
 # grounded evidence findings; it is scored on FINDINGS presence (not a FAIL/BLOCK verdict).
 # Validate offline: `rebar prompt eval code-review-base`. The live model run needs the
-# [eval] extra + credentials (the eval CI). The gold_set is the human-adjudicated subset the
+# [agents] extra + credentials (the eval CI). The gold_set is the human-adjudicated subset the
 # llm-judge would be aligned to (seed labels pending adjudication).
 prompt: code-review-base
 model: anthropic:claude-opus-4-8

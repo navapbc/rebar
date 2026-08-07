@@ -16,7 +16,7 @@
 # (separate per-criterion / one-child-per-call) path with — see `tolerance:` below and
 # `parity.container_fidelity_report` (recall + false-accept + G3/G4-attribution).
 # Validate offline: `rebar prompt eval plan-review-container`. The live model run needs
-# the [eval] extra + credentials (the gated, path-scoped, NON-BLOCKING semantic eval CI;
+# the [agents] extra + credentials (the gated, path-scoped, NON-BLOCKING semantic eval CI;
 # a human-reviewed development gate for S4/S5 — see eval_specs/README.plan-review.md).
 prompt: plan-review-container
 model: anthropic:claude-opus-4-8

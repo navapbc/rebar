@@ -9,7 +9,6 @@ Heavy capabilities live behind extras and are imported lazily, so ``import rebar
   * ``[agents]``  — LLM agent steps, the review ops, the workflow agent runner
     (the provider-agnostic pydantic-ai runtime: ``pydantic-ai-slim[anthropic,retries]``
     + json-repair).
-  * ``[eval]``    — prompt evals (Inspect AI + promptfoo interop).
   * ``[tracing]`` — the OTLP trace sink. WRITE-ONLY by rule: OpenTelemetry is a
     sink, never read back into a rebar decision (the oracle-discipline rule).
   * ``[grounding]`` — the code-grounding oracle's in-process structural parsing
@@ -33,7 +32,6 @@ from importlib.util import find_spec
 # The probe is the lightest import-name that is present iff the extra is.
 EXTRAS: dict[str, tuple[str, str]] = {
     "agents": ("pydantic_ai", "LLM agent steps, review operations, and the workflow agent runner"),
-    "eval": ("inspect_ai", "prompt evaluation (Inspect AI + promptfoo interop)"),
     "tracing": (
         "opentelemetry",
         "the OTLP trace sink (write-only — OpenTelemetry is never read back into a rebar decision)",
