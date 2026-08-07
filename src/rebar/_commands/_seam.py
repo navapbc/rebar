@@ -83,6 +83,39 @@ class CommandError(Exception):
         self.input_str = input_str
 
 
+class SecretScreenRefused(CommandError):
+    """A write-time secret-screen refusal (bug e7a9), raised by :func:`screen_event`.
+
+    A SUBCLASS of :class:`CommandError` so every existing ``except CommandError`` (and the
+    ``returncode``/message/exit-1 contract) still catches it unchanged — the distinction only
+    matters to a caller that wants to tell a DELIBERATE policy refusal (reviewed material
+    embedded a credential shape) apart from a generic emit failure. The LLM sidecars
+    (ticket 4802) catch this first to surface the blocked audit record LOUDLY instead of
+    swallowing it as a transient error, then still return best-effort ``False``.
+    """
+
+
+def warn_secret_screen_refused(ticket_id: str, record_label: str) -> None:
+    """Write an explicit stderr warning that a sidecar audit record was BLOCKED by the
+    write-time secret screen (ticket 4802).
+
+    The three LLM sidecars call this when :class:`SecretScreenRefused` propagates out of their
+    best-effort ``append_event``: a policy refusal (reviewed material — a diff, a plan, a
+    finding — embedded a credential shape) must NOT be swallowed indistinguishably from a
+    transient store error. Matches the ``Warning: ... WITHOUT ...`` house style of
+    ``transition_close``/``close_precheck``; names the ticket, the blocked record, and states
+    the record was NOT written. The caller still returns ``False`` (best-effort preserved)."""
+    import sys
+
+    sys.stderr.write(
+        f"Warning: {record_label} for {ticket_id} was recorded WITHOUT a durable sidecar "
+        "audit record — the write-time secret screen BLOCKED the write because the reviewed "
+        "material matched a live credential shape, so the gate's audit-trail record was NOT "
+        "written. The gate/close outcome is unchanged (best-effort observability); scrub the "
+        "credential from the reviewed material to restore the audit record.\n"
+    )
+
+
 def tracker_dir(repo_root=None) -> Path:
     """Resolve the tracker dir: the REBAR_TRACKER_DIR override, then repo-root."""
     return config.tracker_dir(repo_root)
@@ -392,7 +425,7 @@ def screen_event(data: dict) -> None:
         return
     reason = _secret_override.get()
     if not reason:
-        raise CommandError(
+        raise SecretScreenRefused(
             _secret_screen.refusal_message(findings, override_flag="--allow-secret-pattern")
         )
     data["secret_override"] = _secret_screen.override_record(findings, reason)

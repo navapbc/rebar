@@ -71,13 +71,18 @@ def _append_sidecar_retrying(ticket_id: str, payload: dict[str, Any], tracker, r
     contention that persists across every attempt, propagates to the caller (which logs it
     and returns ``False`` — best-effort). This is the ab54 fix: a transient lock timeout no
     longer drops the record on the first hit."""
-    from rebar._commands._seam import append_event
+    from rebar._commands._seam import SecretScreenRefused, append_event
 
     last_exc: Exception | None = None
     for _ in range(_SIDECAR_WRITE_ATTEMPTS):
         try:
             append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
             return
+        except SecretScreenRefused:
+            # A write-time secret-screen REFUSAL is DETERMINISTIC, not transient contention: a
+            # retry would refuse identically. Propagate immediately so the caller can surface it
+            # loudly (ticket 4802) rather than burning the retry budget on it.
+            raise
         except Exception as exc:
             if not _is_lock_timeout_error(exc):
                 raise
@@ -98,11 +103,15 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
     (ticket ab54), so a brief contention window no longer silently loses the record; only a
     contention that persists across every attempt returns ``False``."""
     from rebar import config as _config
+    from rebar._commands._seam import SecretScreenRefused, warn_secret_screen_refused
 
     try:
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(verdict, material=material)
         _append_sidecar_retrying(payload["ticket_id"], payload, tracker, repo_root)
+    except SecretScreenRefused:
+        warn_secret_screen_refused(str(verdict.get("ticket_id", "?")), EVENT_TYPE)
+        return False
     except Exception:
         # Observability floor: the sidecar is best-effort — a failed emit must never fail
         # the close, but the failure itself is a real signal worth a stderr diagnostic.
