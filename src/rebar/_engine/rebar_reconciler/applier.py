@@ -359,6 +359,7 @@ def apply(
     binding_store=None,
     persist: bool = True,
     abort_check=None,
+    synced_fields_out=None,
 ):
     """Polymorphic dispatch entry point.
 
@@ -366,6 +367,13 @@ def apply(
       1. Typed single-mutation:  apply(mutation, *, client=None) -> ApplyResult
       2. Legacy batch:            apply(mutations: list[dict], pass_id, ...) -> Path
     Selection is by argument type at the top of the function.
+
+    ``synced_fields_out`` (bug e6e9) is an optional out-parameter dict the batch path
+    fills with ``local_id -> {vendor_field: value}`` for every outbound write CONFIRMED
+    to have landed, so ``reconcile._advance_baselines`` can advance the ADR-0026 baseline
+    to the last-SYNCED value rather than the pass-start fetch. Left untouched when None
+    (and by the typed / dry-run / no-write paths, which issue no batch writes), so the
+    caller sees an empty map and falls back to today's fetch-only advance.
     """
     mut_mod = _load_mutation_module()
     if isinstance(mutations, mut_mod.Mutation) or (
@@ -471,6 +479,7 @@ def apply(
                 repo_root=repo_root,
                 binding_store=binding_store,
                 abort_check=abort_check,
+                synced_fields_out=synced_fields_out,
             )
     finally:
         if pending_bug_tickets and not is_dry_run:
@@ -514,6 +523,7 @@ def _apply_batch(
     repo_root: Path | None = None,
     binding_store=None,
     abort_check=None,
+    synced_fields_out=None,
 ) -> Path:
     """Legacy batch dispatch: write a flat-JSON manifest for a list of dict mutations.
 
@@ -529,6 +539,10 @@ def _apply_batch(
                    ("create", "update", or "delete").
         pass_id:   Unique identifier for this reconciliation pass.
         repo_root: Repository root directory. Defaults to four levels above this file.
+        synced_fields_out: Optional dict filled with ``local_id -> {field: value}`` for
+                   the outbound writes that CONFIRMEDLY landed (bug e6e9). Populated from
+                   the batch context AFTER the dispatch loop, so a HeadDriftError abort
+                   contributes only the mutations that actually completed before it.
 
     Returns:
         Path to the written manifest file.
@@ -638,6 +652,9 @@ def _apply_batch(
             file=sys.stderr,
         )
         raise
+
+    if synced_fields_out is not None:
+        synced_fields_out.update(ctx.synced_fields)
 
     manifest = {
         "pass_id": pass_id,

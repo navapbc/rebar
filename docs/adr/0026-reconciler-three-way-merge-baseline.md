@@ -54,6 +54,25 @@ recover this direction signal — the baseline is the *only* source of it.
    false clobbers when both sides edit *different* fields. **Binding-*presence* alone
    is NOT a substitute for the baseline VALUE** — you cannot arbitrate direction
    without the ancestor value.
+5. **The baseline advance means last-SYNCED, not last-FETCHED** (bug
+   `e6e9-ddbf-223b-4f49`). `_advance_baselines` records the pass-START snapshot, which is
+   fetched *before* the outbound apply — so for any field rebar pushed in that pass it
+   held Jira's PRE-push value, making Decision 1's premise false for exactly one pass.
+   Because a REVERT restores a previous value, `local == baseline` then read "local never
+   changed", outbound stood down, and the inbound differ mirrored the stale remote back
+   over the revert. The advance therefore overlays the values rebar's own outbound writes
+   confirmedly landed (`peer_state.merge_baseline`) on top of the fetch. This is a
+   restoration of Decision 1's own definition, not a new rule.
+6. **The overlay is gated on PER-MUTATION success, never on the pass exit code.** A status
+   transition can soft-fail while the pass still exits 0 (an unreachable transition raises
+   into the applier's per-mutation backstop; a 400 illegal-transition is answered with a
+   comment instead of the edit). Recording a write that did not land is strictly worse than
+   the bug in Decision 5: that clobber is self-limiting (the baseline advances to Jira's
+   value, local then differs, the next pass re-pushes), whereas a falsely-advanced baseline
+   asserts an agreement that does not exist and never self-corrects. A baseline that LAGS is
+   recoverable; one that LEADS is not — so under-reporting is always the correct failure
+   direction, and the dispatch layer reports all-or-nothing per `update_issue` call for that
+   reason.
 
 ## Consequences
 
@@ -63,5 +82,18 @@ recover this direction signal — the baseline is the *only* source of it.
 - The convergence property suite must include a **direction-preservation** property: a
   teammate's Jira-side edit to any of the five fields survives a reconcile pass (is
   mirrored, never reverted). This is a first-class regression cell, not an example.
+  **It must be pinned on the LIVE path, for all five fields.** For a long time it existed
+  only for `title`, and the other four were pinned against
+  `adapters/jira/outbound_fields._diff_fields` — which ticket 625b left with no production
+  caller, so those cells stayed green while the live path went uncovered. That is the same
+  failure class as a test surface that passes by not running. The cells now live in
+  `tests/unit/rebar_reconciler/diffing/test_live_path_direction_preservation_e6e9.py` and
+  carry an explicit reachability assertion from the production caller down to the function
+  under test.
+- The ABA sequence — push a value, revert locally to the previous value before the next
+  pass — is the regression oracle for Decisions 5/6 and is pinned per field in
+  `tests/unit/rebar_reconciler/state/test_baseline_advance_aba_e6e9.py`, alongside the
+  held-firm cell (a genuine Jira-side edit still flows inbound, so the fix cannot silently
+  become "never let inbound win") and the soft-fail cell.
 - Whatever store holds the baseline inherits the ADR 0004 producer↔consumer contract
   discipline and the fail-closed-on-corruption rule.

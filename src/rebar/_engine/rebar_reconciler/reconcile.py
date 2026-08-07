@@ -67,6 +67,13 @@ _build_filter_target_set = _helpers._build_filter_target_set
 _mutation_matches_filter = _helpers._mutation_matches_filter
 _build_plan_entries = _helpers._build_plan_entries
 _NoOpSyncLogger = _helpers._NoOpSyncLogger
+# ADR-0026 baseline advance (bug e6e9 grew it past the module-size cap). Pure helpers over
+# the binding store with no back-edge to the reconcile_once spine — exactly what
+# reconcile_helpers holds — re-bound here so the bare-name calls in _persist_and_log and
+# the ``reconcile._advance_baselines`` import in the A3 oracle both keep resolving.
+_accepts_synced_fields_out = _helpers._accepts_synced_fields_out
+_advance_baselines = _helpers._advance_baselines
+_advance_peer_parent = _helpers._advance_peer_parent
 
 
 @dataclass
@@ -121,6 +128,10 @@ class _PassContext:
     # LIVE applied/failed counts read out of the manifest before it was unlinked
     # (bug c903) — LIVE leaves no manifest file, so this is the only failure record.
     apply_tally: dict | None = None
+    # local_id -> {vendor_field: value} for the outbound writes CONFIRMED landed this pass
+    # (bug e6e9), so _advance_baselines records the last-SYNCED value, not the pass-start
+    # fetch. Empty degrades that advance to its pre-e6e9 fetch-only behaviour exactly.
+    synced_fields: dict[str, dict] = field(default_factory=dict)
 
 
 def reconcile_once(
@@ -444,9 +455,23 @@ def _apply_mutations(ctx: _PassContext) -> None:
         # Only forward abort_check when set, so tests that stub applier.apply with
         # a narrower signature are unaffected (epic dust-troth-naval).
         _abort_kw = {"abort_check": ctx.abort_check} if ctx.abort_check is not None else {}
+        # Bug e6e9: forwarded ONLY when the resolved applier accepts it, mirroring the
+        # narrow-signature tolerance the abort_check kwarg above already needs — tests
+        # stub applier.apply with fixed signatures, and an unexpected kwarg would turn a
+        # baseline refinement into a TypeError that aborts the pass.
+        _synced_kw = (
+            {"synced_fields_out": ctx.synced_fields}
+            if _accepts_synced_fields_out(applier.apply)
+            else {}
+        )
         if target_mode is None:
             manifest_path = applier.apply(
-                mutations, pass_id, repo_root, binding_store=binding_store, **_abort_kw
+                mutations,
+                pass_id,
+                repo_root,
+                binding_store=binding_store,
+                **_abort_kw,
+                **_synced_kw,
             )
         else:
             manifest_path = applier.apply(
@@ -457,6 +482,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 binding_store=binding_store,
                 persist=persist,
                 **_abort_kw,
+                **_synced_kw,
             )
     except BaseException as exc:
         apply_exc = exc
@@ -511,49 +537,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
     ctx.apply_tally = apply_tally
 
 
-def _advance_baselines(binding_store: Any, curr_snapshot: Mapping[str, Any]) -> int:
-    """Advance every CONFIRMED binding's per-binding baseline to the current snapshot
-    (story d6bd — the always-on successor to the retired dual-write shadow). Only
-    confirmed bindings whose Jira key is in the current fetch window are advanced (an
-    out-of-window key has no fresh value this pass); ``set_baseline`` filters to the
-    mirrored fields. In-memory until the caller's ``save()`` persists them (ADR 0026).
-    """
-    advanced = 0
-    for local_id, entry in binding_store.all_bindings().items():
-        if entry.get("state") != "confirmed":
-            continue
-        jira_key = entry.get("jira_key")
-        if not jira_key or jira_key not in curr_snapshot:
-            continue
-        binding_store.set_baseline(local_id, curr_snapshot[jira_key])
-        _advance_peer_parent(binding_store, local_id, curr_snapshot[jira_key])
-        advanced += 1
-    return advanced
-
-
-def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, Any]) -> None:
-    """Record the peer parent OBSERVED for one binding — and ONLY if it was observed.
-
-    The evidence an inbound parent CLEAR requires (ticket 88d9). The observation test is
-    ``"parent" in entry``: key PRESENT means the parent map answered for this issue, and an
-    explicit ``None`` is then an authoritative "no parent". Key ABSENT is the whole unsafe set —
-    ``get_parent_map`` degraded to ``{}`` on a REST failure, a truncated page walk, a
-    cross-project issue — and MUST leave the prior observation untouched. Overwriting a good
-    history with a failed read is what would let the orphaning incident recur by a longer route,
-    so this is the load-bearing line, not a defensive nicety.
-
-    getattr-guarded so a store predating the field is a no-op rather than an AttributeError.
-    """
-    if "parent" not in entry:
-        return
-    setter = getattr(binding_store, "set_peer_parent", None)
-    if setter is None:
-        return
-    parent = entry.get("parent")
-    key = parent.get("key") if isinstance(parent, dict) else None
-    setter(local_id, key if isinstance(key, str) and key else None)
-
-
 def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
     """Persist only Jira-key membership for the next pass's edge detection."""
     key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
@@ -592,7 +575,7 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         # ancestor the outbound field differ arbitrates against (ADR 0026). Runs
         # BEFORE save() so they persist this pass; fail-open (never break a sync pass).
         try:
-            _advance_baselines(binding_store, ctx.curr_snapshot)
+            _advance_baselines(binding_store, ctx.curr_snapshot, ctx.synced_fields)
         except Exception as exc:  # noqa: BLE001 — baseline advance is best-effort; never break sync
             print(
                 f"reconcile: baseline advance failed ({exc})",

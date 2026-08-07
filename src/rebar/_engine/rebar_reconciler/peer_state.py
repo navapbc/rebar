@@ -79,6 +79,46 @@ def set_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, Any]
     entry["baseline"] = baseline
 
 
+def merge_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, Any]) -> None:
+    """Overlay the values rebar itself just SYNCED onto a binding's existing baseline.
+
+    The last-synced/last-fetched distinction (bug e6e9). ADR 0026 §22-42 defines the
+    baseline as the LAST-SYNCED value, but ``reconcile._advance_baselines`` writes the
+    pass-START snapshot, which is fetched BEFORE the outbound apply. For any field rebar
+    pushed in that pass, the resulting baseline holds the value Jira had *before* our own
+    write. ``local == baseline`` — ADR 0026's sole direction signal — is then FALSE for one
+    pass, and a local REVERT to the pre-push value lands exactly in that window: outbound
+    stands down believing local never changed, and the inbound differ mirrors Jira's
+    now-stale value back over the revert.
+
+    This applies the correction: ``set_baseline`` records the fetch, then this overlays the
+    fields we actually landed. Unlike ``set_baseline`` it is a per-field MERGE, not a
+    whole-dict replace — the pushed fields are the only ones we have fresher evidence for,
+    and an untouched field must keep its fetched value.
+
+    The caller MUST pass only fields whose write is CONFIRMED landed (per-mutation success,
+    not "the pass ran"). A transition can soft-fail while the pass still exits 0
+    (``applier._apply_one``'s backstop), and a baseline advanced for a push that never
+    landed asserts a sync that did not happen. That failure does NOT self-correct, whereas
+    the bug being fixed here does (after a clobber the baseline advances to Jira's value,
+    local then differs, and the next pass re-pushes). Lagging is recoverable; leading is not.
+
+    A no-op for an unbound local id or an empty overlay, and — like ``set_baseline`` — it
+    leaves ``updated_at`` churn-free when nothing actually changes.
+    """
+    entry = bindings.get(local_id)
+    if entry is None:
+        return
+    overlay = {k: normalize_baseline_value(k, fields[k]) for k in _BASELINE_FIELDS if k in fields}
+    if not overlay:
+        return
+    baseline = dict(entry.get("baseline") or {})
+    merged = {**baseline, **overlay}
+    if merged == baseline:
+        return
+    entry["baseline"] = merged
+
+
 def get_peer_parent(bindings: dict[str, Any], local_id: str) -> str | None:
     """The peer parent key rebar last OBSERVED for this binding, or None.
 
