@@ -119,6 +119,9 @@ def produce_plan_review_verdict(
     except LLMUnavailableError as exc:
         # Write-then-degrade (ticket 8bc5): capture the env/integration-diagnosis interval as a
         # dedicated gate_error_v1 sidecar, THEN preserve the existing soft-degrade outcome.
+        # No consumed counters (df94, Part 2): this is the PREFLIGHT outage — it raises before
+        # the run and before any recorder exists (`rec` is created only past this point), so
+        # zero billable work has happened; there is legitimately nothing consumed to record.
         emit_gate_error(ctx.ticket_id, "plan_review", cause=str(exc), repo_root=repo_root)
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
@@ -177,7 +180,17 @@ def produce_plan_review_verdict(
     except LLMUnavailableError as exc:
         # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
         # infra outage, before preserving the soft-degrade.
-        emit_gate_error(ctx.ticket_id, "plan_review", cause=str(exc), repo_root=repo_root)
+        # Consumed counters (df94, Part 2): the `rec` recorder IS in scope here and may hold
+        # finder/verify steps that ran (and recorded `_usage`) BEFORE the outage struck, so
+        # thread what was spent so far onto the diagnostic (None when the outage hit at/near the
+        # first call, i.e. nothing was consumed — then it emits without one).
+        emit_gate_error(
+            ctx.ticket_id,
+            "plan_review",
+            cause=str(exc),
+            diagnostic=_consumed_diagnostic(rec),
+            repo_root=repo_root,
+        )
         return _degraded_plan_review_verdict(
             ctx, cfg, error=exc, advisory_cap=advisory_cap, runner_name=runner_sel.name
         )
@@ -347,6 +360,9 @@ def _code_review_preflight(request: CodeReviewRequest) -> dict[str, Any] | None:
     except LLMUnavailableError as exc:
         # Write-then-degrade (ticket 8bc5): additively capture the gate_error interval when a
         # ticket-addressed code review is running (the sidecar streams key on a ticket).
+        # No consumed counters (df94, Part 2): the PREFLIGHT outage raises before the run is
+        # assembled and before any recorder exists (`prep.rec` is built downstream in
+        # `_assemble_code_review_run`), so no billable work has happened — legitimately none.
         if request.target_ticket:
             emit_gate_error(
                 request.target_ticket, "code_review", cause=str(exc), repo_root=request.repo_root
@@ -463,9 +479,16 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     except LLMUnavailableError as exc:
         # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
         # infra outage, before preserving the soft-degrade.
+        # Consumed counters (df94, Part 2): `prep.rec` IS in scope and may hold batch/agent
+        # review steps that ran (recording `_usage`) before the outage, so thread the
+        # consumed-so-far counters onto the diagnostic (None when nothing was consumed yet).
         if request.target_ticket:
             emit_gate_error(
-                request.target_ticket, "code_review", cause=str(exc), repo_root=request.repo_root
+                request.target_ticket,
+                "code_review",
+                cause=str(exc),
+                diagnostic=_consumed_diagnostic(prep.rec),
+                repo_root=request.repo_root,
             )
         return gate_source.annotate_result(
             _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name), handle
@@ -502,7 +525,102 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     )
 
 
+def _consumed_diagnostic(rec: Any) -> dict[str, Any] | None:
+    """Best-effort CONSUMED counters for a mid-run gate_error sidecar (df94, Part 2).
+
+    A mid-run :class:`LLMUnavailableError` can strike AFTER some agent/batch steps already ran
+    and recorded their ``_usage``; this sums the ``requests``/``tool_calls`` consumed so far off
+    the in-scope recorder so the gate_error record carries what was spent before the outage (not
+    only the ceiling). Sums each succeeded step's aggregate ``_usage`` and any per-call records a
+    batch step carries. Returns None when NO step recorded usage (the outage struck at/near the
+    first call — nothing was consumed), in which case the caller emits without a diagnostic."""
+    requests = 0
+    tool_calls = 0
+    saw_usage = False
+    for s in getattr(rec, "steps", []) or []:
+        if not isinstance(s, dict) or s.get("status") != "succeeded":
+            continue
+        outputs = s.get("outputs")
+        outputs = outputs if isinstance(outputs, dict) else {}
+        usage = outputs.get("_usage")
+        if not isinstance(usage, dict) or not usage:
+            continue
+        per_call = usage.get("per_call")
+        if isinstance(per_call, list) and per_call:
+            for call in per_call:
+                if isinstance(call, dict):
+                    saw_usage = True
+                    requests += int(call.get("requests") or 0)
+                    tool_calls += int(call.get("tool_calls") or 0)
+        else:
+            saw_usage = True
+            requests += int(usage.get("requests") or 0)
+            tool_calls += int(usage.get("tool_calls") or 0)
+    if not saw_usage:
+        return None
+    return {"requests": requests, "tool_calls": tool_calls}
+
+
 # ── completion ──────────────────────────────────────────────────────────────────────
+def _sum_run_consumption(rec_steps: list[Any]) -> dict[str, Any] | None:
+    """Aggregate a completion run's CONSUMPTION from the workflow recorder's step records.
+
+    Reads the agentic ``verify`` step's ``_usage`` (the runner stamps the consumed
+    ``requests``/``tool_calls`` there) and the per-step ``duration_ms`` the interpreter records
+    (agent-step wall-clock → ``llm_ms``; the deterministic precheck/reconcile → ``det_ms``).
+    Returns None when NO agentic step recorded usage — a deterministic short-circuit ran no LLM,
+    so there is genuinely nothing consumed and the caller must omit the block rather than emit
+    zeros that lie. Tolerant of untimed/partial records (a missing field contributes 0)."""
+    requests = 0
+    tool_calls = 0
+    llm_ms = 0.0
+    det_ms = 0.0
+    llm_calls = 0
+    saw_usage = False
+    for s in rec_steps:
+        if not isinstance(s, dict) or s.get("status") != "succeeded":
+            continue
+        dur = s.get("duration_ms")
+        outputs = s.get("outputs")
+        outputs = outputs if isinstance(outputs, dict) else {}
+        if s.get("kind") == "agent":
+            llm_calls += 1
+            if isinstance(dur, (int, float)):
+                llm_ms += dur
+            usage = outputs.get("_usage")
+            if isinstance(usage, dict) and usage:
+                saw_usage = True
+                requests += int(usage.get("requests") or 0)
+                tool_calls += int(usage.get("tool_calls") or 0)
+        elif isinstance(dur, (int, float)):
+            det_ms += dur
+    if not saw_usage:
+        return None
+    return {
+        "requests": requests,
+        "tool_calls": tool_calls,
+        "llm_calls": llm_calls,
+        "llm_ms": round(llm_ms, 1),
+        "det_ms": round(det_ms, 1),
+    }
+
+
+def _attach_completion_metrics(verdict: dict[str, Any], rec: Any, total_ms: float) -> None:
+    """Reinstate a ``metrics`` block on the completion verdict (df94), reaching parity with the
+    plan-review sidecar's ``metrics`` (``_attach_plan_review_metrics``): the run's CONSUMED
+    ``requests``/``tool_calls`` and its wall-clock ``total_ms``, so a completion FAIL is no
+    longer the blind gate that records only its ceiling. The counters come from the agentic
+    ``verify`` step's ``_usage`` via the recorder; ``total_ms`` is measured around the whole run.
+
+    A deterministic short-circuit (child-closure FAIL) runs NO LLM step, so ``_sum_run_consumption``
+    returns None and the block is OMITTED gracefully (no lying zeros). Mutates
+    ``verdict['metrics']`` in place; never raises inside the gate."""
+    consumed = _sum_run_consumption(getattr(rec, "steps", []) or [])
+    if consumed is None:
+        return
+    verdict["metrics"] = {**consumed, "total_ms": round(total_ms, 1)}
+
+
 def produce_completion_verdict(
     ticket_id: str, *, graph: bool, repo_root=None, cfg, runner=None
 ) -> dict[str, Any]:
@@ -513,6 +631,8 @@ def produce_completion_verdict(
     ``completion_precheck`` op runs the deterministic child-closure check, then the agentic
     verify + reconcile produce the terminal verdict. Preflights and lets
     :class:`LLMUnavailableError` PROPAGATE so the close gate fail-closes."""
+    import time
+
     from rebar.llm.config import gate_config
     from rebar.llm.runner import get_runner
 
@@ -527,6 +647,11 @@ def produce_completion_verdict(
         # Write-then-reraise (ticket 8bc5): capture the env/integration-diagnosis interval as a
         # dedicated gate_error_v1 sidecar, THEN re-raise so the close gate STILL fail-closes
         # (the propagation is preserved — we never swallow it).
+        # No consumed counters (df94, Part 2): the PREFLIGHT outage raises before the run and
+        # before the recorder exists (`recorder` is created only past this point), so no billable
+        # work has happened. The MID-run completion outage is handled separately in
+        # completion_recovery.raise_completion_workflow_failure, which DOES carry the consumed
+        # requests/tool_calls onto its gate_error diagnostic.
         emit_gate_error(ticket_id, "completion", cause=str(exc), repo_root=repo_root)
         raise
 
@@ -546,6 +671,7 @@ def produce_completion_verdict(
         config=cfg,
     )
     recorder = MemoryRecorder()
+    _t_total = time.monotonic()
     with gate_config(cfg):
         res = _ex.run_workflow(
             doc,
@@ -555,6 +681,7 @@ def produce_completion_verdict(
             agent_runner=completion_step,
             recorder=recorder,
         )
+    total_ms = round((time.monotonic() - _t_total) * 1000, 1)
     verdict = res.terminal_output
     if res.status != "succeeded" or not isinstance(verdict, dict) or "verdict" not in verdict:
         # The verifier failed mid-run — fail closed (never a silent PASS). Raise so the
@@ -562,6 +689,7 @@ def produce_completion_verdict(
         raise_completion_workflow_failure(
             ticket_id, res, completion_step.failure_diagnostic, len(recorder.steps), repo_root
         )
+    _attach_completion_metrics(verdict, recorder, total_ms)
     return verdict
 
 

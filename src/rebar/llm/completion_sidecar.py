@@ -267,8 +267,14 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
 
     v = dict(verdict)  # shallow copy — reconcile_verdict mutates its argument in place
     reconcile_verdict(v)
+    # Run CONSUMPTION metrics (df94): the gate-run's consumed requests/tool_calls + duration,
+    # attached by gate_dispatch._attach_completion_metrics for verdicts produced by an actual
+    # LLM run. Carried on BOTH the PASS and FAIL branches so a FAILING gate run's consumption
+    # survives to the sidecar (parity with the plan-review REVIEW_RESULT `metrics` block).
+    # Absent for a deterministic short-circuit (no LLM ran), so it is only carried when present.
+    metrics = v.get("metrics") if isinstance(v.get("metrics"), dict) else None
     if str(v.get("verdict", "")).upper() == "PASS":
-        return {
+        payload = {
             "schema": SCHEMA_PASS,
             "verdict": v.get("verdict"),
             "ticket_id": v.get("ticket_id"),
@@ -289,7 +295,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
             # an unsigned certifiable=False close unexplainable from stored data (bug 96d1).
             "certifiable": v.get("certifiable"),
         }
-    return {
+        if metrics is not None:
+            payload["metrics"] = dict(metrics)
+        return payload
+    payload = {
         "schema": SCHEMA,
         "verdict": v.get("verdict"),
         "ticket_id": v.get("ticket_id"),
@@ -304,3 +313,6 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "trace_id": v.get("trace_id"),
         "material_fingerprint": material,
     }
+    if metrics is not None:
+        payload["metrics"] = dict(metrics)
+    return payload
