@@ -267,13 +267,13 @@ def close_ticket(
             # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
             # not complete while its children are open), NOT a quality gate — so it is enforced
             # UNCONDITIONALLY: neither --force (which bypasses any enabled start-work gate) nor
-            # --force-close (which bypasses the signature/completion-verifier requirement) can
+            # --force (which bypasses the signature/completion-verifier requirement) can
             # close a parent over open children. Resolve/close the children first, or detach
             # (re-home) them, then close the parent.
             raise CommandError(
                 f"Error: cannot close ticket '{ticket_id}' while it has {count} unresolved "
                 "(non-closed) child ticket(s) — the child-closure invariant cannot be bypassed "
-                "(not with --force or --force-close). Close or resolve these children first, or "
+                "(not with --force or --force). Close or resolve these children first, or "
                 "detach them (re-home), then close:\n" + "\n".join(open_children),
                 returncode=1,
             )
@@ -373,7 +373,7 @@ def close_ticket(
         # verifies an attested snapshot of HEAD, so the manifest's `verified-at-sha:` IS the HEAD
         # SHA at verify time; re-read HEAD now and, if it MOVED, the code drifted under us — do NOT
         # attest stale state. The ticket already closed (the transition committed above), so this is
-        # the same closed-without-signature outcome as --force-close: warn on stderr and skip
+        # the same closed-without-signature outcome as --force: warn on stderr and skip
         # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
         _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
         _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
@@ -406,7 +406,7 @@ def close_ticket(
             except _signing.SigningError as exc:
                 # DEGRADE, never wedge (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH
                 # >= 8.9) and a writable tracker. When neither can produce a key the close ALREADY
-                # committed, so this is the same closed-without-signature outcome as --force-close:
+                # committed, so this is the same closed-without-signature outcome as --force:
                 # warn and skip signing (exit 0). Re-close once OpenSSH >= 8.9 is installed.
                 sys.stderr.write(
                     f"Warning: closed {ticket_id} WITHOUT a completion signature — {exc.message} "

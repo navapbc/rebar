@@ -459,6 +459,6 @@ def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
         "Resolve each item before closing, then check the box (edit the description).\n"
         "Items with done-evidence outside the snapshot may be tagged [operator-attested] "
         "to exempt them from this check.\n"
-        'To override: --force-close="<reason>"',
+        'To override: --force="<reason>"',
         returncode=1,
     )

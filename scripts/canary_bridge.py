@@ -378,7 +378,7 @@ def cmd_heartbeat_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force-close={force_close}",
+                f"--force={force_close}",
             ]
         )
         if rc != 0:
@@ -541,7 +541,7 @@ def cmd_binding_drift_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force-close={force_close}",
+                f"--force={force_close}",
             ]
         )
         if rc != 0:

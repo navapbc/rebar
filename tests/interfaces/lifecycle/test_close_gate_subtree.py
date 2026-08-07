@@ -5,7 +5,7 @@ The completion-gate's deterministic referencing-commit precondition
 ``_referencing_commit_exists``) must credit a parent's ENTIRE descendant subtree: a
 ticket that records ``file_impact`` closes when a ``rebar-ticket:`` trailer references it
 OR any of its descendants. A parent's code is delivered by its children's commits, so an
-epic/story must not be forced into ``--force-close`` (unsigned) merely because the
+epic/story must not be forced into ``--force`` (unsigned) merely because the
 referencing commits carry the child ids.
 
 This is safe: the open-children guard runs first, so a parent only reaches this
@@ -67,7 +67,7 @@ def test_parent_closes_when_a_child_commit_references_the_subtree(
 ) -> None:
     """An epic that records file_impact but whose only referencing commit carries the CHILD's
     id closes: the precondition credits the descendant subtree, the verifier runs, and the
-    epic closes signed — no --force-close needed."""
+    epic closes signed — no --force needed."""
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
 

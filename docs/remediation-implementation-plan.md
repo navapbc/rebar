@@ -235,8 +235,8 @@ backstop):
   `json.dump` in inline `python3` heredocs, committed with the UNLINK cascade +
   tombstone at `:1045-1046`);
 - **`ticket-comment.sh:90-91` — COMMENT, still LIVE** via `ticket-transition.sh:439`,
-  which runs it to write the `--force-close=<reason>` audit comment on every
-  force-close transition (`--force-close` is a live, documented flag,
+  which runs it to write the `--force=<reason>` audit comment on every
+  force-close transition (`--force` is a live, documented flag,
   `ticket-transition.sh:33,102-111`). Raw `json.dump`, non-canonical;
 - **`ticket-revert.sh:170-174` — REVERT, still LIVE** via `ticket-transition.sh:179`,
   which `exec`s it on the `archived → open` un-archive seam (same pattern as
@@ -258,7 +258,7 @@ subject to the byte guard.) **Three are NOT deletable and must be canonicalized 
 place, not removed** — note the recurring trap: `ticket-transition.sh` delegates to
 "retired-looking" leaf scripts on its seams:
 - `ticket-comment.sh` — **live**: `ticket-transition.sh:439` invokes it for the
-  `--force-close` audit comment (see the live-writers list above). Conform its
+  `--force` audit comment (see the live-writers list above). Conform its
   `:90-91` serializer to `canonical_bytes` and include it in the parity set.
 - `ticket-revert.sh` — **live**: `ticket-transition.sh:179` `exec`s it on the
   `archived → open` un-archive seam. Conform its `:170-174` raw `json.dump` to

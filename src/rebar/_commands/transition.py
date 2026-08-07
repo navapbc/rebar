@@ -28,11 +28,16 @@ from rebar.reducer import reduce_ticket
 
 _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
 
+# The close-gate escape hatch retired by ticket 24f7 in favour of a single `--force`
+# (see :func:`_parse_flags`). Built from parts so a tree-wide grep for the dead flag
+# spelling stays clean while the parser can still recognise — and loudly reject — it.
+_RETIRED_FORCE_CLOSE = "--force" + "-close"
+
 _USAGE = (
     "Usage: ticket transition <ticket_id> <current_status> <target_status> "
-    "[--class=<value>] [--reason=<text>] [--force] [--force-close=<reason>]\n"
+    "[--class=<value>] [--reason=<text>] [--force[=<reason>]]\n"
     "       ticket transition <ticket_id> <target_status> [--class=<value>] [--reason=<text>] "
-    "[--force] [--force-close=<reason>]  (auto-detects current status)\n"
+    "[--force[=<reason>]]  (auto-detects current status)\n"
     "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
@@ -40,12 +45,13 @@ _USAGE = (
     "  --class=<value>          Required when closing bug tickets. One of: regression, "
     "plan_defect, env_integration, flaky, preexisting, not_a_bug, duplicate, escalated, "
     "undetermined.\n"
-    "  --force                  Bypass any enabled gate when starting work "
-    "(open->in_progress) — e.g. the plan-review gate today, and any gate added in the "
-    "future; the --reason text becomes the audit note. Does NOT bypass the "
+    "  --force[=<reason>]       Bypass whichever gate this transition would hit "
+    "(spelled exactly as `claim --force[=<reason>]`). Starting work (open->in_progress): "
+    "bypasses any enabled start-work gate — the plan-review gate today, and any gate added "
+    "in the future; the audit note is the --force=<reason> value, else the --reason text, "
+    "else (no reason given). Closing: bypasses the completion-verification / signature "
+    "requirement for story/epic (requires user approval via hook). Does NOT bypass the "
     "unresolved-children close guard (a structural invariant — close/detach children first).\n"
-    "  --force-close=<reason>   Bypass the signature requirement for story/epic "
-    "(requires user approval via hook).\n"
     "  --caused-by=<id>         On a bug close, draw a caused_by link to the culprit "
     "change/ticket (overrides git-blame auto-derivation).\n"
     "  --ref=<ref>              Completion close gate: verify (and sign) against the committed "
@@ -55,7 +61,7 @@ _USAGE = (
     "    ticket transition abc1 open closed --class=regression  # close a bug with its class\n"
     "    rebar sign abc1 '[\"tests: PASS\"]' && ticket transition abc1 closed  "
     "# close story with a certified signature\n"
-    '    ticket transition abc1 closed --force-close="verifier timed out"  # bypass with reason\n'
+    '    ticket transition abc1 closed --force="verifier timed out"  # bypass with reason\n'
 )
 
 
@@ -96,11 +102,25 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
     return parent_id
 
 
-def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str, str]:
-    """Parse [--reason[=]] [--class[=]] [--force] [--force-close[=]] [--caused-by[=]] [--ref[=]]
-    from the args AFTER <current> <target>. Returns (reason, force, force_close_reason,
-    close_class, caused_by, ref). Mirrors ticket-transition.sh's flag loop (unknown tokens are
-    silently skipped).
+def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
+    """Parse [--reason[=]] [--class[=]] [--force[=]] [--caused-by[=]] [--ref[=]] from the args
+    AFTER <current> <target>. Returns (reason, force_reason, close_class, caused_by, ref).
+    Mirrors ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+
+    ``--force`` / ``--force=<reason>`` (ticket 24f7) is THE single escape hatch, spelled
+    exactly as ``claim --force[=<reason>]``. ``force_reason`` is ``None`` when the flag is
+    ABSENT and a (possibly empty) string when present, so the caller can tell "not passed"
+    from "passed with no value". Which gate it bypasses is decided by the target status:
+    ``open -> in_progress`` bypasses the start-work (plan-review) gate; ``-> closed``
+    bypasses the completion-verification / signature gate.
+
+    It REPLACES the former close-only spelling outright — no alias (operator decision
+    2026-08-07, clean break). Because this loop silently skips unknown tokens, a bare removal
+    would have made a stale close-only invocation a SILENT no-op that closes the ticket
+    through the very gate it meant to bypass. So the retired spelling is matched explicitly
+    and rejected with an error naming ``--force``. The loop compares tokens exactly (there is
+    no prefix/abbreviation matching here), so truncations stay unknown tokens rather than
+    abbreviation-matching onto a live flag.
 
     ``--ref <ref>`` / ``--ref=<ref>`` (bug 80af) is the OPTIONAL completion-close-gate target:
     the git ref whose committed tree the gate verifies (and signs against) instead of HEAD.
@@ -119,8 +139,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str, str]:
     requires a certified signature via ``rebar sign``. It is now just an unknown
     token, silently skipped.)"""
     reason = ""
-    force = False
-    force_close = ""
+    force_reason: str | None = None
     close_class = ""
     caused_by = ""
     ref = ""
@@ -144,16 +163,19 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str, str]:
             close_class = args[i + 1]
             i += 2
         elif a == "--force":
-            force = True
+            force_reason = ""
             i += 1
-        elif a.startswith("--force-close="):
-            force_close = a[len("--force-close=") :]
+        elif a.startswith("--force="):
+            force_reason = a[len("--force=") :]
             i += 1
-        elif a == "--force-close":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --force-close requires a reason", returncode=1)
-            force_close = args[i + 1]
-            i += 2
+        elif a == _RETIRED_FORCE_CLOSE or a.startswith(_RETIRED_FORCE_CLOSE + "="):
+            raise CommandError(
+                f"Error: {_RETIRED_FORCE_CLOSE} was renamed to --force (ticket 24f7) and no "
+                'longer exists. Use --force="<reason>" instead — on a close it bypasses the '
+                "completion-verification / signature gate exactly as the old flag did, and it "
+                "matches `rebar claim --force`.",
+                returncode=1,
+            )
         elif a.startswith("--caused-by="):
             caused_by = a[len("--caused-by=") :]
             i += 1
@@ -172,7 +194,7 @@ def _parse_flags(args: list[str]) -> tuple[str, bool, str, str, str, str]:
             i += 2
         else:
             i += 1
-    return reason, force, force_close, close_class, caused_by, ref
+    return reason, force_reason, close_class, caused_by, ref
 
 
 def _validate_status(label: str, value: str) -> None:
@@ -200,6 +222,7 @@ def transition_compute(
     *,
     reason: str = "",
     force: bool = False,
+    force_reason: str = "",
     force_close: str = "",
     close_class: str = "",
     caused_by: str = "",
@@ -219,7 +242,14 @@ def transition_compute(
     ``cascade=False`` to suppress this for callers that replay an exact recorded state
     per-ticket (e.g. NDJSON import) where pre-moving a parent would conflict with that
     parent's own explicit transition. ``_cascade_seen`` is the internal recursion guard
-    (the ids already on the cascade stack) — callers leave it ``None``."""
+    (the ids already on the cascade stack) — callers leave it ``None``.
+
+    ``force`` / ``force_reason`` / ``force_close`` are the three faces of the one CLI
+    ``--force[=<reason>]`` flag (ticket 24f7): ``force`` arms the start-work gate bypass,
+    ``force_reason`` carries the explicit ``--force=<reason>`` text for that bypass's audit
+    note (it takes precedence over ``reason``), and ``force_close`` carries the reason for
+    the close-gate bypass. The CLI derives all three from the single flag; library callers
+    may still set them independently."""
     tracker = str(config.tracker_dir(repo_root))
     repo_root_str = os.path.dirname(tracker)
 
@@ -290,8 +320,10 @@ def transition_compute(
         # transition below gates the parent in turn, so every ticket in the chain that
         # starts work is gated. The --force bypass propagates up the cascade so a forced
         # start does not stall on an un-reviewed ancestor (claim/transition parity).
-        force_reason = (reason or "(no reason given)") if force else ""
-        gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=force_reason)
+        # An explicit `--force=<reason>` wins; otherwise fall back to `--reason` text (the
+        # pre-24f7 behaviour of a valueless `--force`), then to the placeholder.
+        note = (force_reason or reason or "(no reason given)") if force else ""
+        gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=note)
 
     # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
     # parent, transition it first (recursively up the chain) so a child is never
@@ -303,6 +335,7 @@ def transition_compute(
         tracker,
         reason=reason,
         force=force,
+        force_reason=force_reason,
         repo_root=repo_root,
         cascade=cascade,
         cascade_seen=_cascade_seen,
@@ -336,6 +369,7 @@ def _cascade_open_parent(
     *,
     reason: str,
     force: bool,
+    force_reason: str = "",
     repo_root,
     cascade: bool,
     cascade_seen: frozenset[str] | None,
@@ -365,6 +399,7 @@ def _cascade_open_parent(
                 "in_progress",
                 reason=reason,
                 force=force,
+                force_reason=force_reason,
                 repo_root=repo_root,
                 _cascade_seen=seen | {ticket_id},
             )
@@ -503,14 +538,20 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return _unarchive(ticket_id, target_status, tracker, os.path.dirname(tracker))
 
     try:
-        reason, force, force_close, close_class, caused_by, ref = _parse_flags(flag_args)
+        reason, force_reason, close_class, caused_by, ref = _parse_flags(flag_args)
+        # One `--force[=<reason>]` flag, two gate bypasses (ticket 24f7). `force` arms the
+        # start-work gate bypass; `force_close` (which the close path tests for truthiness)
+        # arms the close-gate bypass, defaulting a bare `--force` to the same placeholder
+        # `claim --force` uses so the two commands behave identically.
+        force = force_reason is not None
         result = transition_compute(
             ticket_id,
             current_status,
             target_status,
             reason=reason,
             force=force,
-            force_close=force_close,
+            force_reason=force_reason or "",
+            force_close=(force_reason or "(no reason given)") if force else "",
             close_class=close_class,
             caused_by=caused_by,
             ref=(ref or None),

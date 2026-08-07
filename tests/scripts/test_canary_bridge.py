@@ -400,7 +400,7 @@ def test_heartbeat_alert_closes_on_recovery(mod: ModuleType, tmp_path: Path) -> 
     assert "--class" in argv and argv[argv.index("--class") + 1] == "env_integration"
     reason = argv[argv.index("--reason") + 1]
     assert reason.startswith("Fixed: reconciler recovered at ")
-    assert any(a.startswith("--force-close=") for a in argv)
+    assert any(a.startswith("--force=") for a in argv)
 
 
 def test_heartbeat_alert_dry_run_makes_zero_rebar_writes(mod: ModuleType, tmp_path: Path) -> None:

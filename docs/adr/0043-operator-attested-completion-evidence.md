@@ -16,7 +16,7 @@ That scoping is correct, but it created a gap. Some completion criteria have "do
 that inherently lives **outside the codebase**: a deploy happened, a live end-to-end run
 passed, a console setting was flipped, an operator ran a drill. There is no code for the
 verifier to read, so it could never mark such a criterion met — it could only FAIL, forcing
-the operator to `--force-close` (which lands the ticket **unsigned**). This is exactly what
+the operator to `--force` (which lands the ticket **unsigned**). This is exactly what
 happened to the two-vote-gate epic 1fa8 (stories S3–S6 and the epic): the work was done and
 proven live — recorded in `infra/runbooks/two-vote-gate-rollback.md` §C.1 — yet none of it
 could earn a signature.

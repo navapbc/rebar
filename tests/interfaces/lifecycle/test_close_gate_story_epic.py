@@ -6,7 +6,7 @@ ALTERNATIVE to the completion-verifier close gate this project actually uses, an
 never enabled here. These tests pin the resulting behavior:
 
   * a story/epic closes WITHOUT any signature (no gate to satisfy), for both types;
-  * ``--force-close="<reason>"`` still closes and still records the FORCE_CLOSE audit
+  * ``--force="<reason>"`` still closes and still records the FORCE_CLOSE audit
     comment (that path is owned by the force-close flow, not by the removed gate).
 """
 
@@ -49,7 +49,7 @@ def test_force_close_still_closes_with_audit_comment(
     tid = _make(rebar_repo, ttype)
 
     capsys.readouterr()
-    rc = _cli.main(["transition", tid, "in_progress", "closed", "--force-close=verifier offline"])
+    rc = _cli.main(["transition", tid, "in_progress", "closed", "--force=verifier offline"])
     assert rc == 0
     assert _status(tid, rebar_repo) == "closed"
 

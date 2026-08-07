@@ -276,7 +276,7 @@ def test_close_argv_exact_shape(mod: ModuleType, tmp_path: Path) -> None:
     assert argv[i + 1] == "env_integration"
     reason = argv[argv.index("--reason") + 1]
     assert reason.startswith("Fixed: ")
-    force = [a for a in argv if a.startswith("--force-close=")]
+    force = [a for a in argv if a.startswith("--force=")]
     assert len(force) == 1 and force[0].split("=", 1)[1].startswith("Fixed: ")
 
 

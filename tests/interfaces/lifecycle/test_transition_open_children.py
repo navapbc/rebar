@@ -8,7 +8,7 @@ preserved is the behavioral contract the perf fix protected:
 
   * closing a parent with open children is rejected (exit 1, lists the children),
     and the parent stays open;
-  * the guard is UNCONDITIONAL — neither ``--force`` nor ``--force-close`` can close a
+  * the guard is UNCONDITIONAL — not even ``--force`` can close a
     parent over open children (the child-closure invariant is structural, not a quality gate);
   * closing the child first lets the parent close;
   * the guard counts ONLY direct children (by parent_id) — unrelated tickets in
@@ -52,7 +52,7 @@ def test_close_parent_with_open_child_is_blocked(
 def test_force_does_NOT_close_parent_with_open_child(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # The child-closure invariant is structural and UNCONDITIONAL: --force (and --force-close)
+    # The child-closure invariant is structural and UNCONDITIONAL: --force
     # must NOT be able to close a parent over open children (warty-karma-matte).
     parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
     child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
@@ -82,12 +82,12 @@ def test_library_transition_force_does_NOT_close_parent_with_open_child(
 def test_force_close_does_NOT_close_parent_with_open_child(
     rebar_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # --force-close bypasses only the signature/completion-verifier requirement, never the
+    # --force bypasses only the signature/completion-verifier requirement, never the
     # child-closure invariant.
     parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
     child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
 
-    out, rc = _cli_run(["transition", parent, "open", "closed", "--force-close=emergency"], capsys)
+    out, rc = _cli_run(["transition", parent, "open", "closed", "--force=emergency"], capsys)
     assert rc == 1
     assert "unresolved" in out and child in out
     assert _status(parent, rebar_repo) == "open"

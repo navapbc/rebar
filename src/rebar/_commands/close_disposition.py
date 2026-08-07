@@ -9,7 +9,7 @@ attestation on EVERY closed direct child, with no disposition branch — so an e
 uncertified and withheld its parent's signature.
 
 The composition had no honest exit. Reopening and re-closing took the same exemption every time;
-``--force-close`` produced exactly the uncertified state the operator ruling prohibits. Measured
+``--force`` produced exactly the uncertified state the operator ruling prohibits. Measured
 across the store when this was filed, the exemption keyed on the very link that documents the
 disposition:
 

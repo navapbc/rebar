@@ -1,7 +1,7 @@
 """Config-as-artifact guard for the canary's bug-close commands (ticket ed13).
 
 Ticket ed13 made ``--class <value>`` REQUIRED to close a BUG ticket — even with
-``--force-close``. A close command that omits ``--class`` fails at runtime with
+``--force``. A close command that omits ``--class`` fails at runtime with
 "closing a bug ticket requires --class", which turns the canary RED on every
 recovery (regression guard for bug 0e15).
 
@@ -117,7 +117,7 @@ def test_every_bug_close_carries_valid_class(mod: ModuleType, subcommand: str, e
         assert value in _VALID_CLASSES, (
             f"{subcommand} uses invalid --class value {value!r}; valid: {sorted(_VALID_CLASSES)}"
         )
-        assert any(a.startswith("--force-close") for a in argv), (
+        assert any(a.startswith("--force") for a in argv), (
             f"{subcommand} close must bypass the completion-verification gate "
             f"(bot alert tickets have no verifiable criteria — bug 0dc5): {argv}"
         )

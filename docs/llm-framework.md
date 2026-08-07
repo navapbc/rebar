@@ -717,7 +717,7 @@ splits them two ways, **deterministically and FIRST**, before any LLM call:
   returns a **FAIL verdict immediately, without ever invoking the LLM** (the verdict's `runner` is
   `"deterministic"`). A parent cannot be complete over open work.
 - **a closed-but-uncertified child WITHHOLDS CERTIFICATION, but does not block.** If a child is
-  closed *without* a certified/valid completion signature (e.g. it was `--force-close`d), the parent
+  closed *without* a certified/valid completion signature (e.g. it was `--force`d), the parent
   may still **close** — judged on its **own** criteria — but the verdict carries **`certifiable:
   false`** and the close is **left unsigned** (see the close gate below). The parent is
   complete-enough-to-close but not certifiable, because a descendant's attestation is missing.
@@ -818,13 +818,13 @@ main checkout verifies the main checkout's `HEAD`, not your worktree edits):
 
 - on a non-force close it runs `verify_completion`; a **FAIL** verdict, or an **unavailable
   LLM** (missing `[agents]` extra / API key / any verifier error), **blocks** the close
-  (fail-closed `CommandError`) with the findings + a `--force-close` hint;
+  (fail-closed `CommandError`) with the findings + a `--force` hint;
 - on **PASS** it signs the verdict onto the ticket *after* the close is confirmed (so a
   failed/raced close never leaves an orphan certified signature) via `rebar.signing.sign_manifest`
   — **unless the verdict is `certifiable: false`** (a closed-but-uncertified descendant), in which
   case the parent closes but is **left unsigned**;
-- **`--force-close="<reason>"`** closes without verifying or signing. So a **closed-without-
-  signature** ticket means "not certified" — either the gate was bypassed (`--force-close`) *or* a
+- **`--force="<reason>"`** closes without verifying or signing. So a **closed-without-
+  signature** ticket means "not certified" — either the gate was bypassed (`--force`) *or* a
   descendant is still uncertified; it no longer implies the ticket's **own** validation failed. The
   remedy for the descendant case is to re-close the uncertified child so it earns a signature.
 

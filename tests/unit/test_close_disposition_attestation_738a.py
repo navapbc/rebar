@@ -5,7 +5,7 @@ replacement from completion verification — correct, since such a bug never cla
 own acceptance criteria. But it also returned no sign signal, so the close was unsigned, and
 ``child_closure_findings`` counts any unsigned closure as UNCERTIFIED and withholds the parent's
 signature. Two correct rules composing into a state with no honest exit: reopening took the same
-exemption every time, and ``--force-close`` produced the very uncertified state the ruling forbids.
+exemption every time, and ``--force`` produced the very uncertified state the ruling forbids.
 
 The exemption keyed on the link that DOCUMENTS the disposition, so certification was reachable only
 for duplicates that hid their replacement. These tests pin the fix and, more
@@ -48,11 +48,11 @@ def test_every_exempt_class_can_produce_a_verdict(close_class, monkeypatch):
 
 
 def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeypatch, tmp_path):
-    """THE GUARANTEE THIS FIX MUST NOT WEAKEN: `--force-close` still withholds the signature.
+    """THE GUARANTEE THIS FIX MUST NOT WEAKEN: `--force` still withholds the signature.
 
     The disposition branch mints an attestation, so the ordering inside `_completion_precheck`
     becomes load-bearing: `if force_close: return None` runs BEFORE it. If that order were ever
-    reversed, `--force-close --class duplicate` on a linked bug would start producing a signed
+    reversed, `--force --class duplicate` on a linked bug would start producing a signed
     closure — turning the operator's escape hatch into a way to certify without verifying, which is
     exactly the state the reopen ruling exists to prevent.
 
@@ -80,7 +80,7 @@ def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeyp
         close_class="duplicate",
     )
 
-    assert out is None, "a --force-close must return no sign signal, so the close stays unsigned"
+    assert out is None, "a --force must return no sign signal, so the close stays unsigned"
     assert called == [], "the disposition attestation must not even be built for a force-close"
 
 

@@ -138,7 +138,7 @@ def _completion_precheck(
     Returns the PASS verdict ``result`` (the sign signal, fed to
     :func:`sign_completion_verdict` after a confirmed close), or ``None`` when the gate is off or
     the
-    close is a ``--force-close`` (which closes WITHOUT verifying or signing — withholding the
+    close is a ``--force`` (which closes WITHOUT verifying or signing — withholding the
     signed confirmation, so a closed-without-signature ticket is the durable signal that
     validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
     the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
@@ -236,7 +236,7 @@ def _completion_precheck(
             f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
             f"commit references it (nor any of its descendants). Add a "
             f"'rebar-ticket: {resolved_id}' trailer to the commit "
-            'that implements it, then retry (or override with --force-close="<reason>"). '
+            'that implements it, then retry (or override with --force="<reason>"). '
             "Completion verification cannot confirm the work landed without a referencing commit.",
             returncode=1,
         )
@@ -292,7 +292,7 @@ def _completion_precheck(
         raise CommandError(
             f"Error: cannot close {ticket_id}: completion verification could not run "
             f"({exc}).{_hint} {_remedy} "
-            'Override with --force-close="<reason>".',
+            'Override with --force="<reason>".',
             returncode=_rc,
         ) from None
 

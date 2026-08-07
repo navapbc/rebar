@@ -9,7 +9,7 @@ NO model/network — and assert the gate's deterministic behavior:
   * gate ON + PASS → close succeeds AND a SIGNATURE is written AFTER the close (certified);
   * gate ON + FAIL → blocked (exit 1), ticket stays in_progress, no signature;
   * gate ON + verifier raises (missing extra/key, any error) → fail-CLOSED block;
-  * --force-close → closes WITHOUT verifying or signing (withholds the attestation);
+  * --force → closes WITHOUT verifying or signing (withholds the attestation);
   * a bug close with no valid --reason is rejected BEFORE the (billable) verifier runs;
   * an unreadable config fails this gate OFF with a warning (does not block / preempt).
 """
@@ -116,7 +116,7 @@ def test_gate_pass_closes_and_signs_after_close(rebar_repo: Path, monkeypatch) -
 
 def test_gate_pass_uncertifiable_closes_without_signature(rebar_repo: Path, monkeypatch) -> None:
     """A PASS verdict with ``certifiable=False`` (an uncertified/force-closed descendant): the
-    parent's OWN criteria passed so it CLOSES — NOT blocked, no ``--force-close`` needed — but the
+    parent's OWN criteria passed so it CLOSES — NOT blocked, no ``--force`` needed — but the
     close is NOT certified (certification propagates: an unattested descendant leaves the subtree
     unattested). No completion signature is written; the closed-without-signature ticket is the
     durable 'not fully certified' signal."""
@@ -251,7 +251,7 @@ def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> Non
 
 def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
     """clay-cake-act: the library ``rebar.transition(..., force_close=...)`` reaches the SAME
-    completion-gate-bypass seam as the CLI ``--force-close`` — both close the ticket WITHOUT
+    completion-gate-bypass seam as the CLI ``--force`` — both close the ticket WITHOUT
     running the verifier and leave it closed-WITHOUT-signature, identically. (Before the fix
     the library wrapper exposed only ``force``, so a library consumer had no in-process bypass
     and had to shell out to the CLI — the parity gap.)"""
@@ -268,7 +268,7 @@ def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
     )
     assert out["to"] == "closed"
 
-    # CLI path: the --force-close flag the wrapper threads to.
+    # CLI path: the --force flag the wrapper threads to.
     tid_cli = _make(rebar_repo)
     cp = subprocess.run(
         [
@@ -279,7 +279,7 @@ def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
             tid_cli,
             "in_progress",
             "closed",
-            "--force-close=cli override",
+            "--force=cli override",
         ],
         cwd=str(rebar_repo),
         capture_output=True,
@@ -392,7 +392,7 @@ def test_no_file_impact_skips_commit_check(rebar_repo: Path, monkeypatch) -> Non
 
 
 def test_force_close_skips_file_impact_check(rebar_repo: Path, monkeypatch) -> None:
-    """--force-close bypasses the deterministic file_impact/commit precheck too (it withholds
+    """--force bypasses the deterministic file_impact/commit precheck too (it withholds
     the signature but still closes)."""
     _commit(rebar_repo)
     _enable(rebar_repo)
