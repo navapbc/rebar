@@ -17,6 +17,11 @@ agree:
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from rebar import _cli
 from rebar._cli import _help
@@ -25,6 +30,8 @@ from rebar._cli import _help
 # word (no .txt of its own). (The deprecated ``list-epics`` arm was removed in ticket
 # 5899; use ``list --type=epic ...``.)
 _OVERVIEW_ALLOWLIST = frozenset({"help"})
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_RETIRED_BRIDGE_COMMANDS = ("bridge-status", "purge-bridge")
 
 
 def _routable_subcommands() -> frozenset[str]:
@@ -99,3 +106,57 @@ def test_overview_lists_no_unknown_subcommand() -> None:
     known = _help.known_subcommands()
     extra = sorted(listed - known)
     assert extra == [], f"overview lists non-routable subcommands: {extra}"
+
+
+@pytest.mark.parametrize("command", _RETIRED_BRIDGE_COMMANDS)
+def test_retired_bridge_command_is_unknown(command: str, rebar_repo: Path) -> None:
+    """A retired bridge command follows the public unknown-command contract."""
+    completed = subprocess.run(
+        [sys.executable, "-m", "rebar.cli", command],
+        cwd=rebar_repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == f"Error: unknown subcommand '{command}'\n"
+    assert "Subcommands:" in completed.stdout
+
+
+def test_retired_bridge_commands_are_absent_from_top_level_help() -> None:
+    """Top-level help advertises neither retired bridge command."""
+    completed = subprocess.run(
+        [sys.executable, "-m", "rebar.cli", "--help"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    for command in _RETIRED_BRIDGE_COMMANDS:
+        assert command not in completed.stdout
+
+
+def test_shipped_surfaces_name_no_retired_bridge_command() -> None:
+    """The shipped package and active command-contract docs contain no stale token."""
+    package_files = [
+        path
+        for path in (_REPO_ROOT / "src" / "rebar").rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    ]
+    active_docs = [
+        _REPO_ROOT / "docs" / "cli-reference.md",
+        _REPO_ROOT / "docs" / "exit-codes.md",
+        _REPO_ROOT / "docs" / "output-schemas.md",
+    ]
+
+    matches: dict[str, list[str]] = {}
+    for path in [*package_files, *active_docs]:
+        text = path.read_text(encoding="utf-8")
+        found = [command for command in _RETIRED_BRIDGE_COMMANDS if command in text]
+        if found:
+            matches[str(path.relative_to(_REPO_ROOT))] = found
+
+    assert matches == {}

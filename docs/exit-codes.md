@@ -76,7 +76,6 @@ guarantee `2`).
 |------------|:------:|:----:|:-----------:|-------|
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
 | `bridge-fsck` | 0 | — | — | audit; no ticket id |
-| `bridge-status` | 0 | — | — | no ticket id |
 | `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
 | `clarity-check` | 0 | **2** | — | **gate**: 0=pass, 1=fail-verdict, 2=not-found/usage |
@@ -98,7 +97,6 @@ guarantee `2`).
 | `list` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
 | `list-descendants` | 0 | 0 | — | tolerant read: unknown root → empty buckets, 0 |
 | `next-batch` | 0 | 1 | — | |
-| `purge-bridge` | 0 | — | — | no ticket id |
 | `quality-check` | 0 | 1 | — | **gate**: 0=dispatch-ready, 1=not-ready **or** not-found |
 | `ready` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
 | `reopen` | 0 | 1 | 10 | 10 when the ticket is not closed |

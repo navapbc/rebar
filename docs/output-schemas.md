@@ -42,7 +42,6 @@ Structured via `--output json`:
 | `clarity-check`                  | `clarity_result`          |
 | `check-ac` / `quality-check`     | `gate_result`             |
 | `validate`                       | `validate_report`         |
-| `bridge-status`                  | `bridge_status`           |
 | `get-file-impact`                | `file_impact`             |
 | `get-verify-commands`            | `verify_commands`         |
 | `scratch get/set/clear`          | `scratch_envelope`        |

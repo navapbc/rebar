@@ -37,7 +37,7 @@ def _bridge_alert_warning(states: list[dict]) -> str | None:
     if alerted > 0:
         return (
             f"WARNING: {alerted} ticket(s) have unresolved bridge alerts. "
-            "Run: ticket bridge-status for details."
+            "Inspect unresolved bridge alerts for details."
         )
     return None
 
@@ -202,7 +202,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
             if unresolved > 0:
                 print(
                     f"WARNING: ticket {state.get('ticket_id')} has {unresolved} "
-                    "unresolved bridge alert(s). Run: ticket bridge-status for details.",
+                    "unresolved bridge alert(s). Inspect unresolved bridge alerts for details.",
                     file=sys.stderr,
                 )
     return overall_rc

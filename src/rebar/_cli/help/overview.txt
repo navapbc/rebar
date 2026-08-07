@@ -24,9 +24,7 @@ Subcommands:
   clarity-check Score one ticket's clarity (<ticket_id>; exit 0=pass, 1=fail; JSON: score/verdict/threshold)
   check-ac      Check one ticket has an Acceptance Criteria block (<ticket_id>; exit 0=pass, 1=fail; AC_CHECK: pass|fail)
   quality-check Check one ticket's dispatch readiness (<ticket_id>; exit 0=pass, 1=fail; QUALITY: pass|fail)
-  purge-bridge  Remove non-project inbound bridge tickets (--keep=<KEY> [--dry-run])
   summary       One-line ticket summary with blocking status for one or more IDs
-  bridge-status Show last bridge run status [--output json]
   bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)
   bridge-probe  Preflight live Jira capability (create/label/search/delete round-trip)
   exists        O(1) presence check (exit 0=exists, 1=not found)

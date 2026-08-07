@@ -18,7 +18,7 @@ Per-command behaviour is selected by a *profile* (default + allowed set):
 
     reader  show / list / search   default json   {json, llm}
     ready   ready                   default text   {text, llm, json}
-    report  validate / next-batch / bridge-status /
+    report  validate / next-batch /
             summary / check-ac / quality-check / fsck / bridge-fsck
                                     default text   {text, json}
 

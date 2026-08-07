@@ -88,12 +88,7 @@ def test_commands_advertising_output_have_a_schema() -> None:
 # author forgets to wire here lands outside this map and trips the completeness
 # guard below — coverage can't silently regress.
 #
-# Value is either a builder that, given the seeded fixture ids, returns the CLI
-# args after the subcommand (the command emits its registered schema as JSON), or
-# EXEMPT_BRIDGE for the one advertiser whose JSON shape requires a bridge run.
-EXEMPT_BRIDGE = "EXEMPT_BRIDGE"
-
-# advertiser command (hyphenated) -> args-after-subcommand builder | EXEMPT_BRIDGE.
+# Advertiser command (hyphenated) -> args-after-subcommand builder.
 CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "show": lambda s: ["show", s["task"]],
     "list": lambda s: ["list"],
@@ -116,13 +111,8 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "sign": lambda s: ["sign", s["task"], '["did the thing"]'],
     "verify-signature": lambda s: ["verify-signature", s["task"]],
     "delete": lambda s: ["delete", s["doomed"], "--user-approved"],
-    # bridge-status only emits its registered JSON shape AFTER a reconcile bridge
-    # run has written a status file; with no bridge it prints a human hint + exit 1.
-    # Driving it would require standing up the Jira bridge, so it is documented
-    # EXEMPT here (mirrors the env-dependent exemptions in the MCP guard).
     "audit": lambda s: ["audit", "show", s["task"]],
     "metrics": lambda s: ["metrics", "--since", "2026-01-01", "--until", "2026-07-01"],
-    "bridge-status": EXEMPT_BRIDGE,
 }
 
 
@@ -131,16 +121,13 @@ def _output_advertisers() -> set[str]:
 
 
 def test_every_cli_output_advertiser_is_classified() -> None:
-    """Mechanical completeness: every CLI --output advertiser is either driven by
-    CLI_OUTPUT_DRIVERS (validated below) or explicitly EXEMPT — so a new advertiser
-    cannot be added without classifying it."""
+    """Mechanical completeness: every CLI --output advertiser has a real driver."""
     advertised = _output_advertisers()
     classified = set(CLI_OUTPUT_DRIVERS)
     unclassified = advertised - classified
     assert not unclassified, (
         f"CLI commands advertise --output but are not classified for real-output "
-        f"validation: {sorted(unclassified)} — add a driver to CLI_OUTPUT_DRIVERS "
-        f"(or mark EXEMPT_BRIDGE with a reason)."
+        f"validation: {sorted(unclassified)} — add a driver to CLI_OUTPUT_DRIVERS."
     )
     stale = classified - advertised
     assert not stale, (
@@ -193,7 +180,7 @@ def _seed_for_cli(repo: Path) -> dict:
     }
 
 
-_DRIVEN = sorted(c for c, v in CLI_OUTPUT_DRIVERS.items() if v != EXEMPT_BRIDGE)
+_DRIVEN = sorted(CLI_OUTPUT_DRIVERS)
 
 
 @pytest.mark.parametrize("cmd", _DRIVEN)

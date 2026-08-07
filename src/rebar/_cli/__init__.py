@@ -116,9 +116,8 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
-# Bridge arms (E5): full auto-init UNLESS a tracker override is injected (test
-# tracker), matching the dispatcher's `bridge-status`/`purge-bridge` arms.
-_BRIDGE = frozenset({"bridge-status", "bridge-fsck", "purge-bridge"})
+# Bridge audit arm: full auto-init unless a test tracker is injected.
+_BRIDGE = frozenset({"bridge-fsck"})
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -300,18 +299,9 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         # The dispatcher auto-inits only when no test tracker is injected.
         if not config.tracker_dir_override():
             ensure_initialized(init_only=False)
-        tracker = str(config.tracker_dir())
-        if sub == "bridge-status":
-            from rebar._engine_support import bridge
+        from rebar._engine_support import bridge_fsck
 
-            return bridge.bridge_status_cli(rest, tracker)
-        if sub == "bridge-fsck":
-            from rebar._engine_support import bridge_fsck
-
-            return bridge_fsck.main(rest)
-        from rebar._commands import purge_bridge
-
-        return purge_bridge.purge_bridge_cli(rest)
+        return bridge_fsck.main(rest)
     if sub in _IO:
         from rebar._io import _cli as _io_cli
 
