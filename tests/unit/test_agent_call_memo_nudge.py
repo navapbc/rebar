@@ -300,3 +300,146 @@ def test_parallel_batch_of_identical_calls_executes_wrapped_tool_once(monkeypatc
         f"a parallel batch of 3 identical calls must execute the wrapped tool ONCE, "
         f"ran {calls['n']}x (concurrent cache race)"
     )
+
+
+# ── lever 2 (story 2948): read_file memo NORMALIZED BY PATH ─────────────────────────────
+# The f6fc memo keyed on read_file's exact (path, line_start, line_end) signature, so re-reads
+# of the SAME file at DIFFERENT ranges slipped past it — the measured dominant verifier waste
+# (48 read_file calls, 11 distinct files, 77% re-reads). Lever 2 caches the whole file ONCE (an
+# internal line_start=1/line_end=0 read) and serves every subsequent range by slicing the cache.
+
+
+def _file_backed_read_file(lines: list[str], calls: dict):
+    """A stub NAMED ``read_file`` that formats an in-memory file EXACTLY like
+    ``pai_tools.read_file`` (1-based ``"{n}\\ttext"`` rows, ``line_end=0`` = EOF, the
+    ``_READ_MAX_LINES`` window cap read live so a test can shrink it), recording each execution."""
+
+    def read_file(path: str = ".", line_start: int = 1, line_end: int = 0) -> str:
+        calls["n"] += 1
+        cap = pai_tools._READ_MAX_LINES
+        lo = max(1, line_start)
+        hi = line_end if (line_end and line_end >= lo) else len(lines)
+        hi = min(hi, lo + cap - 1)
+        out = [f"{i + 1}\t{lines[i]}" for i in range(lo - 1, min(hi, len(lines)))]
+        return "\n".join(out) or "(empty range)"
+
+    return read_file
+
+
+def _seq_driver(calls_args: list[dict], seen: list | None = None) -> FunctionModel:
+    """Emit ONE call per turn walking ``calls_args`` (heterogeneous args), then land. Records
+    every ToolReturnPart the model receives into ``seen`` (in call order)."""
+    state = {"i": 0}
+
+    def model(messages, info: AgentInfo):
+        if seen is not None:
+            for part in getattr(messages[-1], "parts", []):
+                if isinstance(part, ToolReturnPart):
+                    seen.append(part.content)
+        i = state["i"]
+        state["i"] += 1
+        if i >= len(calls_args):
+            return ModelResponse(parts=[TextPart("landed")])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=info.function_tools[0].name, args=calls_args[i])]
+        )
+
+    return FunctionModel(model)
+
+
+def _base(content: str) -> str:
+    """Strip any appended graduated nudge (which starts with a blank line + '[')."""
+    return content.split("\n\n[", 1)[0]
+
+
+def test_read_file_same_path_different_ranges_reads_underlying_file_once(monkeypatch):
+    """Lever 2 core: three reads of ONE path at DIFFERENT ranges (incl. a normpath-equivalent
+    spelling) execute the underlying file read exactly ONCE and each returns its correct slice."""
+    lines = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _file_backed_read_file(lines, calls))
+    cfg = _cfg()
+    seen: list = []
+    args = [
+        {"path": "src/x.py", "line_start": 2, "line_end": 3},
+        {"path": "./src/x.py", "line_start": 5, "line_end": 5},  # normpath -> same cache entry
+        {"path": "src/x.py"},  # whole file (defaults)
+    ]
+    PydanticAIRunner(cfg, model_override=_seq_driver(args, seen=seen)).run(_req(cfg))
+
+    assert calls["n"] == 1, (
+        f"same-path reads at different ranges must read the underlying file ONCE, ran {calls['n']}x"
+    )
+    assert _base(seen[0]) == "2\tbeta\n3\tgamma"
+    assert _base(seen[1]) == "5\tepsilon"
+    assert _base(seen[2]) == "1\talpha\n2\tbeta\n3\tgamma\n4\tdelta\n5\tepsilon\n6\tzeta"
+
+
+def test_read_file_repeat_at_different_range_still_carries_graduated_nudge(monkeypatch):
+    """A re-read of the same path at a NEW range is still a 'repeat' and carries the L1-then-L2
+    nudge, byte-stable — the escalation must survive the path-normalized key."""
+    lines = ["one", "two", "three", "four"]
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _file_backed_read_file(lines, calls))
+    cfg = _cfg()
+    seen: list = []
+    args = [
+        {"path": "f", "line_start": 1, "line_end": 1},
+        {"path": "f", "line_start": 2, "line_end": 2},  # first repeat -> L1
+        {"path": "f", "line_start": 3, "line_end": 4},  # second repeat -> L2
+    ]
+    PydanticAIRunner(cfg, model_override=_seq_driver(args, seen=seen)).run(_req(cfg))
+
+    assert calls["n"] == 1
+    assert "\n\n[" not in seen[0], "the first read of a path carries no nudge"
+    assert seen[1].startswith("2\ttwo") and seen[1] != "2\ttwo", "first repeat carries L1 nudge"
+    assert seen[2].startswith("3\tthree\n4\tfour"), "second repeat preserves the sliced body"
+    assert seen[2] != seen[1].replace("2\ttwo", "3\tthree\n4\tfour"), (
+        "second repeat escalates to a distinct level-2 nudge"
+    )
+    # Byte-stability: the L2 nudge suffix is identical regardless of the (different) body it rides.
+    l1_suffix = seen[1][len("2\ttwo") :]
+    l2_suffix = seen[2][len("3\tthree\n4\tfour") :]
+    assert l1_suffix != l2_suffix, "L1 and L2 nudges must be distinct"
+
+
+def test_read_file_out_of_range_slice_served_as_empty_range_from_cache(monkeypatch):
+    """An out-of-range request against a COMPLETE cached file yields read_file's '(empty range)'
+    sentinel deterministically from the cache — no re-execution."""
+    lines = ["only-line"]
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _file_backed_read_file(lines, calls))
+    cfg = _cfg()
+    seen: list = []
+    args = [
+        {"path": "f", "line_start": 1, "line_end": 1},
+        {"path": "f", "line_start": 50, "line_end": 60},  # past EOF
+    ]
+    PydanticAIRunner(cfg, model_override=_seq_driver(args, seen=seen)).run(_req(cfg))
+
+    assert calls["n"] == 1
+    assert _base(seen[0]) == "1\tonly-line"
+    assert _base(seen[1]) == "(empty range)"
+
+
+def test_read_file_truncated_file_falls_back_to_exact_read_beyond_window(monkeypatch):
+    """When the whole-file read hit the window cap (a > cap-line file), a request that reaches
+    PAST the cached window falls back to the exact-range read rather than fabricating an empty
+    slice; a request WITHIN the cached window is still served from the (partial) cache."""
+    monkeypatch.setattr(pai_tools, "_READ_MAX_LINES", 3)  # tiny cap so a 7-line file truncates
+    lines = [f"line{i}" for i in range(1, 8)]  # 7 lines > cap 3
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _file_backed_read_file(lines, calls))
+    cfg = _cfg()
+    seen: list = []
+    args = [
+        {"path": "big", "line_start": 1, "line_end": 2},  # within cached window -> from cache
+        {"path": "big", "line_start": 6, "line_end": 7},  # past window -> exact fallback read
+    ]
+    PydanticAIRunner(cfg, model_override=_seq_driver(args, seen=seen)).run(_req(cfg))
+
+    assert _base(seen[0]) == "1\tline1\n2\tline2"  # sliced from the truncated cache
+    assert _base(seen[1]) == "6\tline6\n7\tline7"  # exact fallback read
+    assert calls["n"] == 2, (
+        f"one whole-file read (caches 1..cap) + one exact fallback = 2, ran {calls['n']}x"
+    )

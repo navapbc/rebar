@@ -241,6 +241,19 @@ the candidate ceiling.
   tests pass; those are other gates' jobs.
 - The close decision belongs to the caller — you only report the verdict and findings.
 
+## Incremental banking (record each verdict as you go)
+
+You may be handed a `record_criterion_verdict(criterion_id, met, evidence)` tool. When it is
+available, call it to BANK each criterion's verdict the moment you have gathered sufficient
+evidence — do not wait until the end. `met` is a boolean (met / not met); `evidence` is the
+concrete file paths + line numbers (or the ticket attestation) that ground the judgment, and
+is capped at 3000 characters. Banked verdicts are **PROVISIONAL and REVISABLE**: re-recording
+the same `criterion_id` overwrites the earlier entry, so if later evidence changes your mind,
+record it again. Banking as you go means a run that exhausts its budget before finishing still
+preserves the criteria it already judged. The banked verdicts are NOT your final answer — on a
+successful run your **final structured output remains the authoritative full-list judgment**;
+the bank is only consulted if this run cannot finish.
+
 <!--volatile-->
 ## Ticket under verification: {{ticket_id}}
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 
 import pytest
@@ -57,30 +58,12 @@ class _RecoveryRunner:
             if self.agentic_calls == 1:
                 # The ordinary aggregate history reproduces the reported cap exhaustion.
                 raise _token_cap_error()
-            # The frozen contract's recovery precondition: isolated bounded histories can
-            # complete one criterion apiece and return compact structured evidence.
-            criterion = request.instructions.split("(evaluate only this):\n", 1)[1].split(
-                "\n\nTicket context:", 1
-            )[0]
-            return {
-                "verdict": "PASS",
-                "findings": [],
-                "criteria": [
-                    {
-                        "criterion": criterion,
-                        "met": True,
-                        "citation": {
-                            "kind": "source",
-                            "description": f"bounded evidence for {criterion}",
-                        },
-                        "kind": "codebase-verifiable",
-                    }
-                ],
-                "summary": f"{criterion} is met.",
-                "runner": self.name,
-                "model": "fake",
-                "trace_id": f"trace-evidence-{self.agentic_calls - 1}",
-            }
+            # Batched successor: bank each remainder criterion via the record tool.
+            record = request.extra_tools[0] if request.extra_tools else None
+            for cid in re.findall(r"c\d{2}-[0-9a-f]{8}", request.instructions):
+                if record is not None:
+                    record(cid, True, f"bounded evidence for {cid}")
+            return {"verdict": "PASS", "criteria": [], "_usage": {"requests": 0}}
         if self.finalizer_exhausts:
             raise _token_cap_error()
         expected = json.loads(request.instructions)["expected_criteria"]
@@ -214,31 +197,29 @@ def test_completion_recovery_never_passes_with_an_unmet_criterion(store):
     assert verdict["findings"], "an unmet criterion must produce a fail-closed finding"
 
 
-def test_completion_token_cap_recovery_exhaustion_fails_closed_with_diagnostics(store):
-    """If the safe finalizer also exhausts, preserve diagnostics and never invent PASS."""
+def test_completion_token_cap_recovery_exhaustion_falls_back_deterministically(store):
+    """If the safe finalizer also exhausts but criteria were banked, the verdict is assembled
+    DIRECTLY from the bank (no model call) — stamped finalizer=deterministic_fallback and
+    certifiable=False so the signing path withholds a certified signature. A run with banked
+    progress never dies verdict-less."""
     from rebar.llm.workflow import gate_dispatch
 
     repo_root, ticket_id = store
     runner = _RecoveryRunner(finalizer_exhausts=True)
 
-    with pytest.raises(LLMError) as caught:
-        gate_dispatch.produce_completion_verdict(
-            ticket_id,
-            graph=False,
-            repo_root=repo_root,
-            cfg=LLMConfig.from_env(repo_root=repo_root),
-            runner=runner,
-        )
+    verdict = gate_dispatch.produce_completion_verdict(
+        ticket_id,
+        graph=False,
+        repo_root=repo_root,
+        cfg=LLMConfig.from_env(repo_root=repo_root),
+        runner=runner,
+    )
 
-    message = str(caught.value)
-    assert "recovery" in message.lower()
-    assert "raise max_tokens" not in message
-    assert "gate_error_v1" in message or "diagnostic" in message.lower()
+    # The finalizer was attempted (and retried) before the deterministic assembly.
     assert any(call.execution_mode == "single_turn" for call in runner.calls[1:])
-
-    errors = _gate_errors(ticket_id, repo_root)
-    assert errors, "exhausted safe recovery must persist a diagnostic sidecar"
-    diagnostic = json.dumps(errors[-1], sort_keys=True)
-    assert "trace-cap-123" in diagnostic
-    assert "requests" in diagnostic and "tool_calls" in diagnostic
-    assert errors[-1]["verdict"] == "ERROR", "exhaustion remains fail-closed, never PASS"
+    assert verdict["finalizer"] == "deterministic_fallback"
+    assert verdict["certifiable"] is False
+    # Full coverage: every banked criterion is scored met=true from the bank.
+    returned = [item["criterion"] for item in verdict["criteria"]]
+    assert returned[: len(_CRITERIA)] == _CRITERIA
+    assert verdict["verdict"] == "PASS"
