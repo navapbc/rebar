@@ -9,7 +9,8 @@ This is the receiver's critical section. Given a Gerrit ``patchset-created`` web
 3. short-circuits if the vote is already recorded locally (dedup store) OR already
    present on Gerrit (the authoritative check) — a webhook + backfill never double-vote;
 4. clones the change ref into a temp working tree, fetches the diff, and runs the
-   ``adapter.code_review_decision`` seam;
+   ``adapter.code_review_decision`` seam — which first BINDS that tree to the revision
+   the vote will attach to, and refuses the vote outright if they disagree;
 5. maps PASS→``LLM_REVIEW_MAX_VALUE`` / BLOCK→``LLM_REVIEW_BLOCK_VALUE`` and casts the
    vote via Gerrit REST;
 6. records the dedup row ONLY on a confirmed-successful vote (write-on-success). ANY
@@ -401,6 +402,80 @@ async def review_and_vote(
         return await _review_and_vote(event, config=config, gerrit=gerrit, dedup=dedup, force=force)
 
 
+async def _decision_for_clone(
+    gc: Any,
+    repo_root: str,
+    info: dict[str, Any],
+    *,
+    is_merge: bool,
+    parent_count: int,
+    commit_message: str,
+) -> tuple[dict[str, Any], str]:
+    """Fetch the diff for the ALREADY-CLONED tree at ``repo_root`` and run the
+    ``adapter.code_review_decision`` seam, taking the merge or non-merge diff path.
+
+    ``revision`` is handed to the seam so the adapter can bind the tree it is about to review
+    to the revision the vote will attach to; a proven disagreement raises
+    ``adapter.ReviewedTreeMismatch``, which the caller turns into a refusal to vote.
+
+    Returns ``(decision, diff_text)`` — the reviewed diff travels back out because it feeds the
+    code_review artifact's change fingerprint after the vote."""
+    change_id, revision = info["change_id"], info["revision"]
+    if not is_merge:
+        diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
+        decision = await asyncio.to_thread(
+            adapter.code_review_decision,
+            diff_text,
+            repo_root,
+            info["patchset_ref"],
+            revision=revision,  # binds the reviewed tree to the voted revision
+            commit_message=commit_message,  # scope-intent overlay (non-merge path)
+            change_id=change_id,  # change:<id> novelty keyspace (finding-memory)
+        )
+        return decision, diff_text
+    # 409 guard (S2): a merge (>=2 parents) 409s the bare /patch, so route it through the
+    # auto-merge-delta path instead. Emit the named signal so the otherwise-silent guard is
+    # visible in the logs (fires ONLY on a merge — merge_detection logs is_merge for EVERY
+    # change).
+    _emit(
+        logging.INFO,
+        "merge_change_409_guard",
+        change_id=change_id,
+        revision_id=revision,
+        parent_count=parent_count,
+    )
+    # ONLY the auto-merge delta + integrated-commit context — never /patch. A merge-path REST
+    # failure here is a fail-closed -1 coverage-gap (the clone succeeded, so the vote POST
+    # further up can still reach Gerrit).
+    try:
+        diff_text, merge_commits, stats = await asyncio.to_thread(
+            _assemble_merge_diff, gc, change_id, revision
+        )
+    except GerritError as exc:
+        return _merge_coverage_gap_decision(f"merge context assembly failed: {exc}"), ""
+    # Log WHAT the reviewer saw (context stats) so a merge review can be debugged from logs
+    # alone: empty auto-merge delta, a truncated REST fan-out, or an unexpected file/commit
+    # count are all visible here.
+    _emit(
+        logging.INFO,
+        "merge_change_review",
+        change_id=change_id,
+        revision_id=revision,
+        integrated_commits=merge_commits,
+        **stats,
+    )
+    decision = await asyncio.to_thread(
+        adapter.code_review_decision,
+        diff_text,
+        repo_root,
+        info["patchset_ref"],
+        revision=revision,  # binds the reviewed tree to the voted revision
+        merge_commits=merge_commits,
+        change_id=change_id,  # change:<id> novelty keyspace
+    )
+    return decision, diff_text
+
+
 async def _review_and_vote(
     event: dict,
     *,
@@ -485,7 +560,6 @@ async def _review_and_vote(
         # (not a silent no-vote): the merge change is blocked AND visibly flagged as an infra
         # veto. ``decision`` is pre-set here on a commit-fetch failure so the review is skipped.
         decision: dict[str, Any] | None = None
-        merge_commits: int | None = None
         parent_count = -1  # -1 = commit fetch failed (unknown); logged with the vote below
         commit_message = ""  # the change's commit body (drives scope-intent); "" if unknown
         diff_text = ""  # the reviewed diff (drives the code_review artifact's change_fingerprint)
@@ -524,59 +598,30 @@ async def _review_and_vote(
                     await asyncio.to_thread(
                         gc.clone_change_ref, info["change_number"], info["patchset_ref"], repo_root
                     )
-                    if is_merge:
-                        # 409 guard (S2): a merge (>=2 parents) 409s the bare /patch, so route it
-                        # through the auto-merge-delta path instead. Emit the named signal so the
-                        # otherwise-silent guard is visible in the logs (fires ONLY on a merge —
-                        # merge_detection above logs is_merge for EVERY change).
-                        _emit(
-                            logging.INFO,
-                            "merge_change_409_guard",
-                            change_id=change_id,
-                            revision_id=revision,
-                            parent_count=parent_count,
-                        )
-                        # ONLY the auto-merge delta + integrated-commit context — never /patch.
-                        # A merge-path REST failure here is a fail-closed -1 coverage-gap (the
-                        # clone succeeded, so the vote POST below can still reach Gerrit).
-                        try:
-                            diff_text, merge_commits, stats = await asyncio.to_thread(
-                                _assemble_merge_diff, gc, change_id, revision
-                            )
-                        except GerritError as exc:
-                            decision = _merge_coverage_gap_decision(
-                                f"merge context assembly failed: {exc}"
-                            )
-                        else:
-                            # Log WHAT the reviewer saw (context stats) so a merge review can be
-                            # debugged from logs alone: empty auto-merge delta, a truncated REST
-                            # fan-out, or an unexpected file/commit count are all visible here.
-                            _emit(
-                                logging.INFO,
-                                "merge_change_review",
-                                change_id=change_id,
-                                revision_id=revision,
-                                integrated_commits=merge_commits,
-                                **stats,
-                            )
-                            decision = await asyncio.to_thread(
-                                adapter.code_review_decision,
-                                diff_text,
-                                repo_root,
-                                info["patchset_ref"],
-                                merge_commits=merge_commits,
-                                change_id=change_id,  # change:<id> novelty keyspace
-                            )
-                    else:
-                        diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
-                        decision = await asyncio.to_thread(
-                            adapter.code_review_decision,
-                            diff_text,
-                            repo_root,
-                            info["patchset_ref"],
-                            commit_message=commit_message,  # scope-intent overlay (non-merge path)
-                            change_id=change_id,  # change:<id> novelty keyspace (finding-memory)
-                        )
+                    decision, diff_text = await _decision_for_clone(
+                        gc,
+                        repo_root,
+                        info,
+                        is_merge=is_merge,
+                        parent_count=parent_count,
+                        commit_message=commit_message,
+                    )
+            except adapter.ReviewedTreeMismatch as exc:
+                # The cloned tree is provably NOT the revision this vote would attach to, so
+                # NO vote is honest here — not even a -1, which would certify that this
+                # revision was looked at. Refuse: surface the actionable message and leave the
+                # change unsubmittable, exactly as a setup failure does.
+                _voter_error(
+                    change_id=change_id,
+                    revision_id=revision,
+                    vote_value=None,
+                    error=f"reviewed_tree_mismatch: {exc}",
+                )
+                return {
+                    "status": "error",
+                    "change_id": change_id,
+                    "stage": "reviewed_tree_mismatch",
+                }
             except GerritError as exc:
                 # A clone / (non-merge) get_patch failure → cannot review → fail-closed. The
                 # vote POST below would itself need a usable Gerrit; surface the error and

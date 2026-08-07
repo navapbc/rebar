@@ -69,6 +69,6 @@
     "src/rebar/llm/workflow/lint_refs.py::_check_step": 22,
     "src/rebar/llm/workflow/lint_refs.py::_lint_frame": 18,
     "src/rebar/reducer/_filters.py::match_predicate": 17,
-    "src/rebar/review_bot/voter.py::_review_and_vote": 18
+    "src/rebar/review_bot/voter.py::_review_and_vote": 16
   }
 }
