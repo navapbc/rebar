@@ -387,7 +387,8 @@ jobs:
               fi
             fi
           else
-            echo "::warning::could not fetch main to verify the module-size limit lock; the absolute cap below still applies."
+            echo "::error::could not fetch main to verify the module-size limit lock; failing closed."
+            exit 1
           fi
           # Absolute cap: no src/rebar/**/*.py file may exceed the limit. No allowlist, no exemptions.
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
@@ -399,6 +400,30 @@ jobs:
             exit 1
           fi
           echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
+
+      # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
+      # and LOCKED against main. Raised ceilings and added entries require an administrator
+      # override (force-submit). Removed entries and lowered ceilings pass freely (the ratchet).
+      # Fails CLOSED when the base copy cannot be fetched — no warn-and-continue.
+      - name: Complexity-baseline lock
+        shell: bash
+        run: |
+          baselinefile=.github/complexity-baseline.json
+          if ! git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main' 2>/dev/null; then
+            echo "::error::could not fetch main to verify the complexity-baseline lock; failing closed."
+            exit 1
+          fi
+          if ! git cat-file -e "refs/remotes/gh-main:$baselinefile" 2>/dev/null; then
+            echo "Complexity-baseline lock: main has no baseline yet — bootstrap, allowing."
+          else
+            base_tmp=$(mktemp)
+            git show "refs/remotes/gh-main:$baselinefile" > "$base_tmp"
+            python scripts/check_complexity_baseline.py --lock --base "$base_tmp"
+            status=$?
+            rm -f "$base_tmp"
+            exit $status
+          fi
 
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree

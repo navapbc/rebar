@@ -451,6 +451,62 @@ def _run_update_stale(argv_cwd: Path) -> int:
     return 0
 
 
+# ───────────────────────────── lock gate ────────────────────────────────────
+
+
+def lock_against_base(base: dict[str, int], branch: dict[str, int]) -> list[str]:
+    """Return violations between a base (main) and branch ceilings mapping.
+
+    Each element is a human-readable string containing the offending key. An
+    empty list means the lock passes.
+
+    Allowed changes (produce no violations):
+      - an entry REMOVED
+      - an existing ceiling LOWERED
+
+    Rejected changes (produce violations):
+      - an existing ceiling RAISED
+      - a NEW entry ADDED
+    """
+    violations: list[str] = []
+    for key, branch_ceiling in branch.items():
+        if key not in base:
+            violations.append(
+                f"NEW entry added: {key!r} (ceiling {branch_ceiling}) — "
+                "an administrator must override the gate to add a new baseline entry"
+            )
+        elif branch_ceiling > base[key]:
+            violations.append(
+                f"ceiling RAISED for {key!r}: {base[key]} -> {branch_ceiling} — "
+                "an administrator must override the gate to raise a ceiling"
+            )
+    return violations
+
+
+def _run_lock(base_path: Path) -> int:
+    try:
+        base = load_baseline(base_path)
+    except SchemaError as exc:
+        print(f"error: could not load base baseline from {base_path}: {exc}", file=sys.stderr)
+        return 1
+    try:
+        branch = load_baseline(BASELINE_PATH)
+    except SchemaError as exc:
+        print(f"error: could not load branch baseline: {exc}", file=sys.stderr)
+        return 1
+    violations = lock_against_base(base, branch)
+    if violations:
+        for v in violations:
+            print(f"complexity-baseline lock: {v}")
+        print(
+            "hint: an administrator must override the Verified gate (force-submit) "
+            "to land a raised ceiling or a new baseline entry."
+        )
+        return 1
+    print("complexity-baseline lock: OK (no raised ceilings or new entries)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="check_complexity_baseline.py",
@@ -478,12 +534,31 @@ def build_parser() -> argparse.ArgumentParser:
             "scanner/schema error, so it can never bless regressions."
         ),
     )
+    group.add_argument(
+        "--lock",
+        action="store_true",
+        help=(
+            "Lock gate. Semantically compare the branch baseline against the base "
+            "(main) copy. Requires --base. Exits nonzero if any ceiling is raised or "
+            "any new entry is added. Fails closed if the base cannot be loaded."
+        ),
+    )
+    parser.add_argument(
+        "--base",
+        metavar="PATH",
+        type=Path,
+        help="Path to the base (main) copy of the baseline JSON. Required with --lock.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.lock:
+        if args.base is None:
+            parser.error("--lock requires --base <path>")
+        return _run_lock(args.base)
     if args.update_stale:
         return _run_update_stale(REPO_ROOT)
     return _run_check(REPO_ROOT)
