@@ -49,4 +49,15 @@ def run_jscpd(
         raise ValueError("jscpd report has invalid total clone count")
     if not isinstance(percentage, int | float) or isinstance(percentage, bool):
         raise ValueError("jscpd report has invalid total clone percentage")
+
+    # A ``sources`` count of exactly 0 means jscpd measured NOTHING (an empty or
+    # entirely-unsupported scan root) — never "this repository has zero duplication".
+    # Reporting it as a zero-valued result would publish a confident structural zero, so
+    # this is signalled by raising (the caller converts it to Unavailable) rather than by
+    # adding a key to the returned payload, whose shape existing callers assert exactly.
+    # The key may be absent on some jscpd versions; only an explicit zero counts.
+    sources = total.get("sources")
+    if sources == 0 and not isinstance(sources, bool):
+        raise ValueError("jscpd report shows zero scanned sources")
+
     return {"clones": clones, "percentage": percentage}
