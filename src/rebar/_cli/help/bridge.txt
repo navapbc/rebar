@@ -1,0 +1,7 @@
+Usage: rebar bridge <command>
+
+Run staged Jira synchronization.
+
+Commands:
+  preview   Show proposed Jira changes without applying them
+  sync      Apply the staged Jira synchronization

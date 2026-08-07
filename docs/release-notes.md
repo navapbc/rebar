@@ -8,6 +8,13 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Staged `bridge` command group
+
+`rebar bridge preview` shows proposed Jira changes, while `rebar bridge sync`
+applies them. These are the only bridge-group verbs. This is additive: the
+established `rebar reconcile`, `rebar jira-onboard`, `rebar bridge-probe`,
+`rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
+
 ## `bridge-status` and `purge-bridge` removed (breaking, no aliases)
 
 The public `rebar bridge-status` and `rebar purge-bridge` commands, their help pages,

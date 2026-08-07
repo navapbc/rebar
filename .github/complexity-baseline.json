@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
   "ceilings": {
-    "src/rebar/_cli/__init__.py::_dispatch": 35,
     "src/rebar/_cli/__init__.py::_main_dispatch": 36,
     "src/rebar/_cli/_llm_commands.py::_render_plan_review_text": 16,
     "src/rebar/_commands/close_precheck.py::_completion_precheck": 17,

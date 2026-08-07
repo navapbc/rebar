@@ -27,6 +27,7 @@ Subcommands:
   summary       One-line ticket summary with blocking status for one or more IDs
   bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)
   bridge-probe  Preflight live Jira capability (create/label/search/delete round-trip)
+  bridge        Stage Jira synchronization (preview or sync)
   exists        O(1) presence check (exit 0=exists, 1=not found)
   list-descendants  BFS walk from a root ticket, bucketed by type (JSON)
   next-batch    Select next parallel agent batch for an epic [--output json]

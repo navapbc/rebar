@@ -6,7 +6,7 @@ The `rebar` CLI has two command families. **Help-backed subcommands** are the di
 
 ## Help-backed subcommands
 
-The 51 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 52 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
@@ -19,6 +19,18 @@ Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
 ```
 Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-review history + completion attestation/sidecar + associated code reviews; --output defaults to json)
        rebar audit serve [--host 127.0.0.1] [--port 8765]   (start the optional, read-only audit web UI; disabled by default — enable with `[ui] enabled = true` and install the `nava-rebar[ui]` extra; binds loopback unless --host is overridden)
+```
+
+### `bridge`
+
+```
+Usage: rebar bridge <command>
+
+Run staged Jira synchronization.
+
+Commands:
+  preview   Show proposed Jira changes without applying them
+  sync      Apply the staged Jira synchronization
 ```
 
 ### `bridge-fsck`

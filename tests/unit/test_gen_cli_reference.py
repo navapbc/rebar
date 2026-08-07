@@ -144,3 +144,14 @@ def test_generate_writes_full_doc(tmp_path: Path, monkeypatch):
         assert f"`{cmd}`" in written
     for cmd in _LADDER:
         assert f"`{cmd}`" in written
+
+
+def test_render_expands_the_staged_bridge_group():
+    """The generated reference documents only the two functional nested verbs."""
+    text = gen.render()
+    assert "### `bridge`" in text
+    assert "Usage: rebar bridge <command>" in text
+    assert "preview   Show proposed Jira changes" in text
+    assert "sync      Apply the staged Jira synchronization" in text
+    for future_verb in ("status", "resolve", "probe", "fsck", "bind", "unbind"):
+        assert f"rebar bridge {future_verb}" not in text
