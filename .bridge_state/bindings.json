@@ -41245,9 +41245,17 @@
       "updated_at": "2026-07-16T19:44:47Z"
     },
     "535e-4bc1-4e48-4fc5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why this exists\n\nSurfaced while diagnosing 7084 (store write-lock hold duration). Two questions the operator asked led here: whether each worktree could get its own clone of the `tickets` branch and let git resolve on push, and how compaction conflicts could self-heal given that compaction is deterministic.\n\n**What we found about today's behaviour.** Three mechanisms cover parallel clients, and only two are policies:\n1. **Event appends need no policy.** The tickets-branch `.gitattributes` says so outright \u2014 'uuid-named ticket dirs never collide, so they never need a merge policy'. Files are `{timestamp}-{uuid}-{TYPE}.json` under per-ticket dirs, so concurrent appends are disjoint paths that merge trivially.\n2. **Shared mutable root files use `merge=ours`** (`.bridge_state/* merge=ours`), with the committed rationale that these are 'per-pass derived CACHES the reconciler rebuilds, not ticket events' \u2014 keep ours, let the next pass rebuild the loser. The same file records that `merge=union` is WRONG there because it line-unions JSON into invalid JSON.\n3. **Compaction renames have NO handling at all.** No rename/`.retired` logic exists anywhere in the push path. Locally the race is PREVENTED rather than resolved: every worktree resolves to ONE store via `lock.canonical_tracker`, so the write lock serialises all local writers. ACROSS CLONES (the GitHub Actions reconciler vs a local agent) a concurrent compaction of the same ticket lands in the push path's terminal branch \u2014 '# Real content conflict \u2014 retry won't help, but continue so _MAX_RETRIES is honored' \u2014 which aborts the merge, warns, exhausts retries, and leaves the push PENDING for a human.\n\nThis is also why the per-worktree-clone idea was rejected: it would convert case 3 from a PREVENTED race into an UNHANDLED one, at the frequency of every pair of parallel agents rather than the rare cross-clone case.\n\n## The idea\n\nThe SNAPSHOT and its `.retired` renames are DERIVED from the event log; the event log is the source of truth. A derived cache does not need to be merged \u2014 it needs to be REGENERATED.\n\nOn a compaction conflict:\n* take the UNION of live (non-retired) events from both sides,\n* DISCARD both snapshots,\n* let the next compaction pass rebuild from the merged event set.\n\n**Why this is provably lossless:** uncompacted state is always semantically valid \u2014 compaction is a space optimisation, not a state change. So the resolution direction is always RESURRECT, never RETIRE. The worst outcome is redundant work on a later pass; the failure mode is disk, never correctness.\n\nThis is the same policy already applied to `.bridge_state/*`, applied to the one remaining artifact in the store that is not conflict-free by construction.\n\n## Prior art (researched 2026-08-07)\n\n**git-bug \u2014 the closest domain match \u2014 solved this by removing the need to merge, not by merging better.** It is a distributed, offline-first issue tracker embedded in git: the same shape as rebar (tickets in git, multiple clients, offline edits, sync by push/pull). It uses LAMPORT TIMESTAMPS plus an OPERATION-BASED data model so concurrent edits from multiple remotes merge without conflicts and without manual resolution, and it stores data as git OBJECTS under a ref namespace (`refs/bugs`) rather than worktree files \u2014 so git's file-merge semantics never apply. rebar is already most of the way there: append-only event log plus an HLC (same family as Lamport clocks), and ticket e3d0 already cites the 'git-bug operationPack pattern'. The SNAPSHOT is our only non-conflict-free artifact.\n\n**Nix content-addressed derivations \u2014 the cautionary tale for the alternative we considered first.** Content-addressing the snapshot (naming it by a hash of the folded event set so identical folds collide harmlessly) was our initial preference. Nix's CA derivations (RFC 0062) make the same bet and remain EXPERIMENTAL and opt-in years later \u2014 stabilisation ~65% as of March 2026. The blockers transfer directly: determinism does not hold in practice ('ghc is deterministic only disabling the parallel building i.e. passing -j1'), and divergent realisations poison the cache \u2014 their handling 'just forbids fetching a path if the local system has a different realisation for the same drv output ... can result in a totally useless binary cache in some pathological cases'. That is our failure mode exactly: two byte-different artifacts each claiming to be the same logical snapshot, with NO RULE to choose between them, which is worse than the conflict because both look correct.\n\n**Where content-addressing succeeds, nothing is ever merged.** Bazel's remote CAS, OCI layers and git's own object database are all content-addressed and all successful \u2014 and in every one the artifacts are IMMUTABLE and simply coexist. Content addressing solves IDENTITY and DEDUPLICATION, not CONFLICT RESOLUTION.\n\n**Conclusion:** derived-cache regeneration is the primary move. Content-addressing the snapshot is a COMPLEMENTARY dedup win \u2014 it removes the spurious case (two clients folding an identical event set) but leaves the real one (divergent fold sets) untouched, since different inputs legitimately hash differently and both land.\n\n## The hazard any design must respect\n\nResolution must be ATOMIC OVER THE PAIR \u2014 the SNAPSHOT together with its `.retired` renames. A per-file `merge=ours` would happily take OUR snapshot alongside THEIR retirements, dropping events our snapshot never folded. A `.gitattributes` line therefore CANNOT express this; it needs a custom merge driver or a post-merge repair that reasons about the pair.\n\n## What a plan would need to establish\n\n- Where the resolution lives: a custom git merge driver, or a post-merge repair step in the push/reconverge path.\n- How a compaction conflict is reliably RECOGNISED as such, versus any other content conflict.\n- How the live event set is reconstructed when both sides retired different subsets \u2014 including un-retiring events the other side folded that we did not.\n- That the reducer tolerates a ticket with many events and NO snapshot (it should \u2014 that is simply the pre-compaction state), proven by test rather than assumed.\n- The interaction with `compact.py:150`'s mid-retirement crash window (SNAPSHOT written, retirement incomplete) \u2014 whether the same recovery machinery covers both, since they are the same class of half-applied compaction.\n- Whether CENTRALISING compaction to a single writer is cheaper than resolving the conflict at all, which would make this moot.\n- Whether determinism is worth PROVING regardless (ordering, parallelism, float/dict serialisation), since `compact.py:138` already strips `updated_at` \u2014 one key is not a proof, and the answer gates whether content-addressing is worth adding as the complementary win.\n\n## Note on urgency\n\nNot urgent. The local race is prevented by the shared store and the write lock; only the cross-clone case is exposed, and it degrades to a pending push rather than data loss. This should be judged on its own merits, not as a prerequisite for 7084's lock-duration work (R1/R3/R5), which is independent.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Treat the compaction SNAPSHOT as a derived cache: regenerate on conflict instead of merging it"
+      },
       "created_at": "2026-08-07T16:54:07Z",
       "jira_id": "4587563",
       "jira_key": "REB-2631",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T16:54:11Z"
     },
@@ -53154,6 +53162,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:45:18Z"
+    },
+    "6a65-25b5-b5c3-436d": {
+      "created_at": "2026-08-07T17:00:53Z",
+      "jira_id": "4587564",
+      "jira_key": "REB-2632",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T17:00:56Z"
     },
     "6a74-f464-4ce1-4b79": {
       "baseline": {
@@ -83216,10 +83231,24 @@
     },
     "ab54-f19f-d5bd-422c": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# A PASS `COMPLETION_VERDICT` sidecar is silently lost on write-lock contention (exit 0, no stderr)\n\n## Observed\n\nClosing `d582-fd5a-7ece-4c32` (`--class flaky`) emitted a traceback ending in `flock: could not acquire lock after 60s`, yet **exited 0** and closed and certified the ticket correctly. The ticket is now missing its `*-COMPLETION_VERDICT.json` record. 810 tickets in this store carry one; d582 does not.\n\nThe failing call is the PASS sidecar:\n\n* `llm/completion_sidecar.py:60` \u2014 `append_event(...)` inside `emit()` (defined `:47`)\n* called from `_commands/close_precheck.py:324` (the PASS branch; FAIL is `:310`)\n* raised at `_commands/_seam.py:419`, translating `LockTimeout` from `_store/lock.py:103`\n  (60s = `_DEFAULT_TIMEOUT` 30 x `_DEFAULT_ATTEMPTS` 2, `lock.py:73-74`)\n\n**It fires BEFORE the close, not after.** `close_precheck.py:324` runs inside `_completion_precheck`, which `transition_close.py:326` calls *before* `txn.transition_core(...)` at `:343` \u2014 the documented verify -> close -> sign order (`transition_close.py:246-252`). The STATUS and SIGNATURE writes then succeeded seconds later (12:30:56 and 12:30:58), which is what makes the loss avoidable.\n\n## Why it is silent \u2014 the failure is swallowed twice\n\n`completion_sidecar.py:61-65` catches everything and returns `False`:\n\n```python\nexcept Exception:  # best-effort observability sidecar\n    logger.warning(\"COMPLETION_VERDICT sidecar emit failed; continuing\", exc_info=True)\n    return False\n```\n\nand the caller **discards that return value** \u2014 `close_precheck.py:322-326` wraps the call in a second try/except and never inspects it.\n\nBest-effort is the correct POLICY: a sidecar must never fail a close. The defect is that a **transient, retryable** failure is handled identically to a permanent one:\n\n1. **No retry on `LockTimeout`.** One 60s attempt. Every subsequent close-path write succeeded within\n   seconds. A single re-attempt, or routing the sidecar through the same lock window as\n   STATUS+SIGNATURE (the `_batch_sink` seam already exists at `_seam.py:405-409`), saves the record.\n2. **No machine-readable signal.** Exit stays 0, stdout is clean, and this goes only through\n   `logger.warning` \u2014 unlike the drift and `SigningError` paths, which write explicit\n   `Warning: closed <id> WITHOUT ...` lines to stderr (`transition_close.py:387-393`, `:404-410`).\n   A `gate_error_sidecar` module exists (`llm/gate_error_sidecar.py:34` maps `\"completion\" ->\n   \"COMPLETION_VERDICT\"`) and is not engaged here.\n\n## Blast radius: metric skew, not state corruption\n\n`COMPLETION_VERDICT` is deliberately **reducer-ignored** (`completion_sidecar.py:11-16`, `reducer/_version.py:78`, `verify_authorship.py:378`), so compiled state, deps, validity and the attestation are all unaffected \u2014 d582 is correctly closed and certified, and **no remediation is needed for it**. The durable cost is observability:\n\n* `metrics/sidecar_metrics.py:221` counts a ticket into the `first_pass_verification` denominator only\n  if it has a `COMPLETION_VERDICT` record;\n* `sidecar_metrics.py:106-110` counts accepted closes from `completion_verifier_pass_v1` records.\n\nd582 silently drops out of both. The record is also **not re-emittable** \u2014 the verdict dict was in-memory, so recovering it would need reopen -> re-close and a fresh billable verifier run.\n\n## Not a rare race \u2014 see the amplifier\n\nUnder parallel-agent load the 60s budget is routinely exceeded, so expect silent metric drift across many closes rather than one. The amplifier is filed separately: compact-on-close holds the store write lock for minutes.\n\n## Acceptance Criteria\n\n- [ ] a `LockTimeout` on the PASS/FAIL sidecar is RETRIED at least once, or the sidecar write is routed\n      into the same lock window as STATUS+SIGNATURE via the existing `_batch_sink` seam\n- [ ] when the sidecar is ultimately dropped, the close writes an explicit stderr warning naming the\n      ticket and what was lost, matching the existing `Warning: closed <id> WITHOUT ...` convention\n- [ ] `close_precheck` stops discarding `completion_sidecar.emit`'s boolean return\n- [ ] a test proves a sidecar `LockTimeout` no longer loses the record silently: it either lands after\n      retry, or a stderr warning is emitted \u2014 asserted, with the lock held by the test\n- [ ] the close still succeeds and stays certified when the sidecar genuinely cannot be written\n      (best-effort policy preserved, verified by a test that makes the write fail permanently)\n\n## Testing\n\n    pytest tests/unit -k \"sidecar or completion_verdict or lock\" -q\n    make lint && make typecheck",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "PASS COMPLETION_VERDICT sidecar silently lost on write-lock contention (exit 0, no stderr)"
       },
       "created_at": "2026-08-06T19:09:13Z",
@@ -85603,6 +85632,13 @@
       "peer_parent": "REB-1190",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:46:57Z"
+    },
+    "b0f5-eb05-ed27-4671": {
+      "created_at": "2026-08-07T17:00:57Z",
+      "jira_id": "4587565",
+      "jira_key": "REB-2633",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T17:01:00Z"
     },
     "b134-7545-94fd-4746": {
       "baseline": {
@@ -130935,6 +130971,8 @@
     "REB-263": "a6d3-f6c9-f54e-4831",
     "REB-2630": "db04-4d8b-cb4b-4114",
     "REB-2631": "535e-4bc1-4e48-4fc5",
+    "REB-2632": "6a65-25b5-b5c3-436d",
+    "REB-2633": "b0f5-eb05-ed27-4671",
     "REB-264": "a6ea-6a28-1d84-4626",
     "REB-265": "a79b-f0d1-cb2c-47fa",
     "REB-266": "a83a-fadf-d7f2-43da",
