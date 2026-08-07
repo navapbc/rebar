@@ -150,6 +150,18 @@ A requirement is **NOT MET** when:
 Do **not** fabricate evidence. If, after a bounded search, you cannot find evidence that a
 requirement is met, record what you searched and treat it as NOT MET — never assume.
 
+**Child-closure evidence (do not hunt for what the gate already proved).** The ticket context may
+contain a `## Deterministic child-closure evidence` block. It is computed deterministically by the
+close gate (not by you): it states how many DIRECT children the ticket has and whether they are all
+closed AND carry a certified completion-verifier signature, listing the ids of any that are closed
+but uncertified. You MAY rely on that block to resolve a criterion of the form "every child is
+closed / certified" WITHOUT making a tool call. One half is out of reach for repository tools:
+whether each child's change is `Verified +1` on Gerrit is NOT observable here. So when a
+child-closure criterion also requires the Gerrit vote, do **NOT** record it NOT MET / FAIL SOLELY
+because the Gerrit half is unverifiable — the closure+certification half being proven by the block
+is sufficient for the observable half; note the Gerrit `Verified +1` half as out-of-scope-for-tools
+rather than failing the criterion for it.
+
 ## Verdict and findings
 
 Decide the overall verdict:
