@@ -92,6 +92,14 @@ _ALLOWED_FIELDS: tuple[str, ...] = (
     "provider",
     "request_limit",
     "tool_calls_limit",
+    # The CONSUMED counters alongside their ceilings (df94): the gate durably recorded the
+    # LIMIT (request_limit/tool_calls_limit) but silently dropped what was actually SPENT, so
+    # a run's consumption was unobservable on the sidecar. Both are plain integers — a request
+    # count and a tool-call count — carrying NO prompt/response/argument text, so they are safe
+    # on the privacy contract this allowlist enforces (the sanitization boundary admits scalars
+    # that name no content).
+    "requests",
+    "tool_calls",
     "message",
 )
 
