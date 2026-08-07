@@ -317,7 +317,10 @@ def _completion_precheck(
         _rc = 11 if (_outcome and _outcome.retryable) else 1
         _hint = ""
         if _outcome is not None:
-            _msg = _failure.message_for(_outcome.resolution_class.value)
+            _msg = _failure.message_for(
+                _outcome.resolution_class.value,
+                finish_reason=(_outcome.diagnostic or {}).get("finish_reason"),
+            )
             if _msg:
                 _hint = f" [{_outcome.resolution_class.value}: {_msg}]"
         # Neither a bounded-recovery failure nor a mid-run verifier failure (e.g. a step-budget

@@ -82,7 +82,9 @@ def _llm_error_exit_code(exc: Exception) -> int:
     if o is not None and getattr(o, "retryable", False):
         from rebar.llm.failure import message_for
 
-        msg = message_for(o.resolution_class.value)
+        msg = message_for(
+            o.resolution_class.value, finish_reason=(o.diagnostic or {}).get("finish_reason")
+        )
         if msg:
             sys.stderr.write(f"llm-degrade: {o.resolution_class.value} — {msg}\n")
         return 11
@@ -101,7 +103,8 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     if rc:
         from rebar.llm.failure import message_for
 
-        msg = message_for(rc)
+        _fr = (coverage.get("diagnostic") or {}).get("finish_reason")
+        msg = message_for(rc, finish_reason=_fr)
         sys.stderr.write(f"llm-degrade: {rc} — {msg}\n" if msg else f"llm-degrade: {rc}\n")
     # `verdict` is a string on the plan-review result and the WHOLE nested gate verdict dict on
     # the code-review review_result (`shim._verdict_to_review_result` attaches it) — accept both.
