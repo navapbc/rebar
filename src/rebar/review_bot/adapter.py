@@ -27,16 +27,28 @@ finding, so an operator can tell an infra veto from a code veto.
 SOURCE. The receiver has ALREADY cloned the change ref into ``repo_root`` (see
 ``gerrit_client.clone_change_ref`` / ``voter``); we review that working tree by passing
 ``repo_root`` (the security detectors scan the changed files there) + the fetched ``diff_text``.
+
+TREE↔VOTE BINDING. ``ref`` names what was fetched; ``revision`` is what the vote attaches to.
+They are two independently supplied fields, and the reviewed tree is merely whatever ended up in
+``repo_root``, so the adapter asserts the two agree before reviewing anything and raises
+``ReviewedTreeMismatch`` — the receiver then casts NO vote — when they provably do not.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import subprocess
 from typing import Any
 
 logger = logging.getLogger("rebar.review_bot.adapter")
 
-__all__ = ["RETRYABLE_GAP_REASONS", "append_retries_exhausted_note", "code_review_decision"]
+__all__ = [
+    "RETRYABLE_GAP_REASONS",
+    "ReviewedTreeMismatch",
+    "append_retries_exhausted_note",
+    "code_review_decision",
+]
 
 #: The review-message first-line tag suffixes, keyed by reason. The message begins with
 #: ``[LLM-Review: <suffix>]`` so an infra-failure ``-1`` (a coverage-gap sub-reason) is
@@ -178,11 +190,92 @@ def _block(
     }
 
 
+class ReviewedTreeMismatch(RuntimeError):
+    """The working tree the reviewer was handed is provably NOT the revision the vote would
+    attach to. Raised by :func:`code_review_decision` INSTEAD of returning a decision: there is
+    no honest vote to cast about a tree that is not the change, so the receiver refuses to vote
+    and leaves the change unsubmittable (fail-closed)."""
+
+
+#: Wall-clock bound (seconds) on the single read-only ``rev-parse`` used to identify the tree.
+_REV_PARSE_TIMEOUT = 30
+
+#: A git object name we are willing to COMPARE: 7+ hex digits (git's own minimum useful
+#: abbreviation). Shorter or non-hex input is not a commit name we can compare without inviting
+#: a false verdict, so it is treated as unverifiable rather than as a mismatch.
+_SHA_RE = re.compile(r"\A[0-9a-f]{7,64}\Z")
+
+
+def _resolve_reviewed_head(repo_root) -> str | None:
+    """The commit actually checked out at ``repo_root``, or ``None`` when the directory carries
+    no resolvable git identity (not a repo, no HEAD, git unavailable).
+
+    ``HEAD`` — deliberately NOT ``FETCH_HEAD``. ``gerrit_client.clone_change_ref`` fetches the
+    change ref, checks it out, and THEN fetches the tickets branch from the mirror; that second
+    fetch REWRITES ``.git/FETCH_HEAD``, so reading FETCH_HEAD after the clone yields the tickets
+    commit and would mismatch on every single review. The detached HEAD left by the checkout is
+    the reviewed tree, and nothing later in the clone moves it."""
+    try:
+        # raw-git-ok: read-only `rev-parse` against a disposable review clone, not the tracker
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_REV_PARSE_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def _assert_reviewed_tree(repo_root, ref: str, revision: str) -> None:
+    """Bind the tree that is about to be REVIEWED to the revision the vote will ATTACH to.
+
+    ``ref`` (the patch set's ``refs/changes/...``) and ``revision`` arrive as two independently
+    supplied webhook fields, and the reviewed tree is simply whatever ended up in ``repo_root``.
+    A stale or reused clone directory, a partial fetch, or a future refactor of the checkout
+    logic all produce a tree that is not the voted revision, with no signal at all — this is the
+    signal (ticket ``da31-f9d1``).
+
+    Raises :class:`ReviewedTreeMismatch` ONLY on a PROVEN disagreement: two comparable commit
+    names that differ. A false mismatch would veto every review, so the check abstains (returns,
+    logging a warning) whenever the binding cannot be established — no revision supplied (the
+    seam is also called outside Gerrit), no git identity at ``repo_root``, or either name too
+    short/not hex to compare. A clone that never happened already fails closed upstream, where
+    ``clone_change_ref`` raises."""
+    if not revision:
+        return
+    resolved = _resolve_reviewed_head(repo_root)
+    if resolved is None:
+        logger.warning(
+            "adapter: cannot identify the reviewed tree at %s — binding not checked", repo_root
+        )
+        return
+    left, right = resolved.strip().lower(), revision.strip().lower()
+    if not _SHA_RE.match(left) or not _SHA_RE.match(right):
+        logger.warning(
+            "adapter: uncomparable commit names (%r vs %r) — binding not checked", left, right
+        )
+        return
+    # Prefix-tolerant so an abbreviated name on either side still matches its full form; the
+    # 7-hex floor above is what keeps that from matching unrelated commits.
+    if left.startswith(right) or right.startswith(left):
+        return
+    raise ReviewedTreeMismatch(
+        f"the reviewed tree is not the voted revision: the clone of {ref} at {repo_root} is "
+        f"checked out at {left}, but the vote would attach to {right}. Refusing to vote — "
+        "reviewing one commit and certifying another cannot be made safe. Check that the clone "
+        "directory was fresh and that the fetch of that ref completed, then re-trigger."
+    )
+
+
 def code_review_decision(
     diff_text: str,
     repo_root,
     ref: str,
     *,
+    revision: str = "",
     merge_commits: int | None = None,
     commit_message: str = "",
     change_id: str = "",
@@ -195,7 +288,13 @@ def code_review_decision(
 
     ``change_id`` (the Gerrit change) selects the ``change:<id>`` novelty keyspace for the
     region-gated floor (epic super-path-bag), so cross-patchset finding-memory is keyed on the
-    CHANGE — spanning its revisions — the Gerrit analogue of the local ``session:<id>`` key."""
+    CHANGE — spanning its revisions — the Gerrit analogue of the local ``session:<id>`` key.
+
+    ``ref`` + ``revision`` bind the tree to the vote: before any review runs, the commit checked
+    out at ``repo_root`` is asserted to be ``revision``. A proven disagreement raises
+    :class:`ReviewedTreeMismatch` (the caller must then cast NO vote) rather than returning a
+    decision — see :func:`_assert_reviewed_tree`."""
+    _assert_reviewed_tree(repo_root, ref, revision)
     try:
         # Lazily imported: the [agents] extra (heavy) must not load merely because the receiver
         # package was imported — only when a review actually runs.
