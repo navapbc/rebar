@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 _REST_CALL_BUDGET = 200
 
 
-def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwargs):
+def _call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
     """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
 
     Retryable: TimeoutError; JiraAPIError 5xx/429; and (story 9622)
@@ -83,7 +83,6 @@ def _call_with_retry(fn, *args, timeout_s: int = 30, max_retries: int = 3, **kwa
     Args:
         fn:          Callable to invoke.
         *args:       Positional arguments forwarded to fn.
-        timeout_s:   Per-call timeout in seconds (currently advisory for stub-based callers).
         max_retries: Maximum number of retry attempts after the first failure.
         **kwargs:    Keyword arguments forwarded to fn.
 

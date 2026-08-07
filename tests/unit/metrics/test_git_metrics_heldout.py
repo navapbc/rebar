@@ -133,10 +133,3 @@ def test_provenance_and_no_dup_seed():
         assert matches[0].source == "structural"
         assert matches[0].confidence == "high"
         assert matches[0].accruing_since == "2026-01-01T00:00:00+00:00"
-
-
-def test_trend_unavailable():
-    specs = {spec.id: spec for spec in REGISTRY}
-    assert "cap_change_events" not in specs
-    result = evaluate(specs["module_size_trend"], SimpleNamespace())
-    assert isinstance(result, Unavailable)

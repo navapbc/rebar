@@ -12,9 +12,9 @@ signals from classified/backfilled ones. When ``compute`` returns ``None`` — n
 data has accrued yet — the result is an :class:`Unavailable` carrying a
 human-readable ``reason`` and the ``accruing_since`` timestamp.
 
-:data:`REGISTRY` is the declarative list of specs with unique ids. The current
-seed metrics have ``compute`` callables that return ``None`` (they will report
-``Unavailable`` until their data sources land in later tickets).
+:data:`REGISTRY` is the declarative list of specs with unique ids. It starts
+empty and is hydrated on import by the reader modules' ``register()`` hooks,
+each of which appends only ids not already present.
 
 Provenance vocabularies are CLOSED:
 
@@ -124,29 +124,9 @@ def evaluate(spec: MetricSpec, context: Any = None) -> MetricValue | Unavailable
     )
 
 
-def _no_data_yet(context: Any) -> None:
-    """Seed ``compute`` for metrics whose data source has not landed yet."""
-
-    return None
-
-
-# The declarative registry. Ids MUST be unique. Seed metrics report
-# ``Unavailable`` until their data sources land in later tickets.
-REGISTRY: list[MetricSpec] = [
-    MetricSpec(
-        id="module_size_trend",
-        lens="code_health",
-        source="structural",
-        confidence="high",
-        compute=_no_data_yet,
-        accruing_since="2026-07-18T00:00:00+00:00",
-    ),
-    MetricSpec(
-        id="commit_cadence_trend",
-        lens="delivery",
-        source="git",
-        confidence="high",
-        compute=_no_data_yet,
-        accruing_since="2026-07-18T00:00:00+00:00",
-    ),
-]
+# The declarative registry. Ids MUST be unique. It starts EMPTY: the reader
+# modules (git_metrics, event_metrics, sidecar_metrics, bug_trends) hydrate it
+# on import via their ``register()`` hooks, each appending only ids not already
+# present. Do not seed placeholder specs here — a placeholder holding an id
+# would make the real implementation's ``register()`` a silent no-op.
+REGISTRY: list[MetricSpec] = []
