@@ -113,27 +113,58 @@ def test_failed_jscpd_is_unavailable_not_zero(
     assert "jscpd" in result.reason
 
 
+def _js_source(prefix: str, statements: int) -> str:
+    """Build a JS function large enough to clear jscpd's default token floor.
+
+    The adapter runs ``jscpd`` with its own defaults, and jscpd only reports a
+    clone once the duplicated fragment reaches ``--min-tokens`` (**50** by
+    default, unchanged across @jscpd/core 3.x, 4.x and 5.x). A fixture below
+    that floor yields ``clones: 0`` no matter how perfectly duplicated it is —
+    which is exactly what made this test fail from the day it was written
+    (ticket 4bf4). Each statement below is ~9 tokens, so the default
+    ``statements`` count leaves several times the required margin.
+    """
+
+    body = "".join(
+        f"  const {prefix}_{index} = ({prefix}_seed + {index}) * {index + 2};\n"
+        for index in range(statements)
+    )
+    return f"function {prefix}_compute({prefix}_seed) {{\n{body}  return {prefix}_0;\n}}\n"
+
+
 @pytest.mark.integration
 def test_live_clone(tmp_path: Path) -> None:
     if shutil.which("jscpd") is None:
         pytest.skip("jscpd is not installed")
 
-    first = tmp_path / "first.js"
-    second = tmp_path / "second.js"
-    clone = (
-        "function choose(value) {\n"
-        "  const normalized = value + 1;\n"
-        "  if (normalized > 5) {\n"
-        "    return normalized * 2;\n"
-        "  }\n"
-        "  return normalized - 2;\n"
-        "}\n"
-    )
-    first.write_text(clone, encoding="utf-8")
-    second.write_text(clone, encoding="utf-8")
+    clone = _js_source("alpha", 20)
+    (tmp_path / "first.js").write_text(clone, encoding="utf-8")
+    (tmp_path / "second.js").write_text(clone, encoding="utf-8")
 
     result = _adapter_subject().analyze(tmp_path)
 
     assert isinstance(result, AnalyzerResult)
     assert result.duplication["clones"] >= 1
     assert result.duplication["percentage"] > 0
+
+
+@pytest.mark.integration
+def test_live_distinct_sources_report_no_clone(tmp_path: Path) -> None:
+    """Negative control: detection must discriminate, not report clones for anything.
+
+    Without this, a detector that reported a clone unconditionally would still
+    satisfy ``test_live_clone``. Both files clear the token floor, so a zero
+    here means "no duplication found", not "nothing was examined".
+    """
+
+    if shutil.which("jscpd") is None:
+        pytest.skip("jscpd is not installed")
+
+    (tmp_path / "first.js").write_text(_js_source("alpha", 20), encoding="utf-8")
+    (tmp_path / "second.js").write_text(_js_source("bravo", 24), encoding="utf-8")
+
+    result = _adapter_subject().analyze(tmp_path)
+
+    assert isinstance(result, AnalyzerResult)
+    assert result.duplication["clones"] == 0
+    assert result.duplication["percentage"] == 0
