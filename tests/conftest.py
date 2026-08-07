@@ -82,6 +82,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "legitimately commits to or mutates this checkout (none expected — tests "
         "operate on disposable trackers under tmp_path).",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_reconcile_loop: run the review-bot app's real reconcile loop instead "
+        "of the module's test-safe default stub.",
+    )
 
 
 _EXTERNAL_DIR = _REPO_ROOT / "tests" / "external"
@@ -238,6 +243,12 @@ def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     themselves; this only removes host leakage."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests from inheriting the review bot's 20-minute production drain."""
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "1.0")
 
 
 @pytest.fixture(scope="session")
