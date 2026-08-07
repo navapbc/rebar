@@ -1,11 +1,15 @@
 """Idempotency / dedup store for cast votes (epic d251 / S4b).
 
-Gerrit's ``webhooks`` plugin delivers at-least-once (``maxTries=5``,
-``retryInterval=1000ms``), and because an LLM review blows the ~5s webhook socket
-timeout the SAME ``patchset-created`` event is re-delivered while the first review is
-still running. The backfill reconciler can also pick up the same patchset. To never
-double-vote we record a row per ``(change_id, revision)`` AFTER a confirmed-successful
-vote (write-on-success) and short-circuit on the next sighting.
+Gerrit's ``webhooks`` plugin delivers AT-MOST-once (best-effort): it retries a delivery
+up to ``maxTries=5`` (``retryInterval=1000ms``), but only for non-SSL ``IOException``s,
+and then logs SEVERE and DISCARDS it — nothing is persisted, so pending deliveries are
+also lost on restart. Recovery of a dropped delivery is the backfill reconciler's job (its
+cursor is a low-water mark that re-drives any candidate it abandoned — bug 9f63), not the
+plugin's. Within those retries the SAME ``patchset-created`` event IS re-delivered — an
+LLM review blows the ~5s webhook socket timeout while the first review is still running —
+and the reconciler can pick up the same patchset too. To never double-vote we record a row
+per ``(change_id, revision)`` AFTER a confirmed-successful vote (write-on-success) and
+short-circuit on the next sighting.
 
 Single-box appropriate: a small SQLite file on the box's data volume, opened in WAL
 mode so the webhook worker and the reconciler can read/write concurrently. The Gerrit

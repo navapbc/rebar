@@ -244,8 +244,8 @@ app.state.config = _config()
 
 @app.get("/health")
 async def health() -> dict[str, str | int]:
-    """Liveness probe + in-flight review count. Returns 200 with
-    ``{"status": "ok", "in_flight": N}`` (no kernel call).
+    """Liveness probe + in-flight review count + queue depth. Returns 200 with
+    ``{"status": "ok", "in_flight": N, "queue_depth": M}`` (no kernel call).
 
     ``in_flight`` is the deploy loop's drain signal (bug 34cd): recreating this container
     mid-review KILLS the review, and does so invisibly — the process was asked to stop, so
@@ -259,8 +259,19 @@ async def health() -> dict[str, str | int]:
     loop already polls ``HEALTH_URL`` for its post-deploy readiness gate, so the drain
     needs no second endpoint, no second URL to configure, and no new exposed surface. The
     ``status`` key is unchanged, so every existing caller keeps working.
+
+    ``queue_depth`` is the number of events waiting on the review queue (bug 9f63). Without
+    it, an agent looking at a change still sitting at ``LLM-Review = --`` cannot distinguish
+    "the event was never queued" from "queued, waiting behind N others" from "the bot is
+    down" — all three present identically, and that ambiguity is what caused completed work to
+    be abandoned. Read defensively off ``app.state`` (the queue only exists once the lifespan
+    has run) and always reported as a plain ``int``, ``0`` when there is no queue, so the key
+    is never absent. The ``status`` / ``in_flight`` keys and their expressions are untouched:
+    ``infra/scripts/autodeploy.sh`` parses ``in_flight``.
     """
-    return {"status": "ok", "in_flight": _voter.in_flight_reviews()}
+    queue: asyncio.Queue | None = getattr(app.state, "queue", None)
+    queue_depth = int(queue.qsize()) if queue is not None else 0
+    return {"status": "ok", "in_flight": _voter.in_flight_reviews(), "queue_depth": queue_depth}
 
 
 @app.post("/webhook", status_code=202)

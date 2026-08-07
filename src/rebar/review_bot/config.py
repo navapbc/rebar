@@ -67,6 +67,12 @@ DEFAULT_SHUTDOWN_CANCEL_SECONDS = 10
 #: reset by a successful vote or an explicit ``reset_attempts`` (the bb9b re-trigger).
 DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS = 3
 
+#: Default ceiling (seconds) on how far the backfill reconciler may hold its persisted cursor
+#: BEHIND the newest event it has seen, in order to re-fetch a candidate it abandoned for a
+#: retryable reason (bug 9f63). Bounds the poison-pill case: a candidate that fails forever
+#: must not pin the cursor forever. 24h.
+DEFAULT_RECONCILE_MAX_HOLDBACK_SECONDS = 86400
+
 #: Marker attribute stamped on the handler this module installs, so :func:`configure_logging`
 #: is idempotent (a reload/re-import never stacks duplicate handlers).
 _REVIEWBOT_LOG_HANDLER_MARKER = "_reviewbot_handler"
@@ -269,6 +275,17 @@ class ReceiverConfig:
     reconcile_interval_seconds: int = 300
     #: Attempts before a retryable coverage gap escalates to the fail-closed ``-1``.
     retryable_gap_max_attempts: int = DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS
+    #: Poison-pill ceiling (seconds) on the reconciler's cursor low-water mark (bug 9f63).
+    #: The reconciler holds its cursor back to the oldest candidate it abandoned for a
+    #: RETRYABLE reason so the next pass can re-fetch it (the events-log ``?t1=`` window is a
+    #: SERVER-SIDE inclusive lower bound, so anything left behind the cursor is gone forever).
+    #: A candidate that fails on EVERY pass would otherwise pin the cursor permanently and grow
+    #: the fetch window without bound, so the hold-back is clamped to at most this far behind
+    #: the newest event seen; when the ceiling releases a still-failing candidate the greppable
+    #: ``RECONCILE_DEGRADED reason=holdback_expired`` marker is emitted so the stuck change is
+    #: surfaced loudly rather than dropped in silence. Default 24h — long enough to ride out an
+    #: LLM/Gerrit outage, short enough that the window stays cheap.
+    reconcile_max_holdback_seconds: int = DEFAULT_RECONCILE_MAX_HOLDBACK_SECONDS
     #: The Gerrit project the bot reviews; non-matching projects are skipped.
     project: str = "rebar"
     #: Remote holding the rebar ``tickets`` branch, fetched alongside the change clone so the
@@ -312,6 +329,9 @@ class ReceiverConfig:
             reconcile_interval_seconds=_int_env("RECONCILE_INTERVAL_SECONDS", 300),
             retryable_gap_max_attempts=_int_env(
                 "RETRYABLE_GAP_MAX_ATTEMPTS", DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS
+            ),
+            reconcile_max_holdback_seconds=_int_env(
+                "RECONCILE_MAX_HOLDBACK_SECONDS", DEFAULT_RECONCILE_MAX_HOLDBACK_SECONDS
             ),
             project=os.environ.get("GERRIT_PROJECT", "rebar").strip(),
             reconcile_cursor_path=os.environ.get("RECONCILE_CURSOR_PATH", "").strip(),
