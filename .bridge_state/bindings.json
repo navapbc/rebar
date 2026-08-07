@@ -68497,10 +68497,24 @@
     },
     "8efe-9ceb-7d89-4a33": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "Surfaced by the comment triage, and it is a live contract defect rather than a comment problem.\n\n`_mcp_models.py` hand-mirrors five committed JSON schemas as pydantic models, each with an explicit \"Mirrors src/rebar/schemas/<name>.schema.json\" comment and no generator or drift gate.\n\n**The drift is real and shipped.** `BridgeFsckOut` (`_mcp_models.py:185`) declares three properties; `bridge_fsck.schema.json` has four \u2014 `binding_drift` is missing. `_engine_support/bridge_fsck.py:217` emits it unconditionally, and the generated `types.py:311` has it. So the MCP `outputSchema` advertised to clients under-declares a field the tool always returns.\n\n**And the comment that should have caught it asserts an enforcement that does not exist.** `_mcp_models.py:31-34` claims \"the cross-interface schema tests pin both to the canonical schema\" \u2014 but `rg BridgeFsckOut|GroundingInfoOut|WorkflowRunOut tests/` returns ZERO hits. No test pins these three. That false assurance is precisely why the drift went unnoticed.\n\nA second drift found in the same sweep: `VerifySignatureResultOut` (`:210`) makes `algorithm`, `head_sha` and `key_id` optional while the schema requires all three.\n\nThe sibling TypedDict layer already has the fix pattern: `schemas/gen_types.py` generates it and CI enforces currency via `python -m rebar.schemas.gen_types --check` (`.github/workflows/_build-and-test.yml:545`). The MCP model layer \u2014 the other consumer of the same schemas \u2014 has no equivalent.\n\nExtending the generator to cover `_mcp_models.py` closes the drift class permanently and deletes the five \"Mirrors ...\" comments as a side effect.\n\n## Acceptance Criteria\n\n- [ ] `BridgeFsckOut` declares `binding_drift`\n- [ ] `VerifySignatureResultOut`'s required set matches its schema\n- [ ] The MCP model layer is generated from the schemas, or covered by an equivalent `--check` drift gate\n- [ ] The false \"cross-interface schema tests pin both\" comment is removed or made true\n- [ ] The five hand-sync \"Mirrors ...\" comments are gone",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Close the MCP model schema drift and gate it"
       },
       "created_at": "2026-08-06T22:11:08Z",
