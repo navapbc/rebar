@@ -85,6 +85,15 @@ HEALTH_FAIL_LOG_LINES="${HEALTH_FAIL_LOG_LINES:-100}"   # bounded stderr tail ca
 HEALTH_FAIL_LOG_BYTES="${HEALTH_FAIL_LOG_BYTES:-20000}" # …and a hard byte cap on that tail
 BACKOFF_BASE="${BACKOFF_BASE:-60}"; BACKOFF_FACTOR="${BACKOFF_FACTOR:-2}"; BACKOFF_CAP="${BACKOFF_CAP:-900}"
 BUILD_CACHE_KEEP="${BUILD_CACHE_KEEP:-5GB}"           # buildkit cache hard cap (docker builder prune --keep-storage)
+# Disk-pressure reclaim on the no-op path (incident 2731 follow-up, story 28f9): a quiescent
+# `main` never hits the deploy/backoff paths where prune_docker_caches already runs, so a
+# build burst could fill the root disk and stay pinned until the NEXT real deploy (~39h
+# observed). DISK_PRESSURE_PCT is the root-disk used-% threshold (matches observability.sh's
+# root-disk pressure alarm framing); PRESSURE_PRUNE_MIN_INTERVAL throttles how often the no-op
+# path may reclaim; PRESSURE_PRUNE_TS_FILE persists the last-reclaim timestamp across ticks.
+DISK_PRESSURE_PCT="${DISK_PRESSURE_PCT:-80}"
+PRESSURE_PRUNE_MIN_INTERVAL="${PRESSURE_PRUNE_MIN_INTERVAL:-600}"
+PRESSURE_PRUNE_TS_FILE="${PRESSURE_PRUNE_TS_FILE:-$STATE_DIR/pressure-prune-ts}"
 
 # review-bot redeploys iff a matching path changed between deployed..target.
 BOT_PATHS='src/rebar/ infra/compose/Dockerfile.reviewbot pyproject.toml infra/compose/docker-compose.yml infra/scripts/reviewbot-ensure-tickets.sh'
@@ -186,6 +195,56 @@ capture_bot_logs() {
   log "bot-unhealthy diagnostics — last $HEALTH_FAIL_LOG_LINES lines of $BOT_SERVICE: ${out//AUTODEPLOY_ERROR/AUTODEPLOY_ERR<redacted>}"
 }
 
+# Reclaim docker garbage, best-effort (incident 2731: a failing rebuild loop left
+# multi-GB buildkit cache + dangling layers on the 30G root disk until ENOSPC
+# fail-closed the gate — and the failure path had NO reclamation at all). Bounded:
+# the buildkit cache is hard-capped at BUILD_CACHE_KEEP (keeps a warm cache for
+# fast rebuilds), dangling images are dropped; TAGGED images are never touched
+# (:prev is the rollback lifeline). Each prune is time-bounded (a wedged daemon
+# under disk pressure must not hold the deploy lock) and can NEVER alter control
+# flow or mask the caller's failure exit code — a prune failure only logs.
+prune_docker_caches() {
+  if ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
+    log "prune_docker_caches: builder prune failed (non-fatal)"
+  fi
+  if ! timeout 120 docker image prune -f >/dev/null 2>&1; then
+    log "prune_docker_caches: image prune failed (non-fatal)"
+  fi
+  return 0
+}
+
+# Echo the integer root-disk used percent (same computation as observability.sh's root-disk
+# pressure probe, so the two never drift). Echoes 0 if `df` yields nothing parseable.
+root_disk_pct() {
+  local pct
+  pct="$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')"
+  echo "${pct:-0}"
+}
+
+# Disk-pressure gate for the no-op path (story 28f9): a quiescent `main` never reaches the
+# deploy/backoff paths above where prune_docker_caches already runs, so this is the only
+# reclaim opportunity between deploys. Throttled via PRESSURE_PRUNE_TS_FILE so a busy stretch
+# of no-op ticks can't hammer the docker daemon; a triggered prune emits exactly one countable
+# AUTODEPLOY_DISK_PRESSURE marker so observability.sh can publish it as a metric.
+reclaim_under_pressure() {
+  local pct last
+  pct="$(root_disk_pct)"
+  if [ "$pct" -lt "$DISK_PRESSURE_PCT" ]; then
+    return 0
+  fi
+  last="$(cat "$PRESSURE_PRUNE_TS_FILE" 2>/dev/null || echo 0)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  if [ $(( $(now) - last )) -lt "$PRESSURE_PRUNE_MIN_INTERVAL" ]; then
+    log "disk pressure ($pct% >= $DISK_PRESSURE_PCT%) but throttled (last prune ${last}, interval ${PRESSURE_PRUNE_MIN_INTERVAL}s)"
+    return 0
+  fi
+  marker AUTODEPLOY_DISK_PRESSURE "pressure-prune" "root disk at ${pct}% (threshold ${DISK_PRESSURE_PCT}%)"
+  now > "$PRESSURE_PRUNE_TS_FILE.tmp" && mv "$PRESSURE_PRUNE_TS_FILE.tmp" "$PRESSURE_PRUNE_TS_FILE"
+  log "disk pressure ($pct% >= $DISK_PRESSURE_PCT%): reclaiming docker garbage on the no-op tick"
+  prune_docker_caches
+  log "disk pressure reclaim complete"
+}
+
 # ── single-flight ─────────────────────────────────────────────────────────────
 exec 9>"$LOCK"
 flock -n 9 || { log "another deploy holds the lock; skipping"; exit 0; }
@@ -225,7 +284,12 @@ fi
 # Up to date: no deploy is pending, so any deferral episode is over. Clearing it here (and at
 # the success footer) is what keeps a STALE episode from making the NEXT episode's bound look
 # already-exhausted and killing a review on the first busy tick.
-[ "$TARGET" = "$DEPLOYED" ] && { rm -f "$DEFER_FILE"; log "up to date ($TARGET); no-op"; exit 0; }
+if [ "$TARGET" = "$DEPLOYED" ]; then
+  rm -f "$DEFER_FILE"
+  reclaim_under_pressure
+  log "up to date ($TARGET); no-op"
+  exit 0
+fi
 
 # backoff: same failed TARGET, not time yet -> skip. NEW target -> reset (fix-forward).
 read -r bo_sha bo_cnt bo_next < <(cat "$BACKOFF_FILE" 2>/dev/null || echo "- 0 0")
@@ -233,24 +297,6 @@ if [ "$bo_sha" = "$TARGET" ] && [ "$(now)" -lt "${bo_next:-0}" ]; then
   log "backoff active for $TARGET (fail #$bo_cnt); next attempt at $bo_next"; exit 0
 fi
 [ "$bo_sha" != "$TARGET" ] && { bo_cnt=0; }
-
-# Reclaim docker garbage, best-effort (incident 2731: a failing rebuild loop left
-# multi-GB buildkit cache + dangling layers on the 30G root disk until ENOSPC
-# fail-closed the gate — and the failure path had NO reclamation at all). Bounded:
-# the buildkit cache is hard-capped at BUILD_CACHE_KEEP (keeps a warm cache for
-# fast rebuilds), dangling images are dropped; TAGGED images are never touched
-# (:prev is the rollback lifeline). Each prune is time-bounded (a wedged daemon
-# under disk pressure must not hold the deploy lock) and can NEVER alter control
-# flow or mask the caller's failure exit code — a prune failure only logs.
-prune_docker_caches() {
-  if ! timeout 120 docker builder prune -f --keep-storage "$BUILD_CACHE_KEEP" >/dev/null 2>&1; then
-    log "prune_docker_caches: builder prune failed (non-fatal)"
-  fi
-  if ! timeout 120 docker image prune -f >/dev/null 2>&1; then
-    log "prune_docker_caches: image prune failed (non-fatal)"
-  fi
-  return 0
-}
 
 record_backoff_failure() {
   local n=$(( ${bo_cnt:-0} + 1 ))
