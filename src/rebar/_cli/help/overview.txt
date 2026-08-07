@@ -20,7 +20,7 @@ Subcommands:
   edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --parent; tags via --add-tag/--remove-tag/--set-tags)
   tag           Add a tag to a ticket
   untag         Remove a tag from a ticket
-  validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --output json, --terse, --verbose, --fix)
+  validate      Repo-wide tracker health check (NO ticket id; scores the whole store 1-5, exit 0-4; --output json, --terse, --verbose)
   clarity-check Score one ticket's clarity (<ticket_id>; exit 0=pass, 1=fail; JSON: score/verdict/threshold)
   check-ac      Check one ticket has an Acceptance Criteria block (<ticket_id>; exit 0=pass, 1=fail; AC_CHECK: pass|fail)
   quality-check Check one ticket's dispatch readiness (<ticket_id>; exit 0=pass, 1=fail; QUALITY: pass|fail)

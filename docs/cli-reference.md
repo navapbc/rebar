@@ -455,7 +455,7 @@ Usage: rebar untag <ticket_id> <tag>
 ### `validate`
 
 ```
-Usage: rebar validate [--quick|--full] [--fix] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)
+Usage: rebar validate [--quick|--full] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)
 ```
 
 ### `verify-signature`
