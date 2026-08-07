@@ -70,7 +70,11 @@ def emit(
     operator. Returns True on success, False on any failure (the sidecar is observability
     — a failed emit must NEVER fail the review itself). Best-effort."""
     from rebar import config as _config
-    from rebar._commands._seam import append_event
+    from rebar._commands._seam import (
+        SecretScreenRefused,
+        append_event,
+        warn_secret_screen_refused,
+    )
 
     try:
         tracker = _config.tracker_dir(repo_root)
@@ -85,6 +89,9 @@ def emit(
             source=source,
         )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
+    except SecretScreenRefused:
+        warn_secret_screen_refused(str(verdict.get("ticket_id", "?")), EVENT_TYPE)
+        return False
     except Exception:
         # Observability floor: the sidecar is best-effort observability — a failed emit
         # must never fail the review, but the failure itself is a real signal worth a
