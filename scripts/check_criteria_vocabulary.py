@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from collections.abc import Iterable
@@ -20,6 +21,12 @@ DEFAULT_ALLOWLIST = REPO_ROOT / "scripts" / "criteria-vocabulary-allowlist.txt"
 PHRASE_PATTERN = re.compile(r"\b" + "success" + r"[ _-]criteri(?:a|on)\b", re.IGNORECASE)
 ABBREVIATION_PATTERN = re.compile(r"\bSCs?\b")
 
+# Only the FALLBACK walk (a non-git root) needs a hand-maintained denylist. Inside a git
+# repository the guard asks git for the file list instead, so `.gitignore` — not this set — is
+# the single source of truth for what is out of scope. That distinction is the whole point of
+# bug d5ae: a denylist over an open-ended filesystem drifts, and when it drifted past
+# `.claude/worktrees/` and `bridge_state/` it produced ~47k violations in gitignored paths and
+# permanently reddened the `make lint` commit gate for anyone who had created a worktree.
 EXCLUDED_DIRECTORY_NAMES = frozenset(
     {
         ".git",
@@ -141,8 +148,60 @@ def _abbreviation_is_scoped(path: Path) -> bool:
     )
 
 
+def _git_tracked_relatives(root: Path) -> list[Path] | None:
+    """Return the paths git would consider, or None when *root* is not a usable git repo.
+
+    `--cached --others --exclude-standard` is precisely "tracked, plus untracked files that
+    are not ignored" — so a brand-new file is still scanned the moment it is written, while
+    anything `.gitignore` excludes is out of scope by construction.
+    """
+
+    if not (root / ".git").exists():
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        return None
+    if completed.returncode != 0:
+        return None
+    return [Path(os.fsdecode(entry)) for entry in completed.stdout.split(b"\0") if entry]
+
+
+def _iter_listed_files(root: Path, relatives: list[Path]) -> Iterable[tuple[Path, Path]]:
+    for relative in sorted(set(relatives)):
+        if _is_excluded(relative):
+            continue
+        candidate = root / relative
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        yield candidate, relative
+
+
 def iter_repository_files(root: Path) -> Iterable[tuple[Path, Path]]:
-    """Yield non-symlink text candidates without descending into excluded trees."""
+    """Yield non-symlink text candidates, preferring git's own view of the tree."""
+
+    listed = _git_tracked_relatives(root)
+    if listed is not None:
+        yield from _iter_listed_files(root, listed)
+        return
+    yield from _walk_repository_files(root)
+
+
+def _walk_repository_files(root: Path) -> Iterable[tuple[Path, Path]]:
+    """Fallback for a non-git root: walk without descending into excluded trees."""
 
     for current, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
         directory = Path(current)

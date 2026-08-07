@@ -191,6 +191,92 @@ def test_symlink_into_excluded_tree_is_not_rescanned(tmp_path: Path) -> None:
     assert _run(tmp_path).returncode == 0
 
 
+# Held-out git-scope contract (bug d5ae): when the root IS a git repository the guard must
+# consider exactly the files git would — so a gitignored tree (`.claude/worktrees/...`,
+# `bridge_state/`) is invisible to it, while tracked and untracked-but-not-ignored files are
+# scanned exactly as before. Before this contract the guard walked the whole filesystem and a
+# single agent worktree produced tens of thousands of violations, permanently reddening the
+# `make lint` commit gate in any checkout that had ever created one.
+def _init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=root, check=True, capture_output=True)
+
+
+def _track_everything(root: Path) -> None:
+    subprocess.run(["git", "add", "--all"], cwd=root, check=True, capture_output=True)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ".claude/worktrees/agent-1/docs/experiments/runs.jsonl",
+        "bridge_state/snapshots/2026-06-29T16-50-45.json",
+        "ignored-notes.md",
+    ],
+)
+def test_gitignored_paths_are_not_scanned(tmp_path: Path, relative: str) -> None:
+    _write(tmp_path, ".gitignore", ".claude/\nbridge_state/\nignored-notes.md\n")
+    _write(tmp_path, relative, _legacy_heading())
+    _init_git_repo(tmp_path)
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert relative not in result.stderr
+
+
+@pytest.mark.parametrize("track", [False, True])
+def test_unignored_files_in_a_git_repo_are_still_scanned(tmp_path: Path, track: bool) -> None:
+    _write(tmp_path, ".gitignore", ".claude/\n")
+    _write(tmp_path, "src/rebar/live.py", f'HEADING = "{_legacy_heading()}"\n')
+    _init_git_repo(tmp_path)
+    if track:
+        _track_everything(tmp_path)
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert "src/rebar/live.py:1" in result.stderr
+
+
+def test_curated_exclusions_still_apply_inside_a_git_repo(tmp_path: Path) -> None:
+    _write(tmp_path, "docs/archive/history.md", _legacy_heading())
+    _init_git_repo(tmp_path)
+    _track_everything(tmp_path)
+
+    assert _run(tmp_path).returncode == 0
+
+
+def test_allowlist_counts_are_unchanged_inside_a_git_repo(tmp_path: Path) -> None:
+    relative = "tests/fixture.txt"
+    _write(tmp_path, relative, _legacy_heading())
+    _init_git_repo(tmp_path)
+    _track_everything(tmp_path)
+
+    assert _run(tmp_path, _allowlist_row(relative, 1, "recorded fixture")).returncode == 0
+
+
+def test_missing_git_binary_falls_back_to_the_filesystem_walk(tmp_path: Path) -> None:
+    _write(tmp_path, "src/rebar/live.py", f'HEADING = "{_legacy_heading()}"\n')
+    _init_git_repo(tmp_path)
+
+    allowlist = tmp_path / "allowlist.txt"
+    allowlist.write_text("", encoding="utf-8")
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    env = os.environ.copy()
+    env["PATH"] = str(empty_path)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(tmp_path), "--allowlist", str(allowlist)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "src/rebar/live.py:1" in result.stderr
+
+
 def _write_executable(path: Path) -> None:
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
