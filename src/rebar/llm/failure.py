@@ -340,12 +340,31 @@ RESOLUTION_MESSAGES: dict[str, str] = {
     ),
 }
 
+# A content-policy block (Bedrock Guardrail intervention or the model's own content
+# filter / refusal) normalizes to ``finish_reason=content_filter`` and classifies
+# CHANGE_INPUT — the correct disposition, but the generic CHANGE_INPUT message misreports
+# the cause as "too large / malformed". This specialization names the real failure mode so
+# the operator is not sent to the wrong (size/format) remedy. See :func:`message_for`.
+CONTENT_FILTER_MESSAGE = (
+    "The request was blocked by a content policy — a Bedrock Guardrail, or the model's own "
+    "content filter / refusal (finish_reason=content_filter). This is NOT a size or "
+    "formatting problem; adjust the input, or the guardrail configuration, and retry."
+)
 
-def message_for(resolution_class: str | None) -> str | None:
+
+def message_for(resolution_class: str | None, *, finish_reason: str | None = None) -> str | None:
     """The human-facing stderr message for a persisted `coverage.resolution_class` value
-    (a plain string), or ``None`` when the class is absent/unknown."""
+    (a plain string), or ``None`` when the class is absent/unknown.
+
+    ``finish_reason`` (when available on the outcome's / persisted ``diagnostic``)
+    disambiguates the shared ``CHANGE_INPUT`` class: a ``content_filter`` block gets the
+    guardrail/content-policy message, while genuine size/malformed CHANGE_INPUT cases
+    (HTTP 413, context-length 400) keep the generic one. Omitting it preserves the prior
+    behaviour for the string-only caller."""
     if not resolution_class:
         return None
+    if finish_reason == "content_filter" and resolution_class == ResolutionClass.CHANGE_INPUT.value:
+        return CONTENT_FILTER_MESSAGE
     return RESOLUTION_MESSAGES.get(resolution_class)
 
 
