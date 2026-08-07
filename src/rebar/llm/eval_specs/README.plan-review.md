@@ -56,7 +56,7 @@ rebar prompt eval plan-review-finder      # validate the spec offline (grader di
 The **offline** validation (spec structure, scorer discipline, `at_least(k)` gate,
 coverage threshold) runs with no model and is gated by
 `tests/unit/test_plan_review_evals.py`. The **live** model run (the actual
-recall/false-fire scoring across epochs) needs the `nava-rebar[eval]` extra + model
+recall/false-fire scoring across epochs) needs the `nava-rebar[agents]` extra + model
 credentials and runs in the eval CI.
 
 ## Corpuses

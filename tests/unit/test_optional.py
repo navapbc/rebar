@@ -14,10 +14,10 @@ def test_guard_import_success_returns_module() -> None:
 
 def test_guard_import_missing_names_the_extra_and_pip_install() -> None:
     with pytest.raises(_optional.OptionalDependencyError) as ei:
-        _optional.guard_import("a_module_that_does_not_exist_xyz", extra="eval")
+        _optional.guard_import("a_module_that_does_not_exist_xyz", extra="tracing")
     msg = str(ei.value)
-    assert "eval" in msg
-    assert "pip install 'nava-rebar[eval]'" in msg
+    assert "tracing" in msg
+    assert "pip install 'nava-rebar[tracing]'" in msg
 
 
 def test_require_extra_unknown_is_value_error() -> None:
@@ -26,12 +26,12 @@ def test_require_extra_unknown_is_value_error() -> None:
 
 
 def test_require_extra_missing_raises_with_install_hint() -> None:
-    # eval/tracing are net-new extras, not installed in the dev venv.
-    if _optional.extra_installed("eval"):
-        pytest.skip("eval extra installed in this env")
+    # tracing is a net-new extra, not installed in the dev venv.
+    if _optional.extra_installed("tracing"):
+        pytest.skip("tracing extra installed in this env")
     with pytest.raises(_optional.OptionalDependencyError) as ei:
-        _optional.require_extra("eval")
-    assert "nava-rebar[eval]" in str(ei.value)
+        _optional.require_extra("tracing")
+    assert "nava-rebar[tracing]" in str(ei.value)
 
 
 def test_extra_installed_returns_bool_and_false_for_unknown() -> None:

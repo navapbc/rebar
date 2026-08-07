@@ -4,7 +4,7 @@ deterministic (scripted) and agentic (LLM) steps.
 This package is the lean-runtime half of the engine (epic a88f). Loading,
 validating, linting, migrating, and executing a workflow are pure-Python + a YAML
 safe-loader — no heavy LLM dependency. Only *agentic* steps (and evals/tracing)
-pull the optional ``nava-rebar[agents]`` / ``[eval]`` / ``[tracing]`` extras, and
+pull the optional ``nava-rebar[agents]`` / ``[tracing]`` extras, and
 they are imported lazily at the step boundary, never here.
 
 Sub-modules:

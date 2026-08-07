@@ -59,7 +59,6 @@ collected there:
 - **`[agents]`** — the LLM agent runtime (`pydantic-ai-slim[anthropic]` +
   `json-repair`, `pydantic>=2`): agent workflow steps, `review_*`, the workflow
   agent runner.
-- **`[eval]`** — prompt evaluation (Inspect AI + promptfoo interop).
 - **`[tracing]`** — the OTLP trace sink. **Write-only by rule:** OpenTelemetry is a
   *sink*, never read back into a rebar decision (the oracle-discipline rule). The
   `rebar llm setup` wizard configures its endpoint (`--otlp-endpoint` /
@@ -200,8 +199,6 @@ Three things bite in practice:
   knob, so the value is visible to rebar's config layer) or `AWS_DEFAULT_REGION`. Instance-metadata
   reachability supplies **credentials, never a region** — credential and region discovery are
   independent, so a working instance role does not remove this step.
-- **The `[bedrock]` extra declares a uv resolution conflict with `[eval]`**, so those two extras
-  are not co-installable.
 
 `ANTHROPIC_API_KEY` is **not** required on the Bedrock path, nor for a local OpenAI-compatible
 server.
@@ -294,8 +291,8 @@ the signed provenance because a local/opaque endpoint was used. Observed abridge
 > rather than with a bare `ModuleNotFoundError` — the framework's clean-degradation contract.
 
 The `[agents]` extra ships **`pydantic-ai-slim[anthropic,retries]`** (Claude, the default)
-out of the box. Bedrock has rebar's own **`[bedrock]`** extra (see above, and note its declared
-resolver conflict with `[eval]`); other providers need their pydantic-ai slim group
+out of the box. Bedrock has rebar's own **`[bedrock]`** extra (see above); other providers need
+their pydantic-ai slim group
 (`pip install 'pydantic-ai-slim[openai]'` for ChatGPT + OpenAI-compatible local
 servers, `pydantic-ai-slim[google]` for Gemini) — a missing one raises a clear
 error naming the package.

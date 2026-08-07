@@ -30,7 +30,7 @@ from rebar.grounding import resolve as r
 pytestmark = pytest.mark.unit
 
 # The heavy/optional stack a non-adopting client must NOT pull. tree_sitter* is the
-# [grounding] extra; the rest is the [agents]/[eval]/[tracing] stack.
+# [grounding] extra; the rest is the [agents]/[tracing] stack.
 _HEAVY = (
     "tree_sitter",
     "tree_sitter_language_pack",
@@ -40,7 +40,6 @@ _HEAVY = (
     "anthropic",
     "langfuse",
     "deepagents",
-    "inspect_ai",
     "opentelemetry",
 )
 

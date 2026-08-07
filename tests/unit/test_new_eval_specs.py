@@ -1,7 +1,7 @@
 """The 3 reviewer eval specs added by WS-EVAL-EXISTING (epic 6f2d): completion-verifier,
 ticket-quality, spec-alignment. Offline discipline only — these assert spec SHAPE
 (strict validity, registered scorers, balanced dataset, non-empty gold_set); the live
-recall/false-fire SCORING runs in the eval CI ([eval] extra + credentials)."""
+recall/false-fire SCORING runs in the eval CI ([agents] extra + credentials)."""
 
 from __future__ import annotations
 

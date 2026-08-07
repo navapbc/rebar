@@ -8,6 +8,32 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The `[eval]` extra is removed (breaking, no alias)
+
+`nava-rebar[eval]` no longer exists. Its only member was `inspect-ai`, which rebar never
+imported — there were zero `import inspect_ai` sites in `src/`, and the eval module's own
+implementation comment records the decision not to route through Inspect AI ("our 'model
+call' is a whole tool-using agentic op ... wrapping it would add a dependency and an
+impedance mismatch for no gain"). The module docstring that still advertised Inspect AI
+routing, and the dead `INSPECT_MIN_VERSION` constant, are gone with it.
+
+What agents and automation should change:
+
+- **Installs.** Replace `nava-rebar[eval]` with `nava-rebar[agents]`. `pip` treats an
+  unknown extra as a warning, not an error, so a stale `[eval]` install silently gets the
+  base package — it will not fail loudly. `uv sync --extra eval` *will* fail; update it.
+- **Capability probes.** `rebar._optional.EXTRAS` no longer has an `eval` key, so
+  `extra_installed("eval")` / `require_extra("eval")` now report it as unknown.
+  `rebar llm setup` no longer reports an `eval` row (text) or an `extras.eval` key (JSON),
+  and `rebar.llm.config.available_backends()` no longer returns `eval_extra`.
+- **Live prompt evals** were always gated on `[agents]` + credentials, not on `[eval]`.
+  The CLI hints that said otherwise now say `agents`.
+
+Resolution side effects, all in the consumer's favour: the `eval`-vs-`dev` and
+`eval`-vs-`bedrock` `[tool.uv] conflicts` entries are removed (`dev` and `bedrock` are
+co-installable again), as is the `click>=8.3.3` `override-dependencies` entry — the lock
+reaches a non-vulnerable click without forcing an untested combination.
+
 ## `transition --force-close` renamed to `transition --force` (breaking, no alias)
 
 `rebar transition` now has ONE escape hatch, `--force[=<reason>]`, spelled exactly as

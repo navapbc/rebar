@@ -24,7 +24,7 @@ def test_setup_json_shape(capsys) -> None:
     report = json.loads(capsys.readouterr().out)
     assert set(report) >= {"extras", "dry_run_ok", "recommended_config"}
     assert report["dry_run_ok"] is True
-    assert report["extras"].keys() >= {"agents", "eval", "tracing"}
+    assert report["extras"].keys() >= {"agents", "tracing"}
     assert "[tool.rebar.llm]" in report["recommended_config"]
 
 

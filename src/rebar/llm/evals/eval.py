@@ -3,9 +3,8 @@
 
 Prompts version in our git (WS-F); this is how they evolve *safely*: a git-tracked
 eval spec beside each prompt (``.rebar/evals/<id>.eval.yaml``) — dataset, thresholds,
-scorers — runs through **Inspect AI** (behind the optional ``nava-rebar[eval]``
-extra), and the result gates CI. The hard rule throughout: **judge
-non-determinism must not create false confidence** —
+scorers — is validated and run here, and the result gates CI. The hard rule
+throughout: **judge non-determinism must not create false confidence** —
 
   * a deterministic scorer **gates**; an LLM-judge scorer only **reports** (it never
     gates by itself);
@@ -17,8 +16,12 @@ non-determinism must not create false confidence** —
     human-gold set + a Cohen's-kappa alignment check.
 
 The pure logic here (spec validation, grader discipline, the gate, coverage, JUnit
-conversion, kappa) is stdlib-only and offline-testable; only the actual *run*
-(:func:`run_eval`) imports Inspect AI, lazily, behind ``guard_import``.
+conversion, kappa) is stdlib-only and offline-testable. The live run
+(:func:`run_eval`) is a **native loop over the reviewer's real op** — see the
+``eval_solver`` section below for why it is deliberately not routed through an
+external eval framework — so it needs only the ``agents`` extra (the pydantic-ai
+runtime) plus credentials, and its solver is injectable so the whole
+aggregation/gate/coverage/JUnit path stays offline-testable with a fake.
 
 ``rebar prompt eval`` reads the DIRTY working tree (the prompt as currently edited,
 not the committed copy) so you iterate fast; promoting an edit still requires a
@@ -35,9 +38,6 @@ from xml.sax.saxutils import escape as _xml_escape
 from xml.sax.saxutils import quoteattr as _xml_attr
 
 from rebar.llm.errors import LLMError
-
-# Inspect AI floor: the version whose scorer/epoch API this seam targets.
-INSPECT_MIN_VERSION = "0.3.221"
 
 # Model families we can distinguish (for the cross-family grader rule).
 _FAMILY_PREFIXES = (
