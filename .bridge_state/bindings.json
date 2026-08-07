@@ -26905,7 +26905,7 @@
         "assignee": null,
         "description": "# Batch-commit write primitive for bulk operations (import/migration scale)\n\n## Context\n\nDiscovered from the export/import design brainstorm (`rule-swamp-pupil`, 2026-06-17). rebar's write path commits ONE git commit per event under a per-event lock acquire/release (`src/rebar/_store/event_append.py:82-146`, `src/rebar/_store/lock.py:187-231`); no batch/bulk/transaction primitive exists. A bulk import of N tickets composes N\u00d7~3 events \u2192 thousands of commits + thousands of lock cycles (~3.3 min of lock overhead alone for ~2,000 events, before commit/push). `rule-swamp-pupil` already mitigates network amplification (`REBAR_SYNC_PUSH=off` + single final push), but the per-event commit/lock cost remains. This task is the real fix, deferred until real-world store sizes demand it.\n\n## What / Implementation detail\n\nAdd `_store.batch_stage_and_commit(events)`: under ONE write lock, write/rename M event files, one `git add`, ONE commit. Crucially, **each event remains its own file** (unique name) \u2014 so cross-clone union-merge and SNAPSHOT compaction (which key off event UUIDs, not commit boundaries) are unaffected, and invariants I5 (single locked writer) and I2 (composed events) hold. Route the importer (and optionally the reconciler applier) through it in chunks (per-ticket or per-N). Atomicity: a single commit of M staged files is atomic at the git level; partial staging before commit is recoverable because import is idempotent (resume by `source_id`).\n\n## Acceptance Criteria\n\n- [x] `_store.batch_stage_and_commit(events)`: one lock, M event files, one commit; each event its own file\n- [x] importer routes events through it in chunks; single-event path unchanged\n- [x] atomicity + crash-resume (idempotent) tests; union-merge + compaction regression tests\n- [ ] benchmark: large-import wall-clock before vs after\n\nDeferred optimization for `rule-swamp-pupil`; build if store sizes demand it.\n- [ ] A bulk import of a large synthetic store completes in a fraction of the per-event wall-clock, with the same resulting logical state.\n- [x] Cross-clone convergence + compaction unaffected (regression tests).\n- [x] The single-event write path is unchanged.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Batch-commit write primitive for bulk operations (import/migration scale)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -27959,7 +27959,7 @@
         "assignee": null,
         "description": "## What\nThe 0ac6 slice-3 review found a 10th JIRA_* consumer NOT routed through the typed Config: `src/rebar/_engine_support/bridge_fsck.py` (enumerate_open_count_skew_anomalies, ~lines 279-291) still reads JIRA_URL/JIRA_USER/JIRA_PROJECT/JIRA_API_TOKEN directly from os.environ when constructing an AcliClient. It is OUTSIDE the rebar_reconciler package (_engine_support) and its own comment notes it is NOT on any live path, so it was deliberately left out of slice 3's enumerated 9 reconciler sites.\n\nConsequence: a [tool.rebar.jira] config-file value is consumed everywhere in the reconciler but NOT by this bridge_fsck anomaly helper \u2014 a minor consistency gap.\n\n## Scope / consideration\n- Route the url/user/project through the typed Config (env JIRA_URL/USER/PROJECT override file); keep the secret JIRA_API_TOKEN env-only.\n- NOTE the cross-package wrinkle: bridge_fsck is in _engine_support and resolve_jira_settings lives in the reconciler floor (rebar_reconciler.acli_subprocess). Either (a) import the reconciler floor, or (b) resolve inline via `from rebar.config import load_config` (no reconciler import) \u2014 prefer whichever keeps _engine_support decoupled from the reconciler package.\n\n## Acceptance Criteria\n- [ ] bridge_fsck's AcliClient url/user/project come from load_config().jira.* (env overrides file); JIRA_API_TOKEN stays env-only.\n- [ ] A test asserts a [tool.rebar.jira] file value reaches that consumer (or, if it stays env-only by design, document why).\n- [ ] No new _engine_support -> rebar_reconciler import coupling unless justified.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Route bridge_fsck's AcliClient construction through resolve_jira_settings (jira config-file)"
       },
       "baseline_advanced_at": "2026-07-28T13:11:23Z",
@@ -35762,6 +35762,13 @@
       "peer_parent": "REB-184",
       "state": "confirmed",
       "updated_at": "2026-06-27T01:33:38Z"
+    },
+    "4a44-4abb-ae91-4e51": {
+      "created_at": "2026-08-07T09:44:46Z",
+      "jira_id": "4587522",
+      "jira_key": "REB-2602",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T09:44:50Z"
     },
     "4a48-6dd5-aef3-4c8e": {
       "baseline": {
@@ -44882,7 +44889,7 @@
         "assignee": null,
         "description": "## What\nThe plan-review gate runs FOUR passes (find \u2192 verify \u2192 decide \u2192 coach; see `passes.py`), but several surfaces describe the whole gate as a \"three-pass (find \u2192 verify \u2192 decide) advisory coaching review\", undercounting the Pass-4 coach. Correct the gate-level descriptions to four-pass.\n\n## Scope (gate-level descriptions \u2014 fix)\n- `src/rebar/llm/plan_review/passes.py:1` headline\n- `src/rebar/mcp_server.py:657` (review_plan docstring)\n- `src/rebar/_cli/_llm_commands.py:215,225` (CLI help)\n- `src/rebar/schemas/plan_review_verdict.schema.json:5` (schema description)\n- `src/rebar/llm/plan_review/__init__.py:10,48`, `attest.py:13`\n- `docs/plan-review-gate.md` (header + body \"the three passes\" labels)\n\n## Out of scope (preserve)\n- The \"shared three-pass framework (epic 9da1)\" lineage \u2014 that framework IS three-pass and is shared.\n- The reviewer prompt `.md` files (`plan_review_finder.md`/`plan_review_verifier.md`) \u2014 they name the\n  decision core, and editing them risks the prompt-index drift gate.\n\n## Acceptance Criteria\n- [x] All gate-level \"three-pass\" descriptions read \"four-pass (find \u2192 verify \u2192 decide \u2192 coach)\".\n- [x] The shared-three-pass-framework (epic 9da1) lineage reference is preserved.\n- [x] No reviewer prompt `.md` front-matter is changed (drift gate untouched).\n- [x] `make lint` + test suite pass.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Docs: correct mislabeled 'three-pass' plan-review references to four-pass (find->verify->decide->coach)"
       },
       "baseline_advanced_at": "2026-07-28T05:10:46Z",
@@ -64296,7 +64303,7 @@
         "assignee": null,
         "description": "## Context\nFrom the interactive env-var review (story 60ce). SESSION_ID is read in _commands/transition.py to tag event provenance: session = SESSION_ID (ambient, e.g. CI/agent session) or short git HEAD or \"unknown\". It is intentionally a GENERIC, externally-set var (NOT rebar-namespaced), so renaming to REBAR_SESSION_ID would lose the ambient pickup. Kept AS-IS for now pending a design decision.\n\n## Open questions\n- Should provenance read an ambient SESSION_ID, a rebar-owned REBAR_SESSION_ID, or both (ambient fallback)?\n- Collision risk: SESSION_ID is very generic and may be set by unrelated tooling.\n- Does it belong in the config surface at all, or is it pure runtime provenance?\n\n## Acceptance Criteria\n- [x] EXPLICIT USER APPROVAL REQUIRED before any change to SESSION_ID handling (do not act autonomously)\n- [x] Decision recorded: keep ambient / rename / support both\n- [x] If changed: alias + docs + tests",
         "priority": "Low",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Decide SESSION_ID env-var disposition (reads ambient external session id)"
       },
       "baseline_advanced_at": "2026-07-30T03:06:26Z",
@@ -94339,6 +94346,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-06T19:10:17Z"
     },
+    "c61a-9f8f-8ef9-4601": {
+      "created_at": "2026-08-07T09:44:52Z",
+      "jira_id": "4587523",
+      "jira_key": "REB-2603",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T09:44:55Z"
+    },
     "c622-8877-f677-4535": {
       "baseline": {
         "assignee": {
@@ -102999,6 +103013,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T04:27:58Z"
     },
+    "d5ae-5f4a-858f-431b": {
+      "created_at": "2026-08-07T09:44:57Z",
+      "jira_id": "4587524",
+      "jira_key": "REB-2604",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T09:45:00Z"
+    },
     "d5c7-0d57-c3ab-4e93": {
       "baseline": {
         "assignee": {
@@ -109852,6 +109873,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:21:29Z"
     },
+    "e27c-5a20-cd13-43b2": {
+      "created_at": "2026-08-07T09:45:01Z",
+      "jira_id": "4587525",
+      "jira_key": "REB-2605",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T09:45:04Z"
+    },
     "e2b0-f2aa-bcac-4242": {
       "baseline": {
         "assignee": null,
@@ -111990,9 +112018,31 @@
       "updated_at": "2026-07-06T23:04:12Z"
     },
     "e548-5b35-7eb8-4727": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Report\n\n`tests/unit/test_path_injection_guards.py::test_rerun_502_body_has_no_exception_detail` FAILS on current `origin/main` (reproduced standalone at 43ecfa8f27, and independently at 9bdb22f5887 before that):\n\n```\nAttributeError: 'types.SimpleNamespace' object has no attribute 'headers'\nsrc/rebar/review_bot/app.py:101: in _request_token\n    header_token = request.headers.get(TOKEN_HEADER, \"\").strip()\n```\n\n## Mechanism (unconfirmed \u2014 for the investigation to prove)\n\n`_request_token` (`src/rebar/review_bot/app.py:101`) reads `request.headers` unconditionally. The header path was added for ticket 66af (accept the token via header, keeping the query param for legacy Gerrit webhooks whose `webhooks.config` has not been re-pushed). The test constructs its request as a `types.SimpleNamespace` that predates that change and carries no `headers` attribute, so the attribute read raises before any assertion runs.\n\nWhether the correct fix is to make `_request_token` tolerate a header-less request object, or to update the test's fake to match the real request contract, is EXACTLY the question the investigation must answer \u2014 a header-less request may be a real shape in production (some ASGI/test clients) or may be purely a test artifact. Do not assume.\n\n## Why it matters\n\nThis is red on main. It reds the `Verified` CI gate for anyone whose change touches this suite, and it is a SECURITY-adjacent guard: the test exists to prove a 502 body carries no exception detail (path-injection guard). A guard test that errors before asserting proves nothing \u2014 the guarantee it is supposed to pin is currently unverified.\n\n## Acceptance Criteria\n\n- [ ] The root cause is proven, with a cited mechanism, not guessed\n- [ ] It is established and stated whether a header-less request is a REAL production shape or a test-only artifact, with evidence\n- [ ] The test passes on a clean tree and actually exercises its original assertion (a 502 body containing no exception detail), not merely stops erroring\n- [ ] A regression test fails against the pre-fix code and passes after\n- [ ] The fix lands on main through Gerrit with LLM-Review +1 and Verified +1",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "test_rerun_502_body_has_no_exception_detail fails on main: _request_token reads request.headers on a header-less fake request"
+      },
       "created_at": "2026-08-07T09:39:09Z",
       "jira_id": "4587521",
       "jira_key": "REB-2601",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T09:39:12Z"
     },
@@ -112061,7 +112111,7 @@
         "assignee": null,
         "description": "## Status (rescoped 2026-06-29)\nThe spike's functional goal is MOOT. The framework already moved off forced-tool `ToolStrategy` entirely: the pydantic_ai runtime cutover means review/code/scan + the completion verifier all run on natural-termination output via `output_mode()` (`PromptedOutput`/`NativeOutput`) \u2014 there is no `ToolStrategy`/`AutoStrategy`/`ProviderStrategy` anywhere in `src/rebar`. So the BI-1 optional-None-leakage class the spike worried about is already structurally avoided, and an AutoStrategy/ProviderStrategy evaluation is no longer worth running.\n\nWhat remains is pure DOC HYGIENE: the now-stale \"disable extended thinking because forced tool-choice conflicts\" rationale still lingers in the runner/structured-output source comments and reads as if forced-tool is still in use.\n\n## Scope\n- Update/remove the stale \"disable thinking (forced tool-choice conflict)\" rationale in `src/rebar/llm/runner.py` (~lines 72-77) and `src/rebar/llm/structured.py` (~lines 11-12, 52-54) so it reflects the current pydantic_ai `PromptedOutput`/`NativeOutput` reality (keep any genuinely-still-true note as historical context, clearly labelled).\n- Record the decision in-ticket: the AutoStrategy/ProviderStrategy spike is superseded by the pydantic_ai cutover; no migration needed.\n\n## Acceptance Criteria\n- [x] Stale forced-tool/\"disable thinking\" rationale in `runner.py` + `structured.py` is corrected or removed (no comment implies forced `ToolStrategy` is the current mechanism).\n- [x] Decision recorded: spike moot \u2014 superseded by the pydantic_ai runtime cutover (cite that no ToolStrategy/AutoStrategy/ProviderStrategy exists in `src/rebar`).\n- [x] `make lint` + test suite pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Doc hygiene: correct stale forced-tool/'disable thinking' rationale (AutoStrategy spike superseded by pydantic_ai cutover)"
       },
       "baseline_advanced_at": "2026-07-28T14:54:47Z",
@@ -130072,6 +130122,10 @@
     "REB-260": "a36b-015f-e8a0-495e",
     "REB-2600": "13b4-c597-200b-4e31",
     "REB-2601": "e548-5b35-7eb8-4727",
+    "REB-2602": "4a44-4abb-ae91-4e51",
+    "REB-2603": "c61a-9f8f-8ef9-4601",
+    "REB-2604": "d5ae-5f4a-858f-431b",
+    "REB-2605": "e27c-5a20-cd13-43b2",
     "REB-261": "a566-4a60-bad1-42d1",
     "REB-262": "a621-500a-596b-4f22",
     "REB-263": "a6d3-f6c9-f54e-4831",
