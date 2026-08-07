@@ -20,7 +20,9 @@
       ],
       "description": "Provider provenance record from the agent run (resolved provider/model, the endpoint actually called, and the effective capability record). Carried from the verify step onto the verdict, never recomputed here. Null when the runner resolved no provider (e.g. the fake runner)."
     },
-    "certifiable": { "type": "boolean", "description": "From the precheck: false iff a closed-but-uncertified descendant withholds the parent's certification (the parent may close but not certify). Carried onto the verdict; defaults true." }
+    "certifiable": { "type": "boolean", "description": "From the precheck: false iff a closed-but-uncertified descendant withholds the parent's certification (the parent may close but not certify). Carried onto the verdict; defaults true." },
+    "verify_certifiable": { "type": ["boolean", "null"], "description": "From the verify step's own self-verdict provenance (2948): false when a banked deterministic fallback assembled the verdict without a model call. Combined (AND) with the precheck's `certifiable` so either source can withhold certification." },
+    "finalizer": { "type": ["string", "null"], "description": "How the verify step produced the verdict (primary / llm_finalizer / deterministic_fallback). Carried onto the verdict as its self-verdict provenance." }
   },
   "required": ["ticket_id", "raw_verdict", "raw_findings"],
   "additionalProperties": false

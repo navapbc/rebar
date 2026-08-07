@@ -75,15 +75,34 @@ _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # Completion verification is inherently more tool-heavy than a single-dimension review: it
 # must check potentially many criteria, each against several files. The framework review
 # default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too low and trips the recursion cap
-# mid-verification (→ a false fail-closed block at the gate). Use a generous verification FLOOR;
-# an operator who explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Very large tickets
-# (e.g. a whole framework epic) may still need it raised further, or --force-close. (Doubled
-# from 120→240 after a substantive story tripped the cap, then 240→480 after an 11-child
-# framework epic tripped 240 at the close gate. Per-run step usage is now logged by the
-# runner — `llm call [completion-verifier] … steps=N/limit` — so the next resize can be sized
-# from observed headroom rather than guesswork. The verifier also short-circuits tickets with
-# nothing to verify, so this floor is the ceiling for genuinely multi-criteria work.)
-_VERIFY_MIN_STEPS = 480
+# mid-verification (→ a false fail-closed block at the gate). Historically a FLAT floor of 480
+# handled this, but a flat floor MANUFACTURED exhaustion for TYPICAL tickets (epic 10ae/story
+# 2948, lever 1): measured, an 8-criteria verify converges at ~32 requests yet spends the whole
+# 480-step (240-request) budget on ~77% read_file re-read waste until the runaway guard trips —
+# the exhaustion the recovery path then has to bank around. Lever 1 replaces the flat floor with
+# a CRITERIA-SCALED one: verify_step_floor(c) = clamp(steps_per_criterion × c, step_floor_min,
+# 480). It is AUTHORITATIVE over the framework default (it may LOWER a small ticket below the 250
+# default — that is the point), but an operator who explicitly sets a step budget still wins
+# (min-only against an explicit budget; the criteria-scaled value only ever RAISES an explicit
+# budget that is below it). 480 is retained ONLY as the clamp MAX so no ticket exceeds today's
+# ceiling. Per-run step usage is logged by the runner — `llm call [completion-verifier] …
+# steps=N/limit` — so a resize can be sized from observed headroom. The verifier also
+# short-circuits tickets with nothing to verify.
+_VERIFY_STEP_FLOOR_MAX = 480
+
+
+def verify_step_floor(criteria_count: int, verify_cfg) -> int:
+    """The criteria-scaled PRIMARY completion-verifier step floor (epic 10ae/story 2948, lever 1).
+
+    ``clamp(steps_per_criterion × c, step_floor_min, 480)`` where ``c`` is the ticket's explicit
+    criteria count. Config-tunable via ``verify.completion_verify_steps_per_criterion`` (default
+    8) and ``verify.completion_verify_step_floor_min`` (default 48). ``c`` is floored at 1 so a
+    degenerate zero-criteria surface still receives at least ``step_floor_min``.
+    """
+    per = verify_cfg.completion_verify_steps_per_criterion
+    lo = verify_cfg.completion_verify_step_floor_min
+    scaled = per * max(int(criteria_count), 1)
+    return max(lo, min(scaled, _VERIFY_STEP_FLOOR_MAX))
 
 
 def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[dict]]:
@@ -517,11 +536,6 @@ def _verify_completion_inner(
     from rebar.llm.review_kernel import max_output_cfg
 
     cfg = max_output_cfg(cfg)
-    # Raise the agent step budget to a verification-appropriate floor (an explicit higher
-    # REBAR_LLM_MAX_STEPS still wins) so a multi-criteria verification doesn't trip the
-    # recursion cap mid-run.
-    if cfg.max_iterations < _VERIFY_MIN_STEPS:
-        cfg = replace(cfg, max_iterations=_VERIFY_MIN_STEPS)
     # Pin GREEDY decoding for the verifier (bug e458): an unpinned temperature runs at the
     # provider default (~1.0), whose sampling variance flips borderline judgments — e.g. whether
     # the agent's (fallible, free-form) search located a criterion's test — between runs on
@@ -537,6 +551,41 @@ def _verify_completion_inner(
     root = _reads.show_ticket(ticket_id, repo_root=repo_root)
     if graph is None:
         graph = root.get("ticket_type") == "epic"
+
+    # Criteria-scaled PRIMARY step budget (epic 10ae/story 2948, lever 1). Compute the scaled
+    # floor from the ticket's explicit criteria count, then apply it: it is AUTHORITATIVE over the
+    # framework default (== DEFAULT_MAX_ITERATIONS means no explicit operator step budget, so the
+    # scaled floor becomes the budget even when that LOWERS it — the whole point of lever 1), but
+    # min-only against an EXPLICIT operator budget (a different value the operator set is only ever
+    # raised up to the floor, never lowered). Config read is fail-safe: an unreadable config falls
+    # back to the packaged VerifyConfig defaults so the floor still applies.
+    from rebar import config as _config
+    from rebar._config_schema import VerifyConfig
+    from rebar.llm.config import DEFAULT_MAX_ITERATIONS
+    from rebar.llm.workflow.completion_recovery import (
+        CompletionRecoveryError,
+        explicit_completion_criteria,
+    )
+
+    try:
+        verify_cfg = _config.load_config(repo_root).verify
+    except Exception:  # noqa: BLE001 — config unreadable → packaged defaults, floor still applies
+        verify_cfg = VerifyConfig()
+    # Lever-1 floor scales with the ticket's explicit checkbox count. A ticket with no
+    # enumerable checkboxes (a non-bug without an Acceptance Criteria block) makes
+    # `explicit_completion_criteria` fail closed — but that is the VERDICT PRODUCTION path's
+    # concern (the agents-extra guard / child-closure precheck in produce_completion_verdict own
+    # it), NOT this pre-flight budget sizing. Enumeration must not raise HERE, ahead of the
+    # agents guard, or a lean (no-extras) install degrades to CompletionRecoveryError instead of
+    # the typed missing-extra LLMError (regression caught by the degradation-path gate). Fall
+    # back to a zero criteria count (base floor) and let the downstream path decide.
+    try:
+        criteria_count = len(explicit_completion_criteria(root))
+    except CompletionRecoveryError:
+        criteria_count = 0
+    step_floor = verify_step_floor(criteria_count, verify_cfg)
+    if cfg.max_iterations == DEFAULT_MAX_ITERATIONS or cfg.max_iterations < step_floor:
+        cfg = replace(cfg, max_iterations=step_floor)
 
     # Verdict PRODUCTION runs through the v3 engine workflow
     # (gates/completion-verification.yaml) — which owns its OWN deterministic child-closure
