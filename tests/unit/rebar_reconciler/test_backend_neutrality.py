@@ -7,7 +7,7 @@ provider literal) fails CI:
 
 (a) No core module constructs an ``AcliClient(...)`` inline. The transport is now
     obtained from the configured backend (``select_backend(load_config()).transport``)
-    via the ``_load_acli`` / ``build_acli_client_from_env`` seams; the ONLY sanctioned
+    via the ``_load_acli`` seam; the ONLY sanctioned
     ``AcliClient(...)`` construction lives in ``adapters/jira/backend.py``'s factory,
     which these files must not duplicate.
 
@@ -39,7 +39,6 @@ _NO_INLINE_ACLICLIENT = (
     "applier.py",
     "fetcher.py",
     "run_differs.py",
-    "_attestation.py",
 )
 
 
@@ -131,8 +130,9 @@ def test_differ_apply_core_does_not_import_vendor_mapper(
 # Ticket 97f2 — the four scalar-coupled core modules import NO ``adapters.jira`` /
 # ``acli_subprocess`` symbol at ANY nesting depth (module scope OR inside a function).
 # Their last vendor couplings — the applier's cross-project ``project`` scope, the
-# fetcher's un-defaulted ``query_project`` JQL scope, the ``_attestation`` JIRA_*
-# fail-fast, and the ``apply_handlers`` assignee-error catch — now route through the
+# fetcher's un-defaulted ``query_project`` JQL scope, the bootstrap JIRA_* fail-fast
+# (in a since-deleted helper module), and the ``apply_handlers``
+# assignee-error catch — now route through the
 # Backend port (``project`` / ``query_project`` / ``assert_env_ready`` /
 # ``BackendAssigneeNotFoundError``). Unlike the top-level-only
 # ``_module_level_imported_names`` gate above, every removed site was a function-nested
@@ -144,7 +144,6 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     "fetcher.py",
     "applier.py",
     "apply_handlers.py",
-    "_attestation.py",
     # Ticket aff0: the inbound probe's Jira mechanics moved to adapters/jira/probe.py
     # behind the SupportsAbsenceProbe capability; the root module keeps only the neutral
     # vocabulary and imports no vendor symbol.
