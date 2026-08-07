@@ -43,7 +43,8 @@ def find_ready_tickets(
 
     A ticket is ready when:
     - status is "open" or "in_progress"
-    - all direct blockers are closed (or tombstoned / missing)
+    - every direct blocker is in a TERMINAL state -- closed, archived or deleted
+      (or missing) -- per the shared ``rebar.reducer.is_terminal_status`` predicate
     - if epic_filter is set, ticket's parent_id must equal epic_filter
 
     Args:
