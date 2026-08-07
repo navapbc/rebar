@@ -1231,11 +1231,6 @@ def test_lifespan_starts_and_stops_snapshot_janitor(monkeypatch):
 
     monkeypatch.setattr(snap, "start_background_janitor", fake_start)
 
-    async def fake_reconcile_loop(*, config=None):  # never touches Gerrit
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", fake_reconcile_loop)
-
     async def drive():
         async with appmod.lifespan(appmod.app):
             assert started, "janitor was not started on startup"
@@ -1420,11 +1415,73 @@ def test_reconcile_once_times_out_a_hung_review_and_continues(monkeypatch, tmp_p
     assert result == {"scanned": 1, "reviewed": 0}
 
 
+@pytest.mark.timeout(3)
+def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_path):
+    """The ordinary TestClient lifespan path must be prompt and use the test drain bound."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot.config import shutdown_drain_seconds
+
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path))
+
+    start = time.monotonic()
+    with TestClient(appmod.app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "in_flight": 0}
+
+    assert time.monotonic() - start < 2
+    assert shutdown_drain_seconds() == 1.0
+
+
 def _idle_reconcile_loop(*a, **k):
     async def _loop():
         await asyncio.Event().wait()
 
     return _loop()
+
+
+@pytest.fixture(autouse=True)
+def _safe_review_bot_lifespan_defaults(monkeypatch, request):
+    """Keep review-bot lifespan tests off real background work unless requested."""
+    if request.node.get_closest_marker("real_reconcile_loop") is None:
+        monkeypatch.setattr(reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
+    monkeypatch.setattr(
+        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
+    )
+
+
+@pytest.mark.real_reconcile_loop
+def test_lifespan_can_opt_into_the_real_reconcile_loop(monkeypatch, tmp_path):
+    """The marker bypasses the safe stub while keeping constructor seams offline."""
+    import threading
+
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+
+    started = threading.Event()
+    calls: list[tuple[object, object]] = []
+    fake_gerrit = object()
+    fake_dedup = object()
+
+    async def _record_reconcile_once(*, config, gerrit, dedup):
+        calls.append((gerrit, dedup))
+        started.set()
+        return {"scanned": 0, "reviewed": 0}
+
+    monkeypatch.setattr(appmod._reconcile, "GerritClient", lambda config: fake_gerrit)
+    monkeypatch.setattr(appmod._reconcile, "DedupStore", lambda path: fake_dedup)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_once", _record_reconcile_once)
+    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path))
+
+    with TestClient(appmod.app):
+        assert started.wait(timeout=1), "the real reconcile loop never started"
+
+    assert calls == [(fake_gerrit, fake_dedup)]
 
 
 def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
@@ -1443,10 +1500,6 @@ def test_lifespan_drains_queued_events_on_shutdown(monkeypatch, tmp_path):
         processed.append(event)
 
     monkeypatch.setattr(appmod._voter, "review_and_vote", _fake_review, raising=True)
-    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
-    monkeypatch.setattr(
-        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
-    )
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
 
     async def _run():
@@ -1466,16 +1519,14 @@ def test_lifespan_drain_is_bounded(monkeypatch, tmp_path):
 
     pytest.importorskip("fastapi")
     from rebar.review_bot import app as appmod
+    from rebar.review_bot.config import shutdown_drain_seconds
 
     async def _slow_review(event, *, config, force=False):
         await asyncio.sleep(3600)
 
     monkeypatch.setattr(appmod._voter, "review_and_vote", _slow_review, raising=True)
-    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
-    monkeypatch.setattr(
-        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
-    )
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+    assert shutdown_drain_seconds() == 0.1
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
 
     async def _run():
@@ -1521,6 +1572,7 @@ def test_reviewbot_stop_grace_period_covers_an_in_flight_store_write():
     from rebar.review_bot.config import DEFAULT_SHUTDOWN_DRAIN_SECONDS
 
     lock_budget = _lock._DEFAULT_TIMEOUT * _lock._DEFAULT_ATTEMPTS
+    assert DEFAULT_SHUTDOWN_DRAIN_SECONDS == 1200
     floor = DEFAULT_SHUTDOWN_DRAIN_SECONDS + lock_budget
     grace = _compose_stop_grace_seconds()
 
@@ -1612,10 +1664,6 @@ def test_shutdown_completes_an_in_flight_store_write_and_releases_the_lock(monke
             time.sleep(0.3)  # noqa: ASYNC251 - deliberately synchronous: models emit_code_review_artifact's no-await-inside lock-held window
 
     monkeypatch.setattr(appmod._voter, "review_and_vote", _review_that_writes, raising=True)
-    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_reconcile_loop, raising=True)
-    monkeypatch.setattr(
-        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
-    )
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
 
     async def _run():
@@ -1721,9 +1769,6 @@ def test_lifespan_cancel_await_is_bounded_for_a_task_slow_to_cancel(monkeypatch,
 
     monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _slow_reconcile_loop, raising=True)
-    monkeypatch.setattr(
-        "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
-    )
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
     monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=_cfg(tmp_path)))
