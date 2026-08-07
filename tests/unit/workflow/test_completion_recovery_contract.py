@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from rebar.llm.errors import CompletionRecoveryError
+from rebar.llm.workflow.completion_banking import criterion_id_map
 from rebar.llm.workflow.completion_recovery import (
     _validate_coverage,
     _validate_recovery_inputs,
@@ -19,7 +20,7 @@ def test_pass_like_verdict_cannot_hide_an_unmet_criterion() -> None:
     }
 
     with pytest.raises(CompletionRecoveryError, match="unmet criterion"):
-        _validate_coverage(result, ["Ship the fix"])
+        _validate_coverage(result, ["Ship the fix"], criterion_id_map(["Ship the fix"]))
 
 
 def test_plan_checkbox_is_not_a_completion_criterion() -> None:
@@ -98,4 +99,5 @@ def test_acceptance_criteria_stay_ordered_deduped_and_accept_all_met() -> None:
             ],
         },
         expected,
+        criterion_id_map(expected),
     )

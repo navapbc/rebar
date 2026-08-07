@@ -169,17 +169,17 @@ def test_completion_recovery_failure_persists_bounded_diagnostic(store):
     assert "raise max_tokens" not in error["cause"]
     assert error["evidence_ref"] == "completion-verification/recovery"
     diagnostic = error["diagnostic"]
-    assert diagnostic["stage"] == "evidence"
+    assert diagnostic["stage"] == "successor"
     assert diagnostic["criteria_total"] == 7
     assert diagnostic["criteria_completed"] == 0
-    assert diagnostic["tool_step_limit"] == 16
     assert "requests" in diagnostic
     assert "tool_calls" in diagnostic
-    assert diagnostic["trace_id"] == "trace-cap-123"
-    assert diagnostic["requests"] == 66
-    assert diagnostic["tool_calls"] == 117
-    assert diagnostic["input_tokens"] == 3_350_000
-    assert diagnostic["output_tokens"] == 4_096
+    # The primary run's spend is preserved on the aggregate_-prefixed keys.
+    assert diagnostic["aggregate_trace_id"] == "trace-cap-123"
+    assert diagnostic["aggregate_requests"] == 66
+    assert diagnostic["aggregate_tool_calls"] == 117
+    assert diagnostic["aggregate_input_tokens"] == 3_350_000
+    assert diagnostic["aggregate_output_tokens"] == 4_096
 
 
 def test_completion_non_recovery_failure_does_not_persist_gate_error(store):

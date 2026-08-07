@@ -33,6 +33,7 @@ What this file pins:
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -71,19 +72,24 @@ class _RecoverableRunner:
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
-        if req.execution_mode == "agentic":
-            return {"text": "Observed implementation evidence at src/example.py:10."}
-        payload = json.loads(req.instructions)
-        criteria = [
-            {
-                "criterion": criterion,
-                "met": True,
-                "citation": {"kind": "source", "description": "src/example.py:10"},
-                "kind": "codebase-verifiable",
-            }
-            for criterion in payload["expected_criteria"]
-        ]
-        return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        if req.execution_mode == "single_turn":
+            payload = json.loads(req.instructions)
+            criteria = [
+                {
+                    "criterion": criterion,
+                    "met": True,
+                    "citation": {"kind": "source", "description": "src/example.py:10"},
+                    "kind": "codebase-verifiable",
+                }
+                for criterion in payload["expected_criteria"]
+            ]
+            return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        # Batched successor (agentic, structured): bank each criterion via the record tool.
+        record = req.extra_tools[0] if req.extra_tools else None
+        for cid in re.findall(r"c\d{2}-[0-9a-f]{8}", req.instructions):
+            if record is not None:
+                record(cid, True, "Observed implementation evidence at src/example.py:10.")
+        return {"verdict": "PASS", "criteria": [], "_usage": {"requests": 0}}
 
 
 def _ticket() -> dict:
