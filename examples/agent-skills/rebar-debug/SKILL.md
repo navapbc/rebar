@@ -1,6 +1,16 @@
 ---
 name: rebar-debug
-description: A hypothesis-driven debugging protocol. Takes a problem (or list of problems) and drives each to a proven root cause via the scientific method under a strict two-phase discipline. Phase 1 (Understand) is analysis-only and moves through three separated stages — gather context into a descriptive dossier, fan out a subagent to propose falsifiable root causes with citations, then run experiments to confirm/reject (looping on total rejection) — and its work product is a confirmed, cited root cause. Only a proven root cause unlocks Phase 2 (Repair), which enforces strict RED→GREEN discipline: write a failing test that exercises the mechanism, fix it with a held-out subagent, and replicate the original report to confirm resolution. Use when the user wants to debug a bug/incident/ticket rigorously, asks to find the root cause of a failure, or invokes /rebar-debug.
+description: >-
+  A hypothesis-driven debugging protocol. Takes a problem (or list of problems) and drives
+  each to a proven root cause via the scientific method under a strict two-phase discipline.
+  Phase 1 (Understand) is analysis-only and moves through three separated stages, gather
+  context into a descriptive dossier, fan out a subagent to propose falsifiable root causes
+  with citations, then run experiments to confirm or reject (looping on total rejection),
+  and its work product is a confirmed, cited root cause. Only a proven root cause unlocks
+  Phase 2 (Repair), which enforces strict RED then GREEN discipline, write a failing test
+  that exercises the mechanism, fix it with a held-out subagent, and replicate the original
+  report to confirm resolution. Use when the user wants to debug a bug or incident or ticket
+  rigorously, asks to find the root cause of a failure, or invokes /rebar-debug.
 ---
 
 # Hypothesis-Driven Root-Cause Protocol

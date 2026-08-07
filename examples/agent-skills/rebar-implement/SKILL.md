@@ -1,6 +1,18 @@
 ---
 name: rebar-implement
-description: Autonomously executes a decomposed rebar epic end-to-end under strict TDD held-out discipline, landing each code change as a stacked review. Takes a rebar ticket id or alias, verifies it exists and has been decomposed into children (stops otherwise), creates a fresh worktree from origin/main, claims the epic, then recurses the parent/child graph: claiming, completing, and closing each ticket, descending until it reaches leaves. Every leaf that changes code is built RED-first — the orchestrator authors the behavioral/contract tests (happy-path + edge + E2E) and hands an implementation subagent ONLY the happy-path case, holding out edge/E2E to defeat change-detector tests and over-fitting; then it runs the full suite to validate. Each code leaf becomes a stacked change in the project's review system, closed after it passes; parents close when all children close; and once the epic is closed the whole stack lands on main together — with an exception for changes that must land to verify a ticket, which may land early only after a regression-safety check. A rebar session-log is kept throughout as a handoff trail. Landing defers to the project's own documentation, defaulting to the rebar/Gerrit flow. Use when the user wants to implement/execute/"work" a decomposed epic or ticket tree, or invokes /rebar-implement.
+description: >-
+  Autonomously executes a decomposed rebar epic under strict TDD held-out discipline,
+  landing each code change as a stacked review. Takes a rebar ticket id or alias, verifies
+  it has been decomposed into children (stops otherwise), creates a fresh worktree from
+  origin/main, claims the epic, then recurses the parent/child graph, claiming, completing,
+  and closing each ticket down to the leaves. Every code leaf is built RED-first; the
+  orchestrator authors the behavioral/contract tests (happy-path, edge, E2E) but hands the
+  implementation subagent only the happy-path case, holding out edge and E2E to defeat
+  change-detector tests and over-fitting, then runs the full suite. Each code leaf becomes a
+  stacked change closed once it passes; parents close when their children do; the whole
+  stack lands on main once the epic closes. Landing defers to the project docs, defaulting
+  to the rebar/Gerrit flow. Use when the user wants to implement, execute, or work a
+  decomposed epic or ticket tree, or invokes /rebar-implement.
 ---
 
 # Epic Execution Protocol — TDD held-out oracle, stacked landing
