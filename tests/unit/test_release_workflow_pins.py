@@ -268,3 +268,82 @@ def test_fd84_tag_created_after_publish_not_a_trigger() -> None:
     needs = ghr.get("needs")
     needs = [needs] if isinstance(needs, str) else (needs or [])
     assert "publish" in needs, "github_release must run after (needs) publish"
+
+
+# ── bug 13b4: the PyPI-provenance runbook must name the PyPI verifier ─────────
+#
+# `gh attestation verify --repo <slug>` queries GitHub's *Artifact Attestations*
+# store for a SLSA provenance predicate. `pypa/gh-action-pypi-publish` does not
+# write there: it uploads a PEP 740 bundle carrying the
+# `https://docs.pypi.org/attestations/publish/v1` predicate to *PyPI*. So the
+# GitHub command cannot verify a PyPI release artifact — proved against the
+# rebar 0.11.0 wheel. These tests pin the documented command to the verifier
+# that reads the store the artifact is actually published to, and keep the two
+# stores from being conflated again.
+
+
+def test_13b4_provenance_runbook_uses_the_pypi_verifier() -> None:
+    """The runbook verifies a PyPI artifact with `pypi-attestations verify pypi`,
+    naming this repository as the expected signing identity."""
+    doc = RELEASING_DOC.read_text(encoding="utf-8")
+    assert "pypi-attestations verify pypi" in doc, (
+        "docs/releasing.md must document `pypi-attestations verify pypi` — the verifier "
+        "that reads PyPI's PEP 740 store, which is where the publish action uploads to"
+    )
+    assert "--repository https://github.com/navapbc/rebar" in doc, (
+        "the documented verify command must pass `--repository "
+        "https://github.com/navapbc/rebar` so the check is bound to this repo's identity"
+    )
+
+
+def _fenced_code_blocks(doc: str) -> list[str]:
+    """Every ```-fenced block body in `doc` — i.e. the runnable recipes."""
+    blocks: list[str] = []
+    current: list[str] | None = None
+    for line in doc.splitlines():
+        if line.startswith("```"):
+            if current is None:
+                current = []
+            else:
+                blocks.append("\n".join(current))
+                current = None
+        elif current is not None:
+            current.append(line)
+    return blocks
+
+
+def test_13b4_runbook_does_not_verify_pypi_provenance_via_github_store() -> None:
+    """No `gh attestation verify` command is offered as a runnable recipe.
+
+    Prose *explaining* that the GitHub verifier reads a different store is fine and
+    wanted; only an executable code block would send a consumer down the dead end.
+    """
+    doc = RELEASING_DOC.read_text(encoding="utf-8")
+    offending = [b for b in _fenced_code_blocks(doc) if "gh attestation verify" in b]
+    assert not offending, (
+        "docs/releasing.md offers a runnable `gh attestation verify` recipe; that queries "
+        f"GitHub's SLSA store and cannot see the PEP 740 bundle. Blocks: {offending}"
+    )
+
+
+def test_13b4_runbook_keeps_the_two_attestation_stores_distinct() -> None:
+    """The doc still names the PEP 740 predicate, so a future edit cannot quietly
+    re-describe the PyPI bundle as GitHub SLSA provenance."""
+    doc = RELEASING_DOC.read_text(encoding="utf-8")
+    assert "https://docs.pypi.org/attestations/publish/v1" in doc, (
+        "docs/releasing.md must name the PEP 740 publish predicate so the PyPI bundle is "
+        "not conflated with GitHub's SLSA provenance predicate"
+    )
+
+
+def test_13b4_release_workflow_comment_names_the_pypi_verifier() -> None:
+    """release.yml's `attestations: true` comment points at the right consumer verifier."""
+    text = _text()
+    assert "gh attestation verify" not in text, (
+        "release.yml still points consumers at `gh attestation verify` for the PEP 740 "
+        "bundle it uploads to PyPI"
+    )
+    assert "pypi-attestations verify pypi" in text, (
+        "release.yml's attestations comment must name `pypi-attestations verify pypi` as "
+        "the consumer verifier"
+    )

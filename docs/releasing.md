@@ -93,29 +93,46 @@ short-lived OIDC identity (the same identity Trusted Publishing uses — no stor
 keys) and uploads the attestation alongside the artifact. There is nothing extra
 to run at release time.
 
-**How consumers verify them.** PyPI records each artifact's attestations under
-the release's "provenance"; a downstream can confirm an artifact was built by
-this repo's release workflow (not re-uploaded by a leaked token) with GitHub's
-attestation tooling:
+**How consumers verify them.** PyPI stores each artifact's attestation next to
+the file it covers, and a downstream confirms the artifact was built by this
+repo's release workflow (not re-uploaded by a leaked token) with the official
+PyPI attestation verifier, [`pypi-attestations`][pypi-attestations]:
 
 ```bash
-# Download the artifact you want to check, then verify its provenance names
-# this repo + the release workflow as the signing identity.
-pip download nava-rebar==X.Y.Z --no-deps -d /tmp/nava-rebar-verify
-gh attestation verify /tmp/nava-rebar-verify/nava_rebar-X.Y.Z-py3-none-any.whl \
-  --repo navapbc/rebar
+# Verifies the published artifact against PyPI's own attestation store, and
+# checks that the signing identity is this repo's release workflow.
+uvx pypi-attestations verify pypi \
+  --repository https://github.com/navapbc/rebar \
+  pypi:nava_rebar-X.Y.Z-py3-none-any.whl
 ```
 
 A passing verify proves the file was built and signed by `navapbc/rebar`'s
 `release.yml` via OIDC. (The attestations are also visible on the release's PyPI
 page under each file's *"Provenance"* / *"View details"*.)
 
+[pypi-attestations]: https://github.com/pypi/pypi-attestations
+
+> **Two different attestation stores — do not mix them up.** The bundle the
+> publish action uploads to PyPI carries the
+> `https://docs.pypi.org/attestations/publish/v1` predicate and lives in **PyPI's**
+> store; only a PEP 740 verifier such as `pypi-attestations` can read it.
+> GitHub's [Artifact Attestations][gh-attest] are a *separate* store holding SLSA
+> provenance, and `gh attestation verify --repo navapbc/rebar` queries only that
+> one. `release.yml` does not publish SLSA provenance there for the wheel, so
+> `gh attestation verify` on a downloaded rebar wheel fails with "no attestations
+> found" — proved against the 0.11.0 wheel. That failure means the command was
+> pointed at the wrong store, **not** that the release is unattested. GitHub's own
+> attestation over the *immutable release* remains a distinct, unrelated
+> guarantee, covering the GitHub Release rather than the PyPI artifact.
+
+[gh-attest]: https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations
+
 **Confirm a cut release actually exposes them** (add to the post-release smoke
 test): after step 2 below shows the version live, the release's file listing on
 `https://pypi.org/project/nava-rebar/X.Y.Z/#files` should show a *"Provenance"*
-link per artifact, and the `gh attestation verify` above should pass. If it does
-not, `id-token: write` / `attestations: true` was dropped from `release.yml` —
-fix and ship a new version (PyPI is immutable; see Hard rules).
+link per artifact, and the `pypi-attestations verify pypi` above should pass. If
+it does not, `id-token: write` / `attestations: true` was dropped from
+`release.yml` — fix and ship a new version (PyPI is immutable; see Hard rules).
 
 ---
 

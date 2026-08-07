@@ -303,7 +303,10 @@ jobs:
           # provenance attestations for each artifact, signed via the same OIDC
           # identity as Trusted Publishing. On by default when id-token: write is
           # present; set explicitly so a future default flip can't silently drop
-          # them. Consumers verify with `gh attestation verify` — see
+          # them. The bundle lands in PyPI's PEP 740 store (predicate
+          # https://docs.pypi.org/attestations/publish/v1), NOT in GitHub's
+          # Artifact Attestations store, so consumers verify with
+          # `pypi-attestations verify pypi --repository <this repo>` — see
           # docs/releasing.md ("Supply-chain attestations").
           attestations: true
 
