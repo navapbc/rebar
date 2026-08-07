@@ -116,8 +116,9 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
-# Bridge audit arm: full auto-init unless a test tracker is injected.
-_BRIDGE = frozenset({"bridge-fsck"})
+# Bridge commands share the explicit routing census, while retaining their own
+# initialization policies below.
+_BRIDGE = frozenset({"bridge", "bridge-fsck"})
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -140,23 +141,25 @@ _WRITES_FULL = frozenset(
     }
 )
 
+# Keep the top-level router simple enough to be stable across the Python-version
+# specific ASTs Ruff scans in CI. Each partition follows an existing dispatch
+# seam and retains the established per-command initialization policy.
+_DISPATCH_PRIMARY = (
+    frozenset({"init", "scratch", "metrics", "delete"})
+    | _READS_INIT_ONLY
+    | _READS_NO_INIT
+    | _LIFECYCLE
+    | _COMPACT
+    | _BRIDGE
+)
+_DISPATCH_MIDDLE = _IO | frozenset({"doctor", "fsck", "fsck-recover"}) | _WRITES_FULL
+
 
 def _reconcile(argv: list[str]) -> int:
-    """``rebar reconcile`` → ``python -m rebar_reconciler`` (mirrors cli.py)."""
-    from rebar import config
-    from rebar._engine import engine_env
+    """Compatibility wrapper for the established ``rebar reconcile`` spelling."""
+    from rebar._cli._bridge_commands import launch_reconciler
 
-    root = str(config.repo_root())
-    args = list(argv)
-    if not any(a == "--repo-root" or a.startswith("--repo-root=") for a in args):
-        args += ["--repo-root", root]
-    if not any(a == "--mode" or a.startswith("--mode=") for a in args):
-        args += ["--mode", "dry-run"]
-    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: the
-    # reconciler imports ``rebar.*`` in-package (Tier E E5b), so it needs the
-    # rebar-capable interpreter; engine_env keeps the engine dir on PYTHONPATH so
-    # the top-level ``rebar_reconciler`` package still resolves.
-    return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
+    return launch_reconciler(argv)
 
 
 def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
@@ -244,8 +247,25 @@ def _emit_subcommand_help(sub: str) -> int:
     return 1
 
 
-def _dispatch(sub: str, rest: list[str]) -> int:
-    """Route a known subcommand to its in-process or passthrough implementation."""
+def _dispatch_bridge(sub: str, rest: list[str]) -> int:
+    """Dispatch bridge commands while preserving their distinct init policies."""
+    if sub == "bridge":
+        from rebar._cli._bridge_commands import bridge_cli
+
+        return bridge_cli(rest)
+
+    from rebar import config
+
+    # The bridge mapping audit auto-inits only when no test tracker is injected.
+    if not config.tracker_dir_override():
+        ensure_initialized(init_only=False)
+    from rebar._engine_support import bridge_fsck
+
+    return bridge_fsck.main(rest)
+
+
+def _dispatch_primary(sub: str, rest: list[str]) -> int:
+    """Route bootstrap, read, lifecycle, compaction, and bridge commands."""
     if sub == "init":
         # Explicit bootstrap — NEVER triggers auto-init (it IS init).
         from rebar._commands import init as _init_cmd
@@ -294,14 +314,12 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         return _delete.delete_cli(rest)
     if sub in _BRIDGE:
-        from rebar import config
+        return _dispatch_bridge(sub, rest)
+    raise RuntimeError(f"rebar: primary subcommand {sub!r} has no in-process handler")
 
-        # The dispatcher auto-inits only when no test tracker is injected.
-        if not config.tracker_dir_override():
-            ensure_initialized(init_only=False)
-        from rebar._engine_support import bridge_fsck
 
-        return bridge_fsck.main(rest)
+def _dispatch_middle(sub: str, rest: list[str]) -> int:
+    """Route import/export, repair, and ordinary write commands."""
     if sub in _IO:
         from rebar._io import _cli as _io_cli
 
@@ -339,6 +357,11 @@ def _dispatch(sub: str, rest: list[str]) -> int:
         from rebar._commands import main as commands_main
 
         return commands_main([sub, *rest])
+    raise RuntimeError(f"rebar: middle subcommand {sub!r} has no in-process handler")
+
+
+def _dispatch_suffix(sub: str, rest: list[str]) -> int:
+    """Route field, graph, gate, signing, and static-read commands."""
     if sub in _FIELD_READS:
         ensure_initialized(init_only=False)
         from rebar._engine_support import field_reads, reads
@@ -391,6 +414,15 @@ def _dispatch(sub: str, rest: list[str]) -> int:
     # subcommand was added to the known set without an in-process arm — a wiring
     # bug, surfaced loudly rather than silently mis-dispatched.
     raise RuntimeError(f"rebar: subcommand {sub!r} is known but has no in-process handler")
+
+
+def _dispatch(sub: str, rest: list[str]) -> int:
+    """Route a known subcommand to its in-process implementation."""
+    if sub in _DISPATCH_PRIMARY:
+        return _dispatch_primary(sub, rest)
+    if sub in _DISPATCH_MIDDLE:
+        return _dispatch_middle(sub, rest)
+    return _dispatch_suffix(sub, rest)
 
 
 def main(argv: list[str] | None = None) -> int:
