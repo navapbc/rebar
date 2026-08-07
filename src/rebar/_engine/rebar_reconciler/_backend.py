@@ -41,8 +41,8 @@ class BackendEnvError(RuntimeError):
     Raised by ``Backend.assert_env_ready`` when a required connection setting
     (e.g. Jira's ``JIRA_URL``/``JIRA_USER``/``JIRA_API_TOKEN``) is absent.
     Subclasses ``RuntimeError`` so the pre-port ``except RuntimeError`` contract
-    at existing call sites (e.g. ``build_acli_client_from_env``) is preserved
-    even as those sites move to catching this neutral type.
+    at the bootstrap call sites is preserved even as those sites move to
+    catching this neutral type.
     """
 
 

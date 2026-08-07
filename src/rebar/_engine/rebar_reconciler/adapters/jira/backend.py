@@ -189,10 +189,10 @@ class JiraBackend:
     def assert_env_ready(self) -> None:
         """Fail-fast when a connection essential (JIRA_URL / JIRA_USER /
         JIRA_API_TOKEN) is missing, BEFORE the transport is used for bootstrap-band
-        execution. Preserves the pre-97f2 ``build_acli_client_from_env`` contract:
-        a clear error naming the missing var(s) rather than a cryptic downstream
-        failure — raises the neutral :class:`BackendEnvError` (subclasses
-        ``RuntimeError``)."""
+        execution. Preserves the pre-97f2 bootstrap env-check contract (the
+        historical env-driven client builder, since deleted): a clear error naming
+        the missing var(s) rather than a cryptic downstream failure — raises the
+        neutral :class:`BackendEnvError` (subclasses ``RuntimeError``)."""
         from rebar_reconciler._backend import BackendEnvError
         from rebar_reconciler.adapters.jira import acli_subprocess
 

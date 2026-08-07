@@ -212,22 +212,30 @@ def test_provenance(tmp_path: Path, monkeypatch) -> None:
     assert sources["jira"]["url"] == "env"
 
 
-# ── consumer: the bootstrap client builder requires the resolved essentials ───
-def test_build_acli_client_requires_resolved_url_user_token(tmp_path: Path, monkeypatch) -> None:
-    from rebar_reconciler import _attestation
+# ── consumer: the bootstrap env fail-fast requires the resolved essentials ────
+def test_bootstrap_env_check_requires_resolved_url_user_token(tmp_path: Path, monkeypatch) -> None:
+    """The bootstrap-band fail-fast reads the SAME resolved settings this module
+    pins. Asserted through the live seam — ``JiraBackend.assert_env_ready()``,
+    which preserves the pre-97f2 bootstrap contract — plus the shared resolver for
+    the ``project_default`` substitution."""
+    from rebar_reconciler.adapters.jira.backend import JiraBackend
 
     p = _proj(tmp_path)
-    # url/user from the config FILE, token from env → all three present → builds.
+    # url/user from the config FILE, token from env → all three present → no raise.
     (p / "rebar.toml").write_text(
         "[jira]\nurl = 'https://j.example'\nuser = 'u@x'\n", encoding="utf-8"
     )
     monkeypatch.setenv("REBAR_ROOT", str(p))
     monkeypatch.setenv("JIRA_API_TOKEN", "tok")
-    client = _attestation.build_acli_client_from_env()
-    assert client.jira_url == "https://j.example"
-    assert client.jira_project == "DIG"  # project_default applied (file left it empty)
-    # Missing the env-only token → RuntimeError naming JIRA_API_TOKEN.
+    settings = resolve_jira_settings(project_default="DIG")
+    assert settings.url == "https://j.example"
+    assert settings.project == "DIG"  # project_default applied (file left it empty)
+    backend = JiraBackend(transport=None)
+    backend.assert_env_ready()  # all three essentials resolved → no raise
+    assert backend.project == "DIG"
+    # Missing the env-only token → RuntimeError naming JIRA_API_TOKEN
+    # (BackendEnvError subclasses RuntimeError).
     monkeypatch.delenv("JIRA_API_TOKEN")
     cfg.reset_config_cache()
     with pytest.raises(RuntimeError, match="JIRA_API_TOKEN"):
-        _attestation.build_acli_client_from_env()
+        backend.assert_env_ready()
