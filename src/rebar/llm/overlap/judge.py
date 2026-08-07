@@ -122,7 +122,7 @@ def judge_one(
         # who cut over by configuring the three classes left the MAJORITY of plan-review traffic on
         # their old provider (bug afeb). Inside the try, so a config error is an abstain like any
         # other judge failure — the overlap step stays advisory and never blocks a review.
-        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS, cfg.repo_path))
         prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
         system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
         if shared_side is not None:
@@ -167,7 +167,7 @@ def judge_batch(
     verdicts = {cid: dict(_ABSTAIN) for cid, _ in pairs}
     try:
         # Same per-call class binding as judge_one, and for the same reason (bug afeb).
-        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS, cfg.repo_path))
         prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
         system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
         req = RunRequest(

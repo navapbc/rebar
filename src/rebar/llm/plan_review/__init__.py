@@ -84,7 +84,7 @@ def _verifier_cfg(cfg: LLMConfig) -> LLMConfig:
     # Model-max output budget (bug 30a2): every verifier-cfg consumer rides at the resolved
     # model's maximum output capacity — applied AFTER the model swap so the raise matches the
     # model that actually runs.
-    return max_output_cfg(replace(cfg, model=resolve_model_string(STANDARD_CLASS)))
+    return max_output_cfg(replace(cfg, model=resolve_model_string(STANDARD_CLASS, cfg.repo_path)))
 
 
 def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:

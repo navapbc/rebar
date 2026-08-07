@@ -106,7 +106,7 @@ def _screen_one(bug: dict, system_prompt: str, cfg: LLMConfig, runner: Runner | 
     model CLASS is bound here per call (bug afeb — inheriting raw ``cfg.model`` would ignore
     the operator's class table), inside the try so a config error degrades like any other
     screen failure."""
-    cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS))
+    cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS, cfg.repo_path))
     req = RunRequest(
         system_prompt=system_prompt,
         instructions=(

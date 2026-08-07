@@ -358,8 +358,9 @@ class PydanticAIRunner:
         # `REBAR_LLM_BASE_URL` path. Without it the primary silently fell through to
         # pydantic-ai's stock OpenAIProvider and failed with "Missing credentials" (bug 6e70).
         # Never overrides an explicit `base_url`; a class with no slot endpoint is a no-op.
+        # Both slot reads take the CONFIG's own root, not the ambient cwd (bug 2876).
         if not cfg.base_url and self._model_override is None:
-            slot_endpoint = primary_endpoint_for(resolved)
+            slot_endpoint = primary_endpoint_for(resolved, repo_root=cfg.repo_path)
             if slot_endpoint:
                 cfg = replace(cfg, base_url=slot_endpoint)
         # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
@@ -377,9 +378,9 @@ class PydanticAIRunner:
             # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
             # for a class with no `fallback` configured, which is every deployment until an operator
             # opts in, so the three branches below stay byte-identical there.
-            fallback_targets = (
-                () if self._model_override is not None else fallback_targets_for(resolved)
-            )
+            _root = cfg.repo_path  # the CONFIG's own root, not the ambient cwd (bug 2876)
+            no_chain = self._model_override is not None
+            fallback_targets = () if no_chain else fallback_targets_for(resolved, repo_root=_root)
             candidates = [resolved]
             if self._model_override is not None:
                 model = self._model_override
