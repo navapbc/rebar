@@ -386,12 +386,17 @@ def load_config(
     # silently served from cache). ``raise_or_warn_env`` raises RemovedInputError for
     # an error-class env var and WARNs for a warn-class one (skip_llm: the LLM-scoped
     # env tombstones are enforced in rebar.llm.config, not on every core resolve).
-    from rebar._deprecations import RemovedInputError, raise_or_warn_env, removed_input
+    from rebar._deprecations import raise_or_warn_env, raise_or_warn_file, tombstones
 
     raise_or_warn_env(os.environ)
-    _legacy_conf = repo_root(root) / ".rebar" / "config.conf"
-    if _legacy_conf.exists():
-        raise RemovedInputError(removed_input("file", ".rebar/config.conf"))
+    # File tombstones route through the registry helper like the env and cfg kinds
+    # (bug d064): the row's `behavior` decides raise-vs-warn, and detection is driven
+    # by the registry rather than a hardcoded filename — so a file entry added later,
+    # or an existing one downgraded to `warn`, is honoured without touching this call.
+    _root = repo_root(root)
+    _retired = [ri.name for ri in tombstones() if ri.kind == "file" and (_root / ri.name).exists()]
+    if _retired:
+        raise_or_warn_file(_retired)
 
     effective_cli = cli_overrides if cli_overrides is not None else _CLI_OVERRIDES
     key = (
