@@ -16,6 +16,7 @@ rewired here (that is S4); no logic is relocated (that is S4/S5).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from rebar_reconciler import inbound_fields
@@ -90,7 +91,11 @@ class _JiraOutbound:
         return self._mapper.map_fields_to_remote(changed, ticket, binding_store, local_ticket_types)
 
     def resolve_assignee(
-        self, local_value: str, remote_identity: dict[str, Any] | None
+        self,
+        local_value: str,
+        remote_identity: dict[str, Any] | None,
+        *,
+        assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> tuple[Any, bool, bool]:
         """Re-home the assignee resolver fast-path (ticket 625b; 264f semantics).
 
@@ -101,15 +106,12 @@ class _JiraOutbound:
         is verbatim-unchanged from before this delegation — see
         ``AccountIdIdentity.resolve``'s docstring for the full state table.
 
-        The live account-search resolver is threaded in by ``compute_outbound_mutations``
-        as ``self._assignee_resolver`` (a ``local_value -> (account|None, authoritative,
-        is_account_id)`` callable bound to the current remote key). Reading it via
-        ``getattr`` here is the Cloud-side boundary adapter to that PRE-EXISTING
-        core attribute-injection (``outbound_field_diff.py``); removing the
-        attribute-injection in favour of an explicit parameter is out of scope for
-        this story (ticket 65d7)."""
-        resolver = getattr(self, "_assignee_resolver", None)
-        return AccountIdIdentity(resolver=resolver).resolve(local_value, remote_identity)
+        ``assignee_resolver`` is the live account search, bound by the core diff to the
+        current remote key and passed EXPLICITLY (ticket 65d7 — it used to arrive as an
+        attribute this method rediscovered with ``getattr``). ``None`` keeps its existing
+        meaning: no live search on this path, so ``AccountIdIdentity`` falls back to the
+        permissive, non-authoritative string match."""
+        return AccountIdIdentity(resolver=assignee_resolver).resolve(local_value, remote_identity)
 
 
 class _JiraInbound:

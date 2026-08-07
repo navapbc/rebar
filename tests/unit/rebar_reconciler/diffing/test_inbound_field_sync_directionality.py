@@ -164,7 +164,7 @@ class _PassthroughOutboundMapper:
     def map_fields_to_remote(self, changed, **_kw):
         return dict(changed)
 
-    def resolve_assignee(self, local_value, _remote_identity):
+    def resolve_assignee(self, local_value, _remote_identity, *, assignee_resolver=None):
         return (local_value, False, False)
 
 

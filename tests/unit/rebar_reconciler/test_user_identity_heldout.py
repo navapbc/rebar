@@ -142,11 +142,17 @@ def test_account_id_identity_matches_the_live_cloud_backend_state_for_state(
     Both sides are evaluated live, so this cannot drift the way copied expected
     literals would: if either implementation changes, the equality breaks.
     """
-    # assignee resolution is the OUTBOUND role's job; the backend facade merely holds it
+    # assignee resolution is the OUTBOUND role's job; the backend facade merely holds it.
+    # The resolver reaches it as a DECLARED parameter (ticket 65d7); it used to be set on
+    # the mapper as ``backend.outbound._assignee_resolver`` and rediscovered by ``getattr``,
+    # the side-channel this oracle's own structural test now forbids. Same six states, same
+    # live-vs-live comparison — only how the collaborator arrives has changed.
     backend = JiraBackend(transport=FakeTransport())
-    if resolver_result is not None:
-        backend.outbound._assignee_resolver = lambda _lv: resolver_result  # type: ignore[attr-defined]
-    expected = backend.outbound.resolve_assignee(local_value, remote_identity)
+    expected = backend.outbound.resolve_assignee(
+        local_value,
+        remote_identity,
+        assignee_resolver=(lambda _lv: resolver_result) if resolver_result is not None else None,
+    )
 
     model = AccountIdIdentity(
         resolver=(lambda _lv: resolver_result) if resolver_result is not None else None

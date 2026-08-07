@@ -30,6 +30,7 @@ injected ``OutboundMapper`` (``map_fields_to_remote`` fits the description;
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -252,8 +253,9 @@ def compute_update_fields(
     path for one bound ticket. Returns the vendor-shaped ``OutboundMutation.fields``.
 
     Storage stays vendor-shaped: the baseline is mapped at READ time only. The
-    client-backed account resolver (bound to this remote key) is threaded to the
-    outbound mapper so ``resolve_assignee`` can consult the live account search.
+    client-backed account resolver is bound to this remote key here and passed DOWN as an
+    argument (ticket 65d7) so ``resolve_assignee`` can consult the live account search —
+    a declared collaborator on the port, not an attribute set on the mapper behind its back.
     """
     canonical_remote = inbound_mapper.map_remote_to_local(jira_fields)
     # Arbitration ancestor (story d6bd): the per-binding baseline when available,
@@ -265,16 +267,20 @@ def compute_update_fields(
     else:
         raw_baseline = (prev_snapshot or {}).get(jira_key)
     canonical_baseline = inbound_mapper.map_remote_to_local(raw_baseline) if raw_baseline else None
-    if assignee_resolver is not None:
-        try:
-            outbound_mapper._assignee_resolver = lambda lv: assignee_resolver(lv, jira_key)
-        except (AttributeError, TypeError):
-            pass  # a mapper that forbids attribute injection keeps its own resolution
+    # Bind the caller's (local_value, jira_key) resolver to THIS remote key and hand it to
+    # the diff as an argument (ticket 65d7). It used to be assigned onto the mapper as
+    # a private attribute ON the mapper, under a bare ``except ...: pass``, so a mapper
+    # that refused the assignment silently lost its live account search and degraded every
+    # resolution to non-authoritative — churn the diff could never converge.
+    bound_resolver = (
+        (lambda lv: assignee_resolver(lv, jira_key)) if assignee_resolver is not None else None
+    )
     changed = diff_canonical_fields(
         ticket,
         canonical_remote,
         canonical_baseline,
         outbound_mapper=outbound_mapper,
+        assignee_resolver=bound_resolver,
         binding_store=binding_store,
         local_ticket_types=local_ticket_types,
         jira_key=jira_key,
@@ -293,6 +299,7 @@ def diff_canonical_fields(
     canonical_baseline: dict[str, Any] | None,
     *,
     outbound_mapper: OutboundMapper,
+    assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     binding_store: Any = None,
     local_ticket_types: dict[str, str] | None = None,
     jira_key: str = "",
@@ -396,7 +403,7 @@ def diff_canonical_fields(
         local_assignee, remote_scalar, identity
     ):
         value, authoritative, is_account_id = outbound_mapper.resolve_assignee(
-            local_assignee, identity
+            local_assignee, identity, assignee_resolver=assignee_resolver
         )
         if authoritative and value is None:
             pass  # converged — the resolved identity already matches remote; emit nothing

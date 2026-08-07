@@ -17,6 +17,7 @@ EFFECT that makes ``select_backend("jira-datacenter")`` resolve — see
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from rebar_reconciler._backend import RemoteRef
@@ -80,8 +81,18 @@ class _DCOutbound:
     constructed with DC's ``WikiTextCodec`` (story J3) — the one place Cloud and
     DC diverge in this role."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
+    ) -> None:
         self._mapper = OutboundFieldMapper(WikiTextCodec())
+        #: DC's live account search, bound ONCE to the deployment's client (it takes no
+        #: remote key, unlike Cloud's per-issue closure). A declared constructor parameter
+        #: rather than an attribute the backend sets from outside (ticket 65d7): the
+        #: side-channel form was invisible to mypy and silently degraded every resolution
+        #: to non-authoritative if it ever failed to happen.
+        self._assignee_search = assignee_resolver
 
     def map_local_to_remote(
         self,
@@ -107,16 +118,23 @@ class _DCOutbound:
         return self._mapper.map_fields_to_remote(changed, ticket, binding_store, local_ticket_types)
 
     def resolve_assignee(
-        self, local_value: str, remote_identity: dict[str, Any] | None
+        self,
+        local_value: str,
+        remote_identity: dict[str, Any] | None,
+        *,
+        assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> tuple[Any, bool, bool]:
         """Delegate to :class:`NameIdentity` (story J4), DC's user-identity model
         (compares against the remote identity's ``name``, never an accountId).
-        The live account-search resolver is threaded in by
-        ``compute_outbound_mutations`` as ``self._assignee_resolver`` — the same
-        pre-existing core attribute-injection Cloud's ``_JiraOutbound`` reads
-        (``outbound_field_diff.py``); see that method's docstring."""
-        resolver = getattr(self, "_assignee_resolver", None)
-        return NameIdentity(resolver=resolver).resolve(local_value, remote_identity)
+
+        Two resolvers can be in play, so their precedence is explicit (ticket 65d7):
+        the core diff's ``assignee_resolver`` — bound to the issue being diffed — WINS,
+        and the constructor's deployment-wide search is the fallback. That is exactly
+        the old semantics: the core used to *overwrite* the attribute this backend had
+        set at construction, so a core-supplied resolver already took precedence."""
+        return NameIdentity(resolver=assignee_resolver or self._assignee_search).resolve(
+            local_value, remote_identity
+        )
 
 
 class _DCInbound:
@@ -315,22 +333,24 @@ class JiraDataCenterBackend:
         #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``
         #: from the resolved settings. NOT resolved at call time — see the port docstring.
         self.instance = instance
-        self.outbound = _DCOutbound()
+        # The underlying jira.JIRA client, threaded through so this deployment's LIVE
+        # assignee search (``_search_users_by_username`` bound to it) reaches the outbound
+        # mapper as a DECLARED constructor parameter (ticket 65d7 — it used to be assigned
+        # onto the mapper as a private attribute of ``self.outbound`` behind a
+        # ``# type: ignore[attr-defined]``). ``None`` for a transport built with a fake
+        # client (unit tests), which is fine: the resolver being absent is exactly the
+        # "non-authoritative" fixture path ``NameIdentity``/``_resolve`` already define.
+        self._client = client
+        self.outbound = _DCOutbound(
+            assignee_resolver=(
+                (lambda name: _search_users_by_username(client, name))
+                if client is not None
+                else None
+            )
+        )
         self.inbound = _DCInbound()
         self.sanitizer = _DCSanitizer()
         self.identity = JiraIdentityConvention()
-        # The underlying jira.JIRA client, threaded through so a caller can wire
-        # a LIVE assignee resolver (``_search_users_by_username`` bound to it) as
-        # ``self.outbound._assignee_resolver`` — mirroring Cloud's pre-existing
-        # attribute-injection seam (``outbound_field_diff.py``). ``None`` for a
-        # transport built with a fake client (unit tests), which is fine: the
-        # resolver being absent is exactly the "non-authoritative" fixture path
-        # ``NameIdentity``/``_resolve`` already define.
-        self._client = client
-        if client is not None:
-            self.outbound._assignee_resolver = (  # type: ignore[attr-defined]
-                lambda name: _search_users_by_username(client, name)
-            )
 
     @property
     def project(self) -> str:

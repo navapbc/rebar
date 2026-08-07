@@ -164,7 +164,7 @@ def test_snapshot_canonicalized_via_injected_inbound_mapper(od) -> None:
         ):
             return dict(changed)
 
-        def resolve_assignee(self, local_value, remote_identity):
+        def resolve_assignee(self, local_value, remote_identity, *, assignee_resolver=None):
             return (local_value, False, False)
 
     spy = SpyInbound()
