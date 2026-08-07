@@ -116,8 +116,9 @@ _SIGNING = frozenset({"sign", "verify-signature"})
 _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 # Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
 _COMPACT = frozenset({"compact", "compact-all"})
-# Bridge audit arm: full auto-init unless a test tracker is injected.
-_BRIDGE = frozenset({"bridge-fsck"})
+# Bridge commands share the explicit routing census, while retaining their own
+# initialization policies below.
+_BRIDGE = frozenset({"bridge", "bridge-fsck"})
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -142,21 +143,10 @@ _WRITES_FULL = frozenset(
 
 
 def _reconcile(argv: list[str]) -> int:
-    """``rebar reconcile`` → ``python -m rebar_reconciler`` (mirrors cli.py)."""
-    from rebar import config
-    from rebar._engine import engine_env
+    """Compatibility wrapper for the established ``rebar reconcile`` spelling."""
+    from rebar._cli._bridge_commands import launch_reconciler
 
-    root = str(config.repo_root())
-    args = list(argv)
-    if not any(a == "--repo-root" or a.startswith("--repo-root=") for a in args):
-        args += ["--repo-root", root]
-    if not any(a == "--mode" or a.startswith("--mode=") for a in args):
-        args += ["--mode", "dry-run"]
-    # Launch under THIS interpreter (sys.executable), not a bare ``python3``: the
-    # reconciler imports ``rebar.*`` in-package (Tier E E5b), so it needs the
-    # rebar-capable interpreter; engine_env keeps the engine dir on PYTHONPATH so
-    # the top-level ``rebar_reconciler`` package still resolves.
-    return subprocess.call([sys.executable, "-m", "rebar_reconciler", *args], env=engine_env(root))
+    return launch_reconciler(argv)
 
 
 def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
@@ -244,6 +234,23 @@ def _emit_subcommand_help(sub: str) -> int:
     return 1
 
 
+def _dispatch_bridge(sub: str, rest: list[str]) -> int:
+    """Dispatch bridge commands while preserving their distinct init policies."""
+    if sub == "bridge":
+        from rebar._cli._bridge_commands import bridge_cli
+
+        return bridge_cli(rest)
+
+    from rebar import config
+
+    # The bridge mapping audit auto-inits only when no test tracker is injected.
+    if not config.tracker_dir_override():
+        ensure_initialized(init_only=False)
+    from rebar._engine_support import bridge_fsck
+
+    return bridge_fsck.main(rest)
+
+
 def _dispatch(sub: str, rest: list[str]) -> int:
     """Route a known subcommand to its in-process or passthrough implementation."""
     if sub == "init":
@@ -294,14 +301,7 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
         return _delete.delete_cli(rest)
     if sub in _BRIDGE:
-        from rebar import config
-
-        # The dispatcher auto-inits only when no test tracker is injected.
-        if not config.tracker_dir_override():
-            ensure_initialized(init_only=False)
-        from rebar._engine_support import bridge_fsck
-
-        return bridge_fsck.main(rest)
+        return _dispatch_bridge(sub, rest)
     if sub in _IO:
         from rebar._io import _cli as _io_cli
 
