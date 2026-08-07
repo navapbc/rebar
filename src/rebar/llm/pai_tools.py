@@ -41,6 +41,29 @@ _READ_MAX_LINE_CHARS = 2000
 _SEARCH_MAX_HITS = 200
 
 
+def _resolve_read_window(line_start: int, line_end: int) -> tuple[int, int]:
+    """Resolve a ``read_file`` request into an inclusive 1-based ``(lo, hi)`` window,
+    already clamped to ``_READ_MAX_LINES``. ``line_end=0`` is the "read to EOF"
+    sentinel and yields the full capped window; the caller clamps ``hi`` to the file's
+    actual length, so no line count is needed here.
+
+    Raises ``ValueError`` when the range is malformed — a non-zero ``line_end`` below
+    the effective (``max(1, line_start)``-clamped) start, which includes a negative
+    ``line_end``. That is purely a property of the REQUEST, so it is decided before any
+    file is opened; ``read_file`` reports it through its existing ``Error: {exc}`` path,
+    so the caller never receives file content for a malformed range.
+    """
+    lo = max(1, line_start)
+    if line_end != 0 and line_end < lo:
+        raise ValueError(
+            f"inverted line range: line_end={line_end} is below "
+            f"line_start={line_start} (effective start {lo}). Pass "
+            f"line_end >= line_start, or line_end=0 to read to EOF."
+        )
+    capped = lo + _READ_MAX_LINES - 1
+    return lo, (min(line_end, capped) if line_end else capped)
+
+
 def filesystem_tools(repo_path: str | None) -> list[Callable]:
     """Read-only FS tools confined to ``repo_path`` (realpath-checked, deny-list
     enforced). Plain functions — Pydantic AI reads their signature + docstring."""
@@ -49,8 +72,13 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
 
     def read_file(path: str, line_start: int = 1, line_end: int = 0) -> str:
         """Read a UTF-8 text file under the repo root. ``line_start``/``line_end`` are
-        1-based and inclusive (``line_end=0`` reads to EOF, capped). Read-only."""
+        1-based and inclusive (``line_end=0`` reads to EOF, capped). A non-zero
+        ``line_end`` BELOW the effective start is a malformed (inverted) range: it
+        returns an ``Error:`` naming both bounds and no file content — re-issue the
+        call with ``line_end >= line_start`` (or ``line_end=0`` to read to EOF).
+        Read-only."""
         try:
+            lo, hi = _resolve_read_window(line_start, line_end)
             target = _safe_path(root, path, denied)
         except ValueError as exc:
             return f"Error: {exc}"
@@ -59,9 +87,6 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
                 lines = fh.readlines()
         except OSError as exc:
             return f"Error: {exc}"
-        lo = max(1, line_start)
-        hi = line_end if line_end and line_end >= lo else len(lines)
-        hi = min(hi, lo + _READ_MAX_LINES - 1)
         out = []
         for i in range(lo - 1, min(hi, len(lines))):
             text = lines[i].rstrip("\n")
