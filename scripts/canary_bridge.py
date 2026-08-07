@@ -28,6 +28,8 @@ import textwrap
 import time
 from collections.abc import Callable, Mapping
 
+import alert_dedup
+
 # Every external command (gh, rebar) goes through a Runner so unit tests can
 # inject a fake: argv -> (returncode, stdout, stderr).
 Runner = Callable[[list[str]], tuple[int, str, str]]
@@ -60,54 +62,20 @@ def _append_outputs(path: str, **kv: str) -> None:
             f.write(f"{k}={v}\n")
 
 
-def _find_alert_ticket(
-    runner: Runner,
-    tag: str,
-) -> str:
-    """Fail-soft: returns ticket_id string or '' on any error."""
-    rc, stdout, _stderr = runner(
-        ["rebar", "list", "--type=bug", "--status=open", f"--has-tag={tag}", "--output", "json"]
-    )
-    if rc != 0:
-        return ""
-    try:
-        tickets = json.loads(stdout)
-        return tickets[0]["ticket_id"] if tickets else ""
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
-        return ""
-
+# Dedup (find-the-open-alert + cap accumulation at 1 comment/24h) is SHARED with the
+# dependency-advisory filer and lives in scripts/alert_dedup.py (ticket 63e8). These two
+# names stay as this module's spelling of it — the marker is what differs per lane.
+_find_alert_ticket = alert_dedup.find_alert_ticket
 
 _ALERT_MARKER = "BRIDGE_CANARY_ALERT:"
-_ACCUMULATION_WINDOW_SECS = 24 * 3600
+_ACCUMULATION_WINDOW_SECS = alert_dedup.ACCUMULATION_WINDOW_SECS
 
 
 def _recent_marker_comment(runner: Runner, tid: str, now_epoch: int) -> bool:
-    """True if the ticket already carries a canary marker comment younger than 24h.
-
-    Caps accumulation at ~1 comment/day so a long-red canary cannot flood the
-    ticket. Fail-soft: any show/parse error means "no recent marker" (comment
-    anyway — a duplicate comment is cheaper than a silent gap).
-    """
-    rc, stdout, _stderr = runner(["rebar", "show", tid, "--output", "json"])
-    if rc != 0:
-        return False
-    try:
-        data = json.loads(stdout[stdout.find("{") :])
-        comments = data.get("comments") or []
-    except (json.JSONDecodeError, ValueError, AttributeError):
-        return False
-    for comment in comments:
-        if not isinstance(comment, dict):
-            continue
-        if not str(comment.get("body", "")).startswith(_ALERT_MARKER):
-            continue
-        ts = comment.get("timestamp")
-        if not isinstance(ts, (int, float)):
-            continue
-        secs = ts / 1e9 if ts > 1e12 else ts  # store timestamps are ns
-        if now_epoch - secs < _ACCUMULATION_WINDOW_SECS:
-            return True
-    return False
+    """True if the ticket already carries a canary marker comment younger than 24h."""
+    return alert_dedup.recent_marker_comment(
+        runner, tid, _ALERT_MARKER, now_epoch, _ACCUMULATION_WINDOW_SECS
+    )
 
 
 def _previous_canary_red(

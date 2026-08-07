@@ -179,22 +179,31 @@ jobs:
           fi
 
   pip-audit:
-    # GATING dependency-vulnerability scan (story 95dc). Audits rebar's actual
-    # installed dependency closure against the PyPI advisory / OSV database and
-    # FAILS on any known vulnerability. We scan the base runtime install (no
-    # extras) — that is what a plain `pip install nava-rebar` consumer gets —
-    # plus the [dev] extra so build/test tooling is covered too.
+    # Dependency-vulnerability scan (story 95dc), routed BY LANE (bug 63e8). Audits
+    # rebar's actual installed dependency closure against the PyPI advisory / OSV
+    # database. We scan the base runtime install (no extras) — that is what a plain
+    # `pip install nava-rebar` consumer gets — plus the [dev] extra so build/test
+    # tooling is covered too.
     #
-    # Failure policy (plan-review advisory #3):
-    #   - ANY vulnerability with a known fix version fails the job (→ Verified -1
-    #     on the Gerrit lane). Remediate by bumping the pin.
-    #   - An advisory that is a false positive / unfixable / accepted risk is
-    #     silenced with `--ignore-vuln <GHSA/PYSEC-ID>` below and a one-line
-    #     justification — deliberate, reviewed, and greppable (never a blanket
-    #     skip). No ignores are needed today; the list is intentionally empty.
-    #   - Network flake: the OSV/PyPI advisory DB fetch is retried (3× with
-    #     backoff). If every attempt fails to REACH the DB it is an INFRA error,
-    #     not a vuln — comment `recheck` (Gerrit) / re-run the job (branch CI).
+    # Failure policy — the verdict depends on the LANE, because a committed lock makes
+    # any new advisory against a PINNED transitive dep red on every change in flight at
+    # once (click 8.2.1 / PYSEC-2026-2132: six changes, five work streams, none at
+    # fault). Decision logic + severity bar live in scripts/dependency_audit.py, which is
+    # unit-tested (tests/scripts/test_dependency_audit.py) — workflow YAML is not
+    # reachable from a test, and this class of defect survives exactly by being eyeballed.
+    #   - Gerrit (Verified) lane: a CRITICAL/HIGH advisory fails the job ONLY when the
+    #     change TOUCHES THE DEPENDENCY MAP (uv.lock / pyproject deps / requirements /
+    #     constraints). "If you touch it, you own it." A change that leaves the map alone
+    #     is never blocked by an advisory — it prints the finding and stays green.
+    #   - Branch / scheduled `main` lane: always blocking, so a vulnerable pin surfaces
+    #     loudly. That red blocks no merge and no submit (the mirror casts no vote); it
+    #     blocks RELEASES (release.yml) and escalates to a ticket via
+    #     dependency-advisory-canary.yml.
+    #   - Severity bar: CRITICAL/HIGH fail, MEDIUM warns, LOW is tracked. pip-audit
+    #     carries no severity, so it is enriched from OSV; an advisory with NO severity
+    #     is treated as HIGH (fails) — documented in docs/dependency-advisory-runbook.md.
+    #   - Network flake: the advisory-DB fetch is retried (3× with backoff). Only a
+    #     DB-UNREACHABLE failure is recheckable; `recheck` can NEVER clear a real finding.
     name: pip-audit (dependency vulnerabilities)
     runs-on: ubuntu-latest
     steps:
@@ -220,35 +229,25 @@ jobs:
           # pip-audit is a scan TOOL, not a dependency of the project — kept out of the lock.
           uv pip install pip-audit
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-      - name: pip-audit (scan installed environment; gating, network-retried)
+      - name: Deepen the checkout so the patchset's parent is diffable (Gerrit lane)
+        if: inputs.gerrit-refspec != ''
         shell: bash
+        # The dependency-map ownership signal is `git diff HEAD^..HEAD`. A shallow
+        # patchset checkout has no parent object, so the diff would be unresolvable and
+        # the gate would fail CLOSED (block every change) — defeating the fix. Deepen by
+        # one; a no-op (and harmless error) on a non-shallow clone.
         run: |
           set -uo pipefail
-          # Retry only the network-bound advisory-DB fetch so a transient OSV/PyPI
-          # blip casts no spurious -1; a real vuln fails on the first try and the
-          # exit code is preserved. `--desc` prints advisory detail on a hit.
-          attempt=0
-          until [ "$attempt" -ge 3 ]; do
-            attempt=$((attempt + 1))
-            echo "pip-audit attempt ${attempt}/3"
-            if out=$(pip-audit --desc 2>&1); then
-              echo "$out"
-              echo "pip-audit: OK (no known vulnerabilities)."
-              exit 0
-            fi
-            echo "$out"
-            # Distinguish a real finding from a DB-unreachable infra flake: only
-            # retry when the failure looks network-related.
-            if printf '%s' "$out" | grep -qiE 'temporarily|timed out|timeout|connection|resolve|network|503|502|504'; then
-              echo "pip-audit: transient DB error — backing off before retry." >&2
-              sleep $((attempt * 5))
-              continue
-            fi
-            echo "::error::pip-audit found dependency vulnerabilities (see output). Bump the pinned version, or add --ignore-vuln <ID> with justification if accepted." >&2
-            exit 1
-          done
-          echo "::error::pip-audit could not reach the advisory DB after 3 attempts — INFRASTRUCTURE issue, not a vulnerability. Re-run the job / comment 'recheck'." >&2
-          exit 1
+          git rev-parse --verify -q 'HEAD^' >/dev/null 2>&1 || git fetch --deepen=1 || true
+      - name: Dependency advisories (lane-routed verdict; network-retried)
+        shell: bash
+        env:
+          # Empty on the branch/PR lane, a refspec on the Verified lane — the only thing
+          # that distinguishes "this change owns the advisory" from "someone else's".
+          LANE: ${{ inputs.gerrit-refspec != '' && 'gerrit' || 'branch' }}
+        run: |
+          set -uo pipefail
+          python scripts/dependency_audit.py gate --lane "$LANE"
 
   test:
     name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
