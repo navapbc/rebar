@@ -163,6 +163,50 @@ trail lives in the store:
 rebar comment <id> "Root cause was an unclamped index; fix in pager.py."
 ```
 
+### Passing untrusted or quoted text safely — and the secret screen
+
+The store **auto-pushes**, so a comment body is published the moment it is written. Two
+rules follow.
+
+**Never build a body from an unquoted shell command substitution.** On 2026-08-03 a
+session ran the equivalent of `rebar comment <id> "$(env)"` and published a full
+environment dump carrying seven live credentials. GitHub push protection then rejected
+`refs/heads/tickets`, and **every** session's writes queued local-only for hours — one
+comment took down store sharing for everyone. Prefer a file you have read, and quote it:
+
+```sh
+rebar comment <id> "$(cat notes.md)"     # a file you control — safe
+rebar comment <id> -- "$(cat notes.md)"  # ... and `--` if the body may start with "-"
+rebar comment <id> "$(env)"              # NEVER: publishes your whole environment
+```
+
+Backticks and `$(...)` are expanded by *your shell* before rebar sees anything, so rebar
+cannot tell an intended body from an accidental credential dump. Anything you would not
+paste into a public issue does not belong in a body.
+
+**rebar now refuses secret-bearing bodies at the write seam.** Every event write —
+comment, description, edit — is screened for live credential shapes (Anthropic, OpenAI,
+GitHub, Google, Atlassian, Slack, AWS, PyPI, Stripe, PEM private keys). A match refuses
+the write: nothing lands, and the error names the credential family, the field, and the
+line — never the value itself. Only *live* shapes fire (full length plus an entropy
+floor), so writing *about* a credential — a truncated placeholder like `sk-ant-api03-...`
+or a detection regex — is not refused, and filing a security bug still works.
+
+If the screen is wrong, override it with a reason:
+
+```sh
+rebar comment <id> "<body>" --allow-secret-pattern="synthetic fixture, not a live key"
+rebar create bug "leak writeup" --description="..." --allow-secret-pattern="<reason>"
+```
+
+The flag works on every write verb (`comment`, `create`, `edit`, `session-log`, …) and
+takes the `--flag=<reason>` form only, so a reason can never be omitted. The reason and
+the bypassed families are recorded on the event, so a forced write is auditable and
+distinguishable from a clean one. The override is CLI-only — it is a human operator's
+judgment call and is deliberately not exposed over MCP. Forcing a **genuine** credential
+through reproduces the original outage for every session, so the flag is for false
+positives, not for convenience.
+
 **Link** two tickets with a relation (the relation is required):
 
 ```sh

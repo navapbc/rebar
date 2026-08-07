@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from rebar import config
+from rebar import secret_screen as _secret_screen
 from rebar._engine_support.resolver import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
@@ -341,9 +342,64 @@ def finalize_event(
     ONLY when ``identity.require_authenticated`` is on and a NON-exempt event cannot be signed
     (the write-gate) — exemption (session_log/code_review/identity) is decided inside
     ``_apply_authorship``, so every caller inherits the same gate + exemption semantics.
+
+    Also enforces the write-time secret screen (bug e7a9). This — not ``append_event`` —
+    is where the screen has to live: the reconciler's inbound Jira translate, the txn and
+    delete cores, and the NDJSON importer all compose their own events and reach the store
+    WITHOUT ``append_event``, so a screen there would have left a Jira comment carrying a
+    credential able to reproduce the exact push-protection wedge the screen exists to
+    prevent. A payload that already carries ``data["secret_override"]`` has been forced
+    deliberately upstream (see :func:`append_event`) and passes.
     """
+    screen_event(data)
     event.update(attribution_fields(repo_root))
     _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
+
+
+_secret_override: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "rebar_secret_override", default=""
+)
+
+
+@contextmanager
+def forced_secret_write(reason: str) -> Iterator[None]:
+    """Scope in which the secret screen is overridden with *reason* (bug e7a9).
+
+    Set by the CLI dispatcher for the duration of one command, so EVERY write verb —
+    ``create``/``edit``/``session-log`` as well as ``comment`` — can honour
+    ``--allow-secret-pattern=<reason>`` without each one threading a kwarg down to the
+    seam. An empty reason is not an override: the audit record would have no ``why``.
+    """
+    token = _secret_override.set(reason or "")
+    try:
+        yield
+    finally:
+        _secret_override.reset(token)
+
+
+def screen_event(data: dict) -> None:
+    """Refuse a payload carrying a live credential shape, or record a forced write (e7a9).
+
+    REFUSE, never redact (operator decision 2026-08-07): rewriting the caller's payload
+    would make the stored event differ from what the caller believes it wrote, which an
+    append-only store cannot undo. The refusal names the family/field/line and NEVER the
+    value, so reporting the leak does not become a second leak.
+    """
+    if not isinstance(data, dict) or data.get("secret_override"):
+        return  # already stamped as forced upstream (append_event's kwarg)
+    findings = _secret_screen.screen_event_data(data)
+    if not findings:
+        return
+    reason = _secret_override.get()
+    if not reason:
+        raise CommandError(
+            _secret_screen.refusal_message(findings, override_flag="--allow-secret-pattern")
+        )
+    data["secret_override"] = _secret_screen.override_record(findings, reason)
+    logger.warning(
+        "secret screen FORCED: bypassed %s (reason recorded on the event)",
+        ", ".join(data["secret_override"]["families"]),
+    )
 
 
 def append_event(
@@ -355,6 +411,7 @@ def append_event(
     repo_root=None,
     author_fallback: str = "Unknown",
     under_lock_check=None,
+    allow_secret_pattern: str = "",
 ) -> None:
     """Compose an event and append it through the single locked write path.
 
@@ -364,6 +421,12 @@ def append_event(
     serialisation; it never re-derives the envelope fields composed here). Raises
     :class:`CommandError` carrying the exit code on failure (e.g. 75 = rebase/merge
     guard). (Tier D retired the bash seam; ``rebar._store`` is the sole write core.)
+
+    ``allow_secret_pattern`` is the audited force override for the write-time secret
+    screen (bug e7a9): a non-empty reason lets a refused body through and stamps
+    ``data["secret_override"]`` with that reason and the bypassed families, so a forced
+    write is distinguishable from a clean one. CLI-only by design — it is not exposed
+    over MCP.
     """
     from rebar._store import event_append as _store_append
     from rebar._store import hlc
@@ -379,6 +442,24 @@ def append_event(
     # early, identical message; this is the backstop none can bypass.)
     if not (Path(tracker) / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
+
+    # The audited force override for the write-time secret screen (bug e7a9). The refusal
+    # itself is enforced in ``finalize_event`` below — the ONE seam every writer routes
+    # through — so all this does is stamp the payload as deliberately forced BEFORE that
+    # check runs. Recording WHY (the operator's reason) plus the bypassed families on the
+    # event itself is what makes a forced write auditable and distinguishable from a clean
+    # one; WHO comes from the envelope's ``author``/attribution stamped just below.
+    if allow_secret_pattern:
+        findings = _secret_screen.screen_event_data(data)
+        if findings:
+            data = dict(data)
+            data["secret_override"] = _secret_screen.override_record(findings, allow_secret_pattern)
+            logger.warning(
+                "secret screen FORCED on %s %s: bypassed %s (reason recorded on the event)",
+                ticket_id,
+                event_type,
+                ", ".join(data["secret_override"]["families"]),
+            )
 
     timestamp, uuid_str = hlc.next_tick(str(tracker), ticket_id), str(_uuid.uuid4())
     event = {
