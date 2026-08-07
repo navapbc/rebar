@@ -1,0 +1,274 @@
+{
+  "REB-901": {
+    "assignee": {
+      "accountId": "redacted-account-id",
+      "accountType": "atlassian",
+      "active": true,
+      "displayName": "Redacted User",
+      "emailAddress": "redacted@example.invalid"
+    },
+    "comment": {
+      "comments": [
+        {
+          "author": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "body": {
+            "content": [
+              {
+                "content": [
+                  {
+                    "text": "Redacted comment body 0.",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "type": "doc",
+            "version": 1
+          },
+          "created": "2026-06-25T16:51:29.511-0500",
+          "id": "1000",
+          "jsdPublic": true,
+          "updateAuthor": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "updated": "2026-06-25T16:51:29.511-0500"
+        },
+        {
+          "author": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "body": {
+            "content": [
+              {
+                "content": [
+                  {
+                    "text": "Redacted comment body 1.",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "type": "doc",
+            "version": 1
+          },
+          "created": "2026-06-25T16:51:29.871-0500",
+          "id": "1001",
+          "jsdPublic": true,
+          "updateAuthor": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "updated": "2026-06-25T16:51:29.871-0500"
+        }
+      ],
+      "maxResults": 2,
+      "startAt": 0,
+      "total": 2
+    },
+    "description": {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "Redacted issue description.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "type": "doc",
+      "version": 1
+    },
+    "issuelinks": [
+      {
+        "id": "44439",
+        "inwardIssue": {
+          "fields": {
+            "issuetype": {
+              "name": "Story"
+            },
+            "priority": {
+              "name": "Medium"
+            },
+            "status": {
+              "name": "Done"
+            },
+            "summary": "Redacted linked-issue summary"
+          },
+          "key": "REB-283"
+        },
+        "type": {
+          "inward": "is blocked by",
+          "name": "Blocks",
+          "outward": "blocks"
+        }
+      }
+    ],
+    "issuetype": {
+      "hierarchyLevel": 0,
+      "name": "Story",
+      "subtask": false
+    },
+    "labels": [
+      "rebar-id:0000-1111-2222-3333"
+    ],
+    "parent": {
+      "key": "REB-903"
+    },
+    "priority": {
+      "name": "Medium"
+    },
+    "status": {
+      "name": "Done",
+      "statusCategory": {
+        "key": "done",
+        "name": "Done"
+      }
+    },
+    "summary": "Redacted issue summary"
+  },
+  "REB-902": {
+    "assignee": null,
+    "comment": {
+      "comments": [
+        {
+          "author": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "body": {
+            "content": [
+              {
+                "content": [
+                  {
+                    "text": "Redacted comment body 0.",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "type": "doc",
+            "version": 1
+          },
+          "created": "2026-06-25T16:52:09.984-0500",
+          "id": "1000",
+          "jsdPublic": true,
+          "updateAuthor": {
+            "accountId": "redacted-account-id",
+            "accountType": "atlassian",
+            "active": true,
+            "displayName": "Redacted User",
+            "emailAddress": "redacted@example.invalid"
+          },
+          "updated": "2026-06-25T16:52:09.984-0500"
+        }
+      ],
+      "maxResults": 1,
+      "startAt": 0,
+      "total": 1
+    },
+    "description": {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "Redacted issue description.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "type": "doc",
+      "version": 1
+    },
+    "issuelinks": [],
+    "issuetype": {
+      "hierarchyLevel": 0,
+      "name": "Task",
+      "subtask": false
+    },
+    "labels": [
+      "rebar-id:4444-5555-6666-7777"
+    ],
+    "priority": {
+      "name": "Medium"
+    },
+    "status": {
+      "name": "Done",
+      "statusCategory": {
+        "key": "done",
+        "name": "Done"
+      }
+    },
+    "summary": "Redacted issue summary"
+  },
+  "REB-903": {
+    "assignee": null,
+    "comment": {
+      "comments": [],
+      "maxResults": 0,
+      "startAt": 0,
+      "total": 0
+    },
+    "description": {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "Redacted issue description.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "type": "doc",
+      "version": 1
+    },
+    "issuetype": {
+      "hierarchyLevel": 0,
+      "name": "Story",
+      "subtask": false
+    },
+    "labels": [
+      "rebar-id:8888-9999-aaaa-bbbb"
+    ],
+    "parent": null,
+    "priority": {
+      "name": "Medium"
+    },
+    "status": {
+      "name": "Done",
+      "statusCategory": {
+        "key": "done",
+        "name": "Done"
+      }
+    },
+    "summary": "Redacted issue summary"
+  }
+}

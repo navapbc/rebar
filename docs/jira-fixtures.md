@@ -24,6 +24,7 @@ four responses `fetcher._build_snapshot` consumes:
 | `issuelinks_map.json` | `get_issuelinks_map` | `{key: [issuelink, ...]}` (REST-nested `type`/`inwardIssue`/`outwardIssue`) |
 | `parent_map.json` | `get_parent_map` | `{key: parent_key \| None}` |
 | `_meta.json` | — | capture provenance (project, JQL, key set) |
+| `snapshot_entry_shapes.json` | *derived, not captured* | three post-merge `snapshot[key]` entries — populated / `parent`-absent / horizon-trimmed-empty — redacted from real fetcher output, pinning the `jira_snapshot_entry` contract |
 
 **Why per-endpoint maps (not one nested `/issue` blob).** The split into
 `search.json` + `comment_map` + `issuelinks_map` + `parent_map` is not arbitrary —
@@ -116,7 +117,9 @@ Requires the standard Jira credentials (`JIRA_URL` / `JIRA_USER` /
 - a Jira Cloud REST API change to comments / issuelinks / parent / search;
 - a new enrichment field added to `_build_snapshot` (extend `DEFAULT_KEYS` /
   the capture to cover it);
-- the snapshot-entry schema (`_snapshot_schema.py`, story B) gains a field.
+- the snapshot-entry schema (`src/rebar/schemas/jira_snapshot_entry.schema.json`,
+  ADR 0004) gains a field — update the schema FIRST, then regenerate
+  `src/rebar/types.py` with `python -m rebar.schemas.gen_types`.
 
 After re-capturing, commit the regenerated fixtures and let
 `test_jira_fixtures.py` (scrub + production-path) and `test_snapshot_contract.py`

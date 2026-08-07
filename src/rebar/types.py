@@ -119,7 +119,7 @@ class TicketState(TypedDict):
     file_impact: NotRequired[list[FileImpactEntry]]
     file_impact_scope: NotRequired[FileImpactScope]
     no_file_impact_reason: NotRequired[str]
-    plan_review_health: NotRequired[Any | None]
+    plan_review_health: NotRequired[dict[str, Any] | None]
     verify_commands: NotRequired[list[VerifyCommandEntry]]
     bridge_alerts: NotRequired[list[Any]]
     reverts: NotRequired[list[Any]]
@@ -319,11 +319,26 @@ class WorkflowRun(TypedDict):
     workflow_name: NotRequired[str | None]
     status: str
     terminal_step: NotRequired[str | None]
-    terminal_output: NotRequired[Any | None]
+    terminal_output: NotRequired[dict[str, Any] | None]
     error: NotRequired[str | None]
     steps: NotRequired[dict[str, Any]]
     outputs: NotRequired[dict[str, Any]]
     truncated: NotRequired[bool]
+
+
+class JiraSnapshotEntry(TypedDict):
+    """Shape of the `jira_snapshot_entry` contract schema."""
+
+    summary: NotRequired[str]
+    description: NotRequired[dict[str, Any] | str | None]
+    status: NotRequired[dict[str, Any] | str]
+    priority: NotRequired[dict[str, Any] | str | None]
+    assignee: NotRequired[dict[str, Any] | None]
+    labels: NotRequired[list[str]]
+    issuetype: NotRequired[dict[str, Any] | str]
+    comment: NotRequired[dict[str, Any]]
+    issuelinks: NotRequired[list[dict[str, Any]]]
+    parent: NotRequired[dict[str, Any] | None]
 
 
 # --- public list return shapes ---

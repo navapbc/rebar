@@ -59,6 +59,13 @@ TOP_LEVEL_OBJECTS: list[str] = [
     "next_batch",
     "bridge_fsck",
     "workflow_run",
+    # NOT a facade return shape: the reconciler's per-issue Jira snapshot-entry CONTRACT
+    # (ADR 0004) — the shape the fetcher writes and the differs read. It is generated here
+    # deliberately, so the contract sits under the SAME CI drift gate as the 90-odd sibling
+    # schemas: adding a field to the fetcher's snapshot without first updating
+    # `jira_snapshot_entry.schema.json` (or updating the schema without regenerating this
+    # file) fails `python -m rebar.schemas.gen_types --check`.
+    "jira_snapshot_entry",
 ]
 # Top-level ARRAY schemas → a ``list[...]`` alias (facade returns a list).
 TOP_LEVEL_ARRAYS: list[str] = [
@@ -110,6 +117,12 @@ class _Generator:
             "number": "float",
             "boolean": "bool",
             "null": "None",
+            # Reached from a type UNION (e.g. `["object", "string"]` on a Jira field that
+            # is either a REST sub-object or a bare name). A bare `type: object`/`array`
+            # property is handled with more context in `_pytype`; here we have only the
+            # type name, so the open container form is the honest translation.
+            "object": "dict[str, Any]",
+            "array": "list[Any]",
         }.get(json_type or "", "Any")
 
     def _pytype(self, node: dict[str, Any]) -> str:
@@ -133,7 +146,7 @@ class _Generator:
             rendered = " | ".join(dict.fromkeys(parts)) or "Any"
             if "null" in jtype:
                 rendered = f"{rendered} | None"
-            if "Any" in parts:
+            if any("Any" in part for part in parts):
                 self._used_typing.add("Any")
             return rendered
 
@@ -193,7 +206,12 @@ class _Generator:
         for name in TOP_LEVEL_OBJECTS:
             schema = schemas.load(name)
             class_name = schema.get("title") or _camel(name)
-            doc = f"Return shape of the `{name}` output schema."
+            # An INPUT/contract schema is not a command output, so don't call it one.
+            doc = (
+                f"Shape of the `{name}` contract schema."
+                if name in schemas.INPUT_SCHEMAS
+                else f"Return shape of the `{name}` output schema."
+            )
             object_blocks.append(self._object_block(class_name, schema, doc))
 
         # Top-level array schemas → ``Alias = list[Item]``.
