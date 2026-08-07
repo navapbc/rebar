@@ -6,6 +6,10 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+# Written when a worktree's venv is provisioned. Untracked-and-unignored, it made
+# `git status` permanently non-empty, which pinned the worktree against the local
+# worktree-GC's "no uncommitted work" guard — a build artifact must never look like work.
+.provision.log
 .tickets-tracker/
 bridge_state/
 # The standing per-criterion effectiveness ledger (epic 6982) is a local, growing artifact
