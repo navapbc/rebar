@@ -109,7 +109,7 @@ def _split_positionals(args: list[str]) -> tuple[list[str], str | None]:
 
 
 # The audited force override for the write-time secret screen (bug e7a9). Only the
-# `--flag=<reason>` form is recognised — the same shape as `--force-close=` — so every
+# `--flag=<reason>` form is recognised — the same shape as `transition --force=` — so every
 # other option-looking token stays the loud usage error bug 00da made it, and a reason is
 # structurally impossible to omit. Handled here, above the dispatch, so EVERY write verb
 # honours it: a false positive on a `create` description or a `session-log` entry must not
