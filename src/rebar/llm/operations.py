@@ -19,12 +19,16 @@ reproducible run-to-run.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMError
 from rebar.llm.prompting import prompts
 from rebar.llm.prompting.prompts import select_reviewers  # re-export (rules layer)
 from rebar.llm.runner import Runner, RunRequest, get_runner
+
+if TYPE_CHECKING:
+    from rebar.llm.workflow.completion_prefetch import PrefetchSpec
 
 __all__ = ["assemble_context", "default_reviewer_id", "review_ticket", "select_reviewers"]
 
@@ -75,7 +79,13 @@ def _format_ticket(t: dict) -> str:
     return "\n".join(lines)
 
 
-def assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, list[str]]:
+def assemble_context(
+    ticket_id: str,
+    *,
+    graph: bool,
+    repo_root,
+    prefetch: PrefetchSpec | None = None,
+) -> tuple[str, list[str]]:
     """Build the deterministic LLM review context for a ticket (PUBLIC API).
 
     Returns ``(context_text, reviewed_ids)`` — the rendered, deterministic context block
@@ -83,7 +93,14 @@ def assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, li
     or the whole subtree when ``graph`` is true). This is the shared context-builder BOTH
     the review op (:func:`review_ticket`) and the mandatory completion gate
     (``llm.workflow.gate_ops``) consume. It is public (SC1) so the gate reaches it through a
-    documented contract instead of importing a leading-underscore sibling across modules."""
+    documented contract instead of importing a leading-underscore sibling across modules.
+
+    ``prefetch`` is OPT-IN (story a9dd): when ``None`` (the default, and every existing
+    caller) this function is byte-identical to its pre-story behaviour. When a
+    :class:`~rebar.llm.workflow.completion_prefetch.PrefetchSpec` is passed, the ticket's
+    declared ``file_impact`` contents + referencing-commit diffs are pre-loaded into a bounded
+    ``<prefetched_file_contents>`` section appended to the returned context (the completion
+    gate does this so the verifier need not re-discover its declared files agentically)."""
     from rebar import _reads
 
     root = ticket = _reads.show_ticket(ticket_id, repo_root=repo_root)
@@ -105,7 +122,14 @@ def assemble_context(ticket_id: str, *, graph: bool, repo_root) -> tuple[str, li
                     ids.append(cid)
                     frontier.append(cid)
                     blocks.append(_format_ticket(child))
-    return "\n\n".join(blocks), ids
+    context = "\n\n".join(blocks)
+    if prefetch is not None:
+        from rebar.llm.workflow import completion_prefetch as _pf
+
+        section, _manifest = _pf.assemble_prefetch(prefetch, repo_root=repo_root)
+        if section:
+            context = context + "\n\n" + section
+    return context, ids
 
 
 def review_ticket(
