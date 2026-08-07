@@ -17,8 +17,9 @@ import pytest
 pytest.importorskip("fastapi")  # the [ui] extra; absent in the lean CI suite
 pytest.importorskip("httpx")
 
+import _audit_page_helpers as H
+
 import rebar
-from tests.unit import _audit_page_helpers as H
 
 pytestmark = pytest.mark.unit
 
