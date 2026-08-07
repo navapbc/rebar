@@ -215,6 +215,13 @@ dev = [
     # local↔CI parity reason as xdist; kept here now so the shared dev/CI env has it
     # available for 9ad9's optional store step and follow-on sharding work.
     "pytest-split==0.11.0",
+    # Per-test hang guard (ticket 89d5-61da-b621-47f8). CI runs the xdist suite with
+    # `--timeout=... --timeout-method=thread`: `timeout-minutes` only bounds the whole job,
+    # so without this a single deadlocked test hides behind the last -q dot and eats the full
+    # 60 min with no traceback. The `thread` method's watchdog + faulthandler names the hung
+    # test even when a worker is blocked in a C-level flock/socket/subprocess call. Pinned
+    # exactly for the same local↔CI parity reason as xdist.
+    "pytest-timeout==2.4.0",
     # The commit gate driver: `make install`/`make hooks` run `pre-commit install`,
     # and CI runs `pre-commit run --all-files` for local↔CI parity. Declared here so a
     # clean editable install has it (no reliance on a global/pipx pre-commit).
