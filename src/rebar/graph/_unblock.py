@@ -20,15 +20,15 @@ import os
 from pathlib import Path
 
 from rebar.reducer import reduce_all_tickets, reduce_ticket
+from rebar.types import is_terminal_status
 
 from ._relations import build_blocked_by
 
-_CLOSED_STATUSES = {"closed", "deleted"}
 _VALID_EVENT_SOURCES = {"local-close", "sync-resolution"}
 
 
 def _is_closed(status: str) -> bool:
-    return status in _CLOSED_STATUSES
+    return is_terminal_status(status)
 
 
 def detect_newly_unblocked(

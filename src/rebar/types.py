@@ -335,3 +335,18 @@ VerifyCommands = list[VerifyCommandEntry]
 
 # list form of the `summary` output schema
 Summary = list[dict[str, Any]]
+
+
+# --- terminal-state predicate (bug e63c) ---
+# THE definition of "this blocker no longer blocks", shared by every reader:
+# `graph/_ready.py`, `graph/_unblock.py`, `graph/_graph.py` and
+# `_engine_support/next_batch.py`. Those four once carried three different
+# memberships, so `next-batch` offered a ticket that `ready` withheld. Each member
+# is a terminal state a ticket cannot leave on its own; every member must be a real
+# `TicketStatus` (pinned by a test against common.schema.json#/$defs/ticket_status).
+TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "archived", "deleted"})
+
+
+def is_terminal_status(status: str) -> bool:
+    """True when ``status`` is terminal, i.e. a blocker in it no longer blocks."""
+    return status in TERMINAL_STATUSES
