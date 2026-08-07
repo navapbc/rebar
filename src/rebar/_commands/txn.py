@@ -185,7 +185,6 @@ def transition_core(
     *,
     env_id: str,
     author: str,
-    close_reason: str = "",
     close_class: str = "",
     force_close_reason: str = "",
     repo_root=None,

@@ -431,7 +431,7 @@ Usage: rebar tag <ticket_id> <tag>
 ### `transition`
 
 ```
-Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text>] [--force] [--force=<reason>] [--output json]
+Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<text> (only with --force)] [--force] [--force=<reason>] [--output json]
        rebar transition <ticket_id> <target_status>   (auto-detects current status)
   status: idea | open | in_progress | closed | blocked
   idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
