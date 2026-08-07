@@ -444,6 +444,9 @@ max-complexity = 15
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]
+# MCP model drift gate CLI (ticket 8efe) — prints its --check report to
+# stdout/stderr (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
+"src/rebar/schemas/check_mcp_models.py" = ["T201"]
 
 [tool.mypy]
 # Scoped, opt-in type checking. The pure in-process library core
