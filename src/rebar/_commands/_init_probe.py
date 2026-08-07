@@ -46,9 +46,24 @@ def run_bounded_git(
     timeout: int,
     run_git_fn=run_git,
 ) -> subprocess.CompletedProcess:
-    """Run one network-capable Git command with a descriptive timeout result."""
+    """Run one network-capable Git command with a descriptive timeout result.
+
+    ``timeout`` bounds ELAPSED TIME, which is the wrong axis for a *stalled* transfer: a
+    remote that opens the socket and then moves no bytes is indistinguishable from a slow
+    cold clone, so it holds the caller for the whole budget (task 851e). A ``fetch`` — the
+    long-budget command routed here, via ``init._git_fetch`` at 300s — therefore also gets
+    the throughput-keyed abort from :func:`rebar._snapshot.git_fetch.stall_abort_args`,
+    spliced ahead of the subcommand where git requires ``-c``. The ref-advertisement probe
+    is left alone: its own 10s bound is already tighter than any low-speed window. The
+    prefix is kept out of the timeout message below so it still names the operation the
+    caller asked for."""
+    prefix: tuple[str, ...] = ()
+    if args and args[0] == "fetch":
+        from rebar._snapshot.git_fetch import stall_abort_args
+
+        prefix = tuple(stall_abort_args())
     try:
-        return run_git_fn(repo, *args, check=False, timeout=timeout)
+        return run_git_fn(repo, *prefix, *args, check=False, timeout=timeout)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(
             ["git", *args],
