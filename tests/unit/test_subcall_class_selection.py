@@ -313,9 +313,15 @@ _CFG_MODEL_BY_DESIGN: dict[str, str] = {
 # (`self._config`) and at parameters whose callers are outside `src/rebar` — each with the reason
 # it is not a bug-afeb site. Same ratchet: unregistered means failing.
 _UNFOLLOWABLE: dict[str, str] = {
-    "llm/workflow/completion_recovery.py::_recover": (
-        "config is `self._config` (an attribute): recovery re-runs the step that failed on the "
-        "runner's own config, deliberately keeping whatever model the failed attempt used"
+    "llm/workflow/completion_recovery.py::_run_one_successor": (
+        "config is `self._config` (an attribute): a batched recovery successor re-runs the "
+        "verifier on the runner's own config, deliberately keeping whatever model the primary "
+        "attempt used"
+    ),
+    "llm/workflow/completion_recovery.py::_run_finalizer": (
+        "config is `self._config` (an attribute): the finalizer assembles the full-coverage "
+        "verdict from the bank on the runner's own config, deliberately keeping the primary "
+        "attempt's model"
     ),
     "llm/plan_review/passes.py::pass1_chunk": (
         "Pass-1 finder: the batch runner copies `model_ladder[0]` (a CLASS name) onto cfg.model "

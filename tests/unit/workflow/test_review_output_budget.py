@@ -389,7 +389,14 @@ def test_completion_primary_cfg_carries_model_max(monkeypatch) -> None:
 
     from rebar import _reads
 
-    monkeypatch.setattr(_reads, "show_ticket", lambda tid, repo_root=None: {"ticket_type": "task"})
+    monkeypatch.setattr(
+        _reads,
+        "show_ticket",
+        lambda tid, repo_root=None: {
+            "ticket_type": "task",
+            "description": "## Acceptance Criteria\n- [ ] the work is done",
+        },
+    )
     completion._verify_completion_inner(
         "T-1", graph=False, repo_root=None, config=LLMConfig(runner="fake"), runner=None
     )

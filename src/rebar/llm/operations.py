@@ -32,8 +32,9 @@ __all__ = ["assemble_context", "default_reviewer_id", "review_ticket", "select_r
 # report). The framework review default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too
 # low and trips the recursion cap mid-review (→ LLMRunnerError 'agent exceeded its step
 # budget'). Raise the agent step budget to a review-appropriate FLOOR; an operator who
-# explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's
-# _VERIFY_MIN_STEPS pattern (a review is lighter than a multi-criteria completion verify).
+# explicitly sets a HIGHER REBAR_LLM_MAX_STEPS still wins. Mirrors completion.py's verifier
+# step-floor pattern (a review is lighter than a multi-criteria completion verify, whose floor
+# is criteria-scaled via verify_step_floor); this review floor stays a flat min-only raise.
 _REVIEW_MIN_STEPS = 120
 
 
