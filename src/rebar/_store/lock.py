@@ -318,6 +318,56 @@ def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:
     return fields
 
 
+def write_lock_is_busy(tracker: str | os.PathLike) -> bool:
+    """Whether *tracker*'s write lock is held RIGHT NOW, answered without waiting (bug
+    7084 / remediation R3).
+
+    A single immediate probe of the SAME two legs :func:`acquire` takes, in the SAME
+    order: ``fcntl.flock(LOCK_EX|LOCK_NB)`` on ``.ticket-write.lock``, then ``mkdir`` on
+    ``.ticket-write.lock.d``. No new mechanism — this is what ``_acquire_fcntl`` /
+    ``_acquire_mkdir`` already poll, with a zero deadline. Both legs must be probed: the
+    mkdir leg is the portable window a bash-era or ``flock``-less writer holds, so an
+    fcntl-only probe would report a busy store as free. The fcntl leg is released whether
+    or not the mkdir leg is taken (the fd is closed in a ``finally``), and a mkdir probe
+    that succeeds removes the dir again immediately — this function NEVER leaves a lock
+    behind and NEVER returns holding anything.
+
+    Deliberately ADVISORY and inherently racy: the answer describes an instant, and a
+    holder can arrive one microsecond later. It is only ever used to let an OPTIONAL
+    piece of work stand aside (compact-on-close), never to decide whether a mutation is
+    safe — mutual exclusion still comes from :func:`acquire` alone. Fails OPEN: any
+    unexpected error reports "not busy", so a probe failure degrades to today's
+    behaviour (attempt the work and let the real acquire arbitrate) rather than
+    suppressing work on a store that is actually free."""
+    tracker = canonical_tracker(tracker)
+    lock_path = os.path.join(tracker, WRITE_LOCK_NAME)
+    lock_dir = os.path.join(tracker, MKDIR_LOCK_NAME)
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            # Genuine contention answers the question; any other errno is a real fault
+            # that must not masquerade as a busy lock (it would silently suppress work).
+            return exc.errno in (errno.EAGAIN, errno.EACCES)
+        try:
+            os.mkdir(lock_dir)
+        except FileExistsError:
+            return True
+        except OSError as exc:
+            return exc.errno == errno.EEXIST
+        try:
+            os.rmdir(lock_dir)  # taken only to answer the probe — give it straight back
+        except OSError:
+            pass
+        return False
+    finally:
+        os.close(fd)  # closing the fd releases the fcntl leg
+
+
 def describe_lock_holder(tracker: str | os.PathLike) -> str:
     """Describe whoever currently holds *tracker*'s write lock, for a
     :class:`LockTimeout` message (bug 7084 / remediation R5).

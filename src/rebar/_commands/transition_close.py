@@ -92,11 +92,40 @@ def _raise_plan_review_close_gate_error(ticket_id: str, check: dict[str, object]
 def _compact_on_close(repo_root: str, ticket_id: str) -> None:
     """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
     silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
-    commit kept."""
+    commit kept.
+
+    SKIPPED when the store write lock is already busy (bug 7084 / remediation R3).
+    Compaction is the store's longest lock holder and it is entirely OPTIONAL work — a
+    housekeeping fold of an event log that is completely valid unfolded. Taking the lock
+    behind a queue of foreground writers is what starved them: measured, a 48.1s
+    compact-on-close consumed six concurrent writers' entire 60s budget and all six
+    writes were lost. Standing aside costs nothing, because a skip is a NO-OP for
+    correctness: the raw events stay live and the next compaction (the next close of this
+    ticket, or an explicit ``rebar compact``) folds them.
+
+    No floor is needed for this project's INTERMITTENT load — a skipped fold is picked up
+    by a later uncontended run. Under genuinely SUSTAINED contention compaction could be
+    deferred for a long time, which is why the skip is logged at WARNING rather than
+    swallowed: a skipped compaction that never runs again must not be silent.
+
+    The probe is advisory and racy by nature (:func:`~rebar._store.lock.write_lock_is_busy`
+    describes an instant). That is harmless here in both directions: a false "free" just
+    means we take the lock as we do today, and a false "busy" just defers optional work."""
     import contextlib
     import io
 
     from rebar._commands import compact as _compact
+    from rebar._store import lock as _lock
+
+    tracker = str(config.tracker_dir(repo_root))
+    if _lock.write_lock_is_busy(tracker):
+        logger.warning(
+            "compact-on-close skipped for %s: store write lock busy (holder: %s); "
+            "the events stay live and the next compaction folds them",
+            ticket_id,
+            _lock.describe_lock_holder(tracker),
+        )
+        return
 
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
