@@ -40,6 +40,17 @@ if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
 
+# --- Optional-extra coverage guard (bug 599e-77da-29dd-482d) ----------------------
+# A whole test surface can silently vanish from CI: with no lane installing the `reviewbot`
+# extra, 38 tests behind `pytest.importorskip("fastapi")` — including SECURITY guards —
+# no-op'd for months. With REBAR_REQUIRE_EXTRAS=1 (set by the CI pytest steps) those skips
+# become hard errors instead. Lives in tests/_extra_guard.py so it is directly testable;
+# imported here because a conftest is the earliest hook that runs before any test module.
+import _extra_guard  # noqa: E402  (needs _TESTS_DIR on sys.path, set just above)
+
+_extra_guard.install()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce the declared Git floor, then register custom markers.
 

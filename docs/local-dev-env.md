@@ -398,3 +398,24 @@ make check     # lint + typecheck (check-only, never mutates)
 make test      # default test suite (excludes integration + external)
 make format    # the ONLY target that rewrites files
 ```
+
+### Running the tests CI runs (the optional-extra surface)
+
+`make install` deliberately stays lean, so ~38 tests gated on
+`pytest.importorskip("fastapi")` / `("jinja2")` — the review-bot receiver, the opcert
+service app, the audit UI, and the path-injection + token-redaction security guards —
+**skip** in that env. CI does not: its pytest lane installs `dev + reviewbot + ui` and sets
+`REBAR_REQUIRE_EXTRAS=1`, which turns any such skip into a hard error (see
+`tests/_extra_guard.py`). That env var is what makes a lost extra reddening instead of
+silent — a whole surface once vanished from CI for months because nothing reported it
+(bug `599e-77da-29dd-482d`).
+
+To reproduce the CI selection locally:
+
+```sh
+uv sync --locked --extra dev --extra reviewbot --extra ui
+REBAR_REQUIRE_EXTRAS=1 pytest -m "not integration and not external"
+```
+
+Nothing these extras unlock needs network or cloud credentials; the suite's own
+network guard still applies.

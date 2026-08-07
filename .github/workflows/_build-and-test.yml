@@ -289,10 +289,21 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install rebar from the committed lock (dev extra)
+      # Install EVERY test-bearing extra, not just `dev` (bug 599e-77da-29dd-482d).
+      # `dev` alone left `fastapi` and `jinja2` uninstalled, so 38 tests behind
+      # `pytest.importorskip("fastapi"/"jinja2")` — the review-bot receiver, the
+      # opcert service app, the audit UI, and the path-injection + token-redaction
+      # SECURITY guards — silently SKIPPED in every lane. A change could break all of
+      # them and still earn `Verified +1`; that is how ticket 66af landed a broken
+      # guard. The two extras add only small pure-python wheels on top of what `dev`
+      # already resolves (uvicorn/httpx/boto3 arrive transitively today), and nothing
+      # they unlock needs network or AWS credentials — the suite's own network guard
+      # holds. REBAR_REQUIRE_EXTRAS=1 on the pytest steps below turns "an extra went
+      # missing again" into a hard failure instead of a silent skip.
+      - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
         shell: bash
         run: |
-          uv sync --locked --extra dev --python '${{ matrix.python-version }}'
+          uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # Git identity is required by the suites that build throwaway commit stores.
@@ -590,6 +601,13 @@ jobs:
         # run #1823) AND it holds one of the scarce macOS runner slots (peak 4 observed
         # concurrent; changes deep in a burst queued 6.7-8.4m behind it). The SAME 7856
         # tests still run here; only the tracing is dropped. Ticket f3d4.
+        #
+        # REBAR_REQUIRE_EXTRAS=1 (bug 599e): this lane installs every test-bearing extra,
+        # so an `importorskip` that WOULD skip means the install step lost an extra.
+        # tests/conftest.py turns that into a hard error naming the module instead of a
+        # skip nobody reads. Skips keyed on a missing binary/version floor are unaffected.
+        env:
+          REBAR_REQUIRE_EXTRAS: "1"
         run: >-
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
@@ -603,6 +621,8 @@ jobs:
         # stays a manual probe (bridge-probe / reconcile dry-run).
         # Parallelized (story 8d36) with `--dist loadgroup` so xdist_group-marked
         # tests (the live reconciler E2E) co-locate on one worker and stay serial.
+        env:
+          REBAR_REQUIRE_EXTRAS: "1"  # see the default-suite step above (bug 599e)
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
