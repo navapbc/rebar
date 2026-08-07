@@ -52,6 +52,36 @@ def test_message_for_every_class_and_unknown():
     assert message_for("NOT_A_CLASS") is None
 
 
+def test_message_for_content_filter_names_guardrail_not_size():
+    """A content-filter/guardrail block (finish_reason=content_filter on CHANGE_INPUT) must
+    surface a message that names the content policy / guardrail and does NOT misreport the
+    cause as a size/format problem — the misleading generic parenthetical."""
+    from rebar.llm.failure import CONTENT_FILTER_MESSAGE
+
+    msg = message_for(ResolutionClass.CHANGE_INPUT.value, finish_reason="content_filter")
+    assert msg == CONTENT_FILTER_MESSAGE
+    assert "guardrail" in msg.lower()
+    assert "too large" not in msg.lower() and "malformed" not in msg.lower()
+
+
+def test_message_for_change_input_without_content_filter_is_generic():
+    """A genuine size/malformed CHANGE_INPUT (e.g. HTTP 413, context-length 400) keeps the
+    existing generic message — the shared class must not be over-broadened."""
+    generic = message_for(ResolutionClass.CHANGE_INPUT.value)
+    assert generic and "too large" in generic.lower()
+    # A non-content_filter finish_reason (e.g. length truncation) is still generic.
+    assert message_for(ResolutionClass.CHANGE_INPUT.value, finish_reason="length") == generic
+    assert message_for(ResolutionClass.CHANGE_INPUT.value, finish_reason=None) == generic
+
+
+def test_message_for_content_filter_only_specializes_change_input():
+    """finish_reason=content_filter with a non-CHANGE_INPUT class is unaffected — the
+    disambiguation is scoped to the one class the content-filter block maps to."""
+    assert message_for(
+        ResolutionClass.WAIT_AND_RETRY.value, finish_reason="content_filter"
+    ) == message_for(ResolutionClass.WAIT_AND_RETRY.value)
+
+
 def test_outcome_of_reads_attached_outcome():
     assert outcome_of(_retryable_error()).retryable is True
     assert outcome_of(LLMUnavailableError("bare")) is None
