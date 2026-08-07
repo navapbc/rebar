@@ -131,6 +131,56 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
     )
 
 
+def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug 9f63 AC: 'not queued' must be distinguishable from 'queued behind N others'.
+
+    ``in_flight`` alone counts only reviews already RUNNING, so a change waiting behind a
+    backlog and a change whose webhook was dropped present identically — that ambiguity is
+    what led an agent to read a queued review as an outage and abandon correct work.
+    ``queue_depth`` is the missing half: with it, an operator can tell 'the bot never got
+    the event' (depth 0, no vote) from 'the bot has it, N ahead of you'.
+
+    Requires the ``reviewbot`` extra (fastapi); skipped without it.
+    """
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot.app import app
+
+    monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+    with TestClient(app) as client:
+        idle = client.get("/health").json()
+        assert idle["queue_depth"] == 0, (
+            f"an idle bot must report an empty queue, not omit the field\n{idle}"
+        )
+
+        # Swap in a pre-filled queue rather than pushing onto the live one: the background
+        # worker is parked on the ORIGINAL queue's get(), so it drains anything we enqueue
+        # there before the next request is served, and the assertion would race it. The
+        # handler reads app.state.queue, which is the contract under test.
+        live = app.state.queue
+        backlog: asyncio.Queue = asyncio.Queue()
+        for n in range(3):
+            backlog.put_nowait({"type": "patchset-created", "_n": n})
+        app.state.queue = backlog
+        try:
+            body = client.get("/health").json()
+        finally:
+            # Restore before leaving the context: the lifespan's shutdown drain awaits
+            # queue.join(), and our backlog has no consumer calling task_done(), so a
+            # stray reference would block teardown for the whole drain window.
+            app.state.queue = live
+
+    assert body["queue_depth"] == 3, (
+        f"/health must expose how many events are waiting to be reviewed\n{body}"
+    )
+    assert isinstance(body["queue_depth"], int) and not isinstance(body["queue_depth"], bool), (
+        f"queue_depth must be an integer, like in_flight\n{body}"
+    )
+    # The pre-existing contract is additive-only: autodeploy.sh reads these two keys.
+    assert body["status"] == "ok" and body["in_flight"] == 0
+
+
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
     """Same contract as the endpoint test above, asserted WITHOUT fastapi.
 
