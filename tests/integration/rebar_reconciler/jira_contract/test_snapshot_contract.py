@@ -8,7 +8,8 @@ PRODUCTION code path (the FakeAcliClient's real fixtures → ``fetcher.fetch_sna
 → the differs), so a key/shape divergence fails a test immediately:
 
   1. **Schema conformance** — every ``fetch_snapshot`` entry validates against the
-     canonical ``_snapshot_schema`` (all nine consumer-read keys, shape/type only).
+     canonical ``jira_snapshot_entry`` schema in ``rebar.schemas`` (all ten
+     consumer-read keys, shape/type only).
   2. **Semantic round-trip** — the inbound differ, run on the produced snapshot,
      actually READS ``comment`` / ``issuelinks`` / ``parent`` (+ a scalar exemplar):
      its emitted mutations change with the producer's content, and would be EMPTY
@@ -25,6 +26,13 @@ import copy
 import jsonschema
 import pytest
 from _fakes import install
+
+from rebar import schemas
+
+# The canonical producer<->consumer contract: a packaged JSON Schema like its ~90
+# siblings, so it rides the same CI drift gate (`python -m rebar.schemas.gen_types
+# --check`) instead of a bespoke, unenforced Python literal (ADR 0004).
+_ENTRY = schemas.JIRA_SNAPSHOT_ENTRY
 
 pytestmark = pytest.mark.integration
 
@@ -98,12 +106,11 @@ def produced_snapshot(monkeypatch) -> dict:
 
 
 def test_fetch_snapshot_conforms_to_schema(produced_snapshot) -> None:
-    from rebar_reconciler import _snapshot_schema
-
+    validate = schemas.validator(_ENTRY).validate
     assert produced_snapshot, "producer built an empty snapshot"
     for key, entry in produced_snapshot.items():
         try:
-            _snapshot_schema.validate_snapshot_entry(entry)
+            validate(entry)
         except jsonschema.ValidationError as exc:
             pytest.fail(f"{key} violates the snapshot-entry schema: {exc.message}")
 
@@ -114,13 +121,12 @@ def test_schema_rejects_flat_comments_prefix_shape(produced_snapshot) -> None:
     Take a real producer entry, move its nested ``comment`` to a flat ``comments``
     key (the exact pre-fix divergence), and assert the schema now REJECTS it.
     """
-    from rebar_reconciler import _snapshot_schema
-
+    validate = schemas.validator(_ENTRY).validate
     entry = copy.deepcopy(produced_snapshot["REB-431"])
-    _snapshot_schema.validate_snapshot_entry(entry)  # the real shape is valid
+    validate(entry)  # the real shape is valid
     entry["comments"] = entry.pop("comment")["comments"]  # regress to flat shape
     with pytest.raises(jsonschema.ValidationError):
-        _snapshot_schema.validate_snapshot_entry(entry)
+        validate(entry)
 
 
 def test_producer_carries_enrichment_keys(produced_snapshot) -> None:

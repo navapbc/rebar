@@ -40,12 +40,31 @@ path** — exactly what story A built.
    We explicitly **reject** the heavier options as overkill for a single team: full
    live-sandbox e2e (`jira-python`'s model) and cross-team Pact broker contracts.
 
-2. **The snapshot-entry shape has a single source of truth.** It lives in
-   `src/rebar/_engine/rebar_reconciler/_snapshot_schema.py` — a `TypedDict` (for
-   readers) + a JSON Schema (`SNAPSHOT_ENTRY_SCHEMA`, validated with `jsonschema`).
-   The module docstring tabulates which consumer reads each key. Both the fetcher's
-   output and the differs' expectations target it. When a new field is added to the
-   snapshot, update the schema first.
+2. **The snapshot-entry shape has a single source of truth, and it is ENFORCED.**
+   It lives in `src/rebar/schemas/jira_snapshot_entry.schema.json` — one of the ~90
+   packaged JSON Schemas, loadable via `rebar.schemas.load("jira_snapshot_entry")`
+   and validated with `rebar.schemas.validator("jira_snapshot_entry")` (a
+   `Draft202012Validator`). Each property's `description` names the consumer that
+   reads it. Both the fetcher's output and the differs' expectations target it. When
+   a new field is added to the snapshot, update the schema first.
+
+   *Why it moved (ticket 8537).* This clause originally pointed at a hand-rolled
+   `_snapshot_schema.py` OUTSIDE the schemas machinery, and "update the schema first"
+   was aspirational: no production module imported it, `fetcher.py` never validated
+   against it, and nothing failed if the two drifted. Two mechanisms now make it real:
+
+   - **The generated-types drift gate.** `jira_snapshot_entry` is generated into
+     `src/rebar/types.py` as the `JiraSnapshotEntry` `TypedDict` alongside every other
+     schema-derived shape, so CI's `python -m rebar.schemas.gen_types --check` fails
+     when the schema and its generated layer fall out of step. Editing the contract
+     without regenerating — or regenerating without committing — breaks the build.
+   - **Conformance on real producer output.** `test_snapshot_contract.py` validates
+     every `fetch_snapshot` entry against this schema, so a fetcher that emits a
+     diverging shape (a flat `comments`, a bare-string `parent`, a link without
+     `type.name`) fails immediately.
+
+   The generated `TypedDict` is deliberately open-typed for the nested REST
+   sub-objects; the JSON Schema, not the `TypedDict`, is the enforcement surface.
 
 3. **Assert structure/type and semantic round-trip — never values or interactions.**
    This is the anti-change-detector rule (Google SWE-book): a test that pins exact
@@ -57,7 +76,8 @@ path** — exactly what story A built.
 - **DO** assert a **semantic round-trip** (the consumer's behaviour changes with the
   producer's content — e.g. "inbound emits a link add for the producer's
   `issuelinks`", "the emitted comment-add count flips when the echo marker is
-  stripped") or **structure/type** conformance against `_snapshot_schema`.
+  stripped") or **structure/type** conformance against the packaged
+  `jira_snapshot_entry` schema (`rebar.schemas.validator("jira_snapshot_entry")`).
 - **DO** drive fixtures through the production path (`fetch_snapshot` / the real
   differs), via the story-A `FakeAcliClient`. Don't hand-build snapshot dicts that
   the real fetcher would never emit — that is the exact gap 0ee6/3f04 exploited.
