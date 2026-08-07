@@ -359,7 +359,8 @@ class PydanticAIRunner:
         # pydantic-ai's stock OpenAIProvider and failed with "Missing credentials" (bug 6e70).
         # Never overrides an explicit `base_url`; a class with no slot endpoint is a no-op.
         if not cfg.base_url and self._model_override is None:
-            slot_endpoint = primary_endpoint_for(resolved)
+            # Slot reads (here and below) take the CONFIG's own root, not ambient cwd (bug 2876).
+            slot_endpoint = primary_endpoint_for(resolved, repo_root=cfg.repo_path)
             if slot_endpoint:
                 cfg = replace(cfg, base_url=slot_endpoint)
         # Provider resolution is delegated to the per-run ProviderSession seam (story S1 /
@@ -378,7 +379,9 @@ class PydanticAIRunner:
             # for a class with no `fallback` configured, which is every deployment until an operator
             # opts in, so the three branches below stay byte-identical there.
             fallback_targets = (
-                () if self._model_override is not None else fallback_targets_for(resolved)
+                ()
+                if self._model_override is not None
+                else fallback_targets_for(resolved, repo_root=cfg.repo_path)
             )
             candidates = [resolved]
             if self._model_override is not None:
