@@ -31,7 +31,6 @@ from typing import Any
 
 __all__ = [
     "BRIDGE_FSCK",
-    "BRIDGE_STATUS",
     "CLAIM_RESULT",
     "CLARITY_RESULT",
     "CODE_REVIEW_VERDICT",
@@ -90,7 +89,6 @@ NEXT_BATCH = "next_batch"
 LIST_DESCENDANTS = "list_descendants"
 CLARITY_RESULT = "clarity_result"
 VALIDATE_REPORT = "validate_report"
-BRIDGE_STATUS = "bridge_status"
 FILE_IMPACT = "file_impact"
 VERIFY_COMMANDS = "verify_commands"
 SCRATCH_ENVELOPE = "scratch_envelope"
@@ -299,7 +297,6 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "list_descendants": LIST_DESCENDANTS,
     "clarity_check": CLARITY_RESULT,
     "validate": VALIDATE_REPORT,
-    "bridge_status": BRIDGE_STATUS,
     "get_file_impact": FILE_IMPACT,
     "get_verify_commands": VERIFY_COMMANDS,
     "scratch": SCRATCH_ENVELOPE,
