@@ -23,7 +23,7 @@ import itertools
 import json
 import logging
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -55,6 +55,7 @@ _SHAPE_FIELDS = (
     "request_limit",
     "tool_calls_limit",
     "finish_reason",
+    "distinct_fetches",
 )
 
 # Row-level call outcome, written under the ``"outcome"`` key on EVERY row (bug 8455).
@@ -158,7 +159,7 @@ def failure_usage(
     *,
     request_limit: int,
     tool_calls_limit: int,
-) -> dict[str, int | str | None]:
+) -> dict[str, Any]:
     """Reduce a run's accumulated pydantic-ai messages to its SHAPE, on EITHER outcome.
 
     Originally written for the raise path only (hence the name), but nothing here is
@@ -193,6 +194,8 @@ def failure_usage(
     }
     finish_reason: str | None = None
     signatures: list[str] = []
+    distinct_fetches: list[dict] = []
+    seen_fetches: set[tuple[str, str]] = set()
     for message in messages:
         if type(message).__name__ == "ModelResponse":
             totals["requests"] += 1
@@ -209,11 +212,19 @@ def failure_usage(
             if type(part).__name__ == "ToolCallPart":
                 totals["tool_calls"] += 1
                 signatures.append(_tool_signature(part))
+                name = str(getattr(part, "tool_name", "") or "?")
+                target = fetch_target(name, getattr(part, "args", None))
+                if target is not None:
+                    key = (name, target)
+                    if key not in seen_fetches:
+                        seen_fetches.add(key)
+                        distinct_fetches.append({"tool": name, "target": target})
     return {
         **totals,
         "finish_reason": finish_reason,
         "request_limit": request_limit,
         "tool_calls_limit": tool_calls_limit,
+        "distinct_fetches": distinct_fetches,
         **_repetition_summary(signatures),
     }
 
@@ -266,6 +277,66 @@ def _tool_signature(part: object) -> str:
 
     name = str(getattr(part, "tool_name", "") or "?")
     return tool_call_signature(name, getattr(part, "args", None))
+
+
+def fetch_target(name: str, args: object) -> str | None:
+    """The PRIMARY path/query arg of a fetch-like tool call, or ``None`` for any other tool.
+
+    Records ONLY the primary path/query (``read_file``→its path, ``search_files``→its
+    query/pattern, ``list_directory``→its path) — NEVER the full args, so no line ranges and no
+    content leak into the run shape. ``args`` may be a dict, a JSON string, or an arbitrary
+    object; a dict or a parseable JSON-string dict is inspected, anything else (or a parse
+    failure) yields ``None``.
+    """
+    key_by_tool = {
+        "read_file": ("path",),
+        "search_files": ("query", "pattern", "regex"),
+        "list_directory": ("path",),
+    }
+    keys = key_by_tool.get(name)
+    if keys is None:
+        return None
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(args, dict):
+        return None
+    for key in keys:
+        value = args.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _normalize_fetch_path(path: str) -> str:
+    """Strip a single leading ``./`` for suffix comparison."""
+    return path[2:] if path.startswith("./") else path
+
+
+def fetch_overlap(fetches: list[dict], file_impact: Iterable[str]) -> dict:
+    """Overlap of the run's path-bearing fetches against a ticket's declared ``file_impact``.
+
+    Returns ``{"covered", "total", "fraction"}``. ``total`` counts only path-bearing fetches
+    (``tool == "read_file"``; search queries are ignored for path coverage). ``covered`` counts
+    those whose ``target`` matches a declared path by EXACT path or by one being a SUFFIX of the
+    other (a single leading ``./`` normalized away). ``fraction`` = covered/total (0.0 when
+    total is 0), rounded to 4 dp.
+    """
+    declared = [_normalize_fetch_path(p) for p in file_impact if isinstance(p, str) and p]
+    reads = [
+        _normalize_fetch_path(str(f.get("target")))
+        for f in fetches
+        if f.get("tool") == "read_file" and f.get("target")
+    ]
+    total = len(reads)
+    covered = 0
+    for target in reads:
+        if any(target == dp or target.endswith(dp) or dp.endswith(target) for dp in declared):
+            covered += 1
+    fraction = round(covered / total, 4) if total else 0.0
+    return {"covered": covered, "total": total, "fraction": fraction}
 
 
 #: Minimum sample size (trailing tool calls) before loop accusation is valid.
