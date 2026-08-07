@@ -586,7 +586,7 @@ def score_code_novelty(
         # `cfg.model`, so the diff and the prior findings went to the operator's default provider
         # even with every class configured elsewhere. Inside the existing try, so a config error
         # still lands on the fail-safe below — a broken novelty signal keeps MORE findings.
-        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS))
+        cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS, cfg.repo_path))
         runner_sel = runner or get_runner(cfg)
         prompt = _prompts.get_prompt("code-review-novelty", repo_root=cfg.repo_path)
         system, _meta = _prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
