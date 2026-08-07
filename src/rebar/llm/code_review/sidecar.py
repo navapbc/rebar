@@ -134,7 +134,11 @@ def emit(
         return False
     try:
         from rebar import config as _config
-        from rebar._commands._seam import append_event
+        from rebar._commands._seam import (
+            SecretScreenRefused,
+            append_event,
+            warn_secret_screen_refused,
+        )
 
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(
@@ -145,6 +149,9 @@ def emit(
             change_fp=change_fp,
         )
         append_event(target_ticket, EVENT_TYPE, payload, tracker, repo_root=repo_root)
+    except SecretScreenRefused:
+        warn_secret_screen_refused(target_ticket, f"code-review {EVENT_TYPE}")
+        return False
     except Exception:
         logger.warning("code-review REVIEW_RESULT sidecar emit failed; continuing", exc_info=True)
         return False
