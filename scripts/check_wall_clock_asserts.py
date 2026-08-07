@@ -77,8 +77,10 @@ def _has_timing_operand(node: ast.expr) -> bool:
             for side in (sub.left, sub.right):
                 if isinstance(side, ast.Call):
                     fn = side.func
-                    name = fn.attr if isinstance(fn, ast.Attribute) else (
-                        fn.id if isinstance(fn, ast.Name) else ""
+                    name = (
+                        fn.attr
+                        if isinstance(fn, ast.Attribute)
+                        else (fn.id if isinstance(fn, ast.Name) else "")
                     )
                     if name in _CLOCK_CALLS:
                         return True
@@ -98,7 +100,7 @@ def _upper_bound_wall_clock(test: ast.expr) -> bool:
         if not isinstance(sub, ast.Compare):
             continue
         left = sub.left
-        for op, comparator in zip(sub.ops, sub.comparators):
+        for op, comparator in zip(sub.ops, sub.comparators, strict=True):
             if isinstance(op, (ast.Lt, ast.LtE)):
                 if _has_timing_operand(left) and _is_numeric_budget(comparator):
                     return True

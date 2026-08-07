@@ -415,25 +415,29 @@ def check(schema_path: Path, root: Path) -> list[str]:
         found, pointer = _check_marker(source_lines, lineno)
         if found:
             if not pointer:
-                errors.append((
-                    lineno,
-                    f"{schema_path}:{lineno}: {cls_name}.{field_name}: bare "
-                    f"'# read-via:' marker — a pointer/reason is required "
-                    f"(e.g. '# read-via: path/to/reader.py description').",
-                ))
+                errors.append(
+                    (
+                        lineno,
+                        f"{schema_path}:{lineno}: {cls_name}.{field_name}: bare "
+                        f"'# read-via:' marker — a pointer/reason is required "
+                        f"(e.g. '# read-via: path/to/reader.py description').",
+                    )
+                )
             # valid marker → ok
         else:
             if (cls_name, field_name) in reads:
                 pass  # at least one read site found
             else:
-                errors.append((
-                    lineno,
-                    f"{schema_path}:{lineno}: {cls_name}.{field_name} has no "
-                    f"attribute-read site outside the schema/config plumbing. "
-                    f"Add a read site, or add a '# read-via: <pointer>' marker "
-                    f"on the field line (or the immediately preceding line) to "
-                    f"document where it is consumed.",
-                ))
+                errors.append(
+                    (
+                        lineno,
+                        f"{schema_path}:{lineno}: {cls_name}.{field_name} has no "
+                        f"attribute-read site outside the schema/config plumbing. "
+                        f"Add a read site, or add a '# read-via: <pointer>' marker "
+                        f"on the field line (or the immediately preceding line) to "
+                        f"document where it is consumed.",
+                    )
+                )
 
     errors.sort(key=lambda t: t[0])
     return [msg for _, msg in errors]
@@ -463,13 +467,15 @@ def ticket_pointer_reports(schema_path: Path) -> list[str]:
         if not ticket_ids:
             continue
         joined = ", ".join(ticket_ids)
-        reports.append((
-            lineno,
-            f"{schema_path}:{lineno}: {cls_name}.{field_name}: '# read-via:' marker "
-            f"points at ticket {joined} — this marker expires when that ticket closes. "
-            f"Confirm the ticket is still open, or replace the pointer with the field's "
-            f"real reader.",
-        ))
+        reports.append(
+            (
+                lineno,
+                f"{schema_path}:{lineno}: {cls_name}.{field_name}: '# read-via:' marker "
+                f"points at ticket {joined} — this marker expires when that ticket closes. "
+                f"Confirm the ticket is still open, or replace the pointer with the field's "
+                f"real reader.",
+            )
+        )
     reports.sort(key=lambda t: t[0])
     return [msg for _, msg in reports]
 

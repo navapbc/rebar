@@ -160,8 +160,7 @@ def _render_red(
     else:
         good = NO_LOWER_BOUND
         provenance = (
-            "no lower bound could be resolved from this workflow's run history — pick one "
-            "by hand"
+            "no lower bound could be resolved from this workflow's run history — pick one by hand"
         )
 
     lines = [f"## `{ref_name}` is RED at `{head_sha}`", ""]

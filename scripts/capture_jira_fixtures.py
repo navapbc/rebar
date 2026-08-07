@@ -155,8 +155,8 @@ def _write(name: str, payload: Any) -> Path:
 def capture(keys: list[str]) -> None:
     # Import the production transport lazily so --help works without the package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "rebar" / "_engine"))
-    from rebar_reconciler import acli as acli_mod  # noqa: PLC0415
-    from rebar_reconciler import acli_subprocess  # noqa: PLC0415
+    from rebar_reconciler import acli as acli_mod
+    from rebar_reconciler import acli_subprocess
 
     settings = acli_subprocess.resolve_jira_settings(project_default="REB")
     project = settings.project or "REB"

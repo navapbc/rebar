@@ -147,7 +147,9 @@ def _collect_markers(lines: list[str]) -> tuple[dict[int, str], list[int]]:
     return reasons, empty
 
 
-def _function_marker(func: ast.FunctionDef | ast.AsyncFunctionDef, reasons: dict[int, str]) -> str | None:
+def _function_marker(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, reasons: dict[int, str]
+) -> str | None:
     """A function-level marker: line above the def/decorators, the def line,
     or the first body line."""
     first_line = min([func.lineno] + [d.lineno for d in func.decorator_list])
@@ -165,7 +167,7 @@ def _function_marker(func: ast.FunctionDef | ast.AsyncFunctionDef, reasons: dict
 # ---------------------------------------------------------------------------
 
 
-def _git_subcommand(tokens: list[str | None]) -> str | None | object:
+def _git_subcommand(tokens: list[str | None]) -> str | object | None:
     """The git subcommand from resolved argv tokens, skipping global options.
 
     Returns the subcommand string, None when there is none, or _OPAQUE when an
@@ -250,7 +252,8 @@ class _ScopeLinter:
                     return
                 if f.attr == "append" and len(call.args) == 1:
                     a = call.args[0]
-                    cur.append(a.value if isinstance(a, ast.Constant) and isinstance(a.value, str) else None)
+                    is_str = isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    cur.append(a.value if is_str else None)
                 elif f.attr == "extend" and len(call.args) == 1:
                     add = self._resolve_elements(call.args[0])
                     if add is not None:
@@ -359,7 +362,9 @@ class _ScopeLinter:
             # other expressions (str(x), f-strings, attributes) are operands
         verb = next((t for t in tokens if t in MUTATION_VERBS), None)
         if verb is not None:
-            self._emit(call, "wrapper-git-mutation", f"git wrapper {name}() passed mutation verb {verb!r}")
+            self._emit(
+                call, "wrapper-git-mutation", f"git wrapper {name}() passed mutation verb {verb!r}"
+            )
         elif starred_untracked:
             self._emit(
                 call,
@@ -502,9 +507,7 @@ def _scan_shell_block(
     lines = block.splitlines()
     reasons, empty_markers = _collect_markers(lines)
     violations = [
-        Violation(
-            rel, base_line, "marker-without-reason", "raw-git-ok marker requires a reason"
-        )
+        Violation(rel, base_line, "marker-without-reason", "raw-git-ok marker requires a reason")
         for _ in empty_markers
     ]
     if not _block_has_tracker_context(block, working_directory):

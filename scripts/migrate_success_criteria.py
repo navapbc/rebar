@@ -164,15 +164,13 @@ def migrate(repo_root: str, *, write: bool = False, include_open: bool = False) 
 
 
 def _print_preview(proposal: dict) -> None:
-    print(  # noqa: T201 — CLI output
-        f"  {proposal['ticket_id']} ({proposal['status']}):"
-    )
-    print("    --- before ---")  # noqa: T201 — CLI output
+    print(f"  {proposal['ticket_id']} ({proposal['status']}):")
+    print("    --- before ---")
     for line in proposal["old_description"].splitlines():
-        print(f"    {line}")  # noqa: T201 — CLI output
-    print("    --- after ---")  # noqa: T201 — CLI output
+        print(f"    {line}")
+    print("    --- after ---")
     for line in proposal["new_description"].splitlines():
-        print(f"    {line}")  # noqa: T201 — CLI output
+        print(f"    {line}")
 
 
 def main() -> None:
@@ -192,15 +190,13 @@ def main() -> None:
 
     if args.write:
         count = migrate(args.repo_root, write=True, include_open=args.include_open)
-        print(f"migrated {count} ticket(s)")  # noqa: T201 — CLI output
+        print(f"migrated {count} ticket(s)")
     else:
         proposals = propose_migrations(args.repo_root, include_open=args.include_open)
-        print(  # noqa: T201 — CLI output
-            f"[dry-run] {len(proposals)} ticket(s) would be migrated:"
-        )
+        print(f"[dry-run] {len(proposals)} ticket(s) would be migrated:")
         for proposal in proposals:
             _print_preview(proposal)
-        print(f"[dry-run] {len(proposals)} ticket(s) would be migrated")  # noqa: T201 — CLI output
+        print(f"[dry-run] {len(proposals)} ticket(s) would be migrated")
 
 
 if __name__ == "__main__":

@@ -130,7 +130,7 @@ def run_scanner(*, cwd: Path | None = None) -> list[dict]:
     return code >= 2, invalid JSON, or any non-``C901`` diagnostic is a ``ScannerError``.
     """
     try:
-        proc = subprocess.run(  # noqa: S603 — fixed, non-shell argv
+        proc = subprocess.run(  # fixed, non-shell argv
             RUFF_SCAN_ARGS,
             cwd=str(cwd or REPO_ROOT),
             capture_output=True,
@@ -178,13 +178,13 @@ def build_symbol_index(source: str) -> dict[int, list[tuple[int, str]]]:
     def visit(node: ast.AST, prefix: list[str]) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qual = prefix + [child.name]
+                qual = [*prefix, child.name]
                 keyword_len = 10 if isinstance(child, ast.AsyncFunctionDef) else 4
                 name_col = child.col_offset + keyword_len + 1
                 index.setdefault(child.lineno, []).append((name_col, ".".join(qual)))
                 visit(child, qual)
             elif isinstance(child, ast.ClassDef):
-                visit(child, prefix + [child.name])
+                visit(child, [*prefix, child.name])
             else:
                 visit(child, prefix)
 

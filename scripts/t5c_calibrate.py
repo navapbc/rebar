@@ -20,15 +20,16 @@ OLD_T5C = (
     "OVERLAY — apply ONLY if the plan actually adds a security surface in THIS application's "
     "domain: a new endpoint, network exposure, an authn/authz boundary, storage/transmission of "
     "sensitive data, PII, or a credential/secret/grant. If the application has no such surface "
-    "(e.g. a local library / CLI / git-backed tool with no network or auth), PASS as not-applicable. "
-    "DERIVE the security model from the application's ACTUAL domain — do NOT import generic web-app "
-    "concepts (e.g. a 'declared access level', endpoint authn) that this application does not have; "
-    "a finding that imposes a security requirement the application's domain does not contain is a "
-    "FALSE POSITIVE, not a gap. Where a real surface exists, check (OWASP only where the category "
-    "applies): (a) sensitive paths use the app's own auth mechanism; (b) data protection — "
-    "encryption at rest/in transit; (c) LEAST-PRIVILEGE on any new credential/role/grant; (d) SECRET "
-    "LIFECYCLE — no plaintext secrets. SEVERITY priors: an undeclared sensitive surface or a "
-    "plaintext secret is high. PASS if the application's actual security boundaries are explicit."
+    "(e.g. a local library / CLI / git-backed tool with no network or auth), PASS as "
+    "not-applicable. DERIVE the security model from the application's ACTUAL domain — do NOT "
+    "import generic web-app concepts (e.g. a 'declared access level', endpoint authn) that this "
+    "application does not have; a finding that imposes a security requirement the application's "
+    "domain does not contain is a FALSE POSITIVE, not a gap. Where a real surface exists, check "
+    "(OWASP only where the category applies): (a) sensitive paths use the app's own auth "
+    "mechanism; (b) data protection — encryption at rest/in transit; (c) LEAST-PRIVILEGE on any "
+    "new credential/role/grant; (d) SECRET LIFECYCLE — no plaintext secrets. SEVERITY priors: an "
+    "undeclared sensitive surface or a plaintext secret is high. PASS if the application's actual "
+    "security boundaries are explicit."
 )
 
 FIXTURES = {
@@ -45,7 +46,7 @@ def plan_text(tid: str) -> str:
 def run(label: str, request: dict) -> dict:
     r = preview_criterion(request, repo_root=REPO, timeout=180.0)
     v = r.get("verdict")
-    finding = (r.get("finding") or {})
+    finding = r.get("finding") or {}
     ftext = finding.get("finding") if isinstance(finding, dict) else finding
     print(f"  {label:6s} verdict={v!r} timed_out={r.get('timed_out', False)}")
     if ftext:

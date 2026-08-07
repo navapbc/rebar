@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         for rec in records:
-            print(json.dumps(rec))  # noqa: T201 — CLI presentation surface
+            print(json.dumps(rec))
         return 0
 
     artifact = Path(repo_root) / _ARTIFACT_RELPATH
@@ -154,9 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             for rec in new:
                 fh.write(json.dumps(rec) + "\n")
     skipped = len(records) - len(new)
-    print(  # noqa: T201 — CLI presentation surface
-        f"backfill: {len(new)} new record(s) written, {skipped} skipped (already present)"
-    )
+    print(f"backfill: {len(new)} new record(s) written, {skipped} skipped (already present)")
     return 0
 
 

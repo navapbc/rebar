@@ -254,7 +254,7 @@ def _cleanup(tracker: str, pre_ids: str) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-def _probe() -> None:  # noqa: PLR0915 — deliberately one linear probe script
+def _probe() -> None:  # deliberately one linear probe script
     section("create — types, fields, and validation")
     if os.environ.get("PROBE_INJECT_FAIL") == "1":
         # Harness self-test: a deliberately failing assertion. The probe must

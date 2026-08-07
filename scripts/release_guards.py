@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = args.func(args)
     if failures:
         for line in failures:
-            print(f"release_guards: {line}", file=sys.stderr)  # noqa: T201
+            print(f"release_guards: {line}", file=sys.stderr)
         return 1
     return 0
 

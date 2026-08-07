@@ -8,6 +8,7 @@ Inputs (env vars):
   FAILURE_OBSERVED  "true" if any needed job's result was failure/cancelled
 Output (stdout): exactly one of success|failure|cancelled
 """
+
 from __future__ import annotations
 
 import os

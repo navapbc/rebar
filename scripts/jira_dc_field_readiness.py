@@ -217,8 +217,9 @@ def await_required_fields(
     ``Epic Link``/``Epic Name`` on the first Software project create, so calling this
     beforehand waits for something only the blocked action can produce — bug
     941b-f049-5f29-4410, measured on run 30981084637 and observed as a total-suite
-    deadlock in runs 30975323866 and 30978613228 (see the module docstring). It is nevertheless a bounded LOOP rather
-    than a single read, because provisioning is fast (0.0512s) but not instantaneous
+    deadlock in runs 30975323866 and 30978613228 (see the module docstring). It is
+    nevertheless a bounded LOOP rather than a single read, because provisioning is fast
+    (0.0512s) but not instantaneous
     and a one-shot read immediately after the ``201`` can lose that race.
 
     ``budget``/``interval`` default to the MODULE-LEVEL constants read at CALL time

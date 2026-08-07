@@ -104,7 +104,7 @@ def main() -> int:
             records.append({"coverage_pct": coverage, "ts": ts})
 
     written = persist_snapshots(args.repo_root, records)
-    print(f"persisted {written} snapshot(s)")  # noqa: T201
+    print(f"persisted {written} snapshot(s)")
     return 0
 
 

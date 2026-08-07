@@ -170,19 +170,19 @@ def main() -> int:
         "commits": rows,
     }
     Path(args.out).write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
-    print(  # noqa: T201 — one-shot analysis CLI; the report IS its operational stdout
+    print(
         f"bug-fix commits: {len(rows)}; flagged (> {BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES} "
         f"non-test lines): {len(flagged)} -> {args.out}"
     )
     for r in flagged:
-        print(f"  {r['commit'][:12]}  {r['non_test_lines']:>5}  {r['ticket']}")  # noqa: T201 — report body
+        print(f"  {r['commit'][:12]}  {r['non_test_lines']:>5}  {r['ticket']}")
 
     if args.check_planning_corpus:
         flagged_set = {r["commit"] for r in flagged}
         ok = len(rows) == PLANNING_CORPUS_SIZE and flagged_set == set(ADJUDICATED_SUBSTANTIVE)
         missed = set(ADJUDICATED_SUBSTANTIVE) - flagged_set
         mechanical_fp = flagged_set - set(ADJUDICATED_SUBSTANTIVE)
-        print(  # noqa: T201 — check-mode verdict line, the script's contract output
+        print(
             f"planning-corpus check: corpus={len(rows)} (want {PLANNING_CORPUS_SIZE}); "
             f"missed={sorted(s[:12] for s in missed)}; "
             f"mechanical_fp={sorted(s[:12] for s in mechanical_fp)}; "

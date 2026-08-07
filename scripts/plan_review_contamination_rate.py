@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     data = json.loads(raw)
     sidecars = data if isinstance(data, list) else [data]
     result = contamination_rate(_findings_from_sidecars(sidecars))
-    print(json.dumps(result, indent=2))  # noqa: T201 — CLI presentation (a standalone script)
+    print(json.dumps(result, indent=2))
     return 0
 
 

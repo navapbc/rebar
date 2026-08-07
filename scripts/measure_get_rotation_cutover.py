@@ -165,9 +165,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=40)
     parser.add_argument("--end-ref", default="HEAD")
     args = parser.parse_args()
-    print(  # noqa: T201 - machine-readable measurement output
-        json.dumps(run(args.repo.resolve(), args.count, args.end_ref), indent=2, sort_keys=True)
-    )
+    print(json.dumps(run(args.repo.resolve(), args.count, args.end_ref), indent=2, sort_keys=True))
     return 0
 
 

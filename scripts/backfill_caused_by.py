@@ -82,16 +82,12 @@ def main() -> None:
 
     if args.write:
         count = backfill(args.repo_root, write=True)
-        print(f"wrote {count} caused_by link(s)")  # noqa: T201 — CLI output
+        print(f"wrote {count} caused_by link(s)")
     else:
         proposals = propose_caused_by(args.repo_root)
-        print(  # noqa: T201 — CLI output
-            f"[dry-run] {len(proposals)} caused_by link(s) would be written:"
-        )
+        print(f"[dry-run] {len(proposals)} caused_by link(s) would be written:")
         for proposal in proposals:
-            print(  # noqa: T201 — CLI output
-                f"  {proposal['bug_id']} -> {proposal['culprit_id']}"
-            )
+            print(f"  {proposal['bug_id']} -> {proposal['culprit_id']}")
 
 
 if __name__ == "__main__":

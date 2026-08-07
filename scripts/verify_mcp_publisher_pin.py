@@ -45,7 +45,7 @@ def main() -> int:
     print(f"verify-mcp-pin: pinned URL    = {url}")
     print(f"verify-mcp-pin: pinned SHA256 = {expected}")
     print("verify-mcp-pin: downloading and recomputing the digest…")
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 - fixed https GitHub release URL
+    with urllib.request.urlopen(url) as resp:  # fixed https GitHub release URL
         data = resp.read()
     actual = hashlib.sha256(data).hexdigest()
     print(f"verify-mcp-pin: downloaded    = {actual} ({len(data)} bytes)")

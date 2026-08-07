@@ -72,13 +72,13 @@ def _req(path: str, *, method: str = "GET", payload: dict | None = None) -> tupl
     """One raw REST round trip, recorded verbatim into the evidence log."""
     url = f"{BASE}{path}"
     body = json.dumps(payload).encode() if payload is not None else None
-    request = urllib.request.Request(url, data=body, method=method)  # noqa: S310 — fixed localhost harness
+    request = urllib.request.Request(url, data=body, method=method)  # fixed localhost harness
     token = base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")
     request.add_header("Content-Type", "application/json")
     request.add_header("Accept", "application/json")
     try:
-        with urllib.request.urlopen(request, timeout=60) as resp:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=60) as resp:
             raw = resp.read().decode() or ""
             status = resp.status
     except urllib.error.HTTPError as exc:
@@ -209,7 +209,9 @@ def main() -> int:
     verdicts["setup_epic_link_write"] = f"OK — {child} Epic Link = {landed}"
 
     # ── Q1a: clear via the fields form ───────────────────────────────────────────────────────
-    s1, b1 = _req(f"/rest/api/2/issue/{child}", method="PUT", payload={"fields": {epic_link: None}})
+    s1, _b1 = _req(
+        f"/rest/api/2/issue/{child}", method="PUT", payload={"fields": {epic_link: None}}
+    )
     status, body = _req(f"/rest/api/2/issue/{child}?fields={epic_link}")
     after1 = (body.get("fields") or {}).get(epic_link) if isinstance(body, dict) else "<unread>"
     verdicts["q1a_fields_null"] = (
@@ -219,7 +221,7 @@ def main() -> int:
 
     # ── Q1b: the update-verb form, only if the first did not clear ───────────────────────────
     if after1:
-        s2, b2 = _req(
+        s2, _b2 = _req(
             f"/rest/api/2/issue/{child}",
             method="PUT",
             payload={"update": {epic_link: [{"set": None}]}},
@@ -291,7 +293,7 @@ if __name__ == "__main__":
             OUT_DIR,
         )
         raise
-    except Exception as exc:  # noqa: BLE001 — an unexpected error is itself evidence worth keeping
+    except Exception as exc:  # an unexpected error is itself evidence worth keeping
         _write_evidence({"crashed": repr(exc)})
         logger.info("CRASHED — wrote %d round trip(s) before re-raising", len(_EVIDENCE))
         raise

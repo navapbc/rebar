@@ -112,9 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     block = extract_quickstart_bash(Path(readme).read_text(encoding="utf-8"))
     code = run_quickstart(block)
     if code == 0:
-        print(f"PASS: README quickstart ({readme}) ran green")  # noqa: T201
+        print(f"PASS: README quickstart ({readme}) ran green")
     else:
-        print(f"FAIL: README quickstart ({readme}) exited {code}")  # noqa: T201
+        print(f"FAIL: README quickstart ({readme}) exited {code}")
     return code
 
 

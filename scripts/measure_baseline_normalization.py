@@ -203,7 +203,7 @@ def _worker(corpus_path: Path) -> int:
         "raw_errors": raw["errors"],
         "normalized_errors": normalized["errors"],
     }
-    print(json.dumps(result, sort_keys=True))  # noqa: T201 - machine-readable worker protocol
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 
@@ -317,7 +317,7 @@ def main() -> int:
     if not args.pre_a3_ref:
         raise SystemExit("--pre-a3-ref is required")
     result = run(args.repo.resolve(), args.store_ref, args.pre_a3_ref)
-    print(json.dumps(result, indent=2, sort_keys=True))  # noqa: T201 - experiment artifact
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["passed"] else 1
 
 

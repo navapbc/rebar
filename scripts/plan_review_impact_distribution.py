@@ -171,7 +171,7 @@ def main(argv: list[str]) -> int:
     if not agg["events"]:
         sys.stderr.write(f"no REVIEW_RESULT sidecar events found under {args.tickets_root!r}\n")
         return 1
-    print(json.dumps(agg, indent=2) if args.json else render_text(agg))  # noqa: T201 — CLI report
+    print(json.dumps(agg, indent=2) if args.json else render_text(agg))
     return 0
 
 

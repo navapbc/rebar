@@ -86,12 +86,10 @@ def main(argv: list[str]) -> int:
     ]
     rc = subprocess.run(cmd, cwd=REPO_ROOT, check=False).returncode
     if not JUNIT_PATH.exists():
-        print(  # noqa: T201 — operator script; stderr diagnostic is its output surface
-            f"error: pytest produced no JUnit XML at {JUNIT_PATH}", file=sys.stderr
-        )
+        print(f"error: pytest produced no JUnit XML at {JUNIT_PATH}", file=sys.stderr)
         return 2
     summary = derive_json_summary(JUNIT_PATH, JSON_PATH)
-    print(  # noqa: T201 — operator script; the summary line is its stdout contract
+    print(
         f"live matrix: {summary['passed']} passed, {summary['failed']} failed, "
         f"{summary['error']} error, {summary['skipped']} skipped "
         f"-> {JSON_PATH.relative_to(REPO_ROOT)}"

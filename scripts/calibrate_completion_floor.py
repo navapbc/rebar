@@ -4,8 +4,9 @@ Runs the REAL ``plan_review_completion`` sub-call over the frozen gold set
 (``tests/unit/gold_set_completion.py``) against a synthetic partially-complete epic, then scores the
 model's ``containment`` / ``layer`` answers — and the resulting Pass-3 floor decision — against the
 gold labels. Because the changed artifact is a PROMPT, this is a LIVE LLM run (per G-Eval: freeze
-wording, calibrate to a gold set). Prints per-axis + per-category agreement and Cohen's kappa on the
-binary drop/keep decision; the human-written record lives at ``docs/calibration/completion_floor.md``.
+wording, calibrate to a gold set). Prints per-axis + per-category agreement and Cohen's kappa
+on the binary drop/keep decision; the human-written record lives at
+``docs/calibration/completion_floor.md``.
 
 Reproduce:
   REBAR_MCP_ALLOW_LLM=1 python scripts/calibrate_completion_floor.py
@@ -20,22 +21,21 @@ from pathlib import Path
 
 # the gold set lives with the tests (its other consumer is the deterministic e2e test)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests" / "unit"))
-from gold_set_completion import CATEGORIES, DELIVERED_CHILD_IDS, GOLD_SET  # noqa: E402
+from gold_set_completion import CATEGORIES, DELIVERED_CHILD_IDS, GOLD_SET
 
-from rebar.llm.config import LLMConfig  # noqa: E402
-from rebar.llm.plan_review import passes  # noqa: E402
-from rebar.llm.runner import get_runner  # noqa: E402
+from rebar.llm.config import LLMConfig
+from rebar.llm.plan_review import passes
+from rebar.llm.runner import get_runner
 
 PROMPT_FILE = Path("src/rebar/llm/reviewers/plan_review_completion.md")
 _PRESERVE = frozenset({"T5c", "T10"})
 _FLOOR = 0.4
 
 PLAN = (
-    "# Epic: ingest-and-reconcile pipeline\n\n"
-    "Delivered children: del-a (retry/backoff loop), del-b (record parser), del-c (results API + "
-    "cache). Open sibling: op-x (downstream consumer, still in progress). One child was force-closed "
-    "without verification: fc1.\n\n"
-    "## Acceptance Criteria\n- [ ] children compose into one pipeline\n- [ ] op-x consumes del-c\n"
+    "# Epic: ingest-and-reconcile pipeline\n\nDelivered children: del-a (retry/backoff loop), "
+    "del-b (record parser), del-c (results API + cache). Open sibling: op-x (downstream consumer, "
+    "still in progress). One child was force-closed without verification: fc1.\n\n## Acceptance "
+    "Criteria\n- [ ] children compose into one pipeline\n- [ ] op-x consumes del-c\n"
 )
 MANIFEST = [
     {"ticket_id": cid, "ac_text": f"- [ ] {cid} works\n- [ ] {cid} is verified"}

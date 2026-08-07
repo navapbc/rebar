@@ -54,6 +54,7 @@ _FENCE_RE = re.compile(r"^\s*```")
 # would silently excuse unwrapped prose made of a/b/c/d/e/f characters.)
 _ATOMIC_TOKEN_RE = re.compile(r"://|[/\\]|\w[._-]\w")
 
+
 # A line is unwrappable only when a SINGLE token already exceeds the limit *and* the
 # line is essentially just that token (plus short lead-in) — a URL, module path, or git
 # sha the author physically cannot split. A long line made of many short words IS
@@ -131,7 +132,9 @@ def check_message(raw: str, *, subject_limit: int, body_limit: int) -> list[str]
             in_fence = not in_fence
             continue
         if len(line) > body_limit and not _is_exempt(line, in_fence=in_fence):
-            problems.append(f"line {offset} is {len(line)} chars (limit {body_limit}): {line[:56]!r}…")
+            problems.append(
+                f"line {offset} is {len(line)} chars (limit {body_limit}): {line[:56]!r}…"
+            )
     return problems
 
 
@@ -148,9 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"commit-message wrap: cannot read {args.message_file}: {exc}", file=sys.stderr)
         return 1
 
-    problems = check_message(
-        raw, subject_limit=args.subject_limit, body_limit=args.body_limit
-    )
+    problems = check_message(raw, subject_limit=args.subject_limit, body_limit=args.body_limit)
     if not problems:
         return 0
 

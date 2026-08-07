@@ -455,40 +455,15 @@ max-complexity = 15
 # close-out reconciles the inline `# noqa: T201` sites against this per-file-ignore.
 "src/rebar/_engine/rebar_reconciler/*" = ["T201"]
 "src/rebar/_engine/jira-capability-probe.py" = ["T201"]
-# Live, human-run Jira capture CLI (epic f89d, story A) — same legitimate-print
-# operational surface as jira-capability-probe.py above: it streams capture
-# progress to stderr. KEEPS T201.
-"scripts/capture_jira_fixtures.py" = ["T201"]
-# Human-run bind-state retarget CLI — a one-shot operational tool that prints its
-# dry-run/apply report to stdout (the data surface) + errors to stderr. Same
-# legitimate-print category as the capture CLI above. KEEPS T201.
-"scripts/retarget_jira_project.py" = ["T201"]
-# server.json env-contract drift gate CLI — prints its guard report + ::error::
-# annotations to stdout (the CI surface). Legitimate-print category. KEEPS T201.
-"scripts/check_server_manifest.py" = ["T201"]
-# Config-read drift gate CLI (ticket 6754) — prints its violation report + OK line
-# to stdout (the CI gate surface). Legitimate-print category. KEEPS T201.
-"scripts/check_config_reads.py" = ["T201"]
-# Shrink-only complexity baseline gate CLI (story c9f7) — prints its counter summary
-# to stdout (the CI/pre-commit gate surface) + errors to stderr. Legitimate-print
-# category like the sibling gate CLIs above. KEEPS T201.
-"scripts/check_complexity_baseline.py" = ["T201"]
-# End-to-end CLI probe (ticket f1eb, port of probe-rebar.sh) — its PASS/FAIL
-# section report on stdout + failure detail on stderr ARE the tool's output.
-# Legitimate-print category. KEEPS T201.
-"scripts/probe_rebar.py" = ["T201"]
-# Canary alert-logic CLI (ticket e602, extraction from reconcile-bridge-canary.yml) —
-# prints ::warning::/::error:: workflow annotations + rebar-write failure detail to
-# stdout (the Actions log surface). Legitimate-print category. KEEPS T201.
-"scripts/canary_bridge.py" = ["T201"]
-# Jira DC capability-map CLI (ticket 259b) — prints ::error:: workflow annotations plus
-# a final artifact-location summary to stdout (the Actions log surface). Legitimate-print
-# category. KEEPS T201.
-"scripts/jira_dc_capability_map.py" = ["T201"]
-# Comment-hygiene drift gate CLI (ticket b047) — prints its violation report +
-# teaching message to stdout (the CI gate surface). Legitimate-print category.
-# KEEPS T201.
-"scripts/check_comment_hygiene.py" = ["T201"]
+# Workflow tooling in scripts/ — local, human/CI-run operational CLIs whose stdout and
+# stderr ARE their output (gate reports, ::error:: annotations, probe transcripts, dry-run
+# diffs, machine-readable JSON contracts). Print discipline carries no value here, so the
+# exemption is one whole-directory INVARIANT entry rather than a per-file allowlist that has
+# to grow with every new script — the same shape as "tests/**" above. PERMANENT, not part of
+# the shrinking allowlist. (Ticket ae96: replaced nine discretionary single-file entries and
+# 28 now-redundant inline `# noqa: T201` directives; scripts/ is linted by `make lint` from
+# here on.)
+"scripts/**" = ["T201"]
 # TypedDict generator CLI (story 3a10) — prints its regenerate/--check report to
 # stdout (the CI drift-gate surface). Legitimate-print category. KEEPS T201.
 "src/rebar/schemas/gen_types.py" = ["T201"]

@@ -47,7 +47,7 @@ def main() -> int:
 
     records = backfill(args.transcript_dir)
     for record in records:
-        print(json.dumps(record))  # noqa: T201
+        print(json.dumps(record))
     return 0
 
 

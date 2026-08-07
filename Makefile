@@ -8,7 +8,9 @@
 # pinned exactly in pyproject's [dev] extra, so all of these run the same ruff.
 
 .DEFAULT_GOAL := help
-sources = src tests
+# scripts/ is in scope (ticket ae96): seven of these files ARE the CI gates behind the
+# `Verified` vote, so leaving the gate implementations themselves ungated was the hole.
+sources = src tests scripts
 
 # Pinned git-cliff (standalone Rust binary; install with `pipx install
 # git-cliff==$(GIT_CLIFF_VERSION)`, NOT a pyproject dev extra). The `changelog`
