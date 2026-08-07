@@ -37830,10 +37830,24 @@
     },
     "4bf4-db7d-ce69-45e1": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## The defect\n\n`tests/unit/metrics/test_jscpd_dup_heldout.py::test_live_clone` fails against a real, installed jscpd. The adapter reports `duplication[\"clones\"] == 0` for a fixture that contains two byte-identical files, so the assertion `result.duplication[\"clones\"] >= 1` fails.\n\n    assert 0 >= 1\n\n## Why this is being filed now\n\nThis failure was one of the two used as evidence in bug a5f5 (`make worktree` provisioned its venv from ambient python3, so worktrees ran Python 3.14 while CI tested 3.11-3.13). a5f5's acceptance criteria required re-checking both on an in-matrix interpreter, because every prior observation of them had been on an untested Python and nobody could say which were artifacts.\n\nRe-checked on Python 3.12.13 as part of landing a5f5:\n\n- `tests/unit/grounding/test_coverage_reconstruction.py::test_full_backend_account_is_present`\n  -> PASSES. It was an artifact of the untested interpreter, and needs no ticket.\n- `tests/unit/metrics/test_jscpd_dup_heldout.py::test_live_clone`\n  -> STILL FAILS. So it is genuinely unrelated to the Python revision.\n\n## Environment\n\n    jscpd     5.0.14  (/opt/homebrew/bin/jscpd)\n    python    3.12.13 (in-matrix)\n\nThe test is a live-tool test: it is skipped when jscpd is absent, so CI (which does not install the Node toolchain) never runs it. It only fires for developers who have jscpd on PATH for `rebar metrics`, which is why it has gone unattributed.\n\n## Likely direction, not yet confirmed\n\njscpd 5.x is a major version ahead of whatever the adapter was written against; the most likely cause is a changed report shape or changed default thresholds (`--min-lines` / `--min-tokens`) so the fixture's clone falls under the detection floor. Confirm before fixing \u2014 this ticket records the observation, not a diagnosis.\n\n## Acceptance Criteria\n\n- [ ] Root cause established: adapter contract vs jscpd 5.x behaviour, with evidence.\n- [ ] `test_live_clone` passes against the installed jscpd, or the adapter's supported jscpd\n      range is declared and the test skips outside it (loudly, naming the range) rather than\n      failing.\n- [ ] `rebar metrics` duplication is confirmed to report real clones on jscpd 5.x, not silently\n      zero \u2014 a metric that reads 0 when it means \"I cannot tell\" is worse than `unavailable`.\n\n## Provenance\n\nDiscovered from a5f5 while satisfying its \"re-check on an in-matrix interpreter\" criterion.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "jscpd 5.x live-clone detection returns 0 clones, so test_live_clone fails against a real jscpd"
       },
       "created_at": "2026-08-07T09:52:16Z",
@@ -47080,10 +47094,24 @@
     },
     "6067-fcbd-622b-4c64": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## The defect (same class as c5b3-1b8a-08dd-40af)\n\nFound by the ticket-c5b3 sibling sweep. `src/rebar/metrics/analyzers/lizard_complexity.py` ends `analyze` with:\n\n    files = _file_complexity(lizard.analyze([str(root)]), root)\n    return AnalyzerResult(complexity={\"files\": files, \"functions\": ..., \"total_ccn\": ...,\n                                      \"max_ccn\": max(..., default=0)})\n\nThere is no guard on `files` being empty. If `lizard.analyze` yields zero file records -- because the scan root holds no language lizard supports, because the root is empty, or because a scan silently produced nothing -- the adapter returns `AnalyzerResult(complexity={\"files\": {}, \"functions\": 0, \"total_ccn\": 0, \"max_ccn\": 0})`.\n\nThat is a CONFIDENT ZERO published with `confidence: high, source: structural`: a reader concludes the repository has no complexity, when in fact nothing was measured. It is the identical failure mode ticket c5b3 fixed in the scc adapter, in a different tool's adapter, and the same one epic 839b-f6d2-7e1a-4051 was created to eliminate (\"fabricated authoritative zeros\"). `rebar.metrics.registry.Unavailable` is the correct representation of \"measured nothing\".\n\nNot currently reproducing on this repository (lizard measures 1708 files here), which is why it was found by sweep rather than by observation. It is latent, and it fires for exactly the clients epic 839b's polyglot adoption was meant to serve -- a repository of a language lizard does not support gets a confident zero rather than an honest Unavailable.\n\n## Why it was not fixed inside c5b3\n\nc5b3's acceptance criteria and the operator's ruling are scoped to the scc adapter and the module-size metric. Fixing a second adapter there would have widened a bug fix past its ticket and past its review. Filed instead, per the sibling-sweep disposition rule.\n\n## Also worth checking in the same pass\n\n`src/rebar/metrics/analyzers/jscpd_dup.py` returns whatever `run_jscpd` produces without inspecting whether any file was scanned. A duplication percentage of 0 over zero scanned files is the same fabricated zero; confirm whether `run_jscpd`'s payload distinguishes the two before deciding whether it needs the same guard.\n\n## Acceptance Criteria\n\n- [ ] An empty lizard file map is reported as `Unavailable`, never a zero-valued\n      `AnalyzerResult` -- proven RED-first with a test that fails on the current return.\n- [ ] The jscpd adapter is inspected for the same fabricated zero and either fixed under the\n      same rule or explicitly ruled out with the reason recorded.\n- [ ] A regression asserts a scan root that demonstrably contains analyzable files never\n      yields a zero-valued complexity result.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "lizard adapter reports a confident ZERO complexity when it measures no files"
       },
       "created_at": "2026-08-06T19:04:24Z",
@@ -49786,10 +49814,24 @@
     },
     "63e8-9235-220f-4201": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# A committed lock turns any future advisory on a transitive dep into a build-stopping CI failure\n\n## Why this exists\n\nClosing `e47e-a33d-b9cf-4421` surfaced a `caused_by` edge to `ce5d-d352-9511-47bc` (\"go uv-canonical with a committed lock\"), and the edge is accurate. It is NOT a defect in ce5d \u2014 committing a lock is the right call for reproducibility \u2014 but it has a consequence nobody has a standing answer for:\n\n**Before the committed lock, each install floated and a fixed upstream version was picked up silently. Now a transitive dependency is frozen, so the moment an advisory is published against the pinned version, the GATING `pip-audit` job fails on every change in flight, with no code change and nothing the authors of those changes did wrong.**\n\nThat is exactly what happened with `click 8.2.1` / PYSEC-2026-2132: six changes from five different work streams all went red simultaneously, and each author independently began diagnosing it.\n\n## Why it will recur\n\nNothing about the click case was special. The preconditions are structural:\n* uv's universal resolution locks every extra jointly, so ONE capping dependency (there, `inspect-ai`)\n  holds the whole project on a vulnerable version;\n* `pip-audit` is gating and correctly refuses to distinguish \"reachable in this project\" from\n  \"present in the environment\" \u2014 `click.edit()` was never called anywhere in rebar;\n* the retry logic in the job only retries DB-UNREACHABLE failures, so a real finding is not\n  recheckable \u2014 which is the single most time-wasting property, because `recheck` is the first thing\n  everyone tries.\n\n## The knowledge that must not be rediscovered under time pressure\n\nThis is the substance of the ticket. It took several wrong turns to establish, including one confidently-recorded wrong conclusion:\n* `constraint-dependencies` can only NARROW an existing constraint set. Testing feasibility with it\n  returns UNSATISFIABLE **as its expected output**, which reads as proof that the upgrade is\n  impossible. It is not proof of anything. `override-dependencies` REPLACES the offending requirement\n  and is the correct instrument.\n* `uv lock --upgrade-package <pkg>` is a NO-OP against an upstream cap for the same reason.\n* Overriding a cap is only safe when the cap is STALE rather than a real incompatibility, and that\n  needs evidence (upstream issue/PR showing the incompatibility was fixed; the capped package\n  importing and running under the newer version).\n* An override must carry a REMOVE-WHEN condition, or it outlives its justification silently.\n* `override-dependencies` is a workspace directive, NOT published in wheel metadata \u2014 so it changes\n  this repo's lock only, and downstream consumers are unaffected.\n\n## Out of scope\n\nChanging the pip-audit job to be non-gating, or adding blanket suppressions. The gate did its job here \u2014 it found a real advisory in the shipped environment. The problem is response latency, not the gate.\n\n## Acceptance criteria\n\n- [ ] a short runbook exists (in `docs/`, discoverable from the pip-audit job's own failure output or\n      a comment beside it) covering: how to tell a real finding from a DB-unreachable flake, that\n      `recheck` cannot clear a real finding, the `override-dependencies` vs `constraint-dependencies`\n      distinction, and the evidence required before overriding an upstream cap\n- [ ] the runbook states the verification set for any lock intervention: `uv lock --check` under the\n      uv versions in use, `uv sync --locked --extra dev`, and `pip-audit` over the whole resulting\n      environment to confirm the old pin was masking nothing else\n- [ ] a mechanism exists to notice an override whose REMOVE-WHEN condition has been met, rather than\n      relying on someone happening to re-test \u2014 either a periodic check or a documented review trigger\n- [ ] the runbook is linked from the pip-audit step so a person hitting the failure finds it without\n      knowing it exists\n- [ ] [operator-attested] the runbook is validated by walking the click/PYSEC-2026-2132 case through\n      it and confirming it would have led to `override-dependencies` without the detour, with that\n      walkthrough recorded on this ticket",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Committed lock turns transitive-dep advisories into build stoppages"
       },
       "created_at": "2026-08-03T00:09:47Z",
@@ -64972,10 +65014,24 @@
     },
     "851e-19ef-31dd-4e38": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "Discovered by the sibling sweep while fixing 12e4 (a stalled snapshot fetch burned the full 300s `_GIT_TIMEOUT`).\n\n12e4 fixed the snapshot path: `_snapshot/git_fetch.fetch_origin` and `repo_snapshot._ensure_blobs_present` now pass `http.lowSpeedLimit`/`http.lowSpeedTime`, so a byte-starved transfer aborts on throughput in ~10s instead of at the wall-clock ceiling.\n\nThree other NETWORK git calls still carry a 300s wall-clock bound and no low-speed abort, so each has the identical exposure:\n\n- `src/rebar/review_bot/gerrit_client.py:367` (and the fetch at :401) \u2014 the review bot's own fetch of the Gerrit change, `_GIT_TIMEOUT = 300`. Closest sibling: same process, same per-review budget.\n- `src/rebar/opcert_service/workspace.py:107,124` \u2014 `fetch --quiet review|tickets`, `_GIT_TIMEOUT = 300`.\n- `src/rebar/_commands/init.py:398,419` \u2014 `_FETCH_TIMEOUT = 300`.\n\nDeliberately NOT in scope for 12e4: they are a different remote (self-hosted Gerrit) or a different command path, no stall has been measured on them, and folding them in would have widened an already-large change that was forced to split a module. The 30s callers (`_store/push.py`, `_store/sync.py`, `_store/event_append.py`, `_ref_lock.py`) are low value \u2014 30s is already an order of magnitude tighter than the observed stall.\n\nReuse the seam 12e4 built: `rebar._snapshot.git_fetch.stall_abort_args()` and `is_stall_abort()` are module-public and take no snapshot-specific state, so each call site is a splice of `*stall_abort_args()` before the subcommand plus a decision about whether to retry.\n\n## Acceptance Criteria\n\n- [ ] Each of the three 300s network fetch sites passes the low-speed options.\n- [ ] A test per site proves a zero-byte remote aborts as a stall, and that a dribbling remote is not aborted.\n- [ ] No new duplicate of the abort logic: the sites reuse `git_fetch.stall_abort_args()`.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Arm the throughput-keyed stall abort on the remaining 300s git fetches"
       },
       "created_at": "2026-08-03T03:13:42Z",
@@ -121736,7 +121792,7 @@
         "assignee": null,
         "description": "Same class as [rebar:a371-fb42-32c5-48bd] (an `importorskip`-masked test that is broken the moment its extra IS installed). Found while running the full unit suite with the `[ui]` extra installed to verify a371's fix.\n\n`tests/unit/test_path_injection_guards.py:147` `test_rerun_502_body_has_no_exception_detail` builds a fake request as:\n\n    req = types.SimpleNamespace(\n        app=types.SimpleNamespace(state=types.SimpleNamespace(config=cfg)),\n        query_params={\"token\": \"tok\", \"change\": \"12345\"},\n    )\n    resp = asyncio.run(rerun(req))\n\n`src/rebar/review_bot/app.py:101` reads `request.headers.get(TOKEN_HEADER, \"\").strip()`, and the fake has no `headers`, so the test dies with:\n\n    AttributeError: 'types.SimpleNamespace' object has no attribute 'headers'\n\nReproduced deterministically at origin/main (c89a2ddcc4), py3.12, with `--extra ui` installed (which pulls fastapi):\n\n    pytest tests/unit/test_path_injection_guards.py -q -p no:randomly\n      -> 1 failed, 54 passed\n\nLine 148 is `pytest.importorskip(\"fastapi\")  # the reviewbot extra; absent in the lean CI suite`, so the lean CI suite skips it and the breakage is invisible. As with a371, the test reads as covering the `/rerun` 502-body containment barrier while providing no coverage in any environment where the extra is present.\n\nPresumably the fake request stopped matching `app.rerun` when header-token auth was added to that handler; the fake needs a `headers` mapping (and whatever else the current handler reads).\n\n## Acceptance Criteria\n\n- [ ] `pytest tests/unit/test_path_injection_guards.py` passes with the reviewbot/ui extra\n      installed\n- [ ] The test still asserts the same containment barrier (502 body carries no exception or\n      stack-trace detail) -- do not weaken it to make it pass\n- [ ] Sweep the other `importorskip`-guarded tests for the same rot, since none of them run in\n      the lean CI suite",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "importorskip-masked: test_rerun_502_body_has_no_exception_detail fails when the reviewbot extra IS installed"
       },
       "created_at": "2026-08-07T10:23:37Z",
