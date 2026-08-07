@@ -149,7 +149,7 @@ registry section below):
 ```
 DROP if  cited_reference_accurate == "no"     (veto — inaccurate citation)
      OR  matches_known_fine == "yes"          (live, non-stale registry shield — stale entries already excluded)
-     OR  validity < 0.75                       (low-confidence — <~3-of-4 sub-answers affirm it)
+     OR  validity < 0.75                       (low-confidence — <4-of-5 sub-answers affirm it)
      OR  impact  < 0.5                          (immaterial — below "major")
 else SURVIVE
 ```
@@ -188,7 +188,7 @@ This is a **per-run signal only** — janitor does **not** track dismissal categ
 ## Known-fine registry (shielding + staleness)
 
 The registry (`.rebar-janitor/known-fine.md`) records patterns a maintainer has **explicitly blessed as
-acceptable**. `matches_known_fine` is a **separate drop gate** — it is NOT one of the four validity
+acceptable**. `matches_known_fine` is a **separate drop gate** — it is NOT one of the five validity
 sub-questions, so the `validity ≥ 0.75` floor is computed exactly as above and stays unchanged.
 
 **Governing principle — a ledger of human decisions.** You may read entries, compute staleness,
