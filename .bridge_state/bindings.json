@@ -13002,106 +13002,15 @@
     "16df-766a-7d57-4213": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "# Split build_server() (703-LOC single function) into tool registrars",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "`mcp_server.py:295-997` is one ~703-LOC function of ~40 `@server.tool` closures \u2014 the longest function in the tree. Split into `register_read_tools(server, \u2026)` / `register_write_tools(server, \u2026)` / `register_llm_tools(server, \u2026)` grouped by the existing read/write/LLM taxonomy; `build_server` discovers + wires them. Lift the `run_workflow` background-orchestration and `reconcile` mode-gating out of the tool bodies.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `build_server` delegates to per-cluster registrars; each registrar is on-target size (200-400 LOC).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The MCP tool set + gating (readonly/allow_llm/allow_jira_sync) are unchanged (coverage test green).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `make lint` + MCP suites pass; commit carries a `rebar-ticket:` trailer.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/high_new.svg",
-          "id": "2",
-          "name": "High",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/2"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "# Split build_server() (703-LOC single function) into tool registrars\n\n## What\n`mcp_server.py:295-997` is one ~703-LOC function of ~40 `@server.tool` closures \u2014 the longest function in the tree. Split into `register_read_tools(server, \u2026)` / `register_write_tools(server, \u2026)` / `register_llm_tools(server, \u2026)` grouped by the existing read/write/LLM taxonomy; `build_server` discovers + wires them. Lift the `run_workflow` background-orchestration and `reconcile` mode-gating out of the tool bodies.\n\n## Acceptance Criteria\n- [ ] `build_server` delegates to per-cluster registrars; each registrar is on-target size (200-400 LOC).\n- [ ] The MCP tool set + gating (readonly/allow_llm/allow_jira_sync) are unchanged (coverage test green).\n- [ ] `make lint` + MCP suites pass; commit carries a `rebar-ticket:` trailer.",
+        "priority": "High",
+        "status": "To Do",
         "summary": "Split build_server() (703-LOC single function) into tool registrars"
       },
       "baseline_advanced_at": "2026-07-30T22:32:42Z",
       "created_at": "2026-07-03T05:42:30Z",
       "jira_key": "REB-605",
+      "peer_parent": "REB-601",
       "state": "confirmed",
       "updated_at": "2026-07-03T05:42:30Z"
     },
@@ -43819,7 +43728,7 @@
     "4752-3afb-e8bd-448a": {
       "baseline": {
         "assignee": null,
-        "description": "Replace six verbs with one noun and a coherent verb set.\n\n    rebar bridge setup | check-access | fsck | status | preview | sync | pause | resume\n\nThree verbs retire. `reconcile` goes with NO alias, because the defaults invert: `rebar reconcile` with no arguments means dry-run (the CLI wrapper injects `--mode dry-run` at `_cli/__init__.py:145-160`, while `python -m rebar_reconciler` itself defaults to LIVE, and `_lib_ops.py:92` defaults to dry-run again \u2014 three entry points, two conventions). `bridge sync` with no arguments mutates. Aliasing would be a silent behaviour change; anyone with `reconcile` in a script must re-read the line.\n\n`bridge-status` retires because its producer has never existed in this repo \u2014 rebar was extracted from digital-service-orchestra on 2026-06-08 and the reader was a knowing tombstone from day one. Note the citation in its docstring, \"epic 3a03\", is DANGLING: in this repo 3a03 resolves to an unrelated test-isolation bug created 11 days AFTER the comment citing it. The real epic is `3006-e198-13db-4e1f`.\n\n`purge-bridge` retires: five commits, every one an automated lint sweep or safety retrofit, none a feature or bug fix, and no script, workflow, or runbook invokes it. Its `--keep` flag is also inverted-sense (it deletes everything NOT matching).\n\n`--mode` disappears entirely. Its five values collapse to `preview`/`sync` plus `--max-changes N`; the two `bootstrap-*` values carry no semantics beyond their cap integer (the only non-applier consumers test `MODE_CAPS[m] != 0` and never read 10 or 100).\n\nFlags survive only if their help text can be written without internals. Ten candidates reduced to three: `--max-changes N`, `--only <ids>`, `--except <ids>`, `--max-age <duration>`, plus the house `--output json`. Maintainer decision: `--only`/`--except` limit what is EXAMINED as well as what is changed (unlike the internal `--filter-local-ids` they replace, which filtered only writes and was marked \"for validation use only\" for that reason), and preview/sync remains the read/write knob.\n\n`check-access` is its own verb, not a flag on the health verb: all three narrowing-flag precedents (`flux check --pre`, `dbt debug --connection`, `gh auth status`) are READ-ONLY, and none mutates the remote \u2014 so the precedent does not transfer to an operation that creates and deletes a real Jira issue. `fsck` audits your records; `check-access` proves your access.\n\n`setup` calls `check-access` as its final validation step.\n\n## Review remediation (2026-08-06) \u2014 consumers, verb semantics, cap-0 split\n\n**B3 \u2014 The production consumer is enumerated and migrated.** `.github/workflows/reconcile-bridge.yml:262` runs `rebar reconcile --mode \"$MODE\"`. This is not an incidental caller: `$MODE` is the documented ROLLBACK BRAKE (epic `3006-e198-13db-4e1f`), so retiring `--mode` removes an operational safety control unless its replacement is stated. Mapping:\n* `MODE=reconcile-check` / `MODE=dry-run` -> `bridge preview` (no mutation)\n* `MODE=bootstrap-strict` / `bootstrap-throttle` -> `bridge sync --max-changes 10` / `--max-changes 100`\n* `MODE=live` -> `bridge sync` (uncapped)\n* the brake's \"stop entirely\" position is no longer a mode at all \u2014 it is `bridge pause` (sibling\n  `1104`), which is strictly stronger because it is remote-persisted and applies fleet-wide rather\n  than to one workflow_dispatch invocation.\nThe `workflow_dispatch` input is renamed accordingly in the same change, so the brake is never absent.\n\n**B4 \u2014 The two cap-0 modes are behaviourally distinct, and both land in `bridge preview`.** The collapse rationale covers the bootstrap-* cap integers but not the cap-0 pair, which are NOT the same operation: `reconcile-check` takes NO lock, returns early at `__main__.py:577`, and emits a bound-pair discrepancy report; `dry-run` takes the lock, runs the full differ pass with `persist=False`, and writes a manifest. Neither output is derivable from the other. Sibling `424f` owns the merge and is explicit that this is real work, not a rename: ONE verb, ONE pass, two sections `{plan, drift}`, with `_compare_pair` DELETED and field detail sourced from the differ. This ticket therefore retires the `--mode` spellings only; `424f` owns the behavioural merge, and `424f` depends_on this ticket.\n\n**B6 \u2014 User-facing strings that name a retired verb are enumerated.** Retiring `bridge-status` leaves two strings pointing at a verb that no longer exists: `_engine_support/bridge.py:32` (`_USAGE = \"Usage: ticket bridge-status [--output json]\"`) and `src/rebar/schemas/bridge_status.schema.json:5` (whose description names `rebar bridge-status --output json`). Both are removed with the verb \u2014 the schema file is retired outright, since sibling `b69c` builds status on durable state and publishes its own schema.\n\n\n## Acceptance Criteria\n\n- [ ] `rebar bridge <verb>` exists with the agreed verb set\n- [ ] `reconcile`, `bridge-status`, `purge-bridge` are removed, with release notes; no aliases\n- [ ] `--mode` is gone from the CLI and the engine entrypoint (`_cli/__init__.py:145-160`,\n      `rebar_reconciler/__main__.py:501-508`, `mode.py`)\n- [ ] **Surface scope is explicit (review remediation).** `reconcile`/`mode` lives on THREE surfaces,\n      not one: the CLI, the public library API `rebar.reconcile(mode=...)` (`src/rebar/__init__.py:51`\n      re-exporting `_lib_ops.py:92`), and the MCP tool `reconcile(mode=...)` (`_mcp_reads.py:279`,\n      surfaced via `mcp_server.py`). THIS ticket retires the CLI + engine only. The library and MCP\n      retirements belong to sibling `f789`, which ADDS the bridge surface to those same two\n      interfaces \u2014 so each surface's old verb is removed by the same change that ships its\n      replacement, leaving no window where an MCP or library caller has neither. `f789` already\n      depends_on this ticket, which enforces that order.\n- [ ] A test asserts the CLI no longer accepts `--mode` or the `reconcile` verb, AND that the library\n      and MCP entrypoints are still callable at this ticket's boundary (proving the staged retirement\n      left no surface broken mid-epic)\n- [ ] Every shipped flag's help text contains no internals (no \"mode\", \"rank\", \"gate\", \"lock\", \"cap\", \"pass\", \"binding store\", no exit-code numbers)\n- [ ] `bridge` appears in `rebar --help`. Today `reconcile` appears ZERO times while FOUR\n      bridge-prefixed verbs are listed \u2014 `purge-bridge`, `bridge-status`, `bridge-fsck`,\n      `bridge-probe` \u2014 two of which (`purge-bridge`, `bridge-status`) are dead. Verified against\n      `rebar --help` on 2026-08-06\n- [ ] The dangling \"epic 3a03\" citation is corrected wherever it survives\n- [ ] Each new verb is proven to FUNCTION, not merely to exist (B1): `preview` makes no Jira write and\n      no ticket-event write (asserted against a store snapshot taken before and after); `sync` mutates;\n      `pause` then `status` reports paused and a subsequent `sync` declines; `resume` restores it\n- [ ] `.github/workflows/reconcile-bridge.yml:262` is migrated off `rebar reconcile --mode \"$MODE\"`,\n      and its `workflow_dispatch` mode input is renamed to the new vocabulary in the SAME change, so\n      the epic-3006 rollback brake is never absent (B3)\n- [ ] `_engine_support/bridge.py:32`'s `_USAGE` string and `schemas/bridge_status.schema.json` are\n      removed with the `bridge-status` verb; a test greps the shipped tree for the retired verb names\n      and fails if any user-facing string still names one (B6)\n- [ ] The health verb is `fsck` everywhere \u2014 `doctor` is not shipped, not as an alias, and appears\n      nowhere in help, docs or code (B2/B7)\n- [ ] `check-access` is in the shipped verb set and `setup` calls it as its final validation step",
+        "description": "Replace six verbs with one noun and a coherent verb set.\n\n    rebar bridge setup | check-access | fsck | status | preview | sync | pause | resume\n\nThree verbs retire. `reconcile` goes with NO alias, because the defaults invert: `rebar reconcile` with no arguments means dry-run (the CLI wrapper injects `--mode dry-run` at `_cli/__init__.py:145-160`, while `python -m rebar_reconciler` itself defaults to LIVE, and `_lib_ops.py:92` defaults to dry-run again \u2014 three entry points, two conventions). `bridge sync` with no arguments mutates. Aliasing would be a silent behaviour change; anyone with `reconcile` in a script must re-read the line.\n\n`bridge-status` retires because its producer has never existed in this repo \u2014 rebar was extracted from digital-service-orchestra on 2026-06-08 and the reader was a knowing tombstone from day one. Note the citation in its docstring, \"epic 3a03\", is DANGLING: in this repo 3a03 resolves to an unrelated test-isolation bug created 11 days AFTER the comment citing it. The real epic is `3006-e198-13db-4e1f`.\n\n`purge-bridge` retires: five commits, every one an automated lint sweep or safety retrofit, none a feature or bug fix, and no script, workflow, or runbook invokes it. Its `--keep` flag is also inverted-sense (it deletes everything NOT matching).\n\n`--mode` disappears entirely. Its five values collapse to `preview`/`sync` plus `--max-changes N`; the two `bootstrap-*` values carry no semantics beyond their cap integer (the only non-applier consumers test `MODE_CAPS[m] != 0` and never read 10 or 100).\n\nFlags survive only if their help text can be written without internals. Ten candidates reduced to three: `--max-changes N`, `--only <ids>`, `--except <ids>`, `--max-age <duration>`, plus the house `--output json`. Maintainer decision: `--only`/`--except` limit what is EXAMINED as well as what is changed (unlike the internal `--filter-local-ids` they replace, which filtered only writes and was marked \"for validation use only\" for that reason), and preview/sync remains the read/write knob.\n\n`check-access` is its own verb, not a flag on the health verb: all three narrowing-flag precedents (`flux check --pre`, `dbt debug --connection`, `gh auth status`) are READ-ONLY, and none mutates the remote \u2014 so the precedent does not transfer to an operation that creates and deletes a real Jira issue. `fsck` audits your records; `check-access` proves your access.\n\n`setup` calls `check-access` as its final validation step.\n\n## Review remediation (2026-08-06) \u2014 consumers, verb semantics, cap-0 split\n\n**B3 \u2014 The production consumer is enumerated and migrated.** `.github/workflows/reconcile-bridge.yml:262` runs `rebar reconcile --mode \"$MODE\"`. This is not an incidental caller: `$MODE` is the documented ROLLBACK BRAKE (epic `3006-e198-13db-4e1f`), so retiring `--mode` removes an operational safety control unless its replacement is stated. Mapping:\n* `MODE=reconcile-check` / `MODE=dry-run` -> `bridge preview` (no mutation)\n* `MODE=bootstrap-strict` / `bootstrap-throttle` -> `bridge sync --max-changes 10` / `--max-changes 100`\n* `MODE=live` -> `bridge sync` (uncapped)\n* the brake's \"stop entirely\" position is no longer a mode at all \u2014 it is `bridge pause` (sibling\n  `1104`), which is strictly stronger because it is remote-persisted and applies fleet-wide rather\n  than to one workflow_dispatch invocation.\nThe `workflow_dispatch` input is renamed accordingly in the same change, so the brake is never absent.\n\n**B4 \u2014 The two cap-0 modes are behaviourally distinct, and both land in `bridge preview`.** The collapse rationale covers the bootstrap-* cap integers but not the cap-0 pair, which are NOT the same operation: `reconcile-check` takes NO lock, returns early at `__main__.py:577`, and emits a bound-pair discrepancy report; `dry-run` takes the lock, runs the full differ pass with `persist=False`, and writes a manifest. Neither output is derivable from the other. Sibling `424f` owns the merge and is explicit that this is real work, not a rename: ONE verb, ONE pass, two sections `{plan, drift}`, with `_compare_pair` DELETED and field detail sourced from the differ. This ticket therefore retires the `--mode` spellings only; `424f` owns the behavioural merge, and `424f` depends_on this ticket.\n\n**B6 \u2014 User-facing strings that name a retired verb are enumerated.** Retiring `bridge-status` leaves two strings pointing at a verb that no longer exists: `_engine_support/bridge.py:32` (`_USAGE = \"Usage: ticket bridge-status [--output json]\"`) and `src/rebar/schemas/bridge_status.schema.json:5` (whose description names `rebar bridge-status --output json`). Both are removed with the verb \u2014 the schema file is retired outright, since sibling `b69c` builds status on durable state and publishes its own schema.\n\n\n## Review remediation round 2 (2026-08-07)\n\n**B4 \u2014 `mode.py` is NOT deleted here; only the `--mode` flag is.** The earlier AC listed `mode.py` alongside the flag, contradicting this ticket's own \"retires the `--mode` spellings only\" scope. Two live consumers keep `MODE_CAPS` and the `Mode` rank ladder alive past this ticket:\n* the **MCP surface** gates mutating runs on `MODE_CAPS[parsed] != 0` (`_mcp_reads.py:41,286,291`),\n  and that surface is retired by sibling `f789`, not here;\n* the **phase gate** ranks by `Mode` and \u2014 per sibling `1104`'s decision \u2014 its pause compatibility\n  value must remain a REAL `Mode` member (`gated_mode: \"reconcile-check\"`), because a non-`Mode` shim\n  makes `_mode_blocks` swallow the `ValueError` and silently fail OPEN.\nSo `mode.py` survives with its table and ladder intact; its eventual disposition belongs to `f789` and `1104`. Deleting it here would break both.\n\n**B2 \u2014 Direct engine callers are enumerated and migrated.** Four call sites invoke the engine's `--mode` outside the CLI and break the moment the flag goes: `scripts/jira-pressure-test/e2e_validation_probe.sh:85,429` and `scripts/jira-pressure-test/e2e_field_validation_probe.sh:143,1787` (via their `run_reconciler` helper), using `bootstrap-throttle` and `reconcile-check`. They migrate in the SAME change: `--mode bootstrap-throttle` -> `sync --max-changes 100`, `--mode reconcile-check` -> `preview`.\n\n**B3 \u2014 Engine `--mode` test consumers are enumerated.** `tests/unit/rebar_reconciler/orchestrate/test_reconcile_main.py` (14 occurrences, driving `main(['--mode=...'])`) plus `tests/external/live_jira_dc/_dc_support.py`, `test_reconcile_pass.py` and `test_user_guide_commands.py`. These MIGRATE rather than being deleted \u2014 they are the regression cover for the entrypoint this ticket rewrites, so losing them would remove the proof that the new surface behaves like the old one where it should.\n\n**B1 \u2014 Cross-verb functional assertions are SCOPED, because the edge cannot be added.** The pause/resume/status behavioural chain needs state owned by `1104` (remote-persisted pause) and `b69c` (durable status). An edge from this ticket to either would be a CYCLE \u2014 both already `depends_on` this one, since they attach their verbs to the surface it creates. So this ticket proves only what it alone owns; the behavioural assertions belong to the sibling that builds the state.\n\n\n## Acceptance Criteria\n\n- [ ] `rebar bridge <verb>` exists with the agreed verb set\n- [ ] `reconcile`, `bridge-status`, `purge-bridge` are removed, with release notes; no aliases\n- [ ] The `--mode` FLAG is gone from the CLI and the engine entrypoint (`_cli/__init__.py`'s\n      reconcile wrapper, `rebar_reconciler/__main__.py`'s argparse). **`mode.py` SURVIVES this\n      ticket** \u2014 see B4 below\n- [ ] **Surface scope is explicit (review remediation).** `reconcile`/`mode` lives on THREE surfaces,\n      not one: the CLI, the public library API `rebar.reconcile(mode=...)` (`src/rebar/__init__.py:51`\n      re-exporting `_lib_ops.py:92`), and the MCP tool `reconcile(mode=...)` (`_mcp_reads.py:279`,\n      surfaced via `mcp_server.py`). THIS ticket retires the CLI + engine only. The library and MCP\n      retirements belong to sibling `f789`, which ADDS the bridge surface to those same two\n      interfaces \u2014 so each surface's old verb is removed by the same change that ships its\n      replacement, leaving no window where an MCP or library caller has neither. `f789` already\n      depends_on this ticket, which enforces that order.\n- [ ] A test asserts the CLI no longer accepts `--mode` or the `reconcile` verb, AND that the library\n      and MCP entrypoints are still callable at this ticket's boundary (proving the staged retirement\n      left no surface broken mid-epic)\n- [ ] Every shipped flag's help text contains no internals (no \"mode\", \"rank\", \"gate\", \"lock\", \"cap\", \"pass\", \"binding store\", no exit-code numbers)\n- [ ] `bridge` appears in `rebar --help`. Today `reconcile` appears ZERO times while FOUR\n      bridge-prefixed verbs are listed \u2014 `purge-bridge`, `bridge-status`, `bridge-fsck`,\n      `bridge-probe` \u2014 two of which (`purge-bridge`, `bridge-status`) are dead. Verified against\n      `rebar --help` on 2026-08-06\n- [ ] The dangling \"epic 3a03\" citation is corrected wherever it survives\n- [ ] Each verb this ticket OWNS is proven to function, not merely to exist: `preview` performs no\n      Jira write and no ticket-event write (asserted against a store snapshot before and after), and\n      `sync` mutates. `check-access` round-trips and `setup` calls it as its final step\n- [ ] `pause`, `resume` and `status` are proven only to EXIST and dispatch here; their behavioural\n      assertions belong to `1104` and `b69c` respectively, which own the underlying state and already\n      depend on this ticket \u2014 an edge back would be a cycle (B1)\n- [ ] `.github/workflows/reconcile-bridge.yml:262` is migrated off `rebar reconcile --mode \"$MODE\"`,\n      and its `workflow_dispatch` mode input is renamed to the new vocabulary in the SAME change, so\n      the epic-3006 rollback brake is never absent (B3)\n- [ ] `_engine_support/bridge.py:32`'s `_USAGE` string and `schemas/bridge_status.schema.json` are\n      removed with the `bridge-status` verb; a test greps the shipped tree for the retired verb names\n      and fails if any user-facing string still names one (B6)\n- [ ] The health verb is `fsck` everywhere \u2014 `doctor` is not shipped, not as an alias, and appears\n      nowhere in help, docs or code (B2/B7)\n- [ ] `check-access` is in the shipped verb set and `setup` calls it as its final validation step\n- [ ] The four direct engine callers in `scripts/jira-pressure-test/` are migrated in the same change\n      (B2); a test or CI step proves no script invokes `--mode` after this ticket\n- [ ] The engine `--mode` tests are MIGRATED, not deleted (B3), and still cover the same entrypoint\n      behaviours under the new vocabulary\n- [ ] `mode.py`'s `MODE_CAPS` table and `Mode` ladder still exist and are still consumed at the end of\n      this ticket; a test asserts the phase gate can still round-trip `gated_mode: \"reconcile-check\"`\n      as a real `Mode` member (B4)",
         "priority": "High",
         "status": "To Do",
         "summary": "Establish the bridge command surface and retire three verbs"
@@ -110287,337 +110196,15 @@
     "b49a-6864-e035-4f65": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "`server.json` is the MCP registry front-door contract, but it has drifted from",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "the real config surface. It lists only `REBAR_ROOT`, `REBAR_MCP_READONLY`, and",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "the **deprecated** `REBAR_MCP_ALLOW_RECONCILE_LIVE`, while the actual gates are",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "`mcp.allow_llm` (`REBAR_MCP_ALLOW_LLM`) and `mcp.allow_jira_sync`",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(`REBAR_MCP_ALLOW_JIRA_SYNC`). Users see the LLM/reconcile tools appear but fail",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "at call time with no manifest hint, and new installs inherit deprecated",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "terminology. Nothing prevents this from re-drifting.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Update `server.json` `environmentVariables` to the current contract: add",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  `REBAR_MCP_ALLOW_LLM` and `REBAR_MCP_ALLOW_JIRA_SYNC` with accurate",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  descriptions; keep `REBAR_MCP_ALLOW_RECONCILE_LIVE` only if explicitly labeled",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  a deprecated alias (prefer replacing it with the current name).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Add a **CI drift-guard** that compares the manifest's advertised env-var set",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  against the canonical gate list in code (the `REBAR_MCP_*` env gates read in",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  `mcp_server.py` / the readonly+allow gates), failing the build on divergence \u2014",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  mirroring the existing prompt-index / criteria-routing drift gates in",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  `.github/workflows/test.yml`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "`server.json` + one CI gate (a small script under `scripts/` or a step in",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "`.github/workflows/test.yml`). Identify the single source of truth for the env",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "gates so the guard has an authoritative list to diff against. No behavior change",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "to the server itself.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `server.json` advertises `REBAR_MCP_ALLOW_LLM` and",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  `REBAR_MCP_ALLOW_JIRA_SYNC` with correct descriptions.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The deprecated `REBAR_MCP_ALLOW_RECONCILE_LIVE` is removed or explicitly",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  marked as a deprecated alias.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] A CI gate fails when `server.json`'s env-var set diverges from the",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  canonical `REBAR_MCP_*` gate list in code.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The gate passes on the corrected manifest; `make lint` stays green.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\n\n`server.json` is the MCP registry front-door contract, but it has drifted from\nthe real config surface. It lists only `REBAR_ROOT`, `REBAR_MCP_READONLY`, and\nthe **deprecated** `REBAR_MCP_ALLOW_RECONCILE_LIVE`, while the actual gates are\n`mcp.allow_llm` (`REBAR_MCP_ALLOW_LLM`) and `mcp.allow_jira_sync`\n(`REBAR_MCP_ALLOW_JIRA_SYNC`). Users see the LLM/reconcile tools appear but fail\nat call time with no manifest hint, and new installs inherit deprecated\nterminology. Nothing prevents this from re-drifting.\n\n## What\n\n- Update `server.json` `environmentVariables` to the current contract: add\n  `REBAR_MCP_ALLOW_LLM` and `REBAR_MCP_ALLOW_JIRA_SYNC` with accurate\n  descriptions; keep `REBAR_MCP_ALLOW_RECONCILE_LIVE` only if explicitly labeled\n  a deprecated alias (prefer replacing it with the current name).\n- Add a **CI drift-guard** that compares the manifest's advertised env-var set\n  against the canonical gate list in code (the `REBAR_MCP_*` env gates read in\n  `mcp_server.py` / the readonly+allow gates), failing the build on divergence \u2014\n  mirroring the existing prompt-index / criteria-routing drift gates in\n  `.github/workflows/test.yml`.\n\n## Scope\n\n`server.json` + one CI gate (a small script under `scripts/` or a step in\n`.github/workflows/test.yml`). Identify the single source of truth for the env\ngates so the guard has an authoritative list to diff against. No behavior change\nto the server itself.\n\n## Acceptance Criteria\n\n- [ ] `server.json` advertises `REBAR_MCP_ALLOW_LLM` and\n  `REBAR_MCP_ALLOW_JIRA_SYNC` with correct descriptions.\n- [ ] The deprecated `REBAR_MCP_ALLOW_RECONCILE_LIVE` is removed or explicitly\n  marked as a deprecated alias.\n- [ ] A CI gate fails when `server.json`'s env-var set diverges from the\n  canonical `REBAR_MCP_*` gate list in code.\n- [ ] The gate passes on the corrected manifest; `make lint` stays green.",
+        "priority": "Medium",
+        "status": "In Progress",
         "summary": "Fix server.json MCP env/config contract and add a CI drift-guard"
       },
       "baseline_advanced_at": "2026-07-31T21:07:43Z",
       "created_at": "2026-07-04T07:13:34Z",
       "jira_key": "REB-649",
+      "peer_parent": "REB-648",
       "state": "confirmed",
       "updated_at": "2026-07-04T07:13:34Z"
     },
@@ -131616,94 +131203,15 @@
     "d6cc-e0f2-75a1-4875": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The snapshot re-rooting is currently an UNGUARDED CONVENTION: there is no import-linter contract, gate registry, or test that fails CI when a new tool-using agent op reads cfg.repo_path / builds LLMConfig.from_env without going through gate_source. The run_workflow bypass proves the gap.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] A CI-enforced guard fails when a new code path runs a tool-using agent (get_runner().run with filesystem_tools) without the gate snapshot process (e.g. an enumerated gate registry the surfaces test + a coverage test assert against, or an import-linter/AST contract on from_env/repo_path use, or a runtime assertion).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The guard catches the run_workflow class of bypass (or that path is whitelisted only with an explicit safe mechanism).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Documented in docs/repo-snapshot-gates.md: how to add a new agent op so it follows the process.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## What\nThe snapshot re-rooting is currently an UNGUARDED CONVENTION: there is no import-linter contract, gate registry, or test that fails CI when a new tool-using agent op reads cfg.repo_path / builds LLMConfig.from_env without going through gate_source. The run_workflow bypass proves the gap.\n\n## Acceptance Criteria\n- [ ] A CI-enforced guard fails when a new code path runs a tool-using agent (get_runner().run with filesystem_tools) without the gate snapshot process (e.g. an enumerated gate registry the surfaces test + a coverage test assert against, or an import-linter/AST contract on from_env/repo_path use, or a runtime assertion).\n- [ ] The guard catches the run_workflow class of bypass (or that path is whitelisted only with an explicit safe mechanism).\n- [ ] Documented in docs/repo-snapshot-gates.md: how to add a new agent op so it follows the process.",
+        "priority": "Medium",
+        "status": "In Progress",
         "summary": "Safeguard: prevent new agentic operations from bypassing the snapshot process"
       },
       "baseline_advanced_at": "2026-07-24T23:27:28Z",
       "created_at": "2026-06-27T11:53:09Z",
       "jira_key": "REB-468",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-27T11:53:09Z"
     },
@@ -140780,7 +140288,7 @@
     "e5ec-2e8d-500a-4d2d": {
       "baseline": {
         "assignee": null,
-        "description": "## Status (rescoped 2026-06-29)\nThe spike's functional goal is MOOT. The framework already moved off forced-tool `ToolStrategy` entirely: the pydantic_ai runtime cutover means review/code/scan + the completion verifier all run on natural-termination output via `output_mode()` (`PromptedOutput`/`NativeOutput`) \u2014 there is no `ToolStrategy`/`AutoStrategy`/`ProviderStrategy` anywhere in `src/rebar`. So the BI-1 optional-None-leakage class the spike worried about is already structurally avoided, and an AutoStrategy/ProviderStrategy evaluation is no longer worth running.\n\nWhat remains is pure DOC HYGIENE: the now-stale \"disable extended thinking because forced tool-choice conflicts\" rationale still lingers in the runner/structured-output source comments and reads as if forced-tool is still in use.\n\n## Scope\n- Update/remove the stale \"disable thinking (forced tool-choice conflict)\" rationale in `src/rebar/llm/runner.py` (~lines 72-77) and `src/rebar/llm/structured.py` (~lines 11-12, 52-54) so it reflects the current pydantic_ai `PromptedOutput`/`NativeOutput` reality (keep any genuinely-still-true note as historical context, clearly labelled).\n- Record the decision in-ticket: the AutoStrategy/ProviderStrategy spike is superseded by the pydantic_ai cutover; no migration needed.\n\n## Acceptance Criteria\n- [ ] Stale forced-tool/\"disable thinking\" rationale in `runner.py` + `structured.py` is corrected or removed (no comment implies forced `ToolStrategy` is the current mechanism).\n- [ ] Decision recorded: spike moot \u2014 superseded by the pydantic_ai runtime cutover (cite that no ToolStrategy/AutoStrategy/ProviderStrategy exists in `src/rebar`).\n- [ ] `make lint` + test suite pass.",
+        "description": "## Status (rescoped 2026-06-29)\nThe spike's functional goal is MOOT. The framework already moved off forced-tool `ToolStrategy` entirely: the pydantic_ai runtime cutover means review/code/scan + the completion verifier all run on natural-termination output via `output_mode()` (`PromptedOutput`/`NativeOutput`) \u2014 there is no `ToolStrategy`/`AutoStrategy`/`ProviderStrategy` anywhere in `src/rebar`. So the BI-1 optional-None-leakage class the spike worried about is already structurally avoided, and an AutoStrategy/ProviderStrategy evaluation is no longer worth running.\n\nWhat remains is pure DOC HYGIENE: the now-stale \"disable extended thinking because forced tool-choice conflicts\" rationale still lingers in the runner/structured-output source comments and reads as if forced-tool is still in use.\n\n## Scope\n- Update/remove the stale \"disable thinking (forced tool-choice conflict)\" rationale in `src/rebar/llm/runner.py` (~lines 72-77) and `src/rebar/llm/structured.py` (~lines 11-12, 52-54) so it reflects the current pydantic_ai `PromptedOutput`/`NativeOutput` reality (keep any genuinely-still-true note as historical context, clearly labelled).\n- Record the decision in-ticket: the AutoStrategy/ProviderStrategy spike is superseded by the pydantic_ai cutover; no migration needed.\n\n## Acceptance Criteria\n- [x] Stale forced-tool/\"disable thinking\" rationale in `runner.py` + `structured.py` is corrected or removed (no comment implies forced `ToolStrategy` is the current mechanism).\n- [x] Decision recorded: spike moot \u2014 superseded by the pydantic_ai runtime cutover (cite that no ToolStrategy/AutoStrategy/ProviderStrategy exists in `src/rebar`).\n- [x] `make lint` + test suite pass.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Doc hygiene: correct stale forced-tool/'disable thinking' rationale (AutoStrategy spike superseded by pydantic_ai cutover)"
@@ -158786,202 +158294,15 @@
     "ff7d-34e8-9346-49a3": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "RISK 1 (cross-session duplication). Two independently-authored modules each define their OWN `RetryExhaustedError` with a DIFFERENT base class, each raised by a separate retry loop and re-exported from a different public surface. A caller writing `except RetryExhaustedError` against one import silently MISSES the one raised by the other path \u2014 exception identity drives control flow, so this is a latent reliability bug, not cosmetic.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Verified ground truth: `acli_subprocess.py:124` \u2192 `class RetryExhaustedError(RuntimeError)` (re-exported via `acli.py`); `batch_dispatch.py:39` \u2192 `class RetryExhaustedError(Exception)` (re-exported via `applier.py`). So `acli.RetryExhaustedError is not applier.RetryExhaustedError`. `JiraAPIError` has ONE body (`batch_dispatch.py:31`) re-exported through both surfaces \u2014 only the re-export, not the class, is duplicated. The `acli` raise site chains (`raise ... from last_error`); the `batch_dispatch` site does NOT (`raise RetryExhaustedError(str(last_exc))` \u2014 drops the cause).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What \u2014 OSS-informed design (requests/urllib3/httpx/tenacity + PEP 3134)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Consensus: one package-level base in a dedicated errors module; subclass `Exception` (or the single most-derived stdlib type a caller already catches); carry the last failure; chain the cause. `_errors.py` already exists (`src/rebar/_engine/rebar_reconciler/_errors.py`, ~67 LOC) \u2014 ADD the unified types there:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `class ReconcilerError(Exception)` \u2014 the catch-all base seam (per requests `RequestException` / urllib3 `HTTPError`).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `class RetryExhaustedError(ReconcilerError, RuntimeError)` \u2014 MRO `RetryExhaustedError\u2192ReconcilerError\u2192RuntimeError\u2192Exception` is consistent and is caught by BOTH existing `except RuntimeError` (acli path) AND `except Exception` (batch path) sites, so NO call-site breaks. `__init__(self, message=\"\", *, last_exception=None, attempts=None)` \u2014 message-first keeps both current `RetryExhaustedError(\"\u2026\")` call sites working; the optional fields mirror tenacity `RetryError.last_attempt` / urllib3 `MaxRetryError.reason`. Do NOT list `(RuntimeError, Exception)` literally (redundant/duplicate base \u2014 pylint E0241).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `class JiraAPIError(ReconcilerError)` \u2014 move the single body from `batch_dispatch.py:31` here, keeping `__init__(self, message, status_code)` verbatim.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Then delete both `RetryExhaustedError` bodies and `import` the canonical one (`from rebar_reconciler._errors import RetryExhaustedError`); leave the `acli.py`/`applier.py` `__all__` re-exports (they now re-export the SAME object). Fix the chaining gap at `batch_dispatch.py:137`: `raise RetryExhaustedError(\"\u2026\", last_exception=last_exc, attempts=max_retries+1) from last_exc`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "In: unify the two exception types in `_errors.py`, repoint both modules, fix the missing `from` chain. FOLLOW-ON (separate, not this ticket): consolidate the 5 HTTP/subprocess retry LOOPS (push/batch_dispatch/acli_subprocess\u00d72/acli_rest) onto one `retry(fn, *, attempts, backoff, retry_on)` helper \u2014 linked as discovered_from.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `from rebar._engine.rebar_reconciler.acli import RetryExhaustedError` and `from ...applier import RetryExhaustedError` resolve to the SAME object (`is` identity test).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] A `RetryExhaustedError` raised by either retry loop is caught by `except RuntimeError`, `except Exception`, AND `except ReconcilerError`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Both raise sites chain the cause (`__cause__` is the last underlying exception); `last_exception`/`attempts` populated.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `JiraAPIError` defined once in `_errors.py`, `__init__(message, status_code)` unchanged; both surfaces import it.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Tests cover the cross-path `except` identity + chaining; existing reconciler tests pass.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/high_new.svg",
-          "id": "2",
-          "name": "High",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/2"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "RISK 1 (cross-session duplication). Two independently-authored modules each define their OWN `RetryExhaustedError` with a DIFFERENT base class, each raised by a separate retry loop and re-exported from a different public surface. A caller writing `except RetryExhaustedError` against one import silently MISSES the one raised by the other path \u2014 exception identity drives control flow, so this is a latent reliability bug, not cosmetic.\n\n## Why\nVerified ground truth: `acli_subprocess.py:124` \u2192 `class RetryExhaustedError(RuntimeError)` (re-exported via `acli.py`); `batch_dispatch.py:39` \u2192 `class RetryExhaustedError(Exception)` (re-exported via `applier.py`). So `acli.RetryExhaustedError is not applier.RetryExhaustedError`. `JiraAPIError` has ONE body (`batch_dispatch.py:31`) re-exported through both surfaces \u2014 only the re-export, not the class, is duplicated. The `acli` raise site chains (`raise ... from last_error`); the `batch_dispatch` site does NOT (`raise RetryExhaustedError(str(last_exc))` \u2014 drops the cause).\n\n## What \u2014 OSS-informed design (requests/urllib3/httpx/tenacity + PEP 3134)\nConsensus: one package-level base in a dedicated errors module; subclass `Exception` (or the single most-derived stdlib type a caller already catches); carry the last failure; chain the cause. `_errors.py` already exists (`src/rebar/_engine/rebar_reconciler/_errors.py`, ~67 LOC) \u2014 ADD the unified types there:\n- `class ReconcilerError(Exception)` \u2014 the catch-all base seam (per requests `RequestException` / urllib3 `HTTPError`).\n- `class RetryExhaustedError(ReconcilerError, RuntimeError)` \u2014 MRO `RetryExhaustedError\u2192ReconcilerError\u2192RuntimeError\u2192Exception` is consistent and is caught by BOTH existing `except RuntimeError` (acli path) AND `except Exception` (batch path) sites, so NO call-site breaks. `__init__(self, message=\"\", *, last_exception=None, attempts=None)` \u2014 message-first keeps both current `RetryExhaustedError(\"\u2026\")` call sites working; the optional fields mirror tenacity `RetryError.last_attempt` / urllib3 `MaxRetryError.reason`. Do NOT list `(RuntimeError, Exception)` literally (redundant/duplicate base \u2014 pylint E0241).\n- `class JiraAPIError(ReconcilerError)` \u2014 move the single body from `batch_dispatch.py:31` here, keeping `__init__(self, message, status_code)` verbatim.\nThen delete both `RetryExhaustedError` bodies and `import` the canonical one (`from rebar_reconciler._errors import RetryExhaustedError`); leave the `acli.py`/`applier.py` `__all__` re-exports (they now re-export the SAME object). Fix the chaining gap at `batch_dispatch.py:137`: `raise RetryExhaustedError(\"\u2026\", last_exception=last_exc, attempts=max_retries+1) from last_exc`.\n\n## Scope\nIn: unify the two exception types in `_errors.py`, repoint both modules, fix the missing `from` chain. FOLLOW-ON (separate, not this ticket): consolidate the 5 HTTP/subprocess retry LOOPS (push/batch_dispatch/acli_subprocess\u00d72/acli_rest) onto one `retry(fn, *, attempts, backoff, retry_on)` helper \u2014 linked as discovered_from.\n\n## Acceptance Criteria\n- [ ] `from rebar._engine.rebar_reconciler.acli import RetryExhaustedError` and `from ...applier import RetryExhaustedError` resolve to the SAME object (`is` identity test).\n- [ ] A `RetryExhaustedError` raised by either retry loop is caught by `except RuntimeError`, `except Exception`, AND `except ReconcilerError`.\n- [ ] Both raise sites chain the cause (`__cause__` is the last underlying exception); `last_exception`/`attempts` populated.\n- [ ] `JiraAPIError` defined once in `_errors.py`, `__init__(message, status_code)` unchanged; both surfaces import it.\n- [ ] Tests cover the cross-path `except` identity + chaining; existing reconciler tests pass.",
+        "priority": "High",
+        "status": "In Progress",
         "summary": "Risk 1: unify reconciler exception taxonomy + chaining (OSS-informed)"
       },
       "baseline_advanced_at": "2026-07-26T01:41:07Z",
       "created_at": "2026-06-28T00:11:59Z",
       "jira_key": "REB-496",
+      "peer_parent": "REB-491",
       "state": "confirmed",
       "updated_at": "2026-06-28T00:11:59Z"
     },
