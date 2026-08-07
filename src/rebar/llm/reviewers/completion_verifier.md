@@ -241,6 +241,31 @@ the candidate ceiling.
   tests pass; those are other gates' jobs.
 - The close decision belongs to the caller — you only report the verdict and findings.
 
+## Incremental banking (record each verdict as you go)
+
+You may be handed a `record_criterion_verdict(criterion_id, met, evidence)` tool. When it is
+available, a **Criterion IDs** manifest is included in the ticket context below: it lists every
+acceptance criterion with the exact `criterion_id` string to use.
+
+Explore the codebase however you judge best — broadly or criterion-by-criterion; nothing here
+narrows how you gather evidence or forbids reading ahead. The one rule: **the moment you become
+confident in a criterion's verdict, bank it with `record_criterion_verdict` — do not save your
+decided verdicts to record all at once at the very end.** A steadily growing bank as you make
+decisions is the right shape. The reason is durability, not judgment quality: if your step
+budget runs out mid-verification (a real outcome on a dense ticket), only the criteria you have
+ALREADY banked survive into recovery — a batch of decided-but-unbanked verdicts is lost work.
+Banking as you decide costs one cheap tool call and protects your progress; it does NOT mean
+rushing a judgment or cutting your evidence-gathering short.
+
+Pass the `criterion_id` verbatim from the manifest (if no manifest is present, skip banking and
+just produce your final structured verdict). `met` is a boolean (met / not met); `evidence` is
+the concrete file paths + line numbers (or the ticket attestation) that ground the judgment, and
+is capped at 3000 characters. Banked verdicts are **PROVISIONAL and REVISABLE**: re-recording
+the same `criterion_id` overwrites the earlier entry, so if later evidence changes your mind,
+record it again. The bank is your durable running record; on a successful run your **final
+structured output remains the authoritative full-list judgment**, but you must still bank each
+verdict as you reach it so that an early exhaustion is never silent lost work.
+
 <!--volatile-->
 ## Ticket under verification: {{ticket_id}}
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import replace
 
 import pytest
@@ -337,13 +338,31 @@ def _ctx() -> StepContext:
 
 
 _RUNAWAY_DIAGNOSTIC = {
-    "requests": 90,
+    "requests": 24,
     "tool_calls": 260,
     "tool_calls_distinct": 12,
     "max_consecutive_repeat": 1,
     "distinct_ratio_window": 0.167,
     "top_repeated_tool_calls": [{"signature": "search_files:ab12cd34", "count": 64}],
 }
+
+
+def _remainder_ids(instructions: str) -> list[str]:
+    """The criterion ids a batched successor is handed, parsed from its user message (the
+    ``- <id>: <text>`` lines under the ``Remainder to verify`` header)."""
+    ids: list[str] = []
+    collecting = False
+    for line in instructions.splitlines():
+        if line.startswith("Remainder to verify"):
+            collecting = True
+            continue
+        if collecting:
+            if not line.strip():
+                break
+            match = re.match(r"- (\S+):", line)
+            if match:
+                ids.append(match.group(1))
+    return ids
 
 
 class _RunawayThenRecoverRunner:
@@ -362,7 +381,19 @@ class _RunawayThenRecoverRunner:
             err.diagnostic = dict(_RUNAWAY_DIAGNOSTIC)  # type: ignore[attr-defined]
             raise err
         if req.execution_mode == "agentic":
-            return {"text": "Observed implementation evidence at src/example.py:10."}
+            # A batched recovery successor: bank a met verdict for every remainder criterion
+            # it was handed, the way a real successor banks via record_criterion_verdict /
+            # its structured `criteria` output (harvested into the bank).
+            return {
+                "criteria": [
+                    {
+                        "criterion_id": cid,
+                        "met": True,
+                        "evidence": "src/example.py:10",
+                    }
+                    for cid in _remainder_ids(req.instructions)
+                ]
+            }
         payload = json.loads(req.instructions)
         criteria = [
             {
@@ -394,8 +425,10 @@ def test_runaway_routes_into_bounded_recovery(monkeypatch) -> None:
     assert result.status == "succeeded"
     assert result.outputs["verdict"] == "PASS"
     evidence_runs = [r for r in runner.requests[1:] if r.execution_mode == "agentic"]
-    assert evidence_runs, "recovery must gather evidence in FRESH histories"
-    assert all(r.tool_step_limit == 16 for r in evidence_runs)
+    assert evidence_runs, "recovery must gather evidence in FRESH successor runs"
+    assert all(r.iteration_limit and r.iteration_limit > 0 for r in evidence_runs), (
+        "each recovery successor must carry a bounded iteration budget"
+    )
 
 
 def test_runaway_double_failure_sidecar_names_the_runaway(monkeypatch) -> None:

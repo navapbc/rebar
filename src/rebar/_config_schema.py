@@ -244,6 +244,11 @@ class VerifyConfig:
     # cleared its must-never-suppress bar. Default False, so the floor never drops a finding by
     # default (the total back-out).
     completion_floor_active: bool = False
+    # Completion-recovery banking + criteria-scaled step floor (epic 10ae, story 2948) — FLAT
+    # completion_* fields (see verify_step_floor/plan_recovery_pool + docs; pool = multiplier × N).
+    completion_recovery_pool_multiplier: float = 1.5
+    completion_verify_steps_per_criterion: int = 8
+    completion_verify_step_floor_min: int = 48
     # Validation-assessment cross-checks (bug 5e40) — two per-verdict consistency drops that
     # converge a non-deterministic re-review. Each stays inert (the gate runs un-cross-checked, the
     # verdict byte-identical) until flipped true, mirroring completion_floor_active's evidence gate:
@@ -609,6 +614,9 @@ _SECTIONS: dict[str, dict] = {
         "completion_priority_floor": lambda v, k: _as_float(v, k, minimum=0.0, maximum=1.0),
         "completion_preserve_criteria": lambda v, k: _as_str_tuple(v, k),
         "completion_floor_active": lambda v, k: _as_bool(v, k),
+        "completion_recovery_pool_multiplier": lambda v, k: _as_float(v, k, minimum=1.0),
+        "completion_verify_steps_per_criterion": lambda v, k: _as_int(v, k, minimum=1),
+        "completion_verify_step_floor_min": lambda v, k: _as_int(v, k, minimum=1),
         "contradiction_xcheck_active": lambda v, k: _as_bool(v, k),
         "comment_trail_xcheck_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
