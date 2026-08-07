@@ -4,8 +4,9 @@ Extracted verbatim from ``ticket-ready.py`` (recommendation-#2 Step 1) so the CL
 script and the in-process library share ONE implementation. A ticket is "ready"
 when:
   1. its status is "open" or "in_progress", and
-  2. every direct blocker (a dep with relation "depends_on" or "blocks") is
-     "closed" (or tombstoned / missing).
+  2. every direct blocker (a dep with relation "depends_on" or "blocks") is in a
+     TERMINAL state -- closed, archived or deleted (or missing) -- per the shared
+     ``rebar.reducer.is_terminal_status`` predicate.
 
 Kept dependency-light on purpose: it imports only ``reduce_all_tickets`` from the
 ``ticket_reducer`` package and does not pull in the heavier ``ticket_graph``
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rebar.reducer import reduce_all_tickets
+from rebar.reducer import is_terminal_status, reduce_all_tickets
 
 from ._relations import build_blocked_by
 
@@ -24,11 +25,10 @@ from ._relations import build_blocked_by
 # `idea` is deliberately EXCLUDED (by omission): an undesigned idea must never
 # surface in `ready`/`next-batch`, so it is never counted as ready work here.
 _OPEN_STATUSES = {"open", "in_progress"}
-_CLOSED_STATUSES = {"closed"}
 
 
 def _is_closed(status: str) -> bool:
-    return status in _CLOSED_STATUSES
+    return is_terminal_status(status)
 
 
 def _is_open(status: str) -> bool:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from rebar.reducer import is_terminal_status
+
 from . import _loader as _loader_module
 from ._blockers import _find_direct_blockers
 from ._cache import (
@@ -104,7 +106,7 @@ def _compute_dep_graph(
     ready_to_work = True
     for blocker_id in direct_blockers:
         status = _get_ticket_status(blocker_id, tracker_dir)
-        if status not in ("closed", "deleted"):
+        if not is_terminal_status(status):
             ready_to_work = False
             break
 

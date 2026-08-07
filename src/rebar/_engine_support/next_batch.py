@@ -25,9 +25,8 @@ from typing import Any, cast
 
 from rebar._engine_support.output import error_envelope
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar.reducer import reduce_all_tickets, reduce_ticket
+from rebar.reducer import is_terminal_status, reduce_all_tickets, reduce_ticket
 
-_CLOSED_STATUSES = {"closed", "done", "completed", "deleted"}
 # Files that are shared-by-design and support concurrent additive edits.
 _OVERLAP_SAFE_FILES = {".test-index"}
 # Awaiting-tag constants (formerly sourced from figma-tags.conf / planning-tags.conf).
@@ -177,7 +176,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             d
             for d in (t.get("deps") or [])
             if d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
+            and not is_terminal_status(ticket_status_map.get(d.get("target_id", ""), "closed"))
         ]
         if open_depends_on:
             continue
@@ -226,7 +225,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             continue
         if any(
             d.get("relation") == "depends_on"
-            and ticket_status_map.get(d.get("target_id", ""), "closed") not in _CLOSED_STATUSES
+            and not is_terminal_status(ticket_status_map.get(d.get("target_id", ""), "closed"))
             for d in (t.get("deps") or [])
         ):
             _blocked_ids.add(tid)
