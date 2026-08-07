@@ -177,7 +177,9 @@ def update_issue(
             priority_name = priority.get("name") or "Medium"
         else:
             priority_name = str(priority)
-        acli_cli_ops.update_priority(jira_key, priority_name, acli_cmd=acli_cmd)
+        # No acli_cmd: this call spawns no ACLI subprocess, so an ACLI argv prefix
+        # is inapplicable. It resolves its own Jira target — see its docstring.
+        acli_cli_ops.update_priority(jira_key, priority_name)
 
     if status is not None:
         transition_issue(jira_key, status)

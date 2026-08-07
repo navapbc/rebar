@@ -410,22 +410,28 @@ def _create_issue_from_json(
     return _verify_created_issue(result.stdout, acli_cmd=acli_cmd, client=client)
 
 
-def update_priority(
-    jira_key: str,
-    priority_name: str,
-    *,
-    acli_cmd: list[str] | None = None,
-) -> None:
+def update_priority(jira_key: str, priority_name: str) -> None:
     """Update priority on a Jira issue via REST PUT.
 
     ACLI does not support priority edit — uses direct REST API:
     PUT /rest/api/3/issue/{key} with {"fields":{"priority":{"name":"..."}}}
     Probe-validated: returns 204 on success.
+
+    **Credential resolution differs from the ACLI-based siblings in this module.**
+    They spawn ``acli``, which authenticates from its own config file
+    (``acli auth login``) and takes an optional caller-supplied argv prefix
+    (``acli_cmd``). This function spawns nothing, so no argv prefix applies to it —
+    it takes NO ``acli_cmd`` (bug c9c6). It resolves the Jira target itself via
+    :func:`acli_subprocess.resolve_jira_settings`: the non-secret ``url``/``user``
+    come from the typed config (``JIRA_URL``/``JIRA_USER`` env override the
+    ``[tool.rebar.jira]`` file) and the secret ``api_token`` from the environment
+    only. Callers holding their own credentials (an ``AcliClient``) should use the
+    ``AcliClient.update_priority`` method instead, which PUTs with ``self``'s
+    ``jira_url``/``user``/``api_token``.
+
+    Missing any of url/user/token is a logged skip, not a raise — a partially
+    configured environment must not abort the reconcile pass.
     """
-    # This function needs credentials. When called from the module-level
-    # update_issue (which has no client instance), we resolve url/user through the
-    # typed config (JIRA_URL/JIRA_USER env override the [tool.rebar.jira] file) and
-    # the secret api_token from the environment only.
     _s = acli_subprocess.resolve_jira_settings()
     jira_url, user, api_token = _s.url, _s.user, _s.api_token
     if not all([jira_url, user, api_token]):
