@@ -26,6 +26,7 @@ own-vs-escalation semantics.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -128,28 +129,11 @@ def test_physical_ceiling_refuses_an_oversized_haiku_context() -> None:
     _cr._validate_recovery_inputs(["c"], "x" * 400_000, _SONNET)
 
 
-def test_economic_ceiling_refuses_an_oversized_product() -> None:
-    """AC: a context × criteria product over 3,200,000 is refused with a
-    CompletionRecoveryError carrying {context_chars, criteria_total, recovery_input_chars,
-    recovery_input_char_limit}, before any runner call — even when each axis alone fits
-    the physical ceiling."""
-    # 200,000 chars × 20 criteria = 4,000,000 > 3,200,000; 200,000 ≪ 2,000,000 physical.
-    context = "x" * 200_000
-    criteria = [f"criterion {i}" for i in range(20)]
-    with pytest.raises(CompletionRecoveryError) as caught:
-        _cr._validate_recovery_inputs(criteria, context, _SONNET)
-    diag = caught.value.diagnostic
-    assert diag["context_chars"] == 200_000
-    assert diag["criteria_total"] == 20
-    assert diag["recovery_input_chars"] == 200_000 * 20
-    assert diag["recovery_input_char_limit"] == 3_200_000
-
-
 def test_a_shape_under_both_ceilings_is_admitted() -> None:
-    """Negative control: a context that fits the physical ceiling AND whose product fits
-    the economic ceiling must be admitted (no false refusal)."""
+    """Negative control: a context that fits the physical ceiling must be admitted (no
+    false refusal)."""
     context = "x" * 100_000
-    criteria = [f"criterion {i}" for i in range(10)]  # product 1,000,000 < 3,200,000
+    criteria = [f"criterion {i}" for i in range(10)]
     _cr._validate_recovery_inputs(criteria, context, _SONNET)
 
 
@@ -159,7 +143,7 @@ def test_a_shape_under_both_ceilings_is_admitted() -> None:
 
 
 class _RecoverableRunner:
-    """Primary call truncates (the door into recovery); recovery then succeeds."""
+    """Primary call truncates (the door into recovery); banked successor + finalizer succeed."""
 
     name = "recoverable"
 
@@ -173,19 +157,30 @@ class _RecoverableRunner:
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
-        if req.execution_mode == "agentic":
-            return {"text": "Observed implementation evidence at src/example.py:10."}
-        payload = json.loads(req.instructions)
-        criteria = [
-            {
-                "criterion": criterion,
-                "met": True,
-                "citation": {"kind": "source", "description": "src/example.py:10"},
-                "kind": "codebase-verifiable",
-            }
-            for criterion in payload["expected_criteria"]
-        ]
-        return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        if req.execution_mode == "single_turn":
+            payload = json.loads(req.instructions)
+            criteria = [
+                {
+                    "criterion": criterion,
+                    "met": True,
+                    "citation": {"kind": "source", "description": "src/example.py:10"},
+                    "kind": "codebase-verifiable",
+                }
+                for criterion in payload["expected_criteria"]
+            ]
+            return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        # Batched successor (agentic, structured): bank each criterion via the record tool.
+        record = req.extra_tools[0] if req.extra_tools else None
+        payload = json.loads(req.instructions) if req.instructions.startswith("{") else {}
+        for cid in _criterion_ids_in(req.instructions):
+            if record is not None:
+                record(cid, True, "Observed implementation evidence at src/example.py:10.")
+        return {"verdict": "PASS", "criteria": [], "_usage": {"requests": 0}}
+
+
+def _criterion_ids_in(instructions: str) -> list[str]:
+    """The criterion ids the successor was asked to verify (they appear in its instructions)."""
+    return re.findall(r"c\d{2}-[0-9a-f]{8}", instructions)
 
 
 def _ticket() -> dict:

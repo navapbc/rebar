@@ -227,7 +227,19 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     # closed-but-uncertified descendant) does NOT change the PASS/FAIL verdict — the parent's own
     # criteria stand — but the close gate reads it to close WITHOUT signing (certification
     # propagates). Defaults True (no uncertified descendant, or a direct workflow invocation).
-    result["certifiable"] = bool(ctx.inputs.get("certifiable", True))
+    # The verify step's OWN certifiable (2948) can independently withhold certification when a
+    # banked deterministic fallback assembled the verdict without a model call — combine (AND) so
+    # either source withholds. `verify_certifiable` defaults True (absent / normal LLM verdict).
+    verify_certifiable = ctx.inputs.get("verify_certifiable")
+    verify_certifiable = True if verify_certifiable is None else bool(verify_certifiable)
+    result["certifiable"] = bool(ctx.inputs.get("certifiable", True)) and verify_certifiable
+    # The verify step's self-verdict provenance: how the verdict was produced. The default
+    # "primary" (a normal successful verify) is DROPPED so the reconcile stays byte-identical to
+    # completion.py's tail on the common path; only a fallback marker (llm_finalizer /
+    # deterministic_fallback) is carried onto the verdict so the sidecar/signing path can see it.
+    finalizer = ctx.inputs.get("finalizer")
+    if finalizer is not None and finalizer != "primary":
+        result["finalizer"] = finalizer
     if not result["certifiable"] and "summary" not in result:
         result["summary"] = (
             "Closed without certification: a force-closed (uncertified) descendant leaves the "

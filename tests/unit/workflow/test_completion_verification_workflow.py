@@ -76,7 +76,19 @@ class _CannedRunner(AgentStepRunner):
         payload: dict = {"verdict": verdict, "findings": findings or []}
         if summary is not None:
             payload["summary"] = summary
-        self.outputs = {**payload, "runner": runner, "model": model, "trace_id": trace_id}
+        self.outputs = {
+            **payload,
+            "runner": runner,
+            "model": model,
+            "trace_id": trace_id,
+            # Mirror CompletionAgentStep's success stamping (2948): the verify output always
+            # carries its self-verdict provenance so the reconcile step can wire it without
+            # raising. A primary success is certifiable; `finalizer="primary"` is the default
+            # provenance the reconcile op drops (only a fallback marker is carried onto the
+            # verdict).
+            "finalizer": "primary",
+            "certifiable": True,
+        }
         self.calls = 0
 
     def run(self, ctx) -> StepResult:

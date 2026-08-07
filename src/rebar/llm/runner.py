@@ -198,7 +198,10 @@ class FakeRunner:
         # operation does its own normalize/resolve/reconcile on top.
         if req.mode == "structured" and self._structured is not None:
             payload = _findings.validate_structured(dict(self._structured), req.output_schema)
-            return {**payload, "runner": self.name, "model": None, "trace_id": None}
+            # Surface a (zeroed) per-run usage shape so callers that read `_usage` off the run
+            # result (story 2948 successor-spend inheritance) see the same key the real runner
+            # sets — an injected fake reports zero spend, never a missing key.
+            return {**payload, "runner": self.name, "model": None, "trace_id": None, "_usage": {}}
         return _findings.finalize_findings(
             self._findings,
             runner=self.name,

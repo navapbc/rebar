@@ -76,6 +76,12 @@ steps:
         # hold the runner-stamped record for the call that ran; the verdict simply never set
         # the key, so completion_sidecar recorded `provider_provenance` as absent on every run.
         provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
+        # The verify step's OWN self-verdict provenance (2948): `finalizer` names how the
+        # verdict was produced (primary / llm_finalizer / deterministic_fallback) and
+        # `verify_certifiable` is False when a banked deterministic fallback assembled the
+        # verdict without a model call. Both are ALWAYS present on the verify output.
+        finalizer: ${{ steps.verify.outputs.finalizer }}
+        verify_certifiable: ${{ steps.verify.outputs.certifiable }}
         # Certification decision from the precheck: false iff a closed-but-uncertified descendant
         # withholds the parent's signature (the parent may close but not certify). Carried onto
         # the verdict; the close gate closes WITHOUT signing when false.
