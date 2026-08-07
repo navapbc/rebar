@@ -77,20 +77,62 @@ def test_missing_metrics_extra_returns_unavailable(
     )
 
 
-def test_empty_analysis_has_zero_aggregates(
+def test_empty_analysis_is_unavailable_not_a_confident_zero(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Measuring NO file must be Unavailable: a zero means "measured zero" (ticket 6067).
+
+    This test previously asserted the zero-valued ``AnalyzerResult`` — it encoded the defect.
+    ``complexity_summary`` publishes with ``source: structural, confidence: high``, so an
+    empty file map published as zeros tells a reader the repository has no complexity when in
+    fact nothing was measured. Same invariant c5b3 established for scc.
+    """
+
     subject = _subject()
     fake_lizard = SimpleNamespace(analyze=lambda _paths: [])
     monkeypatch.setattr(subject, "guard_import", lambda *_args, **_kwargs: fake_lizard)
 
     result = subject.analyze(tmp_path)
 
+    assert isinstance(result, Unavailable)
+    assert "lizard" in result.reason
+    assert result.accruing_since == "2026-01-01T00:00:00+00:00"
+
+
+def test_root_without_any_language_lizard_supports_is_unavailable(tmp_path: Path) -> None:
+    """The reported scenario, through the REAL library rather than a fake (ticket 6067).
+
+    A polyglot client whose sources lizard cannot parse is exactly who epic 839b's adoption of
+    lizard was meant to serve, and exactly who got a fabricated zero.
+    """
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "notes.md").write_text("# no functions here\n", encoding="utf-8")
+    (repo_root / "data.toml").write_text("answer = 42\n", encoding="utf-8")
+
+    result = _subject().analyze(repo_root)
+
+    assert isinstance(result, Unavailable)
+    assert "lizard" in result.reason
+
+
+def test_measurable_root_never_reports_a_zero_complexity(tmp_path: Path) -> None:
+    """Regression for AC3: a root that demonstrably HAS analyzable files still measures."""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "choose.py").write_text(
+        "def choose(value):\n    if value:\n        return 1\n    return 0\n",
+        encoding="utf-8",
+    )
+
+    result = _subject().analyze(repo_root)
+
     assert isinstance(result, AnalyzerResult)
-    assert result.complexity == {
-        "files": {},
-        "functions": 0,
-        "total_ccn": 0,
-        "max_ccn": 0,
-    }
+    assert result.complexity is not None
+    assert result.complexity["files"]
+    assert result.complexity["functions"] > 0
+    assert result.complexity["total_ccn"] > 0
+    assert result.complexity["max_ccn"] > 0

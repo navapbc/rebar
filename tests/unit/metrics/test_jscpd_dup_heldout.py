@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -130,6 +131,50 @@ def _js_source(prefix: str, statements: int) -> str:
         for index in range(statements)
     )
     return f"function {prefix}_compute({prefix}_seed) {{\n{body}  return {prefix}_0;\n}}\n"
+
+def test_zero_scanned_sources_is_unavailable_not_a_confident_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A duplication zero over ZERO scanned files is the same fabricated zero (ticket 6067).
+
+    Real jscpd reports ``statistics.total.sources: 0`` for an empty/unsupported root and a
+    positive count otherwise, so the report DOES distinguish "no duplication" from "nothing
+    measured" — the runner just has to stop discarding the field.
+    """
+
+    shared = _runner_subject()
+    adapter = _adapter_subject()
+
+    def run_empty(scan_root: str | Path) -> dict[str, int | float]:
+        def no_sources(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            output_dir = Path(command[command.index("--output") + 1])
+            (output_dir / "jscpd-report.json").write_text(
+                json.dumps(
+                    {
+                        "statistics": {
+                            "total": {
+                                "clones": 0,
+                                "percentage": 0.0,
+                                "sources": 0,
+                                "lines": 0,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        return shared.run_jscpd(scan_root, run=no_sources)
+
+    monkeypatch.setattr(adapter, "run_jscpd", run_empty)
+
+    result = adapter.analyze(tmp_path)
+
+    assert isinstance(result, Unavailable)
+    assert "jscpd" in result.reason
+    assert result.accruing_since == "2026-01-01T00:00:00+00:00"
 
 
 @pytest.mark.integration
