@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
@@ -451,6 +452,138 @@ def _run_update_stale(argv_cwd: Path) -> int:
     return 0
 
 
+# ───────────────────────────── lock gate ────────────────────────────────────
+
+
+def lock_against_base(base: dict[str, int], branch: dict[str, int]) -> list[str]:
+    """Return violations between a base (main) and branch ceilings mapping.
+
+    Each element is a human-readable string containing the offending key. An
+    empty list means the lock passes.
+
+    Allowed changes (produce no violations):
+      - an entry REMOVED
+      - an existing ceiling LOWERED
+
+    Rejected changes (produce violations):
+      - an existing ceiling RAISED
+      - a NEW entry ADDED
+    """
+    violations: list[str] = []
+    for key, branch_ceiling in branch.items():
+        if key not in base:
+            violations.append(
+                f"NEW entry added: {key!r} (ceiling {branch_ceiling}) — "
+                "an administrator must override the gate to add a new baseline entry"
+            )
+        elif branch_ceiling > base[key]:
+            violations.append(
+                f"ceiling RAISED for {key!r}: {base[key]} -> {branch_ceiling} — "
+                "an administrator must override the gate to raise a ceiling"
+            )
+    return violations
+
+
+_BASELINE_REPO_RELPATH = ".github/complexity-baseline.json"
+
+
+class LockFetchError(BaselineError):
+    """The base (main) copy of the baseline could not be established (fail closed)."""
+
+
+def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
+    """Fetch main's copy of the baseline and return its parsed ceilings.
+
+    Used by the CI lock when no explicit ``--base`` path is given. Fetches ``main`` by
+    EXPLICIT URL from the canonical GitHub repo (``GITHUB_REPOSITORY``) — the same posture
+    the module-size gate uses — so the lock does NOT depend on an ``origin`` remote being
+    configured by the checkout action.
+
+    Returns ``None`` when main does not yet carry the baseline file (bootstrap: allow).
+    Raises :class:`LockFetchError` when the base cannot be established for any other reason
+    (missing ``GITHUB_REPOSITORY``, fetch failure, unreadable/invalid base) so the caller
+    can FAIL CLOSED — never a warn-and-continue.
+    """
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if not repo:
+        raise LockFetchError(
+            "GITHUB_REPOSITORY is not set; cannot fetch main to verify the "
+            "complexity-baseline lock (failing closed)"
+        )
+    url = f"https://github.com/{repo}"
+    ref = "refs/remotes/gh-main-complexity-lock"
+    fetch = subprocess.run(  # fixed, non-shell argv
+        ["git", "fetch", "--depth=1", url, f"+refs/heads/main:{ref}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        raise LockFetchError(
+            f"could not fetch main from {url} to verify the complexity-baseline lock "
+            f"(failing closed): {fetch.stderr.strip()}"
+        )
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{ref}:{_BASELINE_REPO_RELPATH}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if exists.returncode != 0:
+        return None  # main has no baseline yet — bootstrap, allow
+    show = subprocess.run(
+        ["git", "show", f"{ref}:{_BASELINE_REPO_RELPATH}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+    )
+    if show.returncode != 0:
+        raise LockFetchError(
+            "could not read main's copy of the baseline (failing closed): "
+            f"{show.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    try:
+        return parse_baseline(show.stdout)
+    except SchemaError as exc:
+        raise LockFetchError(f"main's baseline is unreadable (failing closed): {exc}") from exc
+
+
+def _run_lock(base_path: Path | None) -> int:
+    if base_path is not None:
+        try:
+            base: dict[str, int] | None = load_baseline(base_path)
+        except SchemaError as exc:
+            print(
+                f"error: could not load base baseline from {base_path}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        try:
+            base = _fetch_base_ceilings_from_main()
+        except LockFetchError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            return 1
+        if base is None:
+            print("complexity-baseline lock: main has no baseline yet — bootstrap, allowing.")
+            return 0
+    try:
+        branch = load_baseline(BASELINE_PATH)
+    except SchemaError as exc:
+        print(f"error: could not load branch baseline: {exc}", file=sys.stderr)
+        return 1
+    violations = lock_against_base(base, branch)
+    if violations:
+        for v in violations:
+            print(f"complexity-baseline lock: {v}")
+        print(
+            "hint: an administrator must override the Verified gate (force-submit) "
+            "to land a raised ceiling or a new baseline entry."
+        )
+        return 1
+    print("complexity-baseline lock: OK (no raised ceilings or new entries)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="check_complexity_baseline.py",
@@ -478,12 +611,33 @@ def build_parser() -> argparse.ArgumentParser:
             "scanner/schema error, so it can never bless regressions."
         ),
     )
+    group.add_argument(
+        "--lock",
+        action="store_true",
+        help=(
+            "Lock gate. Semantically compare the branch baseline against the base "
+            "(main) copy. Without --base, fetch main by explicit URL "
+            "(GITHUB_REPOSITORY). Exits nonzero if any ceiling is raised or any new "
+            "entry is added. Fails closed if the base cannot be established."
+        ),
+    )
+    parser.add_argument(
+        "--base",
+        metavar="PATH",
+        type=Path,
+        help=(
+            "Optional explicit path to the base (main) copy of the baseline JSON for "
+            "--lock. When omitted, --lock fetches main itself."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.lock:
+        return _run_lock(args.base)
     if args.update_stale:
         return _run_update_stale(REPO_ROOT)
     return _run_check(REPO_ROOT)
