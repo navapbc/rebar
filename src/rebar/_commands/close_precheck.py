@@ -122,6 +122,41 @@ def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) 
     return False
 
 
+def _emit_completion_sidecar(
+    completion_sidecar, result, ticket_id: str, repo_root, *, is_pass: bool
+) -> None:
+    """Emit the PASS/FAIL COMPLETION_VERDICT sidecar, warning on stderr if it is DROPPED.
+
+    Best-effort persistence (observability, never a gate): a failed/raised emit never changes
+    the close outcome. But a dropped record — most often a write-lock ``LockTimeout`` that
+    outlasted the retry (ticket ab54) — is no longer silent: inspect ``emit``'s bool and, on
+    failure, write an explicit ``Warning: ... WITHOUT ...`` line naming the ticket (matching
+    the transition_close convention) instead of leaving only a swallowed ``logger.warning``."""
+    try:
+        emitted = completion_sidecar.emit(result, material=None, repo_root=repo_root)
+    except Exception:
+        logger.warning("completion sidecar emit raised; close outcome unchanged", exc_info=True)
+        emitted = False
+    if emitted:
+        return
+    import sys
+
+    if is_pass:
+        sys.stderr.write(
+            f"Warning: closing {ticket_id} WITHOUT a durable COMPLETION_VERDICT sidecar — the "
+            "PASS completion record could not be written (write-lock contention or store "
+            "error). The close still succeeds and stays certified; only the offline-queryable "
+            "artifact was lost.\n"
+        )
+    else:
+        sys.stderr.write(
+            f"Warning: completion FAIL for {ticket_id} recorded WITHOUT a durable "
+            "COMPLETION_VERDICT sidecar — the record could not be written (write-lock "
+            "contention or store error). The FAIL still blocks the close; only the "
+            "offline-queryable artifact was lost.\n"
+        )
+
+
 def _completion_precheck(
     ticket_id: str,
     ticket_type: str,
@@ -322,10 +357,7 @@ def _completion_precheck(
         from rebar.llm import completion_sidecar
 
         result.setdefault("ticket_id", resolved_id)
-        try:
-            completion_sidecar.emit(result, material=None, repo_root=repo_root)
-        except Exception:
-            logger.warning("completion FAIL sidecar emit raised; still blocking", exc_info=True)
+        _emit_completion_sidecar(completion_sidecar, result, ticket_id, repo_root, is_pass=False)
         raise CommandError(message, returncode=1)
     # PASS: persist the lossless PASS record to the durable, queryable sidecar (story e7e0)
     # BEFORE any sign/early-return, so EVERY PASS close — including the local (opt-in) and the
@@ -336,10 +368,7 @@ def _completion_precheck(
     from rebar.llm import completion_sidecar
 
     result.setdefault("ticket_id", resolved_id)
-    try:
-        completion_sidecar.emit(result, material=None, repo_root=repo_root)
-    except Exception:
-        logger.warning("completion PASS sidecar emit raised; close proceeds", exc_info=True)
+    _emit_completion_sidecar(completion_sidecar, result, ticket_id, repo_root, is_pass=True)
     # local source (opt-in back-out) verified + passed but is NEVER signed (epic
     # raze-vet-ditch S4: an unattested run produces no signature). Only an EXPLICIT local
     # verdict suppresses signing; the default close path is attested and signs (a verdict with
