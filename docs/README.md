@@ -149,6 +149,10 @@ Developing rebar itself — architecture, internals, and the dev workflow.
   actually constrains behavior, via mutmut.
 - **[maintenance-audit-runbook.md](maintenance-audit-runbook.md)** — the repeatable
   recipe for the periodic principal-engineer code-health audit.
+- **[dependency-advisory-runbook.md](dependency-advisory-runbook.md)** — what to do when
+  a `pip-audit` step goes red: which lane owns the finding, the severity bar, and why
+  `override-dependencies` (not `constraint-dependencies`) is the instrument for an
+  upstream cap.
 - **[jira-fixtures.md](jira-fixtures.md)** — the hermetic-but-honest Jira test fixtures
   and why hand-built snapshot dicts caused a bug class.
 - **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)** — rebar
