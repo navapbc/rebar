@@ -35,15 +35,25 @@ from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
 from rebar.llm.config import LLMConfig, gate_session, use_code_root, use_tickets_root
 
 __all__ = [
+    "PROVENANCE_KEYS",
     "SOURCE_ATTESTED",
     "SOURCE_LOCAL",
     "annotate_result",
     "apply_handle",
+    "copy_provenance",
     "default_ref",
     "default_source",
     "gate_read_root",
     "resolve_gate_handle",
 ]
+
+#: The provenance keys :func:`annotate_result` stamps on a gate payload — the single
+#: source of truth shared with :func:`copy_provenance`.
+PROVENANCE_KEYS = ("source", "verified_at_sha", "signable")
+
+# What an UNPINNED payload gets: one that never resolved a handle at all (an inert or
+# preflight-degraded verdict). Honest and fail-closed — no source, no SHA, never signable.
+_UNPINNED = {"source": None, "verified_at_sha": None, "signable": False}
 
 
 def _snapshot_table(repo_root: str | None) -> dict:
@@ -135,3 +145,18 @@ def annotate_result(result: dict, handle: SnapshotHandle) -> dict:
         result["verified_at_sha"] = handle.sha
         result["signable"] = handle.signable
     return result
+
+
+def copy_provenance(src: dict | None, dst: dict) -> dict:
+    """Propagate the :func:`annotate_result` stamp from one gate payload onto another.
+
+    Used where the handle is resolved DEEPER than the surface that returns the result — the
+    code-review gate resolves it inside the four-pass run, so the ``review_code`` shim must
+    carry the stamp of the handle the review ACTUALLY ran under rather than re-resolving
+    (which could pin a different SHA if the base ref moved in between). A ``src`` that never
+    pinned a source (an inert or preflight-degraded verdict) yields the UNPINNED stamp, so
+    the keys are always present and such a result is never ``signable``."""
+    for key in PROVENANCE_KEYS:
+        value = src.get(key, _UNPINNED[key]) if isinstance(src, dict) else _UNPINNED[key]
+        dst[key] = value
+    return dst
