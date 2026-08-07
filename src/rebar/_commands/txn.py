@@ -151,15 +151,6 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
         pass
 
 
-def bug_close_reason_ok(reason: str) -> bool:
-    """True if a bug-close ``--reason`` is acceptable (starts with ``Fixed`` or
-    ``Escalated``…). Shared by :func:`transition_core`'s close guard and the completion
-    gate's pre-check (in ``transition_compute``) so the two cannot drift. Empty → False."""
-    if not reason:
-        return False
-    return reason.startswith("Fixed") or reason.lower().startswith("escalat")
-
-
 # The closed bug-close classification vocabulary (ticket ed13): a bug close records a
 # REQUIRED, bounded ``--class <value>`` (replacing the old free-text ``--reason``), folded
 # into reduced state as ``close_class``. Single-sourced here so the CLI parser, the close
