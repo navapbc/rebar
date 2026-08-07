@@ -131,6 +131,56 @@ def test_health_endpoint_reports_the_in_flight_count(monkeypatch: pytest.MonkeyP
     )
 
 
+def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug 9f63 AC: 'not queued' must be distinguishable from 'queued behind N others'.
+
+    ``in_flight`` alone counts only reviews already RUNNING, so a change waiting behind a
+    backlog and a change whose webhook was dropped present identically — that ambiguity is
+    what led an agent to read a queued review as an outage and abandon correct work.
+    ``queue_depth`` is the missing half: with it, an operator can tell 'the bot never got
+    the event' (depth 0, no vote) from 'the bot has it, N ahead of you'.
+
+    Driven by awaiting the handler directly rather than through ``TestClient``. The route
+    returns this dict as-is, so it IS the response body — the contract is unchanged — but
+    no ASGI client is constructed, which matters: ``TestClient`` used as a context manager
+    runs the app lifespan, and that starts the queue worker, the backfill reconciler and
+    the snapshot janitor, then on exit awaits ``queue.join()`` under
+    ``shutdown_drain_seconds()`` (1200s). None of that belongs behind an assertion about
+    one JSON field, and the janitor's startup sweep is a real filesystem walk that has no
+    business running here. The sibling test above already covers the HTTP surface.
+
+    Requires the ``reviewbot`` extra (fastapi); skipped without it.
+    """
+    pytest.importorskip("fastapi")
+
+    from rebar.review_bot import app as appmod
+
+    monkeypatch.setattr(voter, "in_flight_reviews", lambda: 0)
+
+    # No lifespan has run in this test, so there may be no queue at all on app.state —
+    # the field must still be present and 0, never absent.
+    monkeypatch.delattr(appmod.app.state, "queue", raising=False)
+    idle = asyncio.run(appmod.health())
+    assert idle["queue_depth"] == 0, (
+        f"with no queue yet, queue_depth must report 0, not be omitted\n{idle}"
+    )
+
+    backlog: asyncio.Queue = asyncio.Queue()
+    for n in range(3):
+        backlog.put_nowait({"type": "patchset-created", "_n": n})
+    monkeypatch.setattr(appmod.app.state, "queue", backlog, raising=False)
+    body = asyncio.run(appmod.health())
+
+    assert body["queue_depth"] == 3, (
+        f"/health must expose how many events are waiting to be reviewed\n{body}"
+    )
+    assert isinstance(body["queue_depth"], int) and not isinstance(body["queue_depth"], bool), (
+        f"queue_depth must be an integer, like in_flight\n{body}"
+    )
+    # The pre-existing contract is additive-only: autodeploy.sh reads these two keys.
+    assert body["status"] == "ok" and body["in_flight"] == 0
+
+
 def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
     """Same contract as the endpoint test above, asserted WITHOUT fastapi.
 

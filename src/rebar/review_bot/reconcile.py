@@ -9,20 +9,40 @@ events-log, finds patchsets in the rebar project whose CURRENT revision has no
 the single-flight lock + dedup, so a webhook and a backfill for the same patchset never
 double-vote.
 
-PERSISTED CURSOR (resumable). The reconciler stores the newest events-log event time it
-has processed in a small file (``config.cursor_path`` — by default
-``<dedup dir>/reconcile_cursor``). Each pass fetches only events SINCE that cursor (the
-events-log REST ``?t1=`` time window), then advances + persists the cursor to the newest
-event seen. This survives a restart (resumable) and avoids rescanning the whole log; it
-is purely an optimization — IDEMPOTENCY is still owned by the per-(change,revision) dedup
-ledger + the authoritative Gerrit vote-existence check, so even a lost/reset cursor can
-never double-vote.
+PERSISTED CURSOR WITH A LOW-WATER MARK (resumable, and re-drives what it abandoned).
+The reconciler stores an events-log event time in a small file (``config.cursor_path`` —
+by default ``<dedup dir>/reconcile_cursor``) and each pass fetches only events SINCE that
+cursor (the events-log REST ``?t1=`` time window). That window is a SERVER-SIDE INCLUSIVE
+LOWER BOUND: events older than ``t1`` are simply absent from the response. So the cursor is
+NOT merely an optimization — anything the cursor moves past is gone from every future
+window, permanently.
+
+Bug 9f63: this pass used to advance the cursor to the newest event in the whole fetched
+window UNCONDITIONALLY, including when a candidate had been abandoned mid-flight (an
+events-log check error, a review timeout, or a voter ``error``/``deferred`` result). The
+abandoned change fell out of every subsequent window and was never retried — the docstring's
+promise that "this poller closes that loop" silently regressed, and only a new event
+(a ``recheck-review`` comment, a re-push) could re-admit the change. The cursor is now a
+LOW-WATER MARK: a pass persists ``min(newest_event, oldest_retryably_abandoned_candidate)``,
+so the next pass re-fetches every candidate it still owes a vote. Terminal outcomes (voted,
+already-voted, malformed, other-project, or a change closed mid-review) do NOT hold it back.
+The hold-back is bounded by ``reconcile_max_holdback_seconds`` so a permanently-failing
+candidate cannot pin the cursor — and forever grow the window — in silence; when that
+ceiling releases one, the greppable ``RECONCILE_DEGRADED reason=holdback_expired`` marker
+fires.
+
+The cursor survives a restart (resumable). IDEMPOTENCY remains owned by the
+per-(change,revision) dedup ledger + the authoritative Gerrit vote-existence check, so a
+re-drive of an already-voted patchset — or even a lost/reset cursor — can never double-vote.
 
 FALLBACK (fail-closed, degraded). If events-log is absent / errors / returns malformed
 data, the reconciler logs a warning, emits a greppable ``RECONCILE_DEGRADED`` marker the
 host probe / alarm can catch, and RELIES ON THE WEBHOOK (degraded backfill). It NEVER
 advances the cursor on an error and NEVER casts a vote it could not justify — a missed
-change simply stays vote-less = unsubmittable = fail-closed.
+change simply stays vote-less = unsubmittable = fail-closed. Note the webhook is only a
+BEST-EFFORT partner: Gerrit's ``webhooks`` plugin is at-most-once (it logs SEVERE and
+DISCARDS after ``maxTries``, and loses pending deliveries on restart), so this reconciler
+is the only recovery path — which is exactly why its cursor must not skip work (9f63).
 
 The reconciler reuses one ``GerritClient`` + ``DedupStore`` so the run is cheap; the
 per-patchset Gerrit-side ``has_llm_review_vote`` check is done inside the voter (the
@@ -49,6 +69,22 @@ logger = logging.getLogger("rebar.review_bot.reconcile")
 
 #: events-log ``?t1=`` expects ``yyyy-MM-dd HH:mm:ss`` in UTC.
 _T1_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+#: The ``voter.review_and_vote`` result statuses that leave the patchset STILL OWED a vote and
+#: are worth re-driving next pass — so the cursor is held back to them (bug 9f63).
+#:
+#: ``error`` covers every transient fail-closed stage the voter reports (``dedup_check``,
+#: ``review_setup``, ``post_vote``, the tree-mismatch guard): none of them wrote a dedup row, so
+#: a re-drive re-attempts. ``deferred`` is the retryable-coverage-gap path, whose own contract
+#: (voter.py) explicitly says the reconciler will re-drive it before the attempt budget escalates
+#: to the fail-closed ``-1``.
+#:
+#: Everything else is TERMINAL and must let the cursor advance: ``voted`` (done);
+#: ``skipped``/``malformed_event`` and ``skipped``/``other_project`` (never ours to vote);
+#: ``skipped``/``dedup`` and ``skipped``/``already_voted_gerrit`` (a vote already exists); and
+#: ``skipped``/``post_vote_closed`` — the change merged/abandoned mid-review, so it is unvotable
+#: and re-driving it would 409 forever (bug c943).
+_RETRYABLE_STATUSES = frozenset({"error", "deferred"})
 
 
 def _emit(event: str, **fields: Any) -> None:
@@ -117,7 +153,11 @@ def _candidate_events(events: list[dict], project: str) -> dict[str, dict]:
     keeping the LATEST patchset seen (highest patchSet.number) for the rebar project.
 
     The events-log mixes many event types; we keep the patchset-bearing ones so the
-    voter's ``_extract`` can pull change/revision/ref. Keyed by change id."""
+    voter's ``_extract`` can pull change/revision/ref. Keyed by change id.
+
+    The normalized event CARRIES ITS ``eventCreatedOn`` FORWARD (bug 9f63): the cursor's
+    low-water mark needs each candidate's own event time to clamp back to, and the voter's
+    ``_extract`` reads only ``change``/``patchSet``/``type``, so the extra key is inert there."""
     latest: dict[str, dict] = {}
     for ev in events:
         if not isinstance(ev, dict):
@@ -155,6 +195,7 @@ def _candidate_events(events: list[dict], project: str) -> dict[str, dict]:
                 "type": "patchset-created",
                 "change": change,
                 "patchSet": patchset,
+                "eventCreatedOn": _event_time(ev),
             }
     return latest
 
@@ -167,10 +208,15 @@ async def reconcile_once(
 ) -> dict[str, int]:
     """Run one backfill pass. Returns ``{scanned, reviewed}`` counts for observability.
 
-    Reads events SINCE the persisted cursor, reviews gap (vote-less) patchsets, then
-    advances + persists the cursor to the newest event seen. On an events-log
-    error/malformed body it emits the degraded marker, does NOT advance the cursor, and
-    casts NO vote (fail-closed; the webhook remains the live path)."""
+    Reads events SINCE the persisted cursor, reviews gap (vote-less) patchsets, then persists
+    the cursor as a LOW-WATER MARK: the newest event seen, but never past the OLDEST candidate
+    this pass abandoned for a retryable reason (bug 9f63), because the events-log ``?t1=``
+    window is a server-side inclusive lower bound and anything the cursor passes is
+    unreachable forever. The hold-back is clamped to ``reconcile_max_holdback_seconds`` behind
+    the newest event so a permanently-failing candidate cannot pin the cursor.
+
+    On an events-log error/malformed body it emits the degraded marker, does NOT advance the
+    cursor, and casts NO vote (fail-closed; the webhook remains the live path)."""
     cfg = config or ReceiverConfig.from_env()
     gc = gerrit or GerritClient(cfg)
     store = dedup or DedupStore(cfg.dedup_db_path)
@@ -199,9 +245,17 @@ async def reconcile_once(
             newest = max(newest, _event_time(ev))
 
     reviewed = 0
+    # change_id -> the candidate's own event time, for every candidate this pass leaves
+    # un-voted for a RETRYABLE reason. Its minimum is the cursor's low-water mark (9f63): the
+    # next pass's ``?t1=`` window must still contain these, or they are lost for good.
+    held_back: dict[str, int] = {}
     for change_id, ev in candidates.items():
         patchset = ev.get("patchSet") or {}
         revision = str(patchset.get("revision"))
+        try:
+            ev_time = int(ev.get("eventCreatedOn") or 0)
+        except (TypeError, ValueError):
+            ev_time = 0
         # Pre-filter: skip if locally recorded OR already voted on Gerrit (cheap skip
         # before spawning a review). The voter re-checks under the lock authoritatively.
         if store.already_voted(change_id, revision):
@@ -210,7 +264,10 @@ async def reconcile_once(
             if await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision):
                 continue
         except GerritError as exc:
+            # We could not even establish whether a vote is needed — the candidate is still
+            # OWED one. Hold the cursor back to it so the next pass re-checks (9f63).
             _emit("reconcile_check_error", change_id=change_id, error=str(exc))
+            held_back[change_id] = ev_time
             continue
         # Bound the backfill review with the SAME per-review timeout the live worker uses
         # (app._worker). Without this a single hung review (blocked clone/subprocess/LLM) would
@@ -225,22 +282,69 @@ async def reconcile_once(
             )
         except (asyncio.TimeoutError, TimeoutError):
             _degraded("review_timeout", change_id=change_id, revision=revision)
+            held_back[change_id] = ev_time
             continue
-        if result.get("status") == "voted":
+        status = str(result.get("status") or "")
+        if status == "voted":
             reviewed += 1
+        elif status in _RETRYABLE_STATUSES:
+            # ``error`` (transient, no dedup row written) or ``deferred`` (retryable coverage
+            # gap): the patchset is still vote-less, so keep it inside the next window (9f63).
+            held_back[change_id] = ev_time
 
-    # Advance + persist the cursor ONLY after a clean pass (newest event time seen). This
-    # makes the poller resumable across restarts and avoids rescanning the whole log.
-    if newest:
-        _write_cursor(cfg.cursor_path, _to_t1(newest))
+    persisted = _persist_cursor(cfg, newest=newest, held_back=held_back, previous=cursor)
 
     _emit(
         "reconcile_done",
         scanned=len(candidates),
         reviewed=reviewed,
         cursor_advanced=bool(newest),
+        held_back=len(held_back),
+        cursor=persisted,
     )
     return {"scanned": len(candidates), "reviewed": reviewed}
+
+
+def _persist_cursor(
+    cfg: ReceiverConfig, *, newest: int, held_back: dict[str, int], previous: str | None
+) -> str:
+    """Compute + persist this pass's cursor and return the value actually on disk.
+
+    The cursor is a LOW-WATER MARK (bug 9f63), not simply "the newest event seen": it is
+    clamped back to the OLDEST retryably-abandoned candidate so the next pass's inclusive
+    ``?t1=`` window still contains it. ``t1`` is inclusive, so clamping TO that event time
+    (not before it) is enough to re-admit it.
+
+    The clamp is BOUNDED by ``cfg.reconcile_max_holdback_seconds``: a candidate that fails on
+    every pass would otherwise pin the cursor forever and grow the fetch window without bound.
+    When the ceiling releases a still-failing candidate we emit the greppable degraded marker
+    so the change is surfaced loudly instead of being dropped in silence."""
+    if not newest:
+        # Nothing datable in this window (empty log / all events time-less) — leave whatever
+        # cursor is already on disk alone, exactly as before.
+        return previous or ""
+
+    target = newest
+    # Ignore time-less (0) candidates: they carry no usable bound, and clamping to 0 would
+    # rescan the entire retained log every pass.
+    floors = [t for t in held_back.values() if t > 0]
+    if floors:
+        oldest = min(floors)
+        ceiling = newest - max(0, cfg.reconcile_max_holdback_seconds)
+        if oldest < ceiling:
+            _degraded(
+                "holdback_expired",
+                change_ids=sorted(cid for cid, t in held_back.items() if 0 < t < ceiling),
+                oldest_held_back=_to_t1(oldest),
+                max_holdback_seconds=cfg.reconcile_max_holdback_seconds,
+            )
+            target = min(newest, ceiling)
+        else:
+            target = min(newest, oldest)
+
+    value = _to_t1(target)
+    _write_cursor(cfg.cursor_path, value)
+    return value
 
 
 async def reconcile_loop(
