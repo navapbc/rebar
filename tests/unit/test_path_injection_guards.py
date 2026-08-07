@@ -15,7 +15,6 @@ Each test pins one containment barrier the fix introduced:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import types
 from pathlib import Path
@@ -145,27 +144,41 @@ def test_editor_raw_prompt_text_refuses_traversal(tmp_path: Path) -> None:
 
 
 def test_rerun_502_body_has_no_exception_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Gerrit lookup failure yields a 502 whose body carries NO exception detail.
+
+    Driven through ``TestClient`` rather than by calling ``rerun()`` with a hand-rolled
+    request double. That is deliberate and load-bearing: this test previously passed a
+    ``types.SimpleNamespace`` carrying only ``app`` + ``query_params``, and when ticket 66af
+    widened ``app._request_token`` to read ``request.headers`` first, the double raised
+    ``AttributeError`` *before any assertion ran* — so the containment guarantee below went
+    silently unverified (bug bolstered-afraid-ichidna). A header-less request is not a real
+    shape: ``.headers`` is an unconditional property on starlette's ``HTTPConnection`` and a
+    request with no caller headers still carries an empty ``Headers``. Exercising the real
+    ASGI request contract makes the whole drift class impossible rather than re-patching the
+    double each time the handler reads one more request attribute.
+    """
     pytest.importorskip("fastapi")  # the reviewbot extra; absent in the lean CI suite
+    from fastapi.testclient import TestClient
+
+    from rebar.review_bot import app as app_module
     from rebar.review_bot import gerrit_client
-    from rebar.review_bot.app import rerun
+    from rebar.review_bot.config import ReceiverConfig
     from rebar.review_bot.gerrit_client import GerritError
 
-    class _FakeGerrit:
-        def __init__(self, cfg):
-            pass
+    def _boom(self, change):
+        raise GerritError("SEKRIT internal detail: /etc/passwd stacktrace", status=500)
 
-        def get_change_event(self, change):
-            raise GerritError("SEKRIT internal detail: /etc/passwd stacktrace", status=500)
-
-    monkeypatch.setattr(gerrit_client, "GerritClient", _FakeGerrit)
-
-    cfg = types.SimpleNamespace(webhook_token="tok")
-    req = types.SimpleNamespace(
-        app=types.SimpleNamespace(state=types.SimpleNamespace(config=cfg)),
-        query_params={"token": "tok", "change": "12345"},
+    monkeypatch.setattr(gerrit_client.GerritClient, "get_change_event", _boom)
+    monkeypatch.setattr(
+        app_module.app.state,
+        "config",
+        ReceiverConfig(gerrit_bot_token="tok", webhook_token="tok"),
+        raising=False,
     )
-    resp = asyncio.run(rerun(req))
 
-    assert resp.status_code == 502
-    assert json.loads(bytes(resp.body)) == {"status": "gerrit error"}
-    assert b"SEKRIT" not in resp.body and b"stacktrace" not in resp.body
+    client = TestClient(app_module.app)
+    resp = client.post("/rerun?change=12345", headers={"X-Rebar-Token": "tok"})
+
+    assert resp.status_code == 502, resp.text
+    assert json.loads(resp.content) == {"status": "gerrit error"}
+    assert b"SEKRIT" not in resp.content and b"stacktrace" not in resp.content
