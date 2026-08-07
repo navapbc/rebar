@@ -93,8 +93,18 @@ _FETCH_TIMEOUT = 300
 
 
 def _git_fetch(cwd: str, *args: str) -> subprocess.CompletedProcess:
+    """Run a NETWORK git op bounded on two independent axes.
+
+    ``_FETCH_TIMEOUT`` bounds elapsed time; the ``-c`` pairs from
+    :func:`rebar._snapshot.git_fetch.stall_abort_args` bound *throughput*, so a remote that
+    opens the socket and then sends nothing aborts in ~10s instead of holding `rebar init`
+    for the full five minutes (task 851e). They must precede the subcommand — git only
+    accepts ``-c`` as a top-level option."""
+    from rebar._snapshot.git_fetch import stall_abort_args
+
     return _init_probe.run_bounded_git(
         cwd,
+        *stall_abort_args(),
         *args,
         timeout=_FETCH_TIMEOUT,
         run_git_fn=run_git,

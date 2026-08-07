@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from rebar._snapshot.git_fetch import stall_abort_args
 from rebar.review_bot.config import ReceiverConfig
 
 logger = logging.getLogger("rebar.review_bot.gerrit_client")
@@ -44,6 +45,14 @@ _ROBOT_ID = "rebar-review-bot"
 #: ref-sized op against an already-warm clone, whereas this method runs ``git init`` on a
 #: freshly created dest and does a COLD fetch of the change ref — 747f's "legitimately minutes
 #: on a cold clone" profile, for which it adopted the same 300s bound.
+#:
+#: That bound is ELAPSED TIME, which is the wrong axis for a *stalled* transfer: a remote that
+#: opens the socket and then moves no bytes is indistinguishable from a slow cold clone, so it
+#: parks the child here for the full five minutes (task 851e). The two network fetches below
+#: therefore also arm the throughput-keyed abort from
+#: :func:`rebar._snapshot.git_fetch.stall_abort_args` — the same seam bug 12e4 built for the
+#: snapshot path, not a copy of it — which ends a dead-air transfer in ~10s while leaving a
+#: slow-but-progressing one alone.
 _GIT_TIMEOUT = 300
 
 
@@ -365,7 +374,20 @@ class GerritClient:
                 timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
-                ["git", "-C", dest, "fetch", "-q", "--depth", "2", repo_url, revision_ref],
+                # The -c pairs arm the throughput-keyed stall abort and MUST precede the
+                # subcommand; see stall_abort_args().
+                [
+                    "git",
+                    "-C",
+                    dest,
+                    *stall_abort_args(),
+                    "fetch",
+                    "-q",
+                    "--depth",
+                    "2",
+                    repo_url,
+                    revision_ref,
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -398,6 +420,7 @@ class GerritClient:
                     "git",
                     "-C",
                     dest,
+                    *stall_abort_args(),
                     "fetch",
                     "-q",
                     "--depth",

@@ -13,60 +13,12 @@ bytes continuously, and it fails for any implementation keyed on elapsed time.
 
 from __future__ import annotations
 
-import socket
 import subprocess
-import threading
-import time
 
 import pytest
+from _stall_remote import serve as _serve
 
 from rebar._snapshot import git_fetch
-
-
-def _serve(mode: str, *, seconds: float, rate: int = 0) -> tuple[int, threading.Event]:
-    """Bind a local HTTP-ish remote and return its port plus a shutdown flag.
-
-    ``mode="stall"`` sends response headers and then **zero** body bytes for ``seconds``.
-    ``mode="dribble"`` sends body bytes continuously at ``rate`` bytes/second — slow, but
-    always progressing."""
-    stop = threading.Event()
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(8)
-    srv.settimeout(0.5)
-    port = srv.getsockname()[1]
-
-    def handle(conn: socket.socket) -> None:
-        try:
-            conn.recv(65536)
-            conn.sendall(
-                b"HTTP/1.1 200 OK\r\n"
-                b"Content-Type: application/x-git-upload-pack-advertisement\r\n"
-                b"Content-Length: 100000000\r\n\r\n"
-            )
-            deadline = time.monotonic() + seconds
-            chunk = b"x" * max(1, rate // 10)
-            while not stop.is_set() and time.monotonic() < deadline:
-                if mode == "dribble":
-                    conn.sendall(chunk)
-                time.sleep(0.1)
-        except OSError:
-            pass
-        finally:
-            conn.close()
-
-    def accept_loop() -> None:
-        while not stop.is_set():
-            try:
-                conn, _ = srv.accept()
-            except (TimeoutError, OSError):
-                continue
-            threading.Thread(target=handle, args=(conn,), daemon=True).start()
-        srv.close()
-
-    threading.Thread(target=accept_loop, daemon=True).start()
-    return port, stop
 
 
 @pytest.fixture
