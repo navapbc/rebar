@@ -1041,6 +1041,9 @@ def test_material_fingerprint_item_text_edit_still_changes() -> None:
 
 
 def test_material_fingerprint_distinguishes_declared_none_without_legacy_churn() -> None:
+    # Golden values re-baselined once, for bug 2be7: the description now enters the basis
+    # with insignificant whitespace canonicalized away. Adding `file_impact_scope` still
+    # must not churn them — that is what this test pins.
     undeclared = _ctx(
         _GOOD_AC,
         state={
@@ -1066,11 +1069,11 @@ def test_material_fingerprint_distinguishes_declared_none_without_legacy_churn()
         },
     )
 
-    assert orchestrator.material_fingerprint(undeclared) == "8a2b6aa064e50d47"
-    assert orchestrator.material_fingerprint(paths) == "54fd84b5d3512772"
+    assert orchestrator.material_fingerprint(undeclared) == "5eb256d6e1db8ce8"
+    assert orchestrator.material_fingerprint(paths) == "fc243d36aeb93a46"
     assert orchestrator.material_fingerprint(declared_none) not in {
-        "8a2b6aa064e50d47",
-        "54fd84b5d3512772",
+        "5eb256d6e1db8ce8",
+        "fc243d36aeb93a46",
     }
 
 
