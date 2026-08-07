@@ -529,7 +529,7 @@ def cmd_advisory_alert(
                 "env_integration",
                 "--reason",
                 reason,
-                f"--force-close={force_close}",
+                f"--force={force_close}",
             ]
         )
         if rc != 0:
