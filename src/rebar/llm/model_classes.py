@@ -394,7 +394,10 @@ def should_fall_back(exc: Exception) -> bool:
 
 
 def fallback_targets_for(
-    resolved: str, slots: Mapping[str, ClassSlot] | None = None
+    resolved: str,
+    slots: Mapping[str, ClassSlot] | None = None,
+    *,
+    repo_root: str | None = None,
 ) -> tuple[FallbackTarget, ...]:
     """The ordered fallback chain configured for the class whose PRIMARY resolves to
     ``resolved``, or an empty tuple.
@@ -403,8 +406,12 @@ def fallback_targets_for(
     identifies the slot that string came from — no new plumbing has to thread a class NAME
     through every call site for a chain to be honored. Classes are consulted in
     :data:`CLASS_NAMES` order, so if two slots name the same primary the first wins (their
-    chains would otherwise be ambiguous for one and the same model)."""
-    slots = load_class_slots() if slots is None else slots
+    chains would otherwise be ambiguous for one and the same model).
+
+    ``repo_root`` is the root the class table is read from when ``slots`` is not supplied; a
+    caller holding an ``LLMConfig`` threads ``cfg.repo_path`` so the chain is read from the SAME
+    root that config resolved against, rather than from ambient discovery (bug 2876)."""
+    slots = load_class_slots(repo_root) if slots is None else slots
     for name in CLASS_NAMES:
         slot = slots.get(name)
         if slot is not None and _resolve_target(slot.model, slot.provider) == resolved:
@@ -412,7 +419,12 @@ def fallback_targets_for(
     return ()
 
 
-def primary_endpoint_for(resolved: str, slots: Mapping[str, ClassSlot] | None = None) -> str | None:
+def primary_endpoint_for(
+    resolved: str,
+    slots: Mapping[str, ClassSlot] | None = None,
+    *,
+    repo_root: str | None = None,
+) -> str | None:
     """The slot-level ``endpoint`` configured for the class whose PRIMARY resolves to
     ``resolved``, or ``None``.
 
@@ -424,8 +436,9 @@ def primary_endpoint_for(resolved: str, slots: Mapping[str, ClassSlot] | None = 
     recover it from the resolved string (the same identity ``fallback_targets_for`` keys on),
     apply it as ``cfg.base_url``, and route the primary through rebar's builder instead of
     pydantic-ai's stock provider (bug 6e70). Classes are consulted in :data:`CLASS_NAMES` order,
-    so if two slots name the same primary the first wins."""
-    slots = load_class_slots() if slots is None else slots
+    so if two slots name the same primary the first wins. ``repo_root`` is threaded exactly as on
+    :func:`fallback_targets_for` — the config's own root, not ambient discovery (bug 2876)."""
+    slots = load_class_slots(repo_root) if slots is None else slots
     for name in CLASS_NAMES:
         slot = slots.get(name)
         if slot is not None and _resolve_target(slot.model, slot.provider) == resolved:

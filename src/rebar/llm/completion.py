@@ -430,7 +430,7 @@ def deterministic_child_failure(
     return findings.validate_structured(result, _OUTPUT_SCHEMA)
 
 
-def _verifier_model_for_completion() -> str:
+def _verifier_model_for_completion(repo_root: str | None = None) -> str:
     """The completion verifier's model: the STANDARD model class (ticket 172e).
 
     This file carried its OWN copy of plan-review's equality test
@@ -446,10 +446,15 @@ def _verifier_model_for_completion() -> str:
 
     A separate function rather than an inline call so the resolution is unit-testable without
     standing up a whole ``verify_completion`` run.
+
+    ``repo_root`` is the root the class table is read from — the caller threads ``cfg.repo_path``
+    so the verifier's model comes from the SAME root the config resolved against instead of from
+    ambient cwd discovery (bug 2876). Left ``None`` it falls back to the active gate root, then
+    ambient discovery, exactly as every other class read does.
     """
     from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
 
-    return resolve_model_string(STANDARD_CLASS)
+    return resolve_model_string(STANDARD_CLASS, repo_root)
 
 
 def verify_completion(
@@ -508,7 +513,7 @@ def _verify_completion_inner(
     from rebar import _reads
 
     cfg = config
-    cfg = replace(cfg, model=_verifier_model_for_completion())
+    cfg = replace(cfg, model=_verifier_model_for_completion(cfg.repo_path))
     # Model-max output budget for the PRIMARY verifier call (bug 30a2): applied AFTER the model
     # swap so the raise matches the model that actually runs; only ever raises, so an explicit
     # higher operator REBAR_LLM_MAX_TOKENS still wins.

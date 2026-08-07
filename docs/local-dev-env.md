@@ -206,7 +206,30 @@ That is deliberate (bug `d2ce-36f5-fd08-4e40`, epic `061c-ecd1`): the path rebar
 against should be the path rebar's users run, and the local gates are the gates a developer and
 every coding agent hit constantly. **The cost, accepted knowingly:** your local gates now need
 **working AWS credentials** on the ambient chain (`AWS_PROFILE`, env keys, instance role) **and
-a resolvable region**. `ANTHROPIC_API_KEY` is not consulted on this path.
+a resolvable region**.
+
+**`ANTHROPIC_API_KEY` is still expected to be set, and to be VALID.** It is not consulted for the
+*primary* Bedrock call, but direct Anthropic is the project's **approved fallback arm** (operator
+decision, ticket `2876-7958-8dee-4882`), so that key is what a Bedrock outage or throttle is meant
+to fall back onto. Two things follow. First, the note in
+`.github/llm-providers/bedrock.toml` that the Bedrock arm "deliberately blanks
+`ANTHROPIC_API_KEY`" scopes to **the CI provider matrix only** — it stops an arm named `bedrock`
+from being silently served by Anthropic; it is not a statement about your machine. Second, a
+*stale or revoked* key is worse than an absent one: the fallback is attempted and fails with a
+`401 authentication_error`, which reads as an LLM outage rather than as your credential. Check it
+in one call before you blame the gate:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models \
+  -H "x-api-key: $ANTHROPIC_API_KEY" -H 'anthropic-version: 2023-06-01'   # 200 = usable
+```
+
+Note that the `fallback` chain itself is **not yet enabled** in `rebar.toml`: turning it on makes
+the runner intersect capabilities across the chain, which would silently move every standard-class
+call from native to prompted structured output. `rebar.toml` records both blockers inline. And
+when it is enabled, a fallback rescues **availability** failures only — a credential failure
+deliberately does *not* fail over (`model_classes.should_fall_back`), so a chain will never paper
+over missing AWS credentials; fix those directly.
 
 **If you do not have Bedrock access (or are offline), take the opt-out — one variable.**
 `REBAR_LLM_CONFIG_FILE` outranks the discovered project config, and the checkout ships the

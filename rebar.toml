@@ -174,6 +174,30 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 # leave it open here. It is a COMPANION to the class table, never a substitute for it: a scalar
 # alone collapses the per-pass frontier/standard split, the trap that deprecated
 # `REBAR_LLM_MODEL` ([rebar:eb58-e71d-ec90-4b00]) — which is why that variable is set nowhere.
+# THE DIRECT-ANTHROPIC ARM IS AN APPROVED FALLBACK, NOT A FORBIDDEN PATH (operator decision
+# 2026-08-07 on [rebar:2876-7958-8dee-4882]). The `.github/llm-providers/bedrock.toml` note that
+# the bedrock arm "deliberately blanks ANTHROPIC_API_KEY" describes THE PROVIDER MATRIX ONLY —
+# there, blanking is how an arm named `bedrock` is prevented from being silently served by
+# Anthropic and scoring as a green Bedrock run. In normal local/CI operation the opposite holds:
+# `ANTHROPIC_API_KEY` is EXPECTED to be present and VALID. Recorded here explicitly so the scope
+# of that blanking is not re-litigated a third time.
+#
+# NO `fallback` CHAIN IS CONFIGURED BELOW YET, AND THAT IS DELIBERATE — two blockers, both
+# MEASURED on [rebar:2876-7958-8dee-4882], must clear first; see that ticket for the split.
+#  1. A chain makes the runner resolve capabilities as the CONSERVATIVE INTERSECTION across its
+#     candidates (`runner.py:441`, `_intersect_capabilities`). `us.anthropic.claude-sonnet-4-6`
+#     is MEASURED native-structured-output-capable ([rebar:18ae], a Converse PASS) while its
+#     direct-Anthropic twin `claude-sonnet-4-6` deliberately stays PromptedOutput
+#     (`capabilities._REBAR_OVERRIDES`, "Do not reintroduce it"). Adding the arm therefore moves
+#     EVERY standard-class call from NativeOutput to PromptedOutput project-wide — undoing a
+#     measured decision as a side effect. `tests/unit/test_provider_parity.py` catches it.
+#  2. The credential has to actually work. Enabling an arm whose key 401s buys no redundancy and
+#     converts a legible Bedrock error into a misleading auth error.
+#
+# When those clear, note that `fallback` FIRES NARROWLY: `should_fall_back` moves to the next
+# candidate only for the availability classes. A CREDENTIAL failure (`CHANGE_SETTINGS`)
+# deliberately does NOT fail over — "a credential error must not be masked by shopping for a
+# provider whose key happens to work" — so a chain can never paper over absent AWS credentials.
 [llm]
 model = "bedrock:us.anthropic.claude-opus-4-8"
 
