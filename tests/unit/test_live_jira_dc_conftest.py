@@ -566,3 +566,124 @@ def test_an_unreadable_field_inventory_reads_as_not_ready(
         "an unreadable field inventory was not reported as leaving the required fields unconfirmed"
     )
     assert "503" in message, "the failure does not record the HTTP status it actually got"
+
+
+# ---------------------------------------------------------------------------
+# The by-path load's SURFACE contract (ticket ccf6) — what a split may not break
+# ---------------------------------------------------------------------------
+#
+# conftest.py exceeded AGENTS.md's 800-LOC hard cap, and the fixture cluster that
+# was extracted to `_dc_fixtures.py` is re-exported back into conftest's namespace.
+# Two distinct things can silently break when that file is split further, and
+# neither shows up until a ~35-minute live harness run:
+#
+#   1. A fixture stops being an attribute of the conftest module, so pytest no
+#      longer collects it and every consumer ERRORS at setup with
+#      "fixture '<name>' not found" (`--collect-only` does not catch this;
+#      fixtures resolve at SETUP).
+#   2. Worse and quieter: a function these unit tests drive through a stubbed
+#      `_request` moves OUT of conftest. `monkeypatch.setattr(harness, "_request",
+#      ...)` rebinds a name in conftest's globals, so a caller living in another
+#      module keeps resolving the REAL `_request` and the "unit" test starts
+#      attempting live HTTP. That fails OPEN — the stub simply stops applying.
+#
+# These two cells pin both, against the loaded-by-path module the split targets.
+
+#: Fixtures the live suite resolves from this conftest. Sourced from the suite's
+#: own signatures, not from conftest's contents, so a fixture that silently stops
+#: being re-exported is a failure here rather than a setup ERROR in the live tier.
+_REQUIRED_FIXTURES = (
+    "track_issue",
+    "jira_dc_project",
+    "jira_dc_pat",
+    "dc_transport",
+    "dc_store_copy_repo",
+    "bound_dc_issue",
+    "dc_request",
+)
+
+
+def test_the_loaded_conftest_still_exposes_every_suite_fixture(harness) -> None:
+    """Every fixture the live suite requests is an attribute of the conftest module
+    and is still marked as a pytest fixture — including the ones defined in a
+    sibling module and re-exported."""
+    missing = [name for name in _REQUIRED_FIXTURES if not hasattr(harness, name)]
+    assert not missing, (
+        f"conftest no longer exposes {missing}. pytest collects fixtures as attributes of "
+        f"the conftest module, so a fixture moved to a sibling file must be re-imported "
+        f'here; otherwise every consumer ERRORs at SETUP with "fixture not found".'
+    )
+    # Same dual spelling as test_jira_dc_pat_is_session_scoped above: pytest 8.4+
+    # moved the marker to ``_fixture_function_marker``.
+    not_fixtures = [
+        name
+        for name in _REQUIRED_FIXTURES
+        if getattr(
+            getattr(harness, name),
+            "_fixture_function_marker",
+            getattr(getattr(harness, name), "_pytestfixturefunction", None),
+        )
+        is None
+    ]
+    assert not not_fixtures, (
+        f"{not_fixtures} are attributes of conftest but are no longer pytest fixtures — "
+        f"the @pytest.fixture decorator was lost somewhere in the move"
+    )
+
+
+#: Callables these unit tests exercise through `monkeypatch.setattr(harness, ...)`.
+#: Each must resolve its patched dependency in CONFTEST's globals, which is true
+#: only while it is *defined* in conftest.
+_MUST_STAY_IN_CONFTEST = (
+    "_request",
+    "_random_project_key",
+    "_create_scratch_project",
+    "_assert_project_capabilities",
+    "_leaked_harness_tokens",
+    "_sweep_leaked_harness_tokens",
+    "wait_for_jira_dc_ready",
+)
+
+
+def test_the_monkeypatched_surface_is_still_defined_in_conftest(harness) -> None:
+    """The stub surface these unit tests rely on has not been moved to a sibling.
+
+    `monkeypatch.setattr(harness, "_request", fake)` only reaches callers whose OWN
+    module globals are conftest's namespace. A caller that moved to another module
+    would keep resolving the real `_request` and start making live HTTP calls from
+    the unit tier — green locally only by accident, and a hang or a real mutation
+    against a running harness otherwise. So each name below must be defined HERE,
+    not merely importable from here.
+    """
+    strays = []
+    for name in _MUST_STAY_IN_CONFTEST:
+        obj = getattr(harness, name, None)
+        assert obj is not None, f"conftest no longer defines {name!r} at all"
+        globals_ = getattr(obj, "__globals__", None)
+        if globals_ is not None and globals_ is not vars(harness):
+            strays.append((name, globals_.get("__name__")))
+    assert not strays, (
+        f"{[n for n, _ in strays]} are re-exported into conftest but DEFINED elsewhere "
+        f"({strays}). Patching them (or their callees) on the conftest module no longer "
+        f"affects the real call path, so these unit tests would silently start issuing "
+        f"live HTTP requests. Move them back, or move their tests with them."
+    )
+
+
+def test_the_live_harness_conftest_is_within_the_module_size_cap() -> None:
+    """conftest.py stays at or under the repo's single-sourced hard cap.
+
+    The CI module-size gate covers `src/rebar` only, so this file drifted to 932
+    LOC without failing the build (ticket ccf6). The limit is read from
+    `.github/module-size-limit.txt` rather than restated, so raising the repo cap
+    raises this with it and the two cannot disagree.
+    """
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    cap = int((repo_root / ".github" / "module-size-limit.txt").read_text().strip())
+    loc = len(_CONFTEST.read_text(encoding="utf-8").splitlines())
+    assert loc <= cap, (
+        f"tests/external/live_jira_dc/conftest.py is {loc} LOC, over the {cap}-LOC hard cap. "
+        f"Split along an existing call-graph seam (AGENTS.md), and check "
+        f"test_the_monkeypatched_surface_is_still_defined_in_conftest before moving anything "
+        f"these unit tests stub."
+    )
