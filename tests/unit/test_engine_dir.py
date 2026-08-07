@@ -143,3 +143,70 @@ def test_wheel_ships_author_guides(tmp_path):
         assert f"rebar/_guides/{guide}" in names, (
             f"wheel is missing packaged guide rebar/_guides/{guide}"
         )
+
+
+def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active():
+    """bug dbb2: engine ``rebar_reconciler.*`` submodules must resolve in ANY session
+    that collects ``tests/unit/**``, not only one that collects
+    ``tests/unit/rebar_reconciler/**``.
+
+    ``tests/unit/`` has no ``__init__.py``, so pytest's prepend import mode puts it at
+    ``sys.path[0]`` for every ``tests/unit`` module it collects — and
+    ``tests/unit/rebar_reconciler/__init__.py`` then shadows the engine package of the
+    same name. Anything that exec's an engine module standalone (e.g.
+    ``tests/scripts/reducer/test_managed_refs.py``'s ``spec_from_file_location`` of
+    ``outbound_differ.py``) resolves its ``from rebar_reconciler.… import …`` through
+    that shadow, and dies with ``ModuleNotFoundError: No module named
+    'rebar_reconciler._loader'`` unless the shadow's ``__path__`` carries the engine
+    package.
+
+    Run in a subprocess, and select a ``tests/unit`` module that is NOT under
+    ``rebar_reconciler/``: an in-process assertion is masked, because a full-suite run
+    always collects ``tests/unit/rebar_reconciler/**`` and therefore always fires that
+    directory's own compensation — the invariant would hold even with the fix reverted.
+    Same masking hazard, and same subprocess remedy, as
+    :func:`test_library_path_exposes_no_generic_top_level_engine_names` above.
+
+    ``-k`` deselects every test in the module named below, so this guard does not
+    recurse into itself; the module is imported (which is what creates the shadow) and
+    only the reducer test actually runs.
+    """
+    import subprocess
+    import sys
+
+    repo_root = Path(_engine.__file__).resolve().parents[2]
+    scripts_test = repo_root / "tests" / "scripts" / "reducer" / "test_managed_refs.py"
+    assert scripts_test.is_file(), scripts_test
+    assert (repo_root / "tests" / "unit" / "rebar_reconciler" / "__init__.py").is_file(), (
+        "precondition: the tests/unit shadow package must exist for this guard to mean "
+        "anything — if it is gone, delete this guard rather than letting it pass vacuously"
+    )
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    cp = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(Path(__file__).resolve()),  # a tests/unit module outside rebar_reconciler/
+            str(scripts_test),
+            "-k",
+            "test_unlink_after_compaction_still_propagates_removal",
+            "-q",
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    combined = cp.stdout + cp.stderr
+    assert "No module named 'rebar_reconciler" not in combined, (
+        "the tests/unit package shadow hid the engine rebar_reconciler submodules:\n" + combined
+    )
+    assert cp.returncode == 0, (
+        "a mixed tests/unit + tests/scripts/reducer selection failed:\n" + combined
+    )
