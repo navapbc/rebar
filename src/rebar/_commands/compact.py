@@ -85,8 +85,23 @@ def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
     ``position`` (the ``{timestamp}-{uuid}`` string plus its resolved introducing
     ``commit_sha``) for the commit-ancestry era check. Unsigned events are omitted (the
     presence-only count lives in ``compiled_state`` already). Best-effort throughout — a
-    lookup/decode failure records ``null`` rather than raising."""
+    lookup/decode failure records ``null`` rather than raising.
+
+    The introducing commits are resolved for the WHOLE ticket in ONE directory-scoped
+    ``git log`` walk (:func:`~rebar.attest.authorship.build_ticket_position_commit_map`),
+    not one full-history walk per signed event. That per-event form was 99.2% of a
+    measured 48.1s ``compact-on-close`` — all of it inside the store write lock, starving
+    every concurrent writer (bug 7084 / remediation R1). Attribution is unchanged: a
+    position the map misses still falls back to the per-event resolver and then to the
+    global one, exactly as before, so the batching can only ever cost time — never a
+    wrong or missing commit in the attestation chain."""
     from rebar.attest import authorship, dsse
+
+    position_commits: dict[str, str] = {}
+    if event_paths:
+        position_commits = authorship.build_ticket_position_commit_map(
+            os.path.dirname(event_paths[0]), repo_root=repo_root
+        )
 
     ledger: list[dict] = []
     for path in event_paths:
@@ -111,7 +126,14 @@ def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
         except Exception:  # noqa: BLE001 — a decode/lookup failure records a null signer
             signer_pubkey = None
 
-        commit_sha = authorship.resolve_event_commit(position_str, ticket_dir, repo_root=repo_root)
+        commit_sha = position_commits.get(position_str)
+        if commit_sha is None:
+            # Map miss (an empty map from a git failure, or a file introduced only inside
+            # a merge commit): fall back to the per-event resolver, which is what this
+            # loop used to call unconditionally.
+            commit_sha = authorship.resolve_event_commit(
+                position_str, ticket_dir, repo_root=repo_root
+            )
         if commit_sha is None:
             # resolve_event_commit can return None at fold time (its ticket-scoped pathspec
             # may miss the introducing commit). Fall back to the GLOBAL position resolver so

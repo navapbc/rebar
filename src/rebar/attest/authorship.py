@@ -141,7 +141,14 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
     :func:`build_introducing_commit_map`'s walk). The LAST line of the log (the oldest = the
     add commit) is returned. Any failure — git non-zero, no match, git missing, a timeout, or
     any exception — yields ``None``; this function NEVER raises (fail-closed, mirroring
-    :func:`resolve_trust_root`)."""
+    :func:`resolve_trust_root`).
+
+    COST: the per-file glob pathspec defeats git's tree pruning, so ONE call walks the whole
+    history — measured 6.78s on a 71k-commit tickets branch, and it grows with history without
+    bound. A caller resolving MANY events of one ticket must use
+    :func:`build_ticket_position_commit_map` (one directory-scoped walk for the whole ticket)
+    and keep this as the per-event fallback for a position that map misses; a caller resolving
+    the whole store uses :func:`build_introducing_commit_map` (bug 7084 / bug 1cc0)."""
     if not position or not ticket_dir:
         return None
     try:
@@ -277,6 +284,98 @@ def keys_valid_at_anchor(
             continue
         valid_keys.append(pub)
     return valid_keys
+
+
+def build_ticket_position_commit_map(ticket_dir: str, *, repo_root=None) -> dict[str, str]:
+    """Map every event POSITION under ONE ``ticket_dir`` to the OLDEST commit that ADDED
+    its file, resolved in a SINGLE ``git log`` pass — the ticket-scoped batched form of
+    :func:`resolve_event_commit` (bug 7084 / remediation R1).
+
+    Compaction builds its authorship ledger by calling :func:`resolve_event_commit` once
+    per signed folded event, serially, WHILE HOLDING THE STORE WRITE LOCK. Measured on a
+    71,041-commit tickets branch that is 6.78s per event — 47.5s of a 48.1s
+    ``compact-on-close`` whose actual mutation is ~0.4s, starving every concurrent writer
+    for the whole window. This resolves a whole ticket in ONE walk: measured 0.53s for an
+    18-file ticket (vs 47.5s) and 3.83s for a 159-file one (vs ~712s).
+
+    The win is not merely "one subprocess instead of N". :func:`resolve_event_commit`'s
+    pathspec is a per-file GLOB (``<dir>/<position>-*.json``), and a wildcard forces git to
+    evaluate the match at every commit, so each query walks the ENTIRE history. A bare
+    DIRECTORY prefix (``<dir>/``) lets git prune whole trees instead, and the cost becomes
+    per-compaction rather than per-signed-event — it stops scaling with the number of
+    signed events entirely.
+
+    Correctness is preserved by construction, using exactly the flags whose equivalence
+    :func:`build_introducing_commit_map` already documents and validates:
+
+    * ``--full-history`` is LOAD BEARING and is NOT dropped — it disables history
+      simplification so the walk sees EVERY add, including a compacted event whose
+      original add commit is off the first-parent chain. Without it the answer is
+      topology-dependent and can miss the real introducing commit;
+    * ``--diff-filter=A --name-only`` lists the paths each commit ADDED, and git emits
+      newest→oldest, so overwriting as we stream leaves the OLDEST add winning — matching
+      :func:`resolve_event_commit`'s ``lines[-1]``;
+    * ``--no-merges`` skips merge commits (``--name-only`` shows no files for a merge
+      anyway) and ``--no-renames`` keeps a rename as add-at-new-path;
+    * the event TYPE is NOT an input, exactly as in :func:`resolve_event_commit`: the key
+      is the ``{timestamp}-{uuid}`` position recovered from the basename, so the same
+      contract holds.
+
+    Never raises: ANY git failure yields ``{}`` and the caller falls back to the per-event
+    resolver, so a miss can only ever cost time, never attribution (fail-closed)."""
+    if not ticket_dir:
+        return {}
+    try:
+        from rebar._commands._seam import tracker_dir
+
+        tracker = str(tracker_dir(repo_root))
+        rel = os.path.relpath(ticket_dir, tracker)
+        proc = subprocess.run(
+            [
+                "git",
+                "-c",
+                "log.showSignature=false",
+                "-C",
+                tracker,
+                "log",
+                "--diff-filter=A",
+                "--full-history",
+                "--no-merges",
+                "--no-renames",
+                "--format=%x1e%H",
+                "--name-only",
+                "--",
+                f"{rel}/",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if proc.returncode != 0:
+            return {}
+        position_map: dict[str, str] = {}
+        for record in proc.stdout.split("\x1e"):
+            if not record.strip():
+                continue
+            lines = record.split("\n")
+            sha = lines[0].strip()
+            if len(sha) != 40:
+                continue
+            for path in lines[1:]:
+                path = path.strip()
+                if not path or not path.endswith(".json"):
+                    continue
+                # basename is ``{position}-{TYPE}.json``; TYPE is dash-free, so stripping
+                # ``.json`` and the trailing ``-{TYPE}`` recovers the position — the exact
+                # inverse of resolve_event_commit's ``<position>-*.json`` glob.
+                base = os.path.basename(path)[: -len(".json")]
+                position = base.rsplit("-", 1)[0] if "-" in base else base
+                if position:
+                    # newest→oldest walk; overwrite so the OLDEST add wins.
+                    position_map[position] = sha
+        return position_map
+    except Exception:  # noqa: BLE001 — ANY git/lookup failure → empty map, never raise (fail-closed)
+        return {}
 
 
 def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
