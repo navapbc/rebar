@@ -88,8 +88,8 @@ present in the target) increments `skipped`. So a malformed record is invisible 
 `would_create + skipped` against the total NDJSON record count: any shortfall is exactly the
 count of malformed (missing `ticket_id`/`ticket_type`) records.
 
-**After invoking it:** run `rebar validate` (or `rebar fsck`) against the tracker to confirm
-store integrity.
+**After invoking it:** run `rebar fsck` against the tracker to confirm store integrity (`fsck`
+checks the stored bytes and git refs; `rebar validate` scores ticket semantics instead).
 
 ## Summary checklist
 

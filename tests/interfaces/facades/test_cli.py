@@ -198,6 +198,18 @@ def test_validate_is_repo_wide_no_ticket_id(rebar_repo: Path) -> None:
         assert key in r
 
 
+def test_validate_rejects_removed_fix_flag(rebar_repo: Path) -> None:
+    """`validate --fix` was advertised but was a silent no-op — a user following the
+    tool's own advice got nothing. The flag is removed, so `--fix` now falls through
+    validate's existing unknown-option handler: it is REFUSED (exit 1) rather than
+    silently accepted. `rebar doctor` is the path for fixing."""
+    cp = _cli("validate", "--fix", cwd=str(rebar_repo))
+    assert cp.returncode == 1
+    assert "Unknown option: --fix" in (cp.stdout + cp.stderr)
+    # Refusal, not a run: no health report is produced.
+    assert "Health Score" not in (cp.stdout + cp.stderr)
+
+
 def test_show_hides_managed_refs_by_default(rebar_repo: Path) -> None:
     """A removed (unlinked) relation must not read as a live link in the default view.
 

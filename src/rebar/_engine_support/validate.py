@@ -306,7 +306,7 @@ def _emit_summary(score: int, buckets: dict[str, list[str]], *, terse: bool) -> 
             print(_labels[score], file=sys.stderr)
         print("", file=sys.stderr)
         print("Run with --verbose for more details", file=sys.stderr)
-        print("Run with --fix to attempt automatic repairs (interactive)", file=sys.stderr)
+        print("Run `rebar doctor` to attempt automatic repairs", file=sys.stderr)
         return
     _labels = {
         5: f"Health Score: {_GREEN}{score}/5{_NC} - Excellent",
@@ -319,7 +319,7 @@ def _emit_summary(score: int, buckets: dict[str, list[str]], *, terse: bool) -> 
     if score < 5:
         print("", file=sys.stderr)
         print("Run with --verbose for more details", file=sys.stderr)
-        print("Run with --fix to attempt automatic repairs (interactive)", file=sys.stderr)
+        print("Run `rebar doctor` to attempt automatic repairs", file=sys.stderr)
 
 
 # ───────────────────────────── library entrypoint ────────────────────────────
@@ -334,12 +334,11 @@ def validate_state(tracker: str, *, quick: bool = False) -> dict[str, Any]:
 
 
 # ───────────────────────────── CLI entrypoint ────────────────────────────────
-_HELP = """Usage: rebar validate [--quick] [--full] [--fix] [--verbose] [--output json] [--terse]
+_HELP = """Usage: rebar validate [--quick] [--full] [--verbose] [--output json] [--terse]
 
 Options:
   --quick        Run only the fast, high-value checks (~2 seconds)
   --full         Run all checks (default, same as no flag)
-  --fix          Attempt to automatically fix issues (interactive)
   --verbose      Show detailed output
   --output json  Emit results as JSON (-o json; default is human text)
   --terse        Single-line output on success; multi-line only when issues exist"""
@@ -358,8 +357,6 @@ def run(argv: list[str], tracker: str) -> int:
     for arg in rest:
         if arg in ("--verbose", "-v"):
             verbose = True
-        elif arg == "--fix":
-            pass  # accepted, no-op (the bash --fix path is unimplemented)
         elif arg == "--quick":
             quick = True
         elif arg == "--full":

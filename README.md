@@ -367,7 +367,7 @@ and the schema source-of-truth.
 **Repo-wide health with `validate`.** `rebar validate` takes **no ticket id** — it
 scans the whole store and prints an overall tracker-health score (1-5, exit 0-4)
 bucketed into critical / major / minor / warning findings (`--output json`,
-`--terse`, `--verbose`, `--fix`). Passing it a ticket id errors. (rebar also has
+`--terse`, `--verbose`). Passing it a ticket id errors. (rebar also has
 *per-ticket* structural gates that each take an `<id>` and verify a ticket is
 *shaped* like dispatchable work — every type needs an `## Acceptance Criteria`
 checklist. See the ticket template and gate reference in
