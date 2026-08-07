@@ -424,11 +424,19 @@ def main(argv: list[str] | None = None) -> int:
     # it at this single boundary so the command surfaces the targeted migration message +
     # a non-zero exit, NOT a raw traceback. (BaseException would otherwise print one.)
     from rebar._deprecations import RemovedInputError
+    from rebar._errors import TrackerRootError
 
     try:
         return _main_dispatch(argv)
     except RemovedInputError as e:
         sys.stderr.write(str(e) + "\n")
+        return 1
+    except TrackerRootError as e:
+        # bug 176d: the read core now RAISES instead of calling sys.exit, so the exit
+        # decision lives here. The auto-init middleware (_cli/_init.py) already refuses
+        # a non-repo cwd before dispatch, so this is the residual path — an explicit
+        # non-repo root, or the repo vanishing mid-session. Same line, same exit 1.
+        sys.stderr.write(f"Error: {e}\n")
         return 1
 
 

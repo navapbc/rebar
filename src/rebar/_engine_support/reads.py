@@ -42,6 +42,7 @@ from typing import Any, cast
 
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._engine_support.ticket_query import TicketQuery
+from rebar._errors import TrackerRootError
 from rebar._ids import binding_jira_key_map
 from rebar.graph._graph import build_dep_graph
 from rebar.graph._ready import find_ready_tickets
@@ -95,11 +96,17 @@ def sort_states(states: list[dict], sort: str) -> list[dict]:
 
 
 # ───────────────────────────── tracker resolution ────────────────────────────
+# The single wording of the uninitialized-root failure. The CLI prints it as
+# f"Error: {exc}", preserving the exact stderr line this path always emitted.
+_NOT_A_REPO = "not inside a git repository (set REBAR_ROOT or run inside the repo)"
+
+
 def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     """Resolve the tracker dir for the read path. The configurable dir NAME comes from
     the single source of truth (``rebar.config``: the ``REBAR_TRACKER_DIR`` override or
     the ``tracker.dir`` config key, default ``.tickets-tracker``); this function adds the
-    read-path-specific git precondition + ``sys.exit`` on an uninitialized root.
+    read-path-specific git precondition, raising :class:`TrackerRootError` on an
+    uninitialized root (never ``sys.exit`` — this is reached from the library/MCP).
 
     Resolution: an explicit override / absolute configured dir is returned verbatim with
     NO git precondition (test fixtures and tooling point this at a hand-built tracker on
@@ -130,11 +137,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
                 .strip()
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
-            print(
-                "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            raise TrackerRootError(_NOT_A_REPO) from None
     else:
         # A repo-root was supplied (arg / REBAR_ROOT). The rebar
         # store is git-backed, so require root to be a git work tree — matching
@@ -150,11 +153,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
             stderr=subprocess.DEVNULL,
         )
         if _r.returncode != 0:
-            print(
-                "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            raise TrackerRootError(_NOT_A_REPO) from None
     return os.path.join(root, name)
 
 

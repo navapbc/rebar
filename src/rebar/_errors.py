@@ -25,6 +25,17 @@ class RebarError(RuntimeError):
         self.stderr = stderr
 
 
+class TrackerRootError(RebarError):
+    """The read path could not resolve a git-backed repo root (bug 176d).
+
+    Raised by ``_engine_support.reads.tracker_dir`` instead of ``sys.exit``: that
+    helper is reached from the library gate surface and thence from MCP, where a
+    ``SystemExit`` (a ``BaseException``) sails past FastMCP's ``except Exception``
+    and kills the server process. The CLI maps this back to exit 1 with the same
+    stderr line it always printed, so its observable contract is unchanged.
+    """
+
+
 class ConcurrencyError(RebarError):
     """Optimistic-concurrency rejection (the ticket changed since it was read).
 
