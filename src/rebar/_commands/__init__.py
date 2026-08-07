@@ -22,7 +22,7 @@ from rebar._commands import doctor as _doctor
 from rebar._commands import idea as _idea
 from rebar._commands import session_log as _session_log
 from rebar._commands import unlink as _unlink
-from rebar._commands._seam import CommandError
+from rebar._commands._seam import CommandError, forced_secret_write
 
 
 class _Cmd(NamedTuple):
@@ -108,6 +108,37 @@ def _split_positionals(args: list[str]) -> tuple[list[str], str | None]:
     return positionals, None
 
 
+# The audited force override for the write-time secret screen (bug e7a9). Only the
+# `--flag=<reason>` form is recognised — the same shape as `--force-close=` — so every
+# other option-looking token stays the loud usage error bug 00da made it, and a reason is
+# structurally impossible to omit. Handled here, above the dispatch, so EVERY write verb
+# honours it: a false positive on a `create` description or a `session-log` entry must not
+# be a permanent hard block just because that verb parses its own argv.
+_ALLOW_SECRET_FLAG = "--allow-secret-pattern"
+
+
+def _extract_allow_secret(args: list[str]) -> tuple[list[str], str]:
+    """Pull ``--allow-secret-pattern=<reason>`` out of *args*, returning the rest + reason.
+
+    Runs BEFORE both dispatch routes: ahead of ``_split_positionals`` so the flag is not
+    mistaken for the option-looking positional that guard exists to reject, and ahead of
+    the self-parsing composers so they never see an option they do not know.
+
+    Only the pre-``--`` segment is inspected: everything after the end-of-options marker
+    is literal data (bug 00da), so a body that legitimately BEGINS with this flag — the
+    documentation of this very feature, for instance — survives verbatim.
+    """
+    head = args[: args.index("--")] if "--" in args else args
+    tail = args[len(head) :]
+    reason, rest = "", []
+    for token in head:
+        if token.startswith(f"{_ALLOW_SECRET_FLAG}="):
+            reason = token.split("=", 1)[1]
+            continue
+        rest.append(token)
+    return rest + tail, reason
+
+
 _SET_FILE_IMPACT_USAGE = (
     "Usage: rebar set-file-impact <ticket_id> <json_array>\n"
     '   or: rebar set-file-impact <ticket_id> --none "<reason>"'
@@ -151,10 +182,14 @@ def main(argv: list[str]) -> int:
         print("Usage: ticket-commands.py <command> [args...]", file=sys.stderr)
         return 1
     command, args = argv[0], argv[1:]
+    # One extraction covering BOTH dispatch routes, so the override the refusal advertises
+    # actually exists for every write verb (bug e7a9).
+    args, allow_secret_pattern = _extract_allow_secret(args)
     argv_handler = _ARGV_REGISTRY.get(command)
     if argv_handler is not None:
         try:
-            return argv_handler(args)
+            with forced_secret_write(allow_secret_pattern):
+                return argv_handler(args)
         except CommandError as exc:
             print(exc.message, file=sys.stderr)
             return exc.returncode
@@ -193,7 +228,8 @@ def main(argv: list[str]) -> int:
         )
         return 2
     try:
-        entry.func(*positionals)
+        with forced_secret_write(allow_secret_pattern):
+            entry.func(*positionals)
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode

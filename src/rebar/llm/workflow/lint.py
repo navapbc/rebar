@@ -30,17 +30,11 @@ from .schema import parse_workflow, step_kind, validate_document
 
 # ── Secret scanning ───────────────────────────────────────────────────────────
 
-_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private key block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
-    ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
-    ("GitHub fine-grained PAT", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b")),
-    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
-    ("Stripe live key", re.compile(r"\bsk_live_[A-Za-z0-9]{16,}\b")),
-    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
-    ("Slack webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+")),
-)
-
+# The credential-shape table is single-sourced in :mod:`rebar.secret_screen` (bug e7a9),
+# which added the write-time store screen. Keeping a second copy here is how the two
+# drift: that module's table also covers the Anthropic / OpenAI / Atlassian / PyPI
+# families the 2026-08-03 leak actually carried, and carries the entropy floor that keeps
+# truncated placeholders and regex literals from firing.
 # Field names that look like they hold a credential; a LITERAL value here (not an
 # expression / env indirection) must be flagged.
 _SECRET_KEY_RE = re.compile(
@@ -63,19 +57,19 @@ def secret_scan(text: str, *, source: str = "<workflow>") -> list[LintFinding]:
     zero; the literal-in-a-secret-field check (precise, parsed-doc) lives in
     :func:`lint_document`.
     """
+    from rebar.secret_screen import iter_line_matches
+
     findings: list[LintFinding] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for label, pat in _SECRET_PATTERNS:
-            m = pat.search(line)
-            if m:
-                findings.append(
-                    LintFinding(
-                        f"{source}:{lineno}",
-                        f"possible {label} embedded in the workflow file "
-                        f"({_redact(m.group(0))}); store it outside git and reference it "
-                        f"with ${{{{ secrets.NAME }}}} or ${{env:VAR}}",
-                    )
+        for label, m in iter_line_matches(line):
+            findings.append(
+                LintFinding(
+                    f"{source}:{lineno}",
+                    f"possible {label} embedded in the workflow file "
+                    f"({_redact(m.group(0))}); store it outside git and reference it "
+                    f"with ${{{{ secrets.NAME }}}} or ${{env:VAR}}",
                 )
+            )
     return findings
 
 

@@ -508,12 +508,31 @@ def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> Any:
         ) from None
 
 
-def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=None) -> None:
+def comment(
+    ticket_id: str,
+    body: str,
+    *,
+    source: dict | None = None,
+    repo_root=None,
+    allow_secret_pattern: str = "",
+) -> None:
     """Append a comment. ``source`` (P1.2 import): optional per-comment provenance
-    (``source_author``/``source_created_at``) preserved on the imported comment."""
+    (``source_author``/``source_created_at``) preserved on the imported comment.
+
+    ``allow_secret_pattern``: audited force override for the write-time secret screen
+    (bug e7a9) — a non-empty reason lets a refused body through and is recorded on the
+    event. Deliberately not exposed over MCP."""
     from rebar._commands import leaf
 
-    _python_leaf(leaf.comment, ticket_id, body, source=source, repo_root=repo_root, what="comment")
+    _python_leaf(
+        leaf.comment,
+        ticket_id,
+        body,
+        source=source,
+        repo_root=repo_root,
+        allow_secret_pattern=allow_secret_pattern,
+        what="comment",
+    )
 
 
 def append_session_log(

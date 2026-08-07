@@ -265,9 +265,15 @@ def _write_event_file(
     # failure is logged, never raised. repo_root is the tracker worktree's parent.
     from rebar._commands import _seam
 
+    # Route through the SHARED finalize seam rather than calling its two halves directly:
+    # identical attribution + signing behaviour, but it also applies the write-time secret
+    # screen (bug e7a9). Jira comment bodies are UNTRUSTED external input landing in a
+    # store that auto-pushes, so this is the highest-value place for the screen after the
+    # local write verbs — a credential pasted into a Jira comment would otherwise
+    # reproduce the exact push-protection wedge the screen exists to prevent. A refusal
+    # raises CommandError, failing this event's translate loudly instead of publishing it.
     _repo_root = tracker_dir.parent
-    event.update(_seam.attribution_fields(_repo_root))
-    _seam._apply_authorship(event, ticket_id, event_type, data, str(tracker_dir), _repo_root)
+    _seam.finalize_event(event, ticket_id, event_type, data, str(tracker_dir), _repo_root)
     final = ticket_dir / _store_event_append.event_filename(ts, uuid_str, event_type)
     tmp = ticket_dir / f".tmp-{uuid_str}-{event_type}"
     # attempts=1 preserves the bare module's historical single-shot acquire. The

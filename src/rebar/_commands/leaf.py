@@ -44,13 +44,23 @@ def _jq_type(value) -> str:
     return "unknown"
 
 
-def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=None) -> None:
+def comment(
+    ticket_id: str,
+    body: str,
+    *,
+    source: dict | None = None,
+    repo_root=None,
+    allow_secret_pattern: str = "",
+) -> None:
     """Append a COMMENT event (mirrors ``ticket_comment``).
 
     ``source`` (P1.2 import): optional per-comment provenance — recognised keys
     ``source_author`` and ``source_created_at`` are copied onto the COMMENT data
     when non-None, so the reducer can surface the original comment's author/time on
     an imported comment (the event itself records the importer + a fresh timestamp).
+
+    ``allow_secret_pattern``: audited force override for the write-time secret screen
+    (bug e7a9) — see :func:`rebar._commands._seam.append_event`.
     """
     tracker = tracker_dir(repo_root)
     if not ticket_id:
@@ -65,7 +75,14 @@ def comment(ticket_id: str, body: str, *, source: dict | None = None, repo_root=
             _src_val = source.get(_src_key)
             if _src_val is not None:
                 data[_src_key] = _src_val
-    append_event(resolved, "COMMENT", data, tracker, repo_root=repo_root)
+    append_event(
+        resolved,
+        "COMMENT",
+        data,
+        tracker,
+        repo_root=repo_root,
+        allow_secret_pattern=allow_secret_pattern,
+    )
 
 
 def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
