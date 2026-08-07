@@ -155,16 +155,24 @@ def test_the_fixture_and_the_assertion_share_one_definition():
     Finding A's defect was that the cell's list and the fixture's list were the same three names
     written twice — so the fixture guaranteed the cell could not fail. Grep-based because the
     subject IS the source text: a duplicated literal is what must not come back.
+
+    Scanned across the harness's whole fixture surface rather than `conftest.py`
+    alone: `dc_store_copy_repo` moved to the sibling `_dc_fixtures.py` when conftest
+    was split under the 800-LOC cap (ticket ccf6), and a guard keyed to one filename
+    would have reported the fixture as *deleted* when it had only moved. The
+    invariant is "one shared definition, wherever the fixture lives".
     """
     live = Path(__file__).resolve().parents[1] / "external" / "live_jira_dc"
-    conftest = (live / "conftest.py").read_text(encoding="utf-8")
+    fixture_modules = sorted(live.glob("conftest.py")) + sorted(live.glob("_dc_fixtures.py"))
+    assert fixture_modules, "the live_jira_dc fixture modules are missing entirely"
+    fixtures = "\n".join(m.read_text(encoding="utf-8") for m in fixture_modules)
     cell = (live / "test_store_copy_isolation.py").read_text(encoding="utf-8")
 
-    assert "for cloud_var in CLOUD_CREDENTIAL_VARS:" in conftest, (
+    assert "for cloud_var in CLOUD_CREDENTIAL_VARS:" in fixtures, (
         "the fixture no longer clears the SHARED credential set — it has grown its own list again"
     )
     assert "CLOUD_CREDENTIAL_VARS" in cell
-    assert '"JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"' not in conftest, (
+    assert '"JIRA_API_TOKEN", "JIRA_EMAIL", "ATLASSIAN_API_TOKEN"' not in fixtures, (
         "a hardcoded credential-name list is back in the fixture"
     )
 
