@@ -25,6 +25,41 @@ from rebar._store.gitutil import run_git
 logger = logging.getLogger(__name__)
 
 _NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
+
+# Bug 2a76: the bare token ``rejected`` above is NOT specific to a non-fast-forward.
+# git prints ``! [remote rejected] HEAD -> tickets (pre-receive hook declined)`` for
+# EVERY server-side decline — GitHub push protection (GH013 secret scanning), a
+# pre-receive hook, branch protection, a rate limit, an internal server error. Those
+# are PERMANENT policy rejections: a fetch+merge cannot fix them, so classifying them
+# as non-fast-forward burned all three retries (three real hits on the remote's hook,
+# zero merge commits) and then reported only "failed after 3 retries" — the reason git
+# gave us was thrown away, making an 8-hour outage indistinguishable from transient
+# contention while commits piled up locally. The fix is the same SUBTRACTIVE exclusion
+# shape already proven in _engine/rebar_reconciler/_ref_lock.py (bug 4afc): a broad
+# marker counts only when nothing names a non-mergeable cause.
+_POLICY_DECLINE_MARKERS = (
+    "hook declined",  # pre-receive / update hook (incl. GitHub push protection GH013)
+    "push declined",
+    "protected branch",
+    "branch protection",
+    "internal server error",
+    "rate limit",
+    "gh0",  # GitHub push-protection / policy error codes: GH006, GH013, ...
+)
+
+
+def _is_non_fast_forward(stderr: str) -> bool:
+    """Whether *stderr* shows a genuine non-fast-forward (retriable by fetch+merge).
+
+    A policy decline also carries the word ``rejected``, so it must be excluded
+    explicitly; ambiguity resolves to TERMINAL (report the reason once) rather than
+    to a retry loop that provably cannot converge (bug 2a76).
+    """
+    if any(marker in stderr.lower() for marker in _POLICY_DECLINE_MARKERS):
+        return False
+    return bool(_NON_FF.search(stderr))
+
+
 _DIRTY_WD = re.compile(
     r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
 )
@@ -69,6 +104,28 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
             "",
             f"git timed out after {_GIT_TIMEOUT}s",
         )
+
+
+# raw-git-ok: locked store seam internal
+def _unpushed_summary(base: str, remote_ref: str) -> str:
+    """A ``" (N unpushed commits …)"`` suffix for a terminal push-failure warning.
+
+    Bug 2a76: without it every failed write logged a byte-identical line, so a
+    permanent outage looked like the same transient blip repeating. The count of
+    ``<remote_ref>..HEAD`` makes the backlog ESCALATE across successive failed
+    writes, which is the signal an operator (or fsck's PUSH_PENDING) acts on.
+    Best-effort by construction: a push failure must never be turned into a crash,
+    so an unresolvable count degrades to ``unknown`` (the remote-tracking ref can be
+    absent on a store that has never fetched).
+    """
+    try:
+        res = _git(base, "rev-list", "--count", f"{remote_ref}..HEAD")
+        count = (res.stdout or "").strip()
+        if res.returncode != 0 or not count.isdigit():
+            count = "unknown"
+    except Exception:  # noqa: BLE001 — diagnostics must never fail a best-effort push
+        count = "unknown"
+    return f" ({count} unpushed commits on {remote_ref}..HEAD)"
 
 
 # raw-git-ok: locked store seam internal
@@ -167,13 +224,22 @@ def push_tickets_branch(base_path: str) -> None:
     remote_ref = f"{remote}/{branch}"
 
     push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
+    stderr = ""
     for attempt in range(1, _MAX_RETRIES + 1):
         res = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
             return
         stderr = res.stderr or ""
-        if not _NON_FF.search(stderr):
-            logger.warning("tickets branch push failed (exit %s): %s", res.returncode, stderr)
+        if not _is_non_fast_forward(stderr):
+            # Terminal: a transport failure OR a policy decline (bug 2a76). Report the
+            # reason git gave AND the backlog size, then stop — hitting the remote twice
+            # more cannot change a permanent rule violation.
+            logger.warning(
+                "tickets branch push failed (exit %s): %s%s",
+                res.returncode,
+                stderr,
+                _unpushed_summary(base_path, remote_ref),
+            )
             return  # non-retriable class — best-effort
 
         # Non-fast-forward: reconcile by MERGE (not rebase). The fetch only moves
@@ -293,7 +359,16 @@ def push_tickets_branch(base_path: str) -> None:
             )
             return
 
-    logger.warning("tickets branch push failed after %s retries", _MAX_RETRIES)
+    # Keep the literal "failed after N retries" wording — two negative assertions
+    # (test_epoch_guard_matrix / test_epoch_guard_reconciliation) prove this line is
+    # ABSENT in their scenarios, so it is appended to, never reworded. Bug 2a76 adds
+    # the last rejection reason and the escalating backlog size.
+    logger.warning(
+        "tickets branch push failed after %s retries: %s%s",
+        _MAX_RETRIES,
+        stderr,
+        _unpushed_summary(base_path, remote_ref),
+    )
 
 
 def push_after_commit(tracker: str | os.PathLike) -> None:
