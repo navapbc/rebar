@@ -325,6 +325,29 @@ def test_container_covers_both_g3_and_g4() -> None:
     assert "benign-reading" in modes
 
 
+def test_every_container_case_carries_a_children_payload() -> None:
+    # Ticket 3e8b: a CONTAINER criterion runs `pass1_container` over a
+    # (parent, children, sibling-roster) decomposition, so `_run_criterion_case` RAISES on a
+    # case that carries only the parent plan as `input` — "a fixture error, not a silent
+    # pass". Every container case must therefore ship a non-empty `children` list of
+    # {ticket_id, title, description} entries (the shape decomp-shape already uses). Without
+    # this gate a new payload-less case silently drops out of `provider_parity.eligible_cases`
+    # instead of failing — which is exactly how the original 12 went unnoticed.
+    ds = E.load_eval_spec("plan-review-container").get("dataset", [])
+    assert ds, "container spec has no dataset"
+    for case in ds:
+        children = case.get("children")
+        assert isinstance(children, list) and children, (
+            f"container case {case.get('id')!r} has no `children` payload — "
+            f"`run_case` can only raise on it, so it is not corpus"
+        )
+        for child in children:
+            missing = {"ticket_id", "title", "description"} - set(child or {})
+            assert not missing, (
+                f"container case {case.get('id')!r} has a child missing {sorted(missing)}"
+            )
+
+
 def test_container_documents_numeric_tolerance() -> None:
     # da34 AC: an EXPLICIT, documented numeric tolerance for the candidate-vs-baseline
     # diff. It must be present in the spec AND agree with the parity.py constants (the

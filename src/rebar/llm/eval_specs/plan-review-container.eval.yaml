@@ -92,6 +92,21 @@ dataset:
       webhooks". Its children cover the importer, the API, and the UI — but NO child
       addresses idempotency. G3 SHOULD fire: a parent acceptance criterion left uncovered by
       the whole child set (checked against the complete roster, not one child).
+    children:
+      - ticket_id: g3ra-a
+        title: "Reconciler: webhook importer"
+        description: >
+          Ingest the inbound webhook payload and turn it into reconciler input records.
+          Covers ONLY ingestion; says nothing about repeated delivery of the same webhook.
+      - ticket_id: g3ra-b
+        title: "Reconciler: API surface"
+        description: >
+          Expose the reconcile endpoints the webhook importer feeds. Covers ONLY the API
+          surface; no de-duplication or replay handling.
+      - ticket_id: g3ra-c
+        title: "Reconciler: UI"
+        description: >
+          Show reconcile runs and their outcomes in the UI. Covers ONLY presentation.
   - id: G3-R-uncovered-rollback-snap
     corpus: snap
     criterion: G3
@@ -101,6 +116,22 @@ dataset:
       A Rails epic requiring "a rollback path for the payments-provider cutover". The
       children add the new provider adapter, the feature flag, and request specs — none
       delivers the rollback path the parent's AC names. G3 SHOULD fire (coverage gap).
+    children:
+      - ticket_id: g3rb-a
+        title: "Payments: new provider adapter"
+        description: >
+          Add the adapter for the new payments provider behind the existing gateway
+          interface. Covers ONLY the forward path onto the new provider.
+      - ticket_id: g3rb-b
+        title: "Payments: cutover feature flag"
+        description: >
+          Add the feature flag that selects the new provider. Covers ONLY flag plumbing and
+          its default; it does not restore any prior state.
+      - ticket_id: g3rb-c
+        title: "Payments: request specs"
+        description: >
+          Add request specs covering checkout against the new provider. Covers ONLY tests
+          of the forward path.
   - id: G3-R-partial-coverage-dso
     corpus: dso
     criterion: G3
@@ -110,6 +141,17 @@ dataset:
       An epic whose AC is "export supports CSV AND Parquet". One child implements CSV
       export; no child (and no named consumer) covers Parquet. G3 SHOULD fire: the parent
       criterion is only PARTIALLY covered by the child set.
+    children:
+      - ticket_id: g3rc-a
+        title: "Export: CSV writer"
+        description: >
+          Implement the CSV export writer and wire it into the export command. Covers ONLY
+          the CSV half of the parent's export format requirement.
+      - ticket_id: g3rc-b
+        title: "Export: CLI flag + docs"
+        description: >
+          Add the `--format` flag and document the CSV output. Names no other format and
+          implements no other writer.
   # ── G4 recall (a real cross-child interaction → finding) ──────────────────────
   - id: G4-R-scope-overlap-rebar
     corpus: rebar
@@ -120,6 +162,17 @@ dataset:
       Two sibling tasks under one epic BOTH rewrite the same signing-manifest module with
       different, contradictory field orders. G4 SHOULD fire: scope overlap + conflicting
       assumptions between siblings (a real cross-child interaction, high confidence).
+    children:
+      - ticket_id: g4ra-a
+        title: "Signing manifest: canonical field order"
+        description: >
+          Rewrite the signing-manifest module so manifest lines are emitted in
+          `kind, ticket, model, runner` order, and update the verifier to expect that order.
+      - ticket_id: g4ra-b
+        title: "Signing manifest: sort lines alphabetically"
+        description: >
+          Rewrite the SAME signing-manifest module so manifest lines are emitted sorted
+          alphabetically by key, and update the verifier to expect THAT order.
   - id: G4-R-ordering-violation-snap
     corpus: snap
     criterion: G4
@@ -129,6 +182,17 @@ dataset:
       Child A deletes the legacy payments column; child B still reads it, and nothing
       orders B's migration before A's drop. G4 SHOULD fire: an ordering violation /
       dependency gap between siblings (a residual-reference + ordering interaction).
+    children:
+      - ticket_id: g4rb-a
+        title: "Drop the legacy payments column"
+        description: >
+          Migration dropping the legacy `payments.legacy_provider_ref` column. Declares no
+          dependency on any sibling.
+      - ticket_id: g4rb-b
+        title: "Reporting: read the legacy payments reference"
+        description: >
+          Reporting query still SELECTs `payments.legacy_provider_ref`. Declares no
+          dependency on the drop migration and is not ordered before it.
   - id: G4-R-dependency-gap-dso
     corpus: dso
     criterion: G4
@@ -138,6 +202,17 @@ dataset:
       Child A produces the Parquet schema that child B's exporter consumes, but B assumes
       a column A never emits. G4 SHOULD fire: a dependency gap / conflicting assumption
       across the (parent + child) pairing, surfaced against the sibling roster.
+    children:
+      - ticket_id: g4rc-a
+        title: "Parquet schema producer"
+        description: >
+          Define and emit the Parquet schema for the export: `id`, `created_at`, `amount`.
+          Emits no other column.
+      - ticket_id: g4rc-b
+        title: "Parquet exporter consumer"
+        description: >
+          Consume the Parquet schema and write the export, reading `id`, `created_at`,
+          `amount` AND `settled_at` — a column the producer never emits.
   # ── G3 false-fire GOOD cases (covered → NO finding), the documented ANTI-FP ────
   - id: G3-FP-covered-by-named-consumer-rebar
     corpus: rebar
@@ -149,6 +224,18 @@ dataset:
       claim", but a NAMED child consumer ("claim/transition gate consolidation") covers it
       by definition. G3 must NOT fire — a criterion covered-by-definition by a named
       consumer counts as covered (the ANTI-FP that pairs with G3-R-uncovered-ac-rebar).
+    children:
+      - ticket_id: g3fa-a
+        title: "claim/transition gate consolidation"
+        description: >
+          Consolidate the start-work gate into ONE checkpoint that BOTH `claim` and
+          `transition open in_progress` route through, so enforcement on claim follows by
+          definition from this consolidation. This is the named consumer covering the
+          parent's enforcement criterion.
+      - ticket_id: g3fa-b
+        title: "Gate: attestation lookup"
+        description: >
+          Read the certified attestation the consolidated checkpoint consults.
   - id: G3-FP-fully-covered-roster-snap
     corpus: snap
     criterion: G3
@@ -158,6 +245,21 @@ dataset:
       A Rails epic whose three AC lines each map onto exactly one child (adapter, flag,
       rollback). The union of children FULLY covers the parent. G3 must NOT fire: checked
       against the WHOLE roster, nothing is uncovered (discrimination, not blanket firing).
+    children:
+      - ticket_id: g3fb-a
+        title: "Payments: new provider adapter"
+        description: >
+          Implement the new payments-provider adapter. Covers the parent's adapter
+          criterion end to end.
+      - ticket_id: g3fb-b
+        title: "Payments: cutover feature flag"
+        description: >
+          Implement the cutover feature flag. Covers the parent's flag criterion end to end.
+      - ticket_id: g3fb-c
+        title: "Payments: rollback path"
+        description: >
+          Implement the documented rollback path back to the previous provider. Covers the
+          parent's rollback criterion end to end.
   # ── G4 false-fire GOOD cases (consistent → NO finding), benign-reading filter ──
   - id: G4-FP-benign-shared-read-rebar
     corpus: rebar
@@ -168,6 +270,17 @@ dataset:
       Two siblings both READ the same immutable config module (no writer, no contradiction,
       no ordering coupling). G4 must NOT fire: a benign shared read is not "implicit shared
       state" — high-confidence-only, the benign-reading filter suppresses it.
+    children:
+      - ticket_id: g4fa-a
+        title: "Reader A: read the vocabulary config"
+        description: >
+          READ the immutable vocabulary config module to validate incoming tags. Writes
+          nothing to it and adds no ordering edge.
+      - ticket_id: g4fa-b
+        title: "Reader B: read the vocabulary config"
+        description: >
+          READ the SAME immutable vocabulary config module to render help text. Writes
+          nothing to it, contradicts no assumption of Reader A, and adds no ordering edge.
   - id: G4-FP-disjoint-scope-dso
     corpus: dso
     criterion: G4
@@ -177,6 +290,17 @@ dataset:
       Two children touch entirely disjoint files (CSV exporter vs the auth middleware) with
       no shared state, no ordering edge, and no consumer impact between them. G4 must NOT
       fire: there is no cross-child interaction to flag (the anti-FP for the overlap cases).
+    children:
+      - ticket_id: g4fb-a
+        title: "Export: CSV writer"
+        description: >
+          Touches `export/csv_writer.py` only. No shared state with, ordering edge to, or
+          consumer impact on the auth middleware.
+      - ticket_id: g4fb-b
+        title: "Auth: middleware timeout"
+        description: >
+          Touches `auth/middleware.py` only. No shared state with, ordering edge to, or
+          consumer impact on the exporter.
   - id: G3-FP-covered-by-external-consumer-dso
     corpus: dso
     criterion: G3
@@ -187,6 +311,18 @@ dataset:
       analytics, but a NAMED external consumer (the existing analytics-pipeline service) reads
       the export by contract. G3 must NOT fire: covered-by-definition by a named consumer (the
       cross-cutting variant of G3-FP-covered-by-named-consumer-rebar).
+    children:
+      - ticket_id: g3fc-a
+        title: "Export: emit the contracted Parquet output"
+        description: >
+          Emit the export in the Parquet layout the EXISTING analytics-pipeline service
+          already reads by contract. Consumability by analytics follows by definition from
+          honouring that named external consumer's contract; no child re-implements
+          analytics.
+      - ticket_id: g3fc-b
+        title: "Export: publish to the shared bucket"
+        description: >
+          Publish the export to the shared bucket path the analytics-pipeline service polls.
   - id: G4-FP-declared-ordered-dependency-snap
     corpus: snap
     criterion: G4
@@ -197,6 +333,16 @@ dataset:
       migrations are correctly ordered (A before B). G4 must NOT fire: the producer/consumer
       dependency is declared + correctly sequenced (the anti-FP for G4-R-ordering-violation-snap
       and G4-R-dependency-gap-dso — a real dependency that is properly ordered is consistent).
+    children:
+      - ticket_id: g4fc-a
+        title: "Audit schema: add the event table"
+        description: >
+          Migration adding the `audit_events` table and its columns. Lands first.
+      - ticket_id: g4fc-b
+        title: "Audit emitter: write audit events"
+        description: >
+          Emit audit events into `audit_events`. Explicitly `depends_on` g4fc-a, so the
+          schema migration is correctly ordered BEFORE this emitter.
 
 # Frozen human-gold subset (kappa alignment for the llm-judge). SEED labels — pending
 # human adjudication (the gating gold subset; auto-labels seed the bulk corpus). Also the
