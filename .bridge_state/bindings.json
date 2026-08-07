@@ -20741,6 +20741,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-29T19:27:27Z"
     },
+    "2bc9-75aa-a08a-478a": {
+      "created_at": "2026-08-07T22:48:39Z",
+      "jira_id": "4587648",
+      "jira_key": "REB-2646",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:48:42Z"
+    },
     "2be7-80d6-208a-4737": {
       "baseline": {
         "assignee": {
@@ -28259,9 +28266,17 @@
       "updated_at": "2026-06-25T22:59:09Z"
     },
     "3b93-a64e-693d-4f5e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## The pathology\n\n`with TestClient(app)` \u2014 the CONTEXT-MANAGER form \u2014 runs the review-bot app's LIFESPAN. That starts the queue worker, the REAL backfill reconciler and the snapshot janitor, and on exit awaits `queue.join()` under `shutdown_drain_seconds()`, which defaults to **1200 seconds** (`review_bot/config.py:49`, `:92-103`).\n\nA test that constructs an ASGI client the idiomatic way therefore inherits a 20-minute shutdown drain plus a real filesystem sweep. Nothing in the test surface warns about it.\n\n## Proven, not theorised\n\nDiagnosed during ticket 9f63 (Gerrit change 1512) by A/B against a clean tree \u2014 this is attribution, not correlation:\n* clean `origin/main` @`1afdbbd0be`, CI's exact py3.11 command (coverage + xdist): **11184 passed, 16m11s**\n* the SAME command on a tree whose only difference was a `/health` test using `with TestClient(app)`: **hung at 99%**\n\n`faulthandler` (`timeout -s ABRT`) showed a worker holding a live anyio blocking portal alongside a thread in `src/rebar/_snapshot/janitor.py:282 startup_sweep` -> `src/rebar/_snapshot/cache.py:133 entry_size`. Fixed there by awaiting the `health()` handler directly instead of constructing a client: **11197 passed, 13m33s**.\n\n## Why the existing mitigations are not enough\n\n**The per-test hang guard (landed today, `f47acb7051`, ticket 89d5) makes this VISIBLE, not IMPOSSIBLE.** `--timeout=300 --timeout-method=thread` plus faulthandler now names the hung test in ~5 minutes instead of eating the full 60-minute job in silence. That is a large improvement and it is why this ticket is about PREVENTION only \u2014 the detection half is done.\n\n**The current safe pattern is unenforced per-test discipline.** The three lifespan-entering tests that behave each hand-roll the same two stubs \u2014 `monkeypatch.setattr(appmod._reconcile, \"reconcile_loop\", _idle_reconcile_loop)` and a `start_background_janitor` stub (`tests/unit/test_review_bot.py:1446-1449`, with `_idle_reconcile_loop` at `:1423`). A fourth author has no way to know that is required. That is exactly what happened.\n\n**Nothing bounds the drain globally in tests.** A grep of `tests/` finds `SHUTDOWN_DRAIN_SECONDS` set only inside one test that is specifically about the drain (`test_review_bot.py:1478`, to \"0.1\"). There is no floor for everything else.\n\n## The work\n\n**1. Bound the drain for the whole test suite.** `shutdown_drain_seconds()` ALREADY reads `SHUTDOWN_DRAIN_SECONDS` from the environment, validates it, and falls back safely on a missing/unparseable/non-positive value. Set it to a small value in the test conftest. This requires NO production change \u2014 it uses a knob the code already exposes \u2014 and it protects every test whether or not its author knew about the stubs.\n\n**2. Make the stubbed path the default in that module.** An autouse fixture applying both stubs, so entering the lifespan is safe by default and a test that genuinely wants the real loop opts OUT explicitly. Removes the per-test discipline that failed here.\n\n## Explicitly NOT doing: an AST lint\n\nFlagging `with TestClient(app)` statically was considered and rejected. The signal is poor: `TestClient` can be aliased, wrapped in a fixture, or built indirectly, and the rule is not 'never enter the lifespan' but 'entering it requires stubs' \u2014 a relationship between statements that AST matching handles badly. It would produce false positives on legitimate tests, false negatives on indirect construction, and need maintaining forever. Items 1 and 2 remove the pathology instead of detecting it, using mechanisms the code already provides.\n\n## Acceptance criteria\n\n- [ ] The test suite bounds `SHUTDOWN_DRAIN_SECONDS` globally, so no test can inherit the 1200s drain\n- [ ] The PRODUCTION default remains 1200s and is still pinned by a test, so bounding it under test cannot mask a real drain regression (`test_review_bot.py:1521` already asserts against `DEFAULT_SHUTDOWN_DRAIN_SECONDS` \u2014 confirm it still does)\n- [ ] The drain-specific test that sets its own value (`:1478`) still controls its own value and is not overridden by the global bound\n- [ ] Entering the app lifespan in that module is safe BY DEFAULT via an autouse fixture; the three existing hand-rolled stub sites are migrated to it rather than left duplicated\n- [ ] A test that wants the REAL reconcile loop can opt out explicitly, and at least one does so, proving the escape hatch works\n- [ ] A RED oracle: a test that enters the lifespan WITHOUT any hand-rolled stub completes promptly, and fails against the pre-fix tree",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Entering the review-bot app lifespan in a test inherits a 1200s shutdown drain \u2014 bound it in tests and make the stubbed path the default"
+      },
       "created_at": "2026-08-07T22:41:41Z",
       "jira_id": "4587645",
       "jira_key": "REB-2643",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T22:41:44Z"
     },
@@ -36132,9 +36147,17 @@
       "updated_at": "2026-06-27T17:33:35Z"
     },
     "4a11-aecf-4d33-45ae": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Discovered while landing bug 9f63\n\n`89d5-61da-b621-47f8` owns the py3.11 CI cell instability, but it is CLOSED, so this preventable defect would otherwise live only as a comment on a closed ticket. Filing it open, because it is a guard we do not have and it cost a landing cycle.\n\n## What happened\n\nA new test in `tests/unit/test_review_bot_in_flight.py` used the idiomatic-looking\n\n```python\nwith TestClient(app) as client:\n    ...\n```\n\nto assert ONE field of the `/health` JSON body. Entering `TestClient` as a context manager runs the app **lifespan**, which:\n\n* starts the queue worker,\n* starts the **real** `reconcile_loop` (`app.py`) \u2014 every other lifespan-entering test in that module stubs it with `_idle_reconcile_loop` (`tests/unit/test_review_bot.py:1462, :1490, :1631`),\n* starts the snapshot janitor, whose `startup_sweep` is a genuine filesystem walk (`src/rebar/_snapshot/janitor.py:282` -> `src/rebar/_snapshot/cache.py:133 entry_size`),\n* and on exit awaits `queue.join()` under `shutdown_drain_seconds()` \u2014 a **1200-second** window.\n\nUnder coverage tracing on the py3.11 cell that combination wedged an xdist worker. The suite reached 99% and produced no further output until the 60-minute job timeout, three runs in a row.\n\n## Why it was expensive to find\n\nIt presents exactly like the runner-side flake it is not. Three of four matrix cells passed; the review-bot test files passed in isolation; the full suite passed on 3.11 *without* `--cov`. Only the complete CI command reproduces it. Attribution needed a controlled A/B:\n\n| tree | py3.11 + coverage + xdist, CI's exact command |\n| --- | --- |\n| clean `origin/main` @ 1afdbbd0be | 11184 passed, 26 skipped, **16m11s** |\n| the branch | **hung at 99%** |\n\nand then `faulthandler` (`timeout -s ABRT`) to see a worker holding a live anyio blocking portal alongside the janitor thread mid-sweep.\n\n## Why a guard is worth it\n\nNothing in the repo makes any of this visible at the call site. `with TestClient(app)` reads like a normal client construction; the 20-minute drain, the live reconciler and the disk walk are all invisible consequences. The existing convention \u2014 stub `reconcile_loop` \u2014 is real but undocumented and unenforced, so it is followed by imitation and lost by anyone who writes a fresh test.\n\n## Fix sketch\n\nCheapest useful version, in rough order of value:\n\n1. A shared fixture (e.g. `review_bot_client`) that enters the lifespan with `reconcile_loop` stubbed, the janitor disabled and `shutdown_drain_seconds` overridden to something test-scaled, so the safe path is also the easy path.\n2. A test-lint or `conftest` assertion that fails fast when the review-bot app lifespan is entered without the reconciler stub, naming the fixture to use.\n3. Prefer awaiting the handler directly when a test only asserts a response payload \u2014 the route returns the dict as-is, so the contract is identical and nothing background starts. (That is what bug 9f63's change ended up doing.)\n\n## Acceptance criteria\n\n- [ ] A test that enters the review-bot app lifespan without stubbing `reconcile_loop` fails fast with a message naming the correct fixture, rather than hanging\n- [ ] The shared fixture bounds `shutdown_drain_seconds` to a test-scaled value, proven by a test asserting the teardown completes in seconds\n- [ ] The snapshot janitor does not perform a real filesystem sweep under that fixture\n- [ ] The convention is stated where a test author will see it, not only inherited by imitation",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "A test entering the review-bot app lifespan silently inherits a 1200s shutdown drain, a real reconciler and a filesystem sweep \u2014 nothing stops the next one"
+      },
       "created_at": "2026-08-07T22:41:45Z",
       "jira_id": "4587646",
       "jira_key": "REB-2644",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T22:41:48Z"
     },
@@ -56738,6 +56761,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-27T16:47:42Z"
     },
+    "742d-54f1-3b6f-4864": {
+      "created_at": "2026-08-07T22:48:45Z",
+      "jira_id": "4587649",
+      "jira_key": "REB-2647",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:48:48Z"
+    },
     "744a-d299-970b-4140": {
       "baseline": {
         "assignee": null,
@@ -68585,9 +68615,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "Surfaced by the comment triage, and it is a live contract defect rather than a comment problem.\n\n`_mcp_models.py` hand-mirrors five committed JSON schemas as pydantic models, each with an explicit \"Mirrors src/rebar/schemas/<name>.schema.json\" comment and no generator or drift gate.\n\n**The drift is real and shipped.** `BridgeFsckOut` (`_mcp_models.py:185`) declares three properties; `bridge_fsck.schema.json` has four \u2014 `binding_drift` is missing. `_engine_support/bridge_fsck.py:217` emits it unconditionally, and the generated `types.py:311` has it. So the MCP `outputSchema` advertised to clients under-declares a field the tool always returns.\n\n**And the comment that should have caught it asserts an enforcement that does not exist.** `_mcp_models.py:31-34` claims \"the cross-interface schema tests pin both to the canonical schema\" \u2014 but `rg BridgeFsckOut|GroundingInfoOut|WorkflowRunOut tests/` returns ZERO hits. No test pins these three. That false assurance is precisely why the drift went unnoticed.\n\nA second drift found in the same sweep: `VerifySignatureResultOut` (`:210`) makes `algorithm`, `head_sha` and `key_id` optional while the schema requires all three.\n\nThe sibling TypedDict layer already has the fix pattern: `schemas/gen_types.py` generates it and CI enforces currency via `python -m rebar.schemas.gen_types --check` (`.github/workflows/_build-and-test.yml:545`). The MCP model layer \u2014 the other consumer of the same schemas \u2014 has no equivalent.\n\nExtending the generator to cover `_mcp_models.py` closes the drift class permanently and deletes the five \"Mirrors ...\" comments as a side effect.\n\n## Acceptance Criteria\n\n- [ ] `BridgeFsckOut` declares `binding_drift`\n- [ ] `VerifySignatureResultOut`'s required set matches its schema\n- [ ] The MCP model layer is generated from the schemas, or covered by an equivalent `--check` drift gate\n- [ ] The false \"cross-interface schema tests pin both\" comment is removed or made true\n- [ ] The five hand-sync \"Mirrors ...\" comments are gone",
+        "description": "Surfaced by the comment triage, and it is a live contract defect rather than a comment problem.\n\n`_mcp_models.py` hand-mirrors five committed JSON schemas as pydantic models, each with an explicit \"Mirrors src/rebar/schemas/<name>.schema.json\" comment and no generator or drift gate.\n\n**The drift is real and shipped.** `BridgeFsckOut` (`_mcp_models.py:185`) declares three properties; `bridge_fsck.schema.json` has four \u2014 `binding_drift` is missing. `_engine_support/bridge_fsck.py:217` emits it unconditionally, and the generated `types.py:311` has it. So the MCP `outputSchema` advertised to clients under-declares a field the tool always returns.\n\n**And the comment that should have caught it asserts an enforcement that does not exist.** `_mcp_models.py:31-34` claims \"the cross-interface schema tests pin both to the canonical schema\" \u2014 but `rg BridgeFsckOut|GroundingInfoOut|WorkflowRunOut tests/` returns ZERO hits. No test pins these three. That false assurance is precisely why the drift went unnoticed.\n\nA second drift found in the same sweep: `VerifySignatureResultOut` (`:210`) makes `algorithm`, `head_sha` and `key_id` optional while the schema requires all three.\n\nThe sibling TypedDict layer already has the fix pattern: `schemas/gen_types.py` generates it and CI enforces currency via `python -m rebar.schemas.gen_types --check` (`.github/workflows/_build-and-test.yml:545`). The MCP model layer \u2014 the other consumer of the same schemas \u2014 has no equivalent.\n\nExtending the generator to cover `_mcp_models.py` closes the drift class permanently and deletes the five \"Mirrors ...\" comments as a side effect.\n\n## Acceptance Criteria\n\n- [x] `BridgeFsckOut` declares `binding_drift`\n- [x] `VerifySignatureResultOut`'s required set matches its schema\n- [x] The MCP model layer is generated from the schemas, or covered by an equivalent `--check` drift gate\n- [x] The false \"cross-interface schema tests pin both\" comment is removed or made true\n- [x] The five hand-sync \"Mirrors ...\" comments are gone",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Close the MCP model schema drift and gate it"
       },
       "created_at": "2026-08-06T22:11:08Z",
@@ -71486,6 +71516,13 @@
       "jira_key": "REB-241",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:08:38Z"
+    },
+    "953a-d616-52d3-4efe": {
+      "created_at": "2026-08-07T22:48:51Z",
+      "jira_id": "4587650",
+      "jira_key": "REB-2648",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:48:54Z"
     },
     "955c-7a98-2485-4209": {
       "baseline": {
@@ -86999,9 +87036,17 @@
       "updated_at": "2026-07-10T01:11:27Z"
     },
     "b42a-ffc3-deeb-4491": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nEstablish the nested `rebar bridge` CLI through a shippable vertical slice. The parent story originally proposed advertising all eight final verbs before their owning stories implemented them. That would expose broken placeholders on `main`. This task therefore registers only the two verbs it owns now: `preview` and `sync`. Later dependency-ordered stories extend the group only when each handler is functional.\n\n`preview` is the read-only path over the existing reconciler dry-run mode. `sync` is the mutating path over the existing live mode. The legacy top-level `reconcile`, `jira-onboard`, `bridge-probe`, and `bridge-fsck` spellings remain unchanged at this boundary.\n\n## Approach\n\n- Add `src/rebar/_cli/_bridge_commands.py` as the nested-group parser and shared reconciler subprocess launcher.\n- Keep `_cli._reconcile` as a compatibility wrapper around that launcher until story `4a44-4abb-ae91-4e51` retires the top-level verb.\n- Route the help-backed `bridge` noun from `src/rebar/_cli/__init__.py`.\n- Register only `preview` and `sync`: preview forces `dry-run`; sync forces `live`.\n- Reject `--mode`, `--filter-local-ids`, and arbitrary trailing arguments so callers cannot override the read/write distinction. Public `--max-changes`, `--only`, `--except`, and `--max-age` remain with `4a44`.\n- Define exact discovery contracts: no nested verb prints group usage; `--help` prints usage; an unknown nested verb fails with the valid choices and never falls through to a same-named top-level command.\n- Regenerate the CLI reference and document only the staged surface that actually ships.\n- Preserve `Mode`, `MODE_CAPS`, the `gated_mode: \"reconcile-check\"` round trip, top-level `doctor`, and all legacy bridge spellings.\n\n## Surface parity\n\n- CLI: in scope and exercised through the real `rebar` entrypoint.\n- Library and MCP: out of scope; story `f789-3f9d-8b35-4e0d` owns those surfaces.\n- Automated workflows and scripts: out of scope; story `4a44-4abb-ae91-4e51` owns their migration.\n- Dual direction: both preview/read and sync/write are proven here.\n\n## Testing\n\nUse a real CLI subprocess against a temporary git-backed tracker plus a stateful fake Jira transport built from production-shaped fixtures. A unit-only dispatch test is insufficient because parsing, subprocess wiring, mode selection, and persisted state are contractual.\n\nRED-first oracle:\n- happy path: `rebar bridge preview` returns the real reconciler JSON plan;\n- held out: exact before/after snapshots prove preview performs zero Jira writes and zero ticket or bridge-state writes;\n- held out: sync starts from an unbound remote-only issue, creates the real local/binding mutation, and preserves unrelated event bytes;\n- held out: no-verb, help, unknown verb, top-level-name collision, forbidden flag, phase-gate, doctor, and legacy-command contracts;\n- mutation: routing preview to live must fail the no-write oracle; routing sync to dry-run must fail the persisted-mutation oracle.\n\nThis wrapper adds no new composed store operation, retry loop, or cache, so the shared contention suites remain the responsibility of the reconciler core.\n\n## Acceptance Criteria\n\n- [ ] `rebar bridge`, `rebar bridge --help`, `rebar bridge preview --help`, and `rebar bridge sync --help` expose only functional `preview` and `sync` verbs with pinned exit/stream contracts.\n- [ ] An unknown nested verb fails with valid choices and never dispatches a same-named top-level command.\n- [ ] `bridge preview` performs zero Jira writes and zero ticket or bridge-state writes, proven by exact snapshots and the fake transport log.\n- [ ] `bridge sync` performs a persisted mutation from a production-shaped fake Jira fixture while preserving unrelated state.\n- [ ] `--mode`, `--filter-local-ids`, and unknown arguments are rejected on both verbs.\n- [ ] Help text contains none of the prohibited internal vocabulary from the parent story.\n- [ ] `Mode`, `MODE_CAPS`, and `gated_mode: \"reconcile-check\"` remain intact and exercised.\n- [ ] Top-level `doctor`, `reconcile`, `jira-onboard`, `bridge-probe`, and `bridge-fsck` behavior remains unchanged.\n- [ ] `docs/cli-reference.md`, `docs/user-guide.md`, and `docs/release-notes.md` describe the staged surface without claiming sibling-owned verbs already ship.\n- [ ] Focused pytest nodes, `make lint`, `make typecheck`, and `make test` pass.\n\n## Rollback\n\nThis is additive and changes no persisted schema. Revert the single Gerrit change to remove the nested group while leaving every legacy spelling intact.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Add safe bridge noun with functional preview and sync"
+      },
       "created_at": "2026-08-07T22:41:48Z",
       "jira_id": "4587647",
       "jira_key": "REB-2645",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T22:41:51Z"
     },
@@ -121207,9 +121252,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "`docs/exit-codes.md` declares itself \"the single source of truth\" (`:5`) covering \"each public dispatcher arm\" (`:69`). It has 41 table rows against 75 real commands \u2014 independently re-derived from `_cli/_help.known_subcommands()` union `_cli/__init__._INTERCEPTS`. The 34 omissions include `review-plan`, `review-code`, and `verify-completion`, whose exit-11 semantics the same document defines four lines into its own codes table.\n\nGrounding found worse: codes **75** (`RebaseGuard`/`EXIT_RESCHEDULE`) and **78** (`StoreIncompatibleError`) reach the process exit status via `_seam.py:419` \u2192 `_commands/__init__.py:160` and appear nowhere in the document. 75 is the one code a CI workflow actually branches on. Codes 3, 4, 12 and `validate`'s 0-4 severity bucket are also undocumented.\n\nThe doc's own scope note is stale: it says only five commands validate unknown options, but `metrics`, `doctor`, `composer` and `fsck` all exit 2 on unknown options today.\n\nA separate candidate finding \u2014 \"define an exit-code vocabulary and standardise usage\" \u2014 was run through the pipeline and FAILED both floors (impact 0.415). The one exit-code defect in this repo's history (`show`/`list` returning 1 instead of 2) was caught by writing the doc and a conformance test, not by constants. That is the mitigation already in place, and this ticket extends it rather than replacing it. Do not add a named exit-code enum.\n\nFull generation was assessed and rejected: the command list is derivable, but per-command *semantics* have no machine-readable source, and exit 11 is produced at the CLI layer (`_cli/_llm_commands.py:129-171`), not in `_commands/`.\n\n## Acceptance Criteria\n\n- [ ] Rows exist for all 75 dispatcher arms\n- [ ] Codes 3, 4, 12, 75 and 78 are documented with their meanings\n- [ ] The stale \"only five commands validate options\" note is corrected\n- [ ] A CI check asserts every dispatcher arm has a row, so a new command without one fails\n- [ ] The document carries a forward-compatibility sentence: an unknown non-zero code MUST be treated as failure",
+        "description": "`docs/exit-codes.md` declares itself \"the single source of truth\" (`:5`) covering \"each public dispatcher arm\" (`:69`). It has 41 table rows against 75 real commands \u2014 independently re-derived from `_cli/_help.known_subcommands()` union `_cli/__init__._INTERCEPTS`. The 34 omissions include `review-plan`, `review-code`, and `verify-completion`, whose exit-11 semantics the same document defines four lines into its own codes table.\n\nGrounding found worse: codes **75** (`RebaseGuard`/`EXIT_RESCHEDULE`) and **78** (`StoreIncompatibleError`) reach the process exit status via `_seam.py:419` \u2192 `_commands/__init__.py:160` and appear nowhere in the document. 75 is the one code a CI workflow actually branches on. Codes 3, 4, 12 and `validate`'s 0-4 severity bucket are also undocumented.\n\nThe doc's own scope note is stale: it says only five commands validate unknown options, but `metrics`, `doctor`, `composer` and `fsck` all exit 2 on unknown options today.\n\nA separate candidate finding \u2014 \"define an exit-code vocabulary and standardise usage\" \u2014 was run through the pipeline and FAILED both floors (impact 0.415). The one exit-code defect in this repo's history (`show`/`list` returning 1 instead of 2) was caught by writing the doc and a conformance test, not by constants. That is the mitigation already in place, and this ticket extends it rather than replacing it. Do not add a named exit-code enum.\n\nFull generation was assessed and rejected: the command list is derivable, but per-command *semantics* have no machine-readable source, and exit 11 is produced at the CLI layer (`_cli/_llm_commands.py:129-171`), not in `_commands/`.\n\n## Acceptance Criteria\n\n- [x] Rows exist for all 75 dispatcher arms\n- [x] Codes 3, 4, 12, 75 and 78 are documented with their meanings\n- [x] The stale \"only five commands validate options\" note is corrected\n- [x] A CI check asserts every dispatcher arm has a row, so a new command without one fails\n- [x] The document carries a forward-compatibility sentence: an unknown non-zero code MUST be treated as failure",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Make docs/exit-codes.md complete and keep it that way"
       },
       "created_at": "2026-08-06T22:11:57Z",
@@ -131298,6 +131343,9 @@
     "REB-2643": "3b93-a64e-693d-4f5e",
     "REB-2644": "4a11-aecf-4d33-45ae",
     "REB-2645": "b42a-ffc3-deeb-4491",
+    "REB-2646": "2bc9-75aa-a08a-478a",
+    "REB-2647": "742d-54f1-3b6f-4864",
+    "REB-2648": "953a-d616-52d3-4efe",
     "REB-265": "a79b-f0d1-cb2c-47fa",
     "REB-266": "a83a-fadf-d7f2-43da",
     "REB-267": "a842-e689-a93a-4ff1",
