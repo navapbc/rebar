@@ -19877,9 +19877,17 @@
       "updated_at": "2026-07-06T23:03:15Z"
     },
     "291e-7b48-3f24-41c6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Report\n\n`scripts/canary_bridge.py:31` does a bare `import alert_dedup`. That only resolves when `scripts/` is already on `sys.path`. Running the affected test file on its own fails:\n\n```\n$ python -m pytest tests/unit/test_reconcile_bridge_canary_class.py -q\nERROR ...::test_every_bug_close_carries_valid_class[heartbeat-alert-_heartbeat_recovery_env]\n  - ModuleNotFoundError: No module named 'alert_dedup'\nERROR ...::test_every_bug_close_carries_valid_class[binding-drift-alert-_drift_recovery_env]\n  - ModuleNotFoundError: No module named 'alert_dedup'\n1 passed, 2 errors\n```\n\nReproduced on `origin/main` with the repo venv on PATH.\n\n## Provenance \u2014 introduced today, not pre-existing\n\n`scripts/alert_dedup.py` was ADDED by `0767c38ebb` (ticket 63e8, 'route dependency advisories by lane'). That change correctly EXTRACTED the dedup helpers out of `canary_bridge.py` rather than duplicating them \u2014 the extraction was the right call \u2014 but it left the consumer importing the new module by bare name.\n\nAn agent working an unrelated ticket hit this and reported it as 'pre-existing \u2026 unrelated', which is true of their change but not of the tree: it is hours old.\n\n## Why it matters even though CI is green\n\nCI's full run passes, because something upstream puts `scripts/` on `sys.path` before the module is imported. The failure only appears when the file is run as a SUBSET \u2014 which is what developers and agents do constantly while iterating. A test that passes in CI and fails when you run it directly trains people to distrust the suite.\n\n## This is a known class in this repo, with a fix landed TODAY\n\nTicket `a371` (merged `1db88c92d7`) was the same shape: `tests/unit/test_audit_ticket_page.py` used a `tests.`-rooted import that could not resolve under bare `pytest`, masked because it sat below an `importorskip`. Its fix added a standing guard, `tests/unit/test_tests_import_convention.py`, which AST-scans for `tests.`-rooted imports anywhere under `tests/`.\n\nThat guard does NOT cover this case: it looks for `tests.`-rooted imports inside `tests/`, not for bare imports of `scripts/` modules. So the class is only half-guarded.\n\n## Acceptance criteria\n\n- [ ] `python -m pytest tests/unit/test_reconcile_bridge_canary_class.py` passes standalone, with the repo venv on PATH and no wrapper\n- [ ] The import is resolved by an explicit, invocation-independent mechanism \u2014 not by relying on ambient `sys.path` ordering. Decide and state which: a package-relative import, an explicit path insert at a documented seam, or making `scripts/` a real package\n- [ ] The remaining sibling call sites are swept \u2014 `canary_bridge.py` is unlikely to be the only bare cross-module import under `scripts/`; enumerate them and state which are safe and why\n- [ ] The `a371` guard is EXTENDED (or a companion added) so a bare import of a `scripts/` module that only resolves under one invocation style fails a test, closing the other half of the class\n- [ ] A test proves the guard is RED against the current defect before the fix\n\n## Note for whoever takes it\n\nThis is the SECOND regression to reach main from `0767c38ebb` within hours; the first was a stale `--force-close` call site in `scripts/dependency_audit.py` (fixed under 24f7, guard added in `839477cd72`). Both slipped because the change was authored concurrently with others and validated against a tree that no longer matched main. The recorded lesson from that one applies here: a sweep is only valid as of the sha it ran against \u2014 re-run it against merged main before pushing.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "canary_bridge's bare 'import alert_dedup' resolves only when scripts/ is on sys.path; subset test runs error"
+      },
       "created_at": "2026-08-07T17:19:26Z",
       "jira_id": "4587567",
       "jira_key": "REB-2635",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T17:19:28Z"
     },
@@ -54512,10 +54520,24 @@
     },
     "6ec8-24c7-182b-40d0": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# The deterministic child-closure proof is computed, then hidden from the verifier\n\nThe completion precheck already computes, deterministically and exactly, whether every direct child of a parent is closed and certified \u2014 `child_closure_findings(ticket)` returns `(blocking, uncertified)`. For epic [rebar:e369-a449-4773-48fb] this is measured as `blocking=0, uncertified=0`: hard proof that all 59 descendants are closed AND carry certified signatures.\n\nThat proof is then **collapsed to a single boolean** (`certifiable`) at `src/rebar/llm/workflow/gate_ops.py:132` and routed only to the `reconcile` step. **Nothing about it reaches the verifier's prompt** \u2014 `src/rebar/llm/workflow/gates/completion-verification.yaml` wires only `context` into the `decide@then/verify` step.\n\n## Why it matters\n\nEpics routinely write an acceptance criterion of the form *\"every child story is closed and its change is `Verified +1` on Gerrit\"* (e369's criterion #1, verbatim). The verifier is handed that criterion with **zero evidence**, and it has no tool that can reach the answer:\n\n* the **closure/certification half** is already proven deterministically one step earlier and is\n  discarded;\n* the **Gerrit half** (`Verified +1`) is not obtainable from the repository at all \u2014 no read-only\n  repo tool can query Gerrit.\n\nSo the verifier must either guess, or follow its own instruction (`src/rebar/llm/reviewers/completion_verifier.md:150-151`: *\"If, after a bounded search, you cannot find evidence that a requirement is met, record what you searched and treat it as NOT MET\"*) and FAIL a criterion that is in fact satisfied and was **already proven satisfied by deterministic code in the same workflow run**. That is a false FAIL on a gate that SIGNS its verdict.\n\nIt also wastes budget: the verifier spends tool calls hunting for evidence that no tool can produce.\n\n## Discovered from\n\n[rebar:c827-2a23-cd00-473e] \u2014 while root-causing why e369's completion verification never reaches a verdict. Recorded there and in [rebar:bf31-fd55-d28d-4b7a]'s RCA as the most likely route to a genuine FAIL even once the run does reach a verdict.\n\n## Acceptance Criteria\n\n- [ ] the deterministic child-closure/certification result (counts, and the ids of any\n      unclosed/uncertified children) is surfaced to the completion verifier as evidence, inside the\n      existing fenced-context delimiter so it keeps the prompt-injection boundary\n- [ ] a criterion of the form \"every child is closed\" can be resolved from that evidence without the\n      verifier making a tool call\n- [ ] the Gerrit half (`Verified +1`) is explicitly addressed: either evidence is supplied, or the\n      verifier is told plainly that this half is out of reach so it does not silently FAIL on it\n- [ ] a test pins that the evidence appears in the verify step's inputs and that its content matches\n      what `child_closure_findings` returned\n- [ ] no change to the deterministic short-circuit: an UNCLOSED direct child must still block with no\n      LLM call",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Child-closure proof is computed deterministically then hidden from the completion verifier"
       },
       "created_at": "2026-08-06T19:05:09Z",
