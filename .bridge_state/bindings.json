@@ -37931,10 +37931,24 @@
     },
     "4c2b-7b86-913e-40ee": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# `read_file` silently reads to EOF when `line_end < line_start`\n\nDiscovered while root-causing [rebar:bf31-fd55-d28d-4b7a] and deliberately left out of that fix's scope to keep its review surface to one function.\n\n`read_file` (`src/rebar/llm/pai_tools.py`) computes `hi = line_end if line_end and line_end >= lo else len(lines)`. An INVERTED range \u2014 `line_end` below `line_start` \u2014 therefore falls back to \"read to EOF\" (capped at `_READ_MAX_LINES`) rather than reporting that the request was malformed. The agent asked for a 30-line window and silently received a 259-line one.\n\nObserved live: the looping verifier in bf31 issued `read_file(<path>, line_start=115, line_end=30)` **31 times**, each returning the same 11,000-char blob. The malformed range was not the cause of that loop, but it is the same class of defect as the one bf31 fixed \u2014 a tool answering a request it did not actually perform, with no signal that it substituted something else.\n\nNote the deliberate, documented case that must be preserved: `line_end=0` means \"read to EOF\" and is part of the tool's contract.\n\n## Acceptance Criteria\n\n- [ ] `read_file` with `line_end < line_start` (and `line_end != 0`) returns an explicit `Error: ...`\n      naming the malformed range, instead of silently reading to EOF\n- [ ] `line_end == 0` still means \"read to EOF, capped\" \u2014 the documented behaviour is unchanged\n      (regression pinned)\n- [ ] a normal `line_start <= line_end` window is unchanged\n- [ ] the docstring states the malformed-range behaviour, since Pydantic AI passes it to the agent\n      as the tool contract (`src/rebar/llm/pai_tools.py:46`)",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "read_file silently reads to EOF when line_end < line_start instead of reporting the malformed range"
       },
       "created_at": "2026-08-06T19:03:23Z",
@@ -42826,7 +42840,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Discovered from bug e548-5b35-7eb8-4727 (bolstered-afraid-ichidna)\n\nWhile root-causing e548 it was proven that the failing test is **invisible to CI**, which is how the breaking change earned `Verified +1`.\n\n## Evidence\n\n- `tests/unit/test_path_injection_guards.py` guards the review-bot test with\n  `pytest.importorskip(\"fastapi\")`. Whole files do the same at module scope, e.g.\n  `tests/unit/test_opcert_service_app.py:20-21`.\n- **No CI lane ever installs fastapi.** All three install steps in\n  `.github/workflows/_build-and-test.yml` (lines 70, 219, 295) run\n  `uv sync --locked --extra dev`. The `dev` extra contains no fastapi (verified by parsing\n  pyproject: `dev has fastapi? False`); fastapi lives only in the `reviewbot` and `ui` extras\n  (`pyproject.toml:93`, `:100`).\n- `.github/workflows/_optionality.yml:169` lists the isolation `specs=(...)` as\n  agents / eval / tracing / grounding / metrics / mcp / union \u2014 **`reviewbot` is absent** \u2014 and\n  that lane runs an import probe only, never pytest.\n- Reproduced: `uv sync --locked --extra dev --extra agents` then running the suite reports\n  `SKIPPED [1] tests/unit/test_path_injection_guards.py:148: could not import 'fastapi'`.\n\n## Why it matters\n\nEvery `rebar.review_bot` and `rebar.opcert_service` test \u2014 including SECURITY guards (the `/rerun` 502 stack-trace-exposure guard, the `X-Opcert-Guard` 403 auth guard, the 66af token redaction suite) \u2014 silently no-ops in CI. A change can break all of them and still be `Verified +1`. This directly contradicts the stated invariant in the `_optionality.yml:163-168` comment: \"the isolation set is every key of `_optional.EXTRAS` \u2014 so a newly declared extra cannot ship with ZERO CI\".\n\n## Acceptance criteria\n\n- [ ] A CI lane installs the `reviewbot` extra and RUNS the tests it unlocks (not just an import probe)\n- [ ] Proven by seeding a deliberate break in a review-bot test and observing CI go red\n- [ ] Consider a guard that fails the build when a `pytest.importorskip` skip is unlocked by no lane",
+        "description": "## Discovered from bug e548-5b35-7eb8-4727 (bolstered-afraid-ichidna)\n\nWhile root-causing e548 it was proven that the failing test is **invisible to CI**, which is how the breaking change earned `Verified +1`.\n\n## Evidence\n\n- `tests/unit/test_path_injection_guards.py` guards the review-bot test with\n  `pytest.importorskip(\"fastapi\")`. Whole files do the same at module scope, e.g.\n  `tests/unit/test_opcert_service_app.py:20-21`.\n- **No CI lane ever installs fastapi.** All three install steps in\n  `.github/workflows/_build-and-test.yml` (lines 70, 219, 295) run\n  `uv sync --locked --extra dev`. The `dev` extra contains no fastapi (verified by parsing\n  pyproject: `dev has fastapi? False`); fastapi lives only in the `reviewbot` and `ui` extras\n  (`pyproject.toml:93`, `:100`).\n- `.github/workflows/_optionality.yml:169` lists the isolation `specs=(...)` as\n  agents / eval / tracing / grounding / metrics / mcp / union \u2014 **`reviewbot` is absent** \u2014 and\n  that lane runs an import probe only, never pytest.\n- Reproduced: `uv sync --locked --extra dev --extra agents` then running the suite reports\n  `SKIPPED [1] tests/unit/test_path_injection_guards.py:148: could not import 'fastapi'`.\n\n## Why it matters\n\nEvery `rebar.review_bot` and `rebar.opcert_service` test \u2014 including SECURITY guards (the `/rerun` 502 stack-trace-exposure guard, the `X-Opcert-Guard` 403 auth guard, the 66af token redaction suite) \u2014 silently no-ops in CI. A change can break all of them and still be `Verified +1`. This directly contradicts the stated invariant in the `_optionality.yml:163-168` comment: \"the isolation set is every key of `_optional.EXTRAS` \u2014 so a newly declared extra cannot ship with ZERO CI\".\n\n## Acceptance criteria\n\n- [x] A CI lane installs the `reviewbot` extra and RUNS the tests it unlocks (not just an import probe)\n- [x] Proven by seeding a deliberate break in a review-bot test and observing CI go red\n- [x] Consider a guard that fails the build when a `pytest.importorskip` skip is unlocked by no lane\n\n## Resolution (change 1486, merged as 604e4e5d67)\n\n- AC1: `.github/workflows/_build-and-test.yml` pytest job now installs\n  `--extra dev --extra reviewbot --extra ui` and RUNS the suite; GH Actions run\n  31178210685 is green on all four cells with the 38 tests executing.\n- AC2: proven in the faithful form \u2014 with fastapi uninstalled,\n  test_review_bot_token_redaction.py reports `4 skipped` today and `4 failed`\n  under the guard; test_opcert_service_app.py goes from a whole-module skip to a\n  collection ERROR. `REBAR_REQUIRE_EXTRAS=1` is set on both CI pytest steps, so\n  the same loss in CI is a red build.\n- AC3: implemented as tests/_extra_guard.py + tests/unit/test_extra_coverage_guard.py\n  (a guard on tests NOT RUNNING, not on an extra being named in a workflow file).",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "review-bot + opcert tests are permanently SKIPPED in CI: no lane installs the reviewbot extra"
@@ -66711,9 +66725,17 @@
       "updated_at": "2026-08-06T19:06:46Z"
     },
     "8aed-f307-8faa-49c6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nParity gap found while fixing bug 2be7 (whitespace-only description edits invalidating a signed plan review). 2be7 canonicalizes insignificant whitespace out of the **description** before it enters the material basis. The basis has a second free-text field that is still hashed raw.\n\n`material_basis()` in `src/rebar/llm/plan_review/material_diff.py` adds, when the ticket declares no file impact:\n\n    basis[\"file_impact_scope\"] = {\n        \"kind\": \"none\",\n        \"reason\": reason if isinstance(reason, str) else \"\",\n    }\n\n`reason` is operator-supplied free text and goes into the hash verbatim. A trailing space or a line-ending difference in it moves the composite fingerprint and stales a signed attestation, exactly as a trailing newline in the description used to.\n\n## Why it was left out of 2be7\n\nDeliberate scope control, not an oversight:\n\n- 2be7's proven root cause and its reproduction are both about the **description** \u2014 the\n  concrete repro is `rebar edit --description=\"$(cat file)\"`, where shell command\n  substitution strips a trailing newline from a long multi-line document. `reason` is a short\n  single-line string that is not normally round-tripped through a file, so it does not have\n  that failure mode.\n- The material fingerprint is a security control: it exists so an attestation cannot survive\n  a substantive plan change. Every widening of the canonicalized surface must arrive with its\n  own RED test proving that meaningful edits to that field still invalidate. Bolting a second\n  field onto 2be7 without that proof is precisely the over-widening 2be7 was careful to avoid.\n\n## Suggested fix\n\nApply the existing `normalize_insignificant_whitespace()` (added by 2be7, same module) to `reason` at the same single point in `material_basis`. Mirror 2be7's test shape: a whitespace-only edit to the reason keeps the fingerprint and reads `certified`; a meaningful edit to it still reads `stale-material`.\n\nNote the legacy generations in `attest._legacy_material_ok` \u2014 the pre-330c (raw) and post-330c/pre-2be7 (checkbox-only) recomputes \u2014 would need the same treatment as 2be7 gave them if pre-existing attestations over a declared-none ticket are to be grandfathered.\n\n## Acceptance Criteria\n\n- [ ] A whitespace-only edit to `no_file_impact_reason` does not change the material\n      fingerprint, so a signed plan review stays `certified` per `rebar review-plan --status`.\n- [ ] A semantically meaningful edit to `no_file_impact_reason` still invalidates the\n      attestation (`stale-material`), proven by a negative-control test.\n- [ ] The pre-330c legacy path still hashes the raw reason, so bug 96d1's grandfather is\n      not regressed (`tests/unit/test_legacy_material_grandfather_96d1.py` passes untouched).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "no_file_impact_reason is hashed raw into plan-review material, so whitespace-only edits to it still stale an attestation"
+      },
       "created_at": "2026-08-07T12:53:42Z",
       "jira_id": "4587541",
       "jira_key": "REB-2619",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-07T12:53:45Z"
     },
@@ -76189,6 +76211,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-16T22:40:17Z"
+    },
+    "9f63-16dc-f014-4df2": {
+      "created_at": "2026-08-07T13:00:42Z",
+      "jira_id": "4587542",
+      "jira_key": "REB-2620",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T13:00:46Z"
     },
     "9f78-ccbf-9248-4097": {
       "baseline": {
@@ -106707,7 +106736,7 @@
         },
         "description": "Running any `tests/unit/*` module in the same pytest session as `tests/scripts/reducer` makes `tests/scripts/reducer/test_managed_refs.py::test_unlink_after_compaction_still_propagates_removal` error with:\n\n    ModuleNotFoundError: No module named 'rebar_reconciler._loader'\n    (raised from src/rebar/_engine/rebar_reconciler/outbound_differ.py:31)\n\nReproduced deterministically on PRISTINE origin/main (53b9c3e6dd), so this is pre-existing and not caused by the change that surfaced it (e63c):\n\n    # 413 passed, 1 skipped -- clean\n    pytest tests/interfaces/queries tests/scripts/reducer tests/scripts/graph -q -p no:randomly\n\n    # 417 passed, 1 skipped, 1 ERROR -- adding ANY tests/unit module triggers it\n    pytest tests/interfaces/queries tests/unit/<any> tests/scripts/reducer tests/scripts/graph -q -p no:randomly\n\nThe test passes in isolation (10 passed). `tests/scripts/` relies on `src/rebar/_engine` being on sys.path so `rebar_reconciler` imports as a top-level package; something in the tests/unit conftest/import path removes or shadows that, and the submodule import then fails.\n\nWhy it matters: pytest-randomly is enabled, so suite ordering varies per run. A developer running a mixed selection sees a failure that is not theirs, which is exactly the false signal that makes people distrust and then ignore the suite. It also means a real regression in that test could be masked or misattributed.\n\nNot scoped to a fix here -- filed so it is not rediscovered.\n\n## Acceptance Criteria\n\n- [x] The mixed selection above passes\n- [x] The sys.path/import contract for `tests/scripts/` is made explicit rather than ambient\n- [x] A guard prevents silent reintroduction (e.g. the suite asserts the import contract holds)",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "tests/unit and tests/scripts/reducer collide: rebar_reconciler._loader ModuleNotFoundError"
       },
       "created_at": "2026-08-07T05:57:35Z",
@@ -130620,6 +130649,7 @@
     "REB-2615": "8120-6d1c-58cb-4473",
     "REB-2619": "8aed-f307-8faa-49c6",
     "REB-262": "a621-500a-596b-4f22",
+    "REB-2620": "9f63-16dc-f014-4df2",
     "REB-263": "a6d3-f6c9-f54e-4831",
     "REB-264": "a6ea-6a28-1d84-4626",
     "REB-265": "a79b-f0d1-cb2c-47fa",
