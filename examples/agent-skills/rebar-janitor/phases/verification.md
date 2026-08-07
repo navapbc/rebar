@@ -30,7 +30,7 @@ otherwise survive to Phase 3 and waste a proposer pair.
 - **Adopted-library contract (anti-FP).** If the "gap" is the documented contract of a maintained
   dependency the code commits to, that contract is the mitigation — don't require re-validating it.
 
-## The 4 binary sub-questions (validity) — each `yes | no | insufficient | na`
+## The 5 binary sub-questions (validity) — each `yes | no | insufficient | na`
 
 - `is_verifiable` — the finding is concrete enough to check against the code (a real citation/metric).
 - `evidence_entails_finding` **(load-bearing)** — the cited evidence actually *entails* the problem
@@ -39,6 +39,17 @@ otherwise survive to Phase 3 and waste a proposer pair.
   contingent on a separate unlikely mistake.
 - `no_viable_alternative_explanation` — no benign reading dissolves it (intentional pattern,
   framework-mandated, generated/vendored code). **This carries the "looks bad but is fine" filter.**
+- `harm_reachable` **(demonstration required)** — name a **concrete triggering input or state** that
+  produces the asserted harm. Not "this could break"; an actual path to it. An accurate citation plus
+  a plausible-sounding consequence is not enough — a citation veto is an *attribution* check, and
+  attribution does not entail correctness (Gao et al., RARR, ACL 2023, are explicit that fixing a
+  premise leaves an invalidated conclusion standing). This sub-question is the entailment check the
+  veto cannot perform.
+
+**When `harm_reachable` is `no` the finding is not dropped — it is RECLASSIFIED as `HARDENING`
+rather than `DEFECT`.** Hardening items are real and may still be worth doing, but they must never be
+reported as bugs. Example: a `zip()` without `strict=` over two lists whose lengths are guaranteed
+equal by construction is hardening; the silent-truncation failure mode cannot occur.
 
 Answer `na` for a sub-question that genuinely doesn't apply (excluded from the score); do not `na` the
 load-bearing `evidence_entails_finding`.
@@ -53,6 +64,51 @@ rethink whether a better mitigation exists, so an existing one must not auto-dis
 Answer only when the finding cites a specific code reference. **A `no` is a hard drop** regardless of
 scores — it catches the hallucinated-citation smell janitor itself hunts. `na` when there's no
 specific citation to check.
+
+## The intent check — `prior_decision` (run on EVERY finding)
+
+The project's own record is evidence the code cannot supply: **the code says what it does; the record
+says why.** A finding can be entirely true and its obvious remediation still wrong, because the state
+it describes was chosen on purpose. Discovery, Verification and Remediation all read code; without
+this, nobody reads the record, and the pipeline audits a project while ignoring its memory.
+
+**Trigger on the SUBJECT, not on a verb.** It is tempting to run this only for removal proposals, but
+a proposal to *add* something back is equally a reversal — it just doesn't look like one in a diff.
+Ask: *has a decision already been recorded about this symbol or subject?*
+
+Deterministic queries — never assert what these can settle:
+
+```sh
+git log -S '<symbol>' --all        # → originating commit → its ticket trailer → the ticket
+git blame -L <range> -- <file>     # → who/when, then the same trailer path
+grep -rn '<symbol|subject>' docs/adr/ docs/    # decision records
+grep -rn '<ticket-id>' src/                    # code comments citing a decision
+```
+
+Emit `prior_decision` ∈ **`explicit_justified` | `explicit_bare` | `incidental` | `none`**:
+
+| Value | The record shows | Effect |
+|---|---|---|
+| `explicit_justified` | a deliberate choice **and** the reasoning for it | scoring penalty (below); always surfaced |
+| `explicit_bare` | a deliberate choice, no reasoning recorded | surfaced, **no penalty** — we know it was chosen, not why, so it cannot tell us the finding is wrong |
+| `incidental` | the state arose without a decision | none |
+| `none` | no record found | none |
+
+**Surface, do not adjudicate.** Attach the record — ticket id, ADR, commit — to the finding and pass
+it through to Phase 4. Do NOT let the verifier decide whether the prior decision was correct. Two
+constraints force this: a project decision is an **N of 1** and may be reversed with good cause, so
+treating the record as a veto would make janitor structurally unable to recommend undoing a decision
+that aged badly — which is most of what janitor is for. And empirically, *retrieving* the right
+record and *acting* on it are separately-failing capabilities: agent-memory systems score ≤28% on
+multi-hop conflict resolution even when handed the ordering rule, and the hardest case — **implicit
+conflict, where a later decision invalidates an earlier one without explicitly negating it** — is
+where every measured system fails. Restricting the penalty to `explicit_justified` deliberately
+confines it to the cases such detection handles well.
+
+**The legitimate-reversal path.** A remediation MAY reverse a recorded decision when it names
+(a) the decision, (b) **what evidence has changed since**, and (c) why the original reasoning no
+longer holds. A reversal carrying (b) takes **no penalty**. What gets penalised is the *uninformed*
+reversal — not disagreeing with the past, but not knowing you were.
 
 ## The 5 impact attributes — anchored to their levels (calibrate per finding; don't default to middle/top)
 
@@ -73,7 +129,14 @@ specific citation to check.
 Ordinal maps: sub-answers `yes=1.0, insufficient=0.5, no=0.0`; `none=0, low=.33, medium=.67, high=1`;
 `local=.33, module=.67, system=1`; `easy=.33, moderate=.67, hard=1`.
 
-- **validity** = graded fraction of the 4 binary sub-answers over the answerable (non-`na`) set. ∈ [0,1].
+- **validity** = graded fraction of the 5 binary sub-answers over the answerable (non-`na`) set,
+  **minus 0.10 when `prior_decision == "explicit_justified"` and the finding's remediation does not
+  name what evidence has changed since**. Clamp to [0,1].
+
+  The penalty lands on *validity* rather than impact deliberately: a recorded deliberate choice is
+  evidence the current state is **intentional**, which bears on whether this is a defect at all — not
+  on what it would cost. It is sized to drop a **marginal** finding (0.75–0.85) while leaving a strong
+  one standing, so the record raises the bar without becoming a veto.
 - **impact** = mean of four terms: `max(prod, debt)`, `blast_radius`, `likelihood`, `reversibility`.
   ∈ [~0.25, 1] (floors at ~0.25 — blast/likelihood/reversibility have no "none" level).
 - **severity label** (record only): `critical ≥ 0.75`, `major ≥ 0.5`, `minor ≥ 0.25`.
