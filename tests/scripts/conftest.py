@@ -29,6 +29,14 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "src" / "rebar" / "_eng
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
+# Ensure repo-root `scripts/` is importable. Those modules import each other by bare name
+# (e.g. canary_bridge -> alert_dedup), which resolves at runtime because `python
+# scripts/<x>.py` puts scripts/ at sys.path[0] — but a test loading them via
+# importlib-from-path gets no such entry (bug 63e8).
+_REPO_SCRIPTS_DIR = str(Path(__file__).resolve().parents[2] / "scripts")
+if _REPO_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _REPO_SCRIPTS_DIR)
+
 # ---------------------------------------------------------------------------
 # Module loading
 # ---------------------------------------------------------------------------
