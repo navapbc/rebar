@@ -17,6 +17,7 @@ import tempfile
 from dataclasses import dataclass
 
 from rebar import config as _config
+from rebar._snapshot.git_fetch import stall_abort_args
 from rebar.opcert_service.config import OpcertServiceConfig
 
 #: Wall-clock bound (seconds) on every git subprocess in this module — :func:`_git` is its only
@@ -60,10 +61,18 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
 
     A ``subprocess.TimeoutExpired`` is neither an ``OSError`` nor a ``CalledProcessError`` and
     would bypass :func:`_git_ok`'s ``WorkspaceError`` conversion, so it is converted here — this
-    is the module's only git seam."""
+    is the module's only git seam.
+
+    A ``fetch`` additionally gets the throughput-keyed stall abort (task 851e): the wall clock
+    above cannot tell a dead-air transfer from a slow cold clone, so without it a wedged remote
+    holds this worker for the full 300s. Armed HERE rather than at the two call sites because
+    this seam is where the argv is built, and only for ``fetch`` because the options configure
+    the curl transport — a local ``config``/``worktree`` call has no transport to tune."""
+    prefix = stall_abort_args() if args and args[0] == "fetch" else []
     try:
         return subprocess.run(
-            ["git", "-C", cwd, *args],
+            # The -c pairs must precede the subcommand; see stall_abort_args().
+            ["git", "-C", cwd, *prefix, *args],
             capture_output=True,
             text=True,
             check=False,
