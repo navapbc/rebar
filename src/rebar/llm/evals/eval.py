@@ -623,7 +623,6 @@ def run_eval(
     prompt_id: str,
     *,
     repo_root=None,
-    dirty: bool = True,
     solve=None,
     runner=None,
     max_cases: int | None = None,

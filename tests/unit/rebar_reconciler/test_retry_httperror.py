@@ -123,3 +123,19 @@ def test_acli_rest_raw_httperror_raise_unchanged():
             )
     assert excinfo.value is err
     assert not isinstance(excinfo.value, RuntimeError)
+
+
+def test_timeout_s_forwards_to_the_wrapped_callable(dispatch):
+    """Ticket 7504: ``timeout_s`` is no longer a named wrapper parameter, so a caller
+    passing ``timeout_s=`` for the wrapped Jira client reaches ``fn`` through
+    ``**kwargs`` instead of being swallowed by the wrapper."""
+    received: dict[str, object] = {}
+
+    def fn(issue_key, **kwargs):
+        received.update(kwargs)
+        return {"key": issue_key}
+
+    result = dispatch._call_with_retry(fn, "DIG-1", timeout_s=60)
+
+    assert result == {"key": "DIG-1"}
+    assert received == {"timeout_s": 60}
