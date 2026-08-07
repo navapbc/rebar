@@ -614,10 +614,19 @@ jobs:
         # skip nobody reads. Skips keyed on a missing binary/version floor are unaffected.
         env:
           REBAR_REQUIRE_EXTRAS: "1"
+        # --timeout (pytest-timeout) is the per-test HANG GUARD: timeout-minutes above only
+        # bounds the whole job, so a single deadlocked test stays invisible behind the last
+        # -q dot and eats the full 60 min with no traceback (the ubuntu/py3.11 incident, ticket
+        # 89d5-61da-b621-47f8). --timeout-method=thread is load-bearing: the default `signal`
+        # method can't fire while a worker is blocked in a C-level flock/socket/subprocess call
+        # (the exact hang shapes this suite exercises); the thread watchdog + faulthandler dumps
+        # every thread's stack and aborts the worker, so a recurrence NAMES the offending test.
+        # 300s dwarfs the slowest legitimate test (the tail is seconds; the 300s snapshot-fetch
+        # backstop is monkeypatched down in-test) while a true hang fails in 5 min, not 60.
         run: >-
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider --durations=25
+          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           ${{ !startsWith(matrix.os, 'macos') && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
@@ -632,5 +641,5 @@ jobs:
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
-          -q -p no:cacheprovider --durations=25
+          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"

@@ -138,6 +138,57 @@ def test_shared_pytest_job_has_incident_timeout() -> None:
     )
 
 
+def _pytest_suite_run_blocks() -> list[str]:
+    """The ``run:`` scripts of every parallel pytest step in the shared reusable's test job.
+
+    Both the default-suite and integration-tier steps launch the xdist-parallel suite
+    (``pytest -m ... -n <N> --dist ...``). Returns their ``run`` bodies so a guard can assert a
+    property holds on ALL of them, not just the one it happened to eyeball.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    steps = ((workflow.get("jobs") or {}).get("test") or {}).get("steps") or []
+    blocks = [
+        str(step.get("run", ""))
+        for step in steps
+        if "pytest -m" in str(step.get("run", "")) and "--dist" in str(step.get("run", ""))
+    ]
+    assert blocks, "_build-and-test.yml jobs.test no longer runs the parallel pytest suite"
+    return blocks
+
+
+def test_shared_pytest_suite_has_a_per_test_hang_guard() -> None:
+    """A single deadlocked test must name itself in seconds, not eat the whole 60-minute job.
+
+    ``timeout-minutes: 60`` (asserted above) only bounds the WHOLE job: a test that blocks
+    forever under ``-q`` stays invisible behind the last dot and is killed 52 minutes later
+    with no traceback and no culprit named — exactly the ubuntu/py3.11 incident (ticket
+    ``89d5-61da-b621-47f8``), whose acceptance criteria require "whatever makes the hang
+    diagnosable (a per-test timeout, -v, or a faulthandler dump)" be committed.
+
+    ``pytest-timeout``'s ``--timeout`` is that instrument, and ``--timeout-method=thread`` is
+    the load-bearing half: the default ``signal`` method arms ``SIGALRM`` in the main thread
+    and cannot fire while a worker is blocked in a C-level syscall (a stuck ``fcntl.flock``,
+    socket ``recv``, or ``subprocess`` pipe) — precisely the hang shapes this suite is full of.
+    The ``thread`` method's watchdog + faulthandler dumps every thread's stack and aborts the
+    worker, so the recurrence points straight at the offending test instead of going silent.
+    """
+    for block in _pytest_suite_run_blocks():
+        assert "--timeout=" in block, (
+            "a parallel pytest step in _build-and-test.yml carries no `--timeout=<seconds>` "
+            "per-test hang guard: a deadlocked test is invisible under -q until the 60-minute "
+            "job cap, with no traceback (ticket 89d5-61da-b621-47f8). Add pytest-timeout's "
+            f"--timeout to the step:\n{block}"
+        )
+        assert "--timeout-method=thread" in block, (
+            "a parallel pytest step in _build-and-test.yml sets --timeout without "
+            "--timeout-method=thread; the default `signal` method cannot interrupt a worker "
+            "blocked in a C-level flock/socket/subprocess call (the hang shapes this suite "
+            f"exercises), so it would still go silent. Use the thread method:\n{block}"
+        )
+
+
 def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
     """Auto-catch the drift class: any scripts/*.py a gate runs in the branch-CI lane (test.yml
     plus the reusable it calls) must also run in the Verified lane (gerrit-verify.yaml plus the
