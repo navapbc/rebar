@@ -100,13 +100,22 @@ def _verdict_to_review_result(
     # the systemic-degrade `resolution_class`/`retryable`/`diagnostic` — so the `_review_code`
     # CLI can map a retryable code-review outage → exit 11 without reaching into the nested dict.
     result["coverage"] = verdict.get("coverage") or {}
+    # Provenance (source / verified_at_sha / signable): the gate resolves its snapshot handle
+    # deep inside the four-pass run, so carry the stamp IT wrote rather than re-resolving here
+    # (a second resolve could pin a different SHA if the ref moved). A verdict that never
+    # pinned a source is stamped UNPINNED — never signable. This is the trust boundary the
+    # MCP `review_code` tool documents, so it must be true of every returned result.
+    from rebar.llm import gate_source as _gate_source
+
+    _gate_source.copy_provenance(verdict, result)
     return result
 
 
 def _disabled_review_result() -> dict[str, Any]:
     from rebar.llm import findings as _findings
+    from rebar.llm import gate_source as _gate_source
 
-    return _findings.finalize_findings(
+    result = _findings.finalize_findings(
         [],
         runner="code-review-disabled",
         model=None,
@@ -114,6 +123,9 @@ def _disabled_review_result() -> dict[str, Any]:
         reviewers=[],  # present (empty) so the review_result contract keys are stable
         summary="code-review capability disabled (verify.enable_code_review is off).",
     )
+    # INERT: no snapshot is resolved (zero work, zero LLM), so the provenance keys are present
+    # but UNPINNED — an inert result must never look signable.
+    return _gate_source.copy_provenance(None, result)
 
 
 def review_code(
@@ -135,8 +147,18 @@ def review_code(
     """Review a code change and return a ``review_result``. Gate-backed (epic b744): when the
     capability is disabled (default) returns an inert empty result; when enabled, runs the
     four-pass gate and translates its verdict. (``reviewers`` is accepted for surface
-    compatibility but the gate selects its own overlays; ``ref``/``source`` are accepted but the
-    v1 gate reviews the supplied diff/working tree — attested-snapshot scoping is a follow-on.)
+    compatibility but the gate selects its own overlays.)
+
+    ``ref``/``source`` select the read-root like every other code-reading gate. The gate pins
+    ONE ref (there is no base+head snapshot pair) and it is the REVIEWED commit, so an explicit
+    ``ref`` **overrides ``head``**: it becomes both the end of the reviewed range and the SHA the
+    attested snapshot is materialized at. That keeps the invariant that the files the reviewer
+    reads are the files at the commit under review — a snapshot pinned somewhere other than the
+    reviewed commit would be a trust hole, not a feature. With no ``ref``, the snapshot pins
+    ``head`` (matching the CLI's documented ``--ref`` default, "the reviewed --head").
+    ``source=attested`` (the default) yields a signable result stamped with ``verified_at_sha``;
+    ``source=local`` reads the checkout and is never signable. The returned result always carries
+    ``source``/``verified_at_sha``/``signable``.
 
     ``target_ticket`` anchors the durable ``code_review`` sidecar directly; ``session_id`` (story
     paradoxal-balsamic-bubblefish) instead keys a LOCAL session artifact so ``rebar review-code``
@@ -147,11 +169,15 @@ def review_code(
         return _disabled_review_result()
 
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
+    # An explicit `ref` selects the reviewed commit (see the docstring): the gate resolves its
+    # ONE snapshot ref from `request.head`, so `ref` must land there or it is silently dropped.
+    reviewed_head = ref or head
     verdict = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             cfg,
             base=base,
-            head=head,
+            head=reviewed_head,
+            source=source,
             diff_text=diff_text,
             changed_files=changed_files,
             commit_message=commit_message,
@@ -166,4 +192,6 @@ def review_code(
     cf = changed_files
     if cf is None and diff_text is not None:
         cf = assemble.changed_from_diff(diff_text)
-    return _verdict_to_review_result(verdict, base=base, head=head, changed_files=list(cf or []))
+    return _verdict_to_review_result(
+        verdict, base=base, head=reviewed_head, changed_files=list(cf or [])
+    )

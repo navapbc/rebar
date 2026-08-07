@@ -467,7 +467,9 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
             emit_gate_error(
                 request.target_ticket, "code_review", cause=str(exc), repo_root=request.repo_root
             )
-        return _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name)
+        return gate_source.annotate_result(
+            _degraded_code_review_verdict(error=exc, runner_name=runner_sel.name), handle
+        )
     total_ms = round((time.monotonic() - prep.t_total) * 1000, 1)
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
@@ -476,17 +478,27 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
         # matches this module's all-lazy cross-module import style.
         from rebar.llm.code_review import finalize as _finalize
 
-        return _finalize.finalize_code_review_verdict(
-            verdict,
-            request=request,
-            prep=prep,
-            cfg=cfg,
-            runner_sel=runner_sel,
-            total_ms=total_ms,
+        # Stamp the provenance of the handle the review ACTUALLY ran under (source /
+        # verified_at_sha / signable), like every other code-reading gate — the
+        # `review_code` shim propagates it onto the returned `review_result`, which is what
+        # decides whether the review can be signed.
+        return gate_source.annotate_result(
+            _finalize.finalize_code_review_verdict(
+                verdict,
+                request=request,
+                prep=prep,
+                cfg=cfg,
+                runner_sel=runner_sel,
+                total_ms=total_ms,
+            ),
+            handle,
         )
-    return _degraded_code_review_verdict(
-        error=(res.error or "code-review workflow LLM tier failed"),
-        runner_name=runner_sel.name,
+    return gate_source.annotate_result(
+        _degraded_code_review_verdict(
+            error=(res.error or "code-review workflow LLM tier failed"),
+            runner_name=runner_sel.name,
+        ),
+        handle,
     )
 
 
