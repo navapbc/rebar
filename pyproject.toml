@@ -79,7 +79,7 @@ Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.10,<3"]
+mcp = ["mcp>=1.28.1,<3", "pyjwt[crypto]>=2.10,<3"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -195,7 +195,7 @@ grounding-t2 = [
 ]
 dev = [
     "pytest>=8",
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
@@ -231,7 +231,7 @@ dev = [
     # over-broad/OIDC permissions). Pinned EXACTLY (not a floor) for local↔CI parity: zizmor
     # tightens/adds audits across releases, so an unpinned floor lets findings drift (green
     # here, red in CI). Bump deliberately.
-    "zizmor==1.28.0",
+    "zizmor==1.29.0",
     # Pull the agents and metrics stacks so optional-capability validation tests
     # (provider construction, MCP/Langfuse, and real polyglot lizard parsing)
     # RUN in CI rather than skipping. Self-referential extras stay here, not in
