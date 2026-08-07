@@ -438,11 +438,34 @@ def test_container_cases_without_a_children_payload_are_excluded() -> None:
     for item in pp.eligible_cases():
         if item.solver_id in CONTAINER_CRITERIA:
             assert item.case.get("children"), f"{item.spec}/{item.case_id} has no children payload"
-    # The rule is real, not vacuous: the container spec DOES carry such cases and they are gone.
+    # The rule is real, not vacuous — pinned on synthetic cases, so it stays meaningful no
+    # matter which shipped fixtures happen to carry a payload.
     assert not pp._runnable("G3", {"input": "parent plan only"})
+    assert not pp._runnable("G3", {"children": []})
     assert pp._runnable("G3", {"children": [{"ticket_id": "t"}]})
     assert pp._runnable("T2", {"input": "inline text"})  # non-container arms are unaffected
-    assert all(i.spec != "plan-review-container" for i in pp.eligible_cases())
+
+
+def test_container_spec_is_eligible_now_that_its_fixtures_carry_children() -> None:
+    """Ticket 3e8b: every `plan-review-container` case now ships a `children` payload, so the
+    spec is corpus again rather than excluded by `_runnable`. This is the inverse of the
+    exclusion witness this test used to carry: the RULE above is unchanged (and pinned on
+    synthetic cases); what changed is that the shipped fixtures satisfy it."""
+    eligible = pp.eligible_cases()
+    container = [i for i in eligible if i.spec == "plan-review-container"]
+    assert container, "plan-review-container is still excluded — its cases need `children`"
+    assert all(i.case.get("children") for i in container)
+
+    # `select_corpus` takes the FIRST gold-block and FIRST gold-advisory case of each spec, so
+    # a re-eligible container spec contributes exactly those two — the two cases that used to
+    # burn an epoch raising on both arms (G3-R-uncovered-ac-rebar / G3-FP-covered-by-named-
+    # consumer-rebar). Asserted as a delta against the container-less corpus rather than as a
+    # hard-coded total, which would break whenever an unrelated spec is added.
+    selected = pp.select_corpus(eligible)
+    picked = [i for i in selected if i.spec == "plan-review-container"]
+    assert sorted(i.label for i in picked) == ["advisory", "block"], picked
+    without = pp.select_corpus([i for i in eligible if i.spec != "plan-review-container"])
+    assert len(selected) == len(without) + 2
 
 
 # ── 4. the provider-clean tally reads the JSONL usage log ───────────────────────────
