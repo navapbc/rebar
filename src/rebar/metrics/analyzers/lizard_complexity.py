@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from rebar.metrics.analyzer import AnalyzerResult
 from rebar.metrics.registry import Unavailable
 
 _ACCRUING_SINCE = "2026-01-01T00:00:00+00:00"
+_LOGGER = logging.getLogger(__name__)
 
 
 def analyze(
@@ -31,6 +33,14 @@ def analyze(
 
     root = repo_root.resolve()
     files = _file_complexity(lizard.analyze([str(root)]), root)
+
+    # An empty map means lizard measured NOTHING (no supported-language files, or a
+    # library that yielded no records) — never "this repository has zero complexity".
+    # Reporting it as a zero-valued result would publish a confident structural zero,
+    # so it is unavailable.
+    if not files:
+        return _unavailable("lizard reported no files")
+
     return AnalyzerResult(
         complexity={
             "files": files,
@@ -69,3 +79,10 @@ def _file_complexity(analysis: Any, repo_root: Path) -> dict[str, dict[str, Any]
             "max_ccn": max((function["ccn"] for function in functions), default=0),
         }
     return dict(sorted(files.items()))
+
+
+def _unavailable(reason: str) -> Unavailable:
+    """Log and build the standard unavailable result."""
+
+    _LOGGER.warning("lizard unavailable: %s", reason)
+    return Unavailable(reason=reason, accruing_since=_ACCRUING_SINCE)
