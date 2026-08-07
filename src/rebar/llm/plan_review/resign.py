@@ -394,3 +394,164 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             "head_sha": sig.get("head_sha"),
         },
     }
+
+
+# --------------------------------------------------------------------------------------
+# The passed-but-unsigned classifier (ticket ammonic-amoral-nabarlek)
+#
+# The rule "a plan review that PASSED but whose attestation FAILED to persist is RETRYABLE,
+# not success" used to live only in the CLI (`_cli/_llm_commands.py`), so the MCP surface —
+# the one autonomous agents actually drive — returned `verdict: PASS` raw and the agent
+# proceeded to `claim`, which the gate then refused because the signature it consumes was
+# never written. The discrimination now lives HERE, below both front-ends: this module
+# already owns `resign_plan_review`, the recovery the classifier names, and is import-light
+# by contract (no `[agents]` extra), so a front-end can always reach it.
+# --------------------------------------------------------------------------------------
+
+#: Attestation persisted — ``signature.signed`` is true.
+ATTESTATION_SIGNED = "signed"
+#: No attestation was attempted (``--no-sign`` / not-signable / drift / readonly MCP): a
+#: ``reason``, no ``error``, or no signature block at all. Not a failure — the review never
+#: promised an attestation.
+ATTESTATION_SKIPPED = "skipped"
+#: The plan (own OR a pinned dependency's) changed before the verdict could be signed. The
+#: recorded review is STALE; only a fresh full review recovers it.
+ATTESTATION_PLAN_CHANGED = "plan_changed"
+#: Signing ABORTED reading the plan's relationships. Re-signing re-collects the same
+#: unreadable state (bug 94a3), so the recovery is to repair the relationship and re-review.
+ATTESTATION_RELATION_UNREADABLE = "relation_unreadable"
+#: A transient/recoverable signing failure (a lock, a retry event, any non-material error).
+#: Nothing materially changed, so the cheap no-LLM re-sign applies.
+ATTESTATION_SIGN_FAILED = "sign_failed"
+
+
+class PlanReviewAttestation:
+    """The classified attestation outcome of a plan-review result.
+
+    ``retryable`` is the single bit both front-ends branch on: the CLI maps it to exit 11
+    and prints :attr:`message` to stderr; the MCP tool attaches the whole thing to the
+    returned payload so an agent can branch on ``cause``/``recovery_tool`` WITHOUT parsing
+    English. ``recovery_tool`` names the rebar operation that recovers the state —
+    ``sign_review`` for the cheap re-sign, ``review_plan`` for a stale or unreadable plan.
+    """
+
+    __slots__ = ("cause", "error", "message", "recovery_tool", "retryable", "signed")
+
+    def __init__(
+        self,
+        *,
+        signed: bool,
+        retryable: bool,
+        cause: str,
+        error: str = "",
+        recovery_tool: str | None = None,
+        message: str = "",
+    ) -> None:
+        self.signed = signed
+        self.retryable = retryable
+        self.cause = cause
+        self.error = error
+        self.recovery_tool = recovery_tool
+        self.message = message
+
+    def as_dict(self) -> dict[str, Any]:
+        """The structured, machine-branchable form attached to an MCP result."""
+        return {
+            "signed": self.signed,
+            "retryable": self.retryable,
+            "cause": self.cause,
+            "error": self.error,
+            "recovery_tool": self.recovery_tool,
+            "message": self.message,
+        }
+
+
+def _is_relation_read_failure(signature: dict[str, Any]) -> bool:
+    """Whether a ``plan_review_sign_aborted`` failure was the relation-snapshot READ giving up.
+
+    That subset is the one ``sign-review`` cannot recover (it re-collects the same generation),
+    so it needs different advice from the other aborts that share the base-class event. The
+    reason vocabulary is ``PlanRelationSnapshotError.REASONS``, the single source."""
+    if signature.get("event") != "plan_review_sign_aborted":
+        return False
+    try:
+        from .relation_snapshot import PlanRelationSnapshotError
+
+        reasons = PlanRelationSnapshotError.REASONS
+    except Exception:  # noqa: BLE001 — the [agents] extra may be absent; fall back to generic advice
+        return False
+    return str(signature.get("error", "")).strip() in reasons
+
+
+def classify_plan_review_attestation(result: dict[str, Any]) -> PlanReviewAttestation:
+    """Classify whether a plan-review ``result`` actually LEFT an attestation behind.
+
+    A signable PASS whose attestation was ATTEMPTED but FAILED to persist (``signed`` False
+    WITH an ``error``, not a deliberate ``reason`` skip) is NOT a silent success: the review's
+    sole durable product — the signature the claim gate consumes — was lost to a recoverable
+    condition, so a later ``claim`` still fails the gate. Such a result is ``retryable``, and
+    ``cause`` says which recovery applies. A deliberately-unsigned PASS and a
+    successfully-signed PASS are both non-retryable."""
+    sig = result.get("signature") or {}
+    if not (sig.get("signed") is False and sig.get("error")):
+        persisted = sig.get("signed") is True
+        return PlanReviewAttestation(
+            signed=persisted,
+            retryable=False,
+            cause=ATTESTATION_SIGNED if persisted else ATTESTATION_SKIPPED,
+        )
+    error = str(sig.get("error"))
+    tid = result.get("ticket_id") or "<id>"
+    if sig.get("event") == "plan_review_generation_changed":
+        # A real material change (own OR dependency — the error already names which): the
+        # recorded review is STALE and cannot be cheaply re-signed. The only recovery is a
+        # fresh full review; sign-review would (correctly) refuse.
+        return PlanReviewAttestation(
+            signed=False,
+            retryable=True,
+            cause=ATTESTATION_PLAN_CHANGED,
+            error=error,
+            recovery_tool="review_plan",
+            message=(
+                "plan review PASSED but the plan changed before it could be signed: "
+                f"{error}\n"
+                "the recorded review is stale — run `rebar review-plan` to re-review "
+                "and sign.\n"
+            ),
+        )
+    if _is_relation_read_failure(sig):
+        # `plan_review_sign_aborted` is the BASE-class event and also covers arbitrary
+        # terminal signing errors, for which `sign-review` IS the right recovery. Only the
+        # relation-snapshot READ failures are hopeless that way: `sign-review` re-collects the
+        # same generation and hits the same unreadable state, so the generic advice sent the
+        # reader in a circle (bug 94a3). Discriminate on the reason, not the event.
+        return PlanReviewAttestation(
+            signed=False,
+            retryable=True,
+            cause=ATTESTATION_RELATION_UNREADABLE,
+            error=error,
+            recovery_tool="review_plan",
+            message=(
+                "plan review PASSED but signing was ABORTED reading the plan's "
+                f"relationships: {error}\n"
+                "`rebar sign-review` would re-collect the same unreadable state. Repair or "
+                "remove the plan relationship the reason names, then run "
+                f"`rebar review-plan {tid}` again.\n"
+            ),
+        )
+    # A TRANSIENT/retryable failure (retry event, a lock, or any non-material error): nothing
+    # materially changed, so the cheap no-LLM recovery applies — re-persist the
+    # already-computed verdict with `sign-review`.
+    return PlanReviewAttestation(
+        signed=False,
+        retryable=True,
+        cause=ATTESTATION_SIGN_FAILED,
+        error=error,
+        recovery_tool="sign_review",
+        message=(
+            "plan review PASSED but the attestation could not be persisted: "
+            f"{error}\n"
+            f"run `rebar sign-review {tid}` to re-sign from the recorded review "
+            "(no LLM re-run) — the claim gate needs the signature.\n"
+        ),
+    )

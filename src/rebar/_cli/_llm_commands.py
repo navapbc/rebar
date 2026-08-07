@@ -89,23 +89,6 @@ def _llm_error_exit_code(exc: Exception) -> int:
     return 1
 
 
-def _is_relation_read_failure(signature: dict) -> bool:
-    """Whether a `plan_review_sign_aborted` failure was the relation-snapshot READ giving up.
-
-    That subset is the one `sign-review` cannot recover (it re-collects the same generation),
-    so it needs different advice from the other aborts that share the base-class event. The
-    reason vocabulary is `PlanRelationSnapshotError.REASONS`, the single source."""
-    if signature.get("event") != "plan_review_sign_aborted":
-        return False
-    try:
-        from rebar.llm.plan_review.relation_snapshot import PlanRelationSnapshotError
-
-        reasons = PlanRelationSnapshotError.REASONS
-    except Exception:  # noqa: BLE001 — the [agents] extra may be absent; fall back to generic advice
-        return False
-    return str(signature.get("error", "")).strip() in reasons
-
-
 def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     """Map a shape-A gate result to an exit code, honouring the systemic-degrade disposition
     (story authorial-hated-blackbear). A PASS is 0. Otherwise, a persisted retryable disposition
@@ -125,50 +108,18 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     v = result.get("verdict")
     verdict = str((v.get("verdict", "") if isinstance(v, dict) else v) or "").upper()
     if verdict == "PASS":
-        # A signable PASS whose attestation was ATTEMPTED but FAILED to persist (signed False
-        # WITH an `error`, not a deliberate `reason` skip) is NOT a silent success: the
-        # review's sole durable product — the signature the claim gate consumes — was lost to
-        # a recoverable condition (e.g. a git index.lock), so a later `claim` still fails the
-        # gate. Surface it as retryable (exit 11) so the expensive review is re-run, not
-        # discarded. A deliberately-unsigned PASS (--no-sign / not-signable / drift → `reason`,
-        # no `error`) and a successfully-signed PASS stay exit 0 (ticket middle-actinium-thrush).
-        sig = result.get("signature") or {}
-        if sig.get("signed") is False and sig.get("error"):
-            tid = result.get("ticket_id") or "<id>"
-            if sig.get("event") == "plan_review_generation_changed":
-                # A real material change (own OR dependency — sig.error already names which):
-                # the recorded review is STALE and cannot be cheaply re-signed. The only
-                # recovery is a fresh full review; sign-review would (correctly) refuse.
-                sys.stderr.write(
-                    "plan review PASSED but the plan changed before it could be signed: "
-                    f"{sig.get('error')}\n"
-                    "the recorded review is stale — run `rebar review-plan` to re-review "
-                    "and sign.\n"
-                )
-            elif _is_relation_read_failure(sig):
-                # `plan_review_sign_aborted` is the BASE-class event and also covers arbitrary
-                # terminal signing errors, for which `sign-review` IS the right recovery. Only
-                # the relation-snapshot READ failures are hopeless that way: `sign-review`
-                # re-collects the same generation and hits the same unreadable state, so the
-                # generic advice sent the reader in a circle (bug 94a3). Discriminate on the
-                # reason, not the event.
-                sys.stderr.write(
-                    "plan review PASSED but signing was ABORTED reading the plan's "
-                    f"relationships: {sig.get('error')}\n"
-                    "`rebar sign-review` would re-collect the same unreadable state. Repair or "
-                    "remove the plan relationship the reason names, then run "
-                    f"`rebar review-plan {tid}` again.\n"
-                )
-            else:
-                # A TRANSIENT/retryable failure (retry event, a lock, or any non-material
-                # error): nothing materially changed, so the cheap no-LLM recovery applies —
-                # re-persist the already-computed verdict with `rebar sign-review`.
-                sys.stderr.write(
-                    "plan review PASSED but the attestation could not be persisted: "
-                    f"{sig.get('error')}\n"
-                    f"run `rebar sign-review {tid}` to re-sign from the recorded review "
-                    "(no LLM re-run) — the claim gate needs the signature.\n"
-                )
+        # A signable PASS whose attestation was ATTEMPTED but FAILED to persist is NOT a
+        # silent success: the review's sole durable product — the signature the claim gate
+        # consumes — was lost to a recoverable condition (e.g. a git index.lock), so a later
+        # `claim` still fails the gate. The discrimination (stale plan vs unreadable relation
+        # vs transient) lives BELOW this CLI in `rebar.llm.plan_review.resign` so the MCP
+        # surface applies the SAME rule (ticket ammonic-amoral-nabarlek); here it maps to
+        # exit 11 ("transient — retry") with the classifier's message on stderr.
+        from rebar.llm.plan_review.resign import classify_plan_review_attestation
+
+        attestation = classify_plan_review_attestation(result)
+        if attestation.retryable:
+            sys.stderr.write(attestation.message)
             return 11
         return 0
     if coverage.get("retryable"):

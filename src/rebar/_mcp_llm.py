@@ -35,6 +35,20 @@ def _structured_llm_failure(exc: Exception) -> dict:
     }
 
 
+def _with_attestation(result, classify) -> dict:
+    """Attach the shared passed-but-unsigned classification to a ``review_plan`` result.
+
+    A PASS whose attestation failed to persist is NOT a success — the signature the claim
+    gate consumes was never written — but MCP has no exit code to say so the way the CLI's
+    exit 11 does. The classifier lives below both surfaces
+    (``rebar.llm.plan_review.resign``); this rides its verdict on the payload as
+    ``attestation`` so a driving agent branches on ``retryable``/``recovery_tool`` rather
+    than parsing English (ticket ammonic-amoral-nabarlek)."""
+    if isinstance(result, dict):
+        result["attestation"] = classify(result).as_dict()
+    return result
+
+
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
     _allow_llm = ctx.allow_llm
@@ -213,6 +227,15 @@ def register_llm_tools(mcp, ctx) -> None:
         SAME basis; ``source=local`` reviews the in-place checkout. ``REBAR_ROOT`` only locates
         the object DB.
 
+        PASSED-BUT-UNSIGNED: a PASS whose attestation failed to persist is NOT a success — a
+        subsequent ``claim`` still fails the gate, because the signature the gate consumes was
+        never written. Every result therefore carries ``attestation``
+        {signed, retryable, cause, error, recovery_tool, message}: branch on
+        ``attestation.retryable`` (do NOT proceed to ``claim``) and call the tool named by
+        ``attestation.recovery_tool`` — ``sign_review`` for a transient sign failure (cheap, no
+        LLM), or ``review_plan`` again when ``cause`` is ``plan_changed`` /
+        ``relation_unreadable``. ``cause`` is ``signed``/``skipped`` when nothing is wrong.
+
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
         dict and advertises NO outputSchema by design (model-produced result; NO_SCHEMA_EXEMPT)."""
@@ -222,14 +245,18 @@ def register_llm_tools(mcp, ctx) -> None:
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
         import rebar.llm
+        from rebar.llm.plan_review.resign import classify_plan_review_attestation
 
         ro = _readonly()
         try:
-            return rebar.llm.review_plan(
+            result = rebar.llm.review_plan(
                 ticket_id, ref=ref, source=source, sign=not ro, emit_sidecar=not ro, force=force
             )
         except rebar.llm.LLMError as exc:
             return _structured_llm_failure(exc)
+        # The CLI maps this same classification to exit 11; MCP has no exit code, so the
+        # structured verdict rides on the payload instead (ticket ammonic-amoral-nabarlek).
+        return _with_attestation(result, classify_plan_review_attestation)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_review(ticket_id: str) -> dict:
