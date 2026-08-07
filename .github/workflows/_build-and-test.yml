@@ -387,7 +387,8 @@ jobs:
               fi
             fi
           else
-            echo "::warning::could not fetch main to verify the module-size limit lock; the absolute cap below still applies."
+            echo "::error::could not fetch main to verify the module-size limit lock; failing closed."
+            exit 1
           fi
           # Absolute cap: no src/rebar/**/*.py file may exceed the limit. No allowlist, no exemptions.
           over=$(find src/rebar -name '*.py' | grep -v __pycache__ \
@@ -399,6 +400,23 @@ jobs:
             exit 1
           fi
           echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
+
+      # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
+      # and LOCKED against main. Raised ceilings and added entries require an administrator
+      # override (force-submit). Removed entries and lowered ceilings pass freely (the ratchet).
+      # The script fetches main by explicit URL (GITHUB_REPOSITORY) and FAILS CLOSED when the
+      # base copy cannot be established — no warn-and-continue. Definition-vs-tree skew guard
+      # (ticket ee2a): skip with a log line when the script is absent from the checked-out tree.
+      - name: Complexity-baseline lock
+        shell: bash
+        run: |
+          if [ ! -f scripts/check_complexity_baseline.py ]; then
+            echo "scripts/check_complexity_baseline.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_complexity_baseline.py --lock
 
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree
