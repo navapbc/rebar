@@ -352,7 +352,6 @@ def close_ticket(
         target_status,
         env_id=env_id,
         author=author,
-        close_reason=reason,
         close_class=close_class,
         force_close_reason=force_close,
         repo_root=repo_root,
