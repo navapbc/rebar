@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -83,27 +84,27 @@ class _RecoverableRunner:
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
-        if req.execution_mode == "agentic":
-            assert req.mode == "text"
-            assert req.tool_step_limit == 16
-            assert req.iteration_limit == 40
-            return {"text": "Observed implementation evidence at src/example.py:10."}
-
-        assert req.execution_mode == "single_turn"
-        payload = json.loads(req.instructions)
-        criteria = [
-            {
-                "criterion": criterion,
-                "met": True,
-                "citation": {
-                    "kind": "source",
-                    "description": "src/example.py:10",
-                },
-                "kind": "codebase-verifiable",
-            }
-            for criterion in payload["expected_criteria"]
-        ]
-        return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        if req.execution_mode == "single_turn":
+            payload = json.loads(req.instructions)
+            criteria = [
+                {
+                    "criterion": criterion,
+                    "met": True,
+                    "citation": {
+                        "kind": "source",
+                        "description": "src/example.py:10",
+                    },
+                    "kind": "codebase-verifiable",
+                }
+                for criterion in payload["expected_criteria"]
+            ]
+            return {"verdict": "PASS", "findings": [], "criteria": criteria}
+        # Batched successor (agentic, structured): bank each criterion via the record tool.
+        record = req.extra_tools[0] if req.extra_tools else None
+        for cid in re.findall(r"c\d{2}-[0-9a-f]{8}", req.instructions):
+            if record is not None:
+                record(cid, True, "Observed implementation evidence at src/example.py:10.")
+        return {"verdict": "PASS", "criteria": [], "_usage": {"requests": 0}}
 
 
 def test_aggregate_truncation_recovers_with_bounded_evidence_and_fresh_finalizer(
@@ -127,7 +128,8 @@ def test_aggregate_truncation_recovers_with_bounded_evidence_and_fresh_finalizer
             "reproduces and expected behavior holds."
         ),
     ]
-    assert len(runner.requests) == 9  # aggregate + seven evidence + finalizer
+    # Banked recovery: primary (exhausted) + ONE batched successor + finalizer.
+    assert len(runner.requests) == 3
     assert runner.requests[-1].execution_mode == "single_turn"
     assert runner.requests[-1].tool_step_limit is None
 
@@ -177,10 +179,10 @@ def test_recovery_exhaustion_stays_typed_and_actionable(monkeypatch) -> None:
         step.run(_ctx())
 
     message = str(caught.value)
-    assert "increasing max_tokens alone cannot repair" in message
+    assert "banked no verdicts" in message
     assert "raise max_tokens" not in message
     assert step.failure_diagnostic is not None
-    assert step.failure_diagnostic["stage"] == "evidence"
+    assert step.failure_diagnostic["stage"] == "successor"
     assert step.failure_diagnostic["criteria_completed"] == 0
 
 
@@ -217,27 +219,36 @@ class _ContradictoryFinalizerRunner:
         self.requests.append(req)
         if len(self.requests) == 1:
             raise UnretryableOutputError("finish_reason=length")
-        if req.execution_mode == "agentic":
-            return {"text": "Repository evidence was gathered."}
+        if req.execution_mode == "single_turn":
+            payload = json.loads(req.instructions)
+            # A contradictory PASS: the LAST criterion is met=false, yet the finalizer
+            # still asserts verdict=PASS. The banked merge must OVERRIDE it to FAIL.
+            return {
+                "verdict": "PASS",
+                "findings": [],
+                "criteria": [
+                    {
+                        "criterion": criterion,
+                        "met": index != len(payload["expected_criteria"]) - 1,
+                        "evidence": "src/example.py:10",
+                        "kind": "codebase-verifiable",
+                    }
+                    for index, criterion in enumerate(payload["expected_criteria"])
+                ],
+                "summary": "Contradictory PASS.",
+            }
+        # Successor banks each criterion (met=true) so the finalizer runs.
+        record = req.extra_tools[0] if req.extra_tools else None
+        for cid in re.findall(r"c\d{2}-[0-9a-f]{8}", req.instructions):
+            if record is not None:
+                record(cid, True, "evidence")
+        return {"verdict": "PASS", "criteria": [], "_usage": {"requests": 0}}
 
-        payload = json.loads(req.instructions)
-        return {
-            "verdict": "PASS",
-            "findings": [],
-            "criteria": [
-                {
-                    "criterion": criterion,
-                    "met": index != len(payload["expected_criteria"]) - 1,
-                    "evidence": ["src/example.py:10"],
-                    "kind": "codebase-verifiable",
-                }
-                for index, criterion in enumerate(payload["expected_criteria"])
-            ],
-            "summary": "Contradictory PASS.",
-        }
 
-
-def test_recovery_rejects_pass_when_any_exact_criterion_is_unmet(monkeypatch) -> None:
+def test_recovery_downgrades_pass_when_any_exact_criterion_is_unmet(monkeypatch) -> None:
+    """A finalizer that returns PASS while marking a criterion met=false must not yield an
+    unearned PASS: the banked merge downgrades the verdict to FAIL (full coverage, no
+    verdict-less death)."""
     monkeypatch.setattr("rebar._reads.show_ticket", lambda *args, **kwargs: _ticket())
     runner = _ContradictoryFinalizerRunner()
     step = CompletionAgentStep(
@@ -246,8 +257,9 @@ def test_recovery_rejects_pass_when_any_exact_criterion_is_unmet(monkeypatch) ->
         config=LLMConfig(runner="fake"),
     )
 
-    with pytest.raises(CompletionRecoveryError, match="unmet criterion"):
-        step.run(_ctx())
+    result = step.run(_ctx()).outputs
+    assert result["verdict"] == "FAIL"
+    assert any(not record["met"] for record in result["criteria"])
 
 
 @pytest.mark.parametrize(
@@ -380,8 +392,8 @@ class _BudgetExhaustedRunner(_RecoverableRunner):
                 "the task."
             )
             err.diagnostic = {  # type: ignore[attr-defined]
-                "requests": 240,
-                "tool_calls": 260,
+                "requests": 20,
+                "tool_calls": 25,
                 "request_limit": 240,
                 "tool_calls_limit": 480,
             }
@@ -403,7 +415,7 @@ def test_step_budget_exhaustion_enters_bounded_recovery(monkeypatch) -> None:
     result = step.run(_ctx()).outputs
 
     assert result["verdict"] == "PASS"
-    assert len(runner.requests) == 9  # aggregate + seven evidence + finalizer
+    assert len(runner.requests) == 3  # aggregate + one batched successor + finalizer
     assert runner.requests[-1].execution_mode == "single_turn"
 
 
@@ -498,9 +510,9 @@ def test_budget_diagnostic_survives_when_recovery_also_fails(monkeypatch) -> Non
 
     diagnostic = step.failure_diagnostic
     assert diagnostic is not None
-    assert diagnostic["stage"] == "evidence"
-    assert diagnostic["aggregate_requests"] == 240
-    assert diagnostic["aggregate_tool_calls"] == 260
+    assert diagnostic["stage"] == "successor"
+    assert diagnostic["aggregate_requests"] == 20
+    assert diagnostic["aggregate_tool_calls"] == 25
     assert diagnostic["aggregate_exception_type"] == "LLMBudgetExhaustedError"
 
 

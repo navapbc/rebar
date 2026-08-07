@@ -48,6 +48,48 @@ _MEMO_NUDGE_L2 = (
     "You already have this result. Stop repeating it and produce your final answer now.]"
 )
 
+
+def _read_window_cap() -> int:
+    """read_file's per-read line-window cap (``pai_tools._READ_MAX_LINES``), imported so the
+    path-normalized read_file memo reproduces read_file's range slice EXACTLY and can tell a
+    COMPLETE whole-file read (row count below the cap → the file ended) from a truncated one."""
+    from rebar.llm.pai_tools import _READ_MAX_LINES
+
+    return _READ_MAX_LINES
+
+
+def _read_file_args(tool_args: Any) -> tuple[str | None, int, int]:
+    """Extract ``(normalized_path, line_start, line_end)`` from a read_file call's args, applying
+    read_file's own defaults (``line_start=1``, ``line_end=0`` = EOF). Path is normalized so
+    ``src/x.py`` and ``./src/x.py`` share one cache entry. Returns ``(None, …)`` when the path is
+    missing/unusable so the caller passes the call straight through."""
+    import os
+
+    path = tool_args.get("path") if isinstance(tool_args, dict) else None
+    if not isinstance(path, str) or not path:
+        return None, 1, 0
+    ls = tool_args.get("line_start", 1)
+    le = tool_args.get("line_end", 0)
+    ls = 1 if ls is None else int(ls)
+    le = 0 if le is None else int(le)
+    return os.path.normpath(path), ls, le
+
+
+def _slice_cached_read(
+    lines: list[str], cached_max: int, line_start: int, line_end: int, cap: int
+) -> str:
+    """Reproduce read_file's range slice over a cached whole-file read. ``lines`` are the cached
+    formatted ``"{n}\\ttext"`` rows for line numbers ``1..cached_max`` (contiguous). Mirrors
+    read_file exactly: ``lo = max(1, line_start)``; ``hi = line_end`` when set and ``>= lo`` else
+    EOF (``cached_max``); ``hi`` capped at ``lo + cap - 1``; the ``"(empty range)"`` sentinel for
+    an empty selection."""
+    lo = max(1, line_start)
+    hi = line_end if (line_end and line_end >= lo) else cached_max
+    hi = min(hi, lo + cap - 1)
+    selected = lines[lo - 1 : hi] if lo <= cached_max else []
+    return "\n".join(selected) or "(empty range)"
+
+
 TOOL_STEP_STEERING_NOTICE = (
     "Tool results are no longer being provided: the evidence-gathering budget for this "
     "run is exhausted. Do not call any more tools. Produce your final answer now, using "
@@ -106,6 +148,15 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
     cache: dict[str, Any] = {}
     counts: dict[str, int] = {}
     locks: dict[str, asyncio.Lock] = {}
+    # read_file is memoized by NORMALIZED PATH, not by exact signature (epic 10ae/story 2948,
+    # lever 2). The f6fc exact-signature memo keyed on line_start/line_end, so re-reads of the
+    # same file at DIFFERENT ranges slipped past it — the measured dominant waste (48 read_file
+    # calls hitting only 11 distinct files, 77% re-reads). The path cache holds the file's WHOLE
+    # content once (a single line_start=1/line_end=0 read through the wrapped tool) and serves
+    # every subsequent range by slicing it. The other three allowlisted tools keep exact-sig memo.
+    # Each value: {"lines": list[str], "max": int, "complete": bool}.
+    read_cache: dict[str, dict] = {}  # keyed by normalized path
+    read_counts: dict[str, int] = {}
 
     def _lock_for(sig: str) -> asyncio.Lock:
         # Safe without a meta-lock: dict get/create runs to completion between awaits on
@@ -121,6 +172,8 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
         async def call_tool(self, name, tool_args, ctx, tool):
             if name not in MEMO_ALLOWLIST:
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+            if name == "read_file":
+                return await self._read_file_call(name, tool_args, ctx, tool)
             sig = usage_log.tool_call_signature(name, tool_args)
             async with _lock_for(sig):
                 if sig in cache:
@@ -137,6 +190,53 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
                 cache[sig] = result
                 counts[sig] = 0
                 return result
+
+        async def _read_file_call(self, name, tool_args, ctx, tool):
+            """Path-normalized read_file memo (lever 2): cache the whole file once, serve any range
+            by slicing. First read of a path → whole-file read + slice (no nudge); a later read of
+            the same path (ANY range) → slice-from-cache + graduated nudge. An "Error:"-prefixed
+            whole-file read is not cached (transient → re-executes). When the whole-file read hit
+            the window cap (a >cap-line file) and the request reaches past the cached window, fall
+            back to the exact-range read so a truncated cache never fabricates "(empty range)"."""
+            path, ls, le = _read_file_args(tool_args)
+            if path is None:
+                return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+            cap = _read_window_cap()
+
+            def _servable(entry: dict) -> bool:
+                # A COMPLETE whole-file cache serves any range; a truncated one only serves a
+                # request whose explicit end is within the cached window.
+                return entry["complete"] or bool(le and le <= entry["max"])
+
+            async with _lock_for(f"read_file::{path}"):
+                entry = read_cache.get(path)
+                if entry is None:
+                    whole = await self.wrapped.call_tool(
+                        name,
+                        {"path": tool_args.get("path"), "line_start": 1, "line_end": 0},
+                        ctx,
+                        tool,
+                    )
+                    if isinstance(whole, str) and whole.startswith("Error:"):
+                        return whole  # transient — do not cache; a retry re-executes
+                    wlines = [] if whole == "(empty range)" else str(whole).split("\n")
+                    cached_max = 0
+                    if wlines:
+                        head = wlines[-1].split("\t", 1)[0]
+                        cached_max = int(head) if head.isdigit() else len(wlines)
+                    entry = {"lines": wlines, "max": cached_max, "complete": cached_max < cap}
+                    read_cache[path] = entry
+                    read_counts[path] = 0
+                    if _servable(entry):
+                        return _slice_cached_read(entry["lines"], entry["max"], ls, le, cap)
+                    # Truncated file, request past the cached window → exact-range read, uncached.
+                    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+                # Repeat read of a cached path (any range): serve with the graduated nudge.
+                read_counts[path] = read_counts[path] + 1
+                nudge = _MEMO_NUDGE_L1 if read_counts[path] == 1 else _MEMO_NUDGE_L2
+                if _servable(entry):
+                    return _slice_cached_read(entry["lines"], entry["max"], ls, le, cap) + nudge
+                return await self.wrapped.call_tool(name, tool_args, ctx, tool) + nudge
 
     all_toolsets = [FunctionToolset(tools), *toolsets] if tools else list(toolsets)
     return [_MemoNudgeToolset(wrapped=ts) for ts in all_toolsets]
