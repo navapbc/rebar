@@ -194,6 +194,14 @@ capability by an `isinstance`-guarded check against the backend (a backend that 
 implement `SupportsLinks` is never asked to sync links) — capability is observed via behavior,
 not structural introspection.
 
+> **AMENDED by [rebar:1de3-a19f-c4ea-4b28].** `SupportsIncremental` was removed as a
+> zero-implementer, unwired capability: no adapter ever defined `search_incremental` and no
+> `isinstance(backend, SupportsIncremental)` dispatch existed, so the promised "core uses an
+> incremental fetch" behaviour was never real. There are now **two** opt-in capability
+> Protocols (`SupportsLinks`, `SupportsComments`). An updated-since incremental fetch can be
+> reintroduced from vendor support (Jira JQL `updated >`, GitHub `since=`, Linear `updatedAt`)
+> if a measured bandwidth need later arises.
+
 **4. One new identity type `RemoteRef{vendor, instance, remote_id}`.**
 
 > **AMENDED by [rebar:6a91-7429-e521-4a2e].** This section originally introduced `instance` as
@@ -264,6 +272,9 @@ the neutral core drives it unchanged.
    also update the file-location loader** to discover the new sub-package dir). A thin
    `JiraBackend` and a test-only `FakeBackend`, both exercised by one backend-agnostic
    contract suite, prove the seam.
+   **AMENDED by [rebar:1de3-a19f-c4ea-4b28] —** the "three opt-in capability Protocols"
+   count above is now **two**: `SupportsIncremental` was removed as a zero-implementer,
+   unwired capability (see the §(d) amendment above).
 6. **Standing up a concrete second backend is out of scope for this ADR.** This ADR (through
    Phase 2) establishes and proves the seam; building an adapter against it is a delivery
    epic's work — enabled by a one-line `config.reconciler.backend` switch once its
