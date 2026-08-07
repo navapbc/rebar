@@ -79,8 +79,13 @@ backfill for the same patchset reference the same robot run.
 
 ### 4. Dedup: write-on-success + Gerrit-side authoritative check
 
-Gerrit's `webhooks` plugin delivers at-least-once and the review blows the ~5s socket
-timeout, so the same event is re-delivered. Two-layer idempotency:
+Gerrit's `webhooks` plugin delivers **at-most-once** (best-effort): its `PostTask.run()`
+retries only non-SSL `IOException`s, then logs SEVERE and **discards** the delivery after
+`maxTries`, and it persists nothing — pending deliveries are lost on restart. It may still
+re-deliver *within* those tries (the review blows the ~5s socket timeout), so the same event
+can arrive more than once; and because a discarded delivery is never replayed, the **backfill
+reconciler** — whose cursor is a low-water mark that re-drives any candidate it abandoned —
+is the recovery path, not the plugin. Two-layer idempotency covers the re-delivery:
 
 - A small **SQLite WAL** ledger on the box's data volume keyed by `(change_id,
   revision)`, recorded **write-on-success** — ONLY after a confirmed-successful vote.

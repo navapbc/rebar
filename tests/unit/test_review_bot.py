@@ -15,6 +15,9 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime
+import json
 import logging
 import shutil
 import subprocess
@@ -683,7 +686,20 @@ class ReconcileGerrit(FakeGerrit):
         self.list_since_calls.append(since)
         if self._list_raises:
             raise GerritError("events-log unreachable", status=503)
-        return list(self._events)
+        # HONOUR ``since`` the way the live events-log ``?t1=`` does — an INCLUSIVE,
+        # SERVER-SIDE lower bound (bug 9f63; verified against the live plugin:
+        # ``t1=13:00:00`` returned ``oldest=13:00:18``, i.e. earlier events are simply
+        # not in the response). The double previously recorded ``since`` and then
+        # returned the full list regardless, so the production cursor filter was never
+        # exercised and the cursor-skip defect shipped behind a green suite.
+        if not since:
+            return list(self._events)
+        cut = (
+            datetime.datetime.strptime(since, "%Y-%m-%d %H:%M:%S")
+            .replace(tzinfo=datetime.timezone.utc)
+            .timestamp()
+        )
+        return [e for e in self._events if int(e.get("eventCreatedOn") or 0) >= cut]
 
     def has_llm_review_vote(self, change_id, revision="current"):
         self.has_vote_calls += 1
@@ -1894,6 +1910,201 @@ def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
     # Next pass: still vote-less → re-driven (the attempts row did not suppress it).
     asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
     assert store.attempt_count("rebar~main~Igap", "rev-gap") == 2
+
+
+# ── cursor low-water mark (bug 9f63) ─────────────────────────────────────────
+#
+# THE DEFECT. ``reconcile_once`` wrote its cursor to ``newest`` — the max event time over
+# the WHOLE fetched window — unconditionally at the end of every pass, with no low-water
+# mark for candidates it had failed to vote. Because the events-log ``?t1=`` window is an
+# inclusive SERVER-SIDE lower bound, any candidate the pass abandoned (check-error,
+# review-timeout, or a voter ``deferred``/``error`` return) fell outside every subsequent
+# window — permanently. Since Gerrit's ``webhooks`` plugin is at-MOST-once and the
+# receiver 202-ACKs into an in-memory queue a container recreation discards, the
+# reconciler is the ONLY recovery path, so the change simply never got a vote until a
+# human minted a fresh event (a ``recheck-review`` comment or a no-op re-push).
+#
+# This contradicted three written contracts: ``reconcile.py``'s module docstring ("This
+# poller closes that loop"), its in-loop comment ("is retried next pass"), and
+# ``docs/adr/0009-review-bot-pipe.md`` ("the reconciler is what recovers a dropped
+# webhook").
+#
+# It shipped because ``ReconcileGerrit.list_events`` recorded ``since`` and ignored it,
+# and because every guarding test used a SINGLE-event window — where ``newest`` IS the
+# failed candidate, so the inclusive re-fetch masked the bug. These tests use a
+# MULTI-event window with the failure on a NON-newest event, which is the only shape that
+# can express the defect.
+
+
+def test_reconcile_cursor_holds_back_an_abandoned_non_newest_candidate(monkeypatch, tmp_path):
+    """Bug 9f63 — the regression oracle.
+
+    A window holds an OLD candidate whose review times out, a NEWER candidate that votes,
+    and later unrelated chatter that drags ``newest`` forward. The abandoned candidate
+    must still be inside the NEXT pass's window and must be re-driven, per
+    ``reconcile.py``'s "is retried next pass" contract. Pre-fix the cursor jumped to the
+    chatter's timestamp and the candidate was never seen again (``scanned`` fell to 0).
+    """
+    cfg = _cfg(tmp_path)
+    # Bound BOTH sides of the abandon path. The timeout is patched tiny so the pass gives
+    # up fast, and the fake review's own wait is short too — so if this patch ever failed
+    # to bind (a refactor moving how reconcile resolves the timeout), the test fails in
+    # under a second instead of blocking on the 1200s production default and wedging the
+    # whole xdist worker.
+    monkeypatch.setattr(reconcile, "review_timeout_seconds", lambda: 0.05)
+
+    stale = _events_log_event("rebar~main~Istale", "rev-stale", number=91, created_on=1000)
+    fresh = _events_log_event("rebar~main~Ifresh", "rev-fresh", number=92, created_on=2000)
+    chatter = {
+        "type": "comment-added",
+        "eventCreatedOn": 3000,
+        "change": {"id": "rebar~main~Ichat", "number": 93, "project": "rebar"},
+        "patchSet": {},  # no revision/ref → not a candidate, but it DOES move ``newest``
+    }
+    g = ReconcileGerrit(events=[stale, fresh, chatter])
+    store = DedupStore(cfg.dedup_db_path)
+
+    driven: list[str] = []
+    real = reconcile._voter.review_and_vote
+
+    async def _review(event, **kw):
+        change_id = event["change"]["id"]
+        driven.append(change_id)
+        if change_id == "rebar~main~Istale":
+            await asyncio.sleep(2)  # outlives the 0.05s bound → wait_for cancels it
+        return {"status": "voted", "change_id": change_id}
+
+    monkeypatch.setattr(reconcile._voter, "review_and_vote", _review)
+    try:
+        first = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+        assert driven == ["rebar~main~Istale", "rebar~main~Ifresh"]
+        assert first["reviewed"] == 1  # only the fresh one actually voted
+
+        driven.clear()
+        second = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    finally:
+        monkeypatch.setattr(reconcile._voter, "review_and_vote", real)
+
+    # THE CONTRACT: the abandoned candidate is re-driven on the next pass.
+    assert "rebar~main~Istale" in driven, (
+        "the abandoned candidate fell outside the next window — the cursor advanced past "
+        "an event the pass never voted, so backfill can never recover it"
+    )
+    assert second["scanned"] >= 1
+
+    # And the cursor did NOT run ahead of the abandoned candidate's event time.
+    cursor = (tmp_path / "reconcile_cursor").read_text(encoding="utf-8").strip()
+    assert cursor <= reconcile._to_t1(1000)
+
+
+def test_reconcile_cursor_advances_past_a_terminal_outcome(monkeypatch, tmp_path):
+    """The hold-back is for RETRYABLE outcomes only.
+
+    A change that merged/abandoned mid-review returns ``skipped``/``post_vote_closed``
+    (voter.py) — terminal and unvotable. Re-driving it forever would 409 (bug c943) and
+    would pin the fetch window open, so the cursor must advance past it exactly as it
+    does for a ``voted`` candidate. This is the negative control for the test above.
+    """
+    cfg = _cfg(tmp_path)
+
+    closed = _events_log_event("rebar~main~Iclosed", "rev-closed", number=94, created_on=1000)
+    chatter = _events_log_event("rebar~main~Ilater", "rev-later", number=95, created_on=3000)
+    g = ReconcileGerrit(events=[closed, chatter])
+    store = DedupStore(cfg.dedup_db_path)
+
+    real = reconcile._voter.review_and_vote
+
+    async def _review(event, **kw):
+        change_id = event["change"]["id"]
+        if change_id == "rebar~main~Iclosed":
+            return {"status": "skipped", "change_id": change_id, "stage": "post_vote_closed"}
+        return {"status": "voted", "change_id": change_id}
+
+    monkeypatch.setattr(reconcile._voter, "review_and_vote", _review)
+    try:
+        asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    finally:
+        monkeypatch.setattr(reconcile._voter, "review_and_vote", real)
+
+    cursor = (tmp_path / "reconcile_cursor").read_text(encoding="utf-8").strip()
+    assert cursor == reconcile._to_t1(3000), (
+        "a terminal skip must not pin the cursor — only retryable outcomes hold it back"
+    )
+
+
+def test_reconcile_holdback_is_bounded_so_a_poison_pill_cannot_pin_the_window(
+    monkeypatch, tmp_path
+):
+    """A candidate that fails on EVERY pass must not hold the cursor back forever.
+
+    Without a ceiling the fetch window grows without bound and the same doomed change is
+    re-driven every 5 minutes in silence. Past ``RECONCILE_MAX_HOLDBACK_SECONDS`` the
+    cursor advances and the change is surfaced as ``holdback_expired``.
+    """
+    cfg = _cfg(tmp_path)
+    cfg = dataclasses.replace(cfg, reconcile_max_holdback_seconds=100)
+
+    doomed = _events_log_event("rebar~main~Idoom", "rev-doom", number=96, created_on=1000)
+    recent = _events_log_event("rebar~main~Inow", "rev-now", number=97, created_on=5000)
+    g = ReconcileGerrit(events=[doomed, recent])
+    store = DedupStore(cfg.dedup_db_path)
+
+    real = reconcile._voter.review_and_vote
+
+    async def _review(event, **kw):
+        change_id = event["change"]["id"]
+        if change_id == "rebar~main~Idoom":
+            return {"status": "error", "change_id": change_id, "stage": "review_setup"}
+        return {"status": "voted", "change_id": change_id}
+
+    monkeypatch.setattr(reconcile._voter, "review_and_vote", _review)
+    try:
+        asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    finally:
+        monkeypatch.setattr(reconcile._voter, "review_and_vote", real)
+
+    # newest=5000, ceiling=100 → the cursor may not be held back before 4900.
+    cursor = (tmp_path / "reconcile_cursor").read_text(encoding="utf-8").strip()
+    assert cursor >= reconcile._to_t1(4900), (
+        "a permanently-failing candidate pinned the cursor past the hold-back ceiling"
+    )
+
+
+def test_reconcile_done_reports_the_carried_backlog(monkeypatch, tmp_path, caplog):
+    """AC: backfill's carried backlog is OBSERVABLE.
+
+    ``reconcile_done`` reported only ``scanned``/``reviewed``, so "backfill is carrying N
+    stalled changes" was invisible — the ambiguity that let an agent read a queued review
+    as an outage. The pass must report how many candidates it left un-voted.
+    """
+    cfg = _cfg(tmp_path)
+
+    stuck = _events_log_event("rebar~main~Istuck", "rev-stuck", number=98, created_on=1000)
+    ok = _events_log_event("rebar~main~Iok", "rev-ok", number=99, created_on=2000)
+    g = ReconcileGerrit(events=[stuck, ok])
+    store = DedupStore(cfg.dedup_db_path)
+
+    real = reconcile._voter.review_and_vote
+
+    async def _review(event, **kw):
+        change_id = event["change"]["id"]
+        if change_id == "rebar~main~Istuck":
+            return {"status": "deferred", "change_id": change_id}
+        return {"status": "voted", "change_id": change_id}
+
+    monkeypatch.setattr(reconcile._voter, "review_and_vote", _review)
+    try:
+        with caplog.at_level(logging.INFO, logger="rebar.review_bot.reconcile"):
+            asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+    finally:
+        monkeypatch.setattr(reconcile._voter, "review_and_vote", real)
+
+    done = [
+        json.loads(r.message) for r in caplog.records if '"reconcile_done"' in (r.message or "")
+    ]
+    assert done, "reconcile_done was not emitted"
+    assert done[-1]["held_back"] == 1
+    assert done[-1]["cursor"]
 
 
 # ── tree↔vote binding (ticket da31-f9d1) ─────────────────────────────────────
