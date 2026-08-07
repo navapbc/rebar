@@ -35,6 +35,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MEMO_ALLOWLIST: frozenset[str] = frozenset(
+    {"read_file", "search_files", "list_directory", "show_ticket"}
+)
+
+_MEMO_NUDGE_L1 = (
+    "\n\n[Note: this result was already retrieved earlier in this run. "
+    "Consider whether you have gathered sufficient evidence to proceed.]"
+)
+_MEMO_NUDGE_L2 = (
+    "\n\n[Warning: this exact query has been repeated multiple times. "
+    "You already have this result. Stop repeating it and produce your final answer now.]"
+)
+
 TOOL_STEP_STEERING_NOTICE = (
     "Tool results are no longer being provided: the evidence-gathering budget for this "
     "run is exhausted. Do not call any more tools. Produce your final answer now, using "
@@ -63,6 +76,70 @@ def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
 
     all_toolsets = [FunctionToolset(tools), *toolsets]
     return [_SteeringToolset(wrapped=ts, limit=limit) for ts in all_toolsets]
+
+
+def _memo_toolsets(tools: list, toolsets: list) -> list:
+    """Wrap every toolset with a memoizing layer that caches results for the four
+    allowlisted read-only tools and appends a graduated nudge on duplicate calls.
+    Non-allowlisted tools always pass through with no caching.
+
+    The cache, per-signature repeat counts, and per-signature locks live in this
+    ENCLOSING scope, not on the toolset instance — pydantic-ai copies a toolset per run
+    step while PREPARING the request, so instance attributes set inside ``call_tool`` do
+    not survive to the next turn (the exact reason the runaway guard keeps its
+    ``signatures`` window here too). A single shared cache across the wrapped toolsets is
+    correct: a tool-call SIGNATURE is unique to its tool, so there is no cross-toolset
+    collision.
+
+    A per-signature :class:`asyncio.Lock` serialises the check-execute-store critical
+    section so that a PARALLEL batch of N identical calls in ONE turn (pydantic-ai runs a
+    turn's tool calls concurrently) still executes the wrapped tool exactly once — the
+    first caller executes and populates the cache while the rest await, then read the
+    cached result. Distinct signatures take distinct locks, so genuine breadth still runs
+    concurrently.
+    """
+    import asyncio
+    from dataclasses import dataclass
+
+    from pydantic_ai.toolsets import FunctionToolset, WrapperToolset
+
+    cache: dict[str, Any] = {}
+    counts: dict[str, int] = {}
+    locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(sig: str) -> asyncio.Lock:
+        # Safe without a meta-lock: dict get/create runs to completion between awaits on
+        # the single event loop, so two coroutines cannot race to create two locks.
+        lock = locks.get(sig)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[sig] = lock
+        return lock
+
+    @dataclass
+    class _MemoNudgeToolset(WrapperToolset):
+        async def call_tool(self, name, tool_args, ctx, tool):
+            if name not in MEMO_ALLOWLIST:
+                return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+            sig = usage_log.tool_call_signature(name, tool_args)
+            async with _lock_for(sig):
+                if sig in cache:
+                    counts[sig] = counts[sig] + 1
+                    nudge = _MEMO_NUDGE_L1 if counts[sig] == 1 else _MEMO_NUDGE_L2
+                    return cache[sig] + nudge
+                result = await self.wrapped.call_tool(name, tool_args, ctx, tool)
+                # Errors (the read-only tools return an "Error:"-prefixed STRING; they never
+                # raise into the agent loop) are transient — never cache them, so the retry
+                # re-executes. Deterministic sentinel-empty results ("(no matches)",
+                # "(empty)") ARE cached: memoizing them is the core waste this eliminates.
+                if isinstance(result, str) and result.startswith("Error:"):
+                    return result
+                cache[sig] = result
+                counts[sig] = 0
+                return result
+
+    all_toolsets = [FunctionToolset(tools), *toolsets] if tools else list(toolsets)
+    return [_MemoNudgeToolset(wrapped=ts) for ts in all_toolsets]
 
 
 def _runaway_guard_toolsets(tools: list, toolsets: list) -> list:
@@ -155,6 +232,11 @@ def build_agent_kwargs(
         # gathered. Intentionally not a forced tool.
         limit = max(0, int(req.tool_step_limit))
         toolsets = _steering_toolsets(tools, toolsets, limit)
+        tools = []
+    if tools or toolsets:
+        # Memo layer (f6fc): caches read-only tool calls and appends a nudge on repeats.
+        # Sits BETWEEN steering (innermost) and the runaway guard (outermost).
+        toolsets = _memo_toolsets(tools, toolsets)
         tools = []
     if tools or toolsets:
         # Runaway loop breaker (bug c827), armed for EVERY Agent call with a tool surface

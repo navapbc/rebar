@@ -58,10 +58,10 @@ def _req(cfg: LLMConfig, **kw) -> RunRequest:
 
 
 def test_kwargs_carry_the_prompt_the_tools_and_the_tool_timeout():
-    """With no step limit the function tools move into ONE runaway-guarded toolset (the
-    loop breaker of bug c827 is armed on every tooled call) with the tool DEFINITIONS
-    still advertised, the optional keys stay absent, and the per-tool liveness bound is
-    the configured float."""
+    """With no step limit the function tools move into a runaway-guarded toolset (the
+    loop breaker of bug c827 is armed on every tooled call) wrapping the memo/nudge layer
+    of f6fc, with the tool DEFINITIONS still advertised, the optional keys stay absent, and
+    the per-tool liveness bound is the configured float."""
     cfg = _cfg(llm_tool_timeout_s=77)
 
     def a_tool() -> str:
@@ -73,7 +73,8 @@ def test_kwargs_carry_the_prompt_the_tools_and_the_tool_timeout():
     assert out["tool_timeout"] == 77.0
     assert out["tools"] == [], "the function tools must move into the guarded toolset"
     (guard,) = out["toolsets"]
-    assert "a_tool" in guard.wrapped.tools, "the tool definition must stay advertised"
+    memo = guard.wrapped
+    assert "a_tool" in memo.wrapped.tools, "the tool definition must stay advertised"
 
 
 def test_model_settings_and_capabilities_ride_along_when_present():
