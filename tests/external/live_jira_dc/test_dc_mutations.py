@@ -2154,10 +2154,11 @@ def test_a_deleted_dc_issue_never_plans_a_local_teardown(
     `local_state[key]["jira_key"]`, but its only production caller passes the PREVIOUS JIRA
     SNAPSHOT as `local_state` (`run_differs.py:222` — `compute_mutations(ctx.prev_snapshot,
     ctx.curr_snapshot, ...)`), and a snapshot entry is the raw Jira `fields` dict
-    (`fetcher.py:479`, contract shape `_snapshot_schema.py:96-135`) which carries no
-    `jira_key`. So that loop never fires in production and NOTHING emits an `(inbound, probe)`
-    for a bound pair whose local ticket is active. The pair's real owner is the outbound
-    differ's bounded direct GET, which on a confirmed 404 records the absence toward grace and
+    (`fetcher.py:479`, contract shape `schemas/jira_snapshot_entry.schema.json`) which carries
+    no `jira_key`. So that loop never fires in production and NOTHING emits an
+    `(inbound, probe)` for a bound pair whose local ticket is active. The pair's real owner
+    is the outbound differ's bounded direct GET, which on a confirmed 404 records the
+    absence toward grace and
     deliberately emits no mutation (`outbound_differ.py:692-702`); `binding_walk.py:167-170`
     skips active-local pairs precisely to leave them to it. (Bug 3b5f has since DELETED that
     dead producer along with the whole `(inbound, probe)` dispatch chain, which is why the

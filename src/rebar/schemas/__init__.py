@@ -53,6 +53,7 @@ __all__ = [
     "GROUNDING",
     "GROUNDING_INFO",
     "INPUT_SCHEMAS",
+    "JIRA_SNAPSHOT_ENTRY",
     "LIST_DESCENDANTS",
     "NEXT_BATCH",
     "OUTPUT_SCHEMAS",
@@ -196,13 +197,25 @@ GROUNDING_INFO = "grounding_info"
 FETCH_TICKET_INPUT = "fetch_ticket_input"
 FETCH_TICKET_OUTPUT = "fetch_ticket_output"
 
+# rebar_reconciler — the per-issue Jira SNAPSHOT-ENTRY contract (ADR 0004): the shape the
+# fetcher (producer) writes and the inbound/outbound differs (consumers) read. An INTERNAL
+# contract validated directly via schemas.validator(JIRA_SNAPSHOT_ENTRY), never a command
+# --output, so (like GROUNDING) it is exempt from OUTPUT_SCHEMAS via INPUT_SCHEMAS below.
+# Its generated TypedDict (rebar/types.py) puts the contract under the CI drift gate, so a
+# fetcher field change has to land in the schema first — which is the enforcement ADR 0004
+# always claimed and previously lacked.
+JIRA_SNAPSHOT_ENTRY = "jira_snapshot_entry"
+
 # Schemas authored to validate documents/objects directly rather than advertise a
-# command's JSON output: the workflow DSL INPUT files (v1/v2) and the internal
-# grounding evidence CONTRACT. Like COMMON, they are loaded by their consumers (the
-# workflow parser/linter; the grounding library) and intentionally absent from
+# command's JSON output: the workflow DSL INPUT files (v1/v2), the internal grounding
+# evidence CONTRACT, and the reconciler's Jira snapshot-entry CONTRACT. Like COMMON, they
+# are loaded by their consumers (the workflow parser/linter; the grounding library; the
+# reconciler's producer/consumer contract test) and intentionally absent from
 # OUTPUT_SCHEMAS; the coverage-guard test exempts this set so an authored-but-unwired
 # check still catches a forgotten OUTPUT schema while permitting these.
-INPUT_SCHEMAS: frozenset[str] = frozenset({WORKFLOW_V1, WORKFLOW_V2, WORKFLOW_V3, GROUNDING})
+INPUT_SCHEMAS: frozenset[str] = frozenset(
+    {WORKFLOW_V1, WORKFLOW_V2, WORKFLOW_V3, GROUNDING, JIRA_SNAPSHOT_ENTRY}
+)
 
 # Per-step I/O CONTRACT schemas (workflow authoring v2): a step's declared input and
 # output shapes, resolved by name from `@register_step`. Like INPUT_SCHEMAS these are

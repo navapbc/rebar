@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jira_snapshot_entry.schema.json",
+  "title": "JiraSnapshotEntry",
+  "description": "One `snapshot[jira_key]` entry — the single source of truth for the shape the reconciler's fetcher (PRODUCER) writes and the inbound/outbound differs (CONSUMERS) read. See docs/adr/0004-reconciler-snapshot-contract.md. It constrains the SHAPE of each contract key (types + nesting), never specific values, so it is not a change-detector. `additionalProperties` stays open: the entry is the raw `fields` map of a Jira issue merged with three enrichment keys, and Jira returns more fields than the reconciler reads. Load with `rebar.schemas.load('jira_snapshot_entry')`; validate with `rebar.schemas.validator('jira_snapshot_entry')`. The generated `JiraSnapshotEntry` TypedDict in `rebar/types.py` is derived from this file and is kept honest by the CI drift gate (`python -m rebar.schemas.gen_types --check`), so a fetcher field change must land here FIRST.",
+  "type": "object",
+  "not": {
+    "required": [
+      "comments"
+    ]
+  },
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Issue summary. Read by both differs (mapped to the local `title`)."
+    },
+    "description": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ],
+      "description": "ADF `doc` dict (REST v3) or plain text. Read by both differs, ADF-decoded."
+    },
+    "status": {
+      "type": [
+        "object",
+        "string"
+      ],
+      "description": "`{\"name\": str, ...}` (or a bare name string). Read by both differs."
+    },
+    "priority": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ],
+      "description": "`{\"name\": str, ...}` (or a bare name string / null). Read by both differs."
+    },
+    "assignee": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "`{\"displayName\"/\"accountId\", ...}`, or null for an unassigned issue."
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Label strings. Read by the label differs (carries the `rebar-id:` binding label)."
+    },
+    "issuetype": {
+      "type": [
+        "object",
+        "string"
+      ],
+      "description": "`{\"name\": str, ...}` (or a bare name string). Read by both differs."
+    },
+    "comment": {
+      "type": "object",
+      "required": [
+        "comments"
+      ],
+      "properties": {
+        "comments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "body"
+            ],
+            "properties": {
+              "author": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "body": {
+                "type": [
+                  "object",
+                  "string"
+                ],
+                "description": "ADF `doc` dict (REST v3) or plain text."
+              },
+              "created": {
+                "type": "string"
+              },
+              "updated": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "startAt": {
+          "type": "integer"
+        },
+        "maxResults": {
+          "type": "integer"
+        }
+      },
+      "description": "The NESTED comment field — bug 0ee6's seam. Comments live under `comment.comments`, NOT under a flat top-level `comments` key, which the top-level `not` clause forbids outright so a producer regressing to the flat shape fails validation. A horizon-trimmed issue carries the same shape with an EMPTY `comments` list."
+    },
+    "issuelinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "inward": {
+                "type": "string"
+              },
+              "outward": {
+                "type": "string"
+              }
+            }
+          },
+          "inwardIssue": {
+            "type": "object"
+          },
+          "outwardIssue": {
+            "type": "object"
+          }
+        }
+      },
+      "description": "REST-nested issue links (bug 3f04 carried none). An EMPTY list is the AUTHORITATIVE \"queried, Jira reports no links\" value; an ABSENT key means never queried."
+    },
+    "parent": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "description": "`{\"key\": str}`, or `null` for an issue that WAS queried and genuinely has no parent (the key is PRESENT with a falsy value). An ABSENT key means never queried — a truncated page walk, a cross-project issue, or `get_parent_map`'s `{}` degradation on any REST failure. Only the PRESENT-and-falsy form may authorise an inbound parent CLEAR, a write that DESTROYS local data (ticket 88d9; the history here contains a revert titled \"Revert the inbound parent clear: it destroys data\"). Do not collapse present-vs-absent. Per JSON Schema, `required` applies only when the value IS an object, so `null` validates."
+    }
+  }
+}
