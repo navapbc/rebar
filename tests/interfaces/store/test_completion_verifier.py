@@ -162,6 +162,14 @@ def test_fail_verdict_carries_remediation_guidance(rebar_repo: Path) -> None:
     # Names the intended channel: documenting evidence as a comment on the ticket.
     assert "comment" in lowered
     assert "evidence" in lowered
+    # External evidence is admissible from ticket text only through the exact
+    # operator-attested classification contract; untagged criteria retain the
+    # codebase-verifiable default and cannot pass from a comment alone.
+    assert "[operator-attested]" in guidance
+    assert "external" in lowered
+    assert "codebase-verifiable" in lowered
+    assert "untagged" in lowered
+    assert "cannot be satisfied by a ticket comment alone" in lowered
     # Steers to the evidence channel only — does not advertise a way to bypass the gate.
     assert "force" not in lowered
     # Generic, not over-fitted to any one incident.

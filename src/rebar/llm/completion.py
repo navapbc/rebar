@@ -46,23 +46,21 @@ _REVIEWER_ID = "completion-verifier"
 _OUTPUT_SCHEMA = "completion_verdict"
 
 # Generic remediation guidance carried on EVERY FAIL verdict (attached in reconcile_verdict, the
-# one chokepoint both the agentic and the deterministic child-closure verdicts pass through). Its
-# job is to point the caller at the intended channel for a requirement that is *already met but
-# not discoverable from the code alone*: record the supporting evidence as a comment on the
-# ticket. The completion verifier can read a ticket's comments (its read-only show_ticket tool),
-# so evidence documented there is taken into account on the next verification. Kept deliberately
-# generic — it describes the evidence channel for any unmet criterion, not any single situation —
-# and it names only that channel, so the caller's attention lands on documenting evidence (or
-# finishing genuinely incomplete work) rather than on any way of bypassing the gate.
+# one chokepoint both the agentic and deterministic child-closure verdicts pass through). It
+# points callers at the evidence path defined by the criterion kind: repository proof for the
+# codebase-verifiable default, or a concrete ticket attestation for an exactly tagged
+# operator-attested criterion. Kept deliberately generic and focused on completing or documenting
+# the work rather than bypassing the gate.
 COMPLETION_REMEDIATION_GUIDANCE = (
-    "How to resolve the unmet criteria: for each one, decide whether the work is genuinely "
-    "incomplete or simply undocumented. If a requirement is already satisfied but the proof "
-    "is not discoverable from the code alone, add a comment to this ticket that documents the "
-    "evidence — cite the concrete artifacts that meet the requirement (file paths and line "
-    "ranges, commands and their output, links, or the reasoning that ties the work to the "
-    "criterion). The completion verifier reads this ticket's comments, so evidence you record "
-    "there is taken into account on the next verification. For any criterion whose work is "
-    "genuinely unfinished, complete it, then re-verify."
+    "How to resolve the unmet criteria: use the evidence path that matches each one. For "
+    "codebase-verifiable work, complete any unfinished work and make its proof discoverable "
+    "in the repository. For evidence that inherently lives outside the repository, mark the "
+    "criterion with the exact `[operator-attested]` tag and add a comment to this ticket that "
+    "documents the concrete artifacts that meet it (commands and their output, links, or the "
+    "reasoning that ties the evidence to the criterion). The completion verifier reads this "
+    "ticket's comments, so properly tagged evidence you record there is taken into account on "
+    "the next verification. An untagged external criterion cannot be satisfied by a ticket "
+    "comment alone. Then re-verify."
 )
 # Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
