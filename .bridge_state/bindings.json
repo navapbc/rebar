@@ -121112,10 +121112,24 @@
     },
     "f0ff-028a-f5cb-4b66": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "`docs/exit-codes.md` declares itself \"the single source of truth\" (`:5`) covering \"each public dispatcher arm\" (`:69`). It has 41 table rows against 75 real commands \u2014 independently re-derived from `_cli/_help.known_subcommands()` union `_cli/__init__._INTERCEPTS`. The 34 omissions include `review-plan`, `review-code`, and `verify-completion`, whose exit-11 semantics the same document defines four lines into its own codes table.\n\nGrounding found worse: codes **75** (`RebaseGuard`/`EXIT_RESCHEDULE`) and **78** (`StoreIncompatibleError`) reach the process exit status via `_seam.py:419` \u2192 `_commands/__init__.py:160` and appear nowhere in the document. 75 is the one code a CI workflow actually branches on. Codes 3, 4, 12 and `validate`'s 0-4 severity bucket are also undocumented.\n\nThe doc's own scope note is stale: it says only five commands validate unknown options, but `metrics`, `doctor`, `composer` and `fsck` all exit 2 on unknown options today.\n\nA separate candidate finding \u2014 \"define an exit-code vocabulary and standardise usage\" \u2014 was run through the pipeline and FAILED both floors (impact 0.415). The one exit-code defect in this repo's history (`show`/`list` returning 1 instead of 2) was caught by writing the doc and a conformance test, not by constants. That is the mitigation already in place, and this ticket extends it rather than replacing it. Do not add a named exit-code enum.\n\nFull generation was assessed and rejected: the command list is derivable, but per-command *semantics* have no machine-readable source, and exit 11 is produced at the CLI layer (`_cli/_llm_commands.py:129-171`), not in `_commands/`.\n\n## Acceptance Criteria\n\n- [ ] Rows exist for all 75 dispatcher arms\n- [ ] Codes 3, 4, 12, 75 and 78 are documented with their meanings\n- [ ] The stale \"only five commands validate options\" note is corrected\n- [ ] A CI check asserts every dispatcher arm has a row, so a new command without one fails\n- [ ] The document carries a forward-compatibility sentence: an unknown non-zero code MUST be treated as failure",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Make docs/exit-codes.md complete and keep it that way"
       },
       "created_at": "2026-08-06T22:11:57Z",
